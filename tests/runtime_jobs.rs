@@ -137,3 +137,61 @@ async fn worker_filters_model_credentials_and_declares_missing_capabilities() ->
     client.close().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn interactive_sessions_are_persistent_serialized_and_owned() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let client = RuntimeClient::connect(config(root.path())).await?;
+    let program = "import sys\nfor line in sys.stdin:\n    line=line.strip()\n    if line=='quit': break\n    print('echo:'+line, flush=True)\n";
+    let session = client
+        .call("interact.start", json!({"argv":["python", "-c", program]}))
+        .await?;
+    let session_id = session["session_id"].as_str().unwrap().to_owned();
+    assert_eq!(session["state"], "running");
+    let first = client
+        .call(
+            "interact.write",
+            json!({"session_id":session_id, "data_base64":"aGVsbG8K", "read_timeout_secs":5}),
+        )
+        .await?;
+    assert!(
+        first["captured"].as_str().unwrap().contains("echo:hello"),
+        "unexpected output: {first}"
+    );
+    assert_eq!(first["state"], "running");
+    let second = client
+        .call(
+            "interact.write",
+            json!({"session_id":session_id, "data_base64":"cXVpdAo=", "read_timeout_secs":5}),
+        )
+        .await?;
+    assert_eq!(second["state"], "exited");
+    assert_eq!(second["exit_code"], 0);
+    let closed = client
+        .call("interact.close", json!({"session_id":session_id}))
+        .await?;
+    assert_eq!(closed["state"], "closed");
+    assert!(
+        client
+            .call(
+                "interact.write",
+                json!({"session_id":session_id, "data_base64":"eA=="}),
+            )
+            .await
+            .is_err(),
+        "writes to a closed session must fail"
+    );
+    assert!(
+        client
+            .call(
+                "interact.write",
+                json!({"session_id":"absent", "data_base64":"eA=="}),
+            )
+            .await
+            .is_err(),
+        "writes to an absent session must fail"
+    );
+    client.call("worker.shutdown", json!({})).await?;
+    client.close().await?;
+    Ok(())
+}

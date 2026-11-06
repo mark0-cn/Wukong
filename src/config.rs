@@ -45,7 +45,7 @@ impl Default for ToolLimits {
     fn default() -> Self {
         Self {
             max_output_bytes: 12000,
-            max_evidence_read_bytes: 64000,
+            max_evidence_read_bytes: 16384,
             timeout_seconds: 360,
         }
     }
@@ -57,6 +57,12 @@ pub struct ExecutionConfig {
     pub model_retries: usize,
     pub compact_after_chars: usize,
     pub keep_recent_messages: usize,
+    /// When enabled, large tool-result envelopes are replaced in the model
+    /// context by a short LM summary (plus the evidence ID). The original
+    /// bytes remain in evidence and the call record; replay stays exact.
+    pub summarize_tool_outputs: bool,
+    pub summarize_threshold_chars: usize,
+    pub summarize_max_tokens: u64,
 }
 impl Default for ExecutionConfig {
     fn default() -> Self {
@@ -65,6 +71,9 @@ impl Default for ExecutionConfig {
             model_retries: 2,
             compact_after_chars: 200000,
             keep_recent_messages: 12,
+            summarize_tool_outputs: false,
+            summarize_threshold_chars: 6000,
+            summarize_max_tokens: 400,
         }
     }
 }

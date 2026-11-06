@@ -98,6 +98,9 @@ Requests/responses are capped at 48 MiB. Uploaded files are capped at 32 MiB.
 | `debug.start` | `target`, `args`; a worker-owned `session_id` |
 | `debug.command` | `session_id`, one GDB/MI `command`, optional `timeout_secs` |
 | `debug.events`, `debug.close` | `session_id`; bounded async records / stop session |
+| `interact.start` | `argv`, optional `env`; a persistent interactive process with a worker-owned `session_id` |
+| `interact.write` | `session_id`, `data_base64`, optional `read_timeout_secs`; writes stdin and returns newly produced bounded output |
+| `interact.close` | `session_id`; terminate the session's process tree |
 | `crash.replay` | `target`, `input`, `args` (`@@` input substitution), timeout; job |
 | `input.minimize` | Replay parameters, `max_attempts`, `minimize_timeout_secs`; delta debugging job |
 | `poc.verify` | Replay parameters, `trials`, distinct `producer_agent_id` / `verifier_agent_id`, `call_id`; job |

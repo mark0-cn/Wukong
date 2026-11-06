@@ -110,6 +110,34 @@ pub struct Budget {
     pub max_total_tokens: u64,
     pub max_usd: Option<f64>,
     pub max_wall_seconds: u64,
+    /// Optional per-role share of the run token budget; missing roles use
+    /// [`Budget::role_share`] defaults. Shares are not enforced to sum to 1.
+    pub role_token_shares: std::collections::HashMap<String, f64>,
+}
+impl Budget {
+    pub fn role_share(&self, role: Role) -> f64 {
+        self.role_token_shares
+            .get(role.as_str())
+            .copied()
+            .unwrap_or(match role {
+                Role::Root => 0.20,
+                Role::Recon => 0.25,
+                Role::Reverse => 0.30,
+                Role::Hunter => 0.25,
+                Role::Fuzz => 0.25,
+                Role::Crash => 0.20,
+                Role::Exploit => 0.45,
+                Role::Verifier => 0.30,
+                Role::Reporter => 0.15,
+            })
+    }
+
+    /// Per-agent token quota derived from the run budget. A 10k floor keeps
+    /// small-budget runs governed by the run-level budget alone instead of
+    /// degenerating into role quotas that kill every agent on its first call.
+    pub fn role_token_cap(&self, role: Role) -> u64 {
+        ((self.role_share(role) * self.max_total_tokens as f64) as u64).max(10_000)
+    }
 }
 impl Default for Budget {
     fn default() -> Self {
@@ -121,6 +149,7 @@ impl Default for Budget {
             max_total_tokens: 500_000,
             max_usd: None,
             max_wall_seconds: 3600,
+            role_token_shares: std::collections::HashMap::new(),
         }
     }
 }
@@ -162,6 +191,7 @@ pub struct AgentRecord {
     pub turns: usize,
     pub total_tokens: u64,
     pub cost_usd: f64,
+    pub token_cap: Option<u64>,
     pub summary: Option<String>,
     pub error: Option<String>,
     pub created_at: DateTime<Utc>,

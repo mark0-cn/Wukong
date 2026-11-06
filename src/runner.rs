@@ -198,6 +198,25 @@ impl AssessmentRunner {
         };
         let mut step = durable.next_step()?;
         if matches!(step, AgentRunStep::CallModel { .. }) {
+            if let Some(cap) = agent.token_cap
+                && agent.total_tokens >= cap
+            {
+                // Per-role token quota: end this agent cleanly and let the
+                // parent react instead of silently starving siblings.
+                let reason = format!(
+                    "role token budget exhausted ({} >= cap {}); partial work retained",
+                    agent.total_tokens, cap
+                );
+                self.coordinator
+                    .set_status(agent_id, Status::Failed, Some(reason.clone()))?;
+                self.emit(
+                    &run.id,
+                    Some(agent_id),
+                    "agent.budget_cap",
+                    json!({"cap":cap,"tokens":agent.total_tokens}),
+                )?;
+                return Ok(());
+            }
             if !self.reserve_budget(agent_id)? {
                 return Ok(());
             }
@@ -301,10 +320,40 @@ impl AssessmentRunner {
                     PendingToolCall::Execute(call) => {
                         let call_id = format!("{}:{}:{}", agent_id, durable.turn(), call.id());
                         let name = call.name().to_string();
-                        let output = self
+                        let mut output = self
                             .tools
                             .execute(agent_id, &call_id, &name, call.arguments())
                             .await?;
+                        // Optional context bounding: replace large envelopes
+                        // with an LM summary. The call record is updated so
+                        // every durable replay returns the same envelope the
+                        // model actually saw.
+                        if self.config.execution.summarize_tool_outputs {
+                            let size = serde_json::to_string(&output.value)?.len();
+                            if size > self.config.execution.summarize_threshold_chars {
+                                let (summary, usage) = self
+                                    .engine
+                                    .summarize_tool_output(
+                                        &name,
+                                        &output.value,
+                                        self.config.execution.summarize_max_tokens,
+                                    )
+                                    .await;
+                                if serde_json::to_string(&summary)
+                                    .map(|s| s.len())
+                                    .unwrap_or(usize::MAX)
+                                    < size
+                                {
+                                    self.tools.replace_call_result(
+                                        &call_id,
+                                        &summary,
+                                        output.is_error,
+                                    )?;
+                                    self.commit_aux_usage(agent_id, usage)?;
+                                    output.value = summary;
+                                }
+                            }
+                        }
                         durable.answer(call, output.value, output.is_error)?;
                         self.store.checkpoint_and_ack(
                             agent_id,
@@ -334,11 +383,43 @@ impl AssessmentRunner {
                 .checkpoint_and_ack(agent_id, serde_json::to_value(&durable)?, &[])?;
             let latest: AgentRecord = self.store.require("agent", agent_id)?;
             if !latest.status.terminal() {
-                // Lifecycle is explicit: a free-text answer cannot silently end an assessment.
-                anyhow::bail!(
-                    "agent returned without lifecycle tool (agent_finish/finish_scan): {}",
-                    response.output()
-                );
+                // Lifecycle fallback: a free-text answer cannot silently end
+                // an assessment, but it must not kill sibling work either.
+                // Fail only this agent, retain its text as the partial
+                // summary, and let the parent receive the terminal notice.
+                let text = response.output().to_string();
+                let summary = text.chars().take(4000).collect::<String>();
+                let reason = "agent returned a plain-text answer without a lifecycle tool \
+                              (agent_finish/finish_scan); partial answer retained as summary"
+                    .to_string();
+                self.store.transaction(|tx| {
+                    let mut agent: AgentRecord =
+                        Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+                    if agent.status.terminal() {
+                        return Ok(());
+                    }
+                    agent.status = Status::Failed;
+                    agent.summary = Some(summary);
+                    agent.error = Some(reason.clone());
+                    agent.updated_at = now();
+                    Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
+                    Coordinator::notify_terminal(tx, &agent)?;
+                    Store::tx_event(
+                        tx,
+                        &agent.run_id,
+                        Some(agent_id),
+                        "agent.lifecycle_fallback",
+                        json!({"reason":reason}),
+                    )?;
+                    Ok(())
+                })?;
+                self.emit(
+                    &run.id,
+                    Some(agent_id),
+                    "agent.lifecycle_fallback",
+                    json!({"reason":reason}),
+                )?;
+                return Ok(());
             }
         }
         self.store.transaction(|tx| {
@@ -402,6 +483,43 @@ impl AssessmentRunner {
         Ok(serde_json::to_string(
             &json!({"notice":"Structured checkpoint summary; older transcript can be retrieved with evidence_read. Preserve unknowns.","full_checkpoint_evidence_id":checkpoint_evidence,"task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,"documents":self.store.list::<SharedDocument>("document",&run.id)?,"findings":self.store.list::<Finding>("finding",&run.id)?,"coverage":self.store.list::<Coverage>("coverage",&run.id)?}),
         )?)
+    }
+
+    /// Account auxiliary model usage (e.g. tool-output summarization) in the
+    /// agent and run totals without touching the conversation checkpoint.
+    fn commit_aux_usage(&self, agent_id: &str, usage: Usage) -> Result<()> {
+        let tokens = usage.total_tokens.or_else(|| {
+            usage
+                .input_tokens
+                .zip(usage.output_tokens)
+                .map(|(i, o)| i.saturating_add(o))
+        });
+        let cost = (usage.input_tokens.unwrap_or(0) as f64
+            * self.config.pricing.input_usd_per_million
+            + usage.output_tokens.unwrap_or(0) as f64 * self.config.pricing.output_usd_per_million)
+            / 1_000_000.0;
+        self.store.transaction(|tx| {
+            let mut agent: AgentRecord =
+                Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+            let mut run: RunRecord =
+                Store::tx_get(tx, "run", &agent.run_id)?.context("run missing")?;
+            agent.total_tokens = agent.total_tokens.saturating_add(tokens.unwrap_or(0));
+            agent.cost_usd += cost;
+            agent.updated_at = now();
+            run.total_tokens = run.total_tokens.saturating_add(tokens.unwrap_or(0));
+            run.cost_usd += cost;
+            run.updated_at = now();
+            Store::tx_put(tx, "agent", agent_id, &run.id, &agent)?;
+            Store::tx_put(tx, "run", &run.id, &run.id, &run)?;
+            Store::tx_event(
+                tx,
+                &run.id,
+                Some(agent_id),
+                "model.usage_aux",
+                json!({"usage":usage,"source":"tool_output_summarizer"}),
+            )?;
+            Ok(())
+        })
     }
 }
 
@@ -469,6 +587,9 @@ mod tests {
     }
     fn reply(name: &str, args: Value) -> Value {
         json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":name,"arguments":args}}]},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":2})
+    }
+    fn reply_text(content: &str) -> Value {
+        json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":content},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":2})
     }
     async fn respond(socket: &mut TcpStream, value: Value) {
         let body = value.to_string();
@@ -690,6 +811,178 @@ mod tests {
             .find(|event| event.kind == "model.usage_unknown")
             .unwrap();
         assert_eq!(event.data["tokens_known"], false);
+        server.await.unwrap();
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn lifecycle_fallback_fails_only_the_agent_and_keeps_its_answer() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            request(&mut socket).await;
+            respond(
+                &mut socket,
+                reply_text("Partial analysis: input parsing is the boundary."),
+            )
+            .await;
+        });
+        let (_dir, runner, run) = fixture(base).await;
+        // A plain-text answer must not kill the run: the agent fails with its
+        // answer retained, and no error escapes the scheduler.
+        runner.slice(&run.root_id).await.unwrap(); // model returns plain text
+        runner.slice(&run.root_id).await.unwrap(); // Done -> lifecycle fallback
+        let agent: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        assert_eq!(agent.status, Status::Failed);
+        assert_eq!(
+            agent.summary.as_deref(),
+            Some("Partial analysis: input parsing is the boundary.")
+        );
+        assert!(
+            agent
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("without a lifecycle tool")
+        );
+        server.await.unwrap();
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn role_token_cap_ends_the_agent_cleanly() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            request(&mut socket).await;
+            respond(
+                &mut socket,
+                reply("finish_scan", json!({"summary":"should never run"})),
+            )
+            .await;
+        });
+        let (_dir, runner, run) = fixture(base).await;
+        let mut agent: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        agent.token_cap = Some(10);
+        agent.total_tokens = 10;
+        runner
+            .store
+            .put("agent", &agent.id, &agent.run_id, &agent)
+            .unwrap();
+        runner.slice(&run.root_id).await.unwrap();
+        let agent: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        assert_eq!(agent.status, Status::Failed);
+        assert!(
+            agent
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("role token budget exhausted")
+        );
+        // The provider was never called for this agent.
+        drop(server);
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn tool_output_summarizer_replaces_large_envelopes_durably() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            let tool_call = request(&mut first).await;
+            assert!(
+                tool_call.to_string().contains("threat_model_save"),
+                "expected a large-output tool call first"
+            );
+            respond(
+                &mut first,
+                reply(
+                    "threat_model_save",
+                    json!({"title":"fixture threat model","body":"a body long enough to matter"}),
+                ),
+            )
+            .await;
+            let (mut second, _) = listener.accept().await.unwrap();
+            let summarize = request(&mut second).await;
+            assert!(
+                summarize
+                    .to_string()
+                    .contains("Condense the tool-result envelope"),
+                "second provider call must be the summarizer"
+            );
+            respond(&mut second, reply_text(r#"{"summary":"short summary"}"#)).await;
+            let (mut third, _) = listener.accept().await.unwrap();
+            request(&mut third).await;
+            respond(
+                &mut third,
+                reply("finish_scan", json!({"summary":"summarized run done"})),
+            )
+            .await;
+        });
+        let (_dir, runner, run) = fixture(base).await;
+        // The summarizer is enabled with an aggressive threshold so the small
+        // threat-model envelope still qualifies.
+        runner
+            .store
+            .transaction(|tx| {
+                let mut current: RunRecord =
+                    Store::tx_get(tx, "run", &run.id)?.context("run missing")?;
+                let mut config: AppConfig = serde_json::from_value(current.config.clone()).unwrap();
+                config.execution.summarize_tool_outputs = true;
+                config.execution.summarize_threshold_chars = 50;
+                current.config = serde_json::to_value(config).unwrap();
+                Store::tx_put(tx, "run", &run.id, &run.id, &current)
+            })
+            .unwrap();
+        let runner_config = {
+            let current: RunRecord = runner.store.require("run", &run.id).unwrap();
+            serde_json::from_value::<AppConfig>(current.config).unwrap()
+        };
+        let runner = AssessmentRunner::new(runner_config.clone(), runner.store.clone())
+            .await
+            .unwrap();
+        let root = runner
+            .store
+            .list::<AgentRecord>("agent", &run.id)
+            .unwrap()
+            .into_iter()
+            .find(|agent| agent.role == Role::Root)
+            .unwrap();
+        runner.slice(&root.id).await.unwrap(); // model -> tool call
+        runner.slice(&root.id).await.unwrap(); // summarize -> answer
+        runner.slice(&root.id).await.unwrap(); // model -> finish_scan call
+        runner.slice(&root.id).await.unwrap(); // execute finish_scan
+        assert_eq!(
+            runner
+                .store
+                .require::<RunRecord>("run", &run.id)
+                .unwrap()
+                .status,
+            Status::Completed
+        );
+        let calls = runner
+            .store
+            .list::<ToolCallRecord>("call", &run.id)
+            .unwrap();
+        let summarized = calls
+            .iter()
+            .find(|call| call.name == "threat_model_save")
+            .unwrap();
+        let result = summarized.result.as_ref().unwrap();
+        assert_eq!(result["value"]["result"]["summarized"], json!(true));
+        assert!(
+            result.to_string().contains("short summary"),
+            "recorded result must be the summarized envelope: {result}"
+        );
+        let agent: AgentRecord = runner.store.require("agent", &root.id).unwrap();
+        let checkpoint = agent.checkpoint.as_ref().unwrap().to_string();
+        assert!(
+            checkpoint.contains("short summary"),
+            "the conversation must hold the summary, not the raw envelope"
+        );
         server.await.unwrap();
         runner.tools.close().await;
     }

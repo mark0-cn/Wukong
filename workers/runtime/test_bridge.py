@@ -86,6 +86,24 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.client.call("job.start", argv=[sys.executable, "-c", "pass"], env={"OPENAI_API_KEY": "rejected"})
 
+    def test_interactive_session_echo_and_ownership(self):
+        program = "import sys\nfor line in sys.stdin:\n    line=line.strip()\n    if line=='quit': break\n    print('echo:'+line, flush=True)\n"
+        started = self.client.call("interact.start", argv=[sys.executable, "-c", program])
+        session_id = started["session_id"]
+        self.assertEqual(started["state"], "running")
+        first = self.client.call("interact.write", session_id=session_id, data_base64="aGVsbG8K", read_timeout_secs=5)
+        self.assertIn("echo:hello", first["captured"])
+        self.assertEqual(first["state"], "running")
+        second = self.client.call("interact.write", session_id=session_id, data_base64="cXVpdAo=", read_timeout_secs=5)
+        self.assertEqual(second["state"], "exited")
+        self.assertEqual(second["exit_code"], 0)
+        closed = self.client.call("interact.close", session_id=session_id)
+        self.assertEqual(closed["state"], "closed")
+        with self.assertRaises(AssertionError):
+            self.client.call("interact.write", session_id=session_id, data_base64="eA==")
+        with self.assertRaises(AssertionError):
+            self.client.call("interact.write", session_id="absent", data_base64="eA==")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -49,6 +49,7 @@ impl Coordinator {
         let run_id = id("run");
         let root_id = id("agent");
         let timestamp = now();
+        let root_token_cap = budget.role_token_cap(Role::Root);
         let run = RunRecord {
             id: run_id.clone(),
             target_path,
@@ -83,6 +84,7 @@ impl Coordinator {
             turns: 0,
             total_tokens: 0,
             cost_usd: 0.0,
+            token_cap: Some(root_token_cap),
             summary: None,
             error: None,
             created_at: timestamp,
@@ -167,6 +169,7 @@ impl Coordinator {
                 turns: 0,
                 total_tokens: 0,
                 cost_usd: 0.0,
+                token_cap: Some(run.budget.role_token_cap(request.role)),
                 summary: None,
                 error: None,
                 created_at: timestamp,
@@ -321,7 +324,7 @@ impl Coordinator {
             Ok(())
         })
     }
-    fn notify_terminal(tx: &rusqlite::Connection, agent: &AgentRecord) -> Result<()> {
+    pub(crate) fn notify_terminal(tx: &rusqlite::Connection, agent: &AgentRecord) -> Result<()> {
         if let Some(parent) = &agent.parent_id {
             Store::tx_message(tx,&agent.run_id,&agent.id,parent,&json!({"type":"agent_finished","agent_id":agent.id,"status":agent.status,"summary":agent.summary,"error":agent.error}).to_string(),Some(&format!("terminal:{}",agent.id)))?;
         }
@@ -446,12 +449,22 @@ impl Coordinator {
             run.updated_at = now();
             Store::tx_put(tx, "run", run_id, run_id, &run)?;
             for mut a in Store::tx_list::<AgentRecord>(tx, "agent", run_id)? {
+                let mut changed = false;
+                if !a.status.terminal() {
+                    // Role caps follow the run budget: a resumed run with an
+                    // enlarged budget rescales every surviving agent's quota.
+                    a.token_cap = Some(run.budget.role_token_cap(a.role));
+                    changed = true;
+                }
                 if matches!(a.status, Status::Running | Status::BudgetPaused) {
                     a.status = if a.wait_until.is_some() {
                         Status::Waiting
                     } else {
                         Status::Queued
                     };
+                    changed = true;
+                }
+                if changed {
                     a.updated_at = now();
                     Store::tx_put(tx, "agent", &a.id, run_id, &a)?;
                 }

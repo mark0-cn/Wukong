@@ -41,7 +41,7 @@ def query(root, params):
     if operation.get("operation") not in {"functions", "decompile", "xrefs"}:
         raise ValueError("unsupported Ghidra operation")
     if operation["operation"] in {"functions", "xrefs"}:
-        operation["limit"] = runtime.bounded_int(operation.get("limit"), 100, 1, 5000)
+        operation["limit"] = runtime.bounded_int(operation.get("limit"), 25, 1, 5000)
     if operation["operation"] == "functions":
         operation["offset"] = runtime.bounded_int(operation.get("offset"), 0, 0, 100000000)
     binding = {"schema": 1, "target_sha256": actual_hash, "version": version, "properties_sha256": digest(properties),
