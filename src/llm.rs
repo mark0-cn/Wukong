@@ -19,7 +19,7 @@ use rig::{
     tool::{ToolExecutionError, ToolOutput, ToolResult},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub use rig::run::{AgentRunStep, ExecCall, PendingToolCall};
 
@@ -629,6 +629,75 @@ impl DurableEngine {
             run.resolve_invalid_calls()?;
         }
         Ok(usage)
+    }
+
+    /// One-shot bare completion that condenses a large tool-result envelope
+    /// into a compact object for the model context. The original envelope is
+    /// always in evidence; provider failures return it unchanged so nothing
+    /// is ever lost. Returns the (possibly summarized) envelope and the
+    /// summarizer's own usage for budget accounting.
+    pub async fn summarize_tool_output(
+        &self,
+        tool_name: &str,
+        envelope: &Value,
+        max_tokens: u64,
+    ) -> (Value, Usage) {
+        let input = serde_json::to_string(envelope).unwrap_or_default();
+        let prompt = format!(
+            "Condense the tool-result envelope below for a binary reverse-engineering agent. \
+             Preserve every concrete fact VERBATIM: addresses, offsets, sizes, hashes, flags, \
+             register/stack values, error messages, function names, exit codes, counts. Drop \
+             redundant prose and boilerplate. Respond with STRICT JSON only: a \"summary\" \
+             string of at most 150 words, plus a flat copy of these scalar fields when present: \
+             id, job_id, session_id, state, status, path, sha256, finding_id, verification_id, \
+             parked, wake_at, exit_code, signal, passed, attempts, successes.\n\
+             Tool: {tool_name}\nEnvelope: {input}"
+        );
+        let request = CompletionRequest::new(prompt)
+            .temperature(0.0)
+            .max_tokens(max_tokens);
+        match self.model.call(request).await {
+            Ok(response) => {
+                use rig::completion::AssistantContent;
+                let usage = response.usage;
+                let text: String = response
+                    .choice
+                    .iter()
+                    .filter_map(|part| match part {
+                        AssistantContent::Text(text) => Some(text.text.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                let trimmed = text
+                    .trim()
+                    .trim_start_matches("```json")
+                    .trim_start_matches("```")
+                    .trim_end_matches("```");
+                let parsed: Value =
+                    serde_json::from_str(trimmed).unwrap_or(json!({"summary": text.trim()}));
+                let mut object = parsed.as_object().cloned().unwrap_or_default();
+                if !object.contains_key("summary") {
+                    object.insert("summary".into(), json!(text.trim()));
+                }
+                if let Some(id) = envelope.get("evidence_id").cloned() {
+                    object.insert("evidence_id".into(), id);
+                }
+                object.insert(
+                    "total_bytes".into(),
+                    envelope.get("total_bytes").cloned().unwrap_or(Value::Null),
+                );
+                object.insert("summarized".into(), json!(true));
+                object.insert(
+                    "retrieve".into(),
+                    json!("use evidence_read with byte ranges"),
+                );
+                (
+                    json!({"result": Value::Object(object), "evidence_id": envelope.get("evidence_id").cloned().unwrap_or(Value::Null), "truncated": false, "total_bytes": envelope.get("total_bytes").cloned().unwrap_or(Value::Null), "summarized": true}),
+                    usage,
+                )
+            }
+            Err(_) => (envelope.clone(), Usage::default()),
+        }
     }
 }
 

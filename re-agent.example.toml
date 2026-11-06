@@ -18,6 +18,11 @@ max_total_tokens = 500000
 max_wall_seconds = 3600
 # max_usd requires input/output prices below.
 # max_usd = 10.0
+# Optional per-role share of the run token budget (defaults are built in:
+# root 0.20, recon 0.25, reverse 0.30, hunter 0.25, fuzz 0.25, crash 0.20,
+# exploit 0.45, verifier 0.30, reporter 0.15; floor 10k tokens).
+# [budget.role_token_shares]
+# exploit = 0.5
 
 [pricing]
 input_usd_per_million = 0.0
@@ -44,7 +49,7 @@ max_cpu = 2
 
 [tools]
 max_output_bytes = 12000
-max_evidence_read_bytes = 64000
+max_evidence_read_bytes = 16384
 timeout_seconds = 360
 
 [execution]
@@ -52,6 +57,11 @@ stream = true
 model_retries = 2
 compact_after_chars = 200000
 keep_recent_messages = 12
+# Optional: replace large tool-result envelopes in the model context with a
+# short LM summary (original bytes stay in evidence; replay stays exact).
+# summarize_tool_outputs = true
+# summarize_threshold_chars = 6000
+# summarize_max_tokens = 400
 
 # Optional per-role worked-example markdown (<role>.md), appended to each
 # agent's prompt as method demonstrations. Values shown are illustrative.

@@ -607,7 +607,7 @@ impl Default for StringsQuery {
         Self {
             min_length: 4,
             max_length: 4096,
-            limit: 200,
+            limit: 50,
             offset: 0,
             contains: None,
         }

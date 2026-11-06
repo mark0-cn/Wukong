@@ -47,6 +47,7 @@ fn fixture(root: &Path) -> (Store, String, String) {
         turns: 1,
         total_tokens: 42,
         cost_usd: 0.012,
+        token_cap: None,
         summary: Some("done".into()),
         error: None,
         created_at: now(),

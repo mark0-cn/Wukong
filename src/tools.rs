@@ -417,6 +417,30 @@ fn builtins() -> Vec<Spec> {
             true,
         ),
         spec(
+            "interactive_start",
+            "Start a persistent interactive process (REPL-style program) owned by this agent; returns a session_id. Worker paths resolve as direct argv entries.",
+            json!({"argv":a,"env":o}),
+            &["argv"],
+            true,
+            true,
+        ),
+        spec(
+            "interactive_send",
+            "Write bytes to an owned interactive session's stdin and return its newly produced output. The session stays alive between calls.",
+            json!({"session_id":id,"data_base64":s,"read_timeout_secs":integer(1,300)}),
+            &["session_id", "data_base64"],
+            true,
+            true,
+        ),
+        spec(
+            "interactive_close",
+            "Close an owned interactive session and terminate its process tree.",
+            json!({"session_id":id}),
+            &["session_id"],
+            true,
+            true,
+        ),
+        spec(
             "crash_replay",
             "Start a persistent clean-directory crash reproduction job.",
             replay_properties(),
@@ -507,6 +531,20 @@ impl ToolService {
                 json!({"enabled":false,"capabilities":{},"reason":"runtime disabled in configuration"}),
             )
         }
+    }
+
+    /// Substitute a completed call's recorded result (e.g. an LM-summarized
+    /// envelope). Evidence and the original bytes are untouched; every later
+    /// durable replay returns the substituted result.
+    pub fn replace_call_result(&self, call_id: &str, value: &Value, is_error: bool) -> Result<()> {
+        let mut record: ToolCallRecord = self.store.require("call", call_id)?;
+        ensure!(
+            matches!(record.state, CallState::Completed | CallState::Failed),
+            "only a completed call result can be replaced"
+        );
+        record.result = Some(json!({"value": value, "is_error": is_error}));
+        record.updated_at = now();
+        self.store.put("call", call_id, &record.run_id, &record)
     }
 
     pub async fn execute(
@@ -918,6 +956,7 @@ impl ToolService {
                 turns: 0,
                 total_tokens: 0,
                 cost_usd: 0.0,
+                token_cap: Some(run.budget.role_token_cap(request.role)),
                 summary: None,
                 error: None,
                 created_at: timestamp,
@@ -1210,7 +1249,7 @@ impl ToolService {
             "functions_search" => GhidraQuery::Functions {
                 pattern: args["pattern"].as_str().map(str::to_owned),
                 offset: number(args, "offset", 0) as usize,
-                limit: number(args, "limit", 100) as usize,
+                limit: number(args, "limit", 25) as usize,
             },
             "function_decompile" => GhidraQuery::Decompile {
                 address: number(args, "address", 0),
@@ -1626,6 +1665,55 @@ impl ToolService {
                 let record = json!({"id":session_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"state":raw["state"],"worker":raw,"created_at":now(),"updated_at":now()});
                 self.store
                     .put("debug_session", session_id, &agent.run_id, &record)?;
+                Ok(raw)
+            }
+            "interactive_start" => {
+                ensure!(
+                    !string_list(&args, "argv")?.is_empty(),
+                    "interactive argv cannot be empty"
+                );
+                let raw = self
+                    .worker_call(agent, call_id, "interact.start", args)
+                    .await?;
+                let session_id = raw["session_id"]
+                    .as_str()
+                    .context("worker interactive session ID missing")?;
+                let record = json!({"id":session_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"state":"running","created_at":now(),"updated_at":now()});
+                self.store
+                    .put("interact_session", session_id, &agent.run_id, &record)?;
+                Ok(raw)
+            }
+            "interactive_send" | "interactive_close" => {
+                let session_id = text(&args, "session_id")?.to_owned();
+                let mut session: Value =
+                    self.require_in_run("interact_session", &session_id, &agent.run_id)?;
+                ensure!(
+                    session["agent_id"] == agent.id
+                        && session["worker_id"] == self.worker_identity()?,
+                    "interactive session is owned by another agent or runtime"
+                );
+                ensure!(
+                    session["state"] == "running",
+                    "interactive session is closed or lost"
+                );
+                let raw = self
+                    .worker_call(
+                        agent,
+                        call_id,
+                        if name == "interactive_close" {
+                            "interact.close"
+                        } else {
+                            "interact.write"
+                        },
+                        args,
+                    )
+                    .await?;
+                if name == "interactive_close" || raw["state"].as_str() == Some("exited") {
+                    session["state"] = json!("closed");
+                }
+                session["updated_at"] = json!(now());
+                self.store
+                    .put("interact_session", &session_id, &agent.run_id, &session)?;
                 Ok(raw)
             }
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify" => {

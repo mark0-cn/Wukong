@@ -121,7 +121,10 @@ mod tests {
     fn demo_loads_for_role_and_misses_are_none() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("recon.md"), "demo recon").unwrap();
-        assert_eq!(load_demo(dir.path(), "recon").unwrap().as_deref(), Some("demo recon"));
+        assert_eq!(
+            load_demo(dir.path(), "recon").unwrap().as_deref(),
+            Some("demo recon")
+        );
         assert_eq!(load_demo(dir.path(), "reverse").unwrap(), None);
     }
 }
