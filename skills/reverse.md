@@ -28,5 +28,8 @@ specific candidate problem, with module-relative addresses.
 
 `agent_finish` with: the reachable path (entry -> checks -> operation), the
 exact offsets involved, the conversions that matter, counterevidence, and one
-candidate input that would exercise the path. If you could not reach a
-conclusion, say exactly what blocked you and what to try next.
+candidate input that would exercise the path. If the goal is to RECONSTRUCT
+an input that passes a chain of checks, load the `tooling` skill and hand the
+check addresses to `angr_solve` instead of solving byte by byte by hand.
+If you could not reach a conclusion, say exactly what blocked you and what
+to try next.

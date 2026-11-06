@@ -86,7 +86,7 @@ Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 
 | `store` / `domain` | SQLite 事务、检查点、事件、内容哈希产物 |
 | `tools` / `mcp` | 工具 schema、角色能力、调用去重、第三方工具 |
 | `binary` / `workers/ghidra` | 二进制画像、字符串、函数、反编译、交叉引用 |
-| `runtime` / `workers/runtime` | GDB/MI、进程/fuzz jobs、重放与独立复核 |
+| `runtime` / `workers/runtime` | GDB/MI、进程/fuzz jobs、符号执行（angr）、交互会话、崩溃重放与独立复核 |
 | `report` / `interface` | CLI、TUI、JSON/Markdown/HTML 报告、证据包 |
 
 根 agent 专注编排，实际目标操作由动态子 agent 完成。发现、验证、覆盖记录和威胁模型在同一任务内共享。每个 agent 保留独立会话。完整工具输出保存为哈希产物，模型只接收有界结果及证据 ID。

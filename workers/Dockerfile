@@ -1,36 +1,65 @@
 # Build from the project root: docker build -f workers/Dockerfile -t re-agent-worker:0.1 .
+# Layer order matters for iteration speed:
+#   1. big, stable downloads (Ghidra, Temurin JDK) come FIRST so toolchain
+#      iterations never invalidate them;
+#   2. the Python toolchain uses BuildKit cache mounts so re-runs keep their
+#      downloaded wheels;
+#   3. COPY workers/runtime comes LAST so script fixes rebuild in seconds.
 # The upstream AFL++ image includes binary-only QEMU instrumentation.
 ARG AFL_IMAGE=aflplusplus/aflplusplus@sha256:9b168a35bf0d5a270ed96b5017d7012805a8cedb37e40d9fea8f4e8c57200d24
 FROM ${AFL_IMAGE}
 USER root
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 gdb gcc ca-certificates curl unzip \
+RUN --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt/lists \
+    apt-get update && apt-get install -y --no-install-recommends \
+    python3 gdb gcc ca-certificates curl unzip python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Ghidra 12.2 requires Java 25 (LTS). Ubuntu 24.04 repositories do not carry
-# JDK 25, so install the official Temurin 25 LTS build with a pinned checksum.
-ARG TEMURIN_URL=https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz
-ARG TEMURIN_SHA256=68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb
-RUN curl --fail --location --retry 4 "$TEMURIN_URL" -o /tmp/temurin25.tar.gz \
-    && printf '%s  /tmp/temurin25.tar.gz\n' "$TEMURIN_SHA256" | sha256sum --check - \
-    && mkdir -p /opt/jdk-25 && tar -xzf /tmp/temurin25.tar.gz -C /opt/jdk-25 --strip-components=1 \
-    && rm /tmp/temurin25.tar.gz
-ENV JAVA_HOME=/opt/jdk-25
-
-# Official Ghidra release, verified against the upstream release checksum.
+# Official Ghidra release and Temurin JDK 25 are fetched ONCE on the host by
+# scripts/fetch-worker-deps.ps1 into workers/deps/ (checksum-verified there),
+# so builds never re-download and never fail on network flakiness. The build
+# verifies the checksums again.
 # Set INSTALL_GHIDRA=0 for a smaller runtime-only worker.
 ARG INSTALL_GHIDRA=1
-ARG GHIDRA_URL=https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.2_build/ghidra_12.2_PUBLIC_20261016.zip
 ARG GHIDRA_SHA256=2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67
+COPY workers/deps/ghidra.zip /tmp/ghidra.zip
 RUN if [ "$INSTALL_GHIDRA" = "1" ]; then \
-      curl --fail --location --retry 4 "$GHIDRA_URL" -o /tmp/ghidra.zip \
-      && printf '%s  /tmp/ghidra.zip\n' "$GHIDRA_SHA256" | sha256sum --check - \
+      printf '%s  /tmp/ghidra.zip\n' "$GHIDRA_SHA256" | sha256sum --check - \
       && unzip -q /tmp/ghidra.zip -d /opt \
       && mv /opt/ghidra_*_PUBLIC /opt/ghidra \
       && rm /tmp/ghidra.zip; \
     fi
 ENV RE_AGENT_GHIDRA_HEADLESS=/opt/ghidra/support/analyzeHeadless
+
+# Ghidra 11.3+ no longer auto-detects java on PATH; the headless launcher
+# requires JAVA_HOME or it tries an interactive JDK prompt and fails.
+ARG TEMURIN_SHA256=68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb
+COPY workers/deps/temurin25.tar.gz /tmp/temurin25.tar.gz
+RUN printf '%s  /tmp/temurin25.tar.gz\n' "$TEMURIN_SHA256" | sha256sum --check - \
+    && mkdir -p /opt/jdk-25 && tar -xzf /tmp/temurin25.tar.gz -C /opt/jdk-25 --strip-components=1 \
+    && rm /tmp/temurin25.tar.gz
+ENV JAVA_HOME=/opt/jdk-25
+
+# Python analysis toolchain used by the typed tools and by agent scripts
+# running through job_start: pwntools (pwn plumbing), z3-solver (constraint
+# solving), angr (symbolic execution, backing angr.solve) and ropper (gadget
+# hunting). angr 9.2.78 is the self-contained release: its libc hook library
+# is bundled (angr 10 splits it into angr-data, which arrives broken in the
+# AFL base venv) and it pins pycparser<2.22, which Python 3.12's
+# "CLexer object is not callable" breakage makes mandatory.
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --force-reinstall --no-deps --no-cache-dir --break-system-packages \
+    -i "$PIP_INDEX_URL" \
+    "angr==9.2.78" "pyvex==9.2.131" "archinfo==9.2.102" "cle==9.2.78" \
+    "claripy==9.2.101" "ailment==9.2.78" "pycparser==2.21" "bitstring==3.1.9" \
+    "z3-solver==4.13.4.0" "ply==3.11" "unicorn>=2" "itanium_demangler==1.1" \
+    "nampa" "cxxheaderparser" "dpkt" "mulpyplexer" "pypcode" "pefile" "networkx" \
+    "cachetools" "sortedcontainers" "pyelftools" "psutil" "requests" "future" "packaging" \
+    && pip3 install --no-cache-dir --break-system-packages -i "$PIP_INDEX_URL" \
+    pwntools ropper
+
 ENV PATH="/opt/jdk-25/bin:/AFLplusplus:/usr/local/bin:${PATH}"
 COPY workers/runtime /opt/re-agent/runtime
 COPY workers/ghidra /opt/re-agent/ghidra
