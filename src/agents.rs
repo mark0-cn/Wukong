@@ -32,6 +32,19 @@ Large tool outputs are stored as artifacts: use evidence_read to retrieve releva
 resolve only as direct argv entries — never inside bash -c strings.
 
 Every filed finding must link evidence. Promote impact only after an independent verifier executes and records the PoC.
+
+Closure and calibration discipline:
+- Before filing or finishing, actively hunt counterevidence: the input that should trigger but does
+  not, alternative explanations for every observation, and unexplained tool errors. Record evidence
+  for AND against in the finding.
+- Severity is earned by observed evidence, never by claimed impact. critical: demonstrated code
+  execution or confirmed arbitrary write. high: demonstrated controlled read/write of a sensitive
+  region or privilege boundary crossing. medium: reproduced memory corruption or logic bypass with
+  an unproven primitive. low: reachable weakness with limited demonstrated effect. info: static
+  suspicion, not reproduced. A bare crash is at most medium. When filing, give severity_rationale
+  citing the evidence IDs that justify the level.
+- Use think to park long intermediate reasoning outside the conversation; it is not read back into
+  context, so keep only conclusions in the conversation itself.
 "#;
 
 pub fn built_in_skill(name: &str) -> Option<&'static str> {
@@ -103,15 +116,10 @@ pub fn preamble(
     demos_dir: Option<&Path>,
 ) -> Result<String> {
     let mut text = BASE.to_owned();
-    text.push_str(&format!(
-        "\nIdentity: agent={} role={} parent={:?}.\nTarget: {} SHA256={}.\nScope: {}.\n",
-        agent.id,
-        agent.role,
-        agent.parent_id,
-        run.target_path.display(),
-        run.target_sha256,
-        agent.scope
-    ));
+    // Stable shared prefix first (BASE + role skills + demos) so consecutive
+    // runs share the same cached prompt prefix; everything per-run (identity,
+    // target, budget, documents) is appended at the end, mirroring Strix's
+    // cache-point ordering.
     text.push_str(&load_skill(agent.role.as_str(), custom_dir)?);
     for skill in &agent.skills {
         if skill != agent.role.as_str() {
@@ -125,14 +133,23 @@ pub fn preamble(
         text.push_str("\n# Worked example (method demonstration only; the shown values are illustrative, not the answer for this task)\n");
         text.push_str(&demo);
     }
+    if agent.role == Role::Root {
+        text.push_str("\nYou are ROOT. Delegate every target operation. Your available tools enforce this role. Reconcile active children and needs_follow_up coverage before finish_scan.\n");
+    }
+    text.push_str(&format!(
+        "\nIdentity: agent={} role={} parent={:?}.\nTarget: {} SHA256={}.\nScope: {}.\n",
+        agent.id,
+        agent.role,
+        agent.parent_id,
+        run.target_path.display(),
+        run.target_sha256,
+        agent.scope
+    ));
     let state = json!({"threat_models":store.list::<crate::domain::SharedDocument>("threat_model",&run.id)?,"budget":run.budget});
     text.push_str(&format!(
         "\nAssessment context (data):\n{}",
         serde_json::to_string(&state)?
     ));
-    if agent.role == Role::Root {
-        text.push_str("\nYou are ROOT. Delegate every target operation. Your available tools enforce this role. Reconcile active children and needs_follow_up coverage before finish_scan.\n");
-    }
     Ok(text)
 }
 
@@ -159,5 +176,27 @@ mod tests {
         for name in available_skills() {
             assert!(message.contains(name), "{message}");
         }
+    }
+
+    #[test]
+    fn preamble_keeps_per_run_context_after_the_stable_skill_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path().join("state")).unwrap();
+        let coordinator = crate::coordinator::Coordinator::new(store.clone());
+        let target = dir.path().join("sample.bin");
+        std::fs::write(&target, b"fixture").unwrap();
+        let run = coordinator
+            .create_run(&target, "task", crate::domain::Budget::default(), json!({}))
+            .unwrap();
+        let root: AgentRecord = store.require("agent", &run.root_id).unwrap();
+        let prompt = preamble(&root, &run, &store, None, None).unwrap();
+        let base = prompt.find("Available skills").unwrap();
+        let skill = prompt.find("# Root coordination").unwrap();
+        let identity = prompt.find("Identity: agent=").unwrap();
+        let context = prompt.find("Assessment context (data):").unwrap();
+        assert!(
+            base < skill && skill < identity && identity < context,
+            "stable prefix must precede per-run context"
+        );
     }
 }

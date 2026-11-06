@@ -268,6 +268,23 @@ pub enum FindingStage {
     Inconclusive,
     Rejected,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Thought {
+    pub id: String,
+    pub run_id: String,
+    pub agent_id: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
     pub id: String,
@@ -277,6 +294,8 @@ pub struct Finding {
     pub description: String,
     pub root_cause: Option<String>,
     pub impact: Option<String>,
+    pub severity: Option<Severity>,
+    pub severity_rationale: Option<String>,
     pub stage: FindingStage,
     pub location: Option<Value>,
     pub evidence_ids: Vec<String>,

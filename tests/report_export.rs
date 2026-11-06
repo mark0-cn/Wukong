@@ -73,6 +73,8 @@ fn fixture(root: &Path) -> (Store, String, String) {
         description: "Unconfirmed parser issue".into(),
         root_cause: None,
         impact: Some("control flow claim".into()),
+        severity: Some(Severity::High),
+        severity_rationale: Some("recorded claim only; verification missing".into()),
         stage: FindingStage::ImpactVerified,
         location: Some(json!({"module_offset":4096})),
         evidence_ids: vec![evidence.id.clone()],

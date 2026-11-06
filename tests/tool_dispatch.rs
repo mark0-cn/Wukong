@@ -541,3 +541,64 @@ async fn docker_independent_verification_uses_real_trials_and_limits_impact() ->
     service.close().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn think_is_private_and_severity_is_gated_by_stage() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    // Scratch reasoning is recorded for audit, acknowledged minimally, and
+    // never replayed into context.
+    let first = service
+        .execute(
+            &agent.id,
+            "think-1",
+            "think",
+            json!({"content":"partial plan: xref the prompt string"}),
+        )
+        .await?;
+    assert!(!first.is_error);
+    assert_eq!(result(&first)["recorded"], true);
+    assert_eq!(result(&first)["thoughts"], 1);
+    let second = service
+        .execute(
+            &agent.id,
+            "think-2",
+            "think",
+            json!({"content":"revised plan"}),
+        )
+        .await?;
+    assert_eq!(result(&second)["thoughts"], 2);
+    let thoughts = store.list::<Thought>("thought", &run.id)?;
+    assert_eq!(thoughts.len(), 2);
+    assert!(thoughts.iter().all(|thought| thought.agent_id == agent.id));
+    // Real evidence from a static tool, so the severity gate is what we test.
+    let evidence = service
+        .execute(&agent.id, "evidence", "binary_strings", json!({"limit":5}))
+        .await?;
+    assert!(!evidence.is_error);
+    let evidence_id = evidence.value["evidence_id"].as_str().unwrap().to_owned();
+    // Severity is earned by evidence: critical on a bare suspicion is refused.
+    let gated = service
+        .execute(&agent.id, "gated", "finding_file", json!({"title":"speculation","description":"not reproduced","severity":"critical","stage":"suspected","evidence_ids":[evidence_id]}))
+        .await?;
+    assert!(gated.is_error);
+    assert!(
+        result(&gated)["error"]
+            .as_str()
+            .unwrap()
+            .contains("reproduced-or-better")
+    );
+    // Medium on a reproduced finding is accepted and round-trips.
+    let filed = service
+        .execute(&agent.id, "filed", "finding_file", json!({"title":"real observation","description":"input reproduced","severity":"medium","severity_rationale":"bare crash only","stage":"reproduced","evidence_ids":[evidence_id]}))
+        .await?;
+    assert!(!filed.is_error, "{:?}", filed.value);
+    assert_eq!(result(&filed)["finding"]["severity"], "medium");
+    assert_eq!(
+        result(&filed)["finding"]["severity_rationale"],
+        "bare crash only"
+    );
+    service.close().await;
+    Ok(())
+}
