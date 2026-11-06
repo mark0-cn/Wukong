@@ -1986,7 +1986,20 @@ fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
         .with_context(|| format!("{key} must be a nonempty string"))
 }
 fn number(args: &Value, key: &str, default: u64) -> u64 {
-    args[key].as_u64().unwrap_or(default)
+    match &args[key] {
+        Value::Number(value) => value.as_u64().unwrap_or(default),
+        Value::String(text) => {
+            let text = text.trim().replace('_', "");
+            let parsed =
+                if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+                    u64::from_str_radix(hex, 16)
+                } else {
+                    text.parse::<u64>()
+                };
+            parsed.unwrap_or(default)
+        }
+        _ => default,
+    }
 }
 fn string_list(args: &Value, key: &str) -> Result<Vec<String>> {
     args.get(key)
