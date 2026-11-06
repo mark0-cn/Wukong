@@ -256,6 +256,17 @@ fn readable_report(snapshot: &Snapshot) -> (String, String) {
         for (name, value) in [
             ("Root cause", finding.root_cause.as_deref()),
             ("Reported impact", finding.impact.as_deref()),
+            (
+                "Severity",
+                finding.severity.map(|severity| match severity {
+                    Severity::Critical => "critical",
+                    Severity::High => "high",
+                    Severity::Medium => "medium",
+                    Severity::Low => "low",
+                    Severity::Info => "info",
+                }),
+            ),
+            ("Severity rationale", finding.severity_rationale.as_deref()),
         ] {
             if let Some(value) = value {
                 md.push_str(&format!("**{name}:** {}\n\n", markdown_text(value)));

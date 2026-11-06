@@ -218,8 +218,8 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "finding_file",
-            "File a suspected or reproduced finding with evidence. Verified impact requires a separate immutable verifier record.",
-            json!({"title":id,"description":id,"root_cause":s,"impact":s,"stage":{"type":"string","enum":["suspected","reproduced","root_cause_confirmed","impact_verified","inconclusive","rejected"]},"location":o,"evidence_ids":a,"verification_id":s}),
+            "File a suspected or reproduced finding with evidence. Verified impact requires a separate immutable verifier record. severity critical/high requires a reproduced-or-better stage.",
+            json!({"title":id,"description":id,"root_cause":s,"impact":s,"severity":{"type":"string","enum":["critical","high","medium","low","info"]},"severity_rationale":s,"stage":{"type":"string","enum":["suspected","reproduced","root_cause_confirmed","impact_verified","inconclusive","rejected"]},"location":o,"evidence_ids":a,"verification_id":s}),
             &["title", "description", "evidence_ids"],
             true,
             false,
@@ -227,7 +227,7 @@ fn builtins() -> Vec<Spec> {
         spec(
             "finding_update",
             "Update an existing finding. Impact promotion is enforced using independent execution evidence.",
-            json!({"id":id,"title":s,"description":s,"root_cause":s,"impact":s,"stage":{"type":"string","enum":["suspected","reproduced","root_cause_confirmed","impact_verified","inconclusive","rejected"]},"location":o,"evidence_ids":a,"verification_id":s}),
+            json!({"id":id,"title":s,"description":s,"root_cause":s,"impact":s,"severity":{"type":"string","enum":["critical","high","medium","low","info"]},"severity_rationale":s,"stage":{"type":"string","enum":["suspected","reproduced","root_cause_confirmed","impact_verified","inconclusive","rejected"]},"location":o,"evidence_ids":a,"verification_id":s}),
             &["id"],
             true,
             false,
@@ -270,6 +270,14 @@ fn builtins() -> Vec<Spec> {
             json!({"name":id}),
             &["name"],
             false,
+            false,
+        ),
+        spec(
+            "think",
+            "Record private scratch reasoning (plans, notes, partial analysis). It is stored for audit but never read back into the conversation and never shown to other agents; keep conclusions in the conversation instead.",
+            json!({"content":id}),
+            &["content"],
+            true,
             false,
         ),
         spec(
@@ -812,6 +820,29 @@ impl ToolService {
             "load_skill" => Ok(
                 json!({"name":args["name"],"content":agents::load_skill(text(&args,"name")?,self.config.skills_dir.as_deref())?}),
             ),
+            "think" => {
+                let content = text(&args, "content")?;
+                ensure!(
+                    content.chars().count() <= 8000,
+                    "think content exceeds 8000 characters"
+                );
+                let thought = crate::domain::Thought {
+                    id: stable("thought", call_id),
+                    run_id: agent.run_id.clone(),
+                    agent_id: agent.id.clone(),
+                    content: content.to_owned(),
+                    created_at: now(),
+                };
+                let thoughts = self
+                    .store
+                    .list::<crate::domain::Thought>("thought", &agent.run_id)?
+                    .into_iter()
+                    .filter(|t| t.agent_id == agent.id)
+                    .count();
+                self.store
+                    .put("thought", &thought.id, &agent.run_id, &thought)?;
+                Ok(json!({"recorded":true,"chars":content.chars().count(),"thoughts":thoughts + 1}))
+            }
             "binary_inspect" => {
                 let run = self.target(agent)?;
                 Ok(serde_json::to_value(binary::inspect(&run.target_path)?)?)
@@ -1161,6 +1192,8 @@ impl ToolService {
                     description: text(args, "description")?.into(),
                     root_cause: None,
                     impact: None,
+                    severity: None,
+                    severity_rationale: None,
                     stage: FindingStage::Suspected,
                     location: None,
                     evidence_ids: vec![],
@@ -1185,6 +1218,12 @@ impl ToolService {
             if let Some(value) = args["impact"].as_str() {
                 finding.impact = Some(value.into());
             }
+            if let Some(value) = args.get("severity") {
+                finding.severity = Some(serde_json::from_value(value.clone())?);
+            }
+            if let Some(value) = args["severity_rationale"].as_str() {
+                finding.severity_rationale = Some(value.into());
+            }
             if let Some(value) = args["verification_id"].as_str() {
                 finding.verification_id = Some(value.into());
             }
@@ -1197,6 +1236,19 @@ impl ToolService {
             }
             if let Some(value) = args.get("stage") {
                 finding.stage = serde_json::from_value(value.clone())?;
+            }
+            if let Some(severity) = finding.severity {
+                ensure!(
+                    !matches!(severity, Severity::Critical | Severity::High)
+                        || !matches!(
+                            finding.stage,
+                            FindingStage::Suspected
+                                | FindingStage::Inconclusive
+                                | FindingStage::Rejected
+                        ),
+                    "severity critical/high requires a reproduced-or-better stage; \
+                     a suspicion or a bare crash is at most medium"
+                );
             }
             if finding.stage == FindingStage::ImpactVerified {
                 let id = finding
