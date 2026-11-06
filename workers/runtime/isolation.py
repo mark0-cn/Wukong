@@ -10,6 +10,26 @@ import sys
 import uuid
 
 
+def ensure_uid_entries(start=20000, count=512):
+    """Register the allocator's UID range in /etc/passwd once per container.
+
+    Python tooling (pyvex/getpass and others) resolves the current uid via
+    pwd.getpwuid; a numeric uid without a passwd entry breaks them inside
+    isolated jobs. The daemon runs as root in isolated mode and performs the
+    one-time registration.
+    """
+    if os.geteuid() != 0:
+        return
+    marker = "/etc/re-agent-passwd.ready"
+    if os.path.exists(marker):
+        return
+    with open("/etc/passwd", "a", encoding="utf-8") as stream:
+        for uid in range(start, start + count):
+            stream.write("re-agent-%d:x:%d:%d::/nonexistent:/bin/false\n" % (uid, uid, uid))
+    with open(marker, "w", encoding="utf-8"):
+        pass
+
+
 def allocate_uid(root):
     import fcntl
     lock = root / "uid-allocator.lock"
@@ -24,6 +44,7 @@ def allocate_uid(root):
         temporary.write_text(json.dumps({"next": value + 1}))
         temporary.chmod(0o600)
         os.replace(temporary, path)
+        ensure_uid_entries()
         return value
 
 

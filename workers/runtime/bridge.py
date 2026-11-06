@@ -892,6 +892,31 @@ class Runtime:
             if len(data) > 1024 * 1024:
                 raise ValueError("interactive write exceeds 1 MiB")
             return session.write(data, bounded_int(params.get("read_timeout_secs"), 10, 1, 300))
+        if method == "angr.solve":
+            target = confined(self.root, params["target"], True)
+            if not target.is_file():
+                raise ValueError("angr target must be a staged file")
+            find = params.get("find")
+            if not isinstance(find, list) or not find or not all(
+                    isinstance(item, int) and 0 <= item < 2**64 for item in find):
+                raise ValueError("find must be a nonempty list of module-relative addresses")
+            avoid = params.get("avoid") or []
+            if not all(isinstance(item, int) and 0 <= item < 2**64 for item in avoid):
+                raise ValueError("avoid addresses must be module-relative integers")
+            stdin_length = bounded_int(params.get("stdin_length"), 64, 1, 4096)
+            max_steps = bounded_int(params.get("max_steps"), 50000, 1, 10_000_000)
+            payload = json.dumps({"find": find, "avoid": avoid,
+                                  "stdin_length": stdin_length, "max_steps": max_steps,
+                                  "printable_only": bool(params.get("printable_only", True))})
+            script = str(Path(__file__).with_name("angr_solve.py"))
+            # The target travels as an argv entry so isolated jobs stage it
+            # into the sandbox like every other worker file reference.
+            spec = {"argv": ["python3", script, payload, str(params["target"])],
+                    "call_id": params.get("call_id"),
+                    "request_id": params.get("request_id"),
+                    "timeout_secs": bounded_int(params.get("timeout_secs"), 600, 10, 3600),
+                    "output_limit": 1024 * 1024}
+            return self.start_job(spec)
         if method == "file.put":
             path = confined(self.root, "files/" + str(params["path"]))
             data = base64.b64decode(params["data_base64"], validate=True)

@@ -104,6 +104,17 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.client.call("interact.write", session_id="absent", data_base64="eA==")
 
+    def test_angr_solve_validates_parameters(self):
+        self.client.put("dummy.bin", b"not-an-elf")
+        with self.assertRaises(AssertionError):
+            self.client.call("angr.solve", target="files/missing.bin", find=[4194304])
+        with self.assertRaises(AssertionError):
+            self.client.call("angr.solve", target="files/dummy.bin", find=[])
+        with self.assertRaises(AssertionError):
+            self.client.call("angr.solve", target="files/dummy.bin", find=[4194304], stdin_length=999999)
+        with self.assertRaises(AssertionError):
+            self.client.call("angr.solve", target="files/dummy.bin", find=[4194304], avoid=["not-an-int"])
+
 
 if __name__ == "__main__":
     unittest.main()

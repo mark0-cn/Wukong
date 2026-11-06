@@ -266,7 +266,7 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "load_skill",
-            "Load one built-in analysis skill by exact name: root, recon, reverse, hunter, fuzz, crash, exploit, verifier, reporter (or a configured custom skill).",
+            "Load one built-in analysis skill by exact name: root, recon, reverse, hunter, fuzz, crash, exploit, verifier, reporter, tooling (or a configured custom skill).",
             json!({"name":id}),
             &["name"],
             false,
@@ -445,6 +445,14 @@ fn builtins() -> Vec<Spec> {
             "Close an owned interactive session and terminate its process tree.",
             json!({"session_id":id}),
             &["session_id"],
+            true,
+            true,
+        ),
+        spec(
+            "angr_solve",
+            "Symbolic execution: solve for a concrete stdin input that reaches a module-relative find address while avoiding others. Runs as a background job with a hard timeout; results (input_base64 + exploration stats) arrive via job_status.",
+            json!({"target":id,"find":a,"avoid":a,"stdin_length":integer(1,4096),"max_steps":integer(1,10000000),"timeout_secs":integer(10,3600),"printable_only":b}),
+            &["target", "find"],
             true,
             true,
         ),
@@ -1768,17 +1776,24 @@ impl ToolService {
                     .put("interact_session", &session_id, &agent.run_id, &session)?;
                 Ok(raw)
             }
-            "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify" => {
+            "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
+            | "angr_solve" => {
                 let run: RunRecord = self.store.require("run", &agent.run_id)?;
                 if name != "job_start" {
                     self.known_file(agent, text(&args, "target")?, true)?;
-                    if name != "fuzz_start" {
+                    if !matches!(name, "fuzz_start" | "angr_solve") {
                         self.known_file(agent, text(&args, "input")?, false)?;
                     }
                 } else {
                     ensure!(
                         !string_list(&args, "argv")?.is_empty(),
                         "job argv cannot be empty"
+                    );
+                }
+                if name == "angr_solve" {
+                    ensure!(
+                        !string_list(&args, "find")?.is_empty(),
+                        "angr_solve requires at least one find address"
                     );
                 }
                 if name == "fuzz_start" {
@@ -1822,6 +1837,7 @@ impl ToolService {
                     "fuzz_start" => "fuzz.start",
                     "crash_replay" => "crash.replay",
                     "input_minimize" => "input.minimize",
+                    "angr_solve" => "angr.solve",
                     _ => "poc.verify",
                 };
                 let raw = self

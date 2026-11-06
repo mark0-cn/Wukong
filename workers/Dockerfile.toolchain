@@ -1,0 +1,23 @@
+# Incremental toolchain fix layer, applied ON TOP of the last good
+# re-agent-worker image so flaky large downloads (Ghidra/Temurin) are never
+# re-run during dependency iteration. For clean builds use workers/Dockerfile.
+FROM re-agent-worker:0.1
+USER root
+# angr 9.2.78 is the self-contained, battle-tested release: its libc hook
+# library is bundled (angr 10 splits it into angr-data, which arrived broken
+# in the AFL base venv) and it pins pycparser<2.22, which the Python 3.12
+# "CLexer object is not callable" breakage makes mandatory. The index is
+# configurable because some networks flake against pypi.org.
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --force-reinstall --no-deps --no-cache-dir --break-system-packages \
+    -i "$PIP_INDEX_URL" \
+    "angr==9.2.78" "pyvex==9.2.131" "archinfo==9.2.102" "cle==9.2.78" \
+    "claripy==9.2.101" "ailment==9.2.78" "pycparser==2.21" "bitstring==3.1.9" \
+    "z3-solver==4.13.4.0" "ply==3.11" "unicorn>=2" "itanium_demangler==1.1" \
+    "nampa" "cxxheaderparser" "dpkt" "mulpyplexer" "pypcode" "pefile" "networkx" \
+    "cachetools" "sortedcontainers" "pyelftools" "psutil" "requests" "future" "packaging" \
+    && pip3 install --no-cache-dir --break-system-packages -i "$PIP_INDEX_URL" \
+    pwntools ropper
+COPY workers/runtime /opt/re-agent/runtime
+COPY workers/ghidra /opt/re-agent/ghidra

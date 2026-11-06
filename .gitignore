@@ -17,3 +17,7 @@ __pycache__/
 # External benchmark adapters and datasets (local only)
 /benchmarks/
 
+
+# Host-cached worker image dependencies (fetched by scripts/fetch-worker-deps.ps1)
+/workers/deps/
+

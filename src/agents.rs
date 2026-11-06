@@ -14,7 +14,7 @@ Static suspicion is not a confirmed bug; a crash is not proof of a controllable 
 Record counterevidence and unknowns. Do not claim source lines when only binary addresses are available.
 
 Available skills (load one by exact name with load_skill; do not invent names):
-root, recon, reverse, hunter, fuzz, crash, exploit, verifier, reporter.
+root, recon, reverse, hunter, fuzz, crash, exploit, verifier, reporter, tooling.
 
 Tool errors are information, not a dead end: read the message, adapt, and retry once with corrected arguments
 before giving up. Arguments accept plain integers and 0x-hex strings interchangeably for addresses/offsets.
@@ -58,12 +58,14 @@ pub fn built_in_skill(name: &str) -> Option<&'static str> {
         "exploit" => include_str!("../skills/exploit.md"),
         "verifier" => include_str!("../skills/verifier.md"),
         "reporter" => include_str!("../skills/reporter.md"),
+        "tooling" => include_str!("../skills/tooling.md"),
         _ => return None,
     })
 }
 pub fn available_skills() -> Vec<&'static str> {
     vec![
         "root", "recon", "reverse", "hunter", "fuzz", "crash", "exploit", "verifier", "reporter",
+        "tooling",
     ]
 }
 pub fn load_skill(name: &str, custom_dir: Option<&Path>) -> Result<String> {

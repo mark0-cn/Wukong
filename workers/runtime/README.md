@@ -27,7 +27,8 @@ the host filesystem and model credentials are not mounted. Add a stronger VM
 boundary for kernel experiments. Do not attach the Docker socket to the worker.
 
 The Dockerfile pins the AFL++ base image by digest and installs GDB, GCC, Python,
-AFL++ with QEMU instrumentation, Temurin JDK 25 LTS (checked SHA256; required by
+AFL++ with QEMU instrumentation, the Python analysis toolchain (pwntools,
+z3-solver, angr, ropper), Temurin JDK 25 LTS (checked SHA256; required by
 Ghidra 12.2), and the official Ghidra 12.2 release with a checked SHA256. Use
 `--build-arg INSTALL_GHIDRA=0` to omit Ghidra. For reproducible builds set `AFL_IMAGE`
 to an upstream image digest after reviewing `docker image inspect` output.
@@ -101,6 +102,7 @@ Requests/responses are capped at 48 MiB. Uploaded files are capped at 32 MiB.
 | `interact.start` | `argv`, optional `env`; a persistent interactive process with a worker-owned `session_id` |
 | `interact.write` | `session_id`, `data_base64`, optional `read_timeout_secs`; writes stdin and returns newly produced bounded output |
 | `interact.close` | `session_id`; terminate the session's process tree |
+| `angr.solve` | `target`, `find`, optional `avoid`/`stdin_length`/`max_steps`/`timeout_secs`/`printable_only`; a bounded symbolic-execution job whose result JSON carries `input_base64` and exploration stats |
 | `crash.replay` | `target`, `input`, `args` (`@@` input substitution), timeout; job |
 | `input.minimize` | Replay parameters, `max_attempts`, `minimize_timeout_secs`; delta debugging job |
 | `poc.verify` | Replay parameters, `trials`, distinct `producer_agent_id` / `verifier_agent_id`, `call_id`; job |
