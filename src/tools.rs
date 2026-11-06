@@ -266,7 +266,7 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "load_skill",
-            "Load one built-in or configured analysis skill by name.",
+            "Load one built-in analysis skill by exact name: root, recon, reverse, hunter, fuzz, crash, exploit, verifier, reporter (or a configured custom skill).",
             json!({"name":id}),
             &["name"],
             false,
