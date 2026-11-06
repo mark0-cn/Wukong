@@ -46,6 +46,7 @@ $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 | Portable worker protocol tests (`workers/runtime/test_bridge.py`) | 6/6 passed |
 | Linux runtime acceptance | GDB break at `main` + stack/memory reads via GDB/MI, relay restart preserves debugger ownership and running jobs, crash replay passes with observed `crash` stage, independent verification 3/3 trials, minimization to the exact 3-byte `BAD` input, AFL++ QEMU fuzz completes with 17,059 executions and a saved `SIGABRT` crash |
 | Ghidra worker acceptance | Ghidra 12.2 headless import + auto-analysis, `functions` search resolves `main` and the noinline helper, decompile of the helper contains the `memcpy` sink, decompile of `main` shows the `copy_input` call, xrefs contain a `UNCONDITIONAL_CALL` from inside `main`, identical repeat query hits the identity-bound cache, mismatched target hash rejected |
+| Fixture ground truth | `fixtures/build.sh` + `fixtures/evaluate.py --repetitions 3` inside the worker container: 33/33 behavior checks pass (normal path, vulnerable path, fixed path; exit codes/signals recorded with sample/input/source hashes) |
 
 ## Delivery audit
 
