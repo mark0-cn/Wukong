@@ -1,0 +1,421 @@
+﻿{
+  "doctor": {
+    "protocol": 1,
+    "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "worker_root": "/tmp/re-agent-acceptance-31444a5f",
+    "isolation": "external_worker",
+    "core_pattern": "|/wsl-capture-crash %t %E %p %s",
+    "external_core_handler": true,
+    "metadata_protected_from_targets": true,
+    "unique_experiment_uids": true,
+    "tools": {
+      "gdb": {
+        "available": true,
+        "path": "/usr/bin/gdb",
+        "version": "GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1"
+      },
+      "afl-fuzz": {
+        "available": true,
+        "path": "/usr/local/bin/afl-fuzz",
+        "version": null
+      },
+      "afl-qemu-trace": {
+        "available": true,
+        "path": "/usr/local/bin/afl-qemu-trace",
+        "version": null
+      },
+      "afl-qemu-bridge": {
+        "available": true,
+        "path": "/usr/local/bin/afl-qemu-bridge",
+        "version": null
+      },
+      "afl-tmin": {
+        "available": true,
+        "path": "/usr/local/bin/afl-tmin",
+        "version": null
+      },
+      "gcc": {
+        "available": true,
+        "path": "/usr/bin/gcc",
+        "version": "gcc (Ubuntu 11.5.0-1ubuntu1~24.04.1) 11.5.0"
+      }
+    },
+    "capabilities": {
+      "process_jobs": true,
+      "persistent_jobs": true,
+      "debug_gdb_mi": true,
+      "fuzz_qemu": true,
+      "crash_replay": true,
+      "input_minimize": true,
+      "poc_verify": true,
+      "formats": [
+        "ELF"
+      ],
+      "native_target_execution": true
+    }
+  },
+  "gdb": {
+    "breakpoint": {
+      "session_id": "66e70c31bef84a6eb691e0293fcd89c3",
+      "token": 5,
+      "class": "done",
+      "record": "5^done,bkpt={number=\"1\",type=\"breakpoint\",disp=\"keep\",enabled=\"y\",addr=\"0x0000000000001205\",func=\"main\",file=\"/tmp/tmp6p3g1o2f/fixture.c\",fullname=\"/tmp/tmp6p3g1o2f/fixture.c\",line=\"5\",thread-groups=[\"i1\"],times=\"0\",original-location=\"main\"}",
+      "events": [
+        "=thread-group-added,id=\"i1\"",
+        "=cmd-param-changed,param=\"auto-load gdb-scripts\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load libthread-db\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load local-gdbinit\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load python-scripts\",value=\"off\"",
+        "~\"Reading symbols from /tmp/re-agent-executions/fe21d64dc8def653f912ed59/b62bd4f29bce493a869489e92de3f563/readonly/target.bin...\\n\""
+      ],
+      "transcript": "debug/66e70c31bef84a6eb691e0293fcd89c3/transcript.mi"
+    },
+    "stack": {
+      "session_id": "66e70c31bef84a6eb691e0293fcd89c3",
+      "token": 7,
+      "class": "done",
+      "record": "7^done,stack=[frame={level=\"0\",addr=\"0x00005b4ca1d3a205\",func=\"main\",file=\"/tmp/tmp6p3g1o2f/fixture.c\",fullname=\"/tmp/tmp6p3g1o2f/fixture.c\",line=\"5\",arch=\"i386:x86-64\"}]",
+      "events": [
+        "=thread-group-added,id=\"i1\"",
+        "=cmd-param-changed,param=\"auto-load gdb-scripts\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load libthread-db\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load local-gdbinit\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load python-scripts\",value=\"off\"",
+        "~\"Reading symbols from /tmp/re-agent-executions/fe21d64dc8def653f912ed59/b62bd4f29bce493a869489e92de3f563/readonly/target.bin...\\n\"",
+        "&\"warning: Error disabling address space randomization: Operation not permitted\\n\"",
+        "=thread-group-started,id=\"i1\",pid=\"18925\"",
+        "=thread-created,id=\"1\",group-id=\"i1\"",
+        "=breakpoint-modified,bkpt={number=\"1\",type=\"breakpoint\",disp=\"keep\",enabled=\"y\",addr=\"0x00005b4ca1d3a205\",func=\"main\",file=\"/tmp/tmp6p3g1o2f/fixture.c\",fullname=\"/tmp/tmp6p3g1o2f/fixture.c\",line=\"5\",thread-groups=[\"i1\"],times=\"0\",original-location=\"main\"}",
+        "=library-loaded,id=\"/lib64/ld-linux-x86-64.so.2\",target-name=\"/lib64/ld-linux-x86-64.so.2\",host-name=\"/lib64/ld-linux-x86-64.so.2\",symbols-loaded=\"0\",thread-group=\"i1\",ranges=[{from=\"0x00007a7491ea5000\",to=\"0x00007a7491ecf195\"}]",
+        "*running,thread-id=\"all\"",
+        "=library-loaded,id=\"/lib/x86_64-linux-gnu/libc.so.6\",target-name=\"/lib/x86_64-linux-gnu/libc.so.6\",host-name=\"/lib/x86_64-linux-gnu/libc.so.6\",symbols-loaded=\"0\",thread-group=\"i1\",ranges=[{from=\"0x00007a7491ca9800\",to=\"0x00007a7491e31039\"}]",
+        "~\"[Thread debugging using libthread_db enabled]\\n\"",
+        "~\"Using host libthread_db library \\\"/lib/x86_64-linux-gnu/libthread_db.so.1\\\".\\n\"",
+        "=breakpoint-modified,bkpt={number=\"1\",type=\"breakpoint\",disp=\"keep\",enabled=\"y\",addr=\"0x00005b4ca1d3a205\",func=\"main\",file=\"/tmp/tmp6p3g1o2f/fixture.c\",fullname=\"/tmp/tmp6p3g1o2f/fixture.c\",line=\"5\",thread-groups=[\"i1\"],times=\"1\",original-location=\"main\"}",
+        "~\"\\n\"",
+        "~\"Breakpoint 1, main (argc=2, argv=0x7ffc88878238) at /tmp/tmp6p3g1o2f/fixture.c:5\\n\"",
+        "&\"warning: 5\\t/tmp/tmp6p3g1o2f/fixture.c: No such file or directory\\n\"",
+        "*stopped,reason=\"breakpoint-hit\",disp=\"keep\",bkptno=\"1\",frame={addr=\"0x00005b4ca1d3a205\",func=\"main\",args=[{name=\"argc\",value=\"2\"},{name=\"argv\",value=\"0x7ffc88878238\"}],file=\"/tmp/tmp6p3g1o2f/fixture.c\",fullname=\"/tmp/tmp6p3g1o2f/fixture.c\",line=\"5\",arch=\"i386:x86-64\"},thread-id=\"1\",stopped-threads=\"all\",core=\"14\""
+      ],
+      "transcript": "debug/66e70c31bef84a6eb691e0293fcd89c3/transcript.mi"
+    },
+    "memory": {
+      "session_id": "66e70c31bef84a6eb691e0293fcd89c3",
+      "token": 8,
+      "class": "done",
+      "record": "8^done,memory=[{begin=\"0x00005b4ca1d3a1e9\",offset=\"0x0000000000000000\",end=\"0x00005b4ca1d3a1f9\",contents=\"f30f1efa554889e54881ecb000000089\"}]",
+      "events": [
+        "=thread-group-added,id=\"i1\"",
+        "=cmd-param-changed,param=\"auto-load gdb-scripts\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load libthread-db\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load local-gdbinit\",value=\"off\"",
+        "=cmd-param-changed,param=\"auto-load python-scripts\",value=\"off\"",
+        "~\"Reading symbols from /tmp/re-agent-executions/fe21d64dc8def653f912ed59/b62bd4f29bce493a869489e92de3f563/readonly/target.bin...\\n\"",
+        "&\"warning: Error disabling address space randomization: Operation not permitted\\n\"",
+        "=thread-group-started,id=\"i1\",pid=\"18925\"",
+        "=thread-created,id=\"1\",group-id=\"i1\"",
+        "=breakpoint-modified,bkpt={number=\"1\",type=\"breakpoint\",disp=\"keep\",enabled=\"y\",addr=\"0x00005b4ca1d3a205\",func=\"main\",file=\"/tmp/tmp6p3g1o2f/fixture.c\",fullname=\"/tmp/tmp6p3g1o2f/fixture.c\",line=\"5\",thread-groups=[\"i1\"],times=\"0\",original-location=\"main\"}",
+        "=library-loaded,id=\"/lib64/ld-linux-x86-64.so.2\",target-name=\"/lib64/ld-linux-x86-64.so.2\",host-name=\"/lib64/ld-linux-x86-64.so.2\",symbols-loaded=\"0\",thread-group=\"i1\",ranges=[{from=\"0x00007a7491ea5000\",to=\"0x00007a7491ecf195\"}]",
+        "*running,thread-id=\"all\"",
+        "=library-loaded,id=\"/lib/x86_64-linux-gnu/libc.so.6\",target-name=\"/lib/x86_64-linux-gnu/libc.so.6\",host-name=\"/lib/x86_64-linux-gnu/libc.so.6\",symbols-loaded=\"0\",thread-group=\"i1\",ranges=[{from=\"0x00007a7491ca9800\",to=\"0x00007a7491e31039\"}]",
+        "~\"[Thread debugging using libthread_db enabled]\\n\"",
+        "~\"Using host libthread_db library \\\"/lib/x86_64-linux-gnu/libthread_db.so.1\\\".\\n\"",
+        "=breakpoint-modified,bkpt={number=\"1\",type=\"breakpoint\",disp=\"keep\",enabled=\"y\",addr=\"0x00005b4ca1d3a205\",func=\"main\",file=\"/tmp/tmp6p3g1o2f/fixture.c\",fullname=\"/tmp/tmp6p3g1o2f/fixture.c\",line=\"5\",thread-groups=[\"i1\"],times=\"1\",original-location=\"main\"}",
+        "~\"\\n\"",
+        "~\"Breakpoint 1, main (argc=2, argv=0x7ffc88878238) at /tmp/tmp6p3g1o2f/fixture.c:5\\n\"",
+        "&\"warning: 5\\t/tmp/tmp6p3g1o2f/fixture.c: No such file or directory\\n\"",
+        "*stopped,reason=\"breakpoint-hit\",disp=\"keep\",bkptno=\"1\",frame={addr=\"0x00005b4ca1d3a205\",func=\"main\",args=[{name=\"argc\",value=\"2\"},{name=\"argv\",value=\"0x7ffc88878238\"}],file=\"/tmp/tmp6p3g1o2f/fixture.c\",fullname=\"/tmp/tmp6p3g1o2f/fixture.c\",line=\"5\",arch=\"i386:x86-64\"},thread-id=\"1\",stopped-threads=\"all\",core=\"14\""
+      ],
+      "transcript": "debug/66e70c31bef84a6eb691e0293fcd89c3/transcript.mi"
+    }
+  },
+  "replay": {
+    "job_id": "74ad5d57e4214f93b45bd4bedb50848c",
+    "kind": "replay",
+    "state": "completed",
+    "created_at": 1793939748.926057,
+    "call_id": null,
+    "fingerprint": "0985f04fe8b14954b27f0c72dc8b8564f14b9e6ee329041c5c3f663bb4804163",
+    "artifacts_dir": "jobs/74ad5d57e4214f93b45bd4bedb50848c",
+    "supervisor_pid": 18937,
+    "supervisor_identity": "linux:7118410",
+    "started_at": 1793939749.0022864,
+    "result": {
+      "trials": 1,
+      "attempts": 1,
+      "requested_trials": 1,
+      "successes": 1,
+      "passed": true,
+      "observed_stage": "crash",
+      "results": [
+        {
+          "state": "completed",
+          "exit_code": -6,
+          "signal": 6,
+          "duration_secs": 0.0317,
+          "stdout": "",
+          "stderr": "",
+          "output_bytes": {
+            "stdout": 0,
+            "stderr": 0
+          },
+          "output_truncated": false,
+          "experiment_uid": 20002,
+          "metadata_protected": true,
+          "input_sha256": "e1ac339843cccef7a663ce27cf0515b2ea10e7a65492486e17d1ceb1d636ee25",
+          "crash_signature": "signal:6",
+          "trial": 0
+        }
+      ],
+      "verifier_agent_id": null,
+      "producer_agent_id": null,
+      "call_id": null,
+      "target": {
+        "path": "files/fixture",
+        "sha256": "72284e37c3992d9bb3ddf6b5d23744730f7d7df3c881160c0ecd1511fc6fb18a",
+        "size": 19040
+      },
+      "input": {
+        "path": "files/crash.bin",
+        "sha256": "e1ac339843cccef7a663ce27cf0515b2ea10e7a65492486e17d1ceb1d636ee25",
+        "size": 23
+      },
+      "expected": null,
+      "environment": {
+        "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+        "python": "3.12.3"
+      },
+      "fresh_working_directory_per_trial": true
+    },
+    "finished_at": 1793939749.0461197,
+    "stdout": "",
+    "stderr": ""
+  },
+  "verification": {
+    "job_id": "c86e87a2b97147bca177cbad9dd8e367",
+    "kind": "verify",
+    "state": "completed",
+    "created_at": 1793939749.0843322,
+    "call_id": "fixture-verification",
+    "fingerprint": "70353070c70cb3d5a73a877a441cee320f540725fb7580556461c0ec85299a3d",
+    "artifacts_dir": "jobs/c86e87a2b97147bca177cbad9dd8e367",
+    "supervisor_pid": 18948,
+    "supervisor_identity": "linux:7118425",
+    "started_at": 1793939749.1862252,
+    "result": {
+      "trials": 3,
+      "attempts": 3,
+      "requested_trials": 3,
+      "successes": 3,
+      "passed": true,
+      "observed_stage": "crash",
+      "results": [
+        {
+          "state": "completed",
+          "exit_code": -6,
+          "signal": 6,
+          "duration_secs": 0.0316,
+          "stdout": "",
+          "stderr": "",
+          "output_bytes": {
+            "stdout": 0,
+            "stderr": 0
+          },
+          "output_truncated": false,
+          "experiment_uid": 20004,
+          "metadata_protected": true,
+          "input_sha256": "e1ac339843cccef7a663ce27cf0515b2ea10e7a65492486e17d1ceb1d636ee25",
+          "crash_signature": "signal:6",
+          "trial": 0
+        },
+        {
+          "state": "completed",
+          "exit_code": -6,
+          "signal": 6,
+          "duration_secs": 0.0321,
+          "stdout": "",
+          "stderr": "",
+          "output_bytes": {
+            "stdout": 0,
+            "stderr": 0
+          },
+          "output_truncated": false,
+          "experiment_uid": 20005,
+          "metadata_protected": true,
+          "input_sha256": "e1ac339843cccef7a663ce27cf0515b2ea10e7a65492486e17d1ceb1d636ee25",
+          "crash_signature": "signal:6",
+          "trial": 1
+        },
+        {
+          "state": "completed",
+          "exit_code": -6,
+          "signal": 6,
+          "duration_secs": 0.0316,
+          "stdout": "",
+          "stderr": "",
+          "output_bytes": {
+            "stdout": 0,
+            "stderr": 0
+          },
+          "output_truncated": false,
+          "experiment_uid": 20006,
+          "metadata_protected": true,
+          "input_sha256": "e1ac339843cccef7a663ce27cf0515b2ea10e7a65492486e17d1ceb1d636ee25",
+          "crash_signature": "signal:6",
+          "trial": 2
+        }
+      ],
+      "verifier_agent_id": "independent-test-verifier",
+      "producer_agent_id": "fixture-producer",
+      "call_id": "fixture-verification",
+      "target": {
+        "path": "files/fixture",
+        "sha256": "72284e37c3992d9bb3ddf6b5d23744730f7d7df3c881160c0ecd1511fc6fb18a",
+        "size": 19040
+      },
+      "input": {
+        "path": "files/crash.bin",
+        "sha256": "e1ac339843cccef7a663ce27cf0515b2ea10e7a65492486e17d1ceb1d636ee25",
+        "size": 23
+      },
+      "expected": null,
+      "environment": {
+        "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+        "python": "3.12.3"
+      },
+      "fresh_working_directory_per_trial": true
+    },
+    "finished_at": 1793939749.315272,
+    "stdout": "",
+    "stderr": ""
+  },
+  "minimization": {
+    "job_id": "9fa0eef5ec7f442d946dfc622bc2f73d",
+    "kind": "minimize",
+    "state": "completed",
+    "created_at": 1793939749.345786,
+    "call_id": null,
+    "fingerprint": "985ed37a4c65999e8f1f1cdae2ba00ac3f22e8b334056d2260b9b15007495573",
+    "artifacts_dir": "jobs/9fa0eef5ec7f442d946dfc622bc2f73d",
+    "supervisor_pid": 18967,
+    "supervisor_identity": "linux:7118452",
+    "started_at": 1793939749.4093323,
+    "result": {
+      "artifact": {
+        "path": "jobs/9fa0eef5ec7f442d946dfc622bc2f73d/minimized.bin",
+        "sha256": "de6b9d5b9a7c9e99a9421d284164b52c8a53000380d39e9e52117f4c3da4caf9",
+        "size": 3
+      },
+      "original_size": 23,
+      "minimized_size": 3,
+      "attempts": 12,
+      "crash_signature": "signal:6",
+      "complete": true
+    },
+    "finished_at": 1793939749.577915,
+    "stdout": "",
+    "stderr": ""
+  },
+  "fuzz": {
+    "job_id": "d8d8f31853cf4e11a5ebf05257414412",
+    "kind": "fuzz",
+    "state": "completed",
+    "created_at": 1793939749.6427324,
+    "call_id": null,
+    "fingerprint": "610e553fa36018b076b3b1706ad033aa818ae0dffa09c3317008001f51cd3b4f",
+    "artifacts_dir": "jobs/d8d8f31853cf4e11a5ebf05257414412",
+    "supervisor_pid": 19024,
+    "supervisor_identity": "linux:7118481",
+    "started_at": 1793939749.7352464,
+    "result": {
+      "state": "completed",
+      "exit_code": 0,
+      "signal": null,
+      "duration_secs": 8.0825,
+      "stdout": "0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 20\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 21\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 22\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 23\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 24\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[?25h\u001b[1;91m\n\n+++ Testing aborted programmatically +++\n\u001b[0m\u001b[1;93m[!] \u001b[0mTime limit was reached\n\u001b[1;94m[*] \u001b[0mStatistics: 3 new corpus items found, 0.05% coverage achieved, 1 crashes saved, 0 timeouts saved, total runtime 0 days, 0 hrs, 0 min, 8 sec\u001b[0m\n\u001b[1;94m[*] \u001b[0mWriting /tmp/re-agent-executions/fe21d64dc8def653f912ed59/8b6c8237fe904e6685ddfd38f61fb7a8/work/fuzz/default/fastresume.bin ...\u001b[0m\n\u001b[1;92m[+] \u001b[0mfastresume.bin successfully written with 295388 bytes.\u001b[0m\n\u001b[1;92m[+] \u001b[0mWe're done here. Have a nice day!\n\u001b[0m\n",
+      "stderr": "\u001b[1;92m[+] \u001b[0mEnabled environment variable AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES with value 1\u001b[0m\n\u001b[1;92m[+] \u001b[0mEnabled environment variable AFL_SKIP_CPUFREQ with value 1\u001b[0m\n\u001b[1;92m[+] \u001b[0mEnabled environment variable AFL_NO_UI with value 1\u001b[0m\n\u001b[1;92m[+] \u001b[0mUsing QEMU binary: /usr/local/bin/afl-qemu-trace\u001b[0m\n\u001b[1;94m[*] \u001b[0mSpinning up the fork server...\u001b[0m\n\u001b[1;92m[+] \u001b[0mAll right - new fork server model v1 is up.\u001b[0m\n\u001b[1;94m[*] \u001b[0mTarget map size: 65536\u001b[0m\n",
+      "output_bytes": {
+        "stdout": 43963,
+        "stderr": 471
+      },
+      "output_truncated": false,
+      "experiment_uid": 20020,
+      "metadata_protected": true
+    },
+    "finished_at": 1793939757.8276598,
+    "stdout": "0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 20\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 21\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.08%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 22\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:06, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, 0 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 23\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.07%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #1 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=503, hits=0, map=28, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #2 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=150, weight=1, favorite=1, was_fuzzed=1, exec_us=493, hits=0, map=29, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #0 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=50, weight=2, favorite=1, was_fuzzed=1, exec_us=3486, hits=0, map=30, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[1;94m[*] \u001b[0mEntering queue cycle 24\n\u001b[0m\n\u001b[1;94m[*] \u001b[0mFuzzing test case #3 (4 total, \u001b[0;31m1 crashes saved\u001b[0m, state: started :-), mode=explore, perf_score=200, weight=1, favorite=1, was_fuzzed=1, exec_us=382, hits=0, map=27, ascii=0, run_time=0:00:00:07, cvg=0.05%) FS (t=0:00:00:00 (0.06%), st=6, avg=1 ms, found=0/4)...\u001b[0m\n\u001b[?25h\u001b[1;91m\n\n+++ Testing aborted programmatically +++\n\u001b[0m\u001b[1;93m[!] \u001b[0mTime limit was reached\n\u001b[1;94m[*] \u001b[0mStatistics: 3 new corpus items found, 0.05% coverage achieved, 1 crashes saved, 0 timeouts saved, total runtime 0 days, 0 hrs, 0 min, 8 sec\u001b[0m\n\u001b[1;94m[*] \u001b[0mWriting /tmp/re-agent-executions/fe21d64dc8def653f912ed59/8b6c8237fe904e6685ddfd38f61fb7a8/work/fuzz/default/fastresume.bin ...\u001b[0m\n\u001b[1;92m[+] \u001b[0mfastresume.bin successfully written with 295388 bytes.\u001b[0m\n\u001b[1;92m[+] \u001b[0mWe're done here. Have a nice day!\n\u001b[0m\n",
+    "stderr": "\u001b[1;92m[+] \u001b[0mEnabled environment variable AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES with value 1\u001b[0m\n\u001b[1;92m[+] \u001b[0mEnabled environment variable AFL_SKIP_CPUFREQ with value 1\u001b[0m\n\u001b[1;92m[+] \u001b[0mEnabled environment variable AFL_NO_UI with value 1\u001b[0m\n\u001b[1;92m[+] \u001b[0mUsing QEMU binary: /usr/local/bin/afl-qemu-trace\u001b[0m\n\u001b[1;94m[*] \u001b[0mSpinning up the fork server...\u001b[0m\n\u001b[1;92m[+] \u001b[0mAll right - new fork server model v1 is up.\u001b[0m\n\u001b[1;94m[*] \u001b[0mTarget map size: 65536\u001b[0m\n",
+    "fuzzer_stats": {
+      "default": {
+        "start_time": "1793939749",
+        "last_update": "1793939757",
+        "run_time": "8",
+        "fuzzer_pid": "19028",
+        "cycles_done": "23",
+        "cycles_wo_finds": "22",
+        "time_wo_finds": "7",
+        "fuzz_time": "7",
+        "calibration_time": "0",
+        "cmplog_time": "0",
+        "cmplog_tightness": "0",
+        "cmplog_tight_new": "0",
+        "cmplog_size_derive": "0",
+        "sync_time": "0",
+        "trim_time": "0",
+        "table_time": "0",
+        "execs_done": "17059",
+        "execs_per_sec": "2131.84",
+        "execs_ps_last_min": "0.00",
+        "corpus_count": "4",
+        "corpus_favored": "4",
+        "corpus_found": "3",
+        "corpus_imported": "0",
+        "corpus_variable": "0",
+        "corpus_disabled": "0",
+        "max_depth": "2",
+        "cur_item": "3",
+        "pending_favs": "0",
+        "pending_total": "0",
+        "stability": "100.00%",
+        "bitmap_cvg": "0.05%",
+        "saved_crashes": "1",
+        "saved_hangs": "0",
+        "total_tmout": "0",
+        "last_find": "1793939749",
+        "last_crash": "1793939757",
+        "last_hang": "0",
+        "execs_since_crash": "1111",
+        "last_edge_execs": "259",
+        "last_edge_find": "1793939749",
+        "exec_timeout": "1000",
+        "slowest_exec_ms": "3",
+        "peak_rss_mb": "9",
+        "cpu_affinity": "23",
+        "edges_found": "33",
+        "total_edges": "65536",
+        "var_byte_count": "0",
+        "havoc_expansion": "5",
+        "auto_dict_entries": "0",
+        "testcache_size": "10",
+        "testcache_count": "4",
+        "testcache_evict": "0",
+        "testcache_hits": "146",
+        "testcache_misses": "1",
+        "afl_banner": "/tmp/re-agent-executions/fe21d64dc8def653f912ed59/8b6c8237fe904e6685ddfd38f61fb7a8/readonly/target.bin",
+        "afl_version": "++5.04a",
+        "target_mode": "qemu shmem_testcase",
+        "command_line": "afl-fuzz -Q -i /tmp/re-agent-executions/fe21d64dc8def653f912ed59/8b6c8237fe904e6685ddfd38f61fb7a8/readonly/seeds -o /tmp/re-agent-executions/fe21d64dc8def653f912ed59/8b6c8237fe904e6685ddfd38f61fb7a8/work/fuzz -V 8 -t 1000 -m 256 -- /tmp/re-agent-executions/fe21d64dc8def653f912ed59/8b6c8237fe904e6685ddfd38f61fb7a8/readonly/target.bin @@",
+        "starved_count": "0"
+      }
+    },
+    "crashes": [
+      {
+        "path": "jobs/d8d8f31853cf4e11a5ebf05257414412/fuzz-artifacts/default/crashes/id:000000,sig:06,src:000000,time:7399,execs:15948,op:havoc,rep:2",
+        "sha256": "de6b9d5b9a7c9e99a9421d284164b52c8a53000380d39e9e52117f4c3da4caf9",
+        "size": 3
+      }
+    ],
+    "crash_reporting_override": true
+  }
+}

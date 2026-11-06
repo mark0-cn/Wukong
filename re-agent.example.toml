@@ -1,0 +1,62 @@
+# Copy to re-agent.toml and set a model/endpoint available to your account.
+state_dir = ".re-agent"
+
+[model]
+provider = "openai_responses"
+model = "your-model-name"
+api_key_env = "OPENAI_API_KEY"
+# base_url = "https://your-provider.example/v1"
+max_tokens = 8192
+request_timeout_secs = 180
+
+[budget]
+max_agents = 24
+max_depth = 4
+max_concurrent_agents = 4
+max_turns_per_agent = 40
+max_total_tokens = 500000
+max_wall_seconds = 3600
+# max_usd requires input/output prices below.
+# max_usd = 10.0
+
+[pricing]
+input_usd_per_million = 0.0
+output_usd_per_million = 0.0
+
+[runtime]
+backend = "disabled"
+state_dir = ".re-agent/worker"
+python = "python"
+bridge_path = "workers/runtime/bridge.py"
+# backend = "docker"
+# docker_container = "re-agent-worker"
+remote_bridge_path = "/opt/re-agent/runtime/bridge.py"
+remote_state_dir = "/state"
+request_timeout_secs = 120
+
+[analysis]
+# Optional local Ghidra launcher; use the version required by your installed JDK.
+# ghidra_executable = "C:/tools/ghidra/support/analyzeHeadless.bat"
+ghidra_cache_dir = ".re-agent/ghidra"
+timeout_seconds = 300
+analysis_timeout_seconds = 240
+max_cpu = 2
+
+[tools]
+max_output_bytes = 12000
+max_evidence_read_bytes = 64000
+timeout_seconds = 360
+
+[execution]
+stream = true
+model_retries = 2
+compact_after_chars = 200000
+keep_recent_messages = 12
+
+# Third-party MCP stdio server, credentials are environment VARIABLE NAMES.
+# [[mcp]]
+# name = "analysis"
+# command = "your-mcp-server"
+# args = []
+# env = ["ANALYSIS_SERVICE_TOKEN"]
+# timeout_seconds = 60

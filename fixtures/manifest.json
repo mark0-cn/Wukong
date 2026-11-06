@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "platform": "linux-x86_64",
+  "description": "Local, source-adjudicated benchmark; observed crashes are separate from vulnerability-detection scoring.",
+  "cases": [
+    {"id":"overflow-vuln","binary":"overflow-vuln","source":"src/overflow.c","stripped":false,"truth":[{"id":"copy-overflow","cwe":"CWE-121","function":"copy_payload","cause":"memcpy copies up to 256 bytes into a 32-byte stack buffer without a bounds check"}],"checks":[{"input":"small.bin","outcome":"exit","code":0},{"input":"overflow.bin","outcome":"signal"}]},
+    {"id":"overflow-vuln-stripped","binary":"overflow-vuln-stripped","source":"src/overflow.c","stripped":true,"truth":[{"id":"copy-overflow","cwe":"CWE-121","function":"copy_payload","cause":"same vulnerable implementation with symbols removed"}],"checks":[{"input":"small.bin","outcome":"exit","code":0},{"input":"overflow.bin","outcome":"signal"}]},
+    {"id":"overflow-fixed","binary":"overflow-fixed","source":"src/overflow.c","stripped":false,"truth":[],"checks":[{"input":"small.bin","outcome":"exit","code":0},{"input":"overflow.bin","outcome":"exit","code":0}]},
+    {"id":"overflow-fixed-stripped","binary":"overflow-fixed-stripped","source":"src/overflow.c","stripped":true,"truth":[],"checks":[{"input":"overflow.bin","outcome":"exit","code":0}]},
+    {"id":"benign","binary":"benign","source":"src/benign.c","stripped":false,"truth":[],"checks":[{"input":"number.bin","outcome":"exit","code":0},{"input":"overflow.bin","outcome":"exit","code":2}]},
+    {"id":"benign-stripped","binary":"benign-stripped","source":"src/benign.c","stripped":true,"truth":[],"checks":[{"input":"number.bin","outcome":"exit","code":0},{"input":"overflow.bin","outcome":"exit","code":2}]}
+  ]
+}
