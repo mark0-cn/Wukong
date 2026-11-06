@@ -53,6 +53,10 @@ model_retries = 2
 compact_after_chars = 200000
 keep_recent_messages = 12
 
+# Optional per-role worked-example markdown (<role>.md), appended to each
+# agent's prompt as method demonstrations. Values shown are illustrative.
+# demos_dir = "demos"
+
 # Third-party MCP stdio server, credentials are environment VARIABLE NAMES.
 # [[mcp]]
 # name = "analysis"

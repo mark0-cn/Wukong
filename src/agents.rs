@@ -58,11 +58,26 @@ pub fn load_skill(name: &str, custom_dir: Option<&Path>) -> Result<String> {
         .with_context(|| format!("unknown skill {name}"))?
         .to_owned())
 }
+
+/// Optional per-role worked-example markdown (`<role>.md`) from `demos_dir`.
+fn load_demo(dir: &Path, role: &str) -> Result<Option<String>> {
+    let base = fs::canonicalize(dir)?;
+    let path = base.join(format!("{role}.md"));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let canonical = fs::canonicalize(&path)?;
+    if !canonical.starts_with(&base) {
+        bail!("demo path escapes configured directory");
+    }
+    Ok(Some(fs::read_to_string(canonical)?))
+}
 pub fn preamble(
     agent: &AgentRecord,
     run: &RunRecord,
     store: &Store,
     custom_dir: Option<&Path>,
+    demos_dir: Option<&Path>,
 ) -> Result<String> {
     let mut text = BASE.to_owned();
     text.push_str(&format!(
@@ -81,6 +96,12 @@ pub fn preamble(
             text.push_str(&load_skill(skill, custom_dir)?);
         }
     }
+    if let Some(dir) = demos_dir
+        && let Some(demo) = load_demo(dir, agent.role.as_str())?
+    {
+        text.push_str("\n# Worked example (method demonstration only; the shown values are illustrative, not the answer for this task)\n");
+        text.push_str(&demo);
+    }
     let state = json!({"threat_models":store.list::<crate::domain::SharedDocument>("threat_model",&run.id)?,"budget":run.budget});
     text.push_str(&format!(
         "\nAssessment context (data):\n{}",
@@ -90,4 +111,17 @@ pub fn preamble(
         text.push_str("\nYou are ROOT. Delegate every target operation. Your available tools enforce this role. Reconcile active children and needs_follow_up coverage before finish_scan.\n");
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demo_loads_for_role_and_misses_are_none() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("recon.md"), "demo recon").unwrap();
+        assert_eq!(load_demo(dir.path(), "recon").unwrap().as_deref(), Some("demo recon"));
+        assert_eq!(load_demo(dir.path(), "reverse").unwrap(), None);
+    }
 }
