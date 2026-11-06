@@ -1,0 +1,470 @@
+﻿{
+  "doctor": {
+    "protocol": 1,
+    "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "worker_root": "/tmp/ghidra-accept3",
+    "isolation": "external_worker",
+    "core_pattern": "|/wsl-capture-crash %t %E %p %s",
+    "external_core_handler": true,
+    "metadata_protected_from_targets": true,
+    "unique_experiment_uids": true,
+    "tools": {
+      "gdb": {
+        "available": true,
+        "path": "/usr/bin/gdb",
+        "version": "GNU gdb (Ubuntu 15.1-1ubuntu1~24.04.1) 15.1"
+      },
+      "afl-fuzz": {
+        "available": true,
+        "path": "/AFLplusplus/afl-fuzz",
+        "version": null
+      },
+      "afl-qemu-trace": {
+        "available": true,
+        "path": "/AFLplusplus/afl-qemu-trace",
+        "version": null
+      },
+      "afl-qemu-bridge": {
+        "available": true,
+        "path": "/AFLplusplus/afl-qemu-bridge",
+        "version": null
+      },
+      "afl-tmin": {
+        "available": true,
+        "path": "/AFLplusplus/afl-tmin",
+        "version": null
+      },
+      "gcc": {
+        "available": true,
+        "path": "/usr/bin/gcc",
+        "version": "gcc (Ubuntu 11.5.0-1ubuntu1~24.04.1) 11.5.0"
+      }
+    },
+    "capabilities": {
+      "process_jobs": true,
+      "persistent_jobs": true,
+      "debug_gdb_mi": true,
+      "fuzz_qemu": true,
+      "crash_replay": true,
+      "input_minimize": true,
+      "poc_verify": true,
+      "formats": [
+        "ELF"
+      ],
+      "native_target_execution": true
+    }
+  },
+  "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+  "functions": {
+    "cache_key": "240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792",
+    "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+    "tool_version": "12.2",
+    "cached": false,
+    "data": {
+      "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+      "image_base": "00100000",
+      "language": "x86:LE:64:default",
+      "compiler": "gcc",
+      "operation": "functions",
+      "functions": [
+        {
+          "name": "main",
+          "address": {
+            "link_time_address": "0010123b",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 4667
+          },
+          "signature": "int __stdcall main(int argc, char * * argv)",
+          "external": false,
+          "body_bytes": 512
+        },
+        {
+          "name": "<EXTERNAL>::__libc_start_main",
+          "address": {
+            "link_time_address": "00105000",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 20480
+          },
+          "signature": "undefined __libc_start_main(void)",
+          "external": false,
+          "body_bytes": 1
+        }
+      ],
+      "returned": 2,
+      "total_functions": 41,
+      "truncated": false,
+      "ok": true
+    },
+    "artifacts": [
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/binding.json",
+        "sha256": "8d722c1b48b432398ea3848bc9d14b6ce99329326fd8ad9562dda96864a97d70",
+        "size": 519
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/execution.json",
+        "sha256": "f6200eba825a6f5bd2059a093997ade47ad9ecb983f2f6a0ac148db0247e6759",
+        "size": 11391
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/output.stderr",
+        "sha256": "2c0917b3554a7a363e12424f3dada1b7d471349dd61f1660ed60797aab533376",
+        "size": 2835
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/output.stdout",
+        "sha256": "be84a2fb672e82fc43ec7894800a4ae3759828e0937fac75b9ca415b6b78ec0f",
+        "size": 9211
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/request.json",
+        "sha256": "389da4389d59465a4165cd907e279e0eca30c1b680f73567b012d81e354280eb",
+        "size": 168
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/response.json",
+        "sha256": "66a9a6e92ba3247990fe4e6cfbd66864b886058f9291cc6c41da329d4e38f997",
+        "size": 1142
+      }
+    ],
+    "stdout_path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/output.stdout",
+    "stderr_path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/output.stderr"
+  },
+  "decompile": {
+    "cache_key": "0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434",
+    "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+    "tool_version": "12.2",
+    "cached": false,
+    "data": {
+      "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+      "image_base": "00100000",
+      "language": "x86:LE:64:default",
+      "compiler": "gcc",
+      "operation": "decompile",
+      "function": {
+        "name": "copy_input",
+        "address": {
+          "link_time_address": "00101209",
+          "ghidra_address_space": "ram",
+          "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+          "space": "module_relative",
+          "value": 4617
+        },
+        "signature": "void __stdcall copy_input(uchar * dst, uchar * src, size_t n)",
+        "external": false,
+        "body_bytes": 50
+      },
+      "code": "\nvoid copy_input(uchar *dst,uchar *src,size_t n)\n\n{\n  size_t n_local;\n  uchar *src_local;\n  uchar *dst_local;\n  \n  memcpy(dst,src,n);\n  return;\n}\n\n",
+      "code_chars": 147,
+      "truncated": false,
+      "artifact_path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/decompile.c",
+      "ok": true
+    },
+    "artifacts": [
+      {
+        "path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/binding.json",
+        "sha256": "1c18eace8d2d33153d6d83b3cd14b54c19ba5a202290b4082a2b30fb6dfec284",
+        "size": 492
+      },
+      {
+        "path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/decompile.c",
+        "sha256": "c693e70a58a5ded1eb7eaf53622e3431aeed8410aa280532f1c5b517cd92126d",
+        "size": 147
+      },
+      {
+        "path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/execution.json",
+        "sha256": "8dd79369f094d95e3b8595c57eb7f4cc85b2286c3c38dd98395a9ecb78fbb5eb",
+        "size": 6592
+      },
+      {
+        "path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/output.stderr",
+        "sha256": "55cbaa5c7aa87b64341d294bec022af0fb550d1a0addcf77e7570260f4bd70dd",
+        "size": 2835
+      },
+      {
+        "path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/output.stdout",
+        "sha256": "14a4090eb7408c9b59e5f175b979a7f03a6ccb03bd8ed4c3361c91c94afcde77",
+        "size": 3460
+      },
+      {
+        "path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/request.json",
+        "sha256": "a0805d01f9a0a4a0c098c399a5c6053b72c77ba2b5ba42f4c06fe94f8599c5a3",
+        "size": 141
+      },
+      {
+        "path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/response.json",
+        "sha256": "58c19d212a9b806bad1b59a0a10d94cedf474cb83239167ab5a365bf3534eece",
+        "size": 1016
+      }
+    ],
+    "stdout_path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/output.stdout",
+    "stderr_path": "ghidra/results/0ea3b7dff6330b5e792350511c0f5292ad0e50ba832c60b3483a9563e81eb434/fb26f3bb72db4065b5364b51f299387f/output.stderr"
+  },
+  "decompile_main": {
+    "cache_key": "f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec",
+    "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+    "tool_version": "12.2",
+    "cached": false,
+    "data": {
+      "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+      "image_base": "00100000",
+      "language": "x86:LE:64:default",
+      "compiler": "gcc",
+      "operation": "decompile",
+      "function": {
+        "name": "main",
+        "address": {
+          "link_time_address": "0010123b",
+          "ghidra_address_space": "ram",
+          "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+          "space": "module_relative",
+          "value": 4667
+        },
+        "signature": "int __stdcall main(int argc, char * * argv)",
+        "external": false,
+        "body_bytes": 512
+      },
+      "code": "\nint main(int argc,char **argv)\n\n{\n  long lVar1;\n  int iVar2;\n  FILE *__stream;\n  size_t n_00;\n  long in_FS_OFFSET;\n  char **argv_local;\n  int argc_local;\n  FILE *file;\n  size_t n;\n  uchar buffer [64];\n  uchar input [128];\n  \n  lVar1 = *(long *)(in_FS_OFFSET + 0x28);\n  if (argc < 2) {\n    iVar2 = 2;\n  }\n  else {\n    __stream = fopen(argv[1],\"rb\");\n    if (__stream == (FILE *)0x0) {\n      iVar2 = 3;\n    }\n    else {\n      buffer[0] = '\\0';\n      buffer[1] = '\\0';\n      buffer[2] = '\\0';\n      buffer[3] = '\\0';\n      buffer[4] = '\\0';\n      buffer[5] = '\\0';\n      buffer[6] = '\\0';\n      buffer[7] = '\\0';\n      buffer[8] = '\\0';\n      buffer[9] = '\\0';\n      buffer[10] = '\\0';\n      buffer[0xb] = '\\0';\n      buffer[0xc] = '\\0';\n      buffer[0xd] = '\\0';\n      buffer[0xe] = '\\0';\n      buffer[0xf] = '\\0';\n      buffer[0x10] = '\\0';\n      buffer[0x11] = '\\0';\n      buffer[0x12] = '\\0';\n      buffer[0x13] = '\\0';\n      buffer[0x14] = '\\0';\n      buffer[0x15] = '\\0';\n      buffer[0x16] = '\\0';\n      buffer[0x17] = '\\0';\n      buffer[0x18] = '\\0';\n      buffer[0x19] = '\\0';\n      buffer[0x1a] = '\\0';\n      buffer[0x1b] = '\\0';\n      buffer[0x1c] = '\\0';\n      buffer[0x1d] = '\\0';\n      buffer[0x1e] = '\\0';\n      buffer[0x1f] = '\\0';\n      buffer[0x20] = '\\0';\n      buffer[0x21] = '\\0';\n      buffer[0x22] = '\\0';\n      buffer[0x23] = '\\0';\n      buffer[0x24] = '\\0';\n      buffer[0x25] = '\\0';\n      buffer[0x26] = '\\0';\n      buffer[0x27] = '\\0';\n      buffer[0x28] = '\\0';\n      buffer[0x29] = '\\0';\n      buffer[0x2a] = '\\0';\n      buffer[0x2b] = '\\0';\n      buffer[0x2c] = '\\0';\n      buffer[0x2d] = '\\0';\n      buffer[0x2e] = '\\0';\n      buffer[0x2f] = '\\0';\n      buffer[0x30] = '\\0';\n      buffer[0x31] = '\\0';\n      buffer[0x32] = '\\0';\n      buffer[0x33] = '\\0';\n      buffer[0x34] = '\\0';\n      buffer[0x35] = '\\0';\n      buffer[0x36] = '\\0';\n      buffer[0x37] = '\\0';\n      buffer[0x38] = '\\0';\n      buffer[0x39] = '\\0';\n      buffer[0x3a] = '\\0';\n      buffer[0x3b] = '\\0';\n      buffer[0x3c] = '\\0';\n      buffer[0x3d] = '\\0';\n      buffer[0x3e] = '\\0';\n      buffer[0x3f] = '\\0';\n      input[0] = '\\0';\n      input[1] = '\\0';\n      input[2] = '\\0';\n      input[3] = '\\0';\n      input[4] = '\\0';\n      input[5] = '\\0';\n      input[6] = '\\0';\n      input[7] = '\\0';\n      input[8] = '\\0';\n      input[9] = '\\0';\n      input[10] = '\\0';\n      input[0xb] = '\\0';\n      input[0xc] = '\\0';\n      input[0xd] = '\\0';\n      input[0xe] = '\\0';\n      input[0xf] = '\\0';\n      input[0x10] = '\\0';\n      input[0x11] = '\\0';\n      input[0x12] = '\\0';\n      input[0x13] = '\\0';\n      input[0x14] = '\\0';\n      input[0x15] = '\\0';\n      input[0x16] = '\\0';\n      input[0x17] = '\\0';\n      input[0x18] = '\\0';\n      input[0x19] = '\\0';\n      input[0x1a] = '\\0';\n      input[0x1b] = '\\0';\n      input[0x1c] = '\\0';\n      input[0x1d] = '\\0';\n      input[0x1e] = '\\0';\n      input[0x1f] = '\\0';\n      input[0x20] = '\\0';\n      input[0x21] = '\\0';\n      input[0x22] = '\\0';\n      input[0x23] = '\\0';\n      input[0x24] = '\\0';\n      input[0x25] = '\\0';\n      input[0x26] = '\\0';\n      input[0x27] = '\\0';\n      input[0x28] = '\\0';\n      input[0x29] = '\\0';\n      input[0x2a] = '\\0';\n      input[0x2b] = '\\0';\n      input[0x2c] = '\\0';\n      input[0x2d] = '\\0';\n      input[0x2e] = '\\0';\n      input[0x2f] = '\\0';\n      input[0x30] = '\\0';\n      input[0x31] = '\\0';\n      input[0x32] = '\\0';\n      input[0x33] = '\\0';\n      input[0x34] = '\\0';\n      input[0x35] = '\\0';\n      input[0x36] = '\\0';\n      input[0x37] = '\\0';\n      input[0x38] = '\\0';\n      input[0x39] = '\\0';\n      input[0x3a] = '\\0';\n      input[0x3b] = '\\0';\n      input[0x3c] = '\\0';\n      input[0x3d] = '\\0';\n      input[0x3e] = '\\0';\n      input[0x3f] = '\\0';\n      input[0x40] = '\\0';\n      input[0x41] = '\\0';\n      input[0x42] = '\\0';\n      input[0x43] = '\\0';\n      input[0x44] = '\\0';\n      input[0x45] = '\\0';\n      input[0x46] = '\\0';\n      input[0x47] = '\\0';\n      input[0x48] = '\\0';\n      input[0x49] = '\\0';\n      input[0x4a] = '\\0';\n      input[0x4b] = '\\0';\n      input[0x4c] = '\\0';\n      input[0x4d] = '\\0';\n      input[0x4e] = '\\0';\n      input[0x4f] = '\\0';\n      input[0x50] = '\\0';\n      input[0x51] = '\\0';\n      input[0x52] = '\\0';\n      input[0x53] = '\\0';\n      input[0x54] = '\\0';\n      input[0x55] = '\\0';\n      input[0x56] = '\\0';\n      input[0x57] = '\\0';\n      input[0x58] = '\\0';\n      input[0x59] = '\\0';\n      input[0x5a] = '\\0';\n      input[0x5b] = '\\0';\n      input[0x5c] = '\\0';\n      input[0x5d] = '\\0';\n      input[0x5e] = '\\0';\n      input[0x5f] = '\\0';\n      input[0x60] = '\\0';\n      input[0x61] = '\\0';\n      input[0x62] = '\\0';\n      input[99] = '\\0';\n      input[100] = '\\0';\n      input[0x65] = '\\0';\n      input[0x66] = '\\0';\n      input[0x67] = '\\0';\n      input[0x68] = '\\0';\n      input[0x69] = '\\0';\n      input[0x6a] = '\\0';\n      input[0x6b] = '\\0';\n      input[0x6c] = '\\0';\n      input[0x6d] = '\\0';\n      input[0x6e] = '\\0';\n      input[0x6f] = '\\0';\n      input[0x70] = '\\0';\n      input[0x71] = '\\0';\n      input[0x72] = '\\0';\n      input[0x73] = '\\0';\n      input[0x74] = '\\0';\n      input[0x75] = '\\0';\n      input[0x76] = '\\0';\n      input[0x77] = '\\0';\n      input[0x78] = '\\0';\n      input[0x79] = '\\0';\n      input[0x7a] = '\\0';\n      input[0x7b] = '\\0';\n      input[0x7c] = '\\0';\n      input[0x7d] = '\\0';\n      input[0x7e] = '\\0';\n      input[0x7f] = '\\0';\n      n_00 = fread(input,1,0x80,__stream);\n      fclose(__stream);\n      copy_input(buffer,input,n_00);\n      if (((buffer[0] == 'B') && (buffer[1] == 'A')) && (buffer[2] == 'D')) {\n                    /* WARNING: Subroutine does not return */\n        abort();\n      }\n      puts(\"fixture-ok\");\n      iVar2 = 0;\n    }\n  }\n  if (lVar1 != *(long *)(in_FS_OFFSET + 0x28)) {\n                    /* WARNING: Subroutine does not return */\n    __stack_chk_fail();\n  }\n  return iVar2;\n}\n\n",
+      "code_chars": 5878,
+      "truncated": false,
+      "artifact_path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/decompile.c",
+      "ok": true
+    },
+    "artifacts": [
+      {
+        "path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/binding.json",
+        "sha256": "d7ceb0a427aaf61644b9bf2f5c5b6f0cc8e84f1a490e66a449082fcbeed53a45",
+        "size": 492
+      },
+      {
+        "path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/decompile.c",
+        "sha256": "f8477109416914a22a686a3e7f4b2d0d248fc3ce363b3860a7a08040971f52e7",
+        "size": 5878
+      },
+      {
+        "path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/execution.json",
+        "sha256": "b40400a8dd6fa5734685128db354d7ddde8401feaca78433a5251ebf01e8f5d9",
+        "size": 6592
+      },
+      {
+        "path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/output.stderr",
+        "sha256": "ac1a48ab01c23591981e3b9ae6f48471847b25178a37662cc81edbc9a2cb3d18",
+        "size": 2835
+      },
+      {
+        "path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/output.stdout",
+        "sha256": "1368ed711db50b26693c083838f35478722211933df0c118c27fc9d458fa2aed",
+        "size": 3460
+      },
+      {
+        "path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/request.json",
+        "sha256": "a1c5a30befa8fbec64b7d73625677b2f83be9818323d71c12eebc55cb9f79947",
+        "size": 141
+      },
+      {
+        "path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/response.json",
+        "sha256": "614a59110c484462bc9aa18cacf1e02d027cb3e4d00dc9e8b2c1e13d9c6bd142",
+        "size": 10155
+      }
+    ],
+    "stdout_path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/output.stdout",
+    "stderr_path": "ghidra/results/f6c97416bcd279182f418add21d65775000c1dc0af1c8f3acba8e11d365b78ec/5d78c4f822894a7199afc680dbeee3cb/output.stderr"
+  },
+  "xrefs": {
+    "cache_key": "ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12",
+    "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+    "tool_version": "12.2",
+    "cached": false,
+    "data": {
+      "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+      "image_base": "00100000",
+      "language": "x86:LE:64:default",
+      "compiler": "gcc",
+      "operation": "xrefs",
+      "address": {
+        "link_time_address": "00101209",
+        "ghidra_address_space": "ram",
+        "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+        "space": "module_relative",
+        "value": 4617
+      },
+      "references": [
+        {
+          "from": {
+            "link_time_address": "00102040",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 8256
+          },
+          "to": {
+            "link_time_address": "00101209",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 4617
+          },
+          "type": "INDIRECTION",
+          "operand": 0
+        },
+        {
+          "from": {
+            "link_time_address": "001020e0",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 8416
+          },
+          "to": {
+            "link_time_address": "00101209",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 4617
+          },
+          "type": "DATA",
+          "operand": 0
+        },
+        {
+          "from": {
+            "link_time_address": "001013e6",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 5094
+          },
+          "to": {
+            "link_time_address": "00101209",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 4617
+          },
+          "type": "UNCONDITIONAL_CALL",
+          "operand": 0
+        }
+      ],
+      "returned": 3,
+      "truncated": false,
+      "ok": true
+    },
+    "artifacts": [
+      {
+        "path": "ghidra/results/ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12/676c8662b69945e2a773110ce1433669/binding.json",
+        "sha256": "290f4d72f481ca44bd30cc3b2c1a9f14009e6a8b9ec0ccfbf178f9294cbc7e81",
+        "size": 521
+      },
+      {
+        "path": "ghidra/results/ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12/676c8662b69945e2a773110ce1433669/execution.json",
+        "sha256": "6844c9e3e0dfb305f71e2bd4dbb441804371b7aeeb94c57c096c90cf6aaca4d2",
+        "size": 6592
+      },
+      {
+        "path": "ghidra/results/ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12/676c8662b69945e2a773110ce1433669/output.stderr",
+        "sha256": "7387a4de52554b8001c9964b25162edebe64f5bed99013902a42d24e25c9667c",
+        "size": 2835
+      },
+      {
+        "path": "ghidra/results/ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12/676c8662b69945e2a773110ce1433669/output.stdout",
+        "sha256": "26956a4fbf9c0c1e2e39cc194d1c401cfce0373041088f7326fa09e4008e2cc9",
+        "size": 3460
+      },
+      {
+        "path": "ghidra/results/ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12/676c8662b69945e2a773110ce1433669/request.json",
+        "sha256": "9ffe42815830dbc881215695497e3bf08149c9e314b27edeb3b8ecfbaa5a9a0f",
+        "size": 170
+      },
+      {
+        "path": "ghidra/results/ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12/676c8662b69945e2a773110ce1433669/response.json",
+        "sha256": "f13e3db665d26e1c8e64dff19aa1a15201412cde70f77cd2b21bc48bfa0c149d",
+        "size": 2216
+      }
+    ],
+    "stdout_path": "ghidra/results/ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12/676c8662b69945e2a773110ce1433669/output.stdout",
+    "stderr_path": "ghidra/results/ad77d6f418d3c764d3494e404cf071b52144ef6febf3ec89f8c64e7846fe0a12/676c8662b69945e2a773110ce1433669/output.stderr"
+  },
+  "cache": {
+    "cache_key": "240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792",
+    "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+    "tool_version": "12.2",
+    "cached": true,
+    "data": {
+      "target_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+      "image_base": "00100000",
+      "language": "x86:LE:64:default",
+      "compiler": "gcc",
+      "operation": "functions",
+      "functions": [
+        {
+          "name": "main",
+          "address": {
+            "link_time_address": "0010123b",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 4667
+          },
+          "signature": "int __stdcall main(int argc, char * * argv)",
+          "external": false,
+          "body_bytes": 512
+        },
+        {
+          "name": "<EXTERNAL>::__libc_start_main",
+          "address": {
+            "link_time_address": "00105000",
+            "ghidra_address_space": "ram",
+            "module_sha256": "1c02cb403484083b039ea724d0c51bbbd41e57441f091e2f9751b0c654372cd9",
+            "space": "module_relative",
+            "value": 20480
+          },
+          "signature": "undefined __libc_start_main(void)",
+          "external": false,
+          "body_bytes": 1
+        }
+      ],
+      "returned": 2,
+      "total_functions": 41,
+      "truncated": false,
+      "ok": true
+    },
+    "artifacts": [
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/binding.json",
+        "sha256": "8d722c1b48b432398ea3848bc9d14b6ce99329326fd8ad9562dda96864a97d70",
+        "size": 519
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/execution.json",
+        "sha256": "f6200eba825a6f5bd2059a093997ade47ad9ecb983f2f6a0ac148db0247e6759",
+        "size": 11391
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/output.stderr",
+        "sha256": "2c0917b3554a7a363e12424f3dada1b7d471349dd61f1660ed60797aab533376",
+        "size": 2835
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/output.stdout",
+        "sha256": "be84a2fb672e82fc43ec7894800a4ae3759828e0937fac75b9ca415b6b78ec0f",
+        "size": 9211
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/request.json",
+        "sha256": "389da4389d59465a4165cd907e279e0eca30c1b680f73567b012d81e354280eb",
+        "size": 168
+      },
+      {
+        "path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/response.json",
+        "sha256": "66a9a6e92ba3247990fe4e6cfbd66864b886058f9291cc6c41da329d4e38f997",
+        "size": 1142
+      }
+    ],
+    "stdout_path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/output.stdout",
+    "stderr_path": "ghidra/results/240d5d04a3ca9f0845ff4da87b0533254886fbee2223cb5f3714724125392792/06b5a3a88bfa4d1b8658f0fa7ef7ecc8/output.stderr"
+  }
+}

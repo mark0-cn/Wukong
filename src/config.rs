@@ -1,0 +1,189 @@
+use crate::{domain::Budget, llm::ModelConfig, mcp::McpServerConfig, runtime::RuntimeConfig};
+use anyhow::{Context, Result, ensure};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Pricing {
+    pub input_usd_per_million: f64,
+    pub output_usd_per_million: f64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StaticConfig {
+    pub ghidra_executable: Option<PathBuf>,
+    pub ghidra_cache_dir: PathBuf,
+    pub ghidra_script_dir: Option<PathBuf>,
+    pub timeout_seconds: u64,
+    pub analysis_timeout_seconds: u64,
+    pub max_cpu: usize,
+}
+impl Default for StaticConfig {
+    fn default() -> Self {
+        Self {
+            ghidra_executable: None,
+            ghidra_cache_dir: PathBuf::from(".re-agent/ghidra"),
+            ghidra_script_dir: None,
+            timeout_seconds: 300,
+            analysis_timeout_seconds: 240,
+            max_cpu: 2,
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToolLimits {
+    pub max_output_bytes: usize,
+    pub max_evidence_read_bytes: usize,
+    pub timeout_seconds: u64,
+}
+impl Default for ToolLimits {
+    fn default() -> Self {
+        Self {
+            max_output_bytes: 12000,
+            max_evidence_read_bytes: 64000,
+            timeout_seconds: 360,
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExecutionConfig {
+    pub stream: bool,
+    pub model_retries: usize,
+    pub compact_after_chars: usize,
+    pub keep_recent_messages: usize,
+}
+impl Default for ExecutionConfig {
+    fn default() -> Self {
+        Self {
+            stream: true,
+            model_retries: 2,
+            compact_after_chars: 200000,
+            keep_recent_messages: 12,
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppConfig {
+    pub state_dir: PathBuf,
+    pub model: ModelConfig,
+    pub budget: Budget,
+    pub runtime: RuntimeConfig,
+    pub analysis: StaticConfig,
+    pub pricing: Pricing,
+    pub tools: ToolLimits,
+    pub skills_dir: Option<PathBuf>,
+    pub mcp: Vec<McpServerConfig>,
+    pub execution: ExecutionConfig,
+}
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            state_dir: PathBuf::from(".re-agent"),
+            model: ModelConfig::default(),
+            budget: Budget::default(),
+            runtime: RuntimeConfig::default(),
+            analysis: StaticConfig::default(),
+            pricing: Pricing::default(),
+            tools: ToolLimits::default(),
+            skills_dir: None,
+            mcp: vec![],
+            execution: ExecutionConfig::default(),
+        }
+    }
+}
+impl AppConfig {
+    pub fn load(path: Option<&Path>) -> Result<Self> {
+        let mut config: Self = if let Some(path) = path {
+            toml::from_str(
+                &fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?,
+            )
+            .context("invalid configuration TOML")?
+        } else {
+            Self::default()
+        };
+        if let Some(path) = path {
+            let absolute = fs::canonicalize(path)?;
+            let base = absolute
+                .parent()
+                .context("configuration directory missing")?;
+            config.resolve_paths(base);
+        }
+        config.validate()?;
+        Ok(config)
+    }
+    fn resolve_paths(&mut self, base: &Path) {
+        fn resolve(base: &Path, path: &mut PathBuf) {
+            if path.is_relative() {
+                *path = base.join(&*path);
+            }
+        }
+        resolve(base, &mut self.state_dir);
+        resolve(base, &mut self.runtime.state_dir);
+        resolve(base, &mut self.runtime.bridge_path);
+        resolve(base, &mut self.analysis.ghidra_cache_dir);
+        if let Some(p) = &mut self.skills_dir {
+            resolve(base, p);
+        }
+        if let Some(p) = &mut self.analysis.ghidra_script_dir {
+            resolve(base, p);
+        }
+        if let Some(p) = &mut self.analysis.ghidra_executable
+            && p.components().count() > 1
+        {
+            resolve(base, p);
+        }
+    }
+    pub fn validate(&self) -> Result<()> {
+        self.model.validate()?;
+        ensure!(
+            self.budget.max_agents > 0 && self.budget.max_concurrent_agents > 0,
+            "agent limits must be positive"
+        );
+        ensure!(
+            self.budget.max_turns_per_agent > 0
+                && self.budget.max_total_tokens > 0
+                && self.budget.max_wall_seconds > 0,
+            "run budgets must be positive"
+        );
+        ensure!(
+            self.tools.max_output_bytes >= 1024
+                && self.tools.max_evidence_read_bytes > 0
+                && self.tools.timeout_seconds > 0,
+            "invalid tool limits"
+        );
+        ensure!(
+            self.execution.compact_after_chars >= 8192 && self.execution.keep_recent_messages > 0,
+            "invalid context retention limits"
+        );
+        ensure!(
+            self.pricing.input_usd_per_million.is_finite()
+                && self.pricing.output_usd_per_million.is_finite()
+                && self.pricing.input_usd_per_million >= 0.0
+                && self.pricing.output_usd_per_million >= 0.0,
+            "invalid pricing"
+        );
+        if let Some(limit) = self.budget.max_usd {
+            ensure!(limit.is_finite() && limit > 0.0, "max_usd must be positive");
+            ensure!(
+                self.pricing.input_usd_per_million > 0.0
+                    && self.pricing.output_usd_per_million > 0.0,
+                "USD budget requires configured input and output prices"
+            );
+        }
+        Ok(())
+    }
+    pub fn write_example(path: &Path) -> Result<()> {
+        if path.exists() {
+            anyhow::bail!("{} already exists", path.display());
+        }
+        fs::write(path, toml::to_string_pretty(&Self::default())?)?;
+        Ok(())
+    }
+}

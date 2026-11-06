@@ -1,0 +1,11 @@
+re-agent
+
+This Rust implementation references the module responsibilities and agent
+coordination semantics of Strix (https://github.com/usestrix/strix), baseline
+06015506625a78b981ae0b34be40239fc1b389be, licensed under Apache-2.0.
+
+The model/provider and durable agent engine uses Rig 0.46.0
+(https://github.com/0xPlaygrounds/rig), licensed under MIT.
+
+External analysis engines retain their respective upstream licenses. Runtime
+images and downloaded engines are not relicensed by this repository.

@@ -1,0 +1,15 @@
+/target/
+/work/
+/.re-agent/
+/runs/
+/.env
+*.db-shm
+*.db-wal
+__pycache__/
+*.pyc
+
+# Local machine config
+/re-agent.toml
+
+*.pdb
+

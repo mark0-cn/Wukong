@@ -1,0 +1,296 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::{fmt, path::PathBuf, str::FromStr};
+use uuid::Uuid;
+
+pub fn id(prefix: &str) -> String {
+    format!("{prefix}_{}", Uuid::new_v4().simple())
+}
+pub fn now() -> DateTime<Utc> {
+    Utc::now()
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    Queued,
+    Running,
+    Waiting,
+    BudgetPaused,
+    Completed,
+    Stopped,
+    Crashed,
+    Failed,
+}
+impl Status {
+    pub fn terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Stopped | Self::Crashed | Self::Failed
+        )
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::BudgetPaused => "budget_paused",
+            Self::Completed => "completed",
+            Self::Stopped => "stopped",
+            Self::Crashed => "crashed",
+            Self::Failed => "failed",
+        }
+    }
+}
+impl fmt::Display for Status {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Root,
+    Recon,
+    Reverse,
+    Hunter,
+    Fuzz,
+    Crash,
+    Exploit,
+    Verifier,
+    Reporter,
+}
+impl Role {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Root => "root",
+            Self::Recon => "recon",
+            Self::Reverse => "reverse",
+            Self::Hunter => "hunter",
+            Self::Fuzz => "fuzz",
+            Self::Crash => "crash",
+            Self::Exploit => "exploit",
+            Self::Verifier => "verifier",
+            Self::Reporter => "reporter",
+        }
+    }
+}
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+impl FromStr for Role {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "root" => Self::Root,
+            "recon" => Self::Recon,
+            "reverse" => Self::Reverse,
+            "hunter" => Self::Hunter,
+            "fuzz" => Self::Fuzz,
+            "crash" => Self::Crash,
+            "exploit" => Self::Exploit,
+            "verifier" => Self::Verifier,
+            "reporter" => Self::Reporter,
+            _ => anyhow::bail!("unknown role {s}"),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Budget {
+    pub max_agents: usize,
+    pub max_depth: u32,
+    pub max_concurrent_agents: usize,
+    pub max_turns_per_agent: usize,
+    pub max_total_tokens: u64,
+    pub max_usd: Option<f64>,
+    pub max_wall_seconds: u64,
+}
+impl Default for Budget {
+    fn default() -> Self {
+        Self {
+            max_agents: 24,
+            max_depth: 4,
+            max_concurrent_agents: 4,
+            max_turns_per_agent: 40,
+            max_total_tokens: 500_000,
+            max_usd: None,
+            max_wall_seconds: 3600,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunRecord {
+    pub id: String,
+    pub target_path: PathBuf,
+    pub target_sha256: String,
+    pub task: String,
+    pub status: Status,
+    pub root_id: String,
+    pub config: Value,
+    pub budget: Budget,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub total_tokens: u64,
+    pub cost_usd: f64,
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRecord {
+    pub id: String,
+    pub run_id: String,
+    pub parent_id: Option<String>,
+    pub name: String,
+    pub role: Role,
+    pub task: String,
+    pub scope: String,
+    pub skills: Vec<String>,
+    pub status: Status,
+    pub depth: u32,
+    pub inherit_context: bool,
+    pub inherited_context: Option<Value>,
+    pub checkpoint: Option<Value>,
+    pub wait_for: Vec<String>,
+    pub wait_until: Option<DateTime<Utc>>,
+    pub turns: usize,
+    pub total_tokens: u64,
+    pub cost_usd: f64,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub id: i64,
+    pub run_id: String,
+    pub sender: String,
+    pub recipient: String,
+    pub content: String,
+    pub acknowledged: bool,
+    pub created_at: DateTime<Utc>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Event {
+    pub seq: i64,
+    pub run_id: String,
+    pub agent_id: Option<String>,
+    pub kind: String,
+    pub data: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CallState {
+    Prepared,
+    Running,
+    Completed,
+    Failed,
+    Uncertain,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallRecord {
+    pub id: String,
+    pub run_id: String,
+    pub agent_id: String,
+    pub name: String,
+    pub arguments: Value,
+    pub state: CallState,
+    pub side_effecting: bool,
+    pub result: Option<Value>,
+    pub evidence_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Evidence {
+    pub id: String,
+    pub run_id: String,
+    pub agent_id: String,
+    pub tool_call_id: String,
+    pub sha256: String,
+    pub relative_path: String,
+    pub size: u64,
+    pub media_type: String,
+    pub source: String,
+    pub metadata: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingStage {
+    Suspected,
+    Reproduced,
+    RootCauseConfirmed,
+    ImpactVerified,
+    Inconclusive,
+    Rejected,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Finding {
+    pub id: String,
+    pub run_id: String,
+    pub agent_id: String,
+    pub title: String,
+    pub description: String,
+    pub root_cause: Option<String>,
+    pub impact: Option<String>,
+    pub stage: FindingStage,
+    pub location: Option<Value>,
+    pub evidence_ids: Vec<String>,
+    pub verification_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Verification {
+    pub id: String,
+    pub run_id: String,
+    pub finding_id: String,
+    pub verifier_agent_id: String,
+    pub passed: bool,
+    pub attempts: u64,
+    pub successes: u64,
+    pub impact: String,
+    pub evidence_ids: Vec<String>,
+    pub environment: Value,
+    pub conditions: Value,
+    pub result: Value,
+    pub created_at: DateTime<Utc>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Coverage {
+    pub id: String,
+    pub run_id: String,
+    pub agent_id: String,
+    pub scope: String,
+    pub kind: String,
+    pub outcome: String,
+    pub notes: String,
+    pub evidence_ids: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedDocument {
+    pub id: String,
+    pub run_id: String,
+    pub agent_id: String,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub amendments: Vec<Value>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

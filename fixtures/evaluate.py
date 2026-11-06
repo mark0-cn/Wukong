@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Measure benchmark process behavior, without inferring vulnerability findings.
+
+Runs only the six local binaries named in the source-controlled manifest. A
+separate report scorer requires explicit adjudication, so a crash or a matching
+phrase can never be counted as an agent-discovered root cause automatically.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import signal
+import subprocess
+import sys
+import time
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def prepare(build):
+    inputs = build / "inputs"
+    inputs.mkdir(parents=True, exist_ok=True)
+    for name, data in {"small.bin": b"sample", "overflow.bin": b"A" * 256, "number.bin": b"42\n"}.items():
+        (inputs / name).write_bytes(data)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--build-dir", type=Path, default=Path(__file__).resolve().parent / "build")
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--repetitions", type=int, default=3)
+    args = parser.parse_args()
+    if not 1 <= args.repetitions <= 100:
+        parser.error("repetitions must be 1..100")
+    build = args.build_dir.resolve()
+    prepare(build)
+    if args.prepare_only:
+        return 0
+    if sys.platform != "linux" or platform.machine().lower() not in ("x86_64", "amd64"):
+        parser.error("this executable benchmark requires Linux x86_64; use the supplied container")
+    import resource
+    def limits():
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
+        resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))
+    manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
+    results = []
+    for case in manifest["cases"]:
+        target = build / case["binary"]
+        if not target.is_file():
+            parser.error(f"missing {target}; run fixtures/build.sh first")
+        for check in case["checks"]:
+            for repetition in range(args.repetitions):
+                payload = build / "inputs" / check["input"]
+                started = time.monotonic()
+                try:
+                    proc = subprocess.run([str(target), str(payload)], cwd=build, stdin=subprocess.DEVNULL,
+                                          capture_output=True, timeout=4, preexec_fn=limits,
+                                          env={"PATH": os.defpath, "LC_ALL": "C"})
+                    rc = proc.returncode
+                    observed = "signal" if rc < 0 else "exit"
+                    passed = observed == check["outcome"] and (observed == "signal" or rc == check["code"])
+                    row = {"returncode": rc, "signal": signal.Signals(-rc).name if rc < 0 else None,
+                           "stdout": proc.stdout[:4096].decode("utf-8", "replace"),
+                           "stderr": proc.stderr[:4096].decode("utf-8", "replace")}
+                except subprocess.TimeoutExpired:
+                    passed, row = False, {"timeout": True}
+                results.append({"case": case["id"], "input": check["input"], "repetition": repetition,
+                                "target_sha256": sha256(target), "input_sha256": sha256(payload),
+                                "elapsed_seconds": time.monotonic() - started,
+                                "expected": check, "passed": passed, **row})
+    output = args.output or build / "results.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    record = {"schema_version": 1, "platform": platform.platform(), "python": sys.version,
+              "manifest_sha256": sha256(Path(__file__).parent / "manifest.json"),
+              "source_hashes": {str(p.relative_to(Path(__file__).parent)): sha256(p) for p in (Path(__file__).parent / "src").glob("*.c")},
+              "passed": all(r["passed"] for r in results), "checks": results,
+              "agent_detection_metrics": None,
+              "note": "These are process-behavior regressions. Agent findings require separate reports and adjudication."}
+    output.write_text(json.dumps(record, indent=2) + "\n")
+    print(json.dumps({"passed": record["passed"], "checks": len(results), "output": str(output)}))
+    return 0 if record["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,9 @@
+.git
+.re-agent
+target
+work
+dist
+reports
+fixtures/build
+**/__pycache__
+**/*.pyc
