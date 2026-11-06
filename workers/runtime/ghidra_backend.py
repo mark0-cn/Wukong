@@ -34,7 +34,7 @@ def query(root, params):
     properties = headless.parent.parent / "Ghidra/application.properties"
     properties_text = properties.read_text(encoding="utf-8")
     version = next((line.split("=", 1)[1].strip() for line in properties_text.splitlines() if line.startswith("application.version=")), "unknown")
-    timeout = runtime.bounded_int(params.get("timeout_secs"), 110, 5, 295)
+    timeout = runtime.bounded_int(params.get("timeout_secs"), 110, 5, 590)
     analysis_timeout = runtime.bounded_int(params.get("analysis_timeout_secs"), min(90, timeout - 1), 1, 290)
     max_cpu = runtime.bounded_int(params.get("max_cpu"), 2, 1, 16)
     operation = dict(params["query"])
