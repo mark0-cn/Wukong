@@ -13,3 +13,7 @@ __pycache__/
 
 *.pdb
 
+
+# External benchmark adapters and datasets (local only)
+/benchmarks/
+

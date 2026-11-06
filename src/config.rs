@@ -79,6 +79,7 @@ pub struct AppConfig {
     pub pricing: Pricing,
     pub tools: ToolLimits,
     pub skills_dir: Option<PathBuf>,
+    pub demos_dir: Option<PathBuf>,
     pub mcp: Vec<McpServerConfig>,
     pub execution: ExecutionConfig,
 }
@@ -93,6 +94,7 @@ impl Default for AppConfig {
             pricing: Pricing::default(),
             tools: ToolLimits::default(),
             skills_dir: None,
+            demos_dir: None,
             mcp: vec![],
             execution: ExecutionConfig::default(),
         }
@@ -129,6 +131,9 @@ impl AppConfig {
         resolve(base, &mut self.runtime.bridge_path);
         resolve(base, &mut self.analysis.ghidra_cache_dir);
         if let Some(p) = &mut self.skills_dir {
+            resolve(base, p);
+        }
+        if let Some(p) = &mut self.demos_dir {
             resolve(base, p);
         }
         if let Some(p) = &mut self.analysis.ghidra_script_dir {

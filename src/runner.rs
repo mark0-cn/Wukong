@@ -181,8 +181,13 @@ impl AssessmentRunner {
             while !history.is_empty() && rig::conversation::pairing::validate(&history).is_err() {
                 history.pop();
             }
-            let preamble =
-                agents::preamble(&agent, &run, &self.store, self.config.skills_dir.as_deref())?;
+            let preamble = agents::preamble(
+                &agent,
+                &run,
+                &self.store,
+                self.config.skills_dir.as_deref(),
+                self.config.demos_dir.as_deref(),
+            )?;
             self.engine.new_run_with_history(
                 &agent.task,
                 &preamble,
