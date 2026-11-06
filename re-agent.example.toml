@@ -18,9 +18,10 @@ max_total_tokens = 500000
 max_wall_seconds = 3600
 # max_usd requires input/output prices below.
 # max_usd = 10.0
-# Optional per-role share of the run token budget (defaults are built in:
-# root 0.20, recon 0.25, reverse 0.30, hunter 0.25, fuzz 0.25, crash 0.20,
-# exploit 0.45, verifier 0.30, reporter 0.15; floor 10k tokens).
+# Optional per-role share of the run token budget for worker agents
+# (defaults are built in: recon 0.25, reverse 0.30, hunter 0.25, fuzz 0.25,
+# crash 0.20, exploit 0.45, verifier 0.30, reporter 0.15; floor 10k tokens).
+# The root agent is governed by the run budget alone and takes no quota.
 # [budget.role_token_shares]
 # exploit = 0.5
 

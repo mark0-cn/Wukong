@@ -110,8 +110,9 @@ pub struct Budget {
     pub max_total_tokens: u64,
     pub max_usd: Option<f64>,
     pub max_wall_seconds: u64,
-    /// Optional per-role share of the run token budget; missing roles use
-    /// [`Budget::role_share`] defaults. Shares are not enforced to sum to 1.
+    /// Optional per-role share of the run token budget for worker agents;
+    /// missing roles use [`Budget::role_share`] defaults. The root agent is
+    /// governed by the run budget alone. Shares are not enforced to sum to 1.
     pub role_token_shares: std::collections::HashMap<String, f64>,
 }
 impl Budget {

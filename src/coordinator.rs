@@ -49,7 +49,6 @@ impl Coordinator {
         let run_id = id("run");
         let root_id = id("agent");
         let timestamp = now();
-        let root_token_cap = budget.role_token_cap(Role::Root);
         let run = RunRecord {
             id: run_id.clone(),
             target_path,
@@ -84,7 +83,7 @@ impl Coordinator {
             turns: 0,
             total_tokens: 0,
             cost_usd: 0.0,
-            token_cap: Some(root_token_cap),
+            token_cap: None, // root is governed by the run budget, not a role quota
             summary: None,
             error: None,
             created_at: timestamp,
@@ -450,9 +449,10 @@ impl Coordinator {
             Store::tx_put(tx, "run", run_id, run_id, &run)?;
             for mut a in Store::tx_list::<AgentRecord>(tx, "agent", run_id)? {
                 let mut changed = false;
-                if !a.status.terminal() {
+                if !a.status.terminal() && a.role != Role::Root {
                     // Role caps follow the run budget: a resumed run with an
-                    // enlarged budget rescales every surviving agent's quota.
+                    // enlarged budget rescales every surviving worker's quota.
+                    // The root is governed by the run budget alone.
                     a.token_cap = Some(run.budget.role_token_cap(a.role));
                     changed = true;
                 }
