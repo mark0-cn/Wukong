@@ -23,6 +23,7 @@ fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Resu
                 skills: vec![],
                 inherit_context: false,
                 wait_for_predecessors: vec![],
+                contract: Default::default(),
             },
         )?
         .agent)
@@ -1049,6 +1050,62 @@ async fn think_has_an_agent_scoped_audit_record_and_severity_is_gated_by_stage()
         result(&filed)["finding"]["severity_rationale"],
         "bare crash only"
     );
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn contracted_tool_tasks_deliver_structured_results_without_vulnerability_findings()
+-> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, _) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let created=service.execute(&run.root_id,"contract-create","create_agent",json!({"name":"format","role":"reverse","task":"recover header","scope":"contract-format","contract":{"constraints":["static only"],"deliverables":["table"],"completion_conditions":["fields covered"]}})).await?;
+    assert!(!created.is_error, "{created:?}");
+    let child_id = result(&created)["agent"]["id"].as_str().unwrap();
+    let child: AgentRecord = store.require("agent", child_id)?;
+    let prompt = re_agent::agents::preamble(&child, &run, &store, None, None)?;
+    assert!(prompt.contains("static only") && prompt.contains("fields covered"));
+    let invalid = service
+        .execute(
+            child_id,
+            "missing-table",
+            "agent_finish",
+            json!({"summary":"done"}),
+        )
+        .await?;
+    assert!(invalid.is_error);
+    let evidence = store.artifact(
+        &run.id,
+        child_id,
+        "contract-table",
+        "test.table",
+        b"test-only table",
+        "text/plain",
+        json!({}),
+    )?;
+    let args = json!({"result":{"outcome":"success","answer":"header recovered","artifacts":[{"name":"table","evidence_id":evidence.id}],"completed_conditions":["fields covered"]}});
+    let finished = service
+        .execute(child_id, "contract-finish", "agent_finish", args.clone())
+        .await?;
+    assert!(!finished.is_error, "{finished:?}");
+    assert_eq!(
+        service
+            .execute(child_id, "contract-finish", "agent_finish", args)
+            .await?
+            .value,
+        finished.value
+    );
+    assert!(store.list::<Finding>("finding", &run.id)?.is_empty());
+    assert_eq!(
+        store
+            .require::<AgentRecord>("agent", child_id)?
+            .task_result
+            .unwrap()
+            .answer,
+        "header recovered"
+    );
+    drop(coordinator);
     service.close().await;
     Ok(())
 }

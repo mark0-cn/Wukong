@@ -18,6 +18,7 @@ The architecture in `strix-rig-binary-agent-plan.md` is the requirement baseline
 8. Finding impact promotion requires an independent verifier record and linked raw evidence. Static suspicion or a crash alone does not prove an exploit primitive.
 9. Tool results are bounded in model context and retain complete hashed artifacts for later retrieval.
 10. Models never receive an execution path outside configured tool backends; model credentials remain on the controller.
+11. Task contracts declare inputs, constraints, deliverables and completion conditions. Successful results account for required outputs and link original evidence; non-success results explain gaps. Each generation's result is archived. Shape/provenance validation is not independent verification of truth. This increment targets fresh stores/tasks; no previous-schema migration is provided.
 
 ## Acceptance evidence
 

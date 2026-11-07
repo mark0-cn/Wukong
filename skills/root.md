@@ -134,3 +134,8 @@ When all children are terminal:
    partially answered / unresolved, with evidence IDs. A bounded negative
    search is reported as "not found in scope X", never "does not exist".
 5. `finish_scan` with the reconciled summary.
+
+For a task with concrete outputs, supply create_agent.contract with input evidence,
+constraints, deliverables and completion_conditions. Read its structured result,
+including unknowns and next_actions, before using the conclusion. Missing artifacts
+must not become a successful summary. A contract check does not verify truth.

@@ -61,6 +61,7 @@ struct Snapshot {
     debug_sessions: Vec<Value>,
     events: Vec<Event>,
     messages: Vec<Message>,
+    task_results: Vec<Value>,
 }
 
 fn snapshot(store: &Store, run_id: &str) -> Result<Snapshot> {
@@ -112,6 +113,7 @@ fn snapshot(store: &Store, run_id: &str) -> Result<Snapshot> {
             debug_sessions: Store::tx_list(tx, "debug_session", run_id)?,
             events,
             messages,
+            task_results: Store::tx_list(tx, "task_result", run_id)?,
         })
     })
 }
