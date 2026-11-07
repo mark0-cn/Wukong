@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -261,6 +262,46 @@ impl Store {
         }
         Ok(bytes)
     }
+
+    /// Stream-verify the whole artifact digest and return only the requested
+    /// range, keeping memory bounded for large evidence files.
+    pub fn read_evidence_range(
+        &self,
+        run_id: &str,
+        evidence_id: &str,
+        offset: u64,
+        length: usize,
+    ) -> Result<Vec<u8>> {
+        let record: Evidence = self.require("evidence", evidence_id)?;
+        if record.run_id != run_id {
+            bail!("evidence belongs to another run");
+        }
+        let path = fs::canonicalize(self.root.join(&record.relative_path))?;
+        if !path.starts_with(self.root.as_path()) {
+            bail!("artifact escapes state directory");
+        }
+        let mut file = fs::File::open(path)?;
+        if file.metadata()?.len() != record.size {
+            bail!("artifact size changed");
+        }
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let count = file.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            digest.update(&buffer[..count]);
+        }
+        if hex::encode(digest.finalize()) != record.sha256 {
+            bail!("artifact digest mismatch");
+        }
+        file.seek(SeekFrom::Start(offset))?;
+        let mut bytes = vec![0_u8; length];
+        let count = file.read(&mut bytes)?;
+        bytes.truncate(count);
+        Ok(bytes)
+    }
     pub fn verify_evidence_links(&self, run_id: &str, ids: &[String]) -> Result<()> {
         for evidence in ids {
             self.read_evidence(run_id, evidence)?;
@@ -296,5 +337,43 @@ struct UtcTimestamp;
 impl UtcTimestamp {
     fn get() -> i64 {
         chrono::Utc::now().timestamp()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_reads_verify_the_streamed_digest_and_stay_bounded() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let store = Store::open(dir.path().join("state"))?;
+        let bytes = b"0123456789abcdef".repeat(4096); // 64 KiB
+        let evidence = store.artifact(
+            "run-1",
+            "agent-1",
+            "call-1",
+            "test",
+            &bytes,
+            "application/octet-stream",
+            serde_json::json!({}),
+        )?;
+        let range = store.read_evidence_range("run-1", &evidence.id, 1000, 4000)?;
+        assert_eq!(&range, &bytes[1000..5000]);
+        // Cross-run references stay rejected.
+        assert!(
+            store
+                .read_evidence_range("other-run", &evidence.id, 0, 10)
+                .is_err()
+        );
+        // Tampering (here: a size change) must be detected.
+        let path = store.root().join(&evidence.relative_path);
+        fs::write(&path, b"tampered")?;
+        assert!(
+            store
+                .read_evidence_range("run-1", &evidence.id, 0, 10)
+                .is_err()
+        );
+        Ok(())
     }
 }
