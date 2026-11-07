@@ -53,10 +53,7 @@ pub enum Command {
     /// Start a real model-driven multi-agent assessment.
     Analyze {
         target: PathBuf,
-        #[arg(
-            long,
-            default_value = "Analyze the binary, establish its input/trust boundaries, investigate concrete vulnerability hypotheses, independently verify reproducible findings and report evidence and limitations."
-        )]
+        #[arg(long, default_value = DEFAULT_TASK)]
         task: String,
         #[arg(long)]
         output: Option<PathBuf>,
@@ -358,7 +355,7 @@ async fn drive_with_events(
 
 /// The default analyze task, shared by the `analyze` command and the TUI's
 /// new-task prompt.
-const DEFAULT_TASK: &str = "Analyze the binary, establish its input/trust boundaries, investigate concrete vulnerability hypotheses, independently verify reproducible findings and report evidence and limitations.";
+const DEFAULT_TASK: &str = "Analyze the binary's purpose, structure, inputs, outputs and key behavior. Reconstruct relevant formats or algorithms, verify observations where practical, and report evidence, uncertainties and limitations. Investigate vulnerabilities only when requested.";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Focus {
@@ -367,17 +364,14 @@ enum Focus {
 }
 
 enum TuiModal {
-    Finding(Finding),
+    Finding(Box<Finding>),
     StopAgent { agent_id: String, name: String },
     Quit,
 }
 
 /// Validate a target path and drive a fresh assessment from the TUI,
 /// returning the new run id and its cancellation token.
-fn start_task(
-    runner: &AssessmentRunner,
-    target: &str,
-) -> Result<(String, CancellationToken)> {
+fn start_task(runner: &AssessmentRunner, target: &str) -> Result<(String, CancellationToken)> {
     let path = std::fs::canonicalize(target.trim())?;
     ensure!(path.is_file(), "not a file: {}", target.trim());
     let config = runner.config();
@@ -405,28 +399,40 @@ fn banner_lines() -> Vec<ratatui::text::Line<'static>> {
     vec![
         Line::from(Span::styled(
             "██████╗ ███████╗    █████╗  ██████╗ ███████╗ ███╗   ██╗ ████████╗",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "██╔══██╗██╔════╝   ██╔══██╗██╔═════╝ ██╔════╝ ████╗  ██║ ╚══██╔══╝",
-            Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "██████╔╝█████╗     ███████║██║  ███╗█████╗   ██╔██╗ ██║    ██║",
-            Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::LightBlue)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "██╔══██╗██╔══╝     ██╔══██║██║   ██║██╔══╝   ██║╚██╗██║    ██║",
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "██║  ██║███████╗    ██║  ██║╚██████╔╝███████╗ ██║ ╚████║    ██║",
-            Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::LightMagenta)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(vec![
             Span::styled(
                 "╚═╝  ╚═╝╚══════╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═╝  ╚═══╝    ╚═╝  ",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 " binary reverse-engineering agents",
@@ -468,14 +474,28 @@ fn clear_editor(editor: &mut ratatui_textarea::TextArea<'_>) {
 
 fn help_lines() -> Vec<Line<'static>> {
     vec![
-        Line::from("F1 close help · Ctrl+Q quit (confirm; pauses live runs) · Ctrl+P pause · Tab switch input/tree"),
+        Line::from(
+            "F1 close help · Ctrl+Q quit (confirm; pauses live runs) · Ctrl+P pause · Tab switch input/tree",
+        ),
         Line::from(""),
-        Line::from("▸ Input (focused by default): type freely; Enter sends the message to the selected agent (or root), Shift+Enter inserts a newline, Esc clears."),
-        Line::from("▸ Esc with an agent selected opens the stop confirmation for that agent (running/waiting agents only)."),
-        Line::from("▸ Tree: ↑/↓ select · Enter opens that agent's conversation · g returns to the live activity stream."),
-        Line::from("▸ Mouse: click an agent to view its conversation, click a finding to open its report, wheel scrolls."),
-        Line::from("▸ New agents are selected automatically as they spawn; the view follows the latest activity."),
-        Line::from("▸ Welcome screen: type a target path and Enter starts a new assessment live in this terminal."),
+        Line::from(
+            "▸ Input (focused by default): type freely; Enter sends the message to the selected agent (or root), Shift+Enter inserts a newline, Esc clears.",
+        ),
+        Line::from(
+            "▸ Esc with an agent selected opens the stop confirmation for that agent (running/waiting agents only).",
+        ),
+        Line::from(
+            "▸ Tree: ↑/↓ select · Enter opens that agent's conversation · g returns to the live activity stream.",
+        ),
+        Line::from(
+            "▸ Mouse: click an agent to view its conversation, click a finding to open its report, wheel scrolls.",
+        ),
+        Line::from(
+            "▸ New agents are selected automatically as they spawn; the view follows the latest activity.",
+        ),
+        Line::from(
+            "▸ Welcome screen: type a target path and Enter starts a new assessment live in this terminal.",
+        ),
     ]
 }
 
@@ -494,22 +514,42 @@ fn finding_modal_lines(finding: &Finding) -> Vec<Line<'static>> {
             Span::raw(short_id(&finding.agent_id).to_owned()),
         ]),
         Line::from(""),
-        Line::from(Span::styled("description", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "description",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from(finding.description.clone()),
     ];
     if let Some(root_cause) = &finding.root_cause {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("root cause", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+        lines.push(Line::from(Span::styled(
+            "root cause",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
         lines.push(Line::from(root_cause.clone()));
     }
     if let Some(impact) = &finding.impact {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("impact", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+        lines.push(Line::from(Span::styled(
+            "impact",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
         lines.push(Line::from(impact.clone()));
     }
     if let Some(rationale) = &finding.severity_rationale {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("severity rationale", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+        lines.push(Line::from(Span::styled(
+            "severity rationale",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
         lines.push(Line::from(rationale.clone()));
     }
     lines.push(Line::from(""));
@@ -524,21 +564,20 @@ fn finding_modal_lines(finding: &Finding) -> Vec<Line<'static>> {
         ]));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Esc or Enter closes", Style::default().fg(Color::DarkGray))));
+    lines.push(Line::from(Span::styled(
+        "Esc or Enter closes",
+        Style::default().fg(Color::DarkGray),
+    )));
     lines
 }
 
 /// The selected agent's conversation: task, model text, reasoning, tool
 /// calls with their recorded results, and coordinator messages — read from
 /// the durable checkpoint and the tool-call ledger.
-fn agent_detail_lines(
-    store: &Store,
-    run_id: &str,
-    agent: &AgentRecord,
-) -> Vec<Line<'static>> {
+fn agent_detail_lines(store: &Store, run_id: &str, agent: &AgentRecord) -> Vec<Line<'static>> {
     use crate::llm::DurableRun;
-    use rig::completion::{AssistantContent, Message};
     use rig::completion::message::UserContent;
+    use rig::completion::{AssistantContent, Message};
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(Line::from(vec![
         Span::styled("task: ", Style::default().fg(Color::DarkGray)),
@@ -560,7 +599,9 @@ fn agent_detail_lines(
             return lines;
         }
     };
-    let calls = store.list::<ToolCallRecord>("call", run_id).unwrap_or_default();
+    let calls = store
+        .list::<ToolCallRecord>("call", run_id)
+        .unwrap_or_default();
     let mut results: std::collections::HashMap<String, &ToolCallRecord> =
         std::collections::HashMap::new();
     for record in calls.iter().filter(|record| record.agent_id == agent.id) {
@@ -598,16 +639,24 @@ fn agent_detail_lines(
                             for line in reasoning.text.lines().take(12) {
                                 lines.push(Line::from(vec![
                                     Span::styled("… ", Style::default().fg(Color::DarkGray)),
-                                    Span::styled(line.to_owned(), Style::default().fg(Color::DarkGray)),
+                                    Span::styled(
+                                        line.to_owned(),
+                                        Style::default().fg(Color::DarkGray),
+                                    ),
                                 ]));
                             }
                         }
                         AssistantContent::ToolCall(call) => {
-                            let args = serde_json::to_string(&call.function.arguments)
-                                .unwrap_or_default();
+                            let args =
+                                serde_json::to_string(&call.function.arguments).unwrap_or_default();
                             let args: String = args.chars().take(110).collect();
                             lines.push(Line::from(vec![
-                                Span::styled("⚙ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                                Span::styled(
+                                    "⚙ ",
+                                    Style::default()
+                                        .fg(Color::Yellow)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
                                 Span::styled(
                                     format!("{} {}", call.function.name, args),
                                     Style::default().fg(Color::Yellow),
@@ -641,10 +690,10 @@ fn agent_detail_lines(
 fn tool_result_brief(record: &ToolCallRecord) -> String {
     let mut brief = String::new();
     if let Some(result) = &record.result {
-        if let Some(is_error) = result["is_error"].as_bool() {
-            if is_error {
-                brief.push_str("error: ");
-            }
+        if let Some(is_error) = result["is_error"].as_bool()
+            && is_error
+        {
+            brief.push_str("error: ");
         }
         if let Some(value) = result["value"]["result"].as_str() {
             let text: String = value.chars().take(160).collect();
@@ -674,16 +723,12 @@ fn tool_result_brief(record: &ToolCallRecord) -> String {
     brief
 }
 
-fn dashboard(
-    store: &Store,
-    run_id: Option<&str>,
-    runner: Option<AssessmentRunner>,
-) -> Result<()> {
+fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunner>) -> Result<()> {
     use crossterm::{
         event::{
             self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste,
-            EnableMouseCapture, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers,
-            MouseButton, MouseEventKind,
+            EnableMouseCapture, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers, MouseButton,
+            MouseEventKind,
         },
         execute,
         terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -715,7 +760,7 @@ fn dashboard(
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut editor = TextArea::default();
-    let _ = editor.set_placeholder_text("▸ type a message (Enter sends, Esc clears)");
+    editor.set_placeholder_text("▸ type a message (Enter sends, Esc clears)");
     let mut scroll: usize = 0;
     let mut detail_scroll: usize = 0;
     let mut follow = true;
@@ -737,16 +782,16 @@ fn dashboard(
     let mut last_findings_rect: Option<Rect> = None;
     let mut last_right_rect: Option<Rect> = None;
     loop {
-        if selected.is_none() {
-            if let Ok(mut runs) = store.runs() {
-                runs.reverse();
-                selected = runs.into_iter().next().map(|run| run.id);
-            }
+        if selected.is_none()
+            && let Ok(mut runs) = store.runs()
+        {
+            runs.reverse();
+            selected = runs.into_iter().next().map(|run| run.id);
         }
         let Some(selected_id) = selected.as_deref() else {
             // Welcome state: no assessment exists yet. Typing goes straight
             // into the task input, Strix-style.
-            let _ = editor.set_placeholder_text("▸ task: target path (Enter to start)");
+            editor.set_placeholder_text("▸ task: target path (Enter to start)");
             terminal.draw(|frame| {
                 let area = frame.area();
                 let mut lines = banner_lines();
@@ -754,13 +799,12 @@ fn dashboard(
                 lines.push(Line::from(vec![
                     Span::styled(
                         "What do you want me to do? Type a target path and press Enter.",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw("  "),
-                    Span::styled(
-                        spinner(frame_clock),
-                        Style::default().fg(Color::LightGreen),
-                    ),
+                    Span::styled(spinner(frame_clock), Style::default().fg(Color::LightGreen)),
                 ]));
                 lines.push(Line::from(Span::styled(
                     "The run is driven live in this terminal; Ctrl+Q pauses and exits.",
@@ -772,7 +816,11 @@ fn dashboard(
                     } else {
                         "Watch-only: model credentials are missing, so new tasks cannot start."
                     },
-                    Style::default().fg(if runner.is_some() { Color::Green } else { Color::Red }),
+                    Style::default().fg(if runner.is_some() {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    }),
                 )));
                 lines.push(Line::from(""));
                 if let Some(error) = &input_error {
@@ -782,9 +830,8 @@ fn dashboard(
                     )));
                 }
                 frame.render_widget(
-                    Paragraph::new(lines).block(
-                        Block::default().borders(Borders::ALL).title(" RE-AGENT "),
-                    ),
+                    Paragraph::new(lines)
+                        .block(Block::default().borders(Borders::ALL).title(" RE-AGENT ")),
                     area,
                 );
             })?;
@@ -800,13 +847,12 @@ fn dashboard(
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     break;
                 }
                 if key.code == KeyCode::Esc {
-                    let spurious = last_mouse_at
-                        .is_some_and(|at| at.elapsed() < Duration::from_millis(250));
+                    let spurious =
+                        last_mouse_at.is_some_and(|at| at.elapsed() < Duration::from_millis(250));
                     if !spurious && !editor.is_empty() {
                         editor.clear();
                         input_error = None;
@@ -874,7 +920,7 @@ fn dashboard(
         if follow {
             scroll = events.len().saturating_sub(right_height.saturating_sub(2));
         }
-        let _ = editor.set_placeholder_text("▸ message (Enter sends, Esc clears)");
+        editor.set_placeholder_text("▸ message (Enter sends, Esc clears)");
         let detail_lines: Vec<Line> = match detail_agent.as_deref() {
             Some(agent_id) => agents
                 .iter()
@@ -953,7 +999,11 @@ fn dashboard(
                             Style::default()
                                 .fg(role_color)
                                 .add_modifier(Modifier::BOLD)
-                                .add_modifier(if cursor { Modifier::UNDERLINED } else { Modifier::empty() }),
+                                .add_modifier(if cursor {
+                                    Modifier::UNDERLINED
+                                } else {
+                                    Modifier::empty()
+                                }),
                         ),
                     ];
                     let vulns = findings.iter().filter(|f| f.agent_id == agent.id).count();
@@ -999,11 +1049,15 @@ fn dashboard(
                 let mut banner_spans = vec![
                     Span::styled(
                         format!("{glyph} "),
-                        Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(status_color)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         &agent.name,
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         format!(
@@ -1017,7 +1071,7 @@ fn dashboard(
                     banner_spans.push(Span::raw("  "));
                     banner_spans.push(sweep_span(frame_clock));
                 }
-                let mut banner = vec![
+                let banner = vec![
                     Line::from(banner_spans),
                     Line::from(Span::styled(
                         "─".repeat(48),
@@ -1027,11 +1081,7 @@ fn dashboard(
                 let banner_rows = banner.len();
                 let start = detail_lines
                     .len()
-                    .saturating_sub(
-                        right_height
-                            .saturating_sub(2)
-                            .saturating_sub(banner_rows),
-                    )
+                    .saturating_sub(right_height.saturating_sub(2).saturating_sub(banner_rows))
                     .saturating_sub(detail_scroll);
                 let window = detail_lines
                     .iter()
@@ -1099,18 +1149,20 @@ fn dashboard(
                             ),
                             Span::styled(event_kind(&event.kind), Style::default().fg(color)),
                             Span::raw("  "),
-                            Span::raw(event_brief(&event)),
+                            Span::raw(event_brief(event)),
                         ])
                     })
                     .collect();
                 frame.render_widget(
                     Paragraph::new(event_lines)
-                        .block(
-                            Block::default().borders(Borders::ALL).title(format!(
-                                " ACTIVITY {} ",
-                                if follow { "· following" } else { "· scrolled" }
-                            )),
-                        )
+                        .block(Block::default().borders(Borders::ALL).title(format!(
+                            " ACTIVITY {} ",
+                            if follow {
+                                "· following"
+                            } else {
+                                "· scrolled"
+                            }
+                        )))
                         .wrap(Wrap { trim: false }),
                     middle[1],
                 );
@@ -1142,9 +1194,14 @@ fn dashboard(
                                         .unwrap_or_else(|| "??".into())
                                         .to_uppercase()
                                 ),
-                                Style::default().fg(severity_color).add_modifier(Modifier::BOLD),
+                                Style::default()
+                                    .fg(severity_color)
+                                    .add_modifier(Modifier::BOLD),
                             ),
-                            Span::styled(format!("{:?} ", finding.stage), Style::default().fg(Color::DarkGray)),
+                            Span::styled(
+                                format!("{:?} ", finding.stage),
+                                Style::default().fg(Color::DarkGray),
+                            ),
                             Span::raw(&finding.title),
                         ])
                     })
@@ -1175,12 +1232,37 @@ fn dashboard(
             );
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
-                    Span::styled(" re-agent ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!(" {} ", run.status), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
-                    Span::styled(format!("tokens {}/{}  ", run.total_tokens, run.budget.max_total_tokens), Style::default().fg(Color::Gray)),
-                    Span::styled(format!("cost ${:.4}  ", run.cost_usd), Style::default().fg(Color::Gray)),
-                    Span::styled(format!("elapsed {elapsed}  "), Style::default().fg(Color::Gray)),
-                    Span::styled(format!("agents {}  ", agents.len()), Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        " re-agent ",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {} ", run.status),
+                        Style::default()
+                            .fg(status_color)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(
+                            "tokens {}/{}  ",
+                            run.total_tokens, run.budget.max_total_tokens
+                        ),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(
+                        format!("cost ${:.4}  ", run.cost_usd),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(
+                        format!("elapsed {elapsed}  "),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(
+                        format!("agents {}  ", agents.len()),
+                        Style::default().fg(Color::Gray),
+                    ),
                     Span::styled(
                         if focus == Focus::Tree {
                             "tree: ↑/↓ · Enter view · g stream · Tab input"
@@ -1217,8 +1299,16 @@ fn dashboard(
                             Paragraph::new(vec![
                                 Line::from(vec![
                                     Span::styled("Stop agent ", Style::default().fg(Color::Yellow)),
-                                    Span::styled(name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                                    Span::styled("? Its descendants stop with it.", Style::default().fg(Color::Yellow)),
+                                    Span::styled(
+                                        name,
+                                        Style::default()
+                                            .fg(Color::Yellow)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(
+                                        "? Its descendants stop with it.",
+                                        Style::default().fg(Color::Yellow),
+                                    ),
                                 ]),
                                 Line::from(""),
                                 Line::from(Span::styled(
@@ -1282,11 +1372,12 @@ fn dashboard(
         }
         // An unparseable terminal event (e.g. an unsupported mouse protocol
         // sequence) must never take the dashboard down.
-        let Ok(read) = event::read() else { continue; };
+        let Ok(read) = event::read() else {
+            continue;
+        };
         match read {
             CEvent::Key(key) if key.kind == KeyEventKind::Press => {
-                if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     modal = Some(TuiModal::Quit);
                     continue;
                 }
@@ -1298,8 +1389,8 @@ fn dashboard(
                     // A bare Esc never quits: Windows terminals can deliver a
                     // mouse click as a spurious Esc, and clicks right before
                     // an Esc are ignored entirely.
-                    let spurious = last_mouse_at
-                        .is_some_and(|at| at.elapsed() < Duration::from_millis(250));
+                    let spurious =
+                        last_mouse_at.is_some_and(|at| at.elapsed() < Duration::from_millis(250));
                     if spurious {
                         continue;
                     }
@@ -1309,16 +1400,15 @@ fn dashboard(
                     // Strix behavior: Esc opens the stop confirmation for
                     // the selected agent when it is stoppable.
                     if let Some(agent_id) = detail_agent.clone() {
-                        if let Some(agent) = agents.iter().find(|a| a.id == agent_id) {
-                            if matches!(agent.status, Status::Running | Status::Waiting)
-                                && agent.checkpoint.is_some()
-                            {
-                                modal = Some(TuiModal::StopAgent {
-                                    agent_id: agent.id.clone(),
-                                    name: agent.name.clone(),
-                                });
-                                continue;
-                            }
+                        if let Some(agent) = agents.iter().find(|a| a.id == agent_id)
+                            && matches!(agent.status, Status::Running | Status::Waiting)
+                            && agent.checkpoint.is_some()
+                        {
+                            modal = Some(TuiModal::StopAgent {
+                                agent_id: agent.id.clone(),
+                                name: agent.name.clone(),
+                            });
+                            continue;
                         }
                         detail_agent = None;
                         continue;
@@ -1328,8 +1418,7 @@ fn dashboard(
                     }
                     continue;
                 }
-                if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     if !run.status.terminal() {
                         Coordinator::new(store.clone())
                             .pause_budget(selected_id, "operator paused in TUI")?;
@@ -1385,7 +1474,9 @@ fn dashboard(
                             if !text.is_empty() && !run.status.terminal() {
                                 let target = detail_agent
                                     .clone()
-                                    .or_else(|| agents.get(tree_cursor).map(|agent| agent.id.clone()))
+                                    .or_else(|| {
+                                        agents.get(tree_cursor).map(|agent| agent.id.clone())
+                                    })
                                     .unwrap_or_else(|| run.root_id.clone());
                                 Coordinator::new(store.clone())
                                     .message("operator", &target, &text)?;
@@ -1444,9 +1535,10 @@ fn dashboard(
             CEvent::Mouse(mouse) => {
                 last_mouse_at = Some(std::time::Instant::now());
                 match mouse.kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if let Some(rect) = last_tree_rect {
-                        if rect.contains((mouse.column, mouse.row).into()) {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(rect) = last_tree_rect
+                            && rect.contains((mouse.column, mouse.row).into())
+                        {
                             let row = mouse.row.saturating_sub(rect.y + 1) as usize;
                             if row < agents.len() {
                                 tree_cursor = row;
@@ -1455,43 +1547,40 @@ fn dashboard(
                                 focus = Focus::Tree;
                             }
                         }
-                    }
-                    if let Some(rect) = last_findings_rect {
-                        if rect.contains((mouse.column, mouse.row).into()) {
+                        if let Some(rect) = last_findings_rect
+                            && rect.contains((mouse.column, mouse.row).into())
+                        {
                             let row = mouse.row.saturating_sub(rect.y + 1) as usize;
                             if row < findings.len() {
-                                modal = Some(TuiModal::Finding(findings[row].clone()));
+                                modal = Some(TuiModal::Finding(Box::new(findings[row].clone())));
                             }
                         }
                     }
-                }
-                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                    let up = matches!(mouse.kind, MouseEventKind::ScrollUp);
-                    let over_right = last_right_rect
-                        .is_some_and(|rect| rect.contains((mouse.column, mouse.row).into()));
-                    if detail_agent.is_some() && over_right {
-                        if up {
-                            detail_scroll = detail_scroll.saturating_add(1);
-                        } else {
-                            detail_scroll = detail_scroll.saturating_sub(1);
-                        }
-                    } else if up {
-                        follow = false;
-                        scroll = scroll.saturating_add(1);
-                    } else if scroll > 0 {
-                        scroll -= 1;
-                        if scroll == 0 {
-                            follow = true;
+                    MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                        let up = matches!(mouse.kind, MouseEventKind::ScrollUp);
+                        let over_right = last_right_rect
+                            .is_some_and(|rect| rect.contains((mouse.column, mouse.row).into()));
+                        if detail_agent.is_some() && over_right {
+                            if up {
+                                detail_scroll = detail_scroll.saturating_add(1);
+                            } else {
+                                detail_scroll = detail_scroll.saturating_sub(1);
+                            }
+                        } else if up {
+                            follow = false;
+                            scroll = scroll.saturating_add(1);
+                        } else if scroll > 0 {
+                            scroll -= 1;
+                            if scroll == 0 {
+                                follow = true;
+                            }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
-            }
-            CEvent::Paste(text) => {
-                if focus == Focus::Editor {
-                    editor.insert_str(&text);
-                }
+            CEvent::Paste(text) if focus == Focus::Editor => {
+                editor.insert_str(&text);
             }
             _ => {}
         }
@@ -1519,10 +1608,17 @@ fn tree_guides(agents: &[AgentRecord], index: usize) -> String {
 }
 
 fn store_agent_role(agents: &[AgentRecord], agent_id: Option<&str>) -> Option<Role> {
-    agent_id.and_then(|id| agents.iter().find(|agent| agent.id == id).map(|agent| agent.role))
+    agent_id.and_then(|id| {
+        agents
+            .iter()
+            .find(|agent| agent.id == id)
+            .map(|agent| agent.role)
+    })
 }
 fn short_id(id: &str) -> &str {
-    id.strip_prefix("agent_").and_then(|hex| hex.get(..6)).unwrap_or(id)
+    id.strip_prefix("agent_")
+        .and_then(|hex| hex.get(..6))
+        .unwrap_or(id)
 }
 fn event_kind(kind: &str) -> &str {
     match kind {
@@ -1548,16 +1644,16 @@ fn event_kind(kind: &str) -> &str {
 }
 fn event_brief(event: &Event) -> String {
     let data = &event.data;
-    let brief = match event.kind.as_str() {
+
+    match event.kind.as_str() {
         "model.finished" => data["usage"]
             .get("total_tokens")
             .and_then(Value::as_u64)
             .map(|tokens| format!("{tokens} tok"))
             .unwrap_or_default(),
-        "tool.started" | "tool.finished" | "tool.result" => data["name"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
+        "tool.started" | "tool.finished" | "tool.result" => {
+            data["name"].as_str().unwrap_or_default().to_string()
+        }
         "agent.created" => format!(
             "{} {}",
             data["role"].as_str().unwrap_or_default(),
@@ -1587,6 +1683,5 @@ fn event_brief(event: &Event) -> String {
             let text: String = text.chars().take(110).collect();
             text
         }
-    };
-    brief
+    }
 }

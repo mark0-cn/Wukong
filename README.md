@@ -1,6 +1,6 @@
 # re-agent
 
-基于 Strix 协作架构、使用 Rust 和 Rig 0.46.0 实现的二进制逆向与漏洞验证 agent。Windows 可以作为控制端；首版动态分析后端面向 Linux x86_64 ELF。ELF、PE、Mach-O 的静态画像由 Rust 直接解析。
+基于 Strix 协作架构、使用 Rust 和 Rig 0.46.0 实现的二进制逆向与分析 agent，支持行为理解、格式与算法还原、调试，以及按需进行漏洞验证。Windows 可以作为控制端；首版动态分析后端面向 Linux x86_64 ELF。ELF、PE、Mach-O 的静态画像由 Rust 直接解析。
 
 需求基线在 [架构方案](docs/strix-rig-binary-agent-plan.md)，实现与验收约定在 [实现契约](docs/implementation-contract.md)。
 
@@ -89,7 +89,9 @@ Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 
 | `runtime` / `workers/runtime` | GDB/MI、进程/fuzz jobs、符号执行（angr）、交互会话、崩溃重放与独立复核 |
 | `report` / `interface` | CLI、TUI、JSON/Markdown/HTML 报告、证据包 |
 
-根 agent 专注编排，实际目标操作由动态子 agent 完成。发现、验证、覆盖记录和威胁模型在同一任务内共享。每个 agent 保留独立会话。完整工具输出保存为哈希产物，模型只接收有界结果及证据 ID。
+根 agent 专注编排，实际目标操作由动态子 agent 完成。分析笔记、待办、发现和覆盖记录在同一任务内共享；威胁模型仅在安全边界分析中按需使用。每个 agent 保留独立会话。活动任务内可向已完成的子 agent 追加问题，保留其历史和累计预算；同范围的新任务只与活动 agent 去重。完整工具输出保存为哈希产物，模型只接收有界结果及证据 ID。
+
+子 agent 完成前须关闭自己的调试和交互会话；根任务完成前须处理全部遗留会话。`view_agent_graph` 会列出待清理会话，其他子 agent 可以关闭已终止 owner 遗留的会话，但不能向它发送命令。
 
 ## 报告与评测
 

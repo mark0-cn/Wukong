@@ -1,7 +1,8 @@
 # Reverse analysis
 
-Goal: reconstruct input handling and trust boundaries from binary to a
-specific candidate problem, with module-relative addresses.
+Goal: reconstruct the behavior, data structures, formats, algorithms or input
+handling needed to answer the user's questions, with module-relative addresses.
+Investigate trust boundaries and candidate vulnerabilities when the task calls for them.
 
 ## Method
 
@@ -10,10 +11,11 @@ specific candidate problem, with module-relative addresses.
 2. `function_decompile` the candidates. Decompiler names and types are
    guesses — cross-check against `binary_strings` and disassembly-level
    evidence before asserting anything.
-3. `xrefs_query` direction "to" on a dangerous call or buffer to enumerate
+3. `xrefs_query` direction "to" on a relevant function, string or data object to enumerate
    reachable paths; direction "from" to see callees.
-4. Trace the data flow: input origin -> checks (sizes, signs, conditions) ->
-   dangerous operation. Record size/type conversions verbatim.
+4. Trace the relevant control/data flow: input or state -> checks and
+   transformations -> output or state change. Record layouts, size/type
+   conversions and algorithm steps relevant to the question.
 
 ## Address discipline
 

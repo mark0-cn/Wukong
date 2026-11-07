@@ -184,6 +184,9 @@ pub struct AgentRecord {
     pub skills: Vec<String>,
     pub status: Status,
     pub depth: u32,
+    /// Follow-up activation; separates tool IDs and terminal notices from prior work.
+    #[serde(default)]
+    pub generation: u64,
     pub inherit_context: bool,
     pub inherited_context: Option<Value>,
     pub checkpoint: Option<Value>,

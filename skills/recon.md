@@ -1,7 +1,7 @@
 # Binary reconnaissance
 
-Goal: a factual dossier on the target that lets reverse/hunter start
-immediately. You do not hunt bugs and you do not exploit.
+Goal: a factual dossier that supports the user's actual reverse-engineering
+questions. You do not hunt bugs or develop exploits unless explicitly assigned.
 
 ## Deliverables (all with evidence IDs)
 
@@ -11,12 +11,12 @@ immediately. You do not hunt bugs and you do not exploit.
    `enabled`/`disabled`/`unknown` and say WHY (observed flag vs assumption).
    A canary import does not mean every function is protected.
 3. **Input model**: how input reaches the program (argv file, stdin, network
-   service?) and which fields the attacker controls. If it is a service, note
+   service?) and which fields are externally supplied. If it is a service, note
    the port and the forking model.
-4. **Dependency surface**: imports/PLT entries that matter (read/write/open/
-   system/execve/printf family) and a libc/build hint if visible.
+4. **Dependencies**: imports and libraries relevant to the requested behavior,
+   plus compiler/runtime/build hints if visible.
 5. **Notable strings**: prompts, error messages, file paths, format strings,
-   "flag"/"win"/"secret" markers (`binary_strings` with `contains` filters and
+   protocol/format identifiers relevant to the task (`binary_strings` with `contains` filters and
    bounded pages).
 6. **Live probe** (execution worker only): `stage_target`, then `file_put` a
    small Python script and `job_start` it — run the binary with benign input,
@@ -32,4 +32,5 @@ immediately. You do not hunt bugs and you do not exploit.
   deliverables it must be labeled inferred.
 - `runtime_doctor` before assuming any execution tool works.
 - Hand off: note the exact promising functions with module-relative addresses
-  for reverse, and the input fields for hunter. Finish with `agent_finish`.
+  for reverse. Include security-specific handoffs only when requested.
+  Finish with `agent_finish`.

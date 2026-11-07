@@ -77,10 +77,10 @@ impl AssessmentRunner {
     /// A role explicitly mapped to the root model name gets a dedicated
     /// engine carrying `role_max_tokens`.
     fn engine_for(&self, role: Role) -> &DurableEngine {
-        if let Some(name) = self.config.model.role_model_name(role) {
-            if let Some(engine) = self.role_engines.get(name) {
-                return engine;
-            }
+        if let Some(name) = self.config.model.role_model_name(role)
+            && let Some(engine) = self.role_engines.get(name)
+        {
+            return engine;
         }
         &self.engine
     }
@@ -217,18 +217,13 @@ impl AssessmentRunner {
         }
     }
     /// Sentinel for the one-shot corrective note queued after a plain-text
-/// answer; a second prose answer fails the agent.
-const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
+    /// answer; a second prose answer fails the agent.
+    const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
 
     /// Fail a non-terminal agent, retaining an optional partial summary so the
     /// parent can read the handoff instead of a blank record. Emits no event;
     /// callers announce the failure themselves.
-    fn fail_agent(
-        &self,
-        agent_id: &str,
-        reason: String,
-        summary: Option<String>,
-    ) -> Result<()> {
+    fn fail_agent(&self, agent_id: &str, reason: String, summary: Option<String>) -> Result<()> {
         self.store.transaction(|tx| {
             let mut target: AgentRecord =
                 Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
@@ -269,10 +264,10 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
     /// deadlock the run.
     fn predecessors_satisfied(&self, agent: &AgentRecord) -> Result<bool> {
         for id in &agent.wait_for_predecessors {
-            if let Ok(target) = self.store.require::<AgentRecord>("agent", id) {
-                if !target.status.terminal() {
-                    return Ok(false);
-                }
+            if let Ok(target) = self.store.require::<AgentRecord>("agent", id)
+                && !target.status.terminal()
+            {
+                return Ok(false);
             }
         }
         Ok(true)
@@ -297,6 +292,13 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
             // A parent's current assistant turn can still contain open calls.
             while !history.is_empty() && rig::conversation::pairing::validate(&history).is_err() {
                 history.pop();
+            }
+            if agent.generation > 0
+                && let Some(summary) = &agent.summary
+            {
+                history.push(Message::user(format!(
+                    "Previous completion summary (data): {summary}"
+                )));
             }
             let preamble = agents::preamble(
                 &agent,
@@ -378,10 +380,11 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
                 }
             }
             engine.prepare_model_call(&mut durable, &step)?;
-            self.store.checkpoint_and_ack(
+            self.store.checkpoint_and_ack_generation(
                 agent_id,
                 serde_json::to_value(&durable)?,
                 &inbox.iter().map(|m| m.id).collect::<Vec<_>>(),
+                Some(agent.generation),
             )?;
             self.emit(
                 &run.id,
@@ -432,12 +435,30 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
             )?;
         } else if let AgentRunStep::CallTools { calls } = step {
             // Persist all pending calls before dispatching the first effect.
-            self.store
-                .checkpoint_and_ack(agent_id, serde_json::to_value(&durable)?, &[])?;
+            self.store.checkpoint_and_ack_generation(
+                agent_id,
+                serde_json::to_value(&durable)?,
+                &[],
+                Some(agent.generation),
+            )?;
             for call in calls {
+                let current: AgentRecord = self.store.require("agent", agent_id)?;
+                if current.generation != agent.generation {
+                    return Ok(());
+                }
                 match call {
                     PendingToolCall::Execute(call) => {
-                        let call_id = format!("{}:{}:{}", agent_id, durable.turn(), call.id());
+                        let call_id = if agent.generation == 0 {
+                            format!("{}:{}:{}", agent_id, durable.turn(), call.id())
+                        } else {
+                            format!(
+                                "{}:generation{}:{}:{}",
+                                agent_id,
+                                agent.generation,
+                                durable.turn(),
+                                call.id()
+                            )
+                        };
                         let name = call.name().to_string();
                         let mut output = self
                             .tools
@@ -473,10 +494,11 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
                             }
                         }
                         durable.answer(call, output.value, output.is_error)?;
-                        self.store.checkpoint_and_ack(
+                        self.store.checkpoint_and_ack_generation(
                             agent_id,
                             serde_json::to_value(&durable)?,
                             &[],
+                            Some(agent.generation),
                         )?;
                         self.emit(
                             &run.id,
@@ -487,18 +509,23 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
                     }
                     PendingToolCall::Malformed(call) => {
                         durable.answer_malformed(call)?;
-                        self.store.checkpoint_and_ack(
+                        self.store.checkpoint_and_ack_generation(
                             agent_id,
                             serde_json::to_value(&durable)?,
                             &[],
+                            Some(agent.generation),
                         )?;
                     }
                     _ => anyhow::bail!("unsupported Rig pending tool call variant"),
                 }
             }
         } else if let AgentRunStep::Done(response) = step {
-            self.store
-                .checkpoint_and_ack(agent_id, serde_json::to_value(&durable)?, &[])?;
+            self.store.checkpoint_and_ack_generation(
+                agent_id,
+                serde_json::to_value(&durable)?,
+                &[],
+                Some(agent.generation),
+            )?;
             let latest: AgentRecord = self.store.require("agent", agent_id)?;
             if !latest.status.terminal() {
                 let text = response.output().to_string();
@@ -551,12 +578,13 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
                     self.config.demos_dir.as_deref(),
                 )?;
                 let mut history = durable.history();
-                history.push(Message::user(format!(
+                history.push(Message::user(
                     "LIFECYCLE_NUDGE: your previous turn answered in plain text. \
                      Act now with a tool call — continue working with tools, or end \
                      with finish_scan (root) / agent_finish (child). A plain-text \
                      answer fails this agent."
-                )));
+                        .to_string(),
+                ));
                 let rebuilt = engine.new_run_with_history(
                     &agent.task,
                     &preamble,
@@ -564,10 +592,11 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
                     run.budget.max_turns_per_agent,
                     history,
                 )?;
-                self.store.checkpoint_and_ack(
+                self.store.checkpoint_and_ack_generation(
                     agent_id,
                     serde_json::to_value(&rebuilt)?,
                     &[],
+                    Some(agent.generation),
                 )?;
                 self.emit(
                     &run.id,
@@ -582,7 +611,7 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
         self.store.transaction(|tx| {
             let mut latest: AgentRecord =
                 Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
-            if latest.status == Status::Running {
+            if latest.status == Status::Running && latest.generation == agent.generation {
                 latest.status = Status::Queued;
                 latest.updated_at = now();
                 Store::tx_put(tx, "agent", agent_id, &latest.run_id, &latest)?;
@@ -637,9 +666,20 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
         run: &RunRecord,
         checkpoint_evidence: &str,
     ) -> Result<String> {
-        Ok(serde_json::to_string(
-            &json!({"notice":"Structured checkpoint summary; older transcript can be retrieved with evidence_read. Preserve unknowns.","full_checkpoint_evidence_id":checkpoint_evidence,"task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,"documents":self.store.list::<SharedDocument>("document",&run.id)?,"findings":self.store.list::<Finding>("finding",&run.id)?,"coverage":self.store.list::<Coverage>("coverage",&run.id)?}),
-        )?)
+        self.store.transaction(|tx| {
+            let mut documents = Vec::new();
+            for kind in ["document", "threat_model", "note", "todo"] {
+                documents.extend(Store::tx_list::<SharedDocument>(tx, kind, &run.id)?);
+            }
+            Ok(serde_json::to_string(&json!({
+                "notice":"Shared analysis checkpoint; retrieve the older transcript with evidence_read. Preserve unknowns.",
+                "full_checkpoint_evidence_id":checkpoint_evidence,
+                "task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,
+                "documents":documents,
+                "findings":Store::tx_list::<Finding>(tx,"finding",&run.id)?,
+                "coverage":Store::tx_list::<Coverage>(tx,"coverage",&run.id)?
+            }))?)
+        })
     }
 
     /// Account auxiliary model usage (e.g. tool-output summarization) in the
@@ -751,6 +791,153 @@ mod tests {
     async fn respond(socket: &mut TcpStream, value: Value) {
         let body = value.to_string();
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn followup_preserves_history_and_uses_new_effect_ids_and_notices() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut requests = vec![];
+            for summary in ["initial analysis result", "clarified analysis result"] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                requests.push(request(&mut socket).await);
+                respond(
+                    &mut socket,
+                    reply("agent_finish", json!({"summary":summary})),
+                )
+                .await;
+            }
+            requests
+        });
+        let (_dir, runner, run) = fixture(base).await;
+        let child = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "analyst".into(),
+                    role: Role::Reverse,
+                    task: "explain the input format".into(),
+                    scope: "input format".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![],
+                },
+            )
+            .unwrap()
+            .agent;
+        runner.slice(&child.id).await.unwrap();
+        runner.slice(&child.id).await.unwrap();
+        assert_eq!(
+            runner
+                .store
+                .require::<AgentRecord>("agent", &child.id)
+                .unwrap()
+                .status,
+            Status::Completed
+        );
+        runner
+            .coordinator
+            .message(
+                &run.root_id,
+                &child.id,
+                "Explain the length field in more detail",
+            )
+            .unwrap();
+        // A slice from before the follow-up must not restore its stale checkpoint.
+        runner
+            .store
+            .checkpoint_and_ack_generation(&child.id, json!({"stale":true}), &[], Some(0))
+            .unwrap();
+        assert!(
+            runner
+                .store
+                .require::<AgentRecord>("agent", &child.id)
+                .unwrap()
+                .checkpoint
+                .is_none()
+        );
+        runner.slice(&child.id).await.unwrap();
+        runner.slice(&child.id).await.unwrap();
+        let completed: AgentRecord = runner.store.require("agent", &child.id).unwrap();
+        assert_eq!(completed.status, Status::Completed);
+        assert_eq!(
+            completed.summary.as_deref(),
+            Some("clarified analysis result")
+        );
+        assert_eq!(completed.total_tokens, 24);
+        let calls: Vec<_> = runner
+            .store
+            .list::<ToolCallRecord>("call", &run.id)
+            .unwrap()
+            .into_iter()
+            .filter(|call| call.name == "agent_finish")
+            .collect();
+        assert_eq!(calls.len(), 2);
+        assert_ne!(calls[0].id, calls[1].id);
+        assert_eq!(
+            runner
+                .store
+                .inbox(&run.root_id)
+                .unwrap()
+                .iter()
+                .filter(|m| m.sender == child.id)
+                .count(),
+            2
+        );
+        let requests = server.await.unwrap();
+        assert!(requests[1].to_string().contains("initial analysis result"));
+        assert!(
+            requests[1]
+                .to_string()
+                .contains("Explain the length field in more detail")
+        );
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn compaction_summary_includes_all_shared_document_kinds_and_amendments() {
+        let (_dir, runner, run) = fixture("http://127.0.0.1:1".into()).await;
+        for (index, tool) in ["threat_model_save", "note_save", "todo_save"]
+            .iter()
+            .enumerate()
+        {
+            let saved = runner
+                .tools
+                .execute(
+                    &run.root_id,
+                    &format!("doc:{index}"),
+                    tool,
+                    json!({"title":tool,"body":format!("shared analysis {index}")}),
+                )
+                .await
+                .unwrap();
+            assert!(!saved.is_error);
+            if *tool == "threat_model_save" {
+                let amended = runner.tools.execute(&run.root_id,"amend","threat_model_amend",
+                    json!({"id":saved.value["result"]["id"],"amendment":"updated boundary evidence"})).await.unwrap();
+                assert!(!amended.is_error);
+            }
+        }
+        let root: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        let summary: Value = serde_json::from_str(
+            &runner
+                .structured_summary(&root, &run, "checkpoint-proof")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(summary["documents"].as_array().unwrap().len(), 3);
+        for index in 0..3 {
+            assert!(
+                summary
+                    .to_string()
+                    .contains(&format!("shared analysis {index}"))
+            );
+        }
+        assert!(summary.to_string().contains("updated boundary evidence"));
+        assert_eq!(summary["full_checkpoint_evidence_id"], "checkpoint-proof");
+        runner.tools.close().await;
     }
 
     #[tokio::test]
@@ -1159,8 +1346,20 @@ mod tests {
         config.model.provider = Provider::Ollama;
         config.model.base_url = Some(base);
         config.model.role_models = Some(HashMap::from([
-            (Role::Recon, crate::llm::RoleModelSpec { model: "flash-fixture".into(), max_tokens: None }),
-            (Role::Exploit, crate::llm::RoleModelSpec { model: "pro-fixture".into(), max_tokens: None }),
+            (
+                Role::Recon,
+                crate::llm::RoleModelSpec {
+                    model: "flash-fixture".into(),
+                    max_tokens: None,
+                },
+            ),
+            (
+                Role::Exploit,
+                crate::llm::RoleModelSpec {
+                    model: "pro-fixture".into(),
+                    max_tokens: None,
+                },
+            ),
         ]));
         config.execution.stream = false;
         config.execution.model_retries = 0;
@@ -1248,7 +1447,10 @@ mod tests {
         config.model.base_url = Some(base);
         config.model.role_models = Some(HashMap::from([(
             Role::Exploit,
-            crate::llm::RoleModelSpec { model: config.model.model.clone(), max_tokens: None },
+            crate::llm::RoleModelSpec {
+                model: config.model.model.clone(),
+                max_tokens: None,
+            },
         )]));
         config.model.role_max_tokens = Some(4321);
         config.execution.stream = false;

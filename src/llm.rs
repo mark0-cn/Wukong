@@ -10,16 +10,16 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, bail, ensure};
 use crate::domain::Role;
+use anyhow::{Context, Result, bail, ensure};
 use rig::{
     DynModel,
     completion::{CompletionRequest, Message, ToolDefinition, Usage},
     operation::Completion,
     providers::{anthropic::AnthropicConfig, ollama::OllamaConfig, openai::OpenAIConfig},
     run::{
-        AgentRun, InvalidToolCallAction, ModelTurn, ModelTurnOutcome, PreparedRequest,
-        RequestPatch, RunSpec, prepare_request,
+        AgentRun, InvalidToolCallAction, ModelTurn, ModelTurnOutcome, PreparedRequest, RunSpec,
+        prepare_request,
     },
     tool::{ToolExecutionError, ToolOutput, ToolResult},
 };
@@ -370,6 +370,49 @@ impl DurableRun {
         history
     }
 
+    /// Commit queued mail to the conversation at a fresh model boundary.
+    /// It can then be compacted like other input instead of growing forever
+    /// in the system preamble. Frozen requests keep their exact old payload.
+    fn flush_notes_before_model(&mut self) -> Result<Option<AgentRunStep>> {
+        if self.notes.is_empty() || self.pending_request.is_some() {
+            return Ok(None);
+        }
+        let AgentRunStep::CallModel {
+            prompt, history, ..
+        } = self.next_step()?
+        else {
+            bail!("coordinator mail requires a model boundary");
+        };
+        let mut messages: Vec<Message> = history.iter().map(|m| Message::clone(m)).collect();
+        messages.push(Message::clone(&prompt));
+        messages.extend(
+            self.notes
+                .iter()
+                .map(|note| Message::user(format!("Coordinator message (data): {note}"))),
+        );
+        let step = self.restart_at_model_boundary(messages)?;
+        self.notes.clear();
+        Ok(Some(step))
+    }
+
+    fn restart_at_model_boundary(&mut self, mut messages: Vec<Message>) -> Result<AgentRunStep> {
+        rig::conversation::pairing::validate(&messages)?;
+        let turns = self.compacted_turns + self.run.turn().saturating_sub(1);
+        let remaining = self.spec.effective_max_turns().saturating_sub(turns);
+        ensure!(remaining > 0, "model turn budget is exhausted");
+        let prompt = messages.pop().context("model boundary requires a prompt")?;
+        let mut spec = self.spec.clone();
+        spec.max_turns = Some(remaining);
+        self.compacted_usage += self.run.usage();
+        self.compacted_turns = turns;
+        self.run = AgentRun::from_spec(
+            &spec,
+            prompt,
+            Some(messages.into_iter().map(Arc::new).collect()),
+        );
+        self.next_step()
+    }
+
     /// Replace old, complete message groups with an explicit summary. The
     /// caller produces the summary; tool-call/result pairs in the retained
     /// suffix and native provider reasoning there remain byte-for-byte data.
@@ -381,6 +424,15 @@ impl DurableRun {
         summary: &str,
         keep_recent: usize,
     ) -> Result<AgentRunStep> {
+        // A failed compaction must not consume notes or replace the model
+        // boundary for the caller that continues with its original step.
+        let mut compacted = self.clone();
+        let step = compacted.compact_at_boundary(summary, keep_recent)?;
+        *self = compacted;
+        Ok(step)
+    }
+
+    fn compact_at_boundary(&mut self, summary: &str, keep_recent: usize) -> Result<AgentRunStep> {
         ensure!(
             self.pending_request.is_none(),
             "cannot compact a prepared model attempt"
@@ -389,6 +441,7 @@ impl DurableRun {
             !summary.trim().is_empty(),
             "compaction requires an explicit summary"
         );
+        self.flush_notes_before_model()?;
         let step = self.next_step()?;
         let AgentRunStep::CallModel {
             prompt, history, ..
@@ -407,30 +460,17 @@ impl DurableRun {
             "no complete message group can be removed with this retention window"
         );
         let usage = self.usage();
-        self.compacted_usage += self.run.usage();
-        self.compacted_turns += self.run.turn().saturating_sub(1);
-        let mut retained = messages.split_off(start);
-        let prompt = retained
-            .pop()
-            .context("compaction removed current prompt")?;
-        let mut history = vec![Arc::new(Message::user(format!(
-            "Prior analysis summary:\n{summary}"
-        )))];
-        history.extend(retained.into_iter().map(Arc::new));
-        let mut spec = self.spec.clone();
-        let remaining = spec
-            .effective_max_turns()
-            .saturating_sub(self.compacted_turns);
-        ensure!(remaining > 0, "model turn budget is exhausted");
-        spec.max_turns = Some(remaining);
-        self.run = AgentRun::from_spec(&spec, prompt, Some(history));
+        let retained = messages.split_off(start);
+        let mut history = vec![Message::user(format!("Prior analysis summary:\n{summary}"))];
+        history.extend(retained);
+        let step = self.restart_at_model_boundary(history)?;
         self.compactions.push(CompactionRecord {
             before_turn: self.compacted_turns + 1,
             removed_messages: start,
             summary: summary.into(),
             usage_before: usage,
         });
-        self.next_step()
+        Ok(step)
     }
 
     pub fn answer(&mut self, call: ExecCall, output: Value, is_error: bool) -> Result<()> {
@@ -600,34 +640,24 @@ impl DurableEngine {
             run.model == self.identity,
             "checkpoint model/endpoint differs from configured model; resume with the original configuration"
         );
-        let AgentRunStep::CallModel {
-            prompt,
-            history,
-            turn,
-        } = step
-        else {
+        let AgentRunStep::CallModel { .. } = step else {
             bail!("prepare_model_call requires a CallModel step");
         };
         if let Some(pending) = &run.pending_request {
             ensure!(
-                pending.turn == *turn,
+                pending.turn == run.run.turn(),
                 "pending model request belongs to another turn"
             );
             return Ok(());
         }
-        let patch = if run.notes.is_empty() {
-            None
-        } else {
-            Some(RequestPatch::new().preamble(format!(
-                    "{}\n\nCoordinator messages (ordered):\n{}",
-                    run.spec.preamble.as_deref().unwrap_or_default(),
-                    run.notes
-                        .iter()
-                        .enumerate()
-                        .map(|(index, note)| format!("{}. {}", index + 1, note))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )))
+        let updated = run.flush_notes_before_model()?;
+        let AgentRunStep::CallModel {
+            prompt,
+            history,
+            turn,
+        } = updated.as_ref().unwrap_or(step)
+        else {
+            bail!("coordinator mail did not yield a model boundary");
         };
         let request = prepare_request(
             &run.spec,
@@ -635,7 +665,7 @@ impl DurableEngine {
             history,
             run.tools.clone(),
             run.run.output_tool_name(),
-            patch.as_ref(),
+            None,
         )
         .context("prepare Rig provider request")?;
         run.run.advertise_tools(*turn, request.tools.clone());
@@ -1090,8 +1120,13 @@ mod tests {
             .new_run("Inspect fixture", "Use evidence", vec![tool()], 4)
             .unwrap();
         for index in 0..2 {
+            run.queue_note(format!("older coordination mail {index}"));
             let step = run.next_step().unwrap();
             engine.call_model(&mut run, step).await.unwrap();
+            assert!(
+                run.notes.is_empty(),
+                "delivered mail must enter the canonical history"
+            );
             let AgentRunStep::CallTools { mut calls } = run.next_step().unwrap() else {
                 panic!("expected calls");
             };
@@ -1109,6 +1144,11 @@ mod tests {
         assert_eq!(run.usage().total_tokens, Some(26));
         assert_eq!(run.turn(), 3);
         rig::conversation::pairing::validate(&run.run.full_history()).unwrap();
+        assert!(
+            !serde_json::to_string(&run.history())
+                .unwrap()
+                .contains("older coordination mail 0")
+        );
         engine.prepare_model_call(&mut run, &step).unwrap();
         assert!(
             run.compact_before_model("invalid while request prepared", 1)
@@ -1128,6 +1168,39 @@ mod tests {
                 .to_string()
                 .contains("Two prior inspection calls completed")
         );
+        assert!(
+            requests[0]
+                .1
+                .to_string()
+                .contains("older coordination mail 0")
+        );
+        for request in &requests {
+            for message in request.1["messages"].as_array().unwrap() {
+                if message["role"] == "system" {
+                    assert!(!message.to_string().contains("coordination mail"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_compaction_preserves_mail_and_the_original_model_boundary() {
+        let engine = engine(Provider::Ollama, "http://127.0.0.1:1".into());
+        let mut run = engine
+            .new_run("understand the format", "Use evidence", vec![tool()], 4)
+            .unwrap();
+        let step = run.next_step().unwrap();
+        run.queue_note("operator constraint that must survive a rejected compaction");
+        let before = run.to_json().unwrap();
+        assert!(run.compact_before_model("summary", 12).is_err());
+        assert_eq!(run.to_json().unwrap(), before);
+        engine.prepare_model_call(&mut run, &step).unwrap();
+        assert!(
+            serde_json::to_string(&run.pending_request)
+                .unwrap()
+                .contains("operator constraint")
+        );
+        assert!(run.notes.is_empty());
     }
 
     #[test]

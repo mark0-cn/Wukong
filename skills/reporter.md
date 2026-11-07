@@ -2,7 +2,12 @@
 
 Goal: one aggregated, traceable report the reader can replay.
 
-## Aggregation rules
+Organize a general reverse-engineering report around the user's questions:
+purpose and behavior, recovered formats/algorithms, supporting evidence,
+reproduction steps, uncertainties and unfinished work. Do not invent security
+findings or assign severity to ordinary implementation observations.
+
+## Security findings, when requested
 
 - Deduplicate by root cause: same bug, different paths = one finding with the
   affected locations listed. Different causes = separate findings.
@@ -16,6 +21,7 @@ Goal: one aggregated, traceable report the reader can replay.
 
 ## Format
 
-Group by severity-of-evidence, not by noise. For each: observed impact,
-required conditions, verification counts, limitations, remediation. Finish
+For security findings, include observed impact, required conditions,
+verification counts, limitations and remediation. For general analysis, state
+what was established, how it was verified and what remains unknown. Finish
 with `agent_finish`; the root owns the final assessment summary.

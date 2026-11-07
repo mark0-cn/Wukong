@@ -9,11 +9,11 @@ The architecture in `strix-rig-binary-agent-plan.md` is the requirement baseline
 ## Required invariants
 
 1. Child creation persists and returns before child work completes. Parent/child identities, scope and skills survive restart.
-2. Messages are durable, acknowledged at a model boundary, and terminal child notifications are deduplicated transactionally.
+2. Messages are durable, acknowledged at a model boundary, and terminal child notifications are deduplicated transactionally per activation. In an active run, a completed child accepts follow-up messages with prior history and cumulative usage retained; generation separates new effects and notices from old receipts. Stopped/failed branches and terminal assessments cannot be reopened by messages.
 3. Root orchestration never invokes target-analysis/execution tools. A root can only finish after active descendants terminate or are explicitly accounted for.
-4. A scan has shared threat models, findings, coverage and notes; each agent has a separate checkpoint and conversation.
+4. An analysis shares notes, to-dos, findings and coverage; threat models are optional for security-boundary work. Each agent has a separate checkpoint and conversation. Compaction includes every shared document kind and retains the original checkpoint as evidence; coordinator messages enter compressible conversation history, never an ever-growing system preamble.
 5. Agent and tool state transitions are durable. Completed side-effecting calls are not blindly re-executed. Ambiguous in-flight effects require worker reconciliation.
-6. Debugger mutation is serialized by session owner. Long-running fuzz jobs use job handles and can be reconciled independently of model state.
+6. Debugger mutation is serialized by session owner. Agents close owned debugger and interactive sessions before completion; root completion checks all sessions. Another in-run agent may close a terminal owner's orphaned session, but cannot send it commands. Long-running fuzz jobs use job handles and can be reconciled independently of model state.
 7. Addresses carry target/module identity and address space. Cache and evidence refer to target/tool/configuration identities.
 8. Finding impact promotion requires an independent verifier record and linked raw evidence. Static suspicion or a crash alone does not prove an exploit primitive.
 9. Tool results are bounded in model context and retain complete hashed artifacts for later retrieval.

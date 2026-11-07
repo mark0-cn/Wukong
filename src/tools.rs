@@ -421,7 +421,7 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "debug_close",
-            "Close your owned debugger session.",
+            "Close your debugger session, or clean up an in-run session whose owner is terminal.",
             json!({"session_id":id}),
             &["session_id"],
             true,
@@ -445,7 +445,7 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "interactive_close",
-            "Close an owned interactive session and terminate its process tree.",
+            "Close your interactive session and terminate its process tree; also permits cleanup when its in-run owner is terminal.",
             json!({"session_id":id}),
             &["session_id"],
             true,
@@ -756,9 +756,15 @@ impl ToolService {
     ) -> Result<Value> {
         match name {
             "create_agent" => self.create_agent(agent, call_id, &args),
-            "view_agent_graph" => Ok(
-                json!({"agents":self.store.list::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"status":a.status,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>()}),
-            ),
+            "view_agent_graph" => {
+                let mut sessions = Vec::new();
+                for kind in ["debug_session", "interact_session"] {
+                    sessions.extend(self.store.list::<Value>(kind, &agent.run_id)?.iter()
+                        .filter(|session| !matches!(session["state"].as_str(), Some("closed" | "lost")))
+                        .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
+                }
+                Ok(json!({"agents":self.store.list::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"status":a.status,"generation":a.generation,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}))
+            },
             "send_message_to_agent" => self.send_message(agent, call_id, &args),
             "wait_for_agents" => {
                 if let Some(value) = self.store.get::<Value>("tool_receipt", call_id)? {
@@ -946,7 +952,8 @@ impl ToolService {
             "file_get" => self.file_get(agent, call_id, &args).await,
             "job_start" | "job_status" | "job_cancel" | "job_artifacts" | "fuzz_start"
             | "fuzz_status" | "debug_start" | "debug_command" | "debug_close" | "crash_replay"
-            | "input_minimize" | "poc_verify" | "angr_solve" => {
+            | "input_minimize" | "poc_verify" | "angr_solve"
+            | "interactive_start" | "interactive_send" | "interactive_close" => {
                 self.runtime_tool(agent, call_id, name, args).await
             }
             _ if self.mcp.contains(name) => self.mcp.call(name, args).await,
@@ -1019,119 +1026,23 @@ impl ToolService {
             agents::load_skill(skill, self.config.skills_dir.as_deref())?;
         }
         self.effect(agent, call_id, |tx| {
-            let parent: AgentRecord =
-                Store::tx_get(tx, "agent", &agent.id)?.context("parent missing")?;
-            let run: RunRecord = Store::tx_get(tx, "run", &agent.run_id)?.context("run missing")?;
-            ensure!(
-                !parent.status.terminal() && !run.status.terminal(),
-                "cannot create a child for a terminal task"
-            );
-            let all = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?;
-            if let Some(existing) = all.iter().find(|other| {
-                other.role == request.role
-                    && other.scope.trim() == request.scope.trim()
-                    && !matches!(
-                        other.status,
-                        Status::Stopped | Status::Crashed | Status::Failed
-                    )
-            }) {
-                return Ok(json!({"created":false,"agent":existing}));
-            }
-            ensure!(
-                all.len() < run.budget.max_agents,
-                "maximum total agent count reached"
-            );
-            ensure!(
-                parent.depth < run.budget.max_depth,
-                "maximum agent depth reached"
-            );
-            let child_id = stable("agent", call_id);
-            for predecessor in &request.wait_for_predecessors {
-                let target = all
-                    .iter()
-                    .find(|a| &a.id == predecessor)
-                    .context("wait_for_predecessors target missing")?;
-                ensure!(
-                    target.run_id == run.id,
-                    "wait_for_predecessors target belongs to another run"
-                );
-                ensure!(
-                    !target.wait_for_predecessors.contains(&child_id),
-                    "wait_for_predecessors would deadlock"
-                );
-            }
-            let timestamp = now();
-            let child = AgentRecord {
-                id: child_id,
-                run_id: run.id.clone(),
-                parent_id: Some(parent.id.clone()),
-                name: request.name,
-                role: request.role,
-                task: request.task,
-                scope: request.scope,
-                skills: request.skills,
-                status: Status::Queued,
-                depth: parent.depth + 1,
-                inherit_context: request.inherit_context,
-                inherited_context: if request.inherit_context {
-                    parent.checkpoint.clone()
-                } else {
-                    None
-                },
-                checkpoint: None,
-                wait_for: vec![],
-                wait_until: None,
-                wait_for_predecessors: request.wait_for_predecessors.clone(),
-                turns: 0,
-                total_tokens: 0,
-                cost_usd: 0.0,
-                token_cap: Some(run.budget.role_token_cap(request.role)),
-                summary: None,
-                error: None,
-                created_at: timestamp,
-                updated_at: timestamp,
-            };
-            Store::tx_put(tx, "agent", &child.id, &agent.run_id, &child)?;
-            Store::tx_event(
+            Ok(serde_json::to_value(Coordinator::tx_create_child(
                 tx,
-                &agent.run_id,
-                Some(&child.id),
-                "agent.created",
-                json!({"parent_id":agent.id,"role":child.role,"scope":child.scope}),
-            )?;
-            Ok(json!({"created":true,"agent":child}))
+                &agent.id,
+                request,
+                stable("agent", call_id),
+            )?)?)
         })
     }
     fn send_message(&self, agent: &AgentRecord, call_id: &str, args: &Value) -> Result<Value> {
         self.effect(agent, call_id, |tx| {
             let recipient = text(args, "agent_id")?;
-            let mut target: AgentRecord =
-                Store::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
-            ensure!(
-                target.run_id == agent.run_id && !target.status.terminal(),
-                "recipient is terminal or belongs to another run"
-            );
-            Store::tx_message(
+            Coordinator::tx_message(
                 tx,
-                &agent.run_id,
                 &agent.id,
                 recipient,
                 text(args, "message")?,
                 Some(call_id),
-            )?;
-            if target.status == Status::Waiting {
-                target.status = Status::Queued;
-                target.wait_for.clear();
-                target.wait_until = None;
-                target.updated_at = now();
-                Store::tx_put(tx, "agent", recipient, &agent.run_id, &target)?;
-            }
-            Store::tx_event(
-                tx,
-                &agent.run_id,
-                Some(recipient),
-                "message.received",
-                json!({"sender":agent.id}),
             )?;
             Ok(json!({"delivered":true,"agent_id":recipient}))
         })
@@ -1664,6 +1575,21 @@ impl ToolService {
         }
         Ok(job)
     }
+    fn authorize_session(&self, agent: &AgentRecord, session: &Value, closing: bool) -> Result<()> {
+        ensure!(
+            session["worker_id"] == self.worker_identity()?,
+            "session belongs to another runtime"
+        );
+        if session["agent_id"] != agent.id {
+            let owner: AgentRecord =
+                self.require_in_run("agent", text(session, "agent_id")?, &agent.run_id)?;
+            ensure!(
+                closing && owner.status.terminal(),
+                "session is owned by another active agent"
+            );
+        }
+        Ok(())
+    }
     async fn observe_job(&self, agent: &AgentRecord, call_id: &str, job_id: &str) -> Result<Value> {
         let mut job = self.known_job(agent, job_id, false)?;
         let status = self
@@ -1770,11 +1696,7 @@ impl ToolService {
                 let session_id = text(&args, "session_id")?.to_owned();
                 let mut session: Value =
                     self.require_in_run("debug_session", &session_id, &agent.run_id)?;
-                ensure!(
-                    session["agent_id"] == agent.id
-                        && session["worker_id"] == self.worker_identity()?,
-                    "debug session is owned by another agent or runtime"
-                );
+                self.authorize_session(agent, &session, name == "debug_close")?;
                 ensure!(
                     session["state"] == "running",
                     "debug session is closed or lost"
@@ -1845,13 +1767,10 @@ impl ToolService {
                 let session_id = text(&args, "session_id")?.to_owned();
                 let mut session: Value =
                     self.require_in_run("interact_session", &session_id, &agent.run_id)?;
+                self.authorize_session(agent, &session, name == "interactive_close")?;
                 ensure!(
-                    session["agent_id"] == agent.id
-                        && session["worker_id"] == self.worker_identity()?,
-                    "interactive session is owned by another agent or runtime"
-                );
-                ensure!(
-                    session["state"] == "running",
+                    session["state"] == "running"
+                        || (name == "interactive_close" && session["state"] == "exited"),
                     "interactive session is closed or lost"
                 );
                 let raw = self
@@ -1866,8 +1785,10 @@ impl ToolService {
                         args,
                     )
                     .await?;
-                if name == "interactive_close" || raw["state"].as_str() == Some("exited") {
+                if name == "interactive_close" {
                     session["state"] = json!("closed");
+                } else if raw["state"].as_str() == Some("exited") {
+                    session["state"] = json!("exited");
                 }
                 session["updated_at"] = json!(now());
                 self.store

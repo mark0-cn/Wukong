@@ -44,6 +44,192 @@ fn result(outcome: &ToolOutcome) -> &Value {
 }
 
 #[tokio::test]
+async fn model_coordination_checks_dependencies_and_reopens_completed_children() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let invalid = service
+        .execute(
+            &run.root_id,
+            "cycle",
+            "create_agent",
+            json!({
+                "name":"blocked","role":"reverse","task":"inspect","scope":"new scope",
+                "wait_for_predecessors":[run.root_id]
+            }),
+        )
+        .await?;
+    assert!(invalid.is_error);
+    assert!(
+        result(&invalid)["error"]
+            .as_str()
+            .unwrap()
+            .contains("deadlock")
+    );
+    coordinator.finish(&agent.id, "initial result")?;
+    let args = json!({"agent_id":agent.id,"message":"clarify the root cause"});
+    let sent = service
+        .execute(
+            &run.root_id,
+            "follow-up",
+            "send_message_to_agent",
+            args.clone(),
+        )
+        .await?;
+    assert!(!sent.is_error, "{sent:?}");
+    service
+        .execute(&run.root_id, "follow-up", "send_message_to_agent", args)
+        .await?;
+    let reopened: AgentRecord = store.require("agent", &agent.id)?;
+    assert_eq!(reopened.status, Status::Queued);
+    assert_eq!(reopened.generation, 1);
+    assert_eq!(
+        store.inbox(&agent.id)?.len(),
+        1,
+        "replayed message must not reopen twice"
+    );
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, owner) = fixture(temp.path())?;
+    let cleaner = child(&coordinator, &run.root_id, Role::Recon, "session cleanup")?;
+    let mut config = AppConfig::default();
+    config.runtime.backend = RuntimeBackend::TrustedLocal;
+    config.runtime.state_dir = temp.path().join("worker");
+    let runtime_config = config.runtime.clone();
+    let service = ToolService::new(config, store.clone()).await?;
+    let program = "import sys\nfor line in sys.stdin:\n print('echo:'+line.strip(),flush=True)\n";
+    let started = service
+        .execute(
+            &owner.id,
+            "interactive:start",
+            "interactive_start",
+            json!({"argv":["python","-u","-c",program]}),
+        )
+        .await?;
+    assert!(!started.is_error, "{started:?}");
+    let session_id = result(&started)["session_id"].as_str().unwrap();
+    let graph = service
+        .execute(
+            &run.root_id,
+            "sessions:graph",
+            "view_agent_graph",
+            json!({}),
+        )
+        .await?;
+    assert!(
+        result(&graph)["open_sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == session_id)
+    );
+    let sent = service
+        .execute(
+            &owner.id,
+            "interactive:send",
+            "interactive_send",
+            json!({"session_id":session_id,"data_base64":"aGVsbG8K","read_timeout_secs":3}),
+        )
+        .await?;
+    assert!(!sent.is_error, "{sent:?}");
+    assert!(
+        result(&sent)["captured"]
+            .as_str()
+            .unwrap()
+            .contains("echo:hello")
+    );
+    let denied = service
+        .execute(
+            &cleaner.id,
+            "foreign:close",
+            "interactive_close",
+            json!({"session_id":session_id}),
+        )
+        .await?;
+    assert!(
+        denied.is_error,
+        "another active agent's process must remain protected"
+    );
+    assert!(coordinator.finish(&owner.id, "premature").is_err());
+    coordinator.stop(&owner.id, "branch stopped")?;
+    let denied = service
+        .execute(
+            &cleaner.id,
+            "foreign:send",
+            "interactive_send",
+            json!({"session_id":session_id,"data_base64":"eA=="}),
+        )
+        .await?;
+    assert!(denied.is_error, "cleanup must not permit sending commands");
+    let closed = service
+        .execute(
+            &cleaner.id,
+            "cleanup:close",
+            "interactive_close",
+            json!({"session_id":session_id}),
+        )
+        .await?;
+    assert!(!closed.is_error, "{closed:?}");
+    assert_eq!(
+        store.require::<Value>("interact_session", session_id)?["state"],
+        "closed"
+    );
+    let started = service
+        .execute(
+            &cleaner.id,
+            "exited:start",
+            "interactive_start",
+            json!({"argv":["python","-c","pass"]}),
+        )
+        .await?;
+    assert!(!started.is_error);
+    let exited_id = result(&started)["session_id"].as_str().unwrap();
+    let mut exited = false;
+    for index in 0..20 {
+        let output = service
+            .execute(
+                &cleaner.id,
+                &format!("exited:observe:{index}"),
+                "interactive_send",
+                json!({"session_id":exited_id,"data_base64":"","read_timeout_secs":1}),
+            )
+            .await?;
+        assert!(!output.is_error, "{output:?}");
+        if result(&output)["state"] == "exited" {
+            exited = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(exited);
+    assert!(
+        coordinator
+            .finish(&cleaner.id, "close even exited leaders")
+            .is_err()
+    );
+    let closed = service
+        .execute(
+            &cleaner.id,
+            "exited:close",
+            "interactive_close",
+            json!({"session_id":exited_id}),
+        )
+        .await?;
+    assert!(!closed.is_error, "{closed:?}");
+    coordinator.finish(&cleaner.id, "sessions closed")?;
+    let runtime = re_agent::runtime::RuntimeClient::connect(runtime_config).await?;
+    runtime.call("worker.shutdown", json!({})).await?;
+    runtime.close().await?;
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn root_tools_are_restricted_at_advertisement_and_dispatch_and_failures_are_evidence()
 -> Result<()> {
     let temp = tempfile::tempdir()?;

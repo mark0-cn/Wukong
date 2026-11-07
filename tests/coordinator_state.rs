@@ -39,7 +39,9 @@ fn wait_for_predecessors_is_validated_and_persisted() {
         format!("{error:#}").contains("wait_for_predecessors target missing"),
         "{error:#}"
     );
-    let first = c.create_child(&run.root_id, request("predecessor")).unwrap();
+    let first = c
+        .create_child(&run.root_id, request("predecessor"))
+        .unwrap();
     let mut gated = request("gated child");
     gated.wait_for_predecessors = vec![first.agent.id.clone()];
     let created = c.create_child(&run.root_id, gated).unwrap();
@@ -47,6 +49,180 @@ fn wait_for_predecessors_is_validated_and_persisted() {
     let stored: AgentRecord = store.require("agent", &created.agent.id).unwrap();
     assert_eq!(stored.wait_for_predecessors, vec![first.agent.id]);
     assert_eq!(stored.status, Status::Queued);
+}
+
+#[test]
+fn predecessor_graph_rejects_ancestors_and_transitive_completion_cycles() {
+    let (_dir, store, c, run) = fixture();
+    let mut blocked = request("root dependency");
+    blocked.wait_for_predecessors = vec![run.root_id.clone()];
+    assert!(
+        c.create_child(&run.root_id, blocked)
+            .unwrap_err()
+            .to_string()
+            .contains("deadlock")
+    );
+    let parent = c
+        .create_child(&run.root_id, request("parent"))
+        .unwrap()
+        .agent;
+    let mut after_parent = request("after parent");
+    after_parent.wait_for_predecessors = vec![parent.id.clone()];
+    let sibling = c.create_child(&run.root_id, after_parent).unwrap().agent;
+    let mut grandchild = request("indirect cycle");
+    grandchild.wait_for_predecessors = vec![sibling.id];
+    assert!(
+        c.create_child(&parent.id, grandchild)
+            .unwrap_err()
+            .to_string()
+            .contains("deadlock")
+    );
+    assert_eq!(
+        store.list::<AgentRecord>("agent", &run.id).unwrap().len(),
+        3
+    );
+}
+
+#[test]
+fn completed_children_accept_followups_and_notify_again_after_restart() {
+    let (dir, store, c, run) = fixture();
+    let child = c
+        .create_child(&run.root_id, request("follow-up"))
+        .unwrap()
+        .agent;
+    store
+        .checkpoint_and_ack(&child.id, json!({"old":"conversation"}), &[])
+        .unwrap();
+    c.finish(&child.id, "first result").unwrap();
+    c.message(&run.root_id, &child.id, "Please clarify the input boundary")
+        .unwrap();
+    let reopened: AgentRecord = store.require("agent", &child.id).unwrap();
+    assert_eq!(reopened.status, Status::Queued);
+    assert_eq!(reopened.generation, 1);
+    assert!(reopened.checkpoint.is_none());
+    assert_eq!(
+        reopened.inherited_context,
+        Some(json!({"old":"conversation"}))
+    );
+    assert!(c.finish(&run.root_id, "too early").is_err());
+    drop(c);
+    drop(store);
+    let store = Store::open(dir.path().join("state")).unwrap();
+    let c = Coordinator::new(store.clone());
+    let mail = store.inbox(&child.id).unwrap();
+    store
+        .checkpoint_and_ack(
+            &child.id,
+            json!({"followup":true}),
+            &mail.iter().map(|m| m.id).collect::<Vec<_>>(),
+        )
+        .unwrap();
+    c.finish(&child.id, "clarified result").unwrap();
+    c.finish(&child.id, "clarified result").unwrap();
+    let notices: Vec<_> = store
+        .inbox(&run.root_id)
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.sender == child.id)
+        .collect();
+    assert_eq!(
+        notices.len(),
+        2,
+        "one terminal notice is owed per activation"
+    );
+    assert!(notices[1].content.contains("clarified result"));
+    let replacement = c.create_child(&run.root_id, request("follow-up")).unwrap();
+    assert!(replacement.created);
+    assert_ne!(replacement.agent.id, child.id);
+    c.stop(&replacement.agent.id, "probe complete").unwrap();
+    c.stop(&run.root_id, "assessment stopped").unwrap();
+    assert!(
+        c.message("operator", &child.id, "do not reopen a terminal assessment")
+            .is_err()
+    );
+}
+
+#[test]
+fn child_and_root_completion_require_worker_sessions_to_close() {
+    let (_dir, store, c, run) = fixture();
+    let child = c
+        .create_child(&run.root_id, request("sessions"))
+        .unwrap()
+        .agent;
+    for kind in ["debug_session", "interact_session"] {
+        let session = json!({"id":kind,"run_id":run.id,"agent_id":child.id,"state":"running"});
+        store.put(kind, kind, &run.id, &session).unwrap();
+    }
+    assert!(
+        c.finish(&child.id, "premature")
+            .unwrap_err()
+            .to_string()
+            .contains("sessions remain")
+    );
+    c.stop(&child.id, "failed worker branch").unwrap();
+    let inbox = store.inbox(&run.root_id).unwrap();
+    store
+        .checkpoint_and_ack(
+            &run.root_id,
+            json!({}),
+            &inbox.iter().map(|m| m.id).collect::<Vec<_>>(),
+        )
+        .unwrap();
+    assert!(
+        c.finish(&run.root_id, "premature")
+            .unwrap_err()
+            .to_string()
+            .contains("sessions remain")
+    );
+    for kind in ["debug_session", "interact_session"] {
+        let mut session: serde_json::Value = store.require(kind, kind).unwrap();
+        session["state"] = json!("closed");
+        store.put(kind, kind, &run.id, &session).unwrap();
+    }
+    c.finish(&run.root_id, "sessions accounted for").unwrap();
+}
+
+#[test]
+fn descendant_followup_reopens_completed_ancestors_and_preserves_legacy_records() {
+    let (_dir, store, c, run) = fixture();
+    let parent = c
+        .create_child(&run.root_id, request("parent"))
+        .unwrap()
+        .agent;
+    let child = c
+        .create_child(&parent.id, request("nested follow-up"))
+        .unwrap()
+        .agent;
+    let mut legacy = serde_json::to_value(&child).unwrap();
+    legacy.as_object_mut().unwrap().remove("generation");
+    assert_eq!(
+        serde_json::from_value::<AgentRecord>(legacy)
+            .unwrap()
+            .generation,
+        0
+    );
+    c.finish(&child.id, "initial nested result").unwrap();
+    let mail = store.inbox(&parent.id).unwrap();
+    store
+        .checkpoint_and_ack(
+            &parent.id,
+            json!({}),
+            &mail.iter().map(|m| m.id).collect::<Vec<_>>(),
+        )
+        .unwrap();
+    c.finish(&parent.id, "initial parent result").unwrap();
+    c.message("operator", &child.id, "clarify nested result")
+        .unwrap();
+    for agent_id in [&parent.id, &child.id] {
+        let reopened: AgentRecord = store.require("agent", agent_id).unwrap();
+        assert_eq!(reopened.status, Status::Queued);
+        assert_eq!(reopened.generation, 1);
+        assert!(!store.inbox(agent_id).unwrap().is_empty());
+    }
+    assert!(
+        c.finish(&parent.id, "cannot finish before follow-up child")
+            .is_err()
+    );
 }
 
 #[test]

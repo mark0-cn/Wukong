@@ -39,6 +39,7 @@ fn fixture(root: &Path) -> (Store, String, String) {
         skills: vec![],
         status: Status::Completed,
         depth: 0,
+        generation: 0,
         inherit_context: false,
         inherited_context: None,
         checkpoint: None,
