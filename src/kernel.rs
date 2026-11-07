@@ -36,7 +36,10 @@ struct Fatal(Option<anyhow::Error>);
 #[derive(Component)]
 struct BusinessTask;
 #[derive(Component)]
-struct SpawnAdmission(String);
+struct SpawnAdmission {
+    id: String,
+    fresh: bool,
+}
 #[derive(Component)]
 struct AdmissionHold;
 #[derive(Component)]
@@ -387,7 +390,8 @@ fn prepare_spawns(
                 .tools
                 .create_agent(&agent, &call_id, &args)?;
             let child: AgentRecord = serde_json::from_value(result["agent"].clone())?;
-            if let Some((existing, _)) = ids.iter().find(|(_, id)| id.0 == child.id) {
+            let existing = ids.iter().find(|(_, id)| id.0 == child.id);
+            if let Some((existing, _)) = existing {
                 commands.entity(entity).insert((
                     SpawnedAgent(existing),
                     Outcome::custom(json!({"agent":child.id})),
@@ -403,7 +407,10 @@ fn prepare_spawns(
                 application.runner.config().skills_dir.as_deref(),
                 application.runner.config().demos_dir.as_deref(),
             )?);
-            commands.entity(entity).insert(SpawnAdmission(child.id));
+            commands.entity(entity).insert(SpawnAdmission {
+                id: child.id,
+                fresh: existing.is_none(),
+            });
             Ok(())
         })();
         if let Err(error) = result {
@@ -424,7 +431,8 @@ fn admit_spawns(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let child: AgentRecord = application.runner.store.require("agent", &admission.0)?;
+                let child: AgentRecord =
+                    application.runner.store.require("agent", &admission.id)?;
                 if child.status.terminal() {
                     commands.entity(entity).insert(Outcome::refused(
                         child
@@ -441,30 +449,43 @@ fn admit_spawns(
 fn configure_spawned(
     spawned: Query<(&SpawnedAgent, &SpawnAdmission, &ForAgent), ReadyToSettle>,
     histories: Query<&Conversation>,
-    configured: Query<(), With<BusinessTask>>,
     application: Res<Application>,
     mut fatal: ResMut<Fatal>,
     mut commands: Commands,
 ) {
-    for (spawned, id, from) in &spawned {
-        if configured.contains(spawned.0) {
+    for (spawned, admission, from) in &spawned {
+        if !admission.fresh {
             continue;
         }
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let child: AgentRecord = application.runner.store.require("agent", &id.0)?;
+                let child: AgentRecord =
+                    application.runner.store.require("agent", &admission.id)?;
                 if child.inherit_context {
                     let parent = histories.get(from.0)?;
-                    let paired = rig_core::conversation::pairing::repair(
-                        parent
-                            .messages()
-                            .iter()
-                            .map(|message| (**message).clone())
-                            .collect(),
-                    );
+                    let pending = parent.pending_calls();
+                    // Never manufacture a result for the parent's in-flight tool calls.
+                    let end = parent
+                        .messages()
+                        .iter()
+                        .position(|message| match &**message {
+                            rig_core::completion::Message::Assistant(assistant) => {
+                                assistant.content.iter().any(|content| {
+                                    if let AssistantContent::ToolCall(call) = content {
+                                        pending.iter().any(|pending| pending.id == call.id)
+                                    } else {
+                                        false
+                                    }
+                                })
+                            }
+                            _ => false,
+                        })
+                        .unwrap_or(parent.messages().len());
+                    let history = parent.messages()[..end].to_vec();
+                    rig_core::conversation::pairing::validate(&history)?;
                     commands.entity(spawned.0).insert(Conversation(
-                        rig_core::conversation::Conversation::from_messages(paired.messages),
+                        rig_core::conversation::Conversation::from_messages(history),
                     ));
                 }
                 Ok(())
@@ -473,7 +494,7 @@ fn configure_spawned(
         if let Ok(child) = application
             .runner
             .store
-            .require::<AgentRecord>("agent", &id.0)
+            .require::<AgentRecord>("agent", &admission.id)
         {
             let connection = application
                 .runner
