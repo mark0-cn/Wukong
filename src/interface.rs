@@ -164,7 +164,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                         _ => "OPENAI_API_KEY",
                     });
             print_json(
-                &json!({"version":env!("CARGO_PKG_VERSION"),"rig_version":crate::llm::RIG_STATE_VERSION,"state_dir":store.root(),"model":{"provider":config.model.provider,"model":config.model.model,"role_model":config.model.role_model,"base_url":config.model.base_url,"credential_env":key_env,"credential_present":std::env::var_os(key_env).is_some()},"static":{"binary_parser":true,"ghidra_executable":config.analysis.ghidra_executable,"configured":config.analysis.ghidra_executable.is_some()},"runtime":runtime,"mcp_servers":config.mcp.iter().map(|s|&s.name).collect::<Vec<_>>()}),
+                &json!({"version":env!("CARGO_PKG_VERSION"),"rig_version":crate::llm::RIG_STATE_VERSION,"state_dir":store.root(),"model":{"provider":config.model.provider,"model":config.model.model,"role_model":config.model.role_model,"role_models":config.model.role_models,"base_url":config.model.base_url,"credential_env":key_env,"credential_present":std::env::var_os(key_env).is_some()},"static":{"binary_parser":true,"ghidra_executable":config.analysis.ghidra_executable,"configured":config.analysis.ghidra_executable.is_some()},"runtime":runtime,"mcp_servers":config.mcp.iter().map(|s|&s.name).collect::<Vec<_>>()}),
             )?;
         }
         Command::Analyze {
