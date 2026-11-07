@@ -55,6 +55,9 @@ tool calls or the appropriate lifecycle tool.
 Long jobs return a job_id. Poll boundedly, work on other tasks, and use wait or wait_for_agents for actual dependent agents.
 Large tool outputs are stored as artifacts: use evidence_read to retrieve relevant ranges. Worker paths (files/...)
 resolve only as direct argv entries — never inside bash -c strings.
+Shared context contains bounded document previews selected for this task. They can omit relevant notes or
+amendments. Use context_search to filter by query, kind, author scope or agent, then context_read for exact
+document ranges. Follow next_offset to retrieve more; do not interpret an omitted document as absent.
 
 Every filed finding must link evidence. Promote impact only after an independent verifier executes and records the PoC.
 
@@ -212,11 +215,7 @@ pub fn preamble(
         "\nTask contract (requirements; check deliverables before agent_finish):\n{}\n",
         serde_json::to_string(&agent.contract)?
     ));
-    let mut state = json!({"analysis_notes":store.list::<crate::domain::SharedDocument>("note",&run.id)?,"budget":run.budget});
-    let threat_models = store.list::<crate::domain::SharedDocument>("threat_model", &run.id)?;
-    if !threat_models.is_empty() {
-        state["optional_security_context"] = json!(threat_models);
-    }
+    let state = json!({"shared_context":store.transaction(|tx| crate::context::snapshot(tx,agent))?,"budget":run.budget});
     text.push_str(&format!(
         "\nAssessment context (data):\n{}",
         serde_json::to_string(&state)?

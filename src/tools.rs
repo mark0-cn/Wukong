@@ -164,6 +164,18 @@ fn build_catalog() -> Vec<Spec> {
             false,
             false,
         ),
+        spec::<args::ContextSearchArgs>(
+            "context_search",
+            "Search same-run shared notes, todos and optional threat models by text, kind, author scope or agent_id. Returns bounded previews and next_offset; use context_read for exact content including amendments.",
+            false,
+            false,
+        ),
+        spec::<args::ContextReadArgs>(
+            "context_read",
+            "Read a bounded character range of an exact same-run shared document as JSON, including amendments. Use kind and id from context_search; follow content.next_offset until the required content is complete.",
+            false,
+            false,
+        ),
         spec::<args::TodoSaveArgs>(
             "todo_save",
             "Create a shared to-do item; status defaults to pending.",
@@ -774,6 +786,18 @@ impl ToolService {
             "notes_list" => {
                 Ok(json!({"notes":self.store.list::<SharedDocument>("note",&agent.run_id)?}))
             }
+            "context_search" => crate::context::search(
+                &self.store,
+                agent,
+                &args,
+                self.config.tools.max_output_bytes,
+            ),
+            "context_read" => crate::context::read(
+                &self.store,
+                agent,
+                &args,
+                self.config.tools.max_output_bytes,
+            ),
             "todos_list" => {
                 Ok(json!({"todos":self.store.list::<SharedDocument>("todo",&agent.run_id)?}))
             }

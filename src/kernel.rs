@@ -1131,7 +1131,10 @@ impl Serve for BusinessTool {
                 )
                 .await?;
             if !output.is_error
-                && name.as_str() != "load_skill"
+                && !matches!(
+                    name.as_str(),
+                    "load_skill" | "context_search" | "context_read"
+                )
                 && application.runner.config().execution.summarize_tool_outputs
                 && output.value.to_string().len()
                     > application
