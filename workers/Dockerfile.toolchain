@@ -19,5 +19,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     "cachetools" "sortedcontainers" "pyelftools" "psutil" "requests" "future" "packaging" \
     && pip3 install --no-cache-dir --break-system-packages -i "$PIP_INDEX_URL" \
     pwntools ropper
+COPY workers/runtime/requirements.txt /tmp/re-agent-runtime-requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -i "$PIP_INDEX_URL" -r /tmp/re-agent-runtime-requirements.txt
 COPY workers/runtime /opt/re-agent/runtime
 COPY workers/ghidra /opt/re-agent/ghidra
