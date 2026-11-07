@@ -6,6 +6,8 @@ from pathlib import Path
 import shutil
 import time
 import uuid
+from contextlib import contextmanager
+from filelock import FileLock, Timeout
 import bridge as runtime
 
 
@@ -20,6 +22,22 @@ def digest(path):
 def identity(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
+
+
+def require_idle(project):
+    if (project / "analysis.active.json").exists():
+        raise ValueError("prior Ghidra analysis outcome is unknown; inspect analysis.active.json and the analyzer before clearing the claim")
+
+
+@contextmanager
+def analysis_claim(project, argv):
+    # A kernel lock alone is insufficient if its owner dies before its analyzer.
+    # Leave the claim on abnormal exit; never infer that a child exited from PID loss.
+    require_idle(project)
+    marker = project / "analysis.active.json"
+    runtime.atomic_json(marker, {"owner_pid": os.getpid(), "argv": argv, "created_at": time.time()})
+    yield
+    marker.unlink()
 
 def query(root, params):
     target = runtime.confined(root, params["target"], True)
@@ -59,26 +77,26 @@ def query(root, params):
         return result
     project = root / "ghidra/projects" / analysis_key
     project.mkdir(parents=True, exist_ok=True)
-    lock_path = project / "worker.lock"
+    lock = FileLock(str(project / "worker.lock"))
     deadline = time.monotonic() + min(timeout, 60)
     while True:
         try:
-            with lock_path.open("x", encoding="utf-8") as lock:
-                json.dump({"owner_pid": os.getpid(), "owner_identity": runtime.process_identity(os.getpid()), "created_at": time.time()}, lock)
+            lock.acquire(timeout=0)
             break
-        except FileExistsError:
+        except Timeout:
             if cache.is_file():
                 result = runtime.load_json(cache)
                 result["cached"] = True
                 return result
             if time.monotonic() >= deadline:
-                raise ValueError("Ghidra project busy or owner lost; inspect worker.lock and running analyzer before removing stale lock")
+                raise ValueError("Ghidra project is busy; the analyzer still owns the project lock")
             time.sleep(0.1)
     try:
         if cache.is_file():
             result = runtime.load_json(cache)
             result["cached"] = True
             return result
+        require_idle(project)
         ready = project / "analysis-complete.json"
         snapshot = project / "target.bin"
         if not ready.is_file():
@@ -100,7 +118,8 @@ def query(root, params):
             argv += ["-import", str(snapshot), "-overwrite"]
         argv += ["-analysisTimeoutPerFile", str(analysis_timeout), "-max-cpu", str(max_cpu), "-scriptPath", str(scripts),
                  "-postScript", "ReAgentBridge.java", str(request), str(response)]
-        execution = runtime.run_process(argv, work, runtime.safe_env(), timeout, 4 * 1048576, work / "output")
+        with analysis_claim(project, argv):
+            execution = runtime.run_process(argv, work, runtime.safe_env(), timeout, 4 * 1048576, work / "output")
         runtime.atomic_json(work / "execution.json", execution)
         if execution["state"] != "completed" or execution["exit_code"] != 0:
             raise ValueError("Ghidra execution failed: %s; logs: %s" % (execution["state"], work.relative_to(root).as_posix()))
@@ -124,4 +143,4 @@ def query(root, params):
         runtime.atomic_json(cache, result)
         return result
     finally:
-        lock_path.unlink(missing_ok=True)
+        lock.release()

@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -757,7 +757,6 @@ impl GhidraBackend {
         let project = self.config.cache_dir.join("projects").join(&analysis_key);
         fs::create_dir_all(&project)?;
         let project = fs::canonicalize(project)?;
-        let lock_path = project.join("worker.lock");
         // A holder keeps the lock for the whole Ghidra run, so waiting must
         // span the configured query budget. Concurrent identical queries are
         // served from the cache the moment the holder publishes its result,
@@ -765,42 +764,18 @@ impl GhidraBackend {
         let deadline =
             tokio::time::Instant::now() + Duration::from_secs(self.config.timeout_seconds);
         let lock = loop {
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&lock_path)
-            {
-                Ok(file) => {
-                    let owner = serde_json::json!({
-                        "owner_pid": std::process::id(),
-                        "created_at_unix": std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0),
-                    });
-                    if let Err(error) = fs::write(&lock_path, serde_json::to_vec(&owner)?) {
-                        drop(file);
-                        let _ = fs::remove_file(&lock_path);
-                        return Err(error.into());
-                    }
-                    break ProjectLock {
-                        path: lock_path.clone(),
-                        file: Some(file),
-                        owner_pid: std::process::id(),
-                    };
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            match ProjectLock::try_acquire(&project) {
+                Ok(lock) => break lock,
+                Err(std::fs::TryLockError::WouldBlock) => {
                     if let Some(result) = cached(&root) {
                         return result;
                     }
                     if tokio::time::Instant::now() >= deadline {
-                        bail!(
-                            "Ghidra project is busy or has a stale worker.lock; inspect worker state before removing the lock"
-                        );
+                        bail!("Ghidra project is busy; the analyzer still owns worker.lock");
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-                Err(e) => return Err(e.into()),
+                Err(std::fs::TryLockError::Error(error)) => return Err(error.into()),
             }
         };
         // The lock can be won between the last poll and the successful open;
@@ -808,7 +783,7 @@ impl GhidraBackend {
         if let Some(result) = cached(&root) {
             return result;
         }
-        let _lock = lock;
+        lock.require_idle()?;
         let ready = project.join("analysis-complete.json");
         let snapshot = project.join("target.bin");
         if !ready.exists() {
@@ -856,7 +831,7 @@ impl GhidraBackend {
         {
             cmd.creation_flags(0x08000000);
         }
-        let mut killer = TreeKill::spawn(cmd)
+        let mut killer = TreeKill::spawn_locked(cmd, lock)
             .with_context(|| format!("launch Ghidra {}", executable.display()))?;
         let status = match tokio::time::timeout(
             Duration::from_secs(self.config.timeout_seconds),
@@ -879,6 +854,8 @@ impl GhidraBackend {
                 );
             }
         };
+        // Finish cancellation/reaping while the project lease is still held.
+        killer.terminate().await;
         if !status.success() {
             bail!(
                 "Ghidra exited {status}; logs: {} and {}",
@@ -933,24 +910,46 @@ impl GhidraBackend {
 }
 
 struct ProjectLock {
-    path: PathBuf,
-    file: Option<fs::File>,
-    owner_pid: u32,
+    _file: fs::File,
+    activity: PathBuf,
 }
-impl Drop for ProjectLock {
-    fn drop(&mut self) {
-        drop(self.file.take());
-        // Only remove a lock this process still owns. A stale foreign lock
-        // must be inspected by an operator, not silently deleted under a
-        // live successor.
-        let owned = fs::read_to_string(&self.path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-            .and_then(|value| value["owner_pid"].as_u64())
-            .is_some_and(|pid| pid == u64::from(self.owner_pid));
-        if owned {
-            let _ = fs::remove_file(&self.path);
-        }
+impl ProjectLock {
+    fn try_acquire(project: &Path) -> std::result::Result<Self, fs::TryLockError> {
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(project.join("worker.lock"))
+            .map_err(fs::TryLockError::Error)?;
+        file.try_lock()?;
+        Ok(Self {
+            _file: file,
+            activity: project.join("analysis.active.json"),
+        })
+    }
+    fn require_idle(&self) -> Result<()> {
+        ensure!(
+            !self.activity.exists(),
+            "prior Ghidra analysis outcome is unknown; inspect analysis.active.json and the analyzer before clearing the claim"
+        );
+        Ok(())
+    }
+    fn begin(&self) -> Result<()> {
+        self.require_idle()?;
+        let mut marker = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&self.activity)?;
+        marker.write_all(&serde_json::to_vec(
+            &serde_json::json!({"owner_pid":std::process::id()}),
+        )?)?;
+        marker.sync_all()?;
+        Ok(())
+    }
+    fn finish(&self) -> Result<()> {
+        fs::remove_file(&self.activity)?;
+        Ok(())
     }
 }
 
@@ -960,6 +959,7 @@ impl Drop for ProjectLock {
 /// would leave running after a cancellation.
 struct TreeKill {
     child: Option<Box<dyn process_wrap::tokio::ChildWrapper>>,
+    project: Option<ProjectLock>,
 }
 impl TreeKill {
     fn spawn(command: tokio::process::Command) -> std::io::Result<Self> {
@@ -972,13 +972,26 @@ impl TreeKill {
         command.wrap(JobObject);
         Ok(Self {
             child: Some(command.spawn()?),
+            project: None,
         })
+    }
+
+    fn spawn_locked(command: tokio::process::Command, project: ProjectLock) -> Result<Self> {
+        project.begin()?;
+        // On a failed/ambiguous spawn the claim remains for inspection.
+        let mut process = Self::spawn(command)?;
+        process.project = Some(project);
+        Ok(process)
     }
 
     async fn terminate(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
-            let _ = child.wait().await;
+            if child.wait().await.is_ok() {
+                if let Some(project) = &self.project {
+                    let _ = project.finish();
+                }
+            }
         }
     }
 }
@@ -987,8 +1000,15 @@ impl Drop for TreeKill {
         if let Some(mut child) = self.child.take() {
             // Signal the entire group/job synchronously; only reaping is deferred.
             let _ = child.start_kill();
+            let project = self.project.take();
             tokio::spawn(async move {
-                let _ = child.wait().await;
+                if child.wait().await.is_ok() {
+                    if let Some(project) = &project {
+                        let _ = project.finish();
+                    }
+                }
+                // Hold the kernel lock through cancellation and reaping.
+                drop(project);
             });
         }
     }
@@ -1072,7 +1092,12 @@ subprocess.Popen([sys.executable,'-c',"import pathlib,time,sys;pathlib.Path(sys.
         fs::create_dir_all(&project)?;
         // A concurrent holder already owns the project lock.
         let lock_path = project.join("worker.lock");
-        fs::File::create(&lock_path)?;
+        let holder_file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .read(true)
+            .open(&lock_path)?;
+        holder_file.try_lock()?;
         let root = backend
             .config
             .cache_dir
@@ -1092,13 +1117,12 @@ subprocess.Popen([sys.executable,'-c',"import pathlib,time,sys;pathlib.Path(sys.
             stderr_path: root.join("stderr.log"),
         };
         let holder_root = root.clone();
-        let holder_lock = lock_path.clone();
         let holder = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(300)).await;
             let staged = holder_root.join("result.json.tmp");
             fs::write(&staged, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
             fs::rename(&staged, holder_root.join("result.json")).unwrap();
-            let _ = fs::remove_file(holder_lock);
+            drop(holder_file);
         });
         let started = std::time::Instant::now();
         let served = backend.query(&target, &query).await?;
@@ -1116,35 +1140,43 @@ subprocess.Popen([sys.executable,'-c',"import pathlib,time,sys;pathlib.Path(sys.
         Ok(())
     }
 
+    #[tokio::test]
+    async fn cancellation_holds_the_project_lock_until_analyzer_reaping() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let lock = ProjectLock::try_acquire(directory.path())?;
+        let mut command = tokio::process::Command::new("python");
+        command.arg("-c").arg("import time;time.sleep(60)");
+        let process = TreeKill::spawn_locked(command, lock)?;
+        drop(process);
+        assert!(matches!(
+            ProjectLock::try_acquire(directory.path()),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while directory.path().join("analysis.active.json").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?;
+        ProjectLock::try_acquire(directory.path())?.require_idle()?;
+        Ok(())
+    }
+
     #[test]
-    fn project_lock_drop_removes_only_its_own_lock() -> Result<()> {
-        let dir = tempfile::tempdir()?;
-        let path = dir.path().join("worker.lock");
-        let lock = ProjectLock {
-            path: path.clone(),
-            file: None,
-            owner_pid: std::process::id(),
-        };
-        // Simulated acquisition: the file records our pid.
-        fs::write(
-            &path,
-            serde_json::to_vec(&serde_json::json!({"owner_pid": std::process::id()}))?,
-        )?;
-        drop(lock);
-        assert!(!path.exists(), "an owned lock must be removed on drop");
-        // A lock now owned by someone else must survive our drop.
-        fs::write(&path, br#"{"owner_pid": 1}"#)?;
-        let foreign = ProjectLock {
-            path: path.clone(),
-            file: None,
-            owner_pid: std::process::id(),
-        };
-        drop(foreign);
-        assert!(
-            path.exists(),
-            "a foreign-owned lock must not be removed on drop"
-        );
-        fs::remove_file(&path)?;
+    fn project_lock_releases_without_unlinking_and_preserves_uncertain_analysis() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let lock = ProjectLock::try_acquire(directory.path())?;
+        assert!(matches!(
+            ProjectLock::try_acquire(directory.path()),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        lock.begin()?;
+        drop(lock); // Simulate an owner lost before analysis completion.
+        assert!(directory.path().join("worker.lock").exists());
+        let successor = ProjectLock::try_acquire(directory.path())?;
+        assert!(successor.require_idle().is_err());
+        successor.finish()?;
+        successor.require_idle()?;
         Ok(())
     }
 }

@@ -83,6 +83,46 @@ class GdbMiTests(unittest.TestCase):
             self.assertTrue(session.records.empty())
 
 
+class GhidraProjectLockTests(unittest.TestCase):
+    def test_unknown_analyzer_claim_prevents_reentry_after_lock_release(self):
+        import ghidra_backend
+        import hashlib
+        from filelock import FileLock, Timeout
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "files/sample"
+            target.parent.mkdir()
+            target.write_bytes(b"fixture")
+            installation = root / "installation"
+            headless = installation / "support/analyzeHeadless"
+            headless.parent.mkdir(parents=True)
+            headless.write_text("fixture launcher")
+            properties = installation / "Ghidra/application.properties"
+            properties.parent.mkdir()
+            properties.write_text("application.version=fixture")
+            scripts = root / "scripts"
+            scripts.mkdir()
+            (scripts / "ReAgentBridge.java").write_text("fixture bridge")
+            params = {"target": "files/sample", "target_sha256": hashlib.sha256(b"fixture").hexdigest(), "query": {"operation": "functions"}}
+            with patch.dict(os.environ, {"RE_AGENT_GHIDRA_HEADLESS": str(headless), "RE_AGENT_GHIDRA_SCRIPT_DIR": str(scripts)}), \
+                    patch.object(ghidra_backend.runtime, "run_process", side_effect=RuntimeError("owner lost")) as execute:
+                with self.assertRaisesRegex(RuntimeError, "owner lost"):
+                    ghidra_backend.query(root, params)
+                project = next((root / "ghidra/projects").iterdir())
+                self.assertTrue((project / "analysis.active.json").exists())
+                with self.assertRaisesRegex(ValueError, "outcome is unknown"):
+                    ghidra_backend.query(root, params)
+                self.assertEqual(execute.call_count, 1)
+                # The kernel lock is released, but the uncertain analyzer claim remains.
+                with FileLock(str(project / "worker.lock"), timeout=0):
+                    with self.assertRaises(Timeout):
+                        FileLock(str(project / "worker.lock"), timeout=0).acquire()
+                (project / "analysis.active.json").unlink()
+                with ghidra_backend.analysis_claim(project, ["fixture"]):
+                    self.assertTrue((project / "analysis.active.json").exists())
+                self.assertFalse((project / "analysis.active.json").exists())
+
+
 class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

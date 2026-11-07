@@ -214,3 +214,13 @@ decision about the same AFL override.
 References: [GDB/MI](https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_002fMI.html),
 [AFL++ QEMU](https://github.com/AFLplusplus/AFLplusplus/blob/stable/qemu_mode/README.md),
 [Ghidra 12.2 release and checksum](https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.2_build).
+
+
+## Ghidra project ownership
+
+The controller uses the standard-library file lock; Python Ghidra workers use
+filelock. `worker.lock` is a persistent lock inode and must not be deleted while
+an analyzer may own it. The lock covers analyzer execution, cancellation/reaping
+and cache publication. An `analysis.active.json` claim survives an owner crash
+or uncertain execution failure. Inspect and reconcile the analyzer before
+clearing that claim; absence of a lock owner alone does not prove its child exited.
