@@ -269,10 +269,10 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "load_skill",
-            "Load one built-in analysis skill by exact name: root, recon, reverse, hunter, fuzz, crash, exploit, verifier, reporter, tooling (or a configured custom skill).",
+            "Activate a named local analysis skill (built-in or configured custom skill). The controller persists its exact content/hash and installs its instructions at the next fresh model boundary; survives compaction and resume.",
             json!({"name":id}),
             &["name"],
-            false,
+            true,
             false,
         ),
         spec(
@@ -873,9 +873,7 @@ impl ToolService {
                     json!({"evidence_id":evidence_id,"offset":offset,"length":part.len(),"total_bytes":total,"next_offset":if end<total{Some(end)}else{None},"content":content}),
                 )
             }
-            "load_skill" => Ok(
-                json!({"name":args["name"],"content":agents::load_skill(text(&args,"name")?,self.config.skills_dir.as_deref())?}),
-            ),
+            "load_skill" => self.activate_skill(agent, call_id, text(&args,"name")?),
             "think" => {
                 let content = text(&args, "content")?;
                 ensure!(
@@ -1023,6 +1021,10 @@ impl ToolService {
             "invalid child role or skill count"
         );
         for skill in &request.skills {
+            ensure!(
+                skill != "root",
+                "root orchestration skill is only available to the root role"
+            );
             agents::load_skill(skill, self.config.skills_dir.as_deref())?;
         }
         self.effect(agent, call_id, |tx| {
@@ -1032,6 +1034,35 @@ impl ToolService {
                 request,
                 stable("agent", call_id),
             )?)?)
+        })
+    }
+    fn activate_skill(&self, agent: &AgentRecord, call_id: &str, name: &str) -> Result<Value> {
+        ensure!(
+            name != "root" || agent.role == Role::Root,
+            "root orchestration skill is only available to the root role"
+        );
+        let content = agents::load_skill(name, self.config.skills_dir.as_deref())?;
+        let sha256 = binary::sha256_bytes(content.as_bytes());
+        let evidence = self.store.artifact(
+            &agent.run_id,
+            &agent.id,
+            call_id,
+            "skill.instructions",
+            content.as_bytes(),
+            "text/markdown",
+            json!({"name":name,"sha256":sha256}),
+        )?;
+        self.effect(agent,call_id,|tx| {
+            let mut current: AgentRecord = Store::tx_get(tx,"agent",&agent.id)?.context("agent missing")?;
+            ensure!(current.generation == agent.generation, "agent activation changed before skill load");
+            let snapshot = ActiveSkill { name:name.into(),sha256:sha256.clone(),content,evidence_id:evidence.id.clone() };
+            if let Some(existing) = current.active_skills.iter_mut().find(|skill|skill.name==name) {
+                *existing=snapshot;
+            } else { current.active_skills.push(snapshot); }
+            current.updated_at=now();
+            Store::tx_put(tx,"agent",&agent.id,&agent.run_id,&current)?;
+            Store::tx_event(tx,&agent.run_id,Some(&agent.id),"skill.activated",json!({"name":name,"sha256":sha256,"evidence_id":evidence.id}))?;
+            Ok(json!({"name":name,"sha256":sha256,"evidence_id":evidence.id,"active":true,"applies":"next fresh model request"}))
         })
     }
     fn send_message(&self, agent: &AgentRecord, call_id: &str, args: &Value) -> Result<Value> {

@@ -37,6 +37,7 @@ fn fixture(root: &Path) -> (Store, String, String) {
         task: "inspect".into(),
         scope: "fixture".into(),
         skills: vec![],
+        active_skills: vec![],
         status: Status::Completed,
         depth: 0,
         generation: 0,

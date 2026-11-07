@@ -173,6 +173,14 @@ pub struct RunRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveSkill {
+    pub name: String,
+    pub sha256: String,
+    pub content: String,
+    pub evidence_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRecord {
     pub id: String,
     pub run_id: String,
@@ -182,6 +190,9 @@ pub struct AgentRecord {
     pub task: String,
     pub scope: String,
     pub skills: Vec<String>,
+    /// Immutable snapshots explicitly activated with load_skill.
+    #[serde(default)]
+    pub active_skills: Vec<ActiveSkill>,
     pub status: Status,
     pub depth: u32,
     /// Follow-up activation; separates tool IDs and terminal notices from prior work.

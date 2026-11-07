@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use crate::domain::Role;
+use crate::domain::{ActiveSkill, Role};
 use anyhow::{Context, Result, bail, ensure};
 use rig::{
     DynModel,
@@ -295,6 +295,8 @@ pub struct DurableRun {
     compacted_turns: usize,
     #[serde(default)]
     pub compactions: Vec<CompactionRecord>,
+    #[serde(default)]
+    skill_base_preamble: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,6 +308,34 @@ pub struct CompactionRecord {
 }
 
 impl DurableRun {
+    pub fn apply_active_skills(&mut self, skills: &[ActiveSkill]) -> Result<()> {
+        ensure!(
+            !self.has_prepared_model_call(),
+            "cannot change skills in a frozen model request"
+        );
+        if skills.is_empty() && self.skill_base_preamble.is_none() {
+            return Ok(());
+        }
+        for skill in skills {
+            ensure!(
+                crate::binary::sha256_bytes(skill.content.as_bytes()) == skill.sha256,
+                "active skill {} failed its content hash check",
+                skill.name
+            );
+        }
+        let base = self
+            .skill_base_preamble
+            .get_or_insert_with(|| self.spec.preamble.clone().unwrap_or_default());
+        let mut preamble = base.clone();
+        for skill in skills {
+            preamble.push_str(&format!(
+                "\n\n# Active controller skill: {} (SHA256 {})\n{}",
+                skill.name, skill.sha256, skill.content
+            ));
+        }
+        self.spec.preamble = Some(preamble);
+        Ok(())
+    }
     pub fn next_step(&mut self) -> Result<AgentRunStep> {
         self.validate_version()?;
         // Recovery after a checkpoint in invalid-call resolution still uses
@@ -629,6 +659,7 @@ impl DurableEngine {
             compacted_usage: Usage::default(),
             compacted_turns: 0,
             compactions: Vec::new(),
+            skill_base_preamble: None,
         })
     }
 
@@ -1201,6 +1232,40 @@ mod tests {
                 .contains("operator constraint")
         );
         assert!(run.notes.is_empty());
+    }
+
+    #[test]
+    fn activated_skills_survive_compaction_and_do_not_change_frozen_requests() {
+        let engine = engine(Provider::Ollama, "http://127.0.0.1:1".into());
+        let content = "Exact validated local instructions";
+        let skill = ActiveSkill {
+            name: "method".into(),
+            sha256: crate::binary::sha256_bytes(content.as_bytes()),
+            content: content.into(),
+            evidence_id: "skill-proof".into(),
+        };
+        let history = (0..12)
+            .map(|i| Message::user(format!("old context {i}")))
+            .collect();
+        let mut run = engine
+            .new_run_with_history("task", "base policy", vec![tool()], 6, history)
+            .unwrap();
+        run.apply_active_skills(std::slice::from_ref(&skill))
+            .unwrap();
+        run.apply_active_skills(std::slice::from_ref(&skill))
+            .unwrap();
+        assert_eq!(
+            run.spec.preamble.as_ref().unwrap().matches(content).count(),
+            1
+        );
+        let step = run.compact_before_model("analysis summary", 2).unwrap();
+        run = roundtrip(&run);
+        assert!(run.spec.preamble.as_ref().unwrap().contains(content));
+        engine.prepare_model_call(&mut run, &step).unwrap();
+        let frozen = serde_json::to_value(&run.pending_request).unwrap();
+        assert!(run.apply_active_skills(&[]).is_err());
+        assert_eq!(serde_json::to_value(&run.pending_request).unwrap(), frozen);
+        assert!(frozen.to_string().contains(content));
     }
 
     #[test]
