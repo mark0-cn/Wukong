@@ -1,4 +1,4 @@
-# Copy to re-agent.toml and set a model/endpoint available to your account.
+﻿# Copy to re-agent.toml and set a model/endpoint available to your account.
 state_dir = ".re-agent"
 
 [model]
@@ -38,7 +38,7 @@ bridge_path = "workers/runtime/bridge.py"
 # docker_container = "re-agent-worker"
 remote_bridge_path = "/opt/re-agent/runtime/bridge.py"
 remote_state_dir = "/state"
-request_timeout_secs = 120
+request_timeout_secs = 300
 
 [analysis]
 # Optional local Ghidra launcher; use the version required by your installed JDK.
