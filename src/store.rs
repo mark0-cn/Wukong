@@ -22,14 +22,14 @@ impl Store {
         fs::create_dir_all(root.as_ref())?;
         let root = fs::canonicalize(root.as_ref())?;
         fs::create_dir_all(root.join("artifacts"))?;
-        let mut conn = Connection::open(root.join("state.sqlite3"))?;
+        let conn = Connection::open(root.join("state.sqlite3"))?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
           CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-          INSERT OR IGNORE INTO meta VALUES('schema_version','1');
+          INSERT OR IGNORE INTO meta VALUES('schema_version','2');
           CREATE TABLE IF NOT EXISTS entities(kind TEXT NOT NULL,id TEXT NOT NULL,run_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id));
           CREATE INDEX IF NOT EXISTS entities_run ON entities(run_id,kind);
-          CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL,sender TEXT NOT NULL,recipient TEXT NOT NULL,content TEXT NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0,dedupe_key TEXT UNIQUE,created_at TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL,sender TEXT NOT NULL,recipient TEXT NOT NULL,content TEXT NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0,dedupe_key TEXT UNIQUE,created_at TEXT NOT NULL,envelope TEXT NOT NULL);
           CREATE INDEX IF NOT EXISTS messages_inbox ON messages(recipient,acknowledged,id);
           CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL,agent_id TEXT,kind TEXT NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS leases(run_id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_at INTEGER NOT NULL);")?;
@@ -38,22 +38,8 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        if version == "1" {
-            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-            // Recheck inside the write transaction: two controllers may open an old store.
-            let current: String = tx.query_row(
-                "SELECT value FROM meta WHERE key='schema_version'",
-                [],
-                |r| r.get(0),
-            )?;
-            if current == "1" {
-                tx.execute_batch("ALTER TABLE messages ADD COLUMN envelope TEXT NOT NULL DEFAULT '{}';
-                    UPDATE messages SET envelope=json_object('delivery',CASE WHEN acknowledged=1 THEN 'included' ELSE 'queued' END);
-                    UPDATE meta SET value='2' WHERE key='schema_version';")?;
-            }
-            tx.commit()?;
-        } else if version != "2" {
-            bail!("unsupported state schema {version}");
+        if version != "2" {
+            bail!("unsupported state schema {version}; use a fresh state directory");
         }
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),

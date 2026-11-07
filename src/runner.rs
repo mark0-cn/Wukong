@@ -826,6 +826,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    contract: Default::default(),
                 },
             )
             .unwrap()
@@ -1453,6 +1454,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    contract: Default::default(),
                 },
             )
             .unwrap()
@@ -1469,6 +1471,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    contract: Default::default(),
                 },
             )
             .unwrap()
@@ -1545,6 +1548,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    contract: Default::default(),
                 },
             )
             .unwrap()
@@ -1602,6 +1606,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    contract: Default::default(),
                 },
             )
             .unwrap();
@@ -1766,6 +1771,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    contract: Default::default(),
                 },
             )
             .unwrap()
@@ -1782,6 +1788,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![alpha.id.clone()],
+                    contract: Default::default(),
                 },
             )
             .unwrap()

@@ -26,6 +26,7 @@ fn request(scope: &str) -> ChildRequest {
         skills: vec!["recon".into()],
         inherit_context: true,
         wait_for_predecessors: vec![],
+        contract: Default::default(),
     }
 }
 
@@ -741,32 +742,137 @@ fn correlated_replies_track_delivery_and_late_generations_are_audited() {
 }
 
 #[test]
-fn version_one_mailboxes_migrate_without_losing_delivery_or_content() {
+fn task_contract_requires_real_deliverables_and_preserves_each_generation_result() {
     let (dir, store, c, run) = fixture();
-    c.message("operator", &run.root_id, "legacy queued")
+    let evidence = store
+        .artifact(
+            &run.id,
+            &run.root_id,
+            "table-fixture",
+            "test.table",
+            b"test-only field table",
+            "text/plain",
+            json!({}),
+        )
         .unwrap();
-    c.message("operator", &run.root_id, "legacy included")
+    let mut task = request("contracted format");
+    task.contract = TaskContract {
+        objective: task.task.clone(),
+        input_evidence_ids: vec![evidence.id.clone()],
+        constraints: vec!["static only".into()],
+        deliverables: vec!["field table".into()],
+        completion_conditions: vec!["account for each field".into()],
+    };
+    let child = c.create_child(&run.root_id, task.clone()).unwrap().agent;
+    let mut conflicting = task.clone();
+    conflicting.contract.deliverables.push("decoder".into());
+    assert!(c.create_child(&run.root_id, conflicting).is_err());
+    assert!(
+        c.finish(&child.id, "prose without required deliverable")
+            .is_err()
+    );
+    let mut answer = TaskResult {
+        answer: "fixture answer".into(),
+        artifacts: vec![TaskArtifact {
+            name: "field table".into(),
+            evidence_id: evidence.id.clone(),
+        }],
+        ..Default::default()
+    };
+    assert!(c.finish_result(&child.id, answer.clone()).is_err());
+    answer.completed_conditions = task.contract.completion_conditions;
+    c.finish_result(&child.id, answer).unwrap();
+    let completed: AgentRecord = store.require("agent", &child.id).unwrap();
+    assert_eq!(completed.task_result.unwrap().outcome, TaskOutcome::Success);
+    assert!(
+        store.inbox(&run.root_id).unwrap()[0]
+            .content
+            .contains("field table")
+    );
+    c.follow_up("operator", &child.id, "clarify the table")
         .unwrap();
-    let mail = store.inbox(&run.root_id).unwrap();
-    store
-        .checkpoint_and_ack(&run.root_id, json!({}), &[mail[1].id])
-        .unwrap();
+    assert!(
+        store
+            .require::<AgentRecord>("agent", &child.id)
+            .unwrap()
+            .task_result
+            .is_none()
+    );
     drop(c);
     drop(store);
-    let path = dir.path().join("state/state.sqlite3");
-    let conn = rusqlite::Connection::open(path).unwrap();
-    conn.execute_batch("ALTER TABLE messages DROP COLUMN envelope; UPDATE meta SET value='1' WHERE key='schema_version';").unwrap();
-    drop(conn);
-    let migrated = Store::open(dir.path().join("state")).unwrap();
-    assert_eq!(
-        migrated.inbox(&run.root_id).unwrap()[0].content,
-        "legacy queued"
-    );
-    let all = migrated
-        .transaction(|tx| Store::tx_messages(tx, &run.id))
+    let reopened = Store::open(dir.path().join("state")).unwrap();
+    let history = reopened
+        .list::<serde_json::Value>("task_result", &run.id)
         .unwrap();
-    assert_eq!(all[1].envelope.delivery, MessageDelivery::Included);
-    let legacy = json!({"id":1,"run_id":"run","sender":"a","recipient":"b","content":"old export","acknowledged":false,"created_at":now()});
-    let decoded: Message = serde_json::from_value(legacy).unwrap();
-    assert_eq!(decoded.envelope.options.kind, MessageKind::Information);
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0]["generation"], 0);
+}
+
+#[test]
+fn non_success_task_results_explain_the_gap_and_evidence_is_integrity_checked() {
+    let (_dir, store, c, run) = fixture();
+    let mut task = request("bounded analysis");
+    task.contract.deliverables = vec!["decoder".into()];
+    let child = c.create_child(&run.root_id, task).unwrap().agent;
+    let mut blocked = TaskResult {
+        outcome: TaskOutcome::Blocked,
+        answer: "more samples needed".into(),
+        ..Default::default()
+    };
+    assert!(c.finish_result(&child.id, blocked.clone()).is_err());
+    blocked.unknowns = vec!["variant encoding".into()];
+    c.finish_result(&child.id, blocked).unwrap();
+    assert_eq!(
+        store
+            .require::<AgentRecord>("agent", &child.id)
+            .unwrap()
+            .task_result
+            .unwrap()
+            .outcome,
+        TaskOutcome::Blocked
+    );
+    let other = c
+        .create_child(&run.root_id, request("integrity check"))
+        .unwrap()
+        .agent;
+    let evidence = store
+        .artifact(
+            &run.id,
+            &other.id,
+            "tampered-result",
+            "test",
+            b"original",
+            "text/plain",
+            json!({}),
+        )
+        .unwrap();
+    fs::write(store.root().join(&evidence.relative_path), b"changed").unwrap();
+    assert!(
+        c.finish_result(
+            &other.id,
+            TaskResult {
+                answer: "answer".into(),
+                evidence_ids: vec![evidence.id],
+                ..Default::default()
+            }
+        )
+        .is_err()
+    );
+    c.finish_result(
+        &other.id,
+        TaskResult {
+            outcome: TaskOutcome::Cancelled,
+            answer: "cancelled by scope decision".into(),
+            next_actions: vec!["parent to revise scope".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        store
+            .require::<AgentRecord>("agent", &other.id)
+            .unwrap()
+            .status,
+        Status::Stopped
+    );
 }

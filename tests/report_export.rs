@@ -38,6 +38,8 @@ fn fixture(root: &Path) -> (Store, String, String) {
         scope: "fixture".into(),
         skills: vec![],
         active_skills: vec![],
+        contract: Default::default(),
+        task_result: None,
         status: Status::Completed,
         depth: 0,
         generation: 0,

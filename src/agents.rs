@@ -40,6 +40,9 @@ explicit additional work on a completed child. Replies use reply_to; delivery is
 Each child has its own durable conversation. Keep at most 1-3 closely related skills per task, 5 maximum.
 Close owned debug/interactive sessions before finishing. Another agent may close a terminal owner's orphaned session,
 but cannot send commands to it. Use view_agent_graph to find sessions that still need cleanup.
+Complete contracted work with agent_finish result: answer, outcome, original evidence references, named artifacts,
+completed_conditions, unknowns and next_actions. Missing evidence/capabilities require a bounded inconclusive or blocked
+result, not invented success. Contract checks establish completeness and provenance, not truth.
 Finish children with agent_finish; only root uses finish_scan. A plain-text answer without a lifecycle tool fails
 the agent and loses its turn — always end with the right lifecycle tool. When woken by a wait_finished note, act
 immediately with tool calls: a plain-text acknowledgment fails the agent.
@@ -199,6 +202,10 @@ pub fn preamble(
         run.target_path.display(),
         run.target_sha256,
         agent.scope
+    ));
+    text.push_str(&format!(
+        "\nTask contract (requirements; check deliverables before agent_finish):\n{}\n",
+        serde_json::to_string(&agent.contract)?
     ));
     let mut state = json!({"analysis_notes":store.list::<crate::domain::SharedDocument>("note",&run.id)?,"budget":run.budget});
     let threat_models = store.list::<crate::domain::SharedDocument>("threat_model", &run.id)?;

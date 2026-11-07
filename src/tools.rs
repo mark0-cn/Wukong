@@ -78,7 +78,7 @@ fn builtins() -> Vec<Spec> {
         spec(
             "create_agent",
             "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors names agents this child waits for: the runner starts it only after all of them are terminal.",
-            json!({"name":id,"role":{"type":"string","enum":["recon","reverse","hunter","fuzz","crash","exploit","verifier","reporter"]},"task":id,"scope":id,"skills":a,"inherit_context":b,"wait_for_predecessors":a}),
+            json!({"name":id,"role":{"type":"string","enum":["recon","reverse","hunter","fuzz","crash","exploit","verifier","reporter"]},"task":id,"scope":id,"skills":a,"inherit_context":b,"wait_for_predecessors":a,"contract":contract_schema()}),
             &["name", "role", "task", "scope"],
             true,
             false,
@@ -133,17 +133,17 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "agent_finish",
-            "Finish a child task with a substantive summary; active descendants must finish first.",
-            json!({"summary":id}),
-            &["summary"],
+            "Finish a child task with a structured result accounting for its contract, evidence and gaps. summary is shorthand for tasks without required outputs. Active descendants must finish first.",
+            json!({"summary":id,"result":result_schema()}),
+            &[],
             true,
             false,
         ),
         spec(
             "finish_scan",
             "Root only: finish the assessment after children and coverage are resolved.",
-            json!({"summary":id}),
-            &["summary"],
+            json!({"summary":id,"result":result_schema()}),
+            &[],
             true,
             false,
         ),
@@ -514,6 +514,17 @@ fn builtins() -> Vec<Spec> {
     }
     specs
 }
+fn contract_schema() -> Value {
+    json!({"type":"object","properties":{"objective":{"type":"string"},"input_evidence_ids":strings(),"constraints":strings(),"deliverables":strings(),"completion_conditions":strings()},"additionalProperties":false})
+}
+fn result_schema() -> Value {
+    json!({"type":"object","properties":{
+        "outcome":{"type":"string","enum":["success","inconclusive","blocked","cancelled"]},
+        "answer":{"type":"string","minLength":1},"evidence_ids":strings(),
+        "artifacts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","minLength":1},"evidence_id":{"type":"string","minLength":1}},"required":["name","evidence_id"],"additionalProperties":false}},
+        "completed_conditions":strings(),"unknowns":strings(),"next_actions":strings()},
+        "required":["outcome","answer"],"additionalProperties":false})
+}
 fn message_properties(follow_up: bool) -> Value {
     let mut properties = json!({"agent_id":{"type":"string","minLength":1},"message":{"type":"string","minLength":1},"recipient_generation":integer(0,u64::MAX),"correlation_id":{"type":"string","minLength":1},"evidence_ids":strings()});
     if !follow_up {
@@ -788,15 +799,31 @@ impl ToolService {
                         .filter(|session| !matches!(session["state"].as_str(), Some("closed" | "lost")))
                         .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
                 }
-                Ok(json!({"agents":self.store.list::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"status":a.status,"generation":a.generation,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}))
-            },
-            "send_message_to_agent" | "follow_up_agent" => self.send_message(agent, call_id, &args, name == "follow_up_agent"),
+                Ok(
+                    json!({"agents":self.store.list::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
+                )
+            }
+            "send_message_to_agent" | "follow_up_agent" => {
+                self.send_message(agent, call_id, &args, name == "follow_up_agent")
+            }
             "message_status" => {
-                let mid = number(&args,"message_id",0) as i64;
-                let message = self.store.transaction(|tx| Ok(Store::tx_messages(tx,&agent.run_id)?.into_iter().find(|message|message.id == mid)))?.context("message not in this run")?;
-                ensure!(agent.role == Role::Root || message.sender == agent.id || message.recipient == agent.id, "message is not addressed to or sent by this agent");
+                let mid = number(&args, "message_id", 0) as i64;
+                let message = self
+                    .store
+                    .transaction(|tx| {
+                        Ok(Store::tx_messages(tx, &agent.run_id)?
+                            .into_iter()
+                            .find(|message| message.id == mid))
+                    })?
+                    .context("message not in this run")?;
+                ensure!(
+                    agent.role == Role::Root
+                        || message.sender == agent.id
+                        || message.recipient == agent.id,
+                    "message is not addressed to or sent by this agent"
+                );
                 Ok(serde_json::to_value(message)?)
-            },
+            }
             "wait_for_agents" => {
                 if let Some(value) = self.store.get::<Value>("tool_receipt", call_id)? {
                     return Ok(value);
@@ -822,17 +849,22 @@ impl ToolService {
                 })
             }
             "agent_finish" | "finish_scan" => {
+                let result: TaskResult = if let Some(result) = args.get("result") {
+                    let result: TaskResult = serde_json::from_value(result.clone())?;
+                    if let Some(summary) = args.get("summary").and_then(Value::as_str) {
+                        ensure!(summary == result.answer, "summary must match result.answer");
+                    }
+                    result
+                } else {
+                    TaskResult {
+                        answer: text(&args, "summary")?.into(),
+                        ..Default::default()
+                    }
+                };
+                self.store
+                    .verify_evidence_links(&agent.run_id, &result.evidence_links())?;
                 self.effect(agent, call_id, |tx| {
-                    let unread: i64 = tx.query_row(
-                        "SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0",
-                        [&agent.id],
-                        |r| r.get(0),
-                    )?;
-                    ensure!(
-                        unread == 0,
-                        "unread mailbox messages remain; process them at a fresh model boundary before finishing"
-                    );
-                    Coordinator::tx_finish(tx, &agent.id, text(&args, "summary")?)?;
+                    Coordinator::tx_finish_result(tx, &agent.id, result)?;
                     Ok(json!({"finished":true,"agent_id":agent.id}))
                 })
             }
@@ -892,8 +924,12 @@ impl ToolService {
                 let part = if offset == total || length == 0 {
                     Vec::new()
                 } else {
-                    self.store
-                        .read_evidence_range(&agent.run_id, &evidence_id, offset as u64, length)?
+                    self.store.read_evidence_range(
+                        &agent.run_id,
+                        &evidence_id,
+                        offset as u64,
+                        length,
+                    )?
                 };
                 let end = offset + part.len();
                 let content = match std::str::from_utf8(&part) {
@@ -904,7 +940,7 @@ impl ToolService {
                     json!({"evidence_id":evidence_id,"offset":offset,"length":part.len(),"total_bytes":total,"next_offset":if end<total{Some(end)}else{None},"content":content}),
                 )
             }
-            "load_skill" => self.activate_skill(agent, call_id, text(&args,"name")?),
+            "load_skill" => self.activate_skill(agent, call_id, text(&args, "name")?),
             "think" => {
                 let content = text(&args, "content")?;
                 ensure!(
@@ -942,7 +978,11 @@ impl ToolService {
                     json!({"raw_tool_output":true,"tool":"binary_inspect","target_sha256":run.target_sha256}),
                 )?;
                 let pick = |key: &str| full.get(key).cloned().unwrap_or(Value::Null);
-                let count = |key: &str| full.get(key).and_then(Value::as_array).map_or(0, |a| a.len());
+                let count = |key: &str| {
+                    full.get(key)
+                        .and_then(Value::as_array)
+                        .map_or(0, |a| a.len())
+                };
                 Ok(json!({
                     "format": pick("format"),
                     "architecture": pick("architecture"),
@@ -981,8 +1021,8 @@ impl ToolService {
             "file_get" => self.file_get(agent, call_id, &args).await,
             "job_start" | "job_status" | "job_cancel" | "job_artifacts" | "fuzz_start"
             | "fuzz_status" | "debug_start" | "debug_command" | "debug_close" | "crash_replay"
-            | "input_minimize" | "poc_verify" | "angr_solve"
-            | "interactive_start" | "interactive_send" | "interactive_close" => {
+            | "input_minimize" | "poc_verify" | "angr_solve" | "interactive_start"
+            | "interactive_send" | "interactive_close" => {
                 self.runtime_tool(agent, call_id, name, args).await
             }
             _ if self.mcp.contains(name) => self.mcp.call(name, args).await,
@@ -1051,6 +1091,8 @@ impl ToolService {
             request.role != Role::Root && request.skills.len() <= 5,
             "invalid child role or skill count"
         );
+        self.store
+            .verify_evidence_links(&agent.run_id, &request.contract.input_evidence_ids)?;
         for skill in &request.skills {
             ensure!(
                 skill != "root",

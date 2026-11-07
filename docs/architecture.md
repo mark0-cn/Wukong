@@ -74,7 +74,31 @@ provider request, not that the model has acted. `replied` records an explicit
 correlated reply (not an assessment of correctness). Old-generation replies are
 retained as `stale` and never injected as current work. `message_status` exposes
 these states. Frozen model requests keep their original mailbox snapshot.
-SQLite schema 2 transactionally migrates schema 1 messages; older exports without
-an envelope still deserialize. Informational mail left on completed work becomes
+This increment uses a fresh schema 2 store; no old-database migration is provided.
+Informational mail left on completed work becomes
 stale when a new generation starts. CLI messages default to information; TUI
 operator input is a question and does not implicitly reopen completed work.
+
+## Task contracts and results
+
+`create_agent.contract` optionally declares an objective, input evidence IDs,
+constraints, required named deliverables and completion-condition labels. A task
+without extra requirements uses its task text as the objective.
+The contract is installed in the specialist prompt and survives checkpoints.
+An active role/scope cannot silently be reused with a conflicting contract.
+
+`agent_finish`/`finish_scan` accept `result`: outcome (success, inconclusive,
+blocked, cancelled), answer, evidence IDs, named evidence artifacts, completed
+condition labels, unknowns and next actions. Summary-only completion is a shorthand
+for tasks without required artifacts or conditions. Success checks required artifact names, linked raw
+evidence integrity and explicit coverage of declared conditions. These are
+completeness/provenance checks, not proof that a model's conclusion is correct.
+Non-success outcomes must identify unknowns or next actions and may omit missing
+outputs. Cancelled work becomes stopped; blocked/inconclusive completion records
+retain their distinct outcome for dependency evaluation.
+
+Results are attached to the terminal notification and agent graph, and archived
+per task/agent ID and generation in exported `snapshot.task_results`. A follow-up
+clears the current result without deleting the archived previous generation.
+The existing agent ID is the task identity in this increment; independent task
+assignment/worker attempts remain a later extension.

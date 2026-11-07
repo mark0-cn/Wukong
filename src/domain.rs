@@ -189,6 +189,9 @@ pub struct AgentRecord {
     pub role: Role,
     pub task: String,
     pub scope: String,
+    pub contract: TaskContract,
+    #[serde(default)]
+    pub task_result: Option<TaskResult>,
     pub skills: Vec<String>,
     /// Immutable snapshots explicitly activated with load_skill.
     #[serde(default)]
@@ -218,6 +221,66 @@ pub struct AgentRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
+pub struct TaskContract {
+    pub objective: String,
+    pub input_evidence_ids: Vec<String>,
+    pub constraints: Vec<String>,
+    /// Names of required evidence-backed artifacts, such as a field table.
+    pub deliverables: Vec<String>,
+    /// Exact labels the result must explicitly account for on success.
+    pub completion_conditions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskOutcome {
+    #[default]
+    Success,
+    Inconclusive,
+    Blocked,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskArtifact {
+    pub name: String,
+    pub evidence_id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskResult {
+    pub outcome: TaskOutcome,
+    pub answer: String,
+    #[serde(default)]
+    pub evidence_ids: Vec<String>,
+    #[serde(default)]
+    pub artifacts: Vec<TaskArtifact>,
+    #[serde(default)]
+    pub completed_conditions: Vec<String>,
+    #[serde(default)]
+    pub unknowns: Vec<String>,
+    #[serde(default)]
+    pub next_actions: Vec<String>,
+}
+
+impl TaskResult {
+    pub fn evidence_links(&self) -> Vec<String> {
+        self.evidence_ids
+            .iter()
+            .cloned()
+            .chain(
+                self.artifacts
+                    .iter()
+                    .map(|artifact| artifact.evidence_id.clone()),
+            )
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub id: i64,
@@ -227,7 +290,6 @@ pub struct Message {
     pub content: String,
     pub acknowledged: bool,
     pub created_at: DateTime<Utc>,
-    #[serde(default)]
     pub envelope: MessageEnvelope,
 }
 

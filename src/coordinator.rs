@@ -17,6 +17,8 @@ pub struct ChildRequest {
     pub task: String,
     pub scope: String,
     #[serde(default)]
+    pub contract: TaskContract,
+    #[serde(default)]
     pub skills: Vec<String>,
     #[serde(default = "yes")]
     pub inherit_context: bool,
@@ -77,6 +79,11 @@ impl Coordinator {
             role: Role::Root,
             task: task.to_owned(),
             scope: "assessment".into(),
+            contract: TaskContract {
+                objective: task.into(),
+                ..Default::default()
+            },
+            task_result: None,
             skills: vec!["root".into()],
             active_skills: vec![],
             status: Status::Queued,
@@ -112,13 +119,16 @@ impl Coordinator {
         Ok(run)
     }
     pub fn create_child(&self, parent_id: &str, request: ChildRequest) -> Result<SpawnResult> {
+        let parent: AgentRecord = self.store.require("agent", parent_id)?;
+        self.store
+            .verify_evidence_links(&parent.run_id, &request.contract.input_evidence_ids)?;
         self.store
             .transaction(|tx| Self::tx_create_child(tx, parent_id, request, id("agent")))
     }
     pub(crate) fn tx_create_child(
         tx: &rusqlite::Connection,
         parent_id: &str,
-        request: ChildRequest,
+        mut request: ChildRequest,
         child_id: String,
     ) -> Result<SpawnResult> {
         if request.role == Role::Root {
@@ -142,10 +152,22 @@ impl Coordinator {
         if run.status.terminal() {
             bail!("run is terminal");
         }
+        if request.contract.objective.trim().is_empty() {
+            request.contract.objective = request.task.clone();
+        }
+        Self::validate_contract(tx, &run.id, &request.contract)?;
         let agents = Store::tx_list::<AgentRecord>(tx, "agent", &run.id)?;
         if let Some(existing) = agents.iter().find(|a| {
             a.scope.trim() == request.scope.trim() && a.role == request.role && !a.status.terminal()
         }) {
+            let mut existing_contract = existing.contract.clone();
+            if existing_contract.objective.trim().is_empty() {
+                existing_contract.objective = existing.task.clone();
+            }
+            ensure!(
+                existing_contract == request.contract,
+                "active scope has a different task contract; send a clarification or use a distinct scope"
+            );
             return Ok(SpawnResult {
                 created: false,
                 agent: existing.clone(),
@@ -176,6 +198,8 @@ impl Coordinator {
             role: request.role,
             task: request.task,
             scope: request.scope,
+            contract: request.contract,
+            task_result: None,
             skills: request.skills,
             active_skills: vec![],
             status: Status::Queued,
@@ -442,6 +466,7 @@ impl Coordinator {
                 agent.wait_until = None;
                 agent.wait_for_predecessors.clear();
                 agent.error = None;
+                agent.task_result = None;
                 agent.updated_at = now();
                 Store::tx_put(tx, "agent", &agent.id, &agent.run_id, &agent)?;
                 Store::tx_event(
@@ -609,22 +634,32 @@ impl Coordinator {
             } else {
                 format!("terminal:{}:{}", agent.id, agent.generation)
             };
-            Store::tx_message(tx,&agent.run_id,&agent.id,parent,&json!({"type":"agent_finished","agent_id":agent.id,"generation":agent.generation,"status":agent.status,"summary":agent.summary,"error":agent.error}).to_string(),Some(&key))?;
+            Store::tx_message(tx,&agent.run_id,&agent.id,parent,&json!({"type":"agent_finished","agent_id":agent.id,"generation":agent.generation,"status":agent.status,"summary":agent.summary,"result":agent.task_result,"error":agent.error}).to_string(),Some(&key))?;
         }
         Ok(())
     }
     pub fn finish(&self, agent_id: &str, summary: &str) -> Result<()> {
-        self.store
-            .transaction(|tx| Self::tx_finish(tx, agent_id, summary))
+        self.finish_result(
+            agent_id,
+            TaskResult {
+                answer: summary.into(),
+                ..Default::default()
+            },
+        )
     }
-    /// Transactional finish usable inside a tool-effect receipt, so a durable
-    /// retry after an uncertain outcome replays the stored result instead of
-    /// re-executing the lifecycle transition.
-    pub(crate) fn tx_finish(
+    pub fn finish_result(&self, agent_id: &str, result: TaskResult) -> Result<()> {
+        let agent: AgentRecord = self.store.require("agent", agent_id)?;
+        self.store
+            .verify_evidence_links(&agent.run_id, &result.evidence_links())?;
+        self.store
+            .transaction(|tx| Self::tx_finish_result(tx, agent_id, result))
+    }
+    pub(crate) fn tx_finish_result(
         tx: &rusqlite::Connection,
         agent_id: &str,
-        summary: &str,
+        result: TaskResult,
     ) -> Result<()> {
+        let summary = &result.answer;
         if summary.trim().is_empty() {
             bail!("completion summary must be nonempty");
         }
@@ -636,6 +671,7 @@ impl Coordinator {
         if agent.status.terminal() {
             bail!("agent already terminated with {}", agent.status);
         }
+        Self::validate_result(tx, &agent, &result)?;
         let unread: i64 = tx.query_row(
             "SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0",
             [agent_id],
@@ -704,7 +740,19 @@ impl Coordinator {
                 );
             }
         }
-        agent.status = Status::Completed;
+        agent.status = if result.outcome == TaskOutcome::Cancelled {
+            Status::Stopped
+        } else {
+            Status::Completed
+        };
+        agent.task_result = Some(result.clone());
+        Store::tx_put(
+            tx,
+            "task_result",
+            &format!("{}:{}", agent.id, agent.generation),
+            &agent.run_id,
+            &json!({"task_id":agent.id,"generation":agent.generation,"result":result}),
+        )?;
         agent.summary = Some(summary.to_owned());
         agent.updated_at = now();
         Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
@@ -712,7 +760,7 @@ impl Coordinator {
         if agent.role == Role::Root {
             let mut run: RunRecord =
                 Store::tx_get(tx, "run", &agent.run_id)?.context("run missing")?;
-            run.status = Status::Completed;
+            run.status = agent.status;
             run.summary = Some(summary.to_owned());
             run.updated_at = now();
             Store::tx_put(tx, "run", &run.id, &run.id, &run)?;
@@ -724,6 +772,114 @@ impl Coordinator {
             "agent.completed",
             json!({"summary":summary}),
         )?;
+        Ok(())
+    }
+    fn validate_contract(
+        tx: &rusqlite::Connection,
+        run_id: &str,
+        contract: &TaskContract,
+    ) -> Result<()> {
+        ensure!(
+            !contract.objective.trim().is_empty() && contract.objective.len() <= 65536,
+            "invalid contract objective"
+        );
+        for values in [
+            &contract.constraints,
+            &contract.deliverables,
+            &contract.completion_conditions,
+        ] {
+            ensure!(
+                values.len() <= 32
+                    && values
+                        .iter()
+                        .all(|value| !value.trim().is_empty() && value.len() <= 4096),
+                "invalid contract requirement"
+            );
+            ensure!(
+                values.iter().collect::<HashSet<_>>().len() == values.len(),
+                "duplicate contract requirement"
+            );
+        }
+        Self::validate_evidence(tx, run_id, &contract.input_evidence_ids)
+    }
+    fn validate_evidence(tx: &rusqlite::Connection, run_id: &str, links: &[String]) -> Result<()> {
+        ensure!(links.len() <= 128, "too many task evidence references");
+        for link in links {
+            let evidence: Evidence =
+                Store::tx_get(tx, "evidence", link)?.context("task evidence missing")?;
+            ensure!(
+                evidence.run_id == run_id,
+                "task evidence belongs to another run"
+            );
+        }
+        Ok(())
+    }
+    fn validate_result(
+        tx: &rusqlite::Connection,
+        agent: &AgentRecord,
+        result: &TaskResult,
+    ) -> Result<()> {
+        ensure!(
+            !result.answer.trim().is_empty() && result.answer.len() <= 65536,
+            "invalid result answer"
+        );
+        Self::validate_evidence(tx, &agent.run_id, &result.evidence_links())?;
+        ensure!(result.artifacts.len() <= 32, "too many task artifacts");
+        let names: HashSet<_> = result
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.name.as_str())
+            .collect();
+        ensure!(
+            names.len() == result.artifacts.len()
+                && names
+                    .iter()
+                    .all(|name| !name.trim().is_empty() && name.len() <= 4096),
+            "invalid or duplicate artifact name"
+        );
+        for values in [
+            &result.completed_conditions,
+            &result.unknowns,
+            &result.next_actions,
+        ] {
+            ensure!(
+                values.len() <= 32
+                    && values
+                        .iter()
+                        .all(|value| !value.trim().is_empty() && value.len() <= 4096),
+                "invalid task result detail"
+            );
+        }
+        ensure!(
+            result
+                .completed_conditions
+                .iter()
+                .all(|condition| agent.contract.completion_conditions.contains(condition)),
+            "result claims an undeclared completion condition"
+        );
+        if result.outcome == TaskOutcome::Success {
+            ensure!(
+                agent
+                    .contract
+                    .deliverables
+                    .iter()
+                    .all(|name| names.contains(name.as_str())),
+                "required task deliverables missing; provide structured result artifacts"
+            );
+            ensure!(
+                agent
+                    .contract
+                    .completion_conditions
+                    .iter()
+                    .all(|condition| result.completed_conditions.contains(condition)),
+                "required completion conditions not accounted for"
+            );
+        } else {
+            ensure!(
+                !result.unknowns.is_empty() || !result.next_actions.is_empty(),
+                "non-success result requires unknowns or next_actions"
+            );
+        }
         Ok(())
     }
     fn is_descendant(agent: &AgentRecord, parent: &str, all: &[AgentRecord]) -> bool {
