@@ -74,6 +74,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result["result"]["stdout"].strip(), "")
         self.assertEqual(self.client.call("doctor")["protocol"], 1)
 
+    def test_job_environment_carries_state_and_job_dirs(self):
+        result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(os.environ['RE_AGENT_STATE_DIR']);print(os.environ['RE_AGENT_JOB_DIR'])"]))
+        state_dir, job_dir = result["result"]["stdout"].strip().splitlines()
+        self.assertTrue(Path(state_dir).is_dir())
+        self.assertTrue(Path(job_dir).is_dir())
+        self.assertEqual(Path(state_dir).resolve(), self.root.resolve())
+
     def test_artifact_confinement(self):
         self.client.put("example.txt", b"example")
         # Client.call asserts worker errors, which is intentional in these cases.

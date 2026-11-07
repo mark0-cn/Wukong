@@ -415,6 +415,11 @@ def supervise_job(root, directory):
             # this job and is collected by job.artifacts. Isolated jobs cannot
             # write it and fall back to their sealed working directory.
             job_env["RE_AGENT_JOB_DIR"] = str(directory)
+            # The state root is injected into every job environment so scripts
+            # can address staged files (os.path.join(RE_AGENT_STATE_DIR,
+            # 'files', ...)) without guessing the worker layout. It is a fixed
+            # path, not a credential.
+            job_env["RE_AGENT_STATE_DIR"] = str(root)
             result = run_process(argv, cwd, job_env, spec["timeout_secs"], spec["output_limit"], directory / "output", directory / "cancel", experiment)
             result["experiment_uid"] = experiment["uid"] if experiment else None
             result["metadata_protected"] = bool(experiment)

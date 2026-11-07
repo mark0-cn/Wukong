@@ -3,8 +3,20 @@
 The worker has Python 3 with pwntools, z3-solver, angr and ropper installed.
 You reach them through the normal execution tools — write a script with
 file_put and run it with job_start (argv ["python3", "files/<script>"]),
-then read job_status. Worker paths resolve only as direct argv entries;
-never wrap them in `bash -c "..."`.
+then read job_status.
+
+## Path discipline (worker layouts are not guessable)
+
+- Worker paths like `files/...` resolve only as DIRECT argv entries; a path
+  written inside a script body or a `bash -c` string is not resolved.
+- Pass the staged target into your script as an argv element with the
+  `{target}` placeholder: `job_start argv ["python3", "files/<script>", "{target}"]`;
+  the harness replaces it with the staged target path and the script reads it
+  from `sys.argv[2]`. In isolated jobs that argv entry is staged automatically.
+- Inside a job, `RE_AGENT_STATE_DIR` is the worker state root and
+  `RE_AGENT_JOB_DIR` is the job's own output directory. Use
+  `os.path.join(os.environ["RE_AGENT_STATE_DIR"], "files", ...)` for anything
+  the placeholder cannot carry. Never hardcode `/state/...` guesses.
 
 ## angr (symbolic execution) — fastest path for input reconstruction
 

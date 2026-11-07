@@ -357,7 +357,7 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "job_start",
-            "Start a persistent process job in the configured worker; returns a job_id immediately.",
+            "Start a persistent process job in the configured worker; returns a job_id immediately. argv entries may use {target} as a placeholder for the staged target path (resolved by the harness and staged in isolated jobs); worker paths like files/... resolve only as direct argv entries, never inside shell strings. Jobs may read RE_AGENT_STATE_DIR and RE_AGENT_JOB_DIR from the environment.",
             json!({"argv":a,"cwd":s,"env":o,"timeout_secs":integer(1,86400),"output_limit":integer(1024,8*1024*1024)}),
             &["argv"],
             true,
@@ -1938,11 +1938,20 @@ impl ToolService {
                     "angr_solve" => "angr.solve",
                     _ => "poc.verify",
                 };
+                // job_start argv may reference the staged target via the
+                // {target} placeholder; the harness resolves it to the worker
+                // path so scripts receive it as a plain argv element (staged
+                // in isolated jobs) instead of guessing the worker layout.
+                let params = if name == "job_start" {
+                    substitute_target_argv(&args, &run.target_sha256)
+                } else {
+                    args.clone()
+                };
                 let raw = self
-                    .worker_call(agent, call_id, method, args.clone())
+                    .worker_call(agent, call_id, method, params.clone())
                     .await?;
                 let job_id = raw["job_id"].as_str().context("worker job ID missing")?;
-                let record = json!({"id":job_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"tool_name":name,"finding_id":finding_id,"call_id":call_id,"worker_request_id":self.request_identity(agent,call_id),"parameters":args,"target_sha256":run.target_sha256,"status":raw,"created_at":now(),"updated_at":now()});
+                let record = json!({"id":job_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"tool_name":name,"finding_id":finding_id,"call_id":call_id,"worker_request_id":self.request_identity(agent,call_id),"parameters":params,"target_sha256":run.target_sha256,"status":raw,"created_at":now(),"updated_at":now()});
                 if let Some(previous) = self.store.get::<Value>("job", job_id)? {
                     ensure!(
                         previous["run_id"] == agent.run_id
@@ -2093,6 +2102,23 @@ impl ToolService {
             Ok(serde_json::to_value(verification)?)
         })
     }
+}
+
+/// Replace the `{target}` placeholder in a job_start argv with the staged
+/// target worker path, so scripts receive it as a plain argv element (the
+/// bridge stages such paths in isolated jobs) instead of guessing the worker
+/// layout.
+fn substitute_target_argv(args: &Value, target_sha256: &str) -> Value {
+    let staged = format!("files/targets/{target_sha256}/sample.bin");
+    let mut params = args.clone();
+    if let Some(argv) = params.get_mut("argv").and_then(Value::as_array_mut) {
+        for entry in argv.iter_mut() {
+            if let Some(text) = entry.as_str() {
+                *entry = json!(text.replace("{target}", &staged));
+            }
+        }
+    }
+    params
 }
 
 fn finish_record(
@@ -2353,4 +2379,31 @@ fn validate_args(value: &Value, definition: &Value, path: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::substitute_target_argv;
+
+    #[test]
+    fn target_placeholder_replaces_argv_entries() {
+        let args = serde_json::json!({
+            "argv": ["python3", "files/tools/exploit.py", "{target}", "extra"],
+            "timeout_secs": 10,
+        });
+        let params = substitute_target_argv(&args, "deadbeef");
+        let argv = params["argv"].as_array().unwrap();
+        assert_eq!(argv[0], "python3");
+        assert_eq!(argv[1], "files/tools/exploit.py");
+        assert_eq!(argv[2], "files/targets/deadbeef/sample.bin");
+        assert_eq!(argv[3], "extra");
+        assert_eq!(params["timeout_secs"], 10);
+    }
+
+    #[test]
+    fn target_placeholder_ignores_non_job_shapes() {
+        let args = serde_json::json!({"argv": "not-an-array"});
+        let params = substitute_target_argv(&args, "deadbeef");
+        assert_eq!(params, args);
+    }
 }
