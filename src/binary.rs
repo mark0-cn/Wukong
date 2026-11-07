@@ -848,9 +848,22 @@ impl GhidraBackend {
                 .open(&lock_path)
             {
                 Ok(file) => {
+                    let owner = serde_json::json!({
+                        "owner_pid": std::process::id(),
+                        "created_at_unix": std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0),
+                    });
+                    if let Err(error) = fs::write(&lock_path, serde_json::to_vec(&owner)?) {
+                        drop(file);
+                        let _ = fs::remove_file(&lock_path);
+                        return Err(error.into());
+                    }
                     break ProjectLock {
                         path: lock_path.clone(),
                         file: Some(file),
+                        owner_pid: std::process::id(),
                     };
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -915,7 +928,7 @@ impl GhidraBackend {
             .stdin(Stdio::null())
             .stdout(fs::File::create(&stdout_path)?)
             .stderr(fs::File::create(&stderr_path)?)
-            .kill_on_drop(true);
+            .kill_on_drop(false);
         #[cfg(windows)]
         {
             cmd.creation_flags(0x08000000);
@@ -924,33 +937,23 @@ impl GhidraBackend {
         {
             cmd.process_group(0);
         }
-        let mut child = cmd
+        let child = cmd
             .spawn()
             .with_context(|| format!("launch Ghidra {}", executable.display()))?;
+        let mut killer = TreeKill { child: Some(child) };
         let status = match tokio::time::timeout(
             Duration::from_secs(self.config.timeout_seconds),
-            child.wait(),
+            killer
+                .child
+                .as_mut()
+                .context("Ghidra child missing")?
+                .wait(),
         )
         .await
         {
             Ok(status) => status?,
             Err(_) => {
-                #[cfg(windows)]
-                if let Some(pid) = child.id() {
-                    let _ = tokio::process::Command::new("taskkill")
-                        .args(["/PID", &pid.to_string(), "/T", "/F"])
-                        .creation_flags(0x08000000)
-                        .output()
-                        .await;
-                }
-                #[cfg(unix)]
-                if let Some(pid) = child.id() {
-                    let _ = tokio::process::Command::new("kill")
-                        .args(["-KILL", "--", &format!("-{pid}")])
-                        .output()
-                        .await;
-                }
-                let _ = child.kill().await;
+                killer.terminate().await;
                 bail!(
                     "Ghidra timed out after {} seconds; logs: {} and {}",
                     self.config.timeout_seconds,
@@ -1015,11 +1018,62 @@ impl GhidraBackend {
 struct ProjectLock {
     path: PathBuf,
     file: Option<fs::File>,
+    owner_pid: u32,
 }
 impl Drop for ProjectLock {
     fn drop(&mut self) {
         drop(self.file.take());
-        let _ = fs::remove_file(&self.path);
+        // Only remove a lock this process still owns. A stale foreign lock
+        // must be inspected by an operator, not silently deleted under a
+        // live successor.
+        let owned = fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|value| value["owner_pid"].as_u64())
+            .is_some_and(|pid| pid == u64::from(self.owner_pid));
+        if owned {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+/// Owns the Ghidra child and terminates its whole process tree on drop or
+/// timeout. analyzeHeadless launchers spawn the real analyzer as a
+/// grandchild (a shell or cmd shim in between), which kill_on_drop alone
+/// would leave running after a cancellation.
+struct TreeKill {
+    child: Option<tokio::process::Child>,
+}
+impl TreeKill {
+    async fn terminate(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        #[cfg(windows)]
+        if let Some(pid) = child.id() {
+            let _ = tokio::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .creation_flags(0x08000000)
+                .output()
+                .await;
+        }
+        #[cfg(unix)]
+        if let Some(pid) = child.id() {
+            let _ = tokio::process::Command::new("kill")
+                .args(["-KILL", "--", &format!("-{pid}")])
+                .output()
+                .await;
+        }
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+}
+impl Drop for TreeKill {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.take() {
+            let mut killer = TreeKill { child: Some(child) };
+            tokio::spawn(async move { killer.terminate().await });
+        }
     }
 }
 
@@ -1114,6 +1168,38 @@ mod tests {
             "the fake Ghidra executable must not have been invoked"
         );
         holder.await.unwrap();
+        Ok(())
+    }
+
+    #[test]
+    fn project_lock_drop_removes_only_its_own_lock() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("worker.lock");
+        let lock = ProjectLock {
+            path: path.clone(),
+            file: None,
+            owner_pid: std::process::id(),
+        };
+        // Simulated acquisition: the file records our pid.
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({"owner_pid": std::process::id()}))?,
+        )?;
+        drop(lock);
+        assert!(!path.exists(), "an owned lock must be removed on drop");
+        // A lock now owned by someone else must survive our drop.
+        fs::write(&path, br#"{"owner_pid": 1}"#)?;
+        let foreign = ProjectLock {
+            path: path.clone(),
+            file: None,
+            owner_pid: std::process::id(),
+        };
+        drop(foreign);
+        assert!(
+            path.exists(),
+            "a foreign-owned lock must not be removed on drop"
+        );
+        fs::remove_file(&path)?;
         Ok(())
     }
 }
