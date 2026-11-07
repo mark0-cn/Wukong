@@ -4,7 +4,7 @@ use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 
 #[derive(Clone)]
 pub struct Coordinator {
@@ -80,6 +80,7 @@ impl Coordinator {
             skills: vec!["root".into()],
             status: Status::Queued,
             depth: 0,
+            generation: 0,
             inherit_context: false,
             inherited_context: None,
             checkpoint: None,
@@ -110,6 +111,15 @@ impl Coordinator {
         Ok(run)
     }
     pub fn create_child(&self, parent_id: &str, request: ChildRequest) -> Result<SpawnResult> {
+        self.store
+            .transaction(|tx| Self::tx_create_child(tx, parent_id, request, id("agent")))
+    }
+    pub(crate) fn tx_create_child(
+        tx: &rusqlite::Connection,
+        parent_id: &str,
+        request: ChildRequest,
+        child_id: String,
+    ) -> Result<SpawnResult> {
         if request.role == Role::Root {
             bail!("a child cannot have root role");
         }
@@ -122,128 +132,232 @@ impl Coordinator {
         if request.skills.len() > 5 {
             bail!("at most 5 related skills per agent");
         }
-        self.store.transaction(|tx| {
-            let parent: AgentRecord =
-                Store::tx_get(tx, "agent", parent_id)?.context("parent agent missing")?;
-            if parent.status.terminal() {
-                bail!("parent is terminal");
-            }
-            let run: RunRecord =
-                Store::tx_get(tx, "run", &parent.run_id)?.context("run missing")?;
-            if run.status.terminal() {
-                bail!("run is terminal");
-            }
-            let agents = Store::tx_list::<AgentRecord>(tx, "agent", &run.id)?;
-            if let Some(existing) = agents.iter().find(|a| {
-                a.scope.trim() == request.scope.trim()
-                    && a.role == request.role
-                    && !matches!(a.status, Status::Stopped | Status::Crashed | Status::Failed)
-            }) {
-                return Ok(SpawnResult {
-                    created: false,
-                    agent: existing.clone(),
-                });
-            }
-            if agents.len() >= run.budget.max_agents {
-                bail!("maximum total agent count reached");
-            }
-            if parent.depth + 1 > run.budget.max_depth {
-                bail!("maximum agent depth reached");
-            }
-            let child_id = id("agent");
-            for predecessor in &request.wait_for_predecessors {
-                let target = agents
-                    .iter()
-                    .find(|a| &a.id == predecessor)
-                    .with_context(|| format!("wait_for_predecessors target missing: {predecessor}"))?;
-                ensure!(
-                    target.run_id == run.id,
-                    "wait_for_predecessors target belongs to another run"
-                );
-                ensure!(
-                    !target.wait_for_predecessors.contains(&child_id),
-                    "wait_for_predecessors would deadlock"
-                );
-            }
-            let timestamp = now();
-            let agent = AgentRecord {
-                id: child_id,
-                run_id: run.id.clone(),
-                parent_id: Some(parent.id.clone()),
-                name: request.name,
-                role: request.role,
-                task: request.task,
-                scope: request.scope,
-                skills: request.skills,
-                status: Status::Queued,
-                depth: parent.depth + 1,
-                inherit_context: request.inherit_context,
-                inherited_context: if request.inherit_context {
-                    parent.checkpoint.clone()
-                } else {
-                    None
-                },
-                checkpoint: None,
-                wait_for: vec![],
-                wait_until: None,
-                wait_for_predecessors: request.wait_for_predecessors.clone(),
-                turns: 0,
-                total_tokens: 0,
-                cost_usd: 0.0,
-                token_cap: Some(run.budget.role_token_cap(request.role)),
-                summary: None,
-                error: None,
-                created_at: timestamp,
-                updated_at: timestamp,
-            };
-            Store::tx_put(tx, "agent", &agent.id, &run.id, &agent)?;
-            Store::tx_event(
-                tx,
-                &run.id,
-                Some(&agent.id),
-                "agent.created",
-                json!({"parent_id":parent.id,"role":agent.role,"scope":agent.scope}),
-            )?;
-            Ok(SpawnResult {
-                created: true,
-                agent,
-            })
+        let parent: AgentRecord =
+            Store::tx_get(tx, "agent", parent_id)?.context("parent agent missing")?;
+        if parent.status.terminal() {
+            bail!("parent is terminal");
+        }
+        let run: RunRecord = Store::tx_get(tx, "run", &parent.run_id)?.context("run missing")?;
+        if run.status.terminal() {
+            bail!("run is terminal");
+        }
+        let agents = Store::tx_list::<AgentRecord>(tx, "agent", &run.id)?;
+        if let Some(existing) = agents.iter().find(|a| {
+            a.scope.trim() == request.scope.trim() && a.role == request.role && !a.status.terminal()
+        }) {
+            return Ok(SpawnResult {
+                created: false,
+                agent: existing.clone(),
+            });
+        }
+        if agents.len() >= run.budget.max_agents {
+            bail!("maximum total agent count reached");
+        }
+        if parent.depth + 1 > run.budget.max_depth {
+            bail!("maximum agent depth reached");
+        }
+        for predecessor in &request.wait_for_predecessors {
+            let target = agents
+                .iter()
+                .find(|a| &a.id == predecessor)
+                .with_context(|| format!("wait_for_predecessors target missing: {predecessor}"))?;
+            ensure!(
+                target.run_id == run.id,
+                "wait_for_predecessors target belongs to another run"
+            );
+        }
+        let timestamp = now();
+        let agent = AgentRecord {
+            id: child_id,
+            run_id: run.id.clone(),
+            parent_id: Some(parent.id.clone()),
+            name: request.name,
+            role: request.role,
+            task: request.task,
+            scope: request.scope,
+            skills: request.skills,
+            status: Status::Queued,
+            depth: parent.depth + 1,
+            generation: 0,
+            inherit_context: request.inherit_context,
+            inherited_context: if request.inherit_context {
+                parent.checkpoint.clone()
+            } else {
+                None
+            },
+            checkpoint: None,
+            wait_for: vec![],
+            wait_until: None,
+            wait_for_predecessors: request.wait_for_predecessors.clone(),
+            turns: 0,
+            total_tokens: 0,
+            cost_usd: 0.0,
+            token_cap: Some(run.budget.role_token_cap(request.role)),
+            summary: None,
+            error: None,
+            created_at: timestamp,
+            updated_at: timestamp,
+        };
+        let mut graph = agents;
+        graph.push(agent.clone());
+        Self::validate_dependencies(&graph)?;
+        Store::tx_put(tx, "agent", &agent.id, &run.id, &agent)?;
+        Store::tx_event(
+            tx,
+            &run.id,
+            Some(&agent.id),
+            "agent.created",
+            json!({"parent_id":parent.id,"role":agent.role,"scope":agent.scope}),
+        )?;
+        Ok(SpawnResult {
+            created: true,
+            agent,
         })
     }
+
+    /// Completion requires children to terminate, so parent -> child edges
+    /// participate in the same graph as explicit predecessor dependencies.
+    fn validate_dependencies(agents: &[AgentRecord]) -> Result<()> {
+        fn visit<'a>(
+            id: &'a str,
+            agents: &'a [AgentRecord],
+            visiting: &mut HashSet<&'a str>,
+            visited: &mut HashSet<&'a str>,
+        ) -> Result<()> {
+            if visited.contains(id) {
+                return Ok(());
+            }
+            ensure!(
+                visiting.insert(id),
+                "agent dependencies would deadlock (cycle at {id})"
+            );
+            if let Some(agent) = agents.iter().find(|a| a.id == id && !a.status.terminal()) {
+                for dependency in agents.iter().filter(|other| {
+                    !other.status.terminal()
+                        && (other.parent_id.as_deref() == Some(id)
+                            || agent.wait_for_predecessors.contains(&other.id))
+                }) {
+                    visit(&dependency.id, agents, visiting, visited)?;
+                }
+            }
+            visiting.remove(id);
+            visited.insert(id);
+            Ok(())
+        }
+        let mut visiting = HashSet::new();
+        let mut visited = HashSet::new();
+        for agent in agents.iter().filter(|a| !a.status.terminal()) {
+            visit(&agent.id, agents, &mut visiting, &mut visited)?;
+        }
+        Ok(())
+    }
     pub fn message(&self, sender: &str, recipient: &str, content: &str) -> Result<()> {
+        self.store
+            .transaction(|tx| Self::tx_message(tx, sender, recipient, content, None))
+    }
+    pub(crate) fn tx_message(
+        tx: &rusqlite::Connection,
+        sender: &str,
+        recipient: &str,
+        content: &str,
+        dedupe_key: Option<&str>,
+    ) -> Result<()> {
         if content.trim().is_empty() {
             bail!("message cannot be empty");
         }
-        self.store.transaction(|tx| {
-            let mut target: AgentRecord =
-                Store::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
-            if target.status.terminal() {
-                bail!("recipient is terminal; create a new focused task");
+        let mut target: AgentRecord =
+            Store::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
+        let run: RunRecord = Store::tx_get(tx, "run", &target.run_id)?.context("run missing")?;
+        ensure!(!run.status.terminal(), "assessment is terminal");
+        ensure!(
+            !target.status.terminal() || target.status == Status::Completed,
+            "recipient is stopped or failed; create a new focused task"
+        );
+        if sender != "operator" {
+            let from: AgentRecord =
+                Store::tx_get(tx, "agent", sender)?.context("sender missing")?;
+            if from.run_id != target.run_id {
+                bail!("cross-run message denied");
             }
-            if sender != "operator" {
-                let from: AgentRecord =
-                    Store::tx_get(tx, "agent", sender)?.context("sender missing")?;
-                if from.run_id != target.run_id {
-                    bail!("cross-run message denied");
+        }
+        if !Store::tx_message(tx, &target.run_id, sender, recipient, content, dedupe_key)? {
+            return Ok(());
+        }
+        if target.status == Status::Completed {
+            // Keep the old conversation as background, but start a new
+            // Rig run so its lifecycle call cannot be replayed as new work.
+            let mut current = Some(target.clone());
+            while let Some(mut agent) = current {
+                if agent.status != Status::Completed {
+                    ensure!(!agent.status.terminal(), "ancestor is stopped or failed");
+                    break;
+                }
+                agent.generation = agent
+                    .generation
+                    .checked_add(1)
+                    .context("agent generation exhausted")?;
+                agent.inherited_context = agent.checkpoint.take().or(agent.inherited_context);
+                agent.status = if run.status == Status::BudgetPaused {
+                    Status::BudgetPaused
+                } else {
+                    Status::Queued
+                };
+                agent.wait_for.clear();
+                agent.wait_until = None;
+                agent.wait_for_predecessors.clear();
+                agent.error = None;
+                agent.updated_at = now();
+                Store::tx_put(tx, "agent", &agent.id, &agent.run_id, &agent)?;
+                Store::tx_event(
+                    tx,
+                    &agent.run_id,
+                    Some(&agent.id),
+                    "agent.reopened",
+                    json!({"generation":agent.generation,"recipient":recipient}),
+                )?;
+                if agent.id == recipient {
+                    target = agent.clone();
+                }
+                current = agent
+                    .parent_id
+                    .as_ref()
+                    .map(|id| Store::tx_get(tx, "agent", id)?.context("parent missing"))
+                    .transpose()?;
+                if let Some(parent) = &current
+                    && parent.status == Status::Completed
+                {
+                    Store::tx_message(
+                        tx,
+                        &target.run_id,
+                        "coordinator",
+                        &parent.id,
+                        &format!(
+                            "A completed descendant {recipient} was reopened for a follow-up. Reconcile its new result before finishing."
+                        ),
+                        None,
+                    )?;
                 }
             }
-            Store::tx_message(tx, &target.run_id, sender, recipient, content, None)?;
-            if target.status == Status::Waiting {
-                target.status = Status::Queued;
-                target.wait_for.clear();
-                target.wait_until = None;
-                target.updated_at = now();
-                Store::tx_put(tx, "agent", recipient, &target.run_id, &target)?;
-            }
-            Store::tx_event(
+            Self::validate_dependencies(&Store::tx_list::<AgentRecord>(
                 tx,
+                "agent",
                 &target.run_id,
-                Some(recipient),
-                "message.received",
-                json!({"sender":sender}),
-            )?;
-            Ok(())
-        })
+            )?)?;
+        } else if target.status == Status::Waiting {
+            target.status = Status::Queued;
+            target.wait_for.clear();
+            target.wait_until = None;
+            target.updated_at = now();
+            Store::tx_put(tx, "agent", recipient, &target.run_id, &target)?;
+        }
+        Store::tx_event(
+            tx,
+            &target.run_id,
+            Some(recipient),
+            "message.received",
+            json!({"sender":sender}),
+        )?;
+        Ok(())
     }
     pub fn wait(&self, agent_id: &str, targets: &[String], timeout_seconds: u64) -> Result<Value> {
         self.store.transaction(|tx| {
@@ -354,7 +468,12 @@ impl Coordinator {
     }
     pub(crate) fn notify_terminal(tx: &rusqlite::Connection, agent: &AgentRecord) -> Result<()> {
         if let Some(parent) = &agent.parent_id {
-            Store::tx_message(tx,&agent.run_id,&agent.id,parent,&json!({"type":"agent_finished","agent_id":agent.id,"status":agent.status,"summary":agent.summary,"error":agent.error}).to_string(),Some(&format!("terminal:{}",agent.id)))?;
+            let key = if agent.generation == 0 {
+                format!("terminal:{}", agent.id)
+            } else {
+                format!("terminal:{}:{}", agent.id, agent.generation)
+            };
+            Store::tx_message(tx,&agent.run_id,&agent.id,parent,&json!({"type":"agent_finished","agent_id":agent.id,"generation":agent.generation,"status":agent.status,"summary":agent.summary,"error":agent.error}).to_string(),Some(&key))?;
         }
         Ok(())
     }
@@ -399,6 +518,21 @@ impl Coordinator {
             .collect();
         if !active.is_empty() {
             bail!("active descendants remain: {}", active.join(", "));
+        }
+        for kind in ["debug_session", "interact_session"] {
+            let open: Vec<_> = Store::tx_list::<Value>(tx, kind, &agent.run_id)?
+                .into_iter()
+                .filter(|session| {
+                    (agent.role == Role::Root || session["agent_id"] == agent.id)
+                        && !matches!(session["state"].as_str(), Some("closed" | "lost"))
+                })
+                .map(|session| format!("{} (owner {})", session["id"], session["agent_id"]))
+                .collect();
+            ensure!(
+                open.is_empty(),
+                "open {kind} sessions remain; close them before finishing: {}",
+                open.join(", ")
+            );
         }
         if agent.role == Role::Root {
             let unresolved = Store::tx_list::<Coverage>(tx, "coverage", &agent.run_id)?

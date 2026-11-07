@@ -314,9 +314,21 @@ impl Store {
         checkpoint: Value,
         message_ids: &[i64],
     ) -> Result<()> {
+        self.checkpoint_and_ack_generation(agent_id, checkpoint, message_ids, None)
+    }
+    pub(crate) fn checkpoint_and_ack_generation(
+        &self,
+        agent_id: &str,
+        checkpoint: Value,
+        message_ids: &[i64],
+        generation: Option<u64>,
+    ) -> Result<()> {
         self.transaction(|tx| {
             let mut agent: AgentRecord =
                 Self::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+            if generation.is_some_and(|expected| expected != agent.generation) {
+                return Ok(());
+            }
             agent.checkpoint = Some(checkpoint);
             agent.updated_at = now();
             Self::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;

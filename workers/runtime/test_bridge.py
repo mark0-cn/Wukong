@@ -7,7 +7,31 @@ import signal
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from integration_test import Client
+
+
+class SessionLaunchTests(unittest.TestCase):
+    def test_isolated_interactive_launch_drops_credentials(self):
+        import bridge
+        import isolation
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work = root / "work"
+            work.mkdir()
+            experiment = {"uid": 20000, "root": str(root), "readonly": str(root), "work": str(work)}
+            with patch.object(isolation, "allocate_uid", return_value=20000), \
+                    patch.object(isolation, "sandbox", return_value=experiment), \
+                    patch.object(isolation, "seal"), \
+                    patch.object(bridge.subprocess, "Popen", side_effect=RuntimeError("capture options")) as launch:
+                with self.assertRaisesRegex(RuntimeError, "capture options"):
+                    bridge.InteractSession(root, {"argv": [sys.executable, "-c", "pass"]}, isolated=True)
+                options = launch.call_args.kwargs
+                self.assertEqual(options["user"], 20000)
+                self.assertEqual(options["group"], 20000)
+                self.assertEqual(options["extra_groups"], [])
+                self.assertEqual(options["env"]["HOME"], str(work))
+                self.assertEqual(options["env"]["TMPDIR"], str(work))
 
 
 class RuntimeTests(unittest.TestCase):
@@ -126,6 +150,20 @@ class RuntimeTests(unittest.TestCase):
         # launching a second process.
         started_replay = self.client.call("interact.start", argv=[sys.executable, "-c", program], request_id="interact-start-dedup")
         self.assertEqual(started_replay["session_id"], session_id)
+
+    @unittest.skipIf(os.name == "nt", "POSIX process group regression")
+    def test_interactive_close_reaps_children_after_leader_exits(self):
+        marker = self.root / "orphan-survived.txt"
+        child = "import pathlib,time;time.sleep(1.5);pathlib.Path(" + repr(str(marker)) + ").write_text('alive')"
+        program = "import subprocess,sys;subprocess.Popen([sys.executable,'-c'," + repr(child) + "]);print('spawned',flush=True)"
+        started = self.client.call("interact.start", argv=[sys.executable, "-c", program])
+        time.sleep(0.25)
+        result = self.client.call("interact.write", session_id=started["session_id"], data_base64="", read_timeout_secs=1)
+        self.assertEqual(result["state"], "exited")
+        self.assertFalse(result["data_sent"])
+        self.client.call("interact.close", session_id=started["session_id"])
+        time.sleep(1.5)
+        self.assertFalse(marker.exists(), "closing an exited leader left its child running")
 
     def test_angr_solve_validates_parameters(self):
         self.client.put("dummy.bin", b"not-an-elf")

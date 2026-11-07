@@ -8,12 +8,12 @@ what to run": delegate the running too.
 
 | Situation | First actions |
 |---|---|
-| Format/arch unknown | `binary_inspect` before spawning anything |
-| ELF with symbols | `functions_search` for candidates; hand to a reverse child |
-| ELF stripped | recon first: strings + imports for anchors, entries via xrefs from imports |
-| PE / Mach-O | static only — worker executes ELF; recon/reverse via inspect, strings and worker Ghidra queries |
-| Execution required | child stages the target itself (`stage_target`); `runtime_doctor` once before assuming worker tools |
-| A crash exists | crash child (replay/minimize); exploit child only after a confirmed root cause |
+| Format/arch unknown | spawn one recon child to run `binary_inspect`; wait for its report |
+| ELF with symbols | delegate `functions_search` and candidate analysis to a reverse child |
+| ELF stripped | recon child obtains strings/import anchors; reverse child follows xrefs |
+| PE / Mach-O | delegate static inspection and Ghidra queries to recon/reverse children; worker execution supports ELF |
+| Execution required | execution child stages the target with `stage_target` and checks `runtime_doctor` |
+| A crash exists | crash child (replay/minimize/root cause); exploit work only when requested |
 | Goal is control-flow hijack | child loads `pwn` alongside `reverse`/`exploit` |
 | Tool errors mid-run | child loads `recovery` before retrying anything mutating |
 
@@ -21,7 +21,7 @@ what to run": delegate the running too.
 
 1. Turn the request into a question checklist with the evidence each answer
    needs. Resolve target identity and constraints before asking for more.
-2. Reuse state: `view_agent_graph`, threat model, notes, coverage — never
+2. Reuse state: `view_agent_graph`, analysis notes and coverage — never
    duplicate existing work.
 3. Start with the smallest overview (recon dossier), then expand only where a
    specific question is unanswered.
@@ -31,20 +31,21 @@ what to run": delegate the running too.
 6. Decompose independent questions into parallel children only after the
    shared dossier exists and only 1-2 at a time; otherwise work sequentially
    and let each result decide the next spawn.
-7. Keep conclusions in the shared ledger (threat model + coverage + notes);
+7. Keep conclusions in the shared ledger (analysis notes + coverage);
    every entry carries evidence IDs.
 
-## Establish the threat model first
+## Establish the analysis context
 
-Read `threat_model_get` before spawning work. If none exists, derive one from
-`binary_inspect`-level facts (format, arch, mitigations, imports, entrypoints,
-how input reaches the program) and save it with `threat_model_save`. Mark
-inferred facts as inferred: "input is a file path from argv[1] — assumed, not
-observed". Children correct you with `threat_model_amend`; read amendments
-back before finishing.
+Read `notes_list` and the task configuration. Use `note_save` to share the
+user's questions, target identity, environment, known facts with evidence IDs,
+constraints and open questions. Build on supplied context and recon reports;
+never run target tools yourself or guess missing facts. Mark inferred facts
+as inferred. When the target is unknown, obtain a recon report first.
 
-If the entrypoints are genuinely unknown, spawn a recon child first and write
-the model from its report instead of guessing.
+A threat model is optional. Use `threat_model_get/save/amend` only when the
+requested work concerns attackers, trust boundaries or exploitability. Do not
+turn behavior analysis, format reconstruction, debugging or compatibility work
+into a security assessment. Choose subsequent roles from the user's objective.
 
 ## Spawn in stages, like a senior researcher
 
@@ -60,13 +61,16 @@ you already hold, and the next spawn is decided from the previous results:
 3. **Decide the next stage FROM the returned facts**, not from a checklist:
    - layout or offsets still unclear → one reverse child with the exact
      handoff facts (evidence IDs, module-relative addresses, SHA256);
-   - a concrete bug hypothesis with preconditions → one hunter child;
+   - a requested vulnerability investigation with a concrete hypothesis and
+     preconditions → one hunter child;
    - a real crash or a candidate input exists → one crash child
      (replay/minimize/classify);
-   - confirmed root cause + overflow → one exploit child (load `pwn` when the
-     goal is ret-to-function);
-   - nothing suspicious and coverage is complete → stop; negative coverage is
-     a result, not a failure.
+   - requested exploit validation + confirmed root cause → one exploit child
+     (load `pwn` when the goal is ret-to-function);
+   - the requested behavior/format/algorithm is still unclear → a focused
+     reverse child with the exact unanswered question;
+   - the user's questions are answered and coverage is complete → stop;
+     a bounded negative result is also useful.
    Skip roles the evidence does not call for; a role is not a station every
    train must stop at.
 4. Spawn at most 1-2 children at a time. Parallel children are allowed only
@@ -95,9 +99,15 @@ you already hold, and the next spawn is decided from the previous results:
   expires; with an empty list it waits for your children. Use the wakeup to
   reconcile, not to poll.
 - `send_message_to_agent` is for requests/answers and critical handoffs only;
-  routine status updates are noise.
-- `stop_agent` agents whose objective is done or moot; a finished child needs
-  no further messages.
+  routine status updates are noise. A targeted follow-up reopens a completed
+  child in this active assessment, preserving its prior conversation and budget.
+  Wait for its new completion report before finishing. Stopped/failed children
+  require a new focused task; completed scopes may also receive a new task.
+- Before `agent_finish`, children close their debug/interactive sessions.
+  `finish_scan` requires all sessions to be closed or accounted as lost.
+  If an owner stopped or failed, assign a cleanup child to close its sessions;
+  cleanup permits closing another terminal agent's session, never sending it commands.
+- `stop_agent` agents whose objective is done or moot.
 
 ## Coverage is the shared ledger
 
@@ -114,8 +124,8 @@ When all children are terminal:
    one finding).
 2. Reconcile contradictions by asking the relevant child a targeted question,
    not by re-analyzing yourself.
-3. State what was NOT done (untested paths, environment limits) in the
-   summary — absence of findings is not a clean bill.
+3. State unresolved questions, untested paths and environment limits in the
+   summary. For security work, absence of findings is not a clean bill.
 4. Revisit the original question checklist: mark each item answered /
    partially answered / unresolved, with evidence IDs. A bounded negative
    search is reported as "not found in scope X", never "does not exist".

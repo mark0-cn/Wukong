@@ -174,9 +174,9 @@ def terminate_tree(process):
         except subprocess.TimeoutExpired:
             process.kill()
         return
-    if process.poll() is not None:
-        return
     if os.name == "nt":
+        if process.poll() is not None:
+            return
         subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                        creationflags=subprocess.CREATE_NO_WINDOW, timeout=15)
@@ -185,10 +185,13 @@ def terminate_tree(process):
             os.killpg(process.pid, signal.SIGTERM)
             process.wait(timeout=1.5)
         except (ProcessLookupError, subprocess.TimeoutExpired):
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            pass
+        # A reaped leader does not mean its descendants have exited. Kill
+        # the remaining group, including children that ignored SIGTERM.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
@@ -608,6 +611,7 @@ class InteractSession:
         self.directory.mkdir(parents=True)
         self.lock = threading.Lock()
         self.dead = False
+        self.closed = False
         self.buffer = bytearray()
         self.total_bytes = 0
         self.last_data = 0.0
@@ -632,9 +636,15 @@ class InteractSession:
                         raise ValueError("isolated interactive argv paths must exist under the state directory")
             isolation.seal(self.experiment)
         cwd = Path(self.experiment["work"]) if self.experiment else self.directory
-        self.process = subprocess.Popen(argv, cwd=cwd, env=safe_env(params.get("env")),
+        env = safe_env(params.get("env"))
+        credential_options = {}
+        if self.experiment:
+            credential_options = isolation.credentials(self.experiment)
+            env.update({"HOME": self.experiment["work"], "TMPDIR": self.experiment["work"]})
+        self.process = subprocess.Popen(argv, cwd=cwd, env=env,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, bufsize=0, **detached_options())
+                                        stderr=subprocess.STDOUT, bufsize=0, **detached_options(), **credential_options)
+        attach_windows_job(self.process)
         threading.Thread(target=self.drain, daemon=True).start()
         self.persist("running")
 
@@ -656,15 +666,18 @@ class InteractSession:
                 self.last_data = time.time()
         with self.lock:
             self.dead = True
-        self.persist("exited")
+            state = "closed" if self.closed else "exited"
+        self.persist(state)
 
     def write(self, data, read_timeout_secs, quiet_ms=250):
         with self.lock:
-            if self.dead or self.process.poll() is not None:
-                return self.snapshot("exited", data_sent=False)
-            self.process.stdin.write(data)
-            self.process.stdin.flush()
-            self.last_data = time.time()
+            exited = self.dead or self.process.poll() is not None
+            if not exited:
+                self.process.stdin.write(data)
+                self.process.stdin.flush()
+                self.last_data = time.time()
+        if exited:
+            return self.snapshot("exited", data_sent=False)
         deadline = time.monotonic() + read_timeout_secs
         while time.monotonic() < deadline:
             with self.lock:
@@ -687,6 +700,7 @@ class InteractSession:
     def close(self):
         with self.lock:
             self.dead = True
+            self.closed = True
             terminate_tree(self.process)
         self.persist("closed")
         return {"session_id": self.id, "state": "closed"}
@@ -921,6 +935,8 @@ class Runtime:
             from ghidra_backend import query
             return query(self.root, params)
         if method == "interact.start":
+            if not self.trusted and not self.isolated:
+                raise ValueError("production interactive sessions require a root Linux worker with isolated processes")
             session = InteractSession(self.root, params, self.isolated)
             self.interact[session.id] = session
             return {"session_id": session.id, "state": "running",
@@ -1050,6 +1066,8 @@ class Runtime:
             if any(job["state"] not in TERMINAL for job in active):
                 raise ValueError("cannot shut down worker while jobs are active; cancel and reconcile them first")
             for session in self.debug.values():
+                session.close()
+            for session in self.interact.values():
                 session.close()
             return {"state": "shutdown"}
         raise ValueError("unsupported worker method: " + method)
