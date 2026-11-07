@@ -558,6 +558,10 @@ mod tests {
                     if children == 1 {
                         assert!(input.to_string().contains("first format result"));
                         assert!(input.to_string().contains("Clarify the length field"));
+                        assert!(
+                            !input.to_string().contains("For reference only"),
+                            "stale informational mail was delivered into the new generation"
+                        );
                     }
                     let output = reply(
                         "agent_finish",
@@ -805,5 +809,83 @@ mod tests {
             .unwrap();
         assert!(usage.data["cost_estimate_usd"].is_null());
         assert_eq!(usage.data["tokens_reported"], true);
+    }
+    #[tokio::test]
+    async fn informational_mail_from_the_awaited_agent_does_not_release_native_wait() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (_dir, runner, run) =
+            fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+        let store = runner.store.clone();
+        let rid = run.id.clone();
+        let root_id = run.root_id.clone();
+        let server = tokio::spawn(async move {
+            let mut roots = 0;
+            let mut children = 0;
+            let mut pending_child = None;
+            while roots < 2 || children < 2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let input = request(&mut socket).await;
+                if input.to_string().contains("role=root") {
+                    let output = if roots == 0 {
+                        reply(
+                            "task",
+                            json!({"description":"worker","prompt":"Analyze the format","scope":"format","role":"reverse","inherit_context":false}),
+                        )
+                    } else {
+                        let child = store
+                            .list::<AgentRecord>("agent", &rid)
+                            .unwrap()
+                            .into_iter()
+                            .find(|agent| agent.role == Role::Reverse)
+                            .unwrap();
+                        reply("wait", json!({"agent":child.id}))
+                    };
+                    roots += 1;
+                    respond(&mut socket, output).await;
+                } else {
+                    if children == 0 {
+                        respond(&mut socket,reply("send_message_to_agent",json!({"agent_id":root_id,"message":"progress only; task is still running","kind":"information"}))).await;
+                    } else {
+                        pending_child = Some(socket);
+                    }
+                    children += 1;
+                }
+            }
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err(),
+                "information incorrectly woke the native waiter"
+            );
+            respond(
+                pending_child.as_mut().unwrap(),
+                reply(
+                    "agent_finish",
+                    json!({"summary":"finished after information"}),
+                ),
+            )
+            .await;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let input = request(&mut socket).await;
+            assert!(
+                input
+                    .to_string()
+                    .contains("progress only; task is still running")
+            );
+            assert!(input.to_string().contains("finished after information"));
+            respond(
+                &mut socket,
+                reply(
+                    "finish_scan",
+                    json!({"summary":"wait observed actual completion"}),
+                ),
+            )
+            .await;
+        });
+        assert_eq!(
+            drive_bounded(&runner, &run.id).await.status,
+            Status::Completed
+        );
+        server.await.unwrap();
     }
 }
