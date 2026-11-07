@@ -977,7 +977,7 @@ mod tests {
                     let output = match parents {
                         0 => reply(
                             "task",
-                            json!({"description":"leaf","prompt":"Leaf objective","scope":"leaf","role":"reverse","inherit_context":false}),
+                            json!({"description":"leaf","prompt":"Leaf objective","scope":"leaf","role":"reverse","inherit_context":true}),
                         ),
                         1 | 3 => reply("wait", json!({"agent":lookup("leaf").id})),
                         2 => reply("agent_finish", json!({"summary":"parent original"})),
@@ -991,6 +991,20 @@ mod tests {
                     output
                 } else {
                     assert!(text.contains("Scope: leaf."));
+                    if leaves == 0 {
+                        assert!(
+                            text.contains("Parent objective"),
+                            "closed parent context was not inherited"
+                        );
+                        assert!(
+                            !input["messages"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .any(|message| message["role"] == "tool"),
+                            "inheriting a pending tool call fabricated a tool result"
+                        );
+                    }
                     let output = reply(
                         "agent_finish",
                         json!({"summary":if leaves==0 {"leaf original"} else {"leaf updated"}}),
