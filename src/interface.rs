@@ -515,6 +515,12 @@ fn dashboard(
             if event::poll(Duration::from_millis(250))?
                 && let CEvent::Key(key) = event::read()?
             {
+                // Windows terminals report press and release as separate
+                // events; handle only presses so a keystroke never lands
+                // twice in the input buffer.
+                if key.kind != crossterm::event::KeyEventKind::Press {
+                    continue;
+                }
                 if input == TuiInput::Task {
                     match key.code {
                         KeyCode::Esc => {
@@ -762,6 +768,10 @@ fn dashboard(
             );
         })?;
         if event::poll(Duration::from_millis(250))? && let CEvent::Key(key) = event::read()? {
+            // Press-only, as above: release events must not double the input.
+            if key.kind != crossterm::event::KeyEventKind::Press {
+                continue;
+            }
             if input != TuiInput::None {
                 match key.code {
                     KeyCode::Esc => {
