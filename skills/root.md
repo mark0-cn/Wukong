@@ -69,6 +69,9 @@ you already hold, and the next spawn is decided from the previous results:
      (load `pwn` when the goal is ret-to-function);
    - the requested behavior/format/algorithm is still unclear → a focused
      reverse child with the exact unanswered question;
+   - a recovered format/algorithm or behavior claim needs independent checks
+     → a verifier child with the claim, input channel, expected outputs and
+     evidence IDs; a vulnerability finding is not required;
    - the user's questions are answered and coverage is complete → stop;
      a bounded negative result is also useful.
    Skip roles the evidence does not call for; a role is not a station every
