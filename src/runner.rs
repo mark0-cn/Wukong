@@ -132,6 +132,9 @@ impl AssessmentRunner {
                         if active.contains(&agent.id) {
                             continue;
                         }
+                        if !self.predecessors_satisfied(&agent)? {
+                            continue;
+                        }
                         self.coordinator
                             .set_status(&agent.id, Status::Running, None)?;
                         active.insert(agent.id.clone());
@@ -177,6 +180,19 @@ impl AssessmentRunner {
                 _=cancel.cancelled(),if !stopping=>{}
             }
         }
+    }
+    /// Whether every declared predecessor of `agent` is terminal. A missing
+    /// predecessor id is treated as satisfied so a stale reference cannot
+    /// deadlock the run.
+    fn predecessors_satisfied(&self, agent: &AgentRecord) -> Result<bool> {
+        for id in &agent.wait_for_predecessors {
+            if let Ok(target) = self.store.require::<AgentRecord>("agent", id) {
+                if !target.status.terminal() {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
     }
     async fn slice(&self, agent_id: &str) -> Result<()> {
         let agent: AgentRecord = self.store.require("agent", agent_id)?;
@@ -950,6 +966,7 @@ mod tests {
                     scope: "fixture scope".into(),
                     skills: vec![],
                     inherit_context: false,
+                    wait_for_predecessors: vec![],
                 },
             )
             .unwrap();
@@ -1056,6 +1073,102 @@ mod tests {
             checkpoint.contains("short summary"),
             "the conversation must hold the summary, not the raw envelope"
         );
+        server.await.unwrap();
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn gated_children_wait_for_their_predecessors() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            // The ungated predecessor A must be the first to reach the model.
+            let (mut a_socket, _) = listener.accept().await.unwrap();
+            let a_req = request(&mut a_socket).await;
+            assert!(
+                a_req.to_string().contains("alpha task"),
+                "unexpected first agent: {}",
+                a_req
+            );
+            // B is gated on A: no second connection may arrive while A runs.
+            let early = tokio::time::timeout(Duration::from_millis(600), listener.accept()).await;
+            assert!(
+                early.is_err(),
+                "gated child started before its predecessor finished"
+            );
+            respond(
+                &mut a_socket,
+                reply("agent_finish", json!({"summary":"alpha done"})),
+            )
+            .await;
+            // Once A is terminal the gate opens and B may run.
+            let (mut b_socket, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+                .await
+                .expect("gated child never ran")
+                .unwrap();
+            let b_req = request(&mut b_socket).await;
+            assert!(
+                b_req.to_string().contains("beta task"),
+                "unexpected second agent: {}",
+                b_req
+            );
+            respond(
+                &mut b_socket,
+                reply("agent_finish", json!({"summary":"beta done"})),
+            )
+            .await;
+        });
+        let (_dir, runner, run) = fixture(base).await;
+        let alpha = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "Alpha".into(),
+                    role: Role::Recon,
+                    task: "alpha task".into(),
+                    scope: "alpha scope".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![],
+                },
+            )
+            .unwrap()
+            .agent;
+        let beta = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "Beta".into(),
+                    role: Role::Recon,
+                    task: "beta task".into(),
+                    scope: "beta scope".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![alpha.id.clone()],
+                },
+            )
+            .unwrap()
+            .agent;
+        // Park the root so only the two children compete for the engine.
+        runner
+            .coordinator
+            .set_status(&run.root_id, Status::Stopped, None)
+            .unwrap();
+        let driven = tokio::time::timeout(
+            Duration::from_secs(10),
+            runner.drive(&run.id, CancellationToken::new()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        // No finish_scan: the drive reports all-terminal agents as failed.
+        assert_eq!(driven.status, Status::Failed);
+        let alpha: AgentRecord = runner.store.require("agent", &alpha.id).unwrap();
+        let beta: AgentRecord = runner.store.require("agent", &beta.id).unwrap();
+        assert!(alpha.status.terminal());
+        assert!(beta.status.terminal());
         server.await.unwrap();
         runner.tools.close().await;
     }

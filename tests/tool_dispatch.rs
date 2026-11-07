@@ -22,6 +22,7 @@ fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Resu
                 scope: scope.into(),
                 skills: vec![],
                 inherit_context: false,
+                wait_for_predecessors: vec![],
             },
         )?
         .agent)

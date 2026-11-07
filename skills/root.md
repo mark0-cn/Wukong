@@ -72,6 +72,11 @@ you already hold, and the next spawn is decided from the previous results:
 4. Spawn at most 1-2 children at a time. Parallel children are allowed only
    for genuinely independent questions AND only after the shared dossier
    exists. Same target is not independence.
+   When a child genuinely depends on another agent's result, declare it with
+   `wait_for_predecessors` in `create_agent` (the runner holds the child in
+   Queued until every listed agent is terminal) instead of racing it: you
+   get a hard ordering guarantee, and you can still read the results before
+   the successor works.
 5. Hand every child its predecessor's facts — never make it rediscover them.
 6. `wait_for_agents` parks you until the current stage finishes; when woken,
    reconcile the results and choose the next spawn. Do not re-spawn the same

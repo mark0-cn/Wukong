@@ -189,6 +189,11 @@ pub struct AgentRecord {
     pub checkpoint: Option<Value>,
     pub wait_for: Vec<String>,
     pub wait_until: Option<DateTime<Utc>>,
+    /// Declared predecessor agents this child must wait for before the
+    /// runner starts it (scheduler-level gating; distinct from the parked
+    /// waiter `wait_for` used by wait_for_agents).
+    #[serde(default)]
+    pub wait_for_predecessors: Vec<String>,
     pub turns: usize,
     pub total_tokens: u64,
     pub cost_usd: f64,
