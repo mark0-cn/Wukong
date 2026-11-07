@@ -95,6 +95,9 @@ JSON-RPC 2.0 requests and responses are one JSON object per stdio line. Error
 responses identify unavailable tools; `doctor` returns actual capabilities,
 executable paths and versions instead of claiming missing backends are usable.
 Requests/responses are capped at 48 MiB. Uploaded files are capped at 32 MiB.
+The controller uses jsonrpsee over bounded stdio frames. RPC errors preserve a
+healthy connection; malformed/oversized frames and timeouts close it. The next
+call reconnects, without automatically replaying the failed request.
 
 | Method | Parameters / result |
 | --- | --- |

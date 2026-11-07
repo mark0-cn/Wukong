@@ -4,14 +4,19 @@
 //! client being dropped, and a lost transport is replaced transparently on the
 //! next call; reconnect uses the same worker state directory.
 use anyhow::{Context, Result, anyhow, bail};
+use futures::{SinkExt, StreamExt};
+use jsonrpsee_core::client::{
+    Client, ClientBuilder, ClientT, Error as RpcError, ReceivedMessage, TransportReceiverT,
+    TransportSenderT,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
     sync::Mutex,
 };
+use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -71,9 +76,7 @@ fn default_docker_executable() -> String {
 
 struct Transport {
     child: Child,
-    input: ChildStdin,
-    output: BufReader<ChildStdout>,
-    next_id: u64,
+    client: Client,
     poisoned: bool,
 }
 #[derive(Clone)]
@@ -189,15 +192,28 @@ impl RuntimeClient {
         }
         let mut child = cmd.spawn().context("spawn runtime bridge")?;
         let input = child.stdin.take().context("worker stdin unavailable")?;
-        let output = BufReader::new(child.stdout.take().context("worker stdout unavailable")?);
+        let output = child.stdout.take().context("worker stdout unavailable")?;
+        let client = ClientBuilder::default()
+            .request_timeout(Duration::from_secs(
+                config.request_timeout_secs.clamp(1, 3600),
+            ))
+            .max_concurrent_requests(1)
+            .build_with_tokio(
+                StdioSender(FramedWrite::new(
+                    input,
+                    LinesCodec::new_with_max_length(MAX_RPC),
+                )),
+                StdioReceiver(FramedRead::new(
+                    output,
+                    LinesCodec::new_with_max_length(MAX_RPC),
+                )),
+            );
         let mut transport = Transport {
             child,
-            input,
-            output,
-            next_id: 1,
+            client,
             poisoned: false,
         };
-        match request(&mut transport, config, "ping", json!({})).await {
+        match request(&mut transport, "ping", json!({})).await {
             Ok(_) => Ok(transport),
             Err(RequestFailure::Worker(error)) => {
                 let _ = transport.child.kill().await;
@@ -229,7 +245,7 @@ impl RuntimeClient {
                 .await
                 .context("runtime transport lost and reconnect failed")?;
         }
-        match request(&mut transport, &self.config, method, params).await {
+        match request(&mut transport, method, params).await {
             Ok(result) => Ok(result),
             Err(RequestFailure::Worker(error)) => Err(error),
             Err(RequestFailure::Transport { timed_out, error }) => {
@@ -268,74 +284,61 @@ enum RequestFailure {
     },
 }
 
+const MAX_RPC: usize = 48 * 1024 * 1024;
+
+struct StdioSender(FramedWrite<ChildStdin, LinesCodec>);
+impl TransportSenderT for StdioSender {
+    type Error = std::io::Error;
+    async fn send(&mut self, message: String) -> std::io::Result<()> {
+        if message.len() > MAX_RPC {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "runtime request exceeds 48 MiB",
+            ));
+        }
+        self.0.send(message).await.map_err(std::io::Error::other)
+    }
+    async fn close(&mut self) -> std::io::Result<()> {
+        SinkExt::<String>::close(&mut self.0)
+            .await
+            .map_err(std::io::Error::other)
+    }
+}
+
+struct StdioReceiver(FramedRead<ChildStdout, LinesCodec>);
+impl TransportReceiverT for StdioReceiver {
+    type Error = std::io::Error;
+    async fn receive(&mut self) -> std::io::Result<ReceivedMessage> {
+        match self.0.next().await {
+            Some(Ok(message)) => Ok(ReceivedMessage::Text(message)),
+            // A codec error terminates this RPC connection immediately. Never
+            // keep discarding an unbounded overlong line from a broken worker.
+            Some(Err(error)) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "runtime bridge closed the transport",
+            )),
+        }
+    }
+}
+
 async fn request(
     transport: &mut Transport,
-    config: &RuntimeConfig,
     method: &str,
     params: Value,
 ) -> Result<Value, RequestFailure> {
-    let id = transport.next_id;
-    transport.next_id += 1;
-    let payload =
-        serde_json::to_vec(&json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params}))
-            .map_err(|error| RequestFailure::Transport {
-                timed_out: false,
-                error: error.into(),
-            })?;
-    if payload.len() > 48 * 1024 * 1024 {
-        return Err(RequestFailure::Transport {
-            timed_out: false,
-            error: anyhow!("runtime request exceeds 48 MiB"),
-        });
-    }
-    let timeout = Duration::from_secs(config.request_timeout_secs.clamp(1, 3600));
-    let exchange = tokio::time::timeout(timeout, async {
-        transport.input.write_all(&payload).await?;
-        transport.input.write_all(b"\n").await?;
-        transport.input.flush().await?;
-        let mut data = Vec::new();
-        // The controller enforces its own limit even for a broken worker.
-        let n = (&mut transport.output)
-            .take(48 * 1024 * 1024 + 1)
-            .read_until(b'\n', &mut data)
-            .await?;
-        if n == 0 {
-            return Err(anyhow!("runtime bridge closed the transport"));
+    let params = params
+        .as_object()
+        .cloned()
+        .ok_or_else(|| RequestFailure::Worker(anyhow!("runtime params must be an object")))?;
+    match transport.client.request(method, params).await {
+        Ok(result) => Ok(result),
+        Err(RpcError::Call(error)) => {
+            Err(RequestFailure::Worker(anyhow!("runtime {method}: {error}")))
         }
-        if data.len() > 48 * 1024 * 1024 {
-            return Err(anyhow!("runtime response too large"));
-        }
-        let response: Value = serde_json::from_slice(&data)
-            .map_err(|error| anyhow!("decode runtime response: {error}"))?;
-        if response.get("id").and_then(Value::as_u64) != Some(id) {
-            return Err(anyhow!("runtime response ID mismatch"));
-        }
-        Ok::<Value, anyhow::Error>(response)
-    })
-    .await;
-    match exchange {
-        Ok(Ok(response)) => {
-            if let Some(error) = response.get("error") {
-                return Err(RequestFailure::Worker(anyhow!(
-                    "runtime {method}: {}",
-                    error.get("message").unwrap_or(error)
-                )));
-            }
-            response
-                .get("result")
-                .cloned()
-                .ok_or_else(|| RequestFailure::Transport {
-                    timed_out: false,
-                    error: anyhow!("runtime response has no result"),
-                })
-        }
-        Ok(Err(error)) => Err(RequestFailure::Transport {
-            timed_out: false,
-            error,
-        }),
-        Err(_) => Err(RequestFailure::Transport {
-            timed_out: true,
-            error: anyhow!("runtime request timed out"),
+        Err(error) => Err(RequestFailure::Transport {
+            timed_out: matches!(error, RpcError::RequestTimeout),
+            error: error.into(),
         }),
     }
 }
