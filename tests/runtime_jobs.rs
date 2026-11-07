@@ -57,7 +57,7 @@ for line in sys.stdin:
         result = {"reconnected": True}
     else:
         result = {}
-    print(json.dumps({"id": request["id"], "result": result}), flush=True)
+    print(json.dumps({"jsonrpc":"2.0", "id": request["id"], "result": result}), flush=True)
 "#,
     )?;
     let config = RuntimeConfig {
@@ -236,6 +236,67 @@ async fn interactive_sessions_are_persistent_serialized_and_owned() -> Result<()
         "writes to an absent session must fail"
     );
     client.call("worker.shutdown", json!({})).await?;
+    client.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rpc_errors_preserve_transport_but_broken_frames_force_reconnection() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let bridge = root.path().join("rpc_fixture.py");
+    std::fs::write(
+        &bridge,
+        r#"
+import json, sys, pathlib
+root=pathlib.Path(sys.argv[sys.argv.index('--state')+1])
+starts=root/'starts'
+count=int(starts.read_text())+1 if starts.exists() else 1
+starts.write_text(str(count))
+for line in sys.stdin:
+    request=json.loads(line)
+    method=request['method']
+    if method=='rpc_error':
+        reply={'jsonrpc':'2.0','id':request['id'],'error':{'code':-32000,'message':'fixture rejection'}}
+    elif method=='malformed':
+        (root/'executed').write_text('once')
+        print('{invalid-json',flush=True)
+        continue
+    elif method=='oversized':
+        sys.stdout.write('x'*(48*1024*1024+1));sys.stdout.flush()
+        continue
+    else:
+        reply={'jsonrpc':'2.0','id':request['id'],'result':{'starts':count}}
+    print(json.dumps(reply),flush=True)
+"#,
+    )?;
+    let client = RuntimeClient::connect(RuntimeConfig {
+        backend: RuntimeBackend::TrustedLocal,
+        state_dir: root.path().to_path_buf(),
+        bridge_path: bridge,
+        request_timeout_secs: 5,
+        ..Default::default()
+    })
+    .await?;
+    assert!(
+        format!(
+            "{:#}",
+            client.call("rpc_error", json!({})).await.unwrap_err()
+        )
+        .contains("fixture rejection")
+    );
+    assert_eq!(
+        client.doctor().await?["starts"],
+        1,
+        "an RPC error must not poison a healthy transport"
+    );
+    assert!(client.call("malformed", json!({})).await.is_err());
+    assert_eq!(client.doctor().await?["starts"], 2);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("executed"))?,
+        "once"
+    );
+    assert!(client.call("oversized", json!({})).await.is_err());
+    assert_eq!(client.doctor().await?["starts"], 3);
     client.close().await?;
     Ok(())
 }
