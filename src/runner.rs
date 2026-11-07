@@ -912,4 +912,87 @@ mod tests {
         );
         server.await.unwrap();
     }
+    #[tokio::test]
+    async fn following_up_a_grandchild_reactivates_and_reports_its_parent() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (_dir, runner, run) =
+            fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+        let store = runner.store.clone();
+        let rid = run.id.clone();
+        let server = tokio::spawn(async move {
+            let mut roots = 0;
+            let mut parents = 0;
+            let mut leaves = 0;
+            for _ in 0..12 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let input = request(&mut socket).await;
+                let text = input.to_string();
+                let lookup = |scope: &str| {
+                    store
+                        .list::<AgentRecord>("agent", &rid)
+                        .unwrap()
+                        .into_iter()
+                        .find(|agent| agent.scope == scope)
+                        .unwrap()
+                };
+                let output = if text.contains("role=root") {
+                    let output = match roots {
+                        0 => reply(
+                            "task",
+                            json!({"description":"parent","prompt":"Parent objective","scope":"parent","role":"reverse","inherit_context":false}),
+                        ),
+                        1 | 3 => reply("wait", json!({"agent":lookup("parent").id})),
+                        2 => reply(
+                            "follow_up_agent",
+                            json!({"agent_id":lookup("leaf").id,"message":"Update the leaf result","recipient_generation":0}),
+                        ),
+                        4 => {
+                            assert!(text.contains("parent updated"));
+                            reply("finish_scan", json!({"summary":"updated tree"}))
+                        }
+                        _ => panic!("unexpected root turn {roots}"),
+                    };
+                    roots += 1;
+                    output
+                } else if text.contains("Scope: parent.") {
+                    let output = match parents {
+                        0 => reply(
+                            "task",
+                            json!({"description":"leaf","prompt":"Leaf objective","scope":"leaf","role":"reverse","inherit_context":false}),
+                        ),
+                        1 | 3 => reply("wait", json!({"agent":lookup("leaf").id})),
+                        2 => reply("agent_finish", json!({"summary":"parent original"})),
+                        4 => {
+                            assert!(text.contains("leaf updated"));
+                            reply("agent_finish", json!({"summary":"parent updated"}))
+                        }
+                        _ => panic!("unexpected parent turn {parents}"),
+                    };
+                    parents += 1;
+                    output
+                } else {
+                    assert!(text.contains("Scope: leaf."));
+                    let output = reply(
+                        "agent_finish",
+                        json!({"summary":if leaves==0 {"leaf original"} else {"leaf updated"}}),
+                    );
+                    leaves += 1;
+                    output
+                };
+                respond(&mut socket, output).await;
+            }
+            assert_eq!((roots, parents, leaves), (5, 5, 2));
+        });
+        assert_eq!(
+            drive_bounded(&runner, &run.id).await.status,
+            Status::Completed
+        );
+        server.await.unwrap();
+        let agents = runner.store.list::<AgentRecord>("agent", &run.id).unwrap();
+        for scope in ["parent", "leaf"] {
+            let agent = agents.iter().find(|agent| agent.scope == scope).unwrap();
+            assert_eq!(agent.generation, 1);
+            assert_eq!(agent.status, Status::Completed);
+        }
+    }
 }

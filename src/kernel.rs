@@ -140,6 +140,9 @@ pub(crate) fn drive(
                 acknowledge_mail.in_set(Stage::Gate).before(admit_spawns),
                 configure_agents.in_set(Stage::Admit),
                 carry_native_turns.in_set(Stage::Prepare),
+                ensure_owner_requests
+                    .in_set(Stage::Prepare)
+                    .before(prepare_models),
                 release_model_slots.in_set(Stage::Prepare),
                 release_predecessors.in_set(Stage::Prepare),
                 prepare_calls.in_set(PrepareSystems::Edit),
@@ -1338,5 +1341,33 @@ fn release_predecessors(
         {
             commands.entity(hold).despawn();
         }
+    }
+}
+
+/// A reactivated business task still owes its tree owner a result, even
+/// when an ancestor assigned the follow-up directly to a deeper descendant.
+fn ensure_owner_requests(
+    mut agents: Query<(&AgentId, &mut OpenRequests), With<BusinessTask>>,
+    application: Res<Application>,
+    mut fatal: ResMut<Fatal>,
+) {
+    for (id, mut open) in &mut agents {
+        failed(
+            &mut fatal,
+            (|| -> Result<()> {
+                let task: AgentRecord = application.runner.store.require("agent", &id.0)?;
+                if !task.status.terminal()
+                    && let Some(owner) = task.parent_id
+                {
+                    if !open.0.iter().any(|request| request.asker.0 == owner) {
+                        open.0.push(Request {
+                            id: RequestId(format!("owner:{}:{}", task.id, task.generation)),
+                            asker: AgentId(owner),
+                        });
+                    }
+                }
+                Ok(())
+            })(),
+        );
     }
 }
