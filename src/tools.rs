@@ -578,9 +578,15 @@ impl ToolService {
             "invalid tool call ID"
         );
         let lock = {
-            self.locks
-                .lock()
-                .await
+            let mut locks = self.locks.lock().await;
+            // Sweep entries nobody references anymore so a long-running
+            // controller does not accumulate one mutex per historical call
+            // id. Holders and waiters keep their Arc alive, so an entry that
+            // is in flight (or queued behind it) is never swept.
+            if locks.len() >= 256 {
+                locks.retain(|_, held| Arc::strong_count(held) > 1);
+            }
+            locks
                 .entry(call_id.into())
                 .or_insert_with(|| Arc::new(Mutex::new(())))
                 .clone()
