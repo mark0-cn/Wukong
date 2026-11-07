@@ -610,6 +610,13 @@ impl ToolService {
                 )
                 .context("decode recorded tool result");
             }
+            // A builtin effect may have committed inside its transactional
+            // receipt while its response envelope was lost. The durable retry
+            // must surface the recorded effect, not re-run the transition
+            // against an agent that is already terminal.
+            if let Some(receipt) = self.store.get::<Value>("tool_receipt", call_id)? {
+                return self.finish_raw(existing.clone(), receipt, false, CallState::Completed);
+            }
             if self.mcp.contains(name) && side_effecting {
                 if let Some(result) = &existing.result {
                     return serde_json::from_value(result.clone())
@@ -752,19 +759,30 @@ impl ToolService {
                 Ok(value)
             }
             "stop_agent" => {
-                let target: AgentRecord =
-                    self.require_in_run("agent", text(&args, "agent_id")?, &agent.run_id)?;
-                self.authorize_control(agent, &target)?;
-                Ok(json!({"stopped":self.coordinator.stop(&target.id,text(&args,"reason")?)?}))
+                let target_id = {
+                    let target: AgentRecord =
+                        self.require_in_run("agent", text(&args, "agent_id")?, &agent.run_id)?;
+                    self.authorize_control(agent, &target)?;
+                    target.id.clone()
+                };
+                self.effect(agent, call_id, |tx| {
+                    Ok(json!({"stopped":Coordinator::tx_stop(tx, &target_id, text(&args, "reason")?)?}))
+                })
             }
             "agent_finish" | "finish_scan" => {
-                ensure!(
-                    self.store.inbox(&agent.id)?.is_empty(),
-                    "unread mailbox messages remain; process them at a fresh model boundary before finishing"
-                );
-                self.coordinator
-                    .finish(&agent.id, text(&args, "summary")?)?;
-                Ok(json!({"finished":true,"agent_id":agent.id}))
+                self.effect(agent, call_id, |tx| {
+                    let unread: i64 = tx.query_row(
+                        "SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0",
+                        [&agent.id],
+                        |r| r.get(0),
+                    )?;
+                    ensure!(
+                        unread == 0,
+                        "unread mailbox messages remain; process them at a fresh model boundary before finishing"
+                    );
+                    Coordinator::tx_finish(tx, &agent.id, text(&args, "summary")?)?;
+                    Ok(json!({"finished":true,"agent_id":agent.id}))
+                })
             }
             "threat_model_get" => {
                 if let Some(id) = args["id"].as_str() {

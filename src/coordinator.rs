@@ -330,26 +330,81 @@ impl Coordinator {
         Ok(())
     }
     pub fn finish(&self, agent_id: &str, summary: &str) -> Result<()> {
+        self.store
+            .transaction(|tx| Self::tx_finish(tx, agent_id, summary))
+    }
+    /// Transactional finish usable inside a tool-effect receipt, so a durable
+    /// retry after an uncertain outcome replays the stored result instead of
+    /// re-executing the lifecycle transition.
+    pub(crate) fn tx_finish(
+        tx: &rusqlite::Connection,
+        agent_id: &str,
+        summary: &str,
+    ) -> Result<()> {
         if summary.trim().is_empty() {
             bail!("completion summary must be nonempty");
         }
-        self.store.transaction(|tx|{
-            let mut agent:AgentRecord=Store::tx_get(tx,"agent",agent_id)?.context("agent missing")?;
-            if agent.status==Status::Completed{return Ok(());}
-            if agent.status.terminal(){bail!("agent already terminated with {}",agent.status);}
-            let unread:i64=tx.query_row("SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0",[agent_id],|r|r.get(0))?;
-            if unread>0{bail!("unread coordinator messages remain; read them at the next model boundary before finishing");}
-            let all=Store::tx_list::<AgentRecord>(tx,"agent",&agent.run_id)?;
-            let active:Vec<_>=all.iter().filter(|a|!a.status.terminal()&&Self::is_descendant(a,agent_id,&all)).map(|a|a.id.clone()).collect();
-            if !active.is_empty(){bail!("active descendants remain: {}",active.join(", "));}
-            if agent.role==Role::Root {
-                let unresolved=Store::tx_list::<Coverage>(tx,"coverage",&agent.run_id)?.into_iter().filter(|c|c.outcome=="needs_follow_up").map(|c|c.id).collect::<Vec<_>>();
-                if !unresolved.is_empty(){bail!("coverage needs follow-up; resolve or mark inconclusive: {}",unresolved.join(", "));}
+        let mut agent: AgentRecord =
+            Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+        if agent.status == Status::Completed {
+            return Ok(());
+        }
+        if agent.status.terminal() {
+            bail!("agent already terminated with {}", agent.status);
+        }
+        let unread: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0",
+            [agent_id],
+            |r| r.get(0),
+        )?;
+        if unread > 0 {
+            bail!(
+                "unread coordinator messages remain; read them at the next model boundary before finishing"
+            );
+        }
+        let all = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?;
+        let active: Vec<_> = all
+            .iter()
+            .filter(|a| !a.status.terminal() && Self::is_descendant(a, agent_id, &all))
+            .map(|a| a.id.clone())
+            .collect();
+        if !active.is_empty() {
+            bail!("active descendants remain: {}", active.join(", "));
+        }
+        if agent.role == Role::Root {
+            let unresolved = Store::tx_list::<Coverage>(tx, "coverage", &agent.run_id)?
+                .into_iter()
+                .filter(|c| c.outcome == "needs_follow_up")
+                .map(|c| c.id)
+                .collect::<Vec<_>>();
+            if !unresolved.is_empty() {
+                bail!(
+                    "coverage needs follow-up; resolve or mark inconclusive: {}",
+                    unresolved.join(", ")
+                );
             }
-            agent.status=Status::Completed;agent.summary=Some(summary.to_owned());agent.updated_at=now();Store::tx_put(tx,"agent",agent_id,&agent.run_id,&agent)?;Self::notify_terminal(tx,&agent)?;
-            if agent.role==Role::Root {let mut run:RunRecord=Store::tx_get(tx,"run",&agent.run_id)?.context("run missing")?;run.status=Status::Completed;run.summary=Some(summary.to_owned());run.updated_at=now();Store::tx_put(tx,"run",&run.id,&run.id,&run)?;}
-            Store::tx_event(tx,&agent.run_id,Some(agent_id),"agent.completed",json!({"summary":summary}))?;Ok(())
-        })
+        }
+        agent.status = Status::Completed;
+        agent.summary = Some(summary.to_owned());
+        agent.updated_at = now();
+        Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
+        Self::notify_terminal(tx, &agent)?;
+        if agent.role == Role::Root {
+            let mut run: RunRecord =
+                Store::tx_get(tx, "run", &agent.run_id)?.context("run missing")?;
+            run.status = Status::Completed;
+            run.summary = Some(summary.to_owned());
+            run.updated_at = now();
+            Store::tx_put(tx, "run", &run.id, &run.id, &run)?;
+        }
+        Store::tx_event(
+            tx,
+            &agent.run_id,
+            Some(agent_id),
+            "agent.completed",
+            json!({"summary":summary}),
+        )?;
+        Ok(())
     }
     fn is_descendant(agent: &AgentRecord, parent: &str, all: &[AgentRecord]) -> bool {
         let mut current = agent.parent_id.as_deref();
@@ -370,44 +425,52 @@ impl Coordinator {
         false
     }
     pub fn stop(&self, agent_id: &str, reason: &str) -> Result<Vec<String>> {
-        self.store.transaction(|tx| {
-            let root: AgentRecord =
-                Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
-            let all = Store::tx_list::<AgentRecord>(tx, "agent", &root.run_id)?;
-            let mut stopped = Vec::new();
-            for mut agent in all
-                .iter()
-                .filter(|a| a.id == agent_id || Self::is_descendant(a, agent_id, &all))
-                .cloned()
-            {
-                if agent.status.terminal() {
-                    continue;
-                }
-                agent.status = Status::Stopped;
-                agent.error = Some(reason.to_owned());
-                agent.updated_at = now();
-                Store::tx_put(tx, "agent", &agent.id, &agent.run_id, &agent)?;
-                Self::notify_terminal(tx, &agent)?;
-                stopped.push(agent.id);
+        self.store
+            .transaction(|tx| Self::tx_stop(tx, agent_id, reason))
+    }
+    /// Transactional stop usable inside a tool-effect receipt, so a durable
+    /// retry after an uncertain outcome replays the stored result instead of
+    /// re-executing the lifecycle transition.
+    pub(crate) fn tx_stop(
+        tx: &rusqlite::Connection,
+        agent_id: &str,
+        reason: &str,
+    ) -> Result<Vec<String>> {
+        let root: AgentRecord = Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+        let all = Store::tx_list::<AgentRecord>(tx, "agent", &root.run_id)?;
+        let mut stopped = Vec::new();
+        for mut agent in all
+            .iter()
+            .filter(|a| a.id == agent_id || Self::is_descendant(a, agent_id, &all))
+            .cloned()
+        {
+            if agent.status.terminal() {
+                continue;
             }
-            if root.role == Role::Root {
-                let mut run: RunRecord =
-                    Store::tx_get(tx, "run", &root.run_id)?.context("run missing")?;
-                if !run.status.terminal() {
-                    run.status = Status::Stopped;
-                    run.updated_at = now();
-                    Store::tx_put(tx, "run", &run.id, &run.id, &run)?;
-                }
+            agent.status = Status::Stopped;
+            agent.error = Some(reason.to_owned());
+            agent.updated_at = now();
+            Store::tx_put(tx, "agent", &agent.id, &agent.run_id, &agent)?;
+            Self::notify_terminal(tx, &agent)?;
+            stopped.push(agent.id);
+        }
+        if root.role == Role::Root {
+            let mut run: RunRecord =
+                Store::tx_get(tx, "run", &root.run_id)?.context("run missing")?;
+            if !run.status.terminal() {
+                run.status = Status::Stopped;
+                run.updated_at = now();
+                Store::tx_put(tx, "run", &run.id, &run.id, &run)?;
             }
-            Store::tx_event(
-                tx,
-                &root.run_id,
-                Some(agent_id),
-                "agents.stopped",
-                json!({"agents":stopped,"reason":reason}),
-            )?;
-            Ok(stopped)
-        })
+        }
+        Store::tx_event(
+            tx,
+            &root.run_id,
+            Some(agent_id),
+            "agents.stopped",
+            json!({"agents":stopped,"reason":reason}),
+        )?;
+        Ok(stopped)
     }
     pub fn pause_budget(&self, run_id: &str, reason: &str) -> Result<()> {
         self.store.transaction(|tx| {
