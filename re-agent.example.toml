@@ -11,6 +11,10 @@ api_key_env = "OPENAI_API_KEY"
 # model. A cheaper/faster model keeps worker agents within their role token
 # quotas, e.g. "deepseek-flash" for DeepSeek endpoints.
 # role_model = "deepseek-flash"
+# Optional: per-request output budget for role agents. Verbose role models
+# can hit the root max_tokens and stop with finish_reason=Length; raise the
+# budget here (only consulted when role_model is set).
+# role_max_tokens = 16384
 # Raise max_tokens where your provider supports it: long decompilation and
 # code-level answers benefit from a larger response budget.
 max_tokens = 8192
