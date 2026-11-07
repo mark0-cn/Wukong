@@ -293,7 +293,14 @@ impl Coordinator {
                 let expired=agent.wait_until.is_some_and(|at|at<=now());
                 let unread:i64=tx.query_row("SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0",[&agent.id],|r|r.get(0))?;
                 if ready||expired||unread>0 {
-                    if ready||expired{let key=format!("wait:{}:{}",agent.id,agent.wait_until.map(|d|d.timestamp_millis()).unwrap_or_default());Store::tx_message(tx,run_id,"coordinator",&agent.id,&json!({"type":"wait_finished","timed_out":expired&&!ready,"agents":all.iter().filter(|a|agent.wait_for.contains(&a.id)).collect::<Vec<_>>()}).to_string(),Some(&key))?;}
+                    if ready||expired{
+                        let key=format!("wait:{}:{}",agent.id,agent.wait_until.map(|d|d.timestamp_millis()).unwrap_or_default());
+                        // Project the waiter's targets into bounded fields; a full
+                        // AgentRecord would embed their conversation checkpoints
+                        // into the parent's model context.
+                        let states:Vec<_>=all.iter().filter(|a|agent.wait_for.contains(&a.id)).map(|a|json!({"id":a.id,"role":a.role,"status":a.status,"summary":a.summary,"error":a.error,"scope":a.scope})).collect();
+                        Store::tx_message(tx,run_id,"coordinator",&agent.id,&json!({"type":"wait_finished","timed_out":expired&&!ready,"agents":states}).to_string(),Some(&key))?;
+                    }
                     agent.status=Status::Queued;agent.wait_for.clear();agent.wait_until=None;agent.updated_at=now();Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;changed+=1;
                 }
             }Ok(changed)
