@@ -720,6 +720,10 @@ fn dashboard(
     let mut help_open = false;
     let mut focus = Focus::Editor;
     let mut frame_clock: u64 = 0;
+    // Windows terminals can deliver a mouse click as a spurious Esc key
+    // event (VT input translation); a bare Esc must never quit, and Esc
+    // right after a mouse event is ignored entirely.
+    let mut last_mouse_at: Option<std::time::Instant> = None;
     let mut last_tree_rect: Option<Rect> = None;
     let mut last_findings_rect: Option<Rect> = None;
     let mut last_right_rect: Option<Rect> = None;
@@ -792,11 +796,12 @@ fn dashboard(
                     break;
                 }
                 if key.code == KeyCode::Esc {
-                    if editor.is_empty() {
-                        break;
+                    let spurious = last_mouse_at
+                        .is_some_and(|at| at.elapsed() < Duration::from_millis(250));
+                    if !spurious && !editor.is_empty() {
+                        editor.clear();
+                        input_error = None;
                     }
-                    editor.clear();
-                    input_error = None;
                     continue;
                 }
                 if key.code == KeyCode::Enter {
@@ -819,6 +824,8 @@ fn dashboard(
                 }
                 let input: ratatui_textarea::Input = key.into();
                 editor.input(input);
+            } else if matches!(read, CEvent::Mouse(_)) {
+                last_mouse_at = Some(std::time::Instant::now());
             }
             continue;
         };
@@ -1151,6 +1158,14 @@ fn dashboard(
                     continue;
                 }
                 if key.code == KeyCode::Esc {
+                    // A bare Esc never quits: Windows terminals can deliver a
+                    // mouse click as a spurious Esc, and clicks right before
+                    // an Esc are ignored entirely.
+                    let spurious = last_mouse_at
+                        .is_some_and(|at| at.elapsed() < Duration::from_millis(250));
+                    if spurious {
+                        continue;
+                    }
                     if modal.take().is_some() {
                         continue;
                     }
@@ -1159,9 +1174,8 @@ fn dashboard(
                     }
                     if !editor.is_empty() {
                         clear_editor(&mut editor);
-                        continue;
                     }
-                    break;
+                    continue;
                 }
                 if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL)
                 {
@@ -1252,7 +1266,9 @@ fn dashboard(
                     },
                 }
             }
-            CEvent::Mouse(mouse) => match mouse.kind {
+            CEvent::Mouse(mouse) => {
+                last_mouse_at = Some(std::time::Instant::now());
+                match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
                     if let Some(rect) = last_tree_rect {
                         if rect.contains((mouse.column, mouse.row).into()) {
@@ -1295,7 +1311,8 @@ fn dashboard(
                     }
                 }
                 _ => {}
-            },
+            }
+            }
             CEvent::Paste(text) => {
                 if focus == Focus::Editor {
                     editor.insert_str(&text);
