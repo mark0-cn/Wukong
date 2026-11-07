@@ -107,15 +107,22 @@ async fn model_server() -> Result<(
                     ),
                     call(
                         "spawn-recon",
-                        "create_agent",
-                        json!({"name":"Fixture recon","role":"recon","task":"Inspect exact target, record static coverage with the output evidence ID, and finish.","scope":"fixture static inspection","skills":["recon"],"inherit_context":false}),
+                        "task",
+                        json!({"description":"Fixture recon","role":"recon","prompt":"Inspect exact target, record static coverage with the output evidence ID, and finish.","scope":"fixture static inspection","skills":["recon"],"inherit_context":false}),
                     ),
                 ],
-                ("root", 1) => vec![call(
-                    "root-wait",
-                    "wait_for_agents",
-                    json!({"timeout_seconds":10}),
-                )],
+                ("root", 1) => vec![call("root-wait", "wait", {
+                    let spawned = request["messages"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|message| message["tool_call_id"] == "spawn-recon")
+                        .unwrap()["content"]
+                        .as_str()
+                        .unwrap();
+                    let agent = spawned.split('`').nth(1).unwrap();
+                    json!({"agent":agent})
+                })],
                 ("root", 2) => vec![call(
                     "root-finish",
                     "finish_scan",
@@ -138,7 +145,10 @@ async fn model_server() -> Result<(
                         ),
                     ]
                 }
-                _ => anyhow::bail!("unexpected model call {role}:{turn}"),
+                _ => anyhow::bail!(
+                    "unexpected model call {role}:{turn}: {}",
+                    request["messages"]
+                ),
             };
             let response=json!({"id":format!("response-{role}-{turn}"),"object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":calls},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}).to_string();
             stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).as_bytes()).await?;
@@ -168,7 +178,12 @@ async fn cli(config: &Path, args: &[&str]) -> Result<std::process::Output> {
         .kill_on_drop(true);
     tokio::time::timeout(Duration::from_secs(30), command.output())
         .await
-        .context("CLI workflow timed out")?
+        .with_context(|| {
+            format!(
+                "CLI workflow timed out in {args:?}, config={}",
+                config.display()
+            )
+        })?
         .context("launch CLI")
 }
 async fn workflow(pause_then_resume: bool) -> Result<()> {

@@ -189,7 +189,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                         _ => "OPENAI_API_KEY",
                     });
             print_json(
-                &json!({"version":env!("CARGO_PKG_VERSION"),"rig_version":crate::llm::RIG_STATE_VERSION,"state_dir":store.root(),"model":{"provider":config.model.provider,"model":config.model.model,"role_model":config.model.role_model,"role_models":config.model.role_models,"base_url":config.model.base_url,"credential_env":key_env,"credential_present":std::env::var_os(key_env).is_some()},"static":{"binary_parser":true,"ghidra_executable":config.analysis.ghidra_executable,"configured":config.analysis.ghidra_executable.is_some()},"runtime":runtime,"mcp_servers":config.mcp.iter().map(|s|&s.name).collect::<Vec<_>>()}),
+                &json!({"version":env!("CARGO_PKG_VERSION"),"rig_version":crate::llm::RIG_VERSION,"state_dir":store.root(),"model":{"provider":config.model.provider,"model":config.model.model,"role_model":config.model.role_model,"role_models":config.model.role_models,"base_url":config.model.base_url,"credential_env":key_env,"credential_present":std::env::var_os(key_env).is_some()},"static":{"binary_parser":true,"ghidra_executable":config.analysis.ghidra_executable,"configured":config.analysis.ghidra_executable.is_some()},"runtime":runtime,"mcp_servers":config.mcp.iter().map(|s|&s.name).collect::<Vec<_>>()}),
             )?;
         }
         Command::Analyze {
@@ -600,8 +600,7 @@ fn finding_modal_lines(finding: &Finding) -> Vec<Line<'static>> {
 /// The selected agent's conversation: task, model text, reasoning, tool
 /// calls with their recorded results, and coordinator messages — read from
 /// the durable checkpoint and the tool-call ledger.
-fn agent_detail_lines(store: &Store, run_id: &str, agent: &AgentRecord) -> Vec<Line<'static>> {
-    use crate::llm::DurableRun;
+fn agent_detail_lines(_store: &Store, _run_id: &str, agent: &AgentRecord) -> Vec<Line<'static>> {
     use rig::completion::message::UserContent;
     use rig::completion::{AssistantContent, Message};
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -618,24 +617,25 @@ fn agent_detail_lines(store: &Store, run_id: &str, agent: &AgentRecord) -> Vec<L
         lines.push(Line::from("Starting agent... no events yet"));
         return lines;
     };
-    let durable = match DurableRun::from_json(&checkpoint.to_string()) {
-        Ok(durable) => durable,
-        Err(error) => {
-            lines.push(Line::from(format!("checkpoint unreadable: {error}")));
-            return lines;
-        }
-    };
-    let calls = store
-        .list::<ToolCallRecord>("call", run_id)
-        .unwrap_or_default();
-    let mut results: std::collections::HashMap<String, &ToolCallRecord> =
-        std::collections::HashMap::new();
-    for record in calls.iter().filter(|record| record.agent_id == agent.id) {
-        if let Some(call_id) = record.id.rsplit(':').next() {
-            results.insert(call_id.to_owned(), record);
+    let durable: rig_core::conversation::Conversation =
+        match serde_json::from_value(checkpoint.clone()) {
+            Ok(durable) => durable,
+            Err(error) => {
+                lines.push(Line::from(format!("checkpoint unreadable: {error}")));
+                return lines;
+            }
+        };
+    let mut results = std::collections::HashMap::new();
+    for message in durable.messages() {
+        if let Message::User { content } = &**message {
+            for part in content {
+                if let UserContent::ToolResult(result) = part {
+                    results.insert(result.call.to_string(), native_tool_brief(result));
+                }
+            }
         }
     }
-    for message in durable.history() {
+    for message in durable.messages().iter().map(|message| (**message).clone()) {
         match message {
             Message::System { .. } => continue,
             Message::User { content } => {
@@ -689,8 +689,8 @@ fn agent_detail_lines(store: &Store, run_id: &str, agent: &AgentRecord) -> Vec<L
                                 ),
                             ]));
                             match results.get(&call.id.to_string()) {
-                                Some(record) => {
-                                    let brief = tool_result_brief(record);
+                                Some(brief) => {
+                                    let brief = brief.clone();
                                     lines.push(Line::from(vec![
                                         Span::styled("   ↳ ", Style::default().fg(Color::DarkGray)),
                                         Span::styled(brief, Style::default().fg(Color::LightBlue)),
@@ -713,40 +713,22 @@ fn agent_detail_lines(store: &Store, run_id: &str, agent: &AgentRecord) -> Vec<L
     lines
 }
 
-fn tool_result_brief(record: &ToolCallRecord) -> String {
-    let mut brief = String::new();
-    if let Some(result) = &record.result {
-        if let Some(is_error) = result["is_error"].as_bool()
-            && is_error
-        {
-            brief.push_str("error: ");
-        }
-        if let Some(value) = result["value"]["result"].as_str() {
-            let text: String = value.chars().take(160).collect();
-            brief.push_str(&text);
-        } else if let Some(value) = result["value"]["result"].as_object() {
-            let mut parts: Vec<String> = Vec::new();
-            for key in ["state", "status", "job_id", "passed", "evidence_id"] {
-                if let Some(v) = value[key].as_str() {
-                    parts.push(format!("{key}={v}"));
-                } else if let Some(v) = value[key].as_bool() {
-                    parts.push(format!("{key}={v}"));
-                }
-            }
-            if parts.is_empty() {
-                let text = serde_json::to_string(value).unwrap_or_default();
-                brief.push_str(&text.chars().take(160).collect::<String>());
-            } else {
-                brief.push_str(&parts.join(" "));
-            }
-        } else {
-            let text = serde_json::to_string(result).unwrap_or_default();
-            brief.push_str(&text.chars().take(160).collect::<String>());
-        }
-    } else {
-        brief.push_str("pending");
-    }
-    brief
+fn native_tool_brief(result: &rig_core::message::ToolResult) -> String {
+    let text = result
+        .content
+        .iter()
+        .map(|content| match content {
+            rig_core::message::ToolResultContent::Text(text) => text.text.clone(),
+            rig_core::message::ToolResultContent::Json { value } => value.to_string(),
+            rig_core::message::ToolResultContent::Image(_) => "[image]".into(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "{}{}",
+        if result.is_error { "error: " } else { "" },
+        text.chars().take(160).collect::<String>()
+    )
 }
 
 fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunner>) -> Result<()> {

@@ -15,6 +15,7 @@ use std::{
 pub struct Store {
     connection: Arc<Mutex<Connection>>,
     root: Arc<PathBuf>,
+    changes: tokio::sync::watch::Sender<u64>,
 }
 
 impl Store {
@@ -44,8 +45,13 @@ impl Store {
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),
             root: Arc::new(root),
+            changes: tokio::sync::watch::channel(0).0,
         })
     }
+    pub(crate) fn subscribe_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
     pub fn root(&self) -> &Path {
         self.root.as_path()
     }
@@ -57,9 +63,14 @@ impl Store {
             .connection
             .lock()
             .map_err(|_| anyhow!("state database mutex poisoned"))?;
+        let before = conn.total_changes();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let result = f(&tx)?;
         tx.commit()?;
+        if conn.total_changes() != before {
+            self.changes
+                .send_modify(|revision| *revision = revision.wrapping_add(1));
+        }
         Ok(result)
     }
     pub fn tx_get<T: DeserializeOwned>(tx: &Connection, kind: &str, id: &str) -> Result<Option<T>> {

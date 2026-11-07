@@ -30,6 +30,7 @@ regex = "1"
 rig = { version = "=0.46.0", features = ["memory", "rmcp"] }
 rig-core = "=0.46.0"
 rig-ecs = "=0.46.0"
+bevy_ecs = "=0.20.0"
 rig-harness = "=0.46.0"
 rig-basics = { version = "=0.46.0", default-features = false }
 rusqlite = { version = "0.32", features = ["bundled"] }

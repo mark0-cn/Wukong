@@ -1,34 +1,19 @@
-//! Rig's serializable agent state machine, driven one durable effect at a time.
-//!
-//! A checkpoint owns conversation and provider-native response state, never a
-//! model client or credential. Persist after `next_step`, after preparation,
-//! and after every answer. Tool execution belongs to the host coordinator.
+//! Configured Rig provider connections and one-shot typed extraction.
+//! Conversation/effect state belongs to the native Rig kernel and memory journal.
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-    time::Duration,
-};
-
-use crate::domain::{ActiveSkill, Role};
+use crate::domain::Role;
 use anyhow::{Context, Result, bail, ensure};
 use rig::{
     DynModel,
-    completion::{CompletionRequest, Message, ToolDefinition, Usage},
+    completion::Usage,
     operation::Completion,
     providers::{anthropic::AnthropicConfig, ollama::OllamaConfig, openai::OpenAIConfig},
-    run::{
-        AgentRun, InvalidToolCallAction, ModelTurn, ModelTurnOutcome, PreparedRequest, RunSpec,
-        prepare_request,
-    },
-    tool::{ToolExecutionError, ToolOutput, ToolResult},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
-pub use rig::run::{AgentRunStep, ExecCall, PendingToolCall};
-
-pub const RIG_STATE_VERSION: &str = "0.46.0";
+pub const RIG_VERSION: &str = "0.46.0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -263,286 +248,13 @@ fn reject_credentials(value: &Value) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ModelIdentity {
-    pub provider: Provider,
-    pub model: String,
-    pub base_url: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PreparedAttempt {
-    turn: usize,
-    prompt: Message,
-    request: PreparedRequest,
-}
-
-/// Same-version durable envelope around Rig's native sans-I/O state machine.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DurableRun {
-    pub rig_version: String,
-    pub model: ModelIdentity,
-    pub spec: RunSpec,
-    pub tools: Vec<Arc<ToolDefinition>>,
-    pub run: AgentRun,
-    #[serde(default)]
-    notes: Vec<String>,
-    #[serde(default)]
-    pending_request: Option<PreparedAttempt>,
-    #[serde(default)]
-    compacted_usage: Usage,
-    #[serde(default)]
-    compacted_turns: usize,
-    #[serde(default)]
-    pub compactions: Vec<CompactionRecord>,
-    #[serde(default)]
-    skill_base_preamble: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompactionRecord {
-    pub before_turn: usize,
-    pub removed_messages: usize,
-    pub summary: String,
-    pub usage_before: Usage,
-}
-
-impl DurableRun {
-    pub fn apply_active_skills(&mut self, skills: &[ActiveSkill]) -> Result<()> {
-        ensure!(
-            !self.has_prepared_model_call(),
-            "cannot change skills in a frozen model request"
-        );
-        if skills.is_empty() && self.skill_base_preamble.is_none() {
-            return Ok(());
-        }
-        for skill in skills {
-            ensure!(
-                crate::binary::sha256_bytes(skill.content.as_bytes()) == skill.sha256,
-                "active skill {} failed its content hash check",
-                skill.name
-            );
-        }
-        let base = self
-            .skill_base_preamble
-            .get_or_insert_with(|| self.spec.preamble.clone().unwrap_or_default());
-        let mut preamble = base.clone();
-        for skill in skills {
-            preamble.push_str(&format!(
-                "\n\n# Active controller skill: {} (SHA256 {})\n{}",
-                skill.name, skill.sha256, skill.content
-            ));
-        }
-        self.spec.preamble = Some(preamble);
-        Ok(())
-    }
-    pub fn next_step(&mut self) -> Result<AgentRunStep> {
-        self.validate_version()?;
-        // Recovery after a checkpoint in invalid-call resolution still uses
-        // Rig's own bounded retry policy and canonical recovery transcript.
-        self.resolve_invalid_calls()?;
-        let mut step = self.run.next_step().context("advance Rig agent run")?;
-        if let AgentRunStep::Done(response) = &mut step {
-            response.usage += self.compacted_usage;
-        }
-        Ok(step)
-    }
-
-    fn validate_version(&self) -> Result<()> {
-        ensure!(
-            self.rig_version == RIG_STATE_VERSION,
-            "checkpoint uses Rig {}, this binary uses {}; cross-version state needs an explicit migration",
-            self.rig_version,
-            RIG_STATE_VERSION
-        );
-        Ok(())
-    }
-
-    fn resolve_invalid_calls(&mut self) -> Result<()> {
-        while let Some(context) = self.run.pending_invalid_tool_call() {
-            self.run
-                .resolve_invalid_tool_call(InvalidToolCallAction::retry(format!(
-                    "Tool {:?} is unavailable. Call only one of these exact tools: {}.",
-                    context.tool_name,
-                    context.allowed_tools.join(", ")
-                )))?;
-        }
-        Ok(())
-    }
-
-    /// Mailbox messages remain in durable context and are applied only when
-    /// preparing a fresh model attempt. A re-issued attempt uses its snapshot.
-    pub fn queue_note(&mut self, note: impl Into<String>) {
-        self.notes.push(note.into());
-    }
-
-    pub fn usage(&self) -> Usage {
-        self.compacted_usage + self.run.usage()
-    }
-
-    pub fn turn(&self) -> usize {
-        self.compacted_turns + self.run.turn()
-    }
-
-    pub fn is_done(&self) -> bool {
-        self.run.is_done()
-    }
-
-    pub fn has_prepared_model_call(&self) -> bool {
-        self.pending_request.is_some()
-    }
-
-    pub fn history(&self) -> Vec<Message> {
-        let mut history = self.run.canonical_history();
-        for note in &self.notes {
-            history.push(Message::user(format!("Coordinator message: {note}")));
-        }
-        history
-    }
-
-    /// Commit queued mail to the conversation at a fresh model boundary.
-    /// It can then be compacted like other input instead of growing forever
-    /// in the system preamble. Frozen requests keep their exact old payload.
-    fn flush_notes_before_model(&mut self) -> Result<Option<AgentRunStep>> {
-        if self.notes.is_empty() || self.pending_request.is_some() {
-            return Ok(None);
-        }
-        let AgentRunStep::CallModel {
-            prompt, history, ..
-        } = self.next_step()?
-        else {
-            bail!("coordinator mail requires a model boundary");
-        };
-        let mut messages: Vec<Message> = history.iter().map(|m| Message::clone(m)).collect();
-        messages.push(Message::clone(&prompt));
-        messages.extend(
-            self.notes
-                .iter()
-                .map(|note| Message::user(format!("Coordinator message (data): {note}"))),
-        );
-        let step = self.restart_at_model_boundary(messages)?;
-        self.notes.clear();
-        Ok(Some(step))
-    }
-
-    fn restart_at_model_boundary(&mut self, mut messages: Vec<Message>) -> Result<AgentRunStep> {
-        rig::conversation::pairing::validate(&messages)?;
-        let turns = self.compacted_turns + self.run.turn().saturating_sub(1);
-        let remaining = self.spec.effective_max_turns().saturating_sub(turns);
-        ensure!(remaining > 0, "model turn budget is exhausted");
-        let prompt = messages.pop().context("model boundary requires a prompt")?;
-        let mut spec = self.spec.clone();
-        spec.max_turns = Some(remaining);
-        self.compacted_usage += self.run.usage();
-        self.compacted_turns = turns;
-        self.run = AgentRun::from_spec(
-            &spec,
-            prompt,
-            Some(messages.into_iter().map(Arc::new).collect()),
-        );
-        self.next_step()
-    }
-
-    /// Replace old, complete message groups with an explicit summary. The
-    /// caller produces the summary; tool-call/result pairs in the retained
-    /// suffix and native provider reasoning there remain byte-for-byte data.
-    /// This is allowed only before an unprepared model effect, never while a
-    /// tool or network request is outstanding. The returned step replaces any
-    /// previously obtained model step.
-    pub fn compact_before_model(
-        &mut self,
-        summary: &str,
-        keep_recent: usize,
-    ) -> Result<AgentRunStep> {
-        // A failed compaction must not consume notes or replace the model
-        // boundary for the caller that continues with its original step.
-        let mut compacted = self.clone();
-        let step = compacted.compact_at_boundary(summary, keep_recent)?;
-        *self = compacted;
-        Ok(step)
-    }
-
-    fn compact_at_boundary(&mut self, summary: &str, keep_recent: usize) -> Result<AgentRunStep> {
-        ensure!(
-            self.pending_request.is_none(),
-            "cannot compact a prepared model attempt"
-        );
-        ensure!(
-            !summary.trim().is_empty(),
-            "compaction requires an explicit summary"
-        );
-        self.flush_notes_before_model()?;
-        let step = self.next_step()?;
-        let AgentRunStep::CallModel {
-            prompt, history, ..
-        } = step
-        else {
-            bail!("compaction is only valid at a model boundary with all tools answered");
-        };
-        let mut messages: Vec<Message> = history.iter().map(|item| Message::clone(item)).collect();
-        messages.push(Message::clone(&prompt));
-        let mut start = messages.len().saturating_sub(keep_recent.max(1));
-        while start > 0 && rig::conversation::pairing::validate(&messages[start..]).is_err() {
-            start -= 1;
-        }
-        ensure!(
-            start > 0,
-            "no complete message group can be removed with this retention window"
-        );
-        let usage = self.usage();
-        let retained = messages.split_off(start);
-        let mut history = vec![Message::user(format!("Prior analysis summary:\n{summary}"))];
-        history.extend(retained);
-        let step = self.restart_at_model_boundary(history)?;
-        self.compactions.push(CompactionRecord {
-            before_turn: self.compacted_turns + 1,
-            removed_messages: start,
-            summary: summary.into(),
-            usage_before: usage,
-        });
-        Ok(step)
-    }
-
-    pub fn answer(&mut self, call: ExecCall, output: Value, is_error: bool) -> Result<()> {
-        let output = ToolOutput::json(output);
-        let result = if is_error {
-            ToolResult::failed(ToolExecutionError::other("tool execution failed"))
-                .with_output(output)
-        } else {
-            ToolResult::success(output)
-        };
-        self.run
-            .answer(call.answer(result))
-            .context("accept Rig tool result")
-    }
-
-    /// Malformed model calls never reach the host's tool implementation.
-    pub fn answer_malformed(&mut self, call: rig::run::MalformedCall) -> Result<()> {
-        self.run
-            .answer(call.answer(None))
-            .context("return malformed-call feedback")
-    }
-
-    pub fn from_json(json: &str) -> Result<Self> {
-        let run: Self = serde_json::from_str(json).context("decode Rig checkpoint")?;
-        run.validate_version()?;
-        Ok(run)
-    }
-
-    pub fn to_json(&self) -> Result<String> {
-        self.validate_version()?;
-        serde_json::to_string(self).context("encode Rig checkpoint")
-    }
-}
-
 #[derive(Clone, Debug)]
-pub struct DurableEngine {
+pub struct ModelEngine {
     config: ModelConfig,
-    identity: ModelIdentity,
     model: DynModel<Completion>,
 }
 
-impl DurableEngine {
+impl ModelEngine {
     pub fn new(mut config: ModelConfig) -> Result<Self> {
         config.validate()?;
         config.base_url = Some(config.resolved_base_url()?);
@@ -558,7 +270,7 @@ impl DurableEngine {
         Self::connect(config, key)
     }
 
-    fn connect(config: ModelConfig, key: String) -> Result<Self> {
+    pub(crate) fn connect(config: ModelConfig, key: String) -> Result<Self> {
         config.validate()?;
         let base_url = config.resolved_base_url()?;
         let client = rig::rig_reqwest::reqwest::Client::builder()
@@ -590,202 +302,36 @@ impl DurableEngine {
                 .native_completion(&config.model)
                 .erase(),
         };
-        let identity = ModelIdentity {
-            provider: config.provider,
-            model: config.model.clone(),
-            base_url,
+        Ok(Self { config, model })
+    }
+
+    /// Configured provider/endpoint as a native Rig kernel connection.
+    pub(crate) fn connection(&self, stream: bool) -> rig_ecs::model::Connection {
+        use rig_core::{
+            catalog::{Catalog, ModelSpec},
+            providers::registry::ProviderId,
+            serve::{ErasedHandler, adapters::ModelAdapter},
         };
-        Ok(Self {
-            config,
-            identity,
-            model,
-        })
-    }
-
-    pub fn new_run(
-        &self,
-        prompt: &str,
-        preamble: &str,
-        tools: Vec<ToolDefinition>,
-        max_turns: usize,
-    ) -> Result<DurableRun> {
-        self.new_run_with_history(prompt, preamble, tools, max_turns, Vec::new())
-    }
-
-    pub fn new_run_with_history(
-        &self,
-        prompt: &str,
-        preamble: &str,
-        tools: Vec<ToolDefinition>,
-        max_turns: usize,
-        history: Vec<Message>,
-    ) -> Result<DurableRun> {
-        ensure!(max_turns > 0, "max_turns must be positive");
-        let mut names = BTreeSet::new();
-        for definition in &tools {
-            ensure!(
-                names.insert(definition.name.to_string()),
-                "duplicate tool {}",
-                definition.name
-            );
-            ensure!(
-                definition.parameters.is_object(),
-                "tool {} schema must be an object",
-                definition.name
-            );
-        }
-        rig::conversation::pairing::validate(&history)
-            .context("inherited conversation has unpaired tool calls")?;
-        let spec = RunSpec {
-            preamble: Some(preamble.into()),
-            max_tokens: Some(self.config.max_tokens),
-            temperature: self.config.temperature,
-            max_turns: Some(max_turns),
-            max_invalid_tool_call_retries: 2,
-            max_consecutive_malformed_tool_calls: Some(2),
-            additional_params: self.config.additional_params.clone(),
-            ..RunSpec::default()
+        let vendor = match self.config.provider {
+            Provider::Anthropic => "anthropic",
+            Provider::Ollama => "ollama",
+            _ => "openai",
         };
-        let history = history.into_iter().map(Arc::new).collect();
-        let run = AgentRun::from_spec(&spec, prompt, Some(history));
-        Ok(DurableRun {
-            rig_version: RIG_STATE_VERSION.into(),
-            model: self.identity.clone(),
-            spec,
-            tools: tools.into_iter().map(Arc::new).collect(),
-            run,
-            notes: Vec::new(),
-            pending_request: None,
-            compacted_usage: Usage::default(),
-            compacted_turns: 0,
-            compactions: Vec::new(),
-            skill_base_preamble: None,
-        })
-    }
-
-    /// Freeze the precise Rig request before persisting the checkpoint and
-    /// issuing network IO. Repeating this on resume retains the same attempt.
-    pub fn prepare_model_call(&self, run: &mut DurableRun, step: &AgentRunStep) -> Result<()> {
-        run.validate_version()?;
-        ensure!(
-            run.model == self.identity,
-            "checkpoint model/endpoint differs from configured model; resume with the original configuration"
-        );
-        let AgentRunStep::CallModel { .. } = step else {
-            bail!("prepare_model_call requires a CallModel step");
-        };
-        if let Some(pending) = &run.pending_request {
-            ensure!(
-                pending.turn == run.run.turn(),
-                "pending model request belongs to another turn"
-            );
-            return Ok(());
+        let provider = ProviderId::catalog(vendor).expect("supported provider");
+        let mut spec = Catalog::builtin()
+            .get(provider, &self.config.model)
+            .map(|resolved| resolved.spec.clone())
+            .unwrap_or_else(|| ModelSpec::new(provider, &self.config.model));
+        spec.tools = true;
+        spec.max_output_tokens = Some(self.config.max_tokens.min(u32::MAX as u64) as u32);
+        let reference = spec.reference();
+        rig_ecs::model::Connection {
+            spec: Arc::new(spec),
+            handler: rig_ecs::effects::Handler(ErasedHandler::new(ModelDelivery {
+                inner: ModelAdapter::<Completion>::new(reference, self.model.clone()),
+                stream,
+            })),
         }
-        let updated = run.flush_notes_before_model()?;
-        let AgentRunStep::CallModel {
-            prompt,
-            history,
-            turn,
-        } = updated.as_ref().unwrap_or(step)
-        else {
-            bail!("coordinator mail did not yield a model boundary");
-        };
-        let request = prepare_request(
-            &run.spec,
-            &self.model.capabilities().completion,
-            history,
-            run.tools.clone(),
-            run.run.output_tool_name(),
-            None,
-        )
-        .context("prepare Rig provider request")?;
-        run.run.advertise_tools(*turn, request.tools.clone());
-        run.pending_request = Some(PreparedAttempt {
-            turn: *turn,
-            prompt: Message::clone(prompt),
-            request,
-        });
-        Ok(())
-    }
-
-    /// Execute exactly one model effect. The host checkpoints the new state
-    /// before dispatching any returned tools. API errors leave it retryable.
-    pub async fn call_model(&self, run: &mut DurableRun, step: AgentRunStep) -> Result<Usage> {
-        self.prepare_model_call(run, &step)?;
-        let pending = run
-            .pending_request
-            .as_ref()
-            .context("model attempt was not prepared")?;
-        let request = pending
-            .request
-            .clone()
-            .apply(CompletionRequest::new(pending.prompt.clone()));
-        let response = self
-            .model
-            .call(request)
-            .await
-            .context("Rig provider completion failed")?;
-        Self::accept_model_response(run, response)
-    }
-
-    /// Stream Rig's typed text/reasoning/tool events to a UI while Rig folds
-    /// the same provider-native final response. Tools become executable only
-    /// after the completed response has been accepted and checkpointed.
-    /// Dropping this future cancels its local stream; a restart reissues the
-    /// persisted request, with the host bounding retries.
-    pub async fn call_model_streaming<F>(
-        &self,
-        run: &mut DurableRun,
-        step: AgentRunStep,
-        mut on_event: F,
-    ) -> Result<Usage>
-    where
-        F: FnMut(&rig::streaming::Item<rig::streaming::StreamEvent>) + Send,
-    {
-        use futures::StreamExt;
-        self.prepare_model_call(run, &step)?;
-        let pending = run
-            .pending_request
-            .as_ref()
-            .context("model attempt was not prepared")?;
-        let request = pending
-            .request
-            .clone()
-            .apply(CompletionRequest::new(pending.prompt.clone()));
-        let mut stream = self
-            .model
-            .stream(request)
-            .context("open Rig provider stream")?;
-        while let Some(item) = stream.next().await {
-            let item = item.context("read Rig provider stream")?;
-            on_event(&item);
-        }
-        let response = stream
-            .finish()
-            .await
-            .context("finish Rig provider stream")?;
-        Self::accept_model_response(run, response)
-    }
-
-    fn accept_model_response(
-        run: &mut DurableRun,
-        response: rig::completion::CompletionResponse,
-    ) -> Result<Usage> {
-        let pending = run
-            .pending_request
-            .as_ref()
-            .context("model attempt was not prepared")?;
-        let usage = response.usage;
-        let turn = ModelTurn::from_response(&response, &pending.request);
-        run.pending_request = None;
-        let outcome = run
-            .run
-            .model_response(turn)
-            .context("accept Rig model response")?;
-        if matches!(outcome, ModelTurnOutcome::NeedsResolution(_)) {
-            run.resolve_invalid_calls()?;
-        }
-        Ok(usage)
     }
 
     /// Rig owns structured extraction and its run loop. Identity/status fields
@@ -856,6 +402,34 @@ impl DurableEngine {
             json!({"result":object,"evidence_id":envelope["evidence_id"],"truncated":false,"total_bytes":envelope["total_bytes"],"summarized":true}),
             usage,
         )
+    }
+}
+
+/// Keep unary/stream configuration while using the same Rig effect adapter.
+struct ModelDelivery {
+    inner: rig_core::serve::adapters::ModelAdapter<Completion>,
+    stream: bool,
+}
+impl rig_core::serve::Serve for ModelDelivery {
+    type Family = rig_core::effect::family::Completion;
+    fn descriptor(&self) -> rig_core::effect::HandlerDescriptor {
+        self.inner.descriptor()
+    }
+    fn check(
+        &self,
+        kind: &rig_core::effect::EffectKind,
+    ) -> Vec<rig_core::completion::UnsupportedOption> {
+        self.inner.check(kind)
+    }
+    async fn serve(
+        &self,
+        mut kind: rig_core::effect::EffectKind,
+        dispatch: rig_core::serve::Dispatch,
+    ) -> rig_core::serve::Reply {
+        if let rig_core::effect::EffectKind::Completion { stream, .. } = &mut kind {
+            *stream = self.stream;
+        }
+        self.inner.serve(kind, dispatch).await
     }
 }
 
@@ -965,8 +539,8 @@ mod tests {
         (base, task)
     }
 
-    fn engine(provider: Provider, base: String) -> DurableEngine {
-        DurableEngine::connect(
+    fn engine(provider: Provider, base: String) -> ModelEngine {
+        ModelEngine::connect(
             ModelConfig {
                 provider,
                 model: match provider {
@@ -983,333 +557,48 @@ mod tests {
         .unwrap()
     }
 
-    fn tool() -> ToolDefinition {
-        ToolDefinition::new(
-            rig::message::ToolName::new("binary_inspect").unwrap(),
-            "Inspect a binary",
-            json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
-        )
-    }
-
-    fn roundtrip(run: &DurableRun) -> DurableRun {
-        let checkpoint = run.to_json().unwrap();
-        assert!(!checkpoint.contains("test-api-credential-never-checkpoint"));
-        DurableRun::from_json(&checkpoint).unwrap()
-    }
-
-    async fn finish_tool_turn(engine: &DurableEngine, run: &mut DurableRun) {
-        let AgentRunStep::CallTools { mut calls } = run.next_step().unwrap() else {
-            panic!("expected tool call");
-        };
-        let PendingToolCall::Execute(call) = calls.remove(0) else {
-            panic!("expected executable call");
-        };
-        assert_eq!(call.name().as_str(), "binary_inspect");
-        assert_eq!(call.arguments()["path"], "fixture");
-        run.answer(call, json!({"format":"ELF"}), false).unwrap();
-        *run = roundtrip(run);
-        let step = run.next_step().unwrap();
-        engine.prepare_model_call(run, &step).unwrap();
-        *run = roundtrip(run);
-        engine.call_model(run, step).await.unwrap();
-        let AgentRunStep::Done(response) = run.next_step().unwrap() else {
-            panic!("expected final answer");
-        };
-        assert_eq!(response.output(), "verified");
-        assert!(response.usage.input_tokens.unwrap() >= 10);
-    }
-
     #[tokio::test]
-    async fn openai_tool_protocol_survives_each_checkpoint_boundary() {
-        let first = json!({"id":"chat-1","object":"chat.completion","created":1,"model":"gpt-5.2","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"binary_inspect","arguments":"{\"path\":\"fixture\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}});
-        let second = json!({"id":"chat-2","object":"chat.completion","created":1,"model":"gpt-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"verified"},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":2,"total_tokens":17}});
-        let (base, server) = server(vec![first, second]).await;
-        let engine = engine(Provider::OpenAi, format!("{base}/v1"));
-        let mut run = engine
-            .new_run("Inspect fixture", "Use evidence", vec![tool()], 4)
-            .unwrap();
-        let step = run.next_step().unwrap();
-        engine.prepare_model_call(&mut run, &step).unwrap();
-        run.queue_note("A message arriving after preparation applies to the next attempt");
-        run = roundtrip(&run);
-        let usage = engine.call_model(&mut run, step).await.unwrap();
-        assert_eq!(usage.input_tokens, Some(10));
-        assert_eq!(run.turn(), 1);
-        run = roundtrip(&run);
-        finish_tool_turn(&engine, &mut run).await;
-        assert_eq!(run.usage().total_tokens, Some(30));
-        let requests = server.await.unwrap();
-        assert_eq!(requests[0].0, "/v1/chat/completions");
-        assert_eq!(
-            requests[0].1["tools"][0]["function"]["name"],
-            "binary_inspect"
-        );
-        assert!(!requests[0].1.to_string().contains("message arriving"));
-        assert!(requests[1].1.to_string().contains("message arriving"));
-        assert!(
-            requests[1].1["messages"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|message| message["role"] == "tool" && message["tool_call_id"] == "call_1")
-        );
-        assert!(run.history().iter().any(|message| {
-            serde_json::to_string(message)
-                .unwrap()
-                .contains("message arriving")
-        }));
-    }
-
-    #[tokio::test]
-    async fn anthropic_thinking_signature_and_tool_use_replay_natively() {
-        let first = json!({"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"inspect the input parser","signature":"provider-signed-thinking"},{"type":"tool_use","id":"toolu_1","name":"binary_inspect","input":{"path":"fixture"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":3}});
-        let second = json!({"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"verified"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":12,"output_tokens":2}});
-        let (base, server) = server(vec![first, second]).await;
-        let engine = engine(Provider::Anthropic, base);
-        let mut run = engine
-            .new_run("Inspect fixture", "Use evidence", vec![tool()], 4)
-            .unwrap();
-        let step = run.next_step().unwrap();
-        engine.call_model(&mut run, step).await.unwrap();
-        run = roundtrip(&run);
-        finish_tool_turn(&engine, &mut run).await;
-        let requests = server.await.unwrap();
-        assert_eq!(requests[0].0, "/v1/messages");
-        let second = requests[1].1.to_string();
-        assert!(
-            second.contains("provider-signed-thinking"),
-            "native signature was lost: {second}"
-        );
-        assert!(second.contains("tool_result") && second.contains("toolu_1"));
-    }
-
-    #[tokio::test]
-    async fn ollama_uses_native_chat_and_retains_thinking_and_usage() {
-        let reply = json!({"model":"qwen3","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":"verified","thinking":"inspect the parser"},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":2});
-        let (base, server) = server(vec![reply]).await;
+    async fn typed_summary_preserves_host_owned_fields_and_failure_usage() {
+        let replies = [r#"{"summary":"short summary"}"#, "not structured output"].into_iter().map(|text| json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":text},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":2})).collect();
+        let (base, received) = server(replies).await;
         let engine = engine(Provider::Ollama, base);
-        let mut run = engine
-            .new_run("Inspect fixture", "Use evidence", vec![], 2)
-            .unwrap();
-        let step = run.next_step().unwrap();
-        engine.call_model(&mut run, step).await.unwrap();
-        run = roundtrip(&run);
-        let AgentRunStep::Done(response) = run.next_step().unwrap() else {
-            panic!("expected final answer");
-        };
-        assert_eq!(response.output(), "verified");
-        assert_eq!(response.usage.input_tokens, Some(10));
-        assert!(run.to_json().unwrap().contains("inspect the parser"));
-        assert_eq!(server.await.unwrap()[0].0, "/api/chat");
+        let original = json!({"result":{"job_id":"job-original","state":"running"},"evidence_id":"ev-original","total_bytes":999});
+        let (summary, usage) = engine
+            .summarize_tool_output("job_status", &original, 400)
+            .await;
+        assert_eq!(summary["result"]["job_id"], "job-original");
+        assert_eq!(summary["evidence_id"], "ev-original");
+        assert_eq!(usage.total_tokens, Some(12));
+        let (fallback, usage) = engine
+            .summarize_tool_output("job_status", &original, 400)
+            .await;
+        assert_eq!(fallback, original);
+        assert_eq!(usage.total_tokens, Some(12));
+        let requests = received.await.unwrap();
+        assert!(
+            requests
+                .iter()
+                .all(|(_, request)| request["format"].is_object())
+        );
     }
 
-    #[tokio::test]
-    async fn responses_api_replays_encrypted_reasoning_and_call_identity() {
-        let first = json!({"id":"resp_1","object":"response","created_at":1,"status":"completed","model":"gpt-5.2","output":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"inspect parser"}],"encrypted_content":"opaque-native-reasoning"},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"binary_inspect","arguments":"{\"path\":\"fixture\"}","status":"completed"}],"usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14},"tools":[]});
-        let second = json!({"id":"resp_2","object":"response","created_at":1,"status":"completed","model":"gpt-5.2","output":[{"type":"message","id":"msg_2","status":"completed","role":"assistant","content":[{"type":"output_text","text":"verified","annotations":[]}]}],"usage":{"input_tokens":14,"output_tokens":2,"total_tokens":16},"tools":[]});
-        let (base, server) = server(vec![first, second]).await;
-        let engine = engine(Provider::OpenAiResponses, format!("{base}/v1"));
-        let mut run = engine
-            .new_run("Inspect fixture", "Use evidence", vec![tool()], 4)
-            .unwrap();
-        let step = run.next_step().unwrap();
-        engine.call_model(&mut run, step).await.unwrap();
-        run = roundtrip(&run);
-        finish_tool_turn(&engine, &mut run).await;
-        let requests = server.await.unwrap();
-        assert_eq!(requests[0].0, "/v1/responses");
-        let second = requests[1].1.to_string();
-        assert!(second.contains("opaque-native-reasoning"));
-        assert!(second.contains("function_call_output") && second.contains("call_1"));
-    }
-
-    #[tokio::test]
-    async fn streaming_emits_typed_events_and_commits_the_folded_response() {
-        let frames = [
-            json!({"id":"chat-stream","object":"chat.completion.chunk","created":1,"model":"gpt-5.2","choices":[{"index":0,"delta":{"role":"assistant","content":"ver"},"finish_reason":null}]}),
-            json!({"id":"chat-stream","object":"chat.completion.chunk","created":1,"model":"gpt-5.2","choices":[{"index":0,"delta":{"content":"ified"},"finish_reason":null}]}),
-            json!({"id":"chat-stream","object":"chat.completion.chunk","created":1,"model":"gpt-5.2","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}),
-            json!({"id":"chat-stream","object":"chat.completion.chunk","created":1,"model":"gpt-5.2","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}),
-        ];
-        let body = frames
-            .iter()
-            .map(|frame| format!("data: {frame}\n\n"))
-            .collect::<String>()
-            + "data: [DONE]\n\n";
-        let (base, server) = server_wire(vec![("text/event-stream".into(), body)]).await;
-        let engine = engine(Provider::OpenAi, format!("{base}/v1"));
-        let mut run = engine
-            .new_run("Inspect fixture", "Use evidence", vec![], 3)
-            .unwrap();
-        let step = run.next_step().unwrap();
-        let mut text = String::new();
-        engine
-            .call_model_streaming(&mut run, step, |item| {
-                if let rig::streaming::Item::Event(rig::streaming::StreamEvent::Text {
-                    text: delta,
-                    ..
-                }) = item
-                {
-                    text.push_str(delta);
-                }
-            })
-            .await
-            .unwrap();
-        assert_eq!(text, "verified");
-        run = roundtrip(&run);
-        let AgentRunStep::Done(response) = run.next_step().unwrap() else {
-            panic!("expected final answer");
-        };
-        assert_eq!(response.output(), "verified");
-        assert_eq!(response.usage.total_tokens, Some(12));
-        assert_eq!(server.await.unwrap()[0].1["stream"], true);
-    }
-
-    #[tokio::test]
-    async fn compaction_retains_tool_pairs_and_total_usage_and_rejects_pending_effects() {
-        let tool_turn = |number| json!({"id":format!("chat-{number}"),"object":"chat.completion","created":1,"model":"gpt-5.2","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":format!("call_{number}"),"type":"function","function":{"name":"binary_inspect","arguments":"{\"path\":\"fixture\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}});
-        let final_turn = json!({"id":"chat-3","object":"chat.completion","created":1,"model":"gpt-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"verified"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}});
-        let (base, server) = server(vec![tool_turn(1), tool_turn(2), final_turn]).await;
-        let engine = engine(Provider::OpenAi, format!("{base}/v1"));
-        let mut run = engine
-            .new_run("Inspect fixture", "Use evidence", vec![tool()], 4)
-            .unwrap();
-        for index in 0..2 {
-            run.queue_note(format!("older coordination mail {index}"));
-            let step = run.next_step().unwrap();
-            engine.call_model(&mut run, step).await.unwrap();
-            assert!(
-                run.notes.is_empty(),
-                "delivered mail must enter the canonical history"
-            );
-            let AgentRunStep::CallTools { mut calls } = run.next_step().unwrap() else {
-                panic!("expected calls");
-            };
-            assert!(run.compact_before_model("summary", 1).is_err());
-            let PendingToolCall::Execute(call) = calls.remove(0) else {
-                panic!("expected executable call");
-            };
-            run.answer(call, json!({"format":"ELF","index":index}), false)
-                .unwrap();
-        }
-        let step = run
-            .compact_before_model("Two prior inspection calls completed", 1)
-            .unwrap();
-        assert_eq!(run.compactions.len(), 1);
-        assert_eq!(run.usage().total_tokens, Some(26));
-        assert_eq!(run.turn(), 3);
-        rig::conversation::pairing::validate(&run.run.full_history()).unwrap();
+    #[test]
+    fn configurations_reject_embedded_credentials() {
         assert!(
-            !serde_json::to_string(&run.history())
-                .unwrap()
-                .contains("older coordination mail 0")
-        );
-        engine.prepare_model_call(&mut run, &step).unwrap();
-        assert!(
-            run.compact_before_model("invalid while request prepared", 1)
-                .is_err()
-        );
-        run = roundtrip(&run);
-        engine.call_model(&mut run, step).await.unwrap();
-        let AgentRunStep::Done(response) = run.next_step().unwrap() else {
-            panic!("expected final");
-        };
-        assert_eq!(response.usage.total_tokens, Some(38));
-        assert_eq!(run.turn(), 3);
-        let requests = server.await.unwrap();
-        assert!(
-            requests[2]
-                .1
-                .to_string()
-                .contains("Two prior inspection calls completed")
-        );
-        assert!(
-            requests[0]
-                .1
-                .to_string()
-                .contains("older coordination mail 0")
-        );
-        for request in &requests {
-            for message in request.1["messages"].as_array().unwrap() {
-                if message["role"] == "system" {
-                    assert!(!message.to_string().contains("coordination mail"));
-                }
+            ModelConfig {
+                base_url: Some("https://user:pass@example.com".into()),
+                ..Default::default()
             }
-        }
-    }
-
-    #[test]
-    fn rejected_compaction_preserves_mail_and_the_original_model_boundary() {
-        let engine = engine(Provider::Ollama, "http://127.0.0.1:1".into());
-        let mut run = engine
-            .new_run("understand the format", "Use evidence", vec![tool()], 4)
-            .unwrap();
-        let step = run.next_step().unwrap();
-        run.queue_note("operator constraint that must survive a rejected compaction");
-        let before = run.to_json().unwrap();
-        assert!(run.compact_before_model("summary", 12).is_err());
-        assert_eq!(run.to_json().unwrap(), before);
-        engine.prepare_model_call(&mut run, &step).unwrap();
+            .validate()
+            .is_err()
+        );
         assert!(
-            serde_json::to_string(&run.pending_request)
-                .unwrap()
-                .contains("operator constraint")
+            ModelConfig {
+                additional_params: Some(json!({"headers":{"authorization":"credential"}})),
+                ..Default::default()
+            }
+            .validate()
+            .is_err()
         );
-        assert!(run.notes.is_empty());
-    }
-
-    #[test]
-    fn activated_skills_survive_compaction_and_do_not_change_frozen_requests() {
-        let engine = engine(Provider::Ollama, "http://127.0.0.1:1".into());
-        let content = "Exact validated local instructions";
-        let skill = ActiveSkill {
-            name: "method".into(),
-            sha256: crate::binary::sha256_bytes(content.as_bytes()),
-            content: content.into(),
-            evidence_id: "skill-proof".into(),
-        };
-        let history = (0..12)
-            .map(|i| Message::user(format!("old context {i}")))
-            .collect();
-        let mut run = engine
-            .new_run_with_history("task", "base policy", vec![tool()], 6, history)
-            .unwrap();
-        run.apply_active_skills(std::slice::from_ref(&skill))
-            .unwrap();
-        run.apply_active_skills(std::slice::from_ref(&skill))
-            .unwrap();
-        assert_eq!(
-            run.spec.preamble.as_ref().unwrap().matches(content).count(),
-            1
-        );
-        let step = run.compact_before_model("analysis summary", 2).unwrap();
-        run = roundtrip(&run);
-        assert!(run.spec.preamble.as_ref().unwrap().contains(content));
-        engine.prepare_model_call(&mut run, &step).unwrap();
-        let frozen = serde_json::to_value(&run.pending_request).unwrap();
-        assert!(run.apply_active_skills(&[]).is_err());
-        assert_eq!(serde_json::to_value(&run.pending_request).unwrap(), frozen);
-        assert!(frozen.to_string().contains(content));
-    }
-
-    #[test]
-    fn checkpoint_and_config_reject_version_or_credential_mistakes() {
-        let engine = engine(Provider::Ollama, "http://127.0.0.1:1".into());
-        let mut run = engine.new_run("inspect", "preamble", vec![], 2).unwrap();
-        run.rig_version = "0.45.0".into();
-        assert!(
-            run.next_step()
-                .unwrap_err()
-                .to_string()
-                .contains("migration")
-        );
-        let mut config = ModelConfig {
-            base_url: Some("https://user:secret@example.org".into()),
-            ..ModelConfig::default()
-        };
-        assert!(config.validate().is_err());
-        config.base_url = Some("http://localhost:11434".into());
-        config.additional_params = Some(json!({"nested":{"api_key":"secret"}}));
-        assert!(config.validate().is_err());
     }
 }

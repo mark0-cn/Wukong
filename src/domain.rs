@@ -5,7 +5,12 @@ use std::{fmt, path::PathBuf, str::FromStr};
 use uuid::Uuid;
 
 pub fn id(prefix: &str) -> String {
-    format!("{prefix}_{}", Uuid::new_v4().simple())
+    let value = Uuid::new_v4().simple().to_string();
+    if prefix == "agent" {
+        value
+    } else {
+        format!("{prefix}_{value}")
+    }
 }
 pub fn now() -> DateTime<Utc> {
     Utc::now()
