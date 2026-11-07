@@ -191,6 +191,78 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
 }
 
 #[tokio::test]
+async fn lifecycle_tools_replay_receipts_after_uncertain_outcomes() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    // The root stops its child; the committed effect is recorded in a
+    // transactional receipt.
+    let stop_args = json!({"agent_id":agent.id,"reason":"scoped stop"});
+    let first = service
+        .execute(
+            &run.root_id,
+            "stop-lifecycle",
+            "stop_agent",
+            stop_args.clone(),
+        )
+        .await?;
+    assert!(!first.is_error, "{first:?}");
+    assert_eq!(result(&first)["stopped"].as_array().unwrap().len(), 1);
+    // Simulate a lost response: the effect committed but the envelope never
+    // reached the model. The durable retry must return the receipt instead
+    // of re-running the transition against an already-terminal agent.
+    let mut record: ToolCallRecord = store.require("call", "stop-lifecycle")?;
+    record.state = CallState::Uncertain;
+    store.put("call", "stop-lifecycle", &run.id, &record)?;
+    let replay = service
+        .execute(&run.root_id, "stop-lifecycle", "stop_agent", stop_args)
+        .await?;
+    assert!(!replay.is_error, "stop replay failed: {replay:?}");
+    assert_eq!(result(&replay)["stopped"].as_array().unwrap().len(), 1);
+
+    // finish_scan runs on a fresh assessment whose root has no children and
+    // no terminal notifications to read first.
+    let second_target = temp.path().join("second.bin");
+    fs::write(&second_target, b"second fixture")?;
+    let second = coordinator.create_run(
+        &second_target,
+        "second assessment",
+        Budget::default(),
+        json!({}),
+    )?;
+    let finish_args = json!({"summary":"assessment complete"});
+    let finish = service
+        .execute(
+            &second.root_id,
+            "finish-lifecycle",
+            "finish_scan",
+            finish_args.clone(),
+        )
+        .await?;
+    assert!(!finish.is_error, "{finish:?}");
+    let mut record: ToolCallRecord = store.require("call", "finish-lifecycle")?;
+    record.state = CallState::Uncertain;
+    store.put("call", "finish-lifecycle", &second.id, &record)?;
+    // The root is already terminal after finish_scan; the replay must come
+    // from the receipt rather than fail the terminal-agent check.
+    let replay = service
+        .execute(
+            &second.root_id,
+            "finish-lifecycle",
+            "finish_scan",
+            finish_args,
+        )
+        .await?;
+    assert!(!replay.is_error, "finish replay failed: {replay:?}");
+    assert_eq!(
+        store.require::<RunRecord>("run", &second.id)?.status,
+        Status::Completed
+    );
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn durable_receipts_prevent_repeated_messages_and_completed_results_replay_exactly()
 -> Result<()> {
     let temp = tempfile::tempdir()?;
