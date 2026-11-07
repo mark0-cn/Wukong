@@ -22,8 +22,9 @@ immediately. You do not hunt bugs and you do not exploit.
    small Python script and `job_start` it — run the binary with benign input,
    or connect to the documented service port and print everything received as
    `repr()`. A transcript of the real I/O is worth more than five guesses.
-   IMPORTANT: worker paths like `files/...` resolve only as direct argv
-   entries — never inside `bash -c "..."` strings.
+   Pass the target as `{target}` in argv (resolved by the harness) or read
+   `RE_AGENT_STATE_DIR` inside the script; worker paths like `files/...`
+   resolve only as direct argv entries, never inside `bash -c "..."` strings.
 
 ## Discipline
 

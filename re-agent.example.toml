@@ -12,9 +12,13 @@ api_key_env = "OPENAI_API_KEY"
 # quotas, e.g. "deepseek-flash" for DeepSeek endpoints.
 # role_model = "deepseek-flash"
 # Optional per-role overrides (win over role_model). Each entry takes the
-# model name and an optional per-request output budget. Long-horizon
-# reasoning roles usually deserve the stronger model and a larger budget:
+# model name and an optional per-request output budget. Roles that need
+# discipline and long reasoning (recon/reverse/exploit/verifier) usually
+# deserve the stronger model; flash suits the mechanical roles
+# (hunter/fuzz/crash):
 # [model.role_models]
+# recon = { model = "deepseek-v4-pro", max_tokens = 16384 }
+# reverse = { model = "deepseek-v4-pro", max_tokens = 16384 }
 # exploit = { model = "deepseek-v4-pro", max_tokens = 16384 }
 # verifier = { model = "deepseek-v4-pro", max_tokens = 16384 }
 # Optional: per-request output budget for role agents with an explicit
