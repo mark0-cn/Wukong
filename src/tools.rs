@@ -835,21 +835,27 @@ impl ToolService {
             }
             "verification_record" => self.verification(agent, call_id, &args).await,
             "evidence_read" => {
-                let bytes = self
-                    .store
-                    .read_evidence(&agent.run_id, text(&args, "evidence_id")?)?;
+                let evidence_id = text(&args, "evidence_id")?.to_owned();
+                let record: Evidence =
+                    self.require_in_run("evidence", &evidence_id, &agent.run_id)?;
+                let total = usize::try_from(record.size)?;
                 let offset = usize::try_from(number(&args, "offset", 0))?;
-                ensure!(offset <= bytes.len(), "evidence offset is past end of file");
+                ensure!(offset <= total, "evidence offset is past end of file");
                 let length = usize::try_from(number(&args, "length", 8192))?
                     .min(self.config.tools.max_evidence_read_bytes);
-                let end = offset.saturating_add(length).min(bytes.len());
-                let part = &bytes[offset..end];
-                let content = match std::str::from_utf8(part) {
+                let part = if offset == total || length == 0 {
+                    Vec::new()
+                } else {
+                    self.store
+                        .read_evidence_range(&agent.run_id, &evidence_id, offset as u64, length)?
+                };
+                let end = offset + part.len();
+                let content = match std::str::from_utf8(&part) {
                     Ok(text) => json!({"encoding":"utf8","data":text}),
-                    Err(_) => json!({"encoding":"base64","data":BASE64.encode(part)}),
+                    Err(_) => json!({"encoding":"base64","data":BASE64.encode(&part)}),
                 };
                 Ok(
-                    json!({"evidence_id":args["evidence_id"],"offset":offset,"length":part.len(),"total_bytes":bytes.len(),"next_offset":if end<bytes.len(){Some(end)}else{None},"content":content}),
+                    json!({"evidence_id":evidence_id,"offset":offset,"length":part.len(),"total_bytes":total,"next_offset":if end<total{Some(end)}else{None},"content":content}),
                 )
             }
             "load_skill" => Ok(
