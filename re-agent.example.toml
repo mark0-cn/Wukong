@@ -17,9 +17,11 @@ api_key_env = "OPENAI_API_KEY"
 # [model.role_models]
 # exploit = "deepseek-v4-pro"
 # verifier = "deepseek-v4-pro"
-# Optional: per-request output budget for role agents that resolve to a model
-# other than the root model. Verbose role models can hit the root max_tokens
-# and stop with finish_reason=Length; raise the budget here.
+# Optional: per-request output budget for role agents with an explicit
+# resolution (role_models or role_model), even when they resolve to the root
+# model name. Verbose role models can hit the root max_tokens and stop with
+# finish_reason=Length; raise the budget here. Unmapped roles keep the root
+# max_tokens.
 # role_max_tokens = 16384
 # Raise max_tokens where your provider supports it: long decompilation and
 # code-level answers benefit from a larger response budget.

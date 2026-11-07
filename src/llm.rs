@@ -108,17 +108,17 @@ impl ModelConfig {
 
     /// The model configuration for a role (non-root) agent: the root settings
     /// with the model name swapped when a role model is configured. A role
-    /// mapped to the root model name keeps the root `max_tokens`.
+    /// with an explicit resolution (per-role map or `role_model`) receives
+    /// `role_max_tokens` when set, even when it resolves to the root model
+    /// name; roles without a resolution keep the root `max_tokens`.
     pub fn role_config_for(&self, role: Role) -> ModelConfig {
         let mut config = self.clone();
         config.role_model = None;
         config.role_models = None;
         if let Some(name) = self.role_model_name(role) {
-            if name != self.model {
-                config.model = name.to_owned();
-                if let Some(max_tokens) = self.role_max_tokens {
-                    config.max_tokens = max_tokens;
-                }
+            config.model = name.to_owned();
+            if let Some(max_tokens) = self.role_max_tokens {
+                config.max_tokens = max_tokens;
             }
         }
         config
