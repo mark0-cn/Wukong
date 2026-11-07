@@ -8,7 +8,7 @@ use crate::{
     runtime::{RuntimeBackend, RuntimeClient},
     store::Store,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 use std::{io, path::PathBuf, time::Duration};
@@ -362,6 +362,70 @@ enum TuiInput {
     Message,
 }
 
+/// Validate a target path and drive a fresh assessment from the TUI,
+/// returning the new run id and its cancellation token.
+fn start_task(
+    runner: &AssessmentRunner,
+    target: &str,
+) -> Result<(String, CancellationToken)> {
+    let path = std::fs::canonicalize(target.trim())?;
+    ensure!(path.is_file(), "not a file: {}", target.trim());
+    let config = runner.config();
+    let created = runner.coordinator.create_run(
+        &path,
+        DEFAULT_TASK,
+        config.budget.clone(),
+        serde_json::to_value(config.clone())?,
+    )?;
+    let cancel = CancellationToken::new();
+    let drive_runner = runner.clone();
+    let drive_id = created.id.clone();
+    let drive_token = cancel.clone();
+    tokio::spawn(async move {
+        let _ = drive_runner.drive(&drive_id, drive_token).await;
+    });
+    Ok((created.id, cancel))
+}
+
+fn banner_lines() -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::{
+        style::{Color, Modifier, Style},
+        text::{Line, Span},
+    };
+    vec![
+        Line::from(Span::styled(
+            "██████╗ ███████╗    █████╗  ██████╗ ███████╗ ███╗   ██╗ ████████╗",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "██╔══██╗██╔════╝   ██╔══██╗██╔═════╝ ██╔════╝ ████╗  ██║ ╚══██╔══╝",
+            Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "██████╔╝█████╗     ███████║██║  ███╗█████╗   ██╔██╗ ██║    ██║",
+            Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "██╔══██╗██╔══╝     ██╔══██║██║   ██║██╔══╝   ██║╚██╗██║    ██║",
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "██║  ██║███████╗    ██║  ██║╚██████╔╝███████╗ ██║ ╚████║    ██║",
+            Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled(
+                "╚═╝  ╚═╝╚══════╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═╝  ╚═══╝    ╚═╝  ",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " binary reverse-engineering agents",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]),
+    ]
+}
+
 fn dashboard(
     store: &Store,
     run_id: Option<&str>,
@@ -406,38 +470,88 @@ fn dashboard(
             }
         }
         let Some(selected_id) = selected.as_deref() else {
-            // Welcome state: no assessment exists yet.
+            // Welcome state: no assessment exists yet. Typing starts the
+            // task input directly, Strix-style.
             terminal.draw(|frame| {
                 let area = frame.area();
-                let lines = vec![
-                    Line::from(Span::styled(
-                        "No assessment yet. Press i, then type a target path (Enter to start).",
+                let mut lines = banner_lines();
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "What do you want me to do? Type a target path and press Enter.",
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    )),
-                    Line::from(Span::styled(
-                        "The run is driven live in this terminal; q pauses and exits.",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                    Line::from(Span::styled(
-                        if runner.is_some() {
-                            "Ready to start tasks."
-                        } else {
-                            "Watch-only: model credentials are missing, so new tasks cannot start."
-                        },
-                        Style::default().fg(if runner.is_some() { Color::Green } else { Color::Red }),
-                    )),
+                    ),
+                ]));
+                lines.push(Line::from(Span::styled(
+                    "The run is driven live in this terminal; q pauses and exits.",
+                    Style::default().fg(Color::DarkGray),
+                )));
+                lines.push(Line::from(Span::styled(
+                    if runner.is_some() {
+                        "Ready to start tasks."
+                    } else {
+                        "Watch-only: model credentials are missing, so new tasks cannot start."
+                    },
+                    Style::default().fg(if runner.is_some() { Color::Green } else { Color::Red }),
+                )));
+                lines.push(Line::from(""));
+                let mut prompt = vec![
+                    Span::styled(" ▸ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled("task: target path ", Style::default().fg(Color::Cyan)),
+                    Span::raw(&buffer),
+                    Span::styled("▌", Style::default().fg(Color::Yellow)),
                 ];
+                if let Some(error) = &input_error {
+                    prompt.push(Span::styled(format!("  {error}"), Style::default().fg(Color::Red)));
+                }
+                lines.push(Line::from(prompt));
                 frame.render_widget(
-                    Paragraph::new(lines)
-                        .block(Block::default().borders(Borders::ALL).title(" RE-AGENT ")),
+                    Paragraph::new(lines).block(
+                        Block::default().borders(Borders::ALL).title(" RE-AGENT "),
+                    ),
                     area,
                 );
             })?;
             if event::poll(Duration::from_millis(250))?
                 && let CEvent::Key(key) = event::read()?
             {
+                if input == TuiInput::Task {
+                    match key.code {
+                        KeyCode::Esc => {
+                            input = TuiInput::None;
+                            buffer.clear();
+                            input_error = None;
+                        }
+                        KeyCode::Enter => {
+                            if let Some(runner) = &runner {
+                                match start_task(runner, &buffer) {
+                                    Ok((run_id, cancel)) => {
+                                        drive_cancel = Some(cancel);
+                                        selected = Some(run_id);
+                                        follow = true;
+                                        scroll = 0;
+                                        input = TuiInput::None;
+                                        buffer.clear();
+                                        input_error = None;
+                                    }
+                                    Err(error) => input_error = Some(format!("{error:#}")),
+                                }
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            buffer.pop();
+                        }
+                        KeyCode::Char(c) => buffer.push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
                 match key.code {
                     KeyCode::Char('i') if runner.is_some() => input = TuiInput::Task,
+                    KeyCode::Char(c) if runner.is_some() && !c.is_control() => {
+                        input = TuiInput::Task;
+                        buffer.push(c);
+                    }
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     _ => {}
                 }
@@ -465,40 +579,8 @@ fn dashboard(
                 ])
                 .split(frame.area());
             // ---- banner ----
-            let banner = vec![
-                Line::from(Span::styled(
-                    "██████╗ ███████╗    █████╗  ██████╗ ███████╗ ███╗   ██╗ ████████╗",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                )),
-                Line::from(Span::styled(
-                    "██╔══██╗██╔════╝   ██╔══██╗██╔════╝ ██╔════╝ ████╗  ██║ ╚══██╔══╝",
-                    Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
-                )),
-                Line::from(Span::styled(
-                    "██████╔╝█████╗     ███████║██║  ███╗█████╗   ██╔██╗ ██║    ██║",
-                    Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD),
-                )),
-                Line::from(Span::styled(
-                    "██╔══██╗██╔══╝     ██╔══██║██║   ██║██╔══╝   ██║╚██╗██║    ██║",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-                )),
-                Line::from(Span::styled(
-                    "██║  ██║███████╗    ██║  ██║╚██████╔╝███████╗ ██║ ╚████║    ██║",
-                    Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD),
-                )),
-                Line::from(vec![
-                    Span::styled(
-                        "╚═╝  ╚═╝╚══════╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═╝  ╚═══╝    ╚═╝  ",
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        " binary reverse-engineering agents",
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ]),
-            ];
             frame.render_widget(
-                Paragraph::new(banner).block(Block::default().borders(Borders::NONE)),
+                Paragraph::new(banner_lines()).block(Block::default().borders(Borders::NONE)),
                 areas[0],
             );
             // ---- middle: agent tree | activity ----
@@ -690,34 +772,17 @@ fn dashboard(
                     KeyCode::Enter => match input {
                         TuiInput::Task => {
                             if let Some(runner) = &runner {
-                                match std::fs::canonicalize(buffer.trim()) {
-                                    Ok(path) if path.is_file() => {
-                                        let config = runner.config();
-                                        let created = runner.coordinator.create_run(
-                                            &path,
-                                            DEFAULT_TASK,
-                                            config.budget.clone(),
-                                            serde_json::to_value(config.clone())?,
-                                        )?;
-                                        let cancel = CancellationToken::new();
-                                        let drive_runner = runner.clone();
-                                        let drive_id = created.id.clone();
-                                        let drive_token = cancel.clone();
-                                        tokio::spawn(async move {
-                                            let _ = drive_runner.drive(&drive_id, drive_token).await;
-                                        });
+                                match start_task(runner, &buffer) {
+                                    Ok((created, cancel)) => {
                                         drive_cancel = Some(cancel);
-                                        selected = Some(created.id);
+                                        selected = Some(created);
                                         follow = true;
                                         scroll = 0;
                                         input = TuiInput::None;
                                         buffer.clear();
                                         input_error = None;
                                     }
-                                    _ => {
-                                        input_error =
-                                            Some(format!("not a file: {}", buffer.trim()));
-                                    }
+                                    Err(error) => input_error = Some(format!("{error:#}")),
                                 }
                             }
                         }
