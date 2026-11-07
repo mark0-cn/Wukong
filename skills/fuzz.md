@@ -23,6 +23,6 @@ not claims.
 
 ## Stop discipline
 
-Stop the campaign (`fuzz.stop`) when the objective is met or the time budget
+Stop the campaign (`job_cancel` with the fuzz job_id) when the objective is met or the time budget
 is spent. Finish with `agent_finish` naming the artifacts and their evidence
 IDs.

@@ -113,7 +113,7 @@ flowchart TB
 | 二进制画像 | Rust `object` + 自定义检查 | `binary.inspect`、`binary.mitigations` |
 | 静态逆向 | Ghidra worker | `functions.search`、`function.decompile`、`xrefs.query` |
 | 动态调试 | GDB/MI worker | `debug.start`、`debug.breakpoint`、`debug.memory` |
-| 无源码 fuzz | AFL++ QEMU 模式 | `fuzz.start`、`fuzz.status`、`fuzz.stop` |
+| 无源码 fuzz | AFL++ QEMU 模式 | `fuzz_start`、`fuzz_status`、`job_cancel`（worker 协议对应 `fuzz.start`/`fuzz.stop`） |
 | 崩溃与 PoC | 独立运行 worker | `crash.replay`、`input.minimize`、`poc.verify` |
 | 扩展接入 | MCP / 自定义适配器 | IDA、Windows 调试器、其他分析引擎 |
 
