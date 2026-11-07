@@ -202,6 +202,25 @@ def bounded_int(value, default, minimum, maximum):
     return value
 
 
+def parse_address(value):
+    """Accept the controller's interchangeable integer spellings for module-relative
+    addresses: JSON integers, plain decimal strings and 0x-hex strings."""
+    if isinstance(value, bool) or isinstance(value, float):
+        raise ValueError("address must be a nonnegative integer or 0x-hex string")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str):
+        text = value.strip().replace("_", "")
+        if not text:
+            raise ValueError("address must be a nonnegative integer or 0x-hex string")
+        parsed = int(text, 16) if text.lower().startswith("0x") else int(text, 10)
+    else:
+        raise ValueError("address must be a nonnegative integer or 0x-hex string")
+    if not 0 <= parsed < 2**64:
+        raise ValueError("address outside the 64-bit module-relative range")
+    return parsed
+
+
 def tail(path, limit=8192):
     if not Path(path).is_file():
         return ""
@@ -896,13 +915,13 @@ class Runtime:
             target = confined(self.root, params["target"], True)
             if not target.is_file():
                 raise ValueError("angr target must be a staged file")
-            find = params.get("find")
-            if not isinstance(find, list) or not find or not all(
-                    isinstance(item, int) and 0 <= item < 2**64 for item in find):
+            try:
+                find = [parse_address(item) for item in params.get("find")]
+                avoid = [parse_address(item) for item in (params.get("avoid") or [])]
+            except TypeError as error:
+                raise ValueError("find/avoid must be arrays of module-relative addresses: %s" % error) from error
+            if not find:
                 raise ValueError("find must be a nonempty list of module-relative addresses")
-            avoid = params.get("avoid") or []
-            if not all(isinstance(item, int) and 0 <= item < 2**64 for item in avoid):
-                raise ValueError("avoid addresses must be module-relative integers")
             stdin_length = bounded_int(params.get("stdin_length"), 64, 1, 4096)
             max_steps = bounded_int(params.get("max_steps"), 50000, 1, 10_000_000)
             payload = json.dumps({"find": find, "avoid": avoid,

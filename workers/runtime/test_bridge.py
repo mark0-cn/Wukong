@@ -115,6 +115,18 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.client.call("angr.solve", target="files/dummy.bin", find=[4194304], avoid=["not-an-int"])
 
+    def test_parse_address_accepts_integer_and_hex_spellings(self):
+        import bridge
+        self.assertEqual(bridge.parse_address(0), 0)
+        self.assertEqual(bridge.parse_address(4198400), 4198400)
+        self.assertEqual(bridge.parse_address("4198400"), 4198400)
+        self.assertEqual(bridge.parse_address("0x401000"), 0x401000)
+        self.assertEqual(bridge.parse_address(" 0X401000 "), 0x401000)
+        self.assertEqual(bridge.parse_address("1_000"), 1000)
+        for invalid in ["-1", "0x", "nope", "", 2**64, 1.5, True, None, [1]]:
+            with self.assertRaises(ValueError, msg=repr(invalid)):
+                bridge.parse_address(invalid)
+
 
 if __name__ == "__main__":
     unittest.main()

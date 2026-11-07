@@ -116,6 +116,81 @@ async fn root_tools_are_restricted_at_advertisement_and_dispatch_and_failures_ar
 }
 
 #[tokio::test]
+async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, _run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    // Both spellings pass schema validation and reach dispatch, which then
+    // reports the unstaged worker target instead of a schema error.
+    for (index, find) in [
+        json!(["0x401000"]),
+        json!([4198400]),
+        json!(["0x401000", 4198400]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let outcome = service
+            .execute(
+                &agent.id,
+                &format!("angr-valid-{index}"),
+                "angr_solve",
+                json!({"target":"files/target.bin","find":find}),
+            )
+            .await?;
+        assert!(outcome.is_error);
+        let error = result(&outcome)["error"].as_str().unwrap().to_owned();
+        assert!(!error.contains("must have type integer"), "{error}");
+        assert!(error.contains("worker_file"), "{error}");
+    }
+    // Malformed spellings still fail schema validation before dispatch.
+    let bad = service
+        .execute(
+            &agent.id,
+            "angr-bad",
+            "angr_solve",
+            json!({"target":"files/target.bin","find":["nope"]}),
+        )
+        .await?;
+    assert!(
+        result(&bad)["error"]
+            .as_str()
+            .unwrap()
+            .contains("must have type integer")
+    );
+    let negative = service
+        .execute(
+            &agent.id,
+            "angr-negative",
+            "angr_solve",
+            json!({"target":"files/target.bin","find":[-1]}),
+        )
+        .await?;
+    assert!(
+        result(&negative)["error"]
+            .as_str()
+            .unwrap()
+            .contains("below its minimum")
+    );
+    let empty = service
+        .execute(
+            &agent.id,
+            "angr-empty",
+            "angr_solve",
+            json!({"target":"files/target.bin","find":[]}),
+        )
+        .await?;
+    assert!(
+        result(&empty)["error"]
+            .as_str()
+            .unwrap()
+            .contains("at least one find address")
+    );
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn durable_receipts_prevent_repeated_messages_and_completed_results_replay_exactly()
 -> Result<()> {
     let temp = tempfile::tempdir()?;

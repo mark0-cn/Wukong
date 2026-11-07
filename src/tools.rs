@@ -50,6 +50,9 @@ fn schema(kind: &str) -> Value {
 fn strings() -> Value {
     json!({"type":"array","items":{"type":"string"}})
 }
+fn addresses() -> Value {
+    json!({"type":"array","items":integer(0,u64::MAX)})
+}
 fn integer(min: u64, max: u64) -> Value {
     json!({"type":"integer","minimum":min,"maximum":max})
 }
@@ -451,7 +454,7 @@ fn builtins() -> Vec<Spec> {
         spec(
             "angr_solve",
             "Symbolic execution: solve for a concrete stdin input that reaches a module-relative find address while avoiding others. Runs as a background job with a hard timeout; results (input_base64 + exploration stats) arrive via job_status.",
-            json!({"target":id,"find":a,"avoid":a,"stdin_length":integer(1,4096),"max_steps":integer(1,10000000),"timeout_secs":integer(10,3600),"printable_only":b}),
+            json!({"target":id,"find":addresses(),"avoid":addresses(),"stdin_length":integer(1,4096),"max_steps":integer(1,10000000),"timeout_secs":integer(10,3600),"printable_only":b}),
             &["target", "find"],
             true,
             true,
@@ -872,7 +875,7 @@ impl ToolService {
             "file_get" => self.file_get(agent, call_id, &args).await,
             "job_start" | "job_status" | "job_cancel" | "job_artifacts" | "fuzz_start"
             | "fuzz_status" | "debug_start" | "debug_command" | "debug_close" | "crash_replay"
-            | "input_minimize" | "poc_verify" => {
+            | "input_minimize" | "poc_verify" | "angr_solve" => {
                 self.runtime_tool(agent, call_id, name, args).await
             }
             _ if self.mcp.contains(name) => self.mcp.call(name, args).await,
@@ -1779,6 +1782,12 @@ impl ToolService {
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
             | "angr_solve" => {
                 let run: RunRecord = self.store.require("run", &agent.run_id)?;
+                if name == "angr_solve" {
+                    ensure!(
+                        !address_list(&args, "find")?.is_empty(),
+                        "angr_solve requires at least one find address"
+                    );
+                }
                 if name != "job_start" {
                     self.known_file(agent, text(&args, "target")?, true)?;
                     if !matches!(name, "fuzz_start" | "angr_solve") {
@@ -1788,12 +1797,6 @@ impl ToolService {
                     ensure!(
                         !string_list(&args, "argv")?.is_empty(),
                         "job argv cannot be empty"
-                    );
-                }
-                if name == "angr_solve" {
-                    ensure!(
-                        !string_list(&args, "find")?.is_empty(),
-                        "angr_solve requires at least one find address"
                     );
                 }
                 if name == "fuzz_start" {
@@ -2141,21 +2144,42 @@ fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
         .filter(|text| !text.trim().is_empty())
         .with_context(|| format!("{key} must be a nonempty string"))
 }
+/// Plain decimal and 0x-hex integer spellings accepted anywhere an address or
+/// offset appears, matching the documented "integers and 0x-hex strings are
+/// interchangeable" contract.
+fn parse_u64_text(text: &str) -> Option<u64> {
+    let text = text.trim().replace('_', "");
+    if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16).ok()
+    } else {
+        text.parse::<u64>().ok()
+    }
+}
 fn number(args: &Value, key: &str, default: u64) -> u64 {
     match &args[key] {
         Value::Number(value) => value.as_u64().unwrap_or(default),
-        Value::String(text) => {
-            let text = text.trim().replace('_', "");
-            let parsed =
-                if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
-                    u64::from_str_radix(hex, 16)
-                } else {
-                    text.parse::<u64>()
-                };
-            parsed.unwrap_or(default)
-        }
+        Value::String(text) => parse_u64_text(text).unwrap_or(default),
         _ => default,
     }
+}
+fn address_list(args: &Value, key: &str) -> Result<Vec<u64>> {
+    let Some(value) = args.get(key) else {
+        return Ok(vec![]);
+    };
+    value
+        .as_array()
+        .with_context(|| format!("{key} must be an array"))?
+        .iter()
+        .map(|item| match item {
+            Value::Number(number) => number
+                .as_u64()
+                .with_context(|| format!("{key} must contain nonnegative integer addresses")),
+            Value::String(text) => parse_u64_text(text).with_context(|| {
+                format!("{key} must contain nonnegative integer or 0x-hex string addresses")
+            }),
+            _ => bail!("{key} must contain nonnegative integer or 0x-hex string addresses"),
+        })
+        .collect()
 }
 fn string_list(args: &Value, key: &str) -> Result<Vec<String>> {
     args.get(key)
@@ -2179,7 +2203,11 @@ fn validate_args(value: &Value, definition: &Value, path: &str) -> Result<()> {
             "array" => value.is_array(),
             "string" => value.is_string(),
             "boolean" => value.is_boolean(),
-            "integer" => value.is_i64() || value.is_u64(),
+            "integer" => match value {
+                Value::Number(number) => number.is_i64() || number.is_u64(),
+                Value::String(text) => parse_u64_text(text).is_some(),
+                _ => false,
+            },
             "number" => value.is_number(),
             _ => true,
         };
@@ -2193,7 +2221,10 @@ fn validate_args(value: &Value, definition: &Value, path: &str) -> Result<()> {
     {
         ensure!(text.chars().count() as u64 >= min, "{path} is too short");
     }
-    if let Some(number) = value.as_f64() {
+    let numeric = value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(parse_u64_text).map(|v| v as f64));
+    if let Some(number) = numeric {
         if let Some(min) = definition["minimum"].as_f64() {
             ensure!(number >= min, "{path} is below its minimum");
         }
