@@ -77,8 +77,8 @@ fn builtins() -> Vec<Spec> {
     let mut specs = vec![
         spec(
             "create_agent",
-            "Create an asynchronous focused child and return immediately; inherited context is optional.",
-            json!({"name":id,"role":{"type":"string","enum":["recon","reverse","hunter","fuzz","crash","exploit","verifier","reporter"]},"task":id,"scope":id,"skills":a,"inherit_context":b}),
+            "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors names agents this child waits for: the runner starts it only after all of them are terminal.",
+            json!({"name":id,"role":{"type":"string","enum":["recon","reverse","hunter","fuzz","crash","exploit","verifier","reporter"]},"task":id,"scope":id,"skills":a,"inherit_context":b,"wait_for_predecessors":a}),
             &["name", "role", "task", "scope"],
             true,
             false,
@@ -1013,9 +1013,24 @@ impl ToolService {
                 parent.depth < run.budget.max_depth,
                 "maximum agent depth reached"
             );
+            let child_id = stable("agent", call_id);
+            for predecessor in &request.wait_for_predecessors {
+                let target = all
+                    .iter()
+                    .find(|a| &a.id == predecessor)
+                    .context("wait_for_predecessors target missing")?;
+                ensure!(
+                    target.run_id == run.id,
+                    "wait_for_predecessors target belongs to another run"
+                );
+                ensure!(
+                    !target.wait_for_predecessors.contains(&child_id),
+                    "wait_for_predecessors would deadlock"
+                );
+            }
             let timestamp = now();
             let child = AgentRecord {
-                id: stable("agent", call_id),
+                id: child_id,
                 run_id: run.id.clone(),
                 parent_id: Some(parent.id.clone()),
                 name: request.name,
@@ -1034,6 +1049,7 @@ impl ToolService {
                 checkpoint: None,
                 wait_for: vec![],
                 wait_until: None,
+                wait_for_predecessors: request.wait_for_predecessors.clone(),
                 turns: 0,
                 total_tokens: 0,
                 cost_usd: 0.0,

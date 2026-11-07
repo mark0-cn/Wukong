@@ -44,6 +44,7 @@ fn fixture(root: &Path) -> (Store, String, String) {
         checkpoint: None,
         wait_for: vec![],
         wait_until: None,
+        wait_for_predecessors: vec![],
         turns: 1,
         total_tokens: 42,
         cost_usd: 0.012,

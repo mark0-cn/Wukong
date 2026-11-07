@@ -1,5 +1,5 @@
 use crate::{domain::*, store::Store};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -20,6 +20,11 @@ pub struct ChildRequest {
     pub skills: Vec<String>,
     #[serde(default = "yes")]
     pub inherit_context: bool,
+    /// Agent ids this child waits for: the runner starts it only after all
+    /// of them are terminal. Lets a parent express "run X only after Y
+    /// finished" as a scheduler constraint instead of prompt discipline.
+    #[serde(default)]
+    pub wait_for_predecessors: Vec<String>,
 }
 fn yes() -> bool {
     true
@@ -80,6 +85,7 @@ impl Coordinator {
             checkpoint: None,
             wait_for: vec![],
             wait_until: None,
+            wait_for_predecessors: vec![],
             turns: 0,
             total_tokens: 0,
             cost_usd: 0.0,
@@ -144,9 +150,24 @@ impl Coordinator {
             if parent.depth + 1 > run.budget.max_depth {
                 bail!("maximum agent depth reached");
             }
+            let child_id = id("agent");
+            for predecessor in &request.wait_for_predecessors {
+                let target = agents
+                    .iter()
+                    .find(|a| &a.id == predecessor)
+                    .with_context(|| format!("wait_for_predecessors target missing: {predecessor}"))?;
+                ensure!(
+                    target.run_id == run.id,
+                    "wait_for_predecessors target belongs to another run"
+                );
+                ensure!(
+                    !target.wait_for_predecessors.contains(&child_id),
+                    "wait_for_predecessors would deadlock"
+                );
+            }
             let timestamp = now();
             let agent = AgentRecord {
-                id: id("agent"),
+                id: child_id,
                 run_id: run.id.clone(),
                 parent_id: Some(parent.id.clone()),
                 name: request.name,
@@ -165,6 +186,7 @@ impl Coordinator {
                 checkpoint: None,
                 wait_for: vec![],
                 wait_until: None,
+                wait_for_predecessors: request.wait_for_predecessors.clone(),
                 turns: 0,
                 total_tokens: 0,
                 cost_usd: 0.0,

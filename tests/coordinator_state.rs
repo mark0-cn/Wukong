@@ -25,7 +25,28 @@ fn request(scope: &str) -> ChildRequest {
         scope: scope.into(),
         skills: vec!["recon".into()],
         inherit_context: true,
+        wait_for_predecessors: vec![],
     }
+}
+
+#[test]
+fn wait_for_predecessors_is_validated_and_persisted() {
+    let (_dir, store, c, run) = fixture();
+    let mut blocked = request("gated child");
+    blocked.wait_for_predecessors = vec!["agent-does-not-exist".into()];
+    let error = c.create_child(&run.root_id, blocked).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("wait_for_predecessors target missing"),
+        "{error:#}"
+    );
+    let first = c.create_child(&run.root_id, request("predecessor")).unwrap();
+    let mut gated = request("gated child");
+    gated.wait_for_predecessors = vec![first.agent.id.clone()];
+    let created = c.create_child(&run.root_id, gated).unwrap();
+    assert!(created.created);
+    let stored: AgentRecord = store.require("agent", &created.agent.id).unwrap();
+    assert_eq!(stored.wait_for_predecessors, vec![first.agent.id]);
+    assert_eq!(stored.status, Status::Queued);
 }
 
 #[test]
