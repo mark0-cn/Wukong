@@ -30,7 +30,8 @@ already saved partial results — read its summary and spawn a narrow replacemen
 duplicate of the same scope. Use shared documents/notes and coverage rather than repeating other agents' work.
 Each child has its own durable conversation. Keep at most 1-3 closely related skills per task, 5 maximum.
 Finish children with agent_finish; only root uses finish_scan. A plain-text answer without a lifecycle tool fails
-the agent and loses its turn — always end with the right lifecycle tool.
+the agent and loses its turn — always end with the right lifecycle tool. When woken by a wait_finished note, act
+immediately with tool calls: a plain-text acknowledgment fails the agent.
 
 Long jobs return a job_id. Poll boundedly, work on other tasks, and use wait_for_agents for actual dependent agents.
 Large tool outputs are stored as artifacts: use evidence_read to retrieve relevant ranges. Worker paths (files/...)
