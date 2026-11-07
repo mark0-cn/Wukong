@@ -1,7 +1,8 @@
 # Worker toolchain quick reference
 
-The worker has Python 3 with pwntools, z3-solver, angr and ropper installed.
-You reach them through the normal execution tools — write a script with
+Use `runtime_doctor` to check the selected worker's actual capabilities.
+The bundled worker includes Python 3, pwntools, z3-solver, angr and ropper;
+other configured workers may not. Reach available tools through execution — write a script with
 file_put and run it with job_start (argv ["python3", "files/<script>"]),
 then read job_status.
 
@@ -13,15 +14,24 @@ then read job_status.
   `{target}` placeholder: `job_start argv ["python3", "files/<script>", "{target}"]`;
   the harness replaces it with the staged target path and the script reads it
   from `sys.argv[2]`. In isolated jobs that argv entry is staged automatically.
-- Inside a job, `RE_AGENT_STATE_DIR` is the worker state root and
-  `RE_AGENT_JOB_DIR` is the job's own output directory. Use
-  `os.path.join(os.environ["RE_AGENT_STATE_DIR"], "files", ...)` for anything
-  the placeholder cannot carry. Never hardcode `/state/...` guesses.
+- Pass every additional input file or directory as a direct argv entry too;
+  staging resolves it to the experiment's read-only copy. Read the resulting
+  `sys.argv` values inside the script. `RE_AGENT_STATE_DIR` and
+  `RE_AGENT_JOB_DIR` identify private worker metadata in isolated mode, not
+  accessible input/output directories. Write outputs under the process's
+  current working directory and collect them with `job_artifacts`.
+- Match the input channel: `job_start` itself has no stdin payload field.
+  For stdin input, stage a wrapper and input file as argv, and let the wrapper
+  feed the file bytes to the target's stdin. Use `interactive_start/send` for
+  multi-round input. `crash_replay`/`poc_verify` currently pass an input file
+  through the `@@` argv placeholder; they do not feed stdin.
 
 ## angr (symbolic execution) — fastest path for input reconstruction
 
-When a reverse handoff says "input must satisfy these checks", prefer the
-dedicated `angr_solve` tool over hand-written solving:
+The current `angr_solve` backend creates a bounded symbolic stdin stream.
+Use it when that matches the target's input channel and required operations
+can be modeled. It does not model arbitrary argv/file/network inputs. Use
+explicit z3 constraints or an appropriate harness for those cases:
 
 - stage_target first; pass the staged path, the module-relative `find`
   address (the success path, e.g. the address after the final check), and
