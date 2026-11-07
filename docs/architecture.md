@@ -102,3 +102,27 @@ per task/agent ID and generation in exported `snapshot.task_results`. A follow-u
 clears the current result without deleting the archived previous generation.
 The existing agent ID is the task identity in this increment; independent task
 assignment/worker attempts remain a later extension.
+
+## Dependency admission and waits
+
+New children default to `dependency_policy=all_success`. `all_terminal` admits a
+collector after every prerequisite ends, including failures. `any_success` admits
+an alternative consumer after one succeeds and blocks only when all alternatives
+end without success. A success requires completed execution plus a success task
+result; inconclusive/blocked results do not qualify. Missing prerequisites are
+errors, never assumed successes.
+
+Before model scheduling, a transaction either releases the gate or records a
+blocked result, fails the unstarted child, archives its result and notifies the
+parent. Failure propagates through dependent children without model calls. The
+release event records producer generations/outcomes; once admitted, later producer
+follow-ups do not revoke the consumer. New dependent work evaluates the latest
+producer result. This is admission ordering, not automatic live dataflow: required
+input evidence still belongs in the task contract.
+
+`wait_for_agents.policy` defaults to all_terminal and also supports all_success
+and any_success. Its return/wakeup includes a condition with state pending,
+satisfied or blocked, separate from timeout. Both creation gates and runtime wait
+edges join the parent-completion dependency graph; cyclic waits are rejected
+transactionally. Wait parking and tool receipts commit together, so replay cannot
+park the same turn a second time after a lost response.

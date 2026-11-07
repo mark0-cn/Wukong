@@ -206,11 +206,14 @@ pub struct AgentRecord {
     pub checkpoint: Option<Value>,
     pub wait_for: Vec<String>,
     pub wait_until: Option<DateTime<Utc>>,
+    pub wait_policy: DependencyPolicy,
     /// Declared predecessor agents this child must wait for before the
     /// runner starts it (scheduler-level gating; distinct from the parked
     /// waiter `wait_for` used by wait_for_agents).
     #[serde(default)]
     pub wait_for_predecessors: Vec<String>,
+    pub dependency_policy: DependencyPolicy,
+    pub predecessors_released: bool,
     pub turns: usize,
     pub total_tokens: u64,
     pub cost_usd: f64,
@@ -219,6 +222,23 @@ pub struct AgentRecord {
     pub error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyPolicy {
+    #[default]
+    AllSuccess,
+    AllTerminal,
+    AnySuccess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum DependencyState {
+    Pending,
+    Satisfied,
+    Blocked { reason: String },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

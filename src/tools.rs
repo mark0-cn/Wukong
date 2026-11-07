@@ -77,8 +77,8 @@ fn builtins() -> Vec<Spec> {
     let mut specs = vec![
         spec(
             "create_agent",
-            "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors names agents this child waits for: the runner starts it only after all of them are terminal.",
-            json!({"name":id,"role":{"type":"string","enum":["recon","reverse","hunter","fuzz","crash","exploit","verifier","reporter"]},"task":id,"scope":id,"skills":a,"inherit_context":b,"wait_for_predecessors":a,"contract":contract_schema()}),
+            "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors gates admission with dependency_policy (default all_success). Failed requirements block execution and notify the parent.",
+            json!({"name":id,"role":{"type":"string","enum":["recon","reverse","hunter","fuzz","crash","exploit","verifier","reporter"]},"task":id,"scope":id,"skills":a,"inherit_context":b,"wait_for_predecessors":a,"dependency_policy":policy_schema(),"contract":contract_schema()}),
             &["name", "role", "task", "scope"],
             true,
             false,
@@ -117,8 +117,8 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "wait_for_agents",
-            "Park until selected in-run agents finish or the timeout expires. Empty list means children.",
-            json!({"agent_ids":a,"timeout_seconds":integer(1,3600)}),
+            "Park on selected agents with policy all_terminal (default), all_success or any_success; return a satisfied/blocked outcome or timeout. Empty list means children.",
+            json!({"agent_ids":a,"timeout_seconds":integer(1,3600),"policy":policy_schema()}),
             &[],
             true,
             false,
@@ -514,6 +514,9 @@ fn builtins() -> Vec<Spec> {
     }
     specs
 }
+fn policy_schema() -> Value {
+    json!({"type":"string","enum":["all_success","all_terminal","any_success"]})
+}
 fn contract_schema() -> Value {
     json!({"type":"object","properties":{"objective":{"type":"string"},"input_evidence_ids":strings(),"constraints":strings(),"deliverables":strings(),"completion_conditions":strings()},"additionalProperties":false})
 }
@@ -800,7 +803,7 @@ impl ToolService {
                         .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
                 }
                 Ok(
-                    json!({"agents":self.store.list::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
+                    json!({"agents":self.store.list::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"dependency_policy":a.dependency_policy,"predecessors":a.wait_for_predecessors,"predecessors_released":a.predecessors_released,"wait_policy":a.wait_policy,"wait_for":a.wait_for,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
                 )
             }
             "send_message_to_agent" | "follow_up_agent" => {
@@ -825,17 +828,18 @@ impl ToolService {
                 Ok(serde_json::to_value(message)?)
             }
             "wait_for_agents" => {
-                if let Some(value) = self.store.get::<Value>("tool_receipt", call_id)? {
-                    return Ok(value);
-                }
-                let value = self.coordinator.wait(
-                    &agent.id,
-                    &string_list(&args, "agent_ids")?,
-                    number(&args, "timeout_seconds", 300),
+                let policy = serde_json::from_value(
+                    args.get("policy").cloned().unwrap_or(json!("all_terminal")),
                 )?;
-                self.store
-                    .put("tool_receipt", call_id, &agent.run_id, &value)?;
-                Ok(value)
+                self.effect(agent, call_id, |tx| {
+                    Coordinator::tx_wait(
+                        tx,
+                        &agent.id,
+                        &string_list(&args, "agent_ids")?,
+                        number(&args, "timeout_seconds", 300),
+                        policy,
+                    )
+                })
             }
             "stop_agent" => {
                 let target_id = {

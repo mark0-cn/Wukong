@@ -22,11 +22,11 @@ pub struct ChildRequest {
     pub skills: Vec<String>,
     #[serde(default = "yes")]
     pub inherit_context: bool,
-    /// Agent ids this child waits for: the runner starts it only after all
-    /// of them are terminal. Lets a parent express "run X only after Y
-    /// finished" as a scheduler constraint instead of prompt discipline.
+    /// Predecessor agents evaluated using dependency_policy before admission.
     #[serde(default)]
     pub wait_for_predecessors: Vec<String>,
+    #[serde(default)]
+    pub dependency_policy: DependencyPolicy,
 }
 fn yes() -> bool {
     true
@@ -94,7 +94,10 @@ impl Coordinator {
             checkpoint: None,
             wait_for: vec![],
             wait_until: None,
+            wait_policy: DependencyPolicy::AllTerminal,
             wait_for_predecessors: vec![],
+            dependency_policy: DependencyPolicy::AllSuccess,
+            predecessors_released: true,
             turns: 0,
             total_tokens: 0,
             cost_usd: 0.0,
@@ -165,7 +168,9 @@ impl Coordinator {
                 existing_contract.objective = existing.task.clone();
             }
             ensure!(
-                existing_contract == request.contract,
+                existing_contract == request.contract
+                    && existing.dependency_policy == request.dependency_policy
+                    && existing.wait_for_predecessors == request.wait_for_predecessors,
                 "active scope has a different task contract; send a clarification or use a distinct scope"
             );
             return Ok(SpawnResult {
@@ -179,6 +184,16 @@ impl Coordinator {
         if parent.depth + 1 > run.budget.max_depth {
             bail!("maximum agent depth reached");
         }
+        ensure!(
+            request.wait_for_predecessors.len() <= 128
+                && request
+                    .wait_for_predecessors
+                    .iter()
+                    .collect::<HashSet<_>>()
+                    .len()
+                    == request.wait_for_predecessors.len(),
+            "invalid or duplicate predecessors"
+        );
         for predecessor in &request.wait_for_predecessors {
             let target = agents
                 .iter()
@@ -214,7 +229,10 @@ impl Coordinator {
             checkpoint: None,
             wait_for: vec![],
             wait_until: None,
+            wait_policy: DependencyPolicy::AllTerminal,
             wait_for_predecessors: request.wait_for_predecessors.clone(),
+            dependency_policy: request.dependency_policy,
+            predecessors_released: request.wait_for_predecessors.is_empty(),
             turns: 0,
             total_tokens: 0,
             cost_usd: 0.0,
@@ -261,7 +279,9 @@ impl Coordinator {
                 for dependency in agents.iter().filter(|other| {
                     !other.status.terminal()
                         && (other.parent_id.as_deref() == Some(id)
-                            || agent.wait_for_predecessors.contains(&other.id))
+                            || (!agent.predecessors_released
+                                && agent.wait_for_predecessors.contains(&other.id))
+                            || agent.wait_for.contains(&other.id))
                 }) {
                     visit(&dependency.id, agents, visiting, visited)?;
                 }
@@ -465,6 +485,7 @@ impl Coordinator {
                 agent.wait_for.clear();
                 agent.wait_until = None;
                 agent.wait_for_predecessors.clear();
+                agent.predecessors_released = true;
                 agent.error = None;
                 agent.task_result = None;
                 agent.updated_at = now();
@@ -520,87 +541,206 @@ impl Coordinator {
         )?;
         Ok(receipt)
     }
-    pub fn wait(&self, agent_id: &str, targets: &[String], timeout_seconds: u64) -> Result<Value> {
-        self.store.transaction(|tx| {
-            let mut agent: AgentRecord =
-                Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
-            if agent.status.terminal() {
-                bail!("agent is terminal");
-            }
-            let all = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?;
-            let ids: Vec<String> = if targets.is_empty() {
-                all.iter()
-                    .filter(|a| a.parent_id.as_deref() == Some(agent_id))
-                    .map(|a| a.id.clone())
-                    .collect()
-            } else {
-                targets.to_vec()
+    pub fn dependency_state(
+        policy: DependencyPolicy,
+        targets: &[String],
+        all: &[AgentRecord],
+    ) -> DependencyState {
+        if targets.is_empty() {
+            return DependencyState::Satisfied;
+        }
+        let mut terminal = 0;
+        let mut successes = 0;
+        for target in targets {
+            let Some(agent) = all.iter().find(|agent| &agent.id == target) else {
+                return DependencyState::Blocked {
+                    reason: format!("dependency {target} is missing"),
+                };
             };
-            if ids.iter().any(|i| i == agent_id) {
-                bail!("cannot wait for yourself");
+            let success = agent.status == Status::Completed
+                && agent
+                    .task_result
+                    .as_ref()
+                    .is_some_and(|result| result.outcome == TaskOutcome::Success);
+            if success {
+                successes += 1;
             }
-            let mut states = Vec::new();
-            let mut pending = Vec::new();
-            for target in &ids {
-                let a = all
-                    .iter()
-                    .find(|a| &a.id == target)
-                    .context("wait target not in this run")?;
-                // Waiting on an ancestor produces a dependency cycle.
-                let mut parent = agent.parent_id.clone();
-                while let Some(pid) = parent {
-                    if pid == a.id {
-                        bail!("cannot wait for an ancestor");
+            if agent.status.terminal() {
+                terminal += 1;
+            }
+            if policy == DependencyPolicy::AllSuccess && agent.status.terminal() && !success {
+                return DependencyState::Blocked {
+                    reason: format!(
+                        "dependency {target} ended without success ({})",
+                        agent.status
+                    ),
+                };
+            }
+        }
+        match policy {
+            DependencyPolicy::AllSuccess if successes == targets.len() => {
+                DependencyState::Satisfied
+            }
+            DependencyPolicy::AllTerminal if terminal == targets.len() => {
+                DependencyState::Satisfied
+            }
+            DependencyPolicy::AnySuccess if successes > 0 => DependencyState::Satisfied,
+            DependencyPolicy::AnySuccess if terminal == targets.len() => DependencyState::Blocked {
+                reason: "all dependency alternatives ended without success".into(),
+            },
+            _ => DependencyState::Pending,
+        }
+    }
+    /// Resolve dependency admission once. Later follow-ups do not revoke work
+    /// already admitted from the predecessor results recorded in this event.
+    pub fn release_dependencies(&self, run_id: &str) -> Result<usize> {
+        self.store.transaction(|tx| {
+            let mut all=Store::tx_list::<AgentRecord>(tx,"agent",run_id)?;
+            let mut count=0;
+            loop {
+                let mut changed=false;
+                for index in 0..all.len() {
+                    let mut agent=all[index].clone();
+                    if agent.status!=Status::Queued || agent.predecessors_released {continue;}
+                    let state=Self::dependency_state(agent.dependency_policy,&agent.wait_for_predecessors,&all);
+                    match &state {
+                        DependencyState::Pending=>continue,
+                        DependencyState::Satisfied=>agent.predecessors_released=true,
+                        DependencyState::Blocked{reason}=>{
+                            agent.status=Status::Failed;
+                            agent.error=Some(reason.clone());
+                            let result=TaskResult{outcome:TaskOutcome::Blocked,answer:reason.clone(),next_actions:vec!["parent must revise the dependency, retry the prerequisite or choose a fallback".into()],..Default::default()};
+                            agent.summary=Some(result.answer.clone());
+                            agent.task_result=Some(result.clone());
+                            Store::tx_put(tx,"task_result",&format!("{}:{}",agent.id,agent.generation),run_id,&json!({"task_id":agent.id,"generation":agent.generation,"result":result}))?;
+                            Self::notify_terminal(tx,&agent)?;
+                        }
                     }
-                    parent = all
-                        .iter()
-                        .find(|a| a.id == pid)
-                        .and_then(|a| a.parent_id.clone());
+                    agent.updated_at=now();
+                    Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;
+                    let predecessors:Vec<_>=all.iter().filter(|other|agent.wait_for_predecessors.contains(&other.id)).map(|other|json!({"id":other.id,"generation":other.generation,"status":other.status,"outcome":other.task_result.as_ref().map(|result|result.outcome)})).collect();
+                    Store::tx_event(tx,run_id,Some(&agent.id),"agent.dependencies_resolved",json!({"policy":agent.dependency_policy,"result":state,"predecessors":predecessors}))?;
+                    all[index]=agent;changed=true;count+=1;
                 }
-                states
-                    .push(json!({"id":a.id,"status":a.status,"summary":a.summary,"error":a.error}));
-                if !a.status.terminal() {
-                    pending.push(a.id.clone());
-                }
+                if !changed {break;}
             }
-            if pending.is_empty() {
-                return Ok(json!({"parked":false,"agents":states}));
-            }
-            agent.status = Status::Waiting;
-            agent.wait_for = pending;
-            agent.wait_until =
-                Some(now() + Duration::seconds(timeout_seconds.clamp(1, 3600) as i64));
-            agent.updated_at = now();
-            Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
-            Store::tx_event(
-                tx,
-                &agent.run_id,
-                Some(agent_id),
-                "agent.waiting",
-                json!({"targets":agent.wait_for,"until":agent.wait_until}),
-            )?;
-            Ok(json!({"parked":true,"agents":states,"wake_at":agent.wait_until}))
+            Ok(count)
         })
     }
+    pub fn wait(&self, agent_id: &str, targets: &[String], timeout_seconds: u64) -> Result<Value> {
+        self.wait_with_policy(
+            agent_id,
+            targets,
+            timeout_seconds,
+            DependencyPolicy::AllTerminal,
+        )
+    }
+    pub fn wait_with_policy(
+        &self,
+        agent_id: &str,
+        targets: &[String],
+        timeout_seconds: u64,
+        policy: DependencyPolicy,
+    ) -> Result<Value> {
+        self.store
+            .transaction(|tx| Self::tx_wait(tx, agent_id, targets, timeout_seconds, policy))
+    }
+    pub(crate) fn tx_wait(
+        tx: &rusqlite::Connection,
+        agent_id: &str,
+        targets: &[String],
+        timeout_seconds: u64,
+        policy: DependencyPolicy,
+    ) -> Result<Value> {
+        let mut agent: AgentRecord =
+            Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+        ensure!(!agent.status.terminal(), "agent is terminal");
+        let all = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?;
+        let ids: Vec<_> = if targets.is_empty() {
+            all.iter()
+                .filter(|other| other.parent_id.as_deref() == Some(agent_id))
+                .map(|other| other.id.clone())
+                .collect()
+        } else {
+            targets.to_vec()
+        };
+        ensure!(
+            ids.len() <= 128 && ids.iter().collect::<HashSet<_>>().len() == ids.len(),
+            "invalid or duplicate wait targets"
+        );
+        ensure!(
+            !ids.iter().any(|id| id == agent_id),
+            "cannot wait for yourself"
+        );
+        for id in &ids {
+            ensure!(
+                all.iter().any(|other| &other.id == id),
+                "wait target not in this run"
+            );
+            let mut parent = agent.parent_id.as_deref();
+            while let Some(pid) = parent {
+                ensure!(pid != id, "cannot wait for an ancestor");
+                parent = all
+                    .iter()
+                    .find(|other| other.id == pid)
+                    .and_then(|other| other.parent_id.as_deref());
+            }
+        }
+        let state = Self::dependency_state(policy, &ids, &all);
+        let states: Vec<_> = all
+            .iter()
+            .filter(|other| ids.contains(&other.id))
+            .map(Self::wait_view)
+            .collect();
+        if state != DependencyState::Pending {
+            return Ok(json!({"parked":false,"agents":states,"condition":state,"policy":policy}));
+        }
+        agent.status = Status::Waiting;
+        agent.wait_for = ids;
+        agent.wait_policy = policy;
+        agent.wait_until = Some(now() + Duration::seconds(timeout_seconds.clamp(1, 3600) as i64));
+        agent.updated_at = now();
+        let mut graph = all;
+        let index = graph
+            .iter()
+            .position(|other| other.id == agent.id)
+            .context("agent missing")?;
+        graph[index] = agent.clone();
+        Self::validate_dependencies(&graph)?;
+        Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
+        Store::tx_event(
+            tx,
+            &agent.run_id,
+            Some(agent_id),
+            "agent.waiting",
+            json!({"targets":agent.wait_for,"until":agent.wait_until,"policy":policy}),
+        )?;
+        Ok(
+            json!({"parked":true,"agents":states,"wake_at":agent.wait_until,"condition":state,"policy":policy}),
+        )
+    }
+    fn wait_view(agent: &AgentRecord) -> Value {
+        json!({"id":agent.id,"role":agent.role,"status":agent.status,"summary":agent.summary,"result":agent.task_result,"error":agent.error,"scope":agent.scope})
+    }
     pub fn wake_waiters(&self, run_id: &str) -> Result<usize> {
-        self.store.transaction(|tx|{
+        self.store.transaction(|tx| {
             let all=Store::tx_list::<AgentRecord>(tx,"agent",run_id)?;let mut changed=0;
-            for mut agent in all.iter().filter(|a|a.status==Status::Waiting).cloned(){
-                let ready=agent.wait_for.iter().all(|i|all.iter().find(|a|&a.id==i).is_none_or(|a|a.status.terminal()));
+            for mut agent in all.iter().filter(|agent|agent.status==Status::Waiting).cloned() {
+                let condition=Self::dependency_state(agent.wait_policy,&agent.wait_for,&all);
+                let ready=condition!=DependencyState::Pending;
                 let expired=agent.wait_until.is_some_and(|at|at<=now());
-                let unread:i64=tx.query_row("SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0 AND COALESCE(json_extract(envelope,'$.kind'),'information')!='information'",[&agent.id],|r|r.get(0))?;
-                if ready||expired||unread>0 {
-                    if ready||expired{
-                        let key=format!("wait:{}:{}",agent.id,agent.wait_until.map(|d|d.timestamp_millis()).unwrap_or_default());
-                        // Project the waiter's targets into bounded fields; a full
-                        // AgentRecord would embed their conversation checkpoints
-                        // into the parent's model context.
-                        let states:Vec<_>=all.iter().filter(|a|agent.wait_for.contains(&a.id)).map(|a|json!({"id":a.id,"role":a.role,"status":a.status,"summary":a.summary,"error":a.error,"scope":a.scope})).collect();
-                        Store::tx_message(tx,run_id,"coordinator",&agent.id,&json!({"type":"wait_finished","timed_out":expired&&!ready,"agents":states,"instruction":"Your wait finished. Act now: inspect these agent states and continue with tool calls (reconcile, spawn the next stage, or finish). Never answer with plain text — end the turn with a tool call."}).to_string(),Some(&key))?;
-                    }
-                    agent.status=Status::Queued;if ready||expired {agent.wait_for.clear();agent.wait_until=None;}agent.updated_at=now();Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;changed+=1;
+                let unread:i64=tx.query_row("SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0 AND COALESCE(json_extract(envelope,'$.kind'),'information')!='information'",[&agent.id],|row|row.get(0))?;
+                if !ready&&!expired&&unread==0 {continue;}
+                if ready||expired {
+                    let key=format!("wait:{}:{}:{}",agent.id,agent.generation,agent.wait_until.map(|date|date.timestamp_millis()).unwrap_or_default());
+                    let states:Vec<_>=all.iter().filter(|other|agent.wait_for.contains(&other.id)).map(Self::wait_view).collect();
+                    Store::tx_message(tx,run_id,"coordinator",&agent.id,&json!({"type":"wait_finished","timed_out":expired&&!ready,"condition":condition,"policy":agent.wait_policy,"agents":states,"instruction":"Inspect the dependency outcome and continue with tools: reconcile results, choose a fallback, or finish."}).to_string(),Some(&key))?;
+                    agent.wait_for.clear();agent.wait_until=None;
                 }
-            }Ok(changed)
+                agent.status=Status::Queued;agent.updated_at=now();
+                Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;changed+=1;
+            }
+            Ok(changed)
         })
     }
     pub fn set_status(&self, agent_id: &str, status: Status, error: Option<String>) -> Result<()> {

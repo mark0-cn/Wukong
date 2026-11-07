@@ -23,6 +23,7 @@ fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Resu
                 skills: vec![],
                 inherit_context: false,
                 wait_for_predecessors: vec![],
+                dependency_policy: Default::default(),
                 contract: Default::default(),
             },
         )?
@@ -1106,6 +1107,65 @@ async fn contracted_tool_tasks_deliver_structured_results_without_vulnerability_
         "header recovered"
     );
     drop(coordinator);
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn conditional_wait_receipts_survive_a_wakeup_without_reparking() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let args = json!({"agent_ids":[agent.id],"policy":"any_success","timeout_seconds":60});
+    let parked = service
+        .execute(
+            &run.root_id,
+            "conditional-wait",
+            "wait_for_agents",
+            args.clone(),
+        )
+        .await?;
+    assert!(!parked.is_error, "{parked:?}");
+    assert_eq!(result(&parked)["parked"], true);
+    coordinator.finish_result(
+        &agent.id,
+        TaskResult {
+            outcome: TaskOutcome::Inconclusive,
+            answer: "not established".into(),
+            unknowns: vec!["required observation".into()],
+            ..Default::default()
+        },
+    )?;
+    coordinator.wake_waiters(&run.id)?;
+    let wake = store
+        .inbox(&run.root_id)?
+        .into_iter()
+        .find(|message| message.sender == "coordinator")
+        .unwrap();
+    let wake: serde_json::Value = serde_json::from_str(&wake.content)?;
+    assert_eq!(wake["condition"]["state"], "blocked");
+    let mut call: ToolCallRecord = store.require("call", "conditional-wait")?;
+    call.state = CallState::Running;
+    call.result = None;
+    store.put("call", &call.id, &run.id, &call)?;
+    let replay = service
+        .execute(&run.root_id, "conditional-wait", "wait_for_agents", args)
+        .await?;
+    // An incomplete outer ledger rebuilds its evidence envelope, while the
+    // transactional business result and wake deadline must stay identical.
+    assert_eq!(result(&replay), result(&parked));
+    assert_eq!(
+        store.require::<AgentRecord>("agent", &run.root_id)?.status,
+        Status::Queued
+    );
+    assert_eq!(
+        store
+            .events(&run.id, 0, 100)?
+            .iter()
+            .filter(|event| event.kind == "agent.waiting")
+            .count(),
+        1
+    );
     service.close().await;
     Ok(())
 }

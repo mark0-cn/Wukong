@@ -26,6 +26,7 @@ fn request(scope: &str) -> ChildRequest {
         skills: vec!["recon".into()],
         inherit_context: true,
         wait_for_predecessors: vec![],
+        dependency_policy: Default::default(),
         contract: Default::default(),
     }
 }
@@ -875,4 +876,202 @@ fn non_success_task_results_explain_the_gap_and_evidence_is_integrity_checked() 
             .status,
         Status::Stopped
     );
+}
+
+#[test]
+fn failed_requirements_block_successors_and_propagate_without_execution() {
+    let (_dir, store, c, run) = fixture();
+    let first = c
+        .create_child(&run.root_id, request("inconclusive prerequisite"))
+        .unwrap()
+        .agent;
+    let mut task = request("dependent");
+    task.wait_for_predecessors = vec![first.id.clone()];
+    let second = c.create_child(&run.root_id, task).unwrap().agent;
+    let mut task = request("transitive dependent");
+    task.wait_for_predecessors = vec![second.id.clone()];
+    let third = c.create_child(&run.root_id, task).unwrap().agent;
+    c.finish_result(
+        &first.id,
+        TaskResult {
+            outcome: TaskOutcome::Inconclusive,
+            answer: "input layout unresolved".into(),
+            unknowns: vec!["length width".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(c.release_dependencies(&run.id).unwrap(), 2);
+    for id in [&second.id, &third.id] {
+        let blocked: AgentRecord = store.require("agent", id).unwrap();
+        assert_eq!(blocked.status, Status::Failed);
+        assert_eq!(blocked.task_result.unwrap().outcome, TaskOutcome::Blocked);
+        assert!(blocked.checkpoint.is_none());
+    }
+    assert_eq!(store.inbox(&run.root_id).unwrap().len(), 3);
+}
+
+#[test]
+fn dependency_policies_distinguish_success_alternatives_and_terminal_collection() {
+    let (_dir, store, c, run) = fixture();
+    let failed = c
+        .create_child(&run.root_id, request("failed alternative"))
+        .unwrap()
+        .agent;
+    let winner = c
+        .create_child(&run.root_id, request("winning alternative"))
+        .unwrap()
+        .agent;
+    let mut any = request("any success");
+    any.wait_for_predecessors = vec![failed.id.clone(), winner.id.clone()];
+    any.dependency_policy = DependencyPolicy::AnySuccess;
+    let any = c.create_child(&run.root_id, any).unwrap().agent;
+    let mut collect = request("collect failures");
+    collect.wait_for_predecessors = vec![failed.id.clone()];
+    collect.dependency_policy = DependencyPolicy::AllTerminal;
+    let collect = c.create_child(&run.root_id, collect).unwrap().agent;
+    c.set_status(&failed.id, Status::Failed, Some("test failure".into()))
+        .unwrap();
+    c.release_dependencies(&run.id).unwrap();
+    assert!(
+        !store
+            .require::<AgentRecord>("agent", &any.id)
+            .unwrap()
+            .predecessors_released
+    );
+    assert!(
+        store
+            .require::<AgentRecord>("agent", &collect.id)
+            .unwrap()
+            .predecessors_released
+    );
+    c.finish(&winner.id, "alternative succeeded").unwrap();
+    c.release_dependencies(&run.id).unwrap();
+    assert!(
+        store
+            .require::<AgentRecord>("agent", &any.id)
+            .unwrap()
+            .predecessors_released
+    );
+    c.follow_up("operator", &winner.id, "refine the result")
+        .unwrap();
+    // Admission has consumed a recorded result; a new producer round does not
+    // silently cancel an already-admitted consumer.
+    c.release_dependencies(&run.id).unwrap();
+    assert!(
+        store
+            .require::<AgentRecord>("agent", &any.id)
+            .unwrap()
+            .predecessors_released
+    );
+    let mut exhausted = request("all alternatives failed");
+    exhausted.wait_for_predecessors = vec![failed.id];
+    exhausted.dependency_policy = DependencyPolicy::AnySuccess;
+    let exhausted = c.create_child(&run.root_id, exhausted).unwrap().agent;
+    c.release_dependencies(&run.id).unwrap();
+    assert_eq!(
+        store
+            .require::<AgentRecord>("agent", &exhausted.id)
+            .unwrap()
+            .status,
+        Status::Failed
+    );
+}
+
+#[test]
+fn runtime_waits_share_cycle_detection_with_predecessor_gates() {
+    let (_dir, store, c, run) = fixture();
+    let a = c
+        .create_child(&run.root_id, request("wait A"))
+        .unwrap()
+        .agent;
+    let b = c
+        .create_child(&run.root_id, request("wait B"))
+        .unwrap()
+        .agent;
+    c.wait(&a.id, std::slice::from_ref(&b.id), 60).unwrap();
+    assert!(
+        c.wait(&b.id, std::slice::from_ref(&a.id), 60)
+            .unwrap_err()
+            .to_string()
+            .contains("deadlock")
+    );
+    let unchanged: AgentRecord = store.require("agent", &b.id).unwrap();
+    assert_eq!(unchanged.status, Status::Queued);
+    assert!(unchanged.wait_for.is_empty());
+    let mut gated = request("wait C");
+    gated.wait_for_predecessors = vec![b.id.clone()];
+    let gated = c.create_child(&run.root_id, gated).unwrap().agent;
+    assert!(
+        c.wait(&b.id, std::slice::from_ref(&gated.id), 60)
+            .unwrap_err()
+            .to_string()
+            .contains("deadlock")
+    );
+}
+
+#[test]
+fn waits_report_unsatisfied_requirements_and_wake_on_any_success() {
+    let (_dir, store, c, run) = fixture();
+    let waiter = c
+        .create_child(&run.root_id, request("conditional waiter"))
+        .unwrap()
+        .agent;
+    let failed = c
+        .create_child(&run.root_id, request("wait failed"))
+        .unwrap()
+        .agent;
+    let winner = c
+        .create_child(&run.root_id, request("wait winner"))
+        .unwrap()
+        .agent;
+    c.set_status(&failed.id, Status::Crashed, Some("test crash".into()))
+        .unwrap();
+    let rejected = c
+        .wait_with_policy(
+            &waiter.id,
+            std::slice::from_ref(&failed.id),
+            60,
+            DependencyPolicy::AllSuccess,
+        )
+        .unwrap();
+    assert_eq!(rejected["parked"], false);
+    assert_eq!(rejected["condition"]["state"], "blocked");
+    let ids = vec![failed.id, winner.id.clone()];
+    assert_eq!(
+        c.wait_with_policy(&waiter.id, &ids, 60, DependencyPolicy::AnySuccess)
+            .unwrap()["parked"],
+        true
+    );
+    c.finish(&winner.id, "success").unwrap();
+    assert_eq!(c.wake_waiters(&run.id).unwrap(), 1);
+    let wake = store.inbox(&waiter.id).unwrap();
+    let data: serde_json::Value = serde_json::from_str(&wake[0].content).unwrap();
+    assert_eq!(data["condition"]["state"], "satisfied");
+    assert_eq!(data["policy"], "any_success");
+}
+
+#[test]
+fn a_missing_dependency_is_not_assumed_successful() {
+    let (_dir, store, c, run) = fixture();
+    let predecessor = c
+        .create_child(&run.root_id, request("missing predecessor"))
+        .unwrap()
+        .agent;
+    let mut task = request("missing dependency consumer");
+    task.wait_for_predecessors = vec![predecessor.id.clone()];
+    let consumer = c.create_child(&run.root_id, task).unwrap().agent;
+    store
+        .transaction(|tx| {
+            tx.execute(
+                "DELETE FROM entities WHERE kind='agent' AND id=?1",
+                [&predecessor.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    c.release_dependencies(&run.id).unwrap();
+    let consumer: AgentRecord = store.require("agent", &consumer.id).unwrap();
+    assert_eq!(consumer.status, Status::Failed);
+    assert!(consumer.error.unwrap().contains("missing"));
 }
