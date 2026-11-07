@@ -12,6 +12,11 @@ Arguments: a single JSON object on argv[1]:
 Prints a single JSON line with the solved stdin (base64) and exploration
 statistics, or an explicit error. This script runs inside the isolated job;
 it never trusts the target and never touches worker metadata.
+
+find/avoid entries are module-relative offsets as reported by the controller's
+binary profile (virtual address minus the declared image base). The controller
+and angr load the same file at possibly different bases, so every entry is
+mapped into the address space angr actually created before exploration.
 """
 import base64
 import json
@@ -22,6 +27,48 @@ from pathlib import Path
 def fail(message):
     print(json.dumps({"solved": False, "error": str(message)[:2048]}))
     sys.exit(1)
+
+
+def mapped_address(project, module_relative):
+    """Translate a module-relative offset into the address space angr loaded
+    the main object at. module-relative = VA - declared image base, and angr
+    maps the main object at its load base (the p_vaddr base for ET_EXEC
+    images, a chosen base for PIE images and Mach-O bundles), so the virtual
+    address is module_relative + load base."""
+    main_object = project.loader.main_object
+    base = getattr(main_object, "mapped_base", None)
+    if base is None:
+        base = main_object.min_addr
+    address = base + module_relative
+    if not main_object.contains_addr(address):
+        fail(
+            "module-relative address 0x%x maps to 0x%x, outside the loaded "
+            "image [0x%x, 0x%x); the profile image base may differ from the "
+            "angr load base"
+            % (module_relative, address, main_object.min_addr, main_object.max_addr + 1)
+        )
+    return address
+
+
+def bounded_explore(simulation, find, avoid, max_steps):
+    """Step the active stash at most max_steps times, matching find/avoid
+    addresses after every step. angr's explore() has no step limit, so a
+    looping program would otherwise run until the job-level timeout."""
+    find_targets = set(find)
+    avoid_targets = set(avoid or [])
+    steps = 0
+    for _ in range(max_steps):
+        if not simulation.active or simulation.found:
+            break
+        simulation.step()
+        steps += 1
+        if find_targets:
+            simulation.move("found", "active", lambda state: state.addr in find_targets)
+        if avoid_targets:
+            simulation.move("avoided", "active", lambda state: state.addr in avoid_targets)
+        if simulation.avoided:
+            simulation.drop(stash="avoided")
+    return simulation, steps
 
 
 def main():
@@ -36,14 +83,27 @@ def main():
         # Trusted (non-isolated) jobs run with the state root as cwd; isolated
         # jobs receive the staged absolute path via argv staging.
         target = str((Path.cwd() / target).resolve())
-    find = params.get("find") or []
-    avoid = params.get("avoid") or []
+    try:
+        find = [
+            int(item, 0) if isinstance(item, str) else int(item)
+            for item in (params.get("find") or [])
+        ]
+        avoid = [
+            int(item, 0) if isinstance(item, str) else int(item)
+            for item in (params.get("avoid") or [])
+        ]
+    except (TypeError, ValueError):
+        fail("find/avoid must be arrays of integer or 0x-hex string addresses")
+    if not find:
+        fail("target and a nonempty find list are required")
+    if not all(0 <= item < 2**64 for item in find + avoid):
+        fail("module-relative addresses must fit the 64-bit range")
     stdin_length = int(params.get("stdin_length", 64))
     max_steps = int(params.get("max_steps", 50000))
-    if not isinstance(target, str) or not find:
-        fail("target and a nonempty find list are required")
     if not (1 <= stdin_length <= 4096):
         fail("stdin_length out of range")
+    if not (1 <= max_steps <= 10_000_000):
+        fail("max_steps out of range")
     try:
         import angr  # noqa: PLC0415 - heavy import inside the job
         import claripy  # noqa: PLC0415
@@ -54,6 +114,11 @@ def main():
     except Exception as error:  # noqa: BLE001 - report load failures cleanly
         fail("angr failed to load target: %s" % error)
     try:
+        find_addresses = [mapped_address(project, offset) for offset in find]
+        avoid_addresses = [mapped_address(project, offset) for offset in avoid]
+        base = getattr(project.loader.main_object, "mapped_base", None)
+        if base is None:
+            base = project.loader.main_object.min_addr
         content = claripy.BVS("stdin", stdin_length * 8)
         state = project.factory.entry_state(
             stdin=angr.SimFile(name="stdin", content=content, has_end=True)
@@ -70,7 +135,9 @@ def main():
                     )
                 )
         simulation = project.factory.simulation_manager(state)
-        simulation.explore(find=find, avoid=avoid or None, num_find=1)
+        simulation, steps = bounded_explore(
+            simulation, find_addresses, avoid_addresses, max_steps
+        )
     except Exception as error:  # noqa: BLE001
         fail("angr exploration failed: %s" % error)
     stats = {
@@ -78,6 +145,9 @@ def main():
         "deadended": len(simulation.deadended),
         "errored": len(simulation.errored),
         "active": len(simulation.active),
+        "steps": steps,
+        "step_limit_reached": not simulation.found and steps >= max_steps,
+        "mapped_base": base,
     }
     if not simulation.found:
         fail("no state reached a find address; stats=%s" % json.dumps(stats))
