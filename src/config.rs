@@ -177,6 +177,27 @@ impl AppConfig {
             "invalid context retention limits"
         );
         ensure!(
+            self.analysis.timeout_seconds > 0
+                && self.analysis.analysis_timeout_seconds > 0
+                && self.analysis.max_cpu > 0,
+            "analysis timeouts and CPU limits must be positive"
+        );
+        ensure!(
+            self.analysis.timeout_seconds >= self.analysis.analysis_timeout_seconds,
+            "analysis.timeout_seconds must cover analysis_timeout_seconds"
+        );
+        if self.runtime.backend != crate::runtime::RuntimeBackend::Disabled {
+            // Worker-side Ghidra queries run synchronously up to
+            // analysis.timeout_seconds; a shorter transport timeout would
+            // kill the call (and previously the whole transport) mid-query.
+            ensure!(
+                self.runtime.request_timeout_secs >= self.analysis.timeout_seconds,
+                "runtime.request_timeout_secs ({}) must cover analysis.timeout_seconds ({})",
+                self.runtime.request_timeout_secs,
+                self.analysis.timeout_seconds
+            );
+        }
+        ensure!(
             self.pricing.input_usd_per_million.is_finite()
                 && self.pricing.output_usd_per_million.is_finite()
                 && self.pricing.input_usd_per_million >= 0.0
@@ -199,5 +220,38 @@ impl AppConfig {
         }
         fs::write(path, toml::to_string_pretty(&Self::default())?)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::RuntimeBackend;
+
+    #[test]
+    fn runtime_timeout_must_cover_worker_ghidra_queries() {
+        let mut config = AppConfig::default();
+        config.runtime.backend = RuntimeBackend::TrustedLocal;
+        config.runtime.request_timeout_secs = 120;
+        config.analysis.timeout_seconds = 300;
+        let error = config.validate().unwrap_err();
+        assert!(error.to_string().contains("must cover"), "{error:#}");
+        // Disabled backends have no transport timeout to contradict.
+        config.runtime.backend = RuntimeBackend::Disabled;
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn analysis_timeout_must_cover_the_analysis_phase() {
+        let mut config = AppConfig::default();
+        config.analysis.timeout_seconds = 100;
+        config.analysis.analysis_timeout_seconds = 200;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("must cover analysis_timeout_seconds")
+        );
     }
 }

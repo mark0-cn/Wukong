@@ -700,21 +700,6 @@ pub struct GhidraConfig {
     pub analysis_timeout_seconds: u64,
     pub max_cpu: usize,
 }
-impl GhidraConfig {
-    pub fn from_env(cache_dir: PathBuf) -> Result<Self> {
-        let executable = std::env::var_os("RE_AGENT_GHIDRA_HEADLESS")
-            .map(PathBuf::from)
-            .context("set RE_AGENT_GHIDRA_HEADLESS to Ghidra support/analyzeHeadless[.bat]")?;
-        Ok(Self {
-            executable,
-            cache_dir,
-            script_dir: None,
-            timeout_seconds: 600,
-            analysis_timeout_seconds: 300,
-            max_cpu: 2,
-        })
-    }
-}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum GhidraQuery {

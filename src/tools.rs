@@ -1337,7 +1337,7 @@ impl ToolService {
             let staged = self
                 .stage_target(agent, &format!("{call_id}:target"))
                 .await?;
-            let result=self.worker_call(agent,call_id,"ghidra.query",json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.analysis.timeout_seconds})).await?;
+            let result=self.worker_call(agent,call_id,"ghidra.query",json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.analysis.timeout_seconds,"analysis_timeout_secs":self.config.analysis.analysis_timeout_seconds,"max_cpu":self.config.analysis.max_cpu})).await?;
             ensure!(
                 result["target_sha256"] == run.target_sha256,
                 "remote Ghidra analyzed another target"

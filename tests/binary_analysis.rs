@@ -207,9 +207,16 @@ async fn missing_ghidra_is_an_error_not_a_fake_analysis() {
 #[ignore = "requires installed Ghidra and JDK; run with --ignored"]
 async fn real_ghidra_import_decompile_xrefs_and_cache() {
     let dir = tempfile::tempdir().unwrap();
-    let backend = binary::GhidraBackend::new(
-        binary::GhidraConfig::from_env(dir.path().join("ghidra")).unwrap(),
-    )
+    let backend = binary::GhidraBackend::new(binary::GhidraConfig {
+        executable: std::env::var_os("RE_AGENT_GHIDRA_HEADLESS")
+            .map(std::path::PathBuf::from)
+            .expect("set RE_AGENT_GHIDRA_HEADLESS to Ghidra support/analyzeHeadless[.bat]"),
+        cache_dir: dir.path().join("ghidra"),
+        script_dir: None,
+        timeout_seconds: 300,
+        analysis_timeout_seconds: 240,
+        max_cpu: 2,
+    })
     .unwrap();
     let target = std::env::current_exe().unwrap();
     let query = binary::GhidraQuery::Functions {

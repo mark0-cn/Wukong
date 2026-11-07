@@ -50,7 +50,7 @@ impl Default for RuntimeConfig {
             ssh_host: None,
             remote_bridge_path: "/opt/re-agent/runtime/bridge.py".into(),
             remote_state_dir: "/state".into(),
-            request_timeout_secs: 120,
+            request_timeout_secs: 300,
         }
     }
 }
@@ -288,7 +288,7 @@ async fn request(
             error: anyhow!("runtime request exceeds 48 MiB"),
         });
     }
-    let timeout = Duration::from_secs(config.request_timeout_secs.clamp(1, 300));
+    let timeout = Duration::from_secs(config.request_timeout_secs.clamp(1, 3600));
     let exchange = tokio::time::timeout(timeout, async {
         transport.input.write_all(&payload).await?;
         transport.input.write_all(b"\n").await?;
