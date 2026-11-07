@@ -723,9 +723,11 @@ impl ToolService {
                 "tool {name} is unavailable for role {}",
                 agent.role
             );
-            if let Some(spec) = builtin {
-                validate_args(&args, &spec.definition.parameters, "arguments")?;
-            }
+            let args = if let Some(spec) = builtin {
+                validated_arguments(args, &spec.definition.parameters)?
+            } else {
+                args
+            };
             self.dispatch(&agent, call_id, name, args).await
         };
         let result = tokio::time::timeout(outer_timeout, result).await;
@@ -2360,73 +2362,65 @@ fn prefix_utf8(bytes: &[u8], limit: usize) -> String {
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
-fn validate_args(value: &Value, definition: &Value, path: &str) -> Result<()> {
-    if let Some(kind) = definition["type"].as_str() {
-        let valid = match kind {
-            "object" => value.is_object(),
-            "array" => value.is_array(),
-            "string" => value.is_string(),
-            "boolean" => value.is_boolean(),
-            "integer" => match value {
-                Value::Number(number) => number.is_i64() || number.is_u64(),
-                Value::String(text) => parse_u64_text(text).is_some(),
-                _ => false,
-            },
-            "number" => value.is_number(),
-            _ => true,
-        };
-        ensure!(valid, "{path} must have type {kind}");
-    }
-    if let Some(choices) = definition["enum"].as_array() {
-        ensure!(choices.contains(value), "{path} is not an allowed value");
-    }
-    if let Some(text) = value.as_str()
-        && let Some(min) = definition["minLength"].as_u64()
-    {
-        ensure!(text.chars().count() as u64 >= min, "{path} is too short");
-    }
-    let numeric = value
-        .as_f64()
-        .or_else(|| value.as_str().and_then(parse_u64_text).map(|v| v as f64));
-    if let Some(number) = numeric {
-        if let Some(min) = definition["minimum"].as_f64() {
-            ensure!(number >= min, "{path} is below its minimum");
+/// Preserve the project's numeric-address syntax before Rig validates JSON Schema.
+/// The original arguments stay in the call ledger; only dispatched values normalize.
+fn normalize_integer_arguments(value: &mut Value, schema: &Value) {
+    if schema["type"] == "integer" {
+        if let Some(parsed) = value.as_str().and_then(parse_u64_text) {
+            *value = json!(parsed);
         }
-        if let Some(max) = definition["maximum"].as_f64() {
-            ensure!(number <= max, "{path} exceeds its maximum");
-        }
-    }
-    if let Some(object) = value.as_object() {
-        if let Some(required) = definition["required"].as_array() {
-            for key in required {
-                let key = key.as_str().context("invalid built-in schema")?;
-                ensure!(object.contains_key(key), "missing required {path}.{key}");
+    } else if let Some(object) = value.as_object_mut() {
+        for (name, value) in object {
+            if let Some(property) = schema["properties"].get(name) {
+                normalize_integer_arguments(value, property);
             }
         }
-        for (key, value) in object {
-            if let Some(property) = definition["properties"].get(key) {
-                validate_args(value, property, &format!("{path}.{key}"))?;
-            } else {
-                ensure!(
-                    definition["additionalProperties"] != false,
-                    "unknown argument {path}.{key}"
-                );
+    } else if let Some(array) = value.as_array_mut() {
+        if let Some(items) = schema.get("items") {
+            for value in array {
+                normalize_integer_arguments(value, items);
             }
         }
     }
-    if let Some(array) = value.as_array()
-        && let Some(items) = definition.get("items")
-    {
-        for (index, item) in array.iter().enumerate() {
-            validate_args(item, items, &format!("{path}[{index}]"))?;
-        }
-    }
-    Ok(())
+}
+fn validated_arguments(mut value: Value, schema: &Value) -> Result<Value> {
+    normalize_integer_arguments(&mut value, schema);
+    rig_core::tool::validate::validate(schema, &value).map_err(|problems| {
+        anyhow::anyhow!(
+            "invalid tool arguments: {}",
+            problems
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    })?;
+    Ok(value)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::substitute_target_argv;
+    use super::{substitute_target_argv, validated_arguments};
+
+    #[test]
+    fn rig_schema_validation_preserves_address_syntax_and_checks_collection_limits() {
+        let schema = serde_json::json!({"type":"object","properties":{"address":{"type":"integer","minimum":1},"names":{"type":"array","maxItems":1,"items":{"type":"string","maxLength":3}}},"required":["address"],"additionalProperties":false});
+        let normalized = validated_arguments(
+            serde_json::json!({"address":"0x40","names":["abc"]}),
+            &schema,
+        )
+        .unwrap();
+        assert_eq!(normalized["address"], 64);
+        for invalid in [
+            serde_json::json!({"address":0}),
+            serde_json::json!({"address":"bad"}),
+            serde_json::json!({"address":1,"names":["long"]}),
+            serde_json::json!({"address":1,"names":["a","b"]}),
+            serde_json::json!({"address":1,"extra":true}),
+        ] {
+            assert!(validated_arguments(invalid, &schema).is_err());
+        }
+    }
 
     #[test]
     fn target_placeholder_replaces_argv_entries() {
