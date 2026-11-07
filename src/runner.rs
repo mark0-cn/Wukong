@@ -190,13 +190,24 @@ impl AssessmentRunner {
                 .zip(usage.output_tokens)
                 .map(|(i, o)| i.saturating_add(o))
         });
-        let cost_known = (self.config.pricing.input_usd_per_million == 0.0
-            || usage.input_tokens.is_some())
-            && (self.config.pricing.output_usd_per_million == 0.0 || usage.output_tokens.is_some());
-        let cost = (usage.input_tokens.unwrap_or(0) as f64
-            * self.config.pricing.input_usd_per_million
-            + usage.output_tokens.unwrap_or(0) as f64 * self.config.pricing.output_usd_per_million)
-            / 1_000_000.0;
+        // The configured rates are flat estimates for all input/output.
+        // Rig owns normalized cache counters and avoids double counting them.
+        let pricing = rig_core::catalog::Pricing::new(
+            self.config.pricing.input_usd_per_million,
+            self.config.pricing.output_usd_per_million,
+        )
+        .with_cache_read(self.config.pricing.input_usd_per_million)
+        .with_cache_write(self.config.pricing.input_usd_per_million);
+        let mut priced_usage = usage;
+        if pricing.input == 0.0 {
+            priced_usage.input_tokens.get_or_insert(0);
+        }
+        if pricing.output == 0.0 {
+            priced_usage.output_tokens.get_or_insert(0);
+        }
+        let estimate = pricing.cost(&priced_usage);
+        let cost_known = estimate.as_ref().is_some_and(|cost| cost.is_complete());
+        let cost = estimate.as_ref().map_or(0.0, |cost| cost.total);
         self.store.transaction(|tx| {
             let mut agent: AgentRecord = Store::tx_get(tx,"agent",agent_id)?.context("agent missing")?;
             let mut run: RunRecord = Store::tx_get(tx,"run",&agent.run_id)?.context("run missing")?;
@@ -772,5 +783,27 @@ mod tests {
         let result = drive_bounded(&runner, &run.id).await;
         assert_eq!(result.status, Status::Completed);
         server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn reported_token_totals_do_not_hide_unknown_costs() {
+        let (_dir, mut runner, run) = fixture("http://127.0.0.1:1".into()).await;
+        runner.config.pricing.input_usd_per_million = 10.0;
+        runner.config.pricing.output_usd_per_million = 20.0;
+        let mut usage = Usage::default();
+        usage.total_tokens = Some(12);
+        runner.account_usage(&run.root_id, usage, true).unwrap();
+        let paused: RunRecord = runner.store.require("run", &run.id).unwrap();
+        assert_eq!(paused.status, Status::BudgetPaused);
+        assert_eq!(paused.total_tokens, 12);
+        assert_eq!(paused.cost_usd, 0.0);
+        let usage = runner
+            .store
+            .events(&run.id, 0, 100)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == "model.usage")
+            .unwrap();
+        assert!(usage.data["cost_estimate_usd"].is_null());
+        assert_eq!(usage.data["tokens_reported"], true);
     }
 }
