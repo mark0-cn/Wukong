@@ -513,12 +513,26 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (_dir, mut runner, run) =
             fixture(format!("http://{}", listener.local_addr().unwrap())).await;
-        runner.config.model.role_model = Some("role-fixture".into());
-        runner.config.model.role_max_tokens = Some(256);
-        runner.role_engines.insert(
-            "role-fixture".into(),
-            Arc::new(ModelEngine::new(runner.config.model.role_config_for(Role::Reverse)).unwrap()),
-        );
+        let mut config = runner.config.clone();
+        config.model.role_models = Some(HashMap::from([
+            (
+                Role::Recon,
+                crate::llm::RoleModelSpec {
+                    model: "role-fixture".into(),
+                    max_tokens: Some(128),
+                },
+            ),
+            (
+                Role::Reverse,
+                crate::llm::RoleModelSpec {
+                    model: "role-fixture".into(),
+                    max_tokens: Some(256),
+                },
+            ),
+        ]));
+        runner = AssessmentRunner::new(config, runner.store.clone())
+            .await
+            .unwrap();
         let store = runner.store.clone();
         let rid = run.id.clone();
         let server = tokio::spawn(async move {
