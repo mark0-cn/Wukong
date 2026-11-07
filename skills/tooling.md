@@ -16,6 +16,9 @@ dedicated `angr_solve` tool over hand-written solving:
   optional `avoid` addresses (failure prints, abort) to `angr_solve`.
 - It returns a job_id; poll job_status. On completion stdout carries
   {"solved": true, "input_base64": ..., "input_hex": ..., "stats": {...}}.
+  The solved input is also persisted as job artifacts (solved-input.bin,
+  solved.json) and imported as evidence when the terminal job_status is
+  polled — prefer those artifacts over scraping the stdout tail.
   Decode input_base64 and feed it to the target with job_start to CONFIRM
   the solution really reaches the find address — angr's answer is a
   hypothesis until the real run agrees.

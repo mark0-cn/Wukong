@@ -10,8 +10,10 @@ Arguments: a single JSON object on argv[1]:
   "max_steps": 50000
 }
 Prints a single JSON line with the solved stdin (base64) and exploration
-statistics, or an explicit error. This script runs inside the isolated job;
-it never trusts the target and never touches worker metadata.
+statistics, or an explicit error. The solved input is also persisted as job
+artifacts (solved-input.bin, solved.json): RE_AGENT_JOB_DIR when the worker
+provides it, otherwise the job working directory. This script runs inside the
+isolated job; it never trusts the target and never touches worker metadata.
 
 find/avoid entries are module-relative offsets as reported by the controller's
 binary profile (virtual address minus the declared image base). The controller
@@ -20,6 +22,7 @@ mapped into the address space angr actually created before exploration.
 """
 import base64
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -161,13 +164,28 @@ def main():
         )
     except Exception as error:  # noqa: BLE001
         fail("solved a find state but could not concretize stdin: %s" % error)
-    print(json.dumps({
+    result = {
         "solved": True,
         "input_base64": base64.b64encode(bytes_out).decode(),
         "input_hex": bytes_out.hex(),
         "length": len(bytes_out),
         "stats": stats,
-    }))
+    }
+    # Persist the solved input as job artifacts so the controller imports it
+    # as evidence instead of scraping a bounded stdout tail. Isolated jobs
+    # cannot write the worker-provided job directory and fall back to their
+    # working directory, which the worker collects after the job finishes.
+    for output_dir in (os.environ.get("RE_AGENT_JOB_DIR"), os.getcwd()):
+        if not output_dir:
+            continue
+        try:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            (Path(output_dir) / "solved-input.bin").write_bytes(bytes_out)
+            (Path(output_dir) / "solved.json").write_text(json.dumps(result), encoding="utf-8")
+            break
+        except OSError:
+            continue
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":
