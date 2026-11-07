@@ -36,7 +36,10 @@ pub struct ToolService {
     locks: Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>,
 }
 
+mod args;
+
 struct Spec {
+    parse: fn(Value) -> Result<Value>,
     definition: ToolDefinition,
     side_effecting: bool,
     target: bool,
@@ -44,462 +47,344 @@ struct Spec {
     root_only: bool,
     child_only: bool,
 }
-fn schema(kind: &str) -> Value {
-    json!({"type":kind})
-}
-fn strings() -> Value {
-    json!({"type":"array","items":{"type":"string"}})
-}
-fn addresses() -> Value {
-    json!({"type":"array","items":integer(0,u64::MAX)})
-}
-fn integer(min: u64, max: u64) -> Value {
-    json!({"type":"integer","minimum":min,"maximum":max})
-}
-fn spec(
+fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema>(
     name: &str,
     description: &str,
-    properties: Value,
-    required: &[&str],
     side_effecting: bool,
     target: bool,
 ) -> Spec {
-    Spec {definition:ToolDefinition::new(ToolName::new(name).expect("built-in tool name"),description,json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}))
-        .with_annotations(ToolAnnotations::default().with_read_only(!side_effecting).with_open_world(target)),side_effecting,target,verifier_only:false,root_only:false,child_only:false}
+    Spec {
+        definition: ToolDefinition::new(
+            ToolName::new(name).expect("built-in tool name"),
+            description,
+            rig_core::tool::args_schema::<A>(),
+        )
+        .with_annotations(
+            ToolAnnotations::default()
+                .with_read_only(!side_effecting)
+                .with_open_world(target),
+        ),
+        parse: |value| Ok(serde_json::to_value(serde_json::from_value::<A>(value)?)?),
+        side_effecting,
+        target,
+        verifier_only: false,
+        root_only: false,
+        child_only: false,
+    }
 }
 
 fn builtins() -> Vec<Spec> {
-    let s = schema("string");
-    let a = strings();
-    let o = schema("object");
-    let b = schema("boolean");
-    let id = json!({"type":"string","minLength":1});
     let mut specs = vec![
-        spec(
+        spec::<args::CreateAgentArgs>(
             "create_agent",
             "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors gates admission with dependency_policy (default all_success). Failed requirements block execution and notify the parent.",
-            json!({"name":id,"role":{"type":"string","enum":["recon","reverse","hunter","fuzz","crash","exploit","verifier","reporter"]},"task":id,"scope":id,"skills":a,"inherit_context":b,"wait_for_predecessors":a,"dependency_policy":policy_schema(),"contract":contract_schema()}),
-            &["name", "role", "task", "scope"],
             true,
             false,
         ),
-        spec(
+        spec::<args::ViewAgentGraphArgs>(
             "view_agent_graph",
             "List this assessment's agent tree, scopes, states and results.",
-            json!({}),
-            &[],
             false,
             false,
         ),
-        spec(
+        spec::<args::SendMessageToAgentArgs>(
             "send_message_to_agent",
             "Queue information, a question, reply, result or blocked notice. Information does not interrupt waits. Only follow_up_agent reopens completed work. Queued/included is not proof of processing.",
-            message_properties(false),
-            &["agent_id", "message"],
             true,
             false,
         ),
-        spec(
+        spec::<args::FollowUpAgentArgs>(
             "follow_up_agent",
             "Explicitly assign a follow-up; reopens completed work in a new generation while preserving history. Use recipient_generation to guard against stale assignments.",
-            message_properties(true),
-            &["agent_id", "message"],
             true,
             false,
         ),
-        spec(
+        spec::<args::MessageStatusArgs>(
             "message_status",
             "Inspect a sent/received message, its delivery state and correlated reply.",
-            json!({"message_id":integer(1,i64::MAX as u64)}),
-            &["message_id"],
             false,
             false,
         ),
-        spec(
+        spec::<args::WaitForAgentsArgs>(
             "wait_for_agents",
             "Park on selected agents with policy all_terminal (default), all_success or any_success; return a satisfied/blocked outcome or timeout. Empty list means children.",
-            json!({"agent_ids":a,"timeout_seconds":integer(1,3600),"policy":policy_schema()}),
-            &[],
             true,
             false,
         ),
-        spec(
+        spec::<args::StopAgentArgs>(
             "stop_agent",
             "Stop yourself or your descendants, with a recorded reason.",
-            json!({"agent_id":id,"reason":id}),
-            &["agent_id", "reason"],
             true,
             false,
         ),
-        spec(
+        spec::<args::AgentFinishArgs>(
             "agent_finish",
             "Finish a child task with a structured result accounting for its contract, evidence and gaps. summary is shorthand for tasks without required outputs. Active descendants must finish first.",
-            json!({"summary":id,"result":result_schema()}),
-            &[],
             true,
             false,
         ),
-        spec(
+        spec::<args::FinishScanArgs>(
             "finish_scan",
             "Root only: finish the assessment after children and coverage are resolved.",
-            json!({"summary":id,"result":result_schema()}),
-            &[],
             true,
             false,
         ),
-        spec(
+        spec::<args::ThreatModelGetArgs>(
             "threat_model_get",
             "Read the shared threat model documents.",
-            json!({"id":s}),
-            &[],
             false,
             false,
         ),
-        spec(
+        spec::<args::ThreatModelSaveArgs>(
             "threat_model_save",
             "Create a shared threat model with a stable document ID.",
-            json!({"title":id,"body":id}),
-            &["title", "body"],
             true,
             false,
         ),
-        spec(
+        spec::<args::ThreatModelAmendArgs>(
             "threat_model_amend",
             "Append a durable amendment to a shared threat model.",
-            json!({"id":id,"amendment":id}),
-            &["id", "amendment"],
             true,
             false,
         ),
-        spec(
+        spec::<args::NoteSaveArgs>(
             "note_save",
             "Save a shared note linked to this task.",
-            json!({"title":id,"body":id}),
-            &["title", "body"],
             true,
             false,
         ),
-        spec(
+        spec::<args::NotesListArgs>(
             "notes_list",
             "List shared notes for this assessment.",
-            json!({}),
-            &[],
             false,
             false,
         ),
-        spec(
+        spec::<args::TodoSaveArgs>(
             "todo_save",
             "Create a shared to-do item; status defaults to pending.",
-            json!({"title":id,"body":s}),
-            &["title"],
             true,
             false,
         ),
-        spec(
+        spec::<args::TodoUpdateArgs>(
             "todo_update",
             "Update the body or status of an existing shared to-do.",
-            json!({"id":id,"body":s,"status":{"type":"string","enum":["pending","in_progress","completed","inconclusive"]}}),
-            &["id"],
             true,
             false,
         ),
-        spec(
-            "todos_list",
-            "List shared to-do items.",
-            json!({}),
-            &[],
-            false,
-            false,
-        ),
-        spec(
+        spec::<args::TodosListArgs>("todos_list", "List shared to-do items.", false, false),
+        spec::<args::CoverageRecordArgs>(
             "coverage_record",
             "Record inspected scope, outcome and supporting evidence. needs_follow_up blocks root completion.",
-            json!({"scope":id,"kind":id,"outcome":{"type":"string","enum":["inspected","needs_follow_up","inconclusive","completed","not_reachable"]},"notes":s,"evidence_ids":a}),
-            &["scope", "kind", "outcome"],
             true,
             false,
         ),
-        spec(
+        spec::<args::CoverageUpdateArgs>(
             "coverage_update",
             "Update a coverage record's outcome, notes and evidence.",
-            json!({"id":id,"outcome":{"type":"string","enum":["inspected","needs_follow_up","inconclusive","completed","not_reachable"]},"notes":s,"evidence_ids":a}),
-            &["id", "outcome"],
             true,
             false,
         ),
-        spec(
+        spec::<args::CoverageListArgs>(
             "coverage_list",
             "List all recorded assessment coverage.",
-            json!({}),
-            &[],
             false,
             false,
         ),
-        spec(
+        spec::<args::FindingFileArgs>(
             "finding_file",
             "File a suspected or reproduced finding with evidence. Verified impact requires a separate immutable verifier record. severity critical/high requires a reproduced-or-better stage.",
-            json!({"title":id,"description":id,"root_cause":s,"impact":s,"severity":{"type":"string","enum":["critical","high","medium","low","info"]},"severity_rationale":s,"stage":{"type":"string","enum":["suspected","reproduced","root_cause_confirmed","impact_verified","inconclusive","rejected"]},"location":o,"evidence_ids":a,"verification_id":s}),
-            &["title", "description", "evidence_ids"],
             true,
             false,
         ),
-        spec(
+        spec::<args::FindingUpdateArgs>(
             "finding_update",
             "Update an existing finding. Impact promotion is enforced using independent execution evidence.",
-            json!({"id":id,"title":s,"description":s,"root_cause":s,"impact":s,"severity":{"type":"string","enum":["critical","high","medium","low","info"]},"severity_rationale":s,"stage":{"type":"string","enum":["suspected","reproduced","root_cause_confirmed","impact_verified","inconclusive","rejected"]},"location":o,"evidence_ids":a,"verification_id":s}),
-            &["id"],
             true,
             false,
         ),
-        spec(
+        spec::<args::FindingsListArgs>(
             "findings_list",
             "List this assessment's findings and recorded stages.",
-            json!({}),
-            &[],
             false,
             false,
         ),
-        spec(
+        spec::<args::FindingGetArgs>(
             "finding_get",
             "Read a finding and its independent verification record.",
-            json!({"id":id}),
-            &["id"],
             false,
             false,
         ),
-        spec(
+        spec::<args::VerificationRecordArgs>(
             "verification_record",
             "Verifier only: ingest a completed poc_verify job, its raw evidence and real trial counts. A crash verifies only crash behavior.",
-            json!({"finding_id":id,"job_id":id,"impact":s,"conditions":o}),
-            &["finding_id", "job_id"],
             true,
             true,
         ),
-        spec(
+        spec::<args::EvidenceReadArgs>(
             "evidence_read",
             "Read a bounded byte range from an integrity-checked evidence artifact. Non-UTF8 is base64.",
-            json!({"evidence_id":id,"offset":integer(0,u64::MAX),"length":integer(1,1024*1024)}),
-            &["evidence_id"],
             false,
             false,
         ),
-        spec(
+        spec::<args::LoadSkillArgs>(
             "load_skill",
             "Activate a named local analysis skill (built-in or configured custom skill). The controller persists its exact content/hash and installs its instructions at the next fresh model boundary; survives compaction and resume.",
-            json!({"name":id}),
-            &["name"],
             true,
             false,
         ),
-        spec(
+        spec::<args::ThinkArgs>(
             "think",
             "Record a concise audited scratch note for this agent. The original content remains in tool-call history and may be inherited by children; this is neither a private channel nor a context-saving mechanism. Use note_save for shared conclusions.",
-            json!({"content":id}),
-            &["content"],
             true,
             false,
         ),
-        spec(
+        spec::<args::BinaryInspectArgs>(
             "binary_inspect",
             "Inspect the exact run target, architecture, sections, imports, symbols and mitigations.",
-            json!({}),
-            &[],
             false,
             true,
         ),
-        spec(
+        spec::<args::BinaryStringsArgs>(
             "binary_strings",
             "Search printable strings with file-offset address references and pagination.",
-            json!({"min_length":integer(1,65536),"max_length":integer(1,65536),"offset":integer(0,u64::MAX),"limit":integer(1,5000),"contains":s}),
-            &[],
             false,
             true,
         ),
-        spec(
+        spec::<args::FunctionsSearchArgs>(
             "functions_search",
             "Ghidra: search analyzed functions, paginated.",
-            json!({"pattern":s,"offset":integer(0,u64::MAX),"limit":integer(1,5000)}),
-            &[],
             false,
             true,
         ),
-        spec(
+        spec::<args::FunctionDecompileArgs>(
             "function_decompile",
             "Ghidra: decompile a function by MODULE-RELATIVE offset.",
-            json!({"address":integer(0,u64::MAX)}),
-            &["address"],
             false,
             true,
         ),
-        spec(
+        spec::<args::XrefsQueryArgs>(
             "xrefs_query",
             "Ghidra: references to/from a MODULE-RELATIVE offset.",
-            json!({"address":integer(0,u64::MAX),"direction":{"type":"string","enum":["to","from","both"]},"limit":integer(1,5000)}),
-            &["address"],
             false,
             true,
         ),
-        spec(
+        spec::<args::RuntimeDoctorArgs>(
             "runtime_doctor",
             "Inspect the configured worker's real platform, versions and available capabilities.",
-            json!({}),
-            &[],
             false,
             true,
         ),
-        spec(
+        spec::<args::StageTargetArgs>(
             "stage_target",
             "Copy the run's SHA256-verified original target into the worker's immutable files area.",
-            json!({}),
-            &[],
             true,
             true,
         ),
-        spec(
+        spec::<args::FilePutArgs>(
             "file_put",
             "Create an immutable worker file from base64 bytes or an existing evidence artifact.",
-            json!({"path":id,"data_base64":s,"evidence_id":s,"executable":b}),
-            &["path"],
             true,
             true,
         ),
-        spec(
+        spec::<args::FileGetArgs>(
             "file_get",
             "Retrieve a declared in-run worker file and persist original bytes as evidence.",
-            json!({"path":id,"max_bytes":integer(1,32*1024*1024)}),
-            &["path"],
             false,
             true,
         ),
-        spec(
+        spec::<args::JobStartArgs>(
             "job_start",
             "Start a persistent process job in the configured worker; returns a job_id immediately. argv entries may use {target} as a placeholder for the staged target path (resolved by the harness and staged in isolated jobs); worker paths like files/... resolve only as direct argv entries, never inside shell strings. Jobs may read RE_AGENT_STATE_DIR and RE_AGENT_JOB_DIR from the environment.",
-            json!({"argv":a,"cwd":s,"env":o,"timeout_secs":integer(1,86400),"output_limit":integer(1024,8*1024*1024)}),
-            &["argv"],
             true,
             true,
         ),
-        spec(
+        spec::<args::JobStatusArgs>(
             "job_status",
             "Observe an in-run job, refresh persisted status and import raw observations.",
-            json!({"job_id":id}),
-            &["job_id"],
             false,
             true,
         ),
-        spec(
+        spec::<args::JobCancelArgs>(
             "job_cancel",
             "Request cancellation of an owned in-run job.",
-            json!({"job_id":id}),
-            &["job_id"],
             true,
             true,
         ),
-        spec(
+        spec::<args::JobArtifactsArgs>(
             "job_artifacts",
             "List and import original artifacts produced by an in-run job.",
-            json!({"job_id":id}),
-            &["job_id"],
             false,
             true,
         ),
-        spec(
+        spec::<args::FuzzStartArgs>(
             "fuzz_start",
             "Start AFL++ QEMU fuzzing after staging target and nonempty seed files.",
-            json!({"target":id,"seeds":id,"args":a,"env":o,"timeout_secs":integer(1,86400),"exec_timeout_ms":integer(10,60000),"memory_mb":integer(16,65536)}),
-            &["target", "seeds"],
             true,
             true,
         ),
-        spec(
+        spec::<args::FuzzStatusArgs>(
             "fuzz_status",
             "Observe a bound AFL++ job and its real statistics/crash files.",
-            json!({"job_id":id}),
-            &["job_id"],
             false,
             true,
         ),
-        spec(
+        spec::<args::DebugStartArgs>(
             "debug_start",
             "Start an owned GDB/MI session on the staged target.",
-            json!({"target":id,"args":a}),
-            &["target"],
             true,
             true,
         ),
-        spec(
+        spec::<args::DebugCommandArgs>(
             "debug_command",
             "Execute exactly one GDB/MI command in your owned session; stable request IDs prevent blind replay.",
-            json!({"session_id":id,"command":id,"timeout_secs":integer(1,60)}),
-            &["session_id", "command"],
             true,
             true,
         ),
-        spec(
+        spec::<args::DebugCloseArgs>(
             "debug_close",
             "Close your debugger session, or clean up an in-run session whose owner is terminal.",
-            json!({"session_id":id}),
-            &["session_id"],
             true,
             true,
         ),
-        spec(
+        spec::<args::InteractiveStartArgs>(
             "interactive_start",
             "Start a persistent interactive process (REPL-style program) owned by this agent; returns a session_id. Worker paths resolve as direct argv entries.",
-            json!({"argv":a,"env":o}),
-            &["argv"],
             true,
             true,
         ),
-        spec(
+        spec::<args::InteractiveSendArgs>(
             "interactive_send",
             "Write bytes to an owned interactive session's stdin and return its newly produced output. The session stays alive between calls.",
-            json!({"session_id":id,"data_base64":s,"read_timeout_secs":integer(1,300)}),
-            &["session_id", "data_base64"],
             true,
             true,
         ),
-        spec(
+        spec::<args::InteractiveCloseArgs>(
             "interactive_close",
             "Close your interactive session and terminate its process tree; also permits cleanup when its in-run owner is terminal.",
-            json!({"session_id":id}),
-            &["session_id"],
             true,
             true,
         ),
-        spec(
+        spec::<args::AngrSolveArgs>(
             "angr_solve",
             "Symbolic execution: solve for a concrete stdin input that reaches a module-relative find address while avoiding others. Runs as a background job with a hard timeout; results (input_base64 + exploration stats) arrive via job_status.",
-            json!({"target":id,"find":addresses(),"avoid":addresses(),"stdin_length":integer(1,4096),"max_steps":integer(1,10000000),"timeout_secs":integer(10,3600),"printable_only":b}),
-            &["target", "find"],
             true,
             true,
         ),
-        spec(
+        spec::<args::CrashReplayArgs>(
             "crash_replay",
             "Start a persistent clean-directory crash reproduction job.",
-            replay_properties(),
-            &["target", "input"],
             true,
             true,
         ),
-        spec(
+        spec::<args::InputMinimizeArgs>(
             "input_minimize",
             "Start crash-preserving delta reduction using observed crash signatures.",
-            replay_properties(),
-            &["target", "input"],
             true,
             true,
         ),
-        spec(
+        spec::<args::PocVerifyArgs>(
             "poc_verify",
             "Verifier only: independently replay a finding's input in fresh directories. Worker observations determine trial success.",
-            {
-                let mut p = replay_properties();
-                p["finding_id"] = id.clone();
-                p
-            },
-            &["finding_id", "target", "input"],
             true,
             true,
         ),
@@ -514,33 +399,6 @@ fn builtins() -> Vec<Spec> {
     }
     specs
 }
-fn policy_schema() -> Value {
-    json!({"type":"string","enum":["all_success","all_terminal","any_success"]})
-}
-fn contract_schema() -> Value {
-    json!({"type":"object","properties":{"objective":{"type":"string"},"input_evidence_ids":strings(),"constraints":strings(),"deliverables":strings(),"completion_conditions":strings()},"additionalProperties":false})
-}
-fn result_schema() -> Value {
-    json!({"type":"object","properties":{
-        "outcome":{"type":"string","enum":["success","inconclusive","blocked","cancelled"]},
-        "answer":{"type":"string","minLength":1},"evidence_ids":strings(),
-        "artifacts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","minLength":1},"evidence_id":{"type":"string","minLength":1}},"required":["name","evidence_id"],"additionalProperties":false}},
-        "completed_conditions":strings(),"unknowns":strings(),"next_actions":strings()},
-        "required":["outcome","answer"],"additionalProperties":false})
-}
-fn message_properties(follow_up: bool) -> Value {
-    let mut properties = json!({"agent_id":{"type":"string","minLength":1},"message":{"type":"string","minLength":1},"recipient_generation":integer(0,u64::MAX),"correlation_id":{"type":"string","minLength":1},"evidence_ids":strings()});
-    if !follow_up {
-        properties["kind"] =
-            json!({"type":"string","enum":["information","question","reply","result","blocked"]});
-        properties["reply_to"] = integer(1, i64::MAX as u64);
-    }
-    properties
-}
-fn replay_properties() -> Value {
-    json!({"target":{"type":"string","minLength":1},"input":{"type":"string","minLength":1},"args":strings(),"expected":{"type":"object","properties":{"exit_code":{"type":"integer"},"signal":{"type":"integer"},"stdout_contains":{"type":"string"},"stderr_contains":{"type":"string"}},"additionalProperties":false},"env":{"type":"object"},"timeout_secs":integer(1,60),"trials":integer(1,16),"max_attempts":integer(1,4096),"minimize_timeout_secs":integer(1,3600)})
-}
-
 impl ToolService {
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
@@ -724,7 +582,7 @@ impl ToolService {
                 agent.role
             );
             let args = if let Some(spec) = builtin {
-                validated_arguments(args, &spec.definition.parameters)?
+                (spec.parse)(validated_arguments(args, &spec.definition.parameters)?)?
             } else {
                 args
             };
