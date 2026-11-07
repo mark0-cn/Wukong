@@ -1,10 +1,12 @@
 # 基于 Strix 架构的 Rust / Rig 二进制逆向与利用验证 Agent 方案
 
 - 编写日期：2026-11-06
-- 文档状态：架构方案，尚未开始实现
+- 文档状态：历史需求与设计基线；当前实现以 [实现架构](architecture.md) 和 [实现契约](implementation-contract.md) 为准
 - Strix 参照基线：`06015506625a78b981ae0b34be40239fc1b389be`
 - Rig 参照基线：`v0.46.0`
 - 首版建议范围：Linux x86_64 ELF、无源码样本、CLI / TUI、本地实验环境
+
+当前版本已改用 Rig ECS 原生执行、会话日志和 SubagentsPlugin。下文的自定义调度器、AgentRun 包装及 create_agent 接口描述保留为设计历史；模型侧创建接口现为 task，业务契约与证据验收仍由项目实现。本次重构不包含旧任务迁移。
 
 ## 1. 项目目标与设计原则
 

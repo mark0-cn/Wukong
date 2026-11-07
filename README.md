@@ -1,6 +1,6 @@
 # re-agent
 
-基于 Strix 协作架构、使用 Rust 和 Rig 0.46.0 实现的二进制逆向与分析 agent，支持行为理解、格式与算法还原、调试，以及按需进行漏洞验证。Windows 可以作为控制端；首版动态分析后端面向 Linux x86_64 ELF。ELF、PE、Mach-O 的静态画像由 Rust 直接解析。
+基于 Strix 协作架构、使用 Rust 和 Rig 0.46.0 实现的二进制逆向与分析 agent，支持行为理解、格式与算法还原、调试，以及按需进行漏洞验证。首版动态分析后端面向 Linux x86_64 ELF。ELF、PE、Mach-O 的静态画像由 Rust 直接解析。
 
 需求基线在 [架构方案](docs/strix-rig-binary-agent-plan.md)，实现与验收约定在 [实现契约](docs/implementation-contract.md)。
 
@@ -13,7 +13,7 @@ cargo build --release
 cargo test --all-targets
 ```
 
-Windows 可执行文件位于 `target/release/re-agent.exe`；Linux/macOS 为 `target/release/re-agent`。核心使用真实 Rig provider 和可持久化的 AgentRun，模型接口测试使用本地 HTTP 服务验证实际协议。
+Windows 可执行文件位于 `target/release/re-agent.exe`；Linux/macOS 为 `target/release/re-agent`。核心使用 Rig ECS 原生执行循环、会话日志和异步子 agent；模型接口测试通过本地 HTTP 服务验证实际 provider 协议。本轮验证在 macOS 上完成，Windows 控制端尚未验证。
 
 ## 开始使用
 
@@ -71,7 +71,7 @@ re-agent verify-bundle .\reports\assessment-01
 re-agent reconcile CALL_ID --result-file .\reviewed-result.json --evidence-id EVIDENCE_ID
 ```
 
-省略 `--config` 时，会使用当前目录的 `re-agent.toml`（如果存在）。`--state` 可选择已有状态目录。`resume` 使用任务原先保存的模型与后端配置，并核对 Rig 版本和 provider 身份；不会把旧会话悄悄切换到另一模型。活动控制端通过租约互斥。
+省略 `--config` 时，会使用当前目录的 `re-agent.toml`（如果存在）。`--state` 可选择已有状态目录。首次模型请求前会保存解析后的 endpoint，包括环境变量提供的默认值。`resume` 使用任务保存的模型与后端配置；原生 Rig 日志保存在状态目录的 `rig/RUN_ID`。活动控制端通过租约互斥。本次实现面向新任务，不迁移旧版自定义 AgentRun 检查点。
 
 Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 jobs 和调试器分别核对：持久化检查点不能恢复已经消失的调试进程。有副作用且结果未知的第三方 MCP 调用保留未决状态，不能盲目重放。
 
@@ -81,8 +81,9 @@ Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 
 
 | 模块 | 职责 |
 |---|---|
-| `coordinator` / `runner` | 动态 agent 树、异步调度、消息、预算与恢复 |
-| `llm` / `agents` / `skills` | Rig、provider 原生状态、角色和上下文 |
+| `kernel` | Rig 原生执行、子任务、消息与日志的业务适配 |
+| `coordinator` / `runner` | 任务契约、依赖、消息账本、预算与完成门槛 |
+| `llm` / `agents` / `skills` | provider 连接、结构化摘要、角色和上下文 |
 | `store` / `domain` | SQLite 事务、检查点、事件、内容哈希产物 |
 | `tools` / `mcp` | 工具 schema、角色能力、调用去重、第三方工具 |
 | `binary` / `workers/ghidra` | 二进制画像、字符串、函数、反编译、交叉引用 |
@@ -90,6 +91,8 @@ Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 
 | `report` / `interface` | CLI、TUI、JSON/Markdown/HTML 报告、证据包 |
 
 根 agent 专注编排，实际目标操作由动态子 agent 完成。分析笔记、待办、发现和覆盖记录在同一任务内共享；威胁模型仅在安全边界分析中按需使用。每个 agent 保留独立会话。活动任务内可向已完成的子 agent 追加问题，保留其历史和累计预算；同范围的新任务只与活动 agent 去重。完整工具输出保存为哈希产物，模型只接收有界结果及证据 ID。
+
+使用 `task` 创建异步子任务，`wait` 等待单个可达 agent 的报告，`wait_for_agents` 按成功或终止条件收集结果。普通信息使用 `send_message_to_agent`，不会提前结束等待或重开任务；已完成任务的新工作使用 `follow_up_agent`。工具参数校验、结构化输出、上下文保留与压缩、重试分类及用量计价复用 Rig，MCP 协议复用 rmcp；证据、权限和 worker 会话清理仍由业务层验收。
 
 子 agent 完成前须关闭自己的调试和交互会话；根任务完成前须处理全部遗留会话。`view_agent_graph` 会列出待清理会话，其他子 agent 可以关闭已终止 owner 遗留的会话，但不能向它发送命令。
 
