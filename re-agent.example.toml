@@ -1,4 +1,4 @@
-﻿# Copy to re-agent.toml and set a model/endpoint available to your account.
+# Copy to re-agent.toml and set a model/endpoint available to your account.
 state_dir = ".re-agent"
 
 [model]
@@ -6,6 +6,8 @@ provider = "openai_responses"
 model = "your-model-name"
 api_key_env = "OPENAI_API_KEY"
 # base_url = "https://your-provider.example/v1"
+# Raise max_tokens where your provider supports it: long decompilation and
+# code-level answers benefit from a larger response budget.
 max_tokens = 8192
 request_timeout_secs = 180
 
@@ -25,6 +27,8 @@ max_wall_seconds = 3600
 # [budget.role_token_shares]
 # exploit = 0.5
 
+# Zero prices disable USD accounting. Set real USD-per-million prices to
+# enable max_usd budgets and cost estimates.
 [pricing]
 input_usd_per_million = 0.0
 output_usd_per_million = 0.0
@@ -38,19 +42,28 @@ bridge_path = "workers/runtime/bridge.py"
 # docker_container = "re-agent-worker"
 remote_bridge_path = "/opt/re-agent/runtime/bridge.py"
 remote_state_dir = "/state"
+# Must cover analysis.timeout_seconds (validated at startup): a shorter
+# transport timeout would cut off worker-side Ghidra queries mid-flight.
 request_timeout_secs = 300
 
 [analysis]
 # Optional local Ghidra launcher; use the version required by your installed JDK.
 # ghidra_executable = "C:/tools/ghidra/support/analyzeHeadless.bat"
 ghidra_cache_dir = ".re-agent/ghidra"
+# timeout_seconds must cover analysis_timeout_seconds (validated at startup).
 timeout_seconds = 300
 analysis_timeout_seconds = 240
 max_cpu = 2
 
 [tools]
+# Bounded envelope the model actually receives; complete outputs stay in
+# evidence artifacts.
 max_output_bytes = 12000
-max_evidence_read_bytes = 16384
+# Sized so a default-length evidence_read (base64 of 8192 bytes) still fits
+# inside max_output_bytes without truncating the pagination fields. Reads
+# larger than the envelope lose next_offset and friends, so prefer several
+# bounded reads.
+max_evidence_read_bytes = 8192
 timeout_seconds = 360
 
 [execution]
@@ -64,9 +77,10 @@ keep_recent_messages = 12
 # summarize_threshold_chars = 6000
 # summarize_max_tokens = 400
 
-# Optional per-role worked-example markdown (<role>.md), appended to each
-# agent's prompt as method demonstrations. Values shown are illustrative.
-# demos_dir = "demos"
+# Per-role worked-example markdown (<role>.md), appended to each agent's
+# prompt as method demonstrations. Values shown are illustrative. The
+# repository ships these in demos/; a missing directory simply skips demos.
+demos_dir = "demos"
 
 # Third-party MCP stdio server, credentials are environment VARIABLE NAMES.
 # [[mcp]]

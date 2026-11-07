@@ -103,7 +103,9 @@ impl Default for AppConfig {
             pricing: Pricing::default(),
             tools: ToolLimits::default(),
             skills_dir: None,
-            demos_dir: None,
+            // The repository ships worked-example demos; a missing directory
+            // simply skips them (see agents::load_demo).
+            demos_dir: Some(PathBuf::from("demos")),
             mcp: vec![],
             execution: ExecutionConfig::default(),
         }
