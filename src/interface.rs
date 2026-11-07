@@ -120,12 +120,21 @@ pub async fn run(cli: Cli) -> Result<()> {
         println!("{}", json!({"config":path}));
         return Ok(());
     }
+    // Config lookup: explicit --config, then ./re-agent.toml in the working
+    // directory, then re-agent.toml next to the executable (so a portable
+    // copy works from any directory), then built-in defaults.
     let auto = PathBuf::from("re-agent.toml");
-    let path = cli
+    let path: Option<PathBuf> = cli
         .config
-        .as_deref()
-        .or_else(|| auto.exists().then_some(auto.as_path()));
-    let mut config = AppConfig::load(path)?;
+        .clone()
+        .or_else(|| auto.exists().then_some(auto.clone()))
+        .or_else(|| {
+            std::env::current_exe().ok().and_then(|exe| {
+                let candidate = exe.parent()?.join("re-agent.toml");
+                candidate.exists().then_some(candidate)
+            })
+        });
+    let mut config = AppConfig::load(path.as_deref())?;
     if let Some(state) = cli.state {
         config.state_dir = state;
     }
