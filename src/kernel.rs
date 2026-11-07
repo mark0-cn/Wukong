@@ -931,6 +931,11 @@ fn deliver_mail(
         let Some(&entity) = agents.get(&agent.id) else {
             continue;
         };
+        // Completed work keeps queued mail until an explicit follow-up. The
+        // coordinator then marks older-generation mail stale before delivery.
+        if agent.status.terminal() {
+            continue;
+        }
         for mail in runner
             .store
             .inbox(&agent.id)?
@@ -952,7 +957,13 @@ fn deliver_mail(
             if native_report {
                 continue;
             }
-            let author = if mail.sender == "operator" {
+            let informational = mail.envelope.options.kind == domain::MessageKind::Information;
+            // Rig's wait observes messages attributed to the awaited agent,
+            // including Inform messages. A typed information notice is host
+            // data carrying its sender in the envelope, never a request/report.
+            let author = if informational {
+                Author::plugin("coordination-information")
+            } else if mail.sender == "operator" {
                 Author::user()
             } else {
                 Author::agent(
@@ -974,7 +985,8 @@ fn deliver_mail(
                 app.world_mut().entity_mut(entity).insert(current);
                 let _ = sender;
             }
-            let mode = if !agent.status.terminal()
+            let mode = if !informational
+                && !agent.status.terminal()
                 && (followup
                     || mail.sender == "operator"
                     || mail.envelope.options.kind == domain::MessageKind::Result)
