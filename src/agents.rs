@@ -21,6 +21,8 @@ Static facts never prove runtime behavior.
 
 Available skills (load one by exact name with load_skill; do not invent names):
 root, recon, reverse, hunter, fuzz, crash, exploit, pwn, verifier, reporter, tooling, recovery.
+Task methods: formats, types, algorithms, state_machine, binary_diff. Load the method that matches the assigned
+question; do not load every method or invent a tool capability to satisfy one.
 
 Classify tool errors before acting. Correct schema/argument errors only when the operation was rejected before
 execution. Retry a transient read-only failure once. If a mutating call timed out or its outcome is uncertain,
@@ -75,13 +77,33 @@ pub fn built_in_skill(name: &str) -> Option<&'static str> {
         "reporter" => include_str!("../skills/reporter.md"),
         "tooling" => include_str!("../skills/tooling.md"),
         "recovery" => include_str!("../skills/recovery.md"),
+        "formats" => include_str!("../skills/formats.md"),
+        "types" => include_str!("../skills/types.md"),
+        "algorithms" => include_str!("../skills/algorithms.md"),
+        "state_machine" => include_str!("../skills/state_machine.md"),
+        "binary_diff" => include_str!("../skills/binary_diff.md"),
         _ => return None,
     })
 }
 pub fn available_skills() -> Vec<&'static str> {
     vec![
-        "root", "recon", "reverse", "hunter", "fuzz", "crash", "exploit", "pwn", "verifier",
-        "reporter", "tooling", "recovery",
+        "root",
+        "recon",
+        "reverse",
+        "hunter",
+        "fuzz",
+        "crash",
+        "exploit",
+        "pwn",
+        "verifier",
+        "reporter",
+        "tooling",
+        "recovery",
+        "formats",
+        "types",
+        "algorithms",
+        "state_machine",
+        "binary_diff",
     ]
 }
 pub fn load_skill(name: &str, custom_dir: Option<&Path>) -> Result<String> {
@@ -215,6 +237,17 @@ mod tests {
         assert!(message.contains("unknown skill binary-triage"), "{message}");
         for name in available_skills() {
             assert!(message.contains(name), "{message}");
+        }
+    }
+
+    #[test]
+    fn advertised_skills_are_unique_loadable_and_bounded() {
+        let mut names = std::collections::HashSet::new();
+        for name in available_skills() {
+            assert!(names.insert(name), "duplicate skill {name}");
+            let content = load_skill(name, None).unwrap();
+            assert!(!content.trim().is_empty(), "empty skill {name}");
+            assert!(content.len() <= 65536, "oversized built-in skill {name}");
         }
     }
 

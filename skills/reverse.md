@@ -6,6 +6,16 @@ Investigate trust boundaries and candidate vulnerabilities when the task calls f
 
 ## Method
 
+Load the relevant method when its detailed workflow is needed:
+
+| Question | Skill | Main deliverable |
+|---|---|---|
+| File/packet/record layout | `formats` | field table and decoded examples |
+| Object/structure layout | `types` | offset/type constraints and candidate declaration |
+| Transformation/checksum/numeric routine | `algorithms` | pseudocode and discriminating test vectors |
+| Command/session lifecycle | `state_machine` | transition table and tested sequences |
+| Changes between versions | `binary_diff` | matched scopes and before/after evidence |
+
 1. `functions_search` with a pattern matching the interesting logic
    (bounded pages; default page is 25 entries, paginate with `offset`).
 2. `function_decompile` the candidates. Decompiler names and types are
@@ -31,12 +41,18 @@ Investigate trust boundaries and candidate vulnerabilities when the task calls f
 
 ## Output
 
-`agent_finish` with: the reachable path (entry -> checks -> operation), the
-exact offsets involved, the conversions that matter, counterevidence, and one
-candidate input that would exercise the path. For input reconstruction, load
+Save the method-specific result in analysis notes with evidence IDs, then
+`agent_finish` with the answer to the assigned question, exact locations,
+supporting observations, conflicting evidence and remaining uncertainty.
+For behavior/path analysis include entry -> checks -> operation and an
+input that would exercise the path. For input reconstruction, load
 `tooling` and choose symbolic execution only when its stdin model matches the
 target; otherwise use a suitable harness or explicit constraints.
 If the goal is a control-flow hijack, hand the layout facts (buffer size,
 saved-RIP offset, target address, mitigations) to a child that loads `pwn`.
 If you could not reach a conclusion, say exactly what blocked you and what
 to try next.
+
+Stop when the assigned question is answered with bounded evidence or a
+specific missing capability/input blocks it. Do not require execution for a
+purely static question or turn every result into a vulnerability finding.
