@@ -102,7 +102,8 @@ pub enum Command {
         #[arg(long)]
         error: bool,
     },
-    /// Live local dashboard; q exits, p pauses the selected assessment.
+    /// Strix-style live dashboard: agent tree, activity stream, findings and
+    /// budget status. q exits, p pauses, up/down scroll the activity, f follows.
     Tui {
         run_id: String,
     },
@@ -332,7 +333,9 @@ fn dashboard(store: &Store, run_id: &str) -> Result<()> {
         Terminal,
         backend::CrosstermBackend,
         layout::{Constraint, Direction, Layout},
-        widgets::{Block, Borders, Paragraph, Row, Table, Wrap},
+        style::{Color, Modifier, Style},
+        text::{Line, Span},
+        widgets::{Block, Borders, Paragraph, Wrap},
     };
     struct Restore;
     impl Drop for Restore {
@@ -341,35 +344,325 @@ fn dashboard(store: &Store, run_id: &str) -> Result<()> {
             let _ = execute!(io::stdout(), LeaveAlternateScreen);
         }
     }
-    store.require::<RunRecord>("run", run_id)?;
+    let run: RunRecord = store.require("run", run_id)?;
     enable_raw_mode()?;
     let _restore = Restore;
     execute!(io::stdout(), EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    let mut scroll: usize = 0;
+    let mut follow = true;
     loop {
         let run: RunRecord = store.require("run", run_id)?;
         let agents = store.list::<AgentRecord>("agent", run_id)?;
-        let events = store.recent_events(run_id, 12)?;
-        terminal.draw(|frame|{
-            let areas=Layout::default().direction(Direction::Vertical).constraints([Constraint::Length(4),Constraint::Percentage(55),Constraint::Min(5)]).split(frame.area());
-            frame.render_widget(Paragraph::new(format!("{}  status={}  tokens={}/{}  cost~${:.4}\nTarget {}\nq: exit   p: pause   Use CLI message/resume to steer work.",run.id,run.status,run.total_tokens,run.budget.max_total_tokens,run.cost_usd,run.target_path.display())).block(Block::default().borders(Borders::ALL).title("re-agent")),areas[0]);
-            let rows=agents.iter().map(|a|Row::new(vec![format!("{}{}","  ".repeat(a.depth as usize),a.name),a.id.clone(),a.role.to_string(),a.status.to_string(),a.turns.to_string(),a.scope.clone()]));
-            frame.render_widget(Table::new(rows,[Constraint::Percentage(18),Constraint::Percentage(28),Constraint::Length(10),Constraint::Length(14),Constraint::Length(6),Constraint::Percentage(25)]).header(Row::new(["Agent","ID","Role","Status","Turns","Scope"])).block(Block::default().borders(Borders::ALL).title("Agent graph")),areas[1]);
-            let text=events.iter().rev().take(12).map(|e|format!("{} {} {}",e.seq,e.kind,e.agent_id.as_deref().unwrap_or("assessment"))).collect::<Vec<_>>().join("\n");
-            frame.render_widget(Paragraph::new(text).wrap(Wrap{trim:false}).block(Block::default().borders(Borders::ALL).title("Latest events")),areas[2]);
+        let findings = store.list::<Finding>("finding", run_id)?;
+        let events = store.recent_events(run_id, 600)?;
+        let tree_height = terminal.size()?.height.saturating_sub(14).max(4) as usize;
+        let event_height = tree_height;
+        if follow {
+            scroll = events.len().saturating_sub(event_height.saturating_sub(2));
+        }
+        terminal.draw(|frame| {
+            let areas = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(7),
+                    Constraint::Min(10),
+                    Constraint::Length(6),
+                    Constraint::Length(1),
+                ])
+                .split(frame.area());
+            // ---- banner ----
+            let banner = vec![
+                Line::from(Span::styled(
+                    "██████╗ ███████╗    █████╗  ██████╗ ███████╗ ███╗   ██╗ ████████╗",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "██╔══██╗██╔════╝   ██╔══██╗██╔════╝ ██╔════╝ ████╗  ██║ ╚══██╔══╝",
+                    Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "██████╔╝█████╗     ███████║██║  ███╗█████╗   ██╔██╗ ██║    ██║",
+                    Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "██╔══██╗██╔══╝     ██╔══██║██║   ██║██╔══╝   ██║╚██╗██║    ██║",
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(Span::styled(
+                    "██║  ██║███████╗    ██║  ██║╚██████╔╝███████╗ ██║ ╚████║    ██║",
+                    Style::default().fg(Color::LightMagenta).add_modifier(Modifier::BOLD),
+                )),
+                Line::from(vec![
+                    Span::styled(
+                        "╚═╝  ╚═╝╚══════╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═╝  ╚═══╝    ╚═╝  ",
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " binary reverse-engineering agents",
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]),
+            ];
+            frame.render_widget(
+                Paragraph::new(banner).block(Block::default().borders(Borders::NONE)),
+                areas[0],
+            );
+            // ---- middle: agent tree | activity ----
+            let middle = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+                .split(areas[1]);
+            let tree_lines: Vec<Line> = agents
+                .iter()
+                .map(|agent| {
+                    let (glyph, status_color) = match agent.status {
+                        Status::Running => ("◉", Color::Yellow),
+                        Status::Queued => ("○", Color::DarkGray),
+                        Status::Waiting => ("◌", Color::LightYellow),
+                        Status::BudgetPaused => ("⏸", Color::Yellow),
+                        Status::Completed => ("✔", Color::Green),
+                        Status::Stopped => ("◼", Color::DarkGray),
+                        Status::Failed => ("✖", Color::Red),
+                        Status::Crashed => ("✖", Color::LightRed),
+                    };
+                    let role_color = match agent.role {
+                        Role::Root => Color::Cyan,
+                        Role::Recon => Color::Blue,
+                        Role::Reverse => Color::Magenta,
+                        Role::Hunter => Color::Yellow,
+                        Role::Fuzz => Color::Green,
+                        Role::Crash => Color::Red,
+                        Role::Exploit => Color::LightRed,
+                        Role::Verifier => Color::LightBlue,
+                        Role::Reporter => Color::LightGreen,
+                    };
+                    Line::from(vec![
+                        Span::raw("  ".repeat(agent.depth as usize)),
+                        Span::styled(glyph, Style::default().fg(status_color)),
+                        Span::raw(if agent.depth > 0 { "▸ " } else { " " }),
+                        Span::styled(&agent.name, Style::default().fg(role_color).add_modifier(Modifier::BOLD)),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("{} t={} {}", agent.role, agent.turns, agent.status),
+                            Style::default().fg(status_color),
+                        ),
+                    ])
+                })
+                .collect();
+            frame.render_widget(
+                Paragraph::new(tree_lines)
+                    .block(Block::default().borders(Borders::ALL).title(" AGENT TREE "))
+                    .wrap(Wrap { trim: false }),
+                middle[0],
+            );
+            let visible = events.iter().rev().skip(scroll).take(event_height).collect::<Vec<_>>();
+            let event_lines: Vec<Line> = visible
+                .iter()
+                .map(|event| {
+                    let role = store_agent_role(&agents, event.agent_id.as_deref());
+                    let color = match role {
+                        Some(Role::Root) => Color::Cyan,
+                        Some(Role::Recon) => Color::Blue,
+                        Some(Role::Reverse) => Color::Magenta,
+                        Some(Role::Hunter) => Color::Yellow,
+                        Some(Role::Fuzz) => Color::Green,
+                        Some(Role::Crash) => Color::Red,
+                        Some(Role::Exploit) => Color::LightRed,
+                        Some(Role::Verifier) => Color::LightBlue,
+                        Some(Role::Reporter) => Color::LightGreen,
+                        None => Color::DarkGray,
+                    };
+                    let stamp = event
+                        .created_at
+                        .with_timezone(&chrono::Local)
+                        .format("%H:%M:%S")
+                        .to_string();
+                    Line::from(vec![
+                        Span::styled(format!("{stamp} "), Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            format!("[{}] ", event.agent_id.as_deref().map(short_id).unwrap_or("assessment")),
+                            Style::default().fg(color).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(event_kind(&event.kind), Style::default().fg(color)),
+                        Span::raw("  "),
+                        Span::raw(event_brief(&event)),
+                    ])
+                })
+                .collect();
+            frame.render_widget(
+                Paragraph::new(event_lines)
+                    .block(Block::default().borders(Borders::ALL).title(format!(" ACTIVITY {} ", if follow { "· following" } else { "· scrolled" })))
+                    .wrap(Wrap { trim: false }),
+                middle[1],
+            );
+            // ---- findings ----
+            let finding_lines: Vec<Line> = if findings.is_empty() {
+                vec![Line::from(Span::styled(
+                    "no findings recorded",
+                    Style::default().fg(Color::DarkGray),
+                ))]
+            } else {
+                findings
+                    .iter()
+                    .map(|finding| {
+                        let severity_color = match finding.severity {
+                            Some(Severity::Critical) => Color::LightRed,
+                            Some(Severity::High) => Color::Red,
+                            Some(Severity::Medium) => Color::Yellow,
+                            Some(Severity::Low) => Color::LightBlue,
+                            Some(Severity::Info) | None => Color::Gray,
+                        };
+                        Line::from(vec![
+                            Span::styled(
+                                format!("{} ", finding.severity.map(|s| format!("{s:?}")).unwrap_or_else(|| "??".into()).to_uppercase()),
+                                Style::default().fg(severity_color).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(format!("{:?} ", finding.stage), Style::default().fg(Color::DarkGray)),
+                            Span::raw(&finding.title),
+                        ])
+                    })
+                    .collect()
+            };
+            frame.render_widget(
+                Paragraph::new(finding_lines)
+                    .block(Block::default().borders(Borders::ALL).title(" FINDINGS "))
+                    .wrap(Wrap { trim: true }),
+                areas[2],
+            );
+            // ---- status bar ----
+            let status_color = match run.status {
+                Status::Running => Color::Green,
+                Status::BudgetPaused | Status::Waiting => Color::Yellow,
+                Status::Completed => Color::LightGreen,
+                Status::Failed | Status::Crashed => Color::Red,
+                _ => Color::Gray,
+            };
+            let elapsed = chrono::Utc::now().signed_duration_since(run.created_at);
+            let elapsed = format!(
+                "{:02}:{:02}:{:02}",
+                elapsed.num_hours(),
+                elapsed.num_minutes() % 60,
+                elapsed.num_seconds() % 60
+            );
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(" re-agent ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!(" {} ", run.status), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("tokens {}/{}  ", run.total_tokens, run.budget.max_total_tokens), Style::default().fg(Color::Gray)),
+                    Span::styled(format!("cost ${:.4}  ", run.cost_usd), Style::default().fg(Color::Gray)),
+                    Span::styled(format!("elapsed {elapsed}  "), Style::default().fg(Color::Gray)),
+                    Span::styled(format!("agents {}  ", agents.len()), Style::default().fg(Color::Gray)),
+                    Span::styled("q quit · p pause · ↑/↓ scroll · f follow", Style::default().fg(Color::DarkGray)),
+                ])),
+                areas[3],
+            );
         })?;
-        if event::poll(Duration::from_millis(250))?
-            && let CEvent::Key(key) = event::read()?
-        {
+        if event::poll(Duration::from_millis(250))? && let CEvent::Key(key) = event::read()? {
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
                 KeyCode::Char('p') if !run.status.terminal() => {
-                    Coordinator::new(store.clone())
-                        .pause_budget(run_id, "operator paused in TUI")?;
+                    Coordinator::new(store.clone()).pause_budget(run_id, "operator paused in TUI")?;
+                }
+                KeyCode::Char('f') => follow = true,
+                KeyCode::Up => {
+                    follow = false;
+                    scroll = scroll.saturating_add(1);
+                }
+                KeyCode::Down => {
+                    if scroll > 0 {
+                        scroll -= 1;
+                        if scroll == 0 {
+                            follow = true;
+                        }
+                    }
+                }
+                KeyCode::PageUp => {
+                    follow = false;
+                    scroll = scroll.saturating_add(10);
+                }
+                KeyCode::PageDown => {
+                    scroll = scroll.saturating_sub(10);
+                    if scroll == 0 {
+                        follow = true;
+                    }
                 }
                 _ => {}
             }
         }
     }
     Ok(())
+}
+
+fn store_agent_role(agents: &[AgentRecord], agent_id: Option<&str>) -> Option<Role> {
+    agent_id.and_then(|id| agents.iter().find(|agent| agent.id == id).map(|agent| agent.role))
+}
+fn short_id(id: &str) -> &str {
+    id.strip_prefix("agent_").and_then(|hex| hex.get(..6)).unwrap_or(id)
+}
+fn event_kind(kind: &str) -> &str {
+    match kind {
+        "model.started" => "✶ model",
+        "model.finished" => "✶ model done",
+        "tool.started" => "⚙ run",
+        "tool.finished" => "⚙ done",
+        "tool.result" => "⚙ result",
+        "agent.created" => "✦ spawn",
+        "agent.status" => "◆ status",
+        "agent.finished" => "◆ finished",
+        "agent.budget_cap" => "◆ quota",
+        "agent.lifecycle_nudge" => "◆ nudge",
+        "agent.lifecycle_fallback" => "◆ fallback",
+        "finding.updated" => "◆ finding",
+        "verification.recorded" => "◆ verify",
+        "controller.started" => "▶ start",
+        "controller.finished" => "■ finish",
+        "controller.stopping" => "■ stopping",
+        "context.compacted" => "≡ compact",
+        _ => kind,
+    }
+}
+fn event_brief(event: &Event) -> String {
+    let data = &event.data;
+    let brief = match event.kind.as_str() {
+        "model.finished" => data["usage"]
+            .get("total_tokens")
+            .and_then(Value::as_u64)
+            .map(|tokens| format!("{tokens} tok"))
+            .unwrap_or_default(),
+        "tool.started" | "tool.finished" | "tool.result" => data["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        "agent.created" => format!(
+            "{} {}",
+            data["role"].as_str().unwrap_or_default(),
+            data["scope"].as_str().unwrap_or_default()
+        ),
+        "agent.status" => data["status"].as_str().unwrap_or_default().to_string(),
+        "agent.budget_cap" => format!(
+            "{}>=cap {}",
+            data["tokens"].as_u64().unwrap_or_default(),
+            data["cap"].as_u64().unwrap_or_default()
+        ),
+        "finding.updated" => data["title"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_default(),
+        "verification.recorded" => format!(
+            "passed={} {}",
+            data["passed"].as_bool().unwrap_or_default(),
+            data["verification_id"].as_str().unwrap_or_default()
+        ),
+        "controller.finished" | "controller.stopping" | "controller.started" => data["status"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_default(),
+        _ => {
+            let text = serde_json::to_string(data).unwrap_or_default();
+            let text: String = text.chars().take(110).collect();
+            text
+        }
+    };
+    brief
 }
