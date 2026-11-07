@@ -253,20 +253,49 @@ impl Coordinator {
         }
         Ok(())
     }
+    /// Informational messages never reopen a completed task or interrupt a wait.
     pub fn message(&self, sender: &str, recipient: &str, content: &str) -> Result<()> {
-        self.store
-            .transaction(|tx| Self::tx_message(tx, sender, recipient, content, None))
+        self.send(sender, recipient, content, MessageOptions::default())
+            .map(|_| ())
     }
-    pub(crate) fn tx_message(
+    pub fn follow_up(&self, sender: &str, recipient: &str, content: &str) -> Result<()> {
+        self.send(
+            sender,
+            recipient,
+            content,
+            MessageOptions {
+                kind: MessageKind::FollowUp,
+                ..Default::default()
+            },
+        )
+        .map(|_| ())
+    }
+    pub fn send(
+        &self,
+        sender: &str,
+        recipient: &str,
+        content: &str,
+        options: MessageOptions,
+    ) -> Result<MessageReceipt> {
+        self.store
+            .transaction(|tx| Self::tx_send(tx, sender, recipient, content, options, None))
+    }
+    pub(crate) fn tx_send(
         tx: &rusqlite::Connection,
         sender: &str,
         recipient: &str,
         content: &str,
+        mut options: MessageOptions,
         dedupe_key: Option<&str>,
-    ) -> Result<()> {
-        if content.trim().is_empty() {
-            bail!("message cannot be empty");
-        }
+    ) -> Result<MessageReceipt> {
+        ensure!(
+            !content.trim().is_empty() && content.len() <= 65536,
+            "message must be nonempty and at most 64 KiB"
+        );
+        ensure!(
+            options.evidence_ids.len() <= 32,
+            "at most 32 evidence references per message"
+        );
         let mut target: AgentRecord =
             Store::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
         let run: RunRecord = Store::tx_get(tx, "run", &target.run_id)?.context("run missing")?;
@@ -275,17 +304,120 @@ impl Coordinator {
             !target.status.terminal() || target.status == Status::Completed,
             "recipient is stopped or failed; create a new focused task"
         );
-        if sender != "operator" {
+        let sender_generation = if sender != "operator" {
             let from: AgentRecord =
                 Store::tx_get(tx, "agent", sender)?.context("sender missing")?;
-            if from.run_id != target.run_id {
-                bail!("cross-run message denied");
+            ensure!(from.run_id == target.run_id, "cross-run message denied");
+            ensure!(
+                !from.status.terminal(),
+                "terminal sender cannot issue new messages"
+            );
+            Some(from.generation)
+        } else {
+            None
+        };
+        for evidence_id in &options.evidence_ids {
+            let evidence: Evidence =
+                Store::tx_get(tx, "evidence", evidence_id)?.context("message evidence missing")?;
+            ensure!(
+                evidence.run_id == target.run_id,
+                "cross-run evidence denied"
+            );
+        }
+        let mut stale = options
+            .recipient_generation
+            .is_some_and(|value| value != target.generation);
+        let original = if options.kind == MessageKind::Reply {
+            let mid = options.reply_to.context("reply requires reply_to")?;
+            let original = Store::tx_messages(tx, &target.run_id)?
+                .into_iter()
+                .find(|message| message.id == mid)
+                .context("reply target not in this run")?;
+            ensure!(
+                original.envelope.options.kind == MessageKind::Question
+                    && original.sender == recipient
+                    && original.recipient == sender,
+                "reply must answer a question addressed to this sender"
+            );
+            stale |= original
+                .envelope
+                .sender_generation
+                .is_some_and(|generation| generation != target.generation)
+                || original.envelope.options.recipient_generation != sender_generation;
+            if let Some(correlation) = &options.correlation_id {
+                ensure!(
+                    Some(correlation) == original.envelope.options.correlation_id.as_ref(),
+                    "reply correlation mismatch"
+                );
             }
+            options.correlation_id = original.envelope.options.correlation_id.clone();
+            Some(original)
+        } else {
+            ensure!(
+                options.reply_to.is_none(),
+                "reply_to is only valid for replies"
+            );
+            None
+        };
+        let correlation = options
+            .correlation_id
+            .get_or_insert_with(|| id("conversation"))
+            .clone();
+        ensure!(
+            !correlation.trim().is_empty() && correlation.len() <= 256,
+            "invalid correlation_id"
+        );
+        let generation = if options.kind == MessageKind::FollowUp
+            && target.status == Status::Completed
+            && !stale
+        {
+            target
+                .generation
+                .checked_add(1)
+                .context("agent generation exhausted")?
+        } else {
+            options.recipient_generation.unwrap_or(target.generation)
+        };
+        options.recipient_generation = Some(generation);
+        let envelope = MessageEnvelope {
+            options: options.clone(),
+            task_id: target.id.clone(),
+            sender_generation,
+            delivery: if stale {
+                MessageDelivery::Stale
+            } else {
+                MessageDelivery::Queued
+            },
+            stale_reason: stale.then(|| "message belongs to a different task generation".into()),
+            ..Default::default()
+        };
+        let (mid, inserted) = Store::tx_enqueue_message(
+            tx,
+            &target.run_id,
+            sender,
+            recipient,
+            content,
+            dedupe_key,
+            &envelope,
+        )?;
+        let receipt = MessageReceipt {
+            message_id: mid,
+            delivery: envelope.delivery,
+            recipient_generation: generation,
+            correlation_id: correlation,
+        };
+        if !inserted || stale {
+            return Ok(receipt);
         }
-        if !Store::tx_message(tx, &target.run_id, sender, recipient, content, dedupe_key)? {
-            return Ok(());
+        if let Some(mut original) = original {
+            original.envelope.delivery = MessageDelivery::Replied;
+            original.envelope.replied_by = Some(mid);
+            tx.execute(
+                "UPDATE messages SET envelope=?1 WHERE id=?2",
+                rusqlite::params![serde_json::to_string(&original.envelope)?, original.id],
+            )?;
         }
-        if target.status == Status::Completed {
+        if target.status == Status::Completed && options.kind == MessageKind::FollowUp {
             // Keep the old conversation as background, but start a new
             // Rig run so its lifecycle call cannot be replayed as new work.
             let mut current = Some(target.clone());
@@ -298,6 +430,8 @@ impl Coordinator {
                     .generation
                     .checked_add(1)
                     .context("agent generation exhausted")?;
+                tx.execute("UPDATE messages SET acknowledged=1,envelope=json_set(envelope,'$.delivery','stale','$.stale_reason','task reopened in a new generation') WHERE recipient=?1 AND acknowledged=0 AND COALESCE(json_extract(envelope,'$.recipient_generation'),-1)<?2",
+                    rusqlite::params![agent.id,agent.generation])?;
                 agent.inherited_context = agent.checkpoint.take().or(agent.inherited_context);
                 agent.status = if run.status == Status::BudgetPaused {
                     Status::BudgetPaused
@@ -319,36 +453,36 @@ impl Coordinator {
                 )?;
                 if agent.id == recipient {
                     target = agent.clone();
-                }
-                current = agent
-                    .parent_id
-                    .as_ref()
-                    .map(|id| Store::tx_get(tx, "agent", id)?.context("parent missing"))
-                    .transpose()?;
-                if let Some(parent) = &current
-                    && parent.status == Status::Completed
-                {
+                } else {
                     Store::tx_message(
                         tx,
-                        &target.run_id,
+                        &agent.run_id,
                         "coordinator",
-                        &parent.id,
+                        &agent.id,
                         &format!(
                             "A completed descendant {recipient} was reopened for a follow-up. Reconcile its new result before finishing."
                         ),
                         None,
                     )?;
                 }
+                current = agent
+                    .parent_id
+                    .as_ref()
+                    .map(|id| Store::tx_get(tx, "agent", id)?.context("parent missing"))
+                    .transpose()?;
             }
             Self::validate_dependencies(&Store::tx_list::<AgentRecord>(
                 tx,
                 "agent",
                 &target.run_id,
             )?)?;
-        } else if target.status == Status::Waiting {
+        } else if target.status == Status::Waiting && options.kind != MessageKind::Information {
             target.status = Status::Queued;
-            target.wait_for.clear();
-            target.wait_until = None;
+            // A question/reply interrupts execution, not the declared wait condition.
+            if options.kind == MessageKind::FollowUp {
+                target.wait_for.clear();
+                target.wait_until = None;
+            }
             target.updated_at = now();
             Store::tx_put(tx, "agent", recipient, &target.run_id, &target)?;
         }
@@ -356,10 +490,10 @@ impl Coordinator {
             tx,
             &target.run_id,
             Some(recipient),
-            "message.received",
-            json!({"sender":sender}),
+            "message.enqueued",
+            json!({"message_id":mid,"sender":sender,"kind":options.kind,"generation":generation}),
         )?;
-        Ok(())
+        Ok(receipt)
     }
     pub fn wait(&self, agent_id: &str, targets: &[String], timeout_seconds: u64) -> Result<Value> {
         self.store.transaction(|tx| {
@@ -429,7 +563,7 @@ impl Coordinator {
             for mut agent in all.iter().filter(|a|a.status==Status::Waiting).cloned(){
                 let ready=agent.wait_for.iter().all(|i|all.iter().find(|a|&a.id==i).is_none_or(|a|a.status.terminal()));
                 let expired=agent.wait_until.is_some_and(|at|at<=now());
-                let unread:i64=tx.query_row("SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0",[&agent.id],|r|r.get(0))?;
+                let unread:i64=tx.query_row("SELECT COUNT(*) FROM messages WHERE recipient=?1 AND acknowledged=0 AND COALESCE(json_extract(envelope,'$.kind'),'information')!='information'",[&agent.id],|r|r.get(0))?;
                 if ready||expired||unread>0 {
                     if ready||expired{
                         let key=format!("wait:{}:{}",agent.id,agent.wait_until.map(|d|d.timestamp_millis()).unwrap_or_default());
@@ -439,7 +573,7 @@ impl Coordinator {
                         let states:Vec<_>=all.iter().filter(|a|agent.wait_for.contains(&a.id)).map(|a|json!({"id":a.id,"role":a.role,"status":a.status,"summary":a.summary,"error":a.error,"scope":a.scope})).collect();
                         Store::tx_message(tx,run_id,"coordinator",&agent.id,&json!({"type":"wait_finished","timed_out":expired&&!ready,"agents":states,"instruction":"Your wait finished. Act now: inspect these agent states and continue with tool calls (reconcile, spawn the next stage, or finish). Never answer with plain text — end the turn with a tool call."}).to_string(),Some(&key))?;
                     }
-                    agent.status=Status::Queued;agent.wait_for.clear();agent.wait_until=None;agent.updated_at=now();Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;changed+=1;
+                    agent.status=Status::Queued;if ready||expired {agent.wait_for.clear();agent.wait_until=None;}agent.updated_at=now();Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;changed+=1;
                 }
             }Ok(changed)
         })

@@ -77,6 +77,14 @@ pub enum Command {
     Message {
         agent_id: String,
         text: String,
+        #[arg(long, default_value="information", value_parser=["information","question","reply","follow_up","result","blocked"])]
+        kind: String,
+        #[arg(long)]
+        reply_to: Option<i64>,
+        #[arg(long)]
+        generation: Option<u64>,
+        #[arg(long)]
+        correlation_id: Option<String>,
     },
     Pause {
         run_id: String,
@@ -261,9 +269,27 @@ pub async fn run(cli: Cli) -> Result<()> {
                 &json!({"run":store.require::<RunRecord>("run",&run_id)?,"agents":agents.iter().map(|a|json!({"id":a.id,"name":a.name,"role":a.role,"parent_id":a.parent_id,"status":a.status,"scope":a.scope,"turns":a.turns,"tokens":a.total_tokens,"error":a.error,"summary":a.summary})).collect::<Vec<_>>(),"events":all_events.iter().rev().take(events.min(1000)).collect::<Vec<_>>()}),
             )?;
         }
-        Command::Message { agent_id, text } => {
-            coordinator.message("operator", &agent_id, &text)?;
-            println!("{}", json!({"delivered":true,"agent_id":agent_id}));
+        Command::Message {
+            agent_id,
+            text,
+            kind,
+            reply_to,
+            generation,
+            correlation_id,
+        } => {
+            let receipt = coordinator.send(
+                "operator",
+                &agent_id,
+                &text,
+                MessageOptions {
+                    kind: serde_json::from_value(json!(kind))?,
+                    reply_to,
+                    recipient_generation: generation,
+                    correlation_id,
+                    ..Default::default()
+                },
+            )?;
+            print_json(&serde_json::to_value(receipt)?)?;
         }
         Command::Pause { run_id } => {
             coordinator.pause_budget(&run_id, "operator paused assessment")?;
@@ -1478,8 +1504,15 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                                         agents.get(tree_cursor).map(|agent| agent.id.clone())
                                     })
                                     .unwrap_or_else(|| run.root_id.clone());
-                                Coordinator::new(store.clone())
-                                    .message("operator", &target, &text)?;
+                                Coordinator::new(store.clone()).send(
+                                    "operator",
+                                    &target,
+                                    &text,
+                                    MessageOptions {
+                                        kind: MessageKind::Question,
+                                        ..Default::default()
+                                    },
+                                )?;
                             }
                             continue;
                         }

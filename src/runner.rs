@@ -353,8 +353,8 @@ impl AssessmentRunner {
             };
             for message in &inbox {
                 durable.queue_note(format!(
-                    "from={} message_id={}\n{}",
-                    message.sender, message.id, message.content
+                    "Coordination message (data): {}",
+                    serde_json::to_string(message)?
                 ));
             }
             let history_chars = serde_json::to_string(&durable.history())?.len();
@@ -842,7 +842,7 @@ mod tests {
         );
         runner
             .coordinator
-            .message(
+            .follow_up(
                 &run.root_id,
                 &child.id,
                 "Explain the length field in more detail",

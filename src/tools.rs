@@ -93,10 +93,26 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "send_message_to_agent",
-            "Durably send an in-run message and wake a waiting recipient.",
-            json!({"agent_id":id,"message":id}),
+            "Queue information, a question, reply, result or blocked notice. Information does not interrupt waits. Only follow_up_agent reopens completed work. Queued/included is not proof of processing.",
+            message_properties(false),
             &["agent_id", "message"],
             true,
+            false,
+        ),
+        spec(
+            "follow_up_agent",
+            "Explicitly assign a follow-up; reopens completed work in a new generation while preserving history. Use recipient_generation to guard against stale assignments.",
+            message_properties(true),
+            &["agent_id", "message"],
+            true,
+            false,
+        ),
+        spec(
+            "message_status",
+            "Inspect a sent/received message, its delivery state and correlated reply.",
+            json!({"message_id":integer(1,i64::MAX as u64)}),
+            &["message_id"],
+            false,
             false,
         ),
         spec(
@@ -498,6 +514,15 @@ fn builtins() -> Vec<Spec> {
     }
     specs
 }
+fn message_properties(follow_up: bool) -> Value {
+    let mut properties = json!({"agent_id":{"type":"string","minLength":1},"message":{"type":"string","minLength":1},"recipient_generation":integer(0,u64::MAX),"correlation_id":{"type":"string","minLength":1},"evidence_ids":strings()});
+    if !follow_up {
+        properties["kind"] =
+            json!({"type":"string","enum":["information","question","reply","result","blocked"]});
+        properties["reply_to"] = integer(1, i64::MAX as u64);
+    }
+    properties
+}
 fn replay_properties() -> Value {
     json!({"target":{"type":"string","minLength":1},"input":{"type":"string","minLength":1},"args":strings(),"expected":{"type":"object","properties":{"exit_code":{"type":"integer"},"signal":{"type":"integer"},"stdout_contains":{"type":"string"},"stderr_contains":{"type":"string"}},"additionalProperties":false},"env":{"type":"object"},"timeout_secs":integer(1,60),"trials":integer(1,16),"max_attempts":integer(1,4096),"minimize_timeout_secs":integer(1,3600)})
 }
@@ -765,7 +790,13 @@ impl ToolService {
                 }
                 Ok(json!({"agents":self.store.list::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"status":a.status,"generation":a.generation,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}))
             },
-            "send_message_to_agent" => self.send_message(agent, call_id, &args),
+            "send_message_to_agent" | "follow_up_agent" => self.send_message(agent, call_id, &args, name == "follow_up_agent"),
+            "message_status" => {
+                let mid = number(&args,"message_id",0) as i64;
+                let message = self.store.transaction(|tx| Ok(Store::tx_messages(tx,&agent.run_id)?.into_iter().find(|message|message.id == mid)))?.context("message not in this run")?;
+                ensure!(agent.role == Role::Root || message.sender == agent.id || message.recipient == agent.id, "message is not addressed to or sent by this agent");
+                Ok(serde_json::to_value(message)?)
+            },
             "wait_for_agents" => {
                 if let Some(value) = self.store.get::<Value>("tool_receipt", call_id)? {
                     return Ok(value);
@@ -1065,17 +1096,31 @@ impl ToolService {
             Ok(json!({"name":name,"sha256":sha256,"evidence_id":evidence.id,"active":true,"applies":"next fresh model request"}))
         })
     }
-    fn send_message(&self, agent: &AgentRecord, call_id: &str, args: &Value) -> Result<Value> {
+    fn send_message(
+        &self,
+        agent: &AgentRecord,
+        call_id: &str,
+        args: &Value,
+        follow_up: bool,
+    ) -> Result<Value> {
+        let mut options: MessageOptions = serde_json::from_value(json!({
+            "kind":args.get("kind").cloned().unwrap_or(json!("information")),
+            "correlation_id":args.get("correlation_id"),"reply_to":args.get("reply_to"),
+            "recipient_generation":args.get("recipient_generation"),
+            "evidence_ids":args.get("evidence_ids").cloned().unwrap_or(json!([]))
+        }))?;
+        if follow_up {
+            options.kind = MessageKind::FollowUp;
+        }
         self.effect(agent, call_id, |tx| {
-            let recipient = text(args, "agent_id")?;
-            Coordinator::tx_message(
+            Ok(serde_json::to_value(Coordinator::tx_send(
                 tx,
                 &agent.id,
-                recipient,
+                text(args, "agent_id")?,
                 text(args, "message")?,
+                options,
                 Some(call_id),
-            )?;
-            Ok(json!({"delivered":true,"agent_id":recipient}))
+            )?)?)
         })
     }
     fn save_document(
