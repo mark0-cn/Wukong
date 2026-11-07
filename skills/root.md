@@ -28,8 +28,9 @@ what to run": delegate the running too.
 4. Batch operations around one hypothesis at a time.
 5. Match evidence type to claim: static facts for layout, runtime for
    behavior. Static analysis never proves execution.
-6. Decompose independent questions into parallel children; chain only when
-   dependent.
+6. Decompose independent questions into parallel children only after the
+   shared dossier exists and only 1-2 at a time; otherwise work sequentially
+   and let each result decide the next spawn.
 7. Keep conclusions in the shared ledger (threat model + coverage + notes);
    every entry carries evidence IDs.
 
@@ -45,16 +46,38 @@ back before finishing.
 If the entrypoints are genuinely unknown, spawn a recon child first and write
 the model from its report instead of guessing.
 
-## Spawn narrowly, check before you spawn
+## Spawn in stages, like a senior researcher
+
+Do not fan out every role at once. Each spawn must be justified by evidence
+you already hold, and the next spawn is decided from the previous results:
 
 1. `view_agent_graph` first: an existing child with the same role AND scope is
    already doing the work — do not duplicate it.
-2. Give every child: a specific measurable goal, the exact scope, the facts it
-   needs (SHA256, addresses, evidence IDs, service port), and a completion
-   condition. A vague scope produces duplicate work.
-3. Prefer independent children (parallel) over chains. The maximum depth is
-   small; a handoff chain wastes it.
-4. Roles are templates, not straitjackets: combine roles via `skills` when a
+2. **Stage 1: one reconnaissance child** (recon, or reverse with a narrow
+   scope when the format is already known). Give it a specific measurable
+   goal and a completion condition; `wait_for_agents` for its terminal
+   result. Read its summary and evidence before spawning anything else.
+3. **Decide the next stage FROM the returned facts**, not from a checklist:
+   - layout or offsets still unclear → one reverse child with the exact
+     handoff facts (evidence IDs, module-relative addresses, SHA256);
+   - a concrete bug hypothesis with preconditions → one hunter child;
+   - a real crash or a candidate input exists → one crash child
+     (replay/minimize/classify);
+   - confirmed root cause + overflow → one exploit child (load `pwn` when the
+     goal is ret-to-function);
+   - nothing suspicious and coverage is complete → stop; negative coverage is
+     a result, not a failure.
+   Skip roles the evidence does not call for; a role is not a station every
+   train must stop at.
+4. Spawn at most 1-2 children at a time. Parallel children are allowed only
+   for genuinely independent questions AND only after the shared dossier
+   exists. Same target is not independence.
+5. Hand every child its predecessor's facts — never make it rediscover them.
+6. `wait_for_agents` parks you until the current stage finishes; when woken,
+   reconcile the results and choose the next spawn. Do not re-spawn the same
+   scope and do not spawn successors while a predecessor's result is
+   unread.
+7. Roles are templates, not straitjackets: combine roles via `skills` when a
    task genuinely needs two disciplines, and keep the total at 1-3 skills.
 
 ## Budget and lifecycle discipline

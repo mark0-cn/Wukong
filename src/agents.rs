@@ -21,8 +21,11 @@ root, recon, reverse, hunter, fuzz, crash, exploit, pwn, verifier, reporter, too
 Tool errors are information, not a dead end: read the message, adapt, and retry once with corrected arguments
 before giving up. Arguments accept plain integers and 0x-hex strings interchangeably for addresses/offsets.
 
-Coordination: before creating a child, inspect the agent graph and shared threat model. Supply a specific task,
-scope and completion condition. Children have per-role token quotas; a child that reports its quota exhausted has
+Coordination: spawn children in stages, not all at once. Start with one reconnaissance child, wait for its terminal
+result, read its summary and evidence, and decide the next child from those returned facts; keep at most 1-2 children
+running at a time and skip roles the evidence does not call for. Hand each child its predecessor's facts instead of
+making it rediscover them. Before creating a child, inspect the agent graph and shared threat model. Supply a specific
+task, scope and completion condition. Children have per-role token quotas; a child that reports its quota exhausted has
 already saved partial results — read its summary and spawn a narrow replacement for the missing piece, never a
 duplicate of the same scope. Use shared documents/notes and coverage rather than repeating other agents' work.
 Each child has its own durable conversation. Keep at most 1-3 closely related skills per task, 5 maximum.
