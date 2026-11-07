@@ -27,6 +27,7 @@ import tempfile
 import threading
 import time
 import uuid
+from pygdbmi.gdbmiparser import parse_response as parse_mi_response
 
 PROTOCOL = 1
 MAX_RPC = 48 * 1024 * 1024
@@ -538,21 +539,32 @@ class DebugSession:
 
     def read_records(self):
         with (self.directory / "transcript.mi").open("w", encoding="utf-8") as transcript:
-            for raw in self.process.stdout:
-                line = raw.rstrip("\r\n")[:65536]
+            for raw in iter(lambda: self.process.stdout.readline(65537), ""):
+                if len(raw) > 65536:
+                    self.dead = True
+                    terminate_tree(self.process)
+                    break
+                line = raw.rstrip("\r\n")
                 if self.transcript_bytes < 4 * 1024 * 1024:
                     transcript.write(line + "\n")
                     transcript.flush()
                     self.transcript_bytes += len(line.encode("utf-8"))
-                if re.match(r"^\d+\^", line):
+                try:
+                    parsed = parse_mi_response(line)
+                except Exception:
+                    self.dead = True
+                    terminate_tree(self.process)
+                    break
+                record = {**parsed, "record": line}
+                if parsed["type"] == "result" and parsed.get("token") is not None:
                     try:
-                        self.records.put_nowait(line)
+                        self.records.put_nowait(record)
                     except queue.Full:
                         self.dead = True
                         terminate_tree(self.process)
                         break
-                elif line and line != "(gdb) ":
-                    self.events.append(line)
+                elif line and parsed["type"] != "done":
+                    self.events.append(record)
         self.dead = True
 
     def command(self, command, timeout, internal=False):
@@ -573,15 +585,15 @@ class DebugSession:
             records = []
             while time.monotonic() < deadline:
                 try:
-                    line = self.records.get(timeout=min(0.1, max(0.01, deadline - time.monotonic())))
+                    record = self.records.get(timeout=min(0.1, max(0.01, deadline - time.monotonic())))
                 except queue.Empty:
                     if self.dead:
                         raise ValueError("GDB terminated while executing command")
                     continue
-                records.append(line)
-                if line.startswith(token + "^"):
-                    result_class = line[len(token) + 1:].split(",", 1)[0]
-                    return {"session_id": self.id, "token": self.token, "class": result_class, "record": line,
+                records.append(record)
+                if record.get("token") == self.token:
+                    return {"session_id": self.id, "token": self.token, "class": record["message"],
+                            "record": record["record"], "payload": record.get("payload"),
                             "events": list(self.events)[-64:], "transcript": "debug/" + self.id + "/transcript.mi"}
             # The command may still have effects. Invalidate the session, never
             # issue another command against an unknown debugger state.

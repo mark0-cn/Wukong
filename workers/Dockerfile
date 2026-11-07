@@ -69,6 +69,8 @@ ENV PATH="/opt/jdk-25/bin:/AFLplusplus:/usr/local/bin:${PATH}"
 # entries break pyvex/getpass inside isolated jobs.
 RUN python3 -c "f=open('/etc/passwd','a');[f.write('re-agent-%d:x:%d:%d::/nonexistent:/bin/false\n'%(u,u,u)) for u in range(20000,20512)];f.close();open('/etc/re-agent-passwd.ready','w').close()"
 RUN python3 -c "import angr, claripy, pwn, z3; print('toolchain ok:', angr.__version__)"
+COPY workers/runtime/requirements.txt /tmp/re-agent-runtime-requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -i "$PIP_INDEX_URL" -r /tmp/re-agent-runtime-requirements.txt
 COPY workers/runtime /opt/re-agent/runtime
 COPY workers/ghidra /opt/re-agent/ghidra
 RUN useradd --create-home --uid 10001 worker && mkdir -p /state && chown worker:worker /state
