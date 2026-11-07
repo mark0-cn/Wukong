@@ -168,7 +168,11 @@ fn write_target(path: &Path) -> Result<()> {
     fs::write(path, data)?;
     Ok(())
 }
-async fn cli(config: &Path, args: &[&str]) -> Result<std::process::Output> {
+async fn cli_with_base(
+    config: &Path,
+    args: &[&str],
+    base: Option<&str>,
+) -> Result<std::process::Output> {
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_re-agent"));
     command
         .arg("--config")
@@ -176,6 +180,9 @@ async fn cli(config: &Path, args: &[&str]) -> Result<std::process::Output> {
         .args(args)
         .env("RE_AGENT_TEST_PROVIDER_KEY", "not-a-real-secret")
         .kill_on_drop(true);
+    if let Some(base) = base {
+        command.env("OPENAI_BASE_URL", base);
+    }
     tokio::time::timeout(Duration::from_secs(30), command.output())
         .await
         .with_context(|| {
@@ -197,7 +204,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
     };
     config.model.provider = Provider::OpenAi;
     config.model.model = "test-model".into();
-    config.model.base_url = Some(endpoint);
+    config.model.base_url = None;
     config.model.api_key_env = Some("RE_AGENT_TEST_PROVIDER_KEY".into());
     config.execution.stream = false;
     config.execution.model_retries = 0;
@@ -206,7 +213,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
     }
     let config_path = temp.path().join("config.toml");
     fs::write(&config_path, toml::to_string_pretty(&config)?)?;
-    let output = cli(
+    let output = cli_with_base(
         &config_path,
         &[
             "analyze",
@@ -214,6 +221,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
             "--task",
             "Inspect only the test fixture",
         ],
+        Some(&endpoint),
     )
     .await?;
     if !output.status.success() {
@@ -245,6 +253,10 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         .into_iter()
         .next()
         .context("run not persisted")?;
+    ensure!(
+        run.config["model"]["base_url"] == endpoint,
+        "resolved provider endpoint was not frozen"
+    );
     if pause_then_resume {
         ensure!(
             run.status == Status::BudgetPaused,
@@ -252,7 +264,12 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         );
         let paused_calls = counts.lock().await.get("root").copied().unwrap_or_default();
         ensure!(paused_calls == 1, "paused checkpoint repeated model work");
-        let output = cli(&config_path, &["resume", &run.id, "--max-tokens", "10000"]).await?;
+        let output = cli_with_base(
+            &config_path,
+            &["resume", &run.id, "--max-tokens", "10000"],
+            Some("http://127.0.0.1:1/v1"),
+        )
+        .await?;
         ensure!(
             output.status.success(),
             "resume failed: {}",

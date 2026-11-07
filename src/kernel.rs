@@ -68,7 +68,7 @@ pub(crate) fn drive(
     cancel: CancellationToken,
     runtime: tokio::runtime::Handle,
 ) -> Result<RunRecord> {
-    let run: RunRecord = runner.store.require("run", run_id)?;
+    let mut run: RunRecord = runner.store.require("run", run_id)?;
     ensure!(!run.status.terminal(), "cannot drive a terminal assessment");
     runner.coordinator.resume(run_id, None)?;
     let directory = runner.config().state_dir.join("rig").join(run_id);
@@ -81,6 +81,18 @@ pub(crate) fn drive(
                 .is_file(),
         "this run has no native Rig journal; start a new assessment"
     );
+    if root.checkpoint.is_none() {
+        // Freeze the resolved endpoint, including environment fallback, before
+        // any model IO. Credentials remain environment-variable names only.
+        run.config = serde_json::to_value(runner.config())?;
+        runner.store.put("run", run_id, run_id, &run)?;
+    } else {
+        let saved: crate::config::AppConfig = serde_json::from_value(run.config.clone())?;
+        ensure!(
+            serde_json::to_value(&saved.model)? == serde_json::to_value(&runner.config().model)?,
+            "native session model configuration changed; use the saved provider/endpoint configuration"
+        );
+    }
     let journal = rig::memory::DirStore::open(directory)?;
     let (wake_tx, wakes) = mpsc::channel();
     let store_wake = wake_tx.clone();

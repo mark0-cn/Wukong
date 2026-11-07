@@ -305,6 +305,10 @@ impl ModelEngine {
         Ok(Self { config, model })
     }
 
+    pub(crate) fn resolved_config(&self) -> &ModelConfig {
+        &self.config
+    }
+
     /// Configured provider/endpoint as a native Rig kernel connection.
     pub(crate) fn connection(&self, stream: bool) -> rig_ecs::model::Connection {
         use rig_core::{
