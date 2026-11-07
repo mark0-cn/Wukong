@@ -895,7 +895,39 @@ impl ToolService {
             }
             "binary_inspect" => {
                 let run = self.target(agent)?;
-                Ok(serde_json::to_value(binary::inspect(&run.target_path)?)?)
+                let full = serde_json::to_value(binary::inspect(&run.target_path)?)?;
+                let bytes = serde_json::to_vec(&full)?;
+                let evidence = self.store.artifact(
+                    &agent.run_id,
+                    &agent.id,
+                    call_id,
+                    "binary_inspect.full",
+                    &bytes,
+                    "application/json",
+                    json!({"raw_tool_output":true,"tool":"binary_inspect","target_sha256":run.target_sha256}),
+                )?;
+                let pick = |key: &str| full.get(key).cloned().unwrap_or(Value::Null);
+                let count = |key: &str| full.get(key).and_then(Value::as_array).map_or(0, |a| a.len());
+                Ok(json!({
+                    "format": pick("format"),
+                    "architecture": pick("architecture"),
+                    "bits": pick("bits"),
+                    "endianness": pick("endianness"),
+                    "kind": pick("kind"),
+                    "image_base": pick("image_base"),
+                    "entry": pick("entry"),
+                    "mitigations": pick("mitigations"),
+                    "libraries": pick("libraries"),
+                    "has_debug_symbols": pick("has_debug_symbols"),
+                    "warnings": pick("warnings"),
+                    "sha256": pick("sha256"),
+                    "size": pick("size"),
+                    "imports_count": count("imports"),
+                    "sections_count": count("sections"),
+                    "symbols_count": count("symbols"),
+                    "full_evidence_id": evidence.id,
+                    "full_bytes": bytes.len(),
+                }))
             }
             "binary_strings" => {
                 let run = self.target(agent)?;
@@ -1397,6 +1429,7 @@ impl ToolService {
                 result["target_sha256"] == run.target_sha256,
                 "remote Ghidra analyzed another target"
             );
+            let mut result = result;
             let mut evidence_ids = Vec::new();
             if let Some(artifacts) = result["artifacts"].as_array() {
                 for artifact in artifacts {
@@ -1413,6 +1446,13 @@ impl ToolService {
                     );
                     evidence_ids.push(self.import_file(agent, call_id, &raw)?.id);
                 }
+            }
+            // The per-artifact metadata (binding/execution/request/response
+            // digests) is redundant inline: the artifacts themselves are
+            // already imported as evidence above. Keep the inline result to
+            // the analysis payload the model actually reads.
+            if let Some(object) = result.as_object_mut() {
+                object.remove("artifacts");
             }
             return Ok(json!({"analysis":result,"artifact_evidence_ids":evidence_ids}));
         }
