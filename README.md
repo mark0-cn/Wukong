@@ -32,7 +32,7 @@ $env:OPENAI_API_KEY = "your-provider-key"
 .\target\release\re-agent.exe --config .\re-agent.toml analyze .\sample.elf --task "分析输入边界，调查具体问题，独立复核并报告证据" --output .\reports\assessment-01
 ```
 
-支持 `openai`（Chat Completions）、`openai_responses`、`anthropic` 和 `ollama`。凭据通过环境变量注入，不写入配置或检查点。自定义 endpoint 通过 `model.base_url` 指定。`ollama` 默认本地 endpoint，可不配置凭据。
+支持 `openai`（Chat Completions）、`openai_responses`、`anthropic` 和 `ollama`。凭据通过环境变量注入，不写入配置或检查点。自定义 endpoint 通过 `model.base_url` 指定。`ollama` 默认本地 endpoint，可不配置凭据。根 agent 始终使用 `model.model`；设置 `model.role_model` 后，各角色（recon/reverse/crash/exploit 等）子 agent 改用该模型名（同一 provider/endpoint/凭据），例如 `role_model = "deepseek-flash"` 搭配根模型的 `"deepseek-v4-pro"`。
 
 ## 配置 Linux worker
 

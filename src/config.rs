@@ -71,7 +71,7 @@ impl Default for ExecutionConfig {
             model_retries: 2,
             compact_after_chars: 200000,
             keep_recent_messages: 12,
-            summarize_tool_outputs: false,
+            summarize_tool_outputs: true,
             summarize_threshold_chars: 6000,
             summarize_max_tokens: 400,
         }

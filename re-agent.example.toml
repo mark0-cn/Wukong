@@ -6,6 +6,11 @@ provider = "openai_responses"
 model = "your-model-name"
 api_key_env = "OPENAI_API_KEY"
 # base_url = "https://your-provider.example/v1"
+# Optional: role (non-root) agents use this model name instead of `model`,
+# with the same provider/endpoint/credentials. Leave unset to share the root
+# model. A cheaper/faster model keeps worker agents within their role token
+# quotas, e.g. "deepseek-flash" for DeepSeek endpoints.
+# role_model = "deepseek-flash"
 # Raise max_tokens where your provider supports it: long decompilation and
 # code-level answers benefit from a larger response budget.
 max_tokens = 8192
@@ -71,11 +76,11 @@ stream = true
 model_retries = 2
 compact_after_chars = 200000
 keep_recent_messages = 12
-# Optional: replace large tool-result envelopes in the model context with a
-# short LM summary (original bytes stay in evidence; replay stays exact).
-# summarize_tool_outputs = true
-# summarize_threshold_chars = 6000
-# summarize_max_tokens = 400
+# Replace large tool-result envelopes in the model context with a short LM
+# summary (original bytes stay in evidence; replay stays exact).
+summarize_tool_outputs = true
+summarize_threshold_chars = 6000
+summarize_max_tokens = 400
 
 # Per-role worked-example markdown (<role>.md), appended to each agent's
 # prompt as method demonstrations. Values shown are illustrative. The

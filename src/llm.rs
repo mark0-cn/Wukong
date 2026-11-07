@@ -46,6 +46,10 @@ pub enum Provider {
 pub struct ModelConfig {
     pub provider: Provider,
     pub model: String,
+    /// Model name used by role (non-root) agents. Provider, endpoint and
+    /// credentials are inherited from the root settings above; only the model
+    /// name is swapped. When unset, role agents share the root model.
+    pub role_model: Option<String>,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
     pub max_tokens: u64,
@@ -59,6 +63,7 @@ impl Default for ModelConfig {
         Self {
             provider: Provider::OpenAi,
             model: "gpt-5.2".into(),
+            role_model: None,
             base_url: None,
             api_key_env: None,
             max_tokens: 8192,
@@ -70,8 +75,24 @@ impl Default for ModelConfig {
 }
 
 impl ModelConfig {
+    /// The model configuration for a role (non-root) agent: the root settings
+    /// with the model name swapped when `role_model` is configured.
+    pub fn role_config(&self) -> ModelConfig {
+        let mut config = self.clone();
+        if let Some(role_model) = &self.role_model {
+            config.model = role_model.clone();
+        }
+        config
+    }
+
     pub fn validate(&self) -> Result<()> {
         ensure!(!self.model.trim().is_empty(), "model must not be empty");
+        if let Some(role_model) = &self.role_model {
+            ensure!(
+                !role_model.trim().is_empty(),
+                "role_model must not be empty when set"
+            );
+        }
         ensure!(self.max_tokens > 0, "max_tokens must be positive");
         ensure!(
             self.request_timeout_secs > 0,
