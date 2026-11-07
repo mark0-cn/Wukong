@@ -11,7 +11,11 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use rig::completion::{Message, Usage};
 use serde_json::{Value, json};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -22,8 +26,9 @@ pub struct AssessmentRunner {
     pub tools: Arc<ToolService>,
     config: AppConfig,
     engine: Arc<DurableEngine>,
-    /// Engine for role (non-root) agents when `model.role_model` is set.
-    role_engine: Option<Arc<DurableEngine>>,
+    /// Engines for role (non-root) agents, keyed by resolved model name
+    /// (`model.role_models` entries plus the legacy `model.role_model`).
+    role_engines: HashMap<String, Arc<DurableEngine>>,
     events: broadcast::Sender<Value>,
 }
 
@@ -31,11 +36,25 @@ impl AssessmentRunner {
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
         let engine = Arc::new(DurableEngine::new(config.model.clone())?);
-        let role_engine = if config.model.role_model.is_some() {
-            Some(Arc::new(DurableEngine::new(config.model.role_config())?))
-        } else {
-            None
-        };
+        let mut names = HashSet::new();
+        if let Some(map) = &config.model.role_models {
+            names.extend(map.values().cloned());
+        }
+        if let Some(name) = &config.model.role_model {
+            names.insert(name.clone());
+        }
+        names.remove(&config.model.model);
+        let mut role_engines = HashMap::new();
+        for name in names {
+            let mut role = config.model.clone();
+            role.role_model = None;
+            role.role_models = None;
+            role.model = name.clone();
+            if let Some(max_tokens) = config.model.role_max_tokens {
+                role.max_tokens = max_tokens;
+            }
+            role_engines.insert(name, Arc::new(DurableEngine::new(role)?));
+        }
         let tools = Arc::new(ToolService::new(config.clone(), store.clone()).await?);
         let (events, _) = broadcast::channel(1024);
         Ok(Self {
@@ -44,18 +63,21 @@ impl AssessmentRunner {
             tools,
             config,
             engine,
-            role_engine,
+            role_engines,
             events,
         })
     }
-    /// The engine that serves an agent: role agents use the configured role
-    /// model (same provider/endpoint, different model name) when set.
+    /// The engine that serves an agent: role agents use their resolved role
+    /// model (same provider/endpoint, different model name) when configured.
     fn engine_for(&self, role: Role) -> &DurableEngine {
-        if role == Role::Root {
-            &self.engine
-        } else {
-            self.role_engine.as_deref().unwrap_or(&self.engine)
+        if let Some(name) = self.config.model.role_model_name(role) {
+            if name != self.config.model.model {
+                if let Some(engine) = self.role_engines.get(name) {
+                    return engine;
+                }
+            }
         }
+        &self.engine
     }
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
@@ -173,7 +195,12 @@ impl AssessmentRunner {
                     if let Err(error)=result {
                         let agent:AgentRecord=self.store.require("agent",&agent_id)?;
                         self.emit(run_id,Some(&agent_id),"agent.error",json!({"message":format!("{error:#}")}))?;
-                        if !agent.status.terminal()&&agent.status!=Status::BudgetPaused{self.coordinator.set_status(&agent_id,Status::Failed,Some(format!("{error:#}")))?;}
+                        if !agent.status.terminal()&&agent.status!=Status::BudgetPaused{
+                            let summary=agent.checkpoint.as_ref()
+                                .and_then(|state| DurableRun::from_json(&state.to_string()).ok())
+                                .and_then(|durable| Self::last_assistant_text(&durable));
+                            self.fail_agent(&agent_id,format!("{error:#}"),summary)?;
+                        }
                     }
                 }
                 _=ticker.tick()=>{}
@@ -185,7 +212,51 @@ impl AssessmentRunner {
 /// answer; a second prose answer fails the agent.
 const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
 
-/// Whether every declared predecessor of `agent` is terminal. A missing
+    /// Fail a non-terminal agent, retaining an optional partial summary so the
+    /// parent can read the handoff instead of a blank record. Emits no event;
+    /// callers announce the failure themselves.
+    fn fail_agent(
+        &self,
+        agent_id: &str,
+        reason: String,
+        summary: Option<String>,
+    ) -> Result<()> {
+        self.store.transaction(|tx| {
+            let mut target: AgentRecord =
+                Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+            if target.status.terminal() {
+                return Ok(());
+            }
+            target.status = Status::Failed;
+            target.error = Some(reason);
+            if let Some(summary) = &summary {
+                target.summary = Some(summary.clone());
+            }
+            target.updated_at = now();
+            Store::tx_put(tx, "agent", agent_id, &target.run_id, &target)?;
+            Coordinator::notify_terminal(tx, &target)?;
+            Ok(())
+        })
+    }
+
+    /// The last non-empty assistant text in a durable run's history, bounded
+    /// for storage as a partial summary. None when the history has no text
+    /// (e.g. a pure tool-call turn).
+    fn last_assistant_text(durable: &DurableRun) -> Option<String> {
+        durable
+            .history()
+            .into_iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::Assistant(assistant) if !assistant.text().trim().is_empty() => {
+                    Some(assistant.text())
+                }
+                _ => None,
+            })
+            .map(|text| text.chars().take(4000).collect())
+    }
+
+    /// Whether every declared predecessor of `agent` is terminal. A missing
     /// predecessor id is treated as satisfied so a stale reference cannot
     /// deadlock the run.
     fn predecessors_satisfied(&self, agent: &AgentRecord) -> Result<bool> {
@@ -240,18 +311,20 @@ const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
                 && agent.total_tokens >= cap
             {
                 // Per-role token quota: end this agent cleanly and let the
-                // parent react instead of silently starving siblings.
+                // parent react instead of silently starving siblings. The
+                // last assistant text is retained as the partial summary so
+                // the parent can read the handoff instead of a blank record.
                 let reason = format!(
                     "role token budget exhausted ({} >= cap {}); partial work retained",
                     agent.total_tokens, cap
                 );
-                self.coordinator
-                    .set_status(agent_id, Status::Failed, Some(reason.clone()))?;
+                let summary = Self::last_assistant_text(&durable);
+                self.fail_agent(agent_id, reason, summary)?;
                 self.emit(
                     &run.id,
                     Some(agent_id),
                     "agent.budget_cap",
-                    json!({"cap":cap,"tokens":agent.total_tokens}),
+                    json!({"cap":cap,"tokens":agent.total_tokens,"summary_retained":true}),
                 )?;
                 return Ok(());
             }
@@ -995,6 +1068,146 @@ mod tests {
         );
         // The provider was never called for this agent.
         drop(server);
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn role_quota_failure_retains_the_partial_answer_as_summary() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            request(&mut socket).await;
+            respond(
+                &mut socket,
+                reply_text("HANDOFF: padding 40, ret2win at 0x400756"),
+            )
+            .await;
+        });
+        let (_dir, runner, run) = fixture(base).await;
+        runner.slice(&run.root_id).await.unwrap(); // model answers with the handoff
+        runner.slice(&run.root_id).await.unwrap(); // Done -> corrective rebuild
+        let mut agent: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        agent.token_cap = Some(1);
+        agent.total_tokens = 1;
+        runner
+            .store
+            .put("agent", &agent.id, &agent.run_id, &agent)
+            .unwrap();
+        runner.slice(&run.root_id).await.unwrap(); // quota fires before the next call
+        let agent: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        assert_eq!(agent.status, Status::Failed);
+        assert_eq!(
+            agent.summary.as_deref(),
+            Some("HANDOFF: padding 40, ret2win at 0x400756"),
+            "the partial answer must survive the quota kill"
+        );
+        assert!(
+            agent
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("role token budget exhausted")
+        );
+        drop(server);
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn per_role_model_map_routes_each_role() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = request(&mut socket).await;
+            assert!(
+                body.to_string().contains("flash-fixture"),
+                "recon must use the flash model: {body}"
+            );
+            respond(
+                &mut socket,
+                reply("agent_finish", json!({"summary":"recon done"})),
+            )
+            .await;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = request(&mut socket).await;
+            assert!(
+                body.to_string().contains("pro-fixture"),
+                "exploit must use the mapped pro model: {body}"
+            );
+            respond(
+                &mut socket,
+                reply("agent_finish", json!({"summary":"exploit done"})),
+            )
+            .await;
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.bin");
+        std::fs::write(&target, b"role map fixture").unwrap();
+        let mut config = AppConfig {
+            state_dir: dir.path().join("state"),
+            ..AppConfig::default()
+        };
+        config.model.provider = Provider::Ollama;
+        config.model.base_url = Some(base);
+        config.model.role_models = Some(HashMap::from([
+            (Role::Recon, "flash-fixture".to_string()),
+            (Role::Exploit, "pro-fixture".to_string()),
+        ]));
+        config.execution.stream = false;
+        config.execution.model_retries = 0;
+        let store = Store::open(&config.state_dir).unwrap();
+        let runner = AssessmentRunner::new(config.clone(), store).await.unwrap();
+        let run = runner
+            .coordinator
+            .create_run(
+                &target,
+                "role map fixture task",
+                config.budget.clone(),
+                serde_json::to_value(config).unwrap(),
+            )
+            .unwrap();
+        let recon = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "recon-fixture".into(),
+                    role: Role::Recon,
+                    task: "recon fixture task".into(),
+                    scope: "recon scope".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![],
+                },
+            )
+            .unwrap()
+            .agent;
+        let exploit = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "exploit-fixture".into(),
+                    role: Role::Exploit,
+                    task: "exploit fixture task".into(),
+                    scope: "exploit scope".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![],
+                },
+            )
+            .unwrap()
+            .agent;
+        runner.slice(&recon.id).await.unwrap(); // model call -> agent_finish
+        runner.slice(&recon.id).await.unwrap(); // execute agent_finish
+        runner.slice(&exploit.id).await.unwrap(); // model call -> agent_finish
+        runner.slice(&exploit.id).await.unwrap(); // execute agent_finish
+        let recon: AgentRecord = runner.store.require("agent", &recon.id).unwrap();
+        let exploit: AgentRecord = runner.store.require("agent", &exploit.id).unwrap();
+        assert!(recon.status.terminal());
+        assert!(exploit.status.terminal());
+        server.await.unwrap();
         runner.tools.close().await;
     }
 

@@ -4,9 +4,14 @@
 //! model client or credential. Persist after `next_step`, after preparation,
 //! and after every answer. Tool execution belongs to the host coordinator.
 
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::{Context, Result, bail, ensure};
+use crate::domain::Role;
 use rig::{
     DynModel,
     completion::{CompletionRequest, Message, ToolDefinition, Usage},
@@ -50,10 +55,17 @@ pub struct ModelConfig {
     /// credentials are inherited from the root settings above; only the model
     /// name is swapped. When unset, role agents share the root model.
     pub role_model: Option<String>,
-    /// `max_tokens` override for role agents. Verbose role models (such as
+    /// Per-role model-name overrides; a role present here wins over
+    /// `role_model`. Provider, endpoint and credentials are still inherited
+    /// from the root settings. A role mapped to the root model name runs with
+    /// the root settings (including `max_tokens`).
+    #[serde(default)]
+    pub role_models: Option<HashMap<Role, String>>,
+    /// `max_tokens` override for role agents whose resolved model name
+    /// differs from the root model. Verbose role models (such as
     /// deepseek-flash) can exhaust the root model's output budget and stop
-    /// with finish_reason=Length; raise it here. Only consulted when
-    /// `role_model` is set.
+    /// with finish_reason=Length; raise it here. Only consulted when the
+    /// role resolves to a model other than the root model.
     pub role_max_tokens: Option<u64>,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
@@ -69,6 +81,7 @@ impl Default for ModelConfig {
             provider: Provider::OpenAi,
             model: "gpt-5.2".into(),
             role_model: None,
+            role_models: None,
             role_max_tokens: None,
             base_url: None,
             api_key_env: None,
@@ -81,14 +94,31 @@ impl Default for ModelConfig {
 }
 
 impl ModelConfig {
+    /// The model name a role (non-root) agent resolves to: the per-role map
+    /// wins, then the legacy `role_model`, then the root model name.
+    pub fn role_model_name(&self, role: Role) -> Option<&str> {
+        if role == Role::Root {
+            return None;
+        }
+        if let Some(name) = self.role_models.as_ref().and_then(|map| map.get(&role)) {
+            return Some(name);
+        }
+        self.role_model.as_deref()
+    }
+
     /// The model configuration for a role (non-root) agent: the root settings
-    /// with the model name swapped when `role_model` is configured.
-    pub fn role_config(&self) -> ModelConfig {
+    /// with the model name swapped when a role model is configured. A role
+    /// mapped to the root model name keeps the root `max_tokens`.
+    pub fn role_config_for(&self, role: Role) -> ModelConfig {
         let mut config = self.clone();
-        if let Some(role_model) = &self.role_model {
-            config.model = role_model.clone();
-            if let Some(max_tokens) = self.role_max_tokens {
-                config.max_tokens = max_tokens;
+        config.role_model = None;
+        config.role_models = None;
+        if let Some(name) = self.role_model_name(role) {
+            if name != self.model {
+                config.model = name.to_owned();
+                if let Some(max_tokens) = self.role_max_tokens {
+                    config.max_tokens = max_tokens;
+                }
             }
         }
         config
@@ -101,6 +131,14 @@ impl ModelConfig {
                 !role_model.trim().is_empty(),
                 "role_model must not be empty when set"
             );
+        }
+        if let Some(role_models) = &self.role_models {
+            for name in role_models.values() {
+                ensure!(
+                    !name.trim().is_empty(),
+                    "role_models values must not be empty"
+                );
+            }
         }
         if let Some(max_tokens) = self.role_max_tokens {
             ensure!(max_tokens > 0, "role_max_tokens must be positive");
