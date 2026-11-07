@@ -127,31 +127,38 @@ impl AssessmentRunner {
         .context("Rig kernel thread failed")?
     }
 
-    /// Fail a non-terminal agent, retaining an optional partial summary so the
-    /// parent can read the handoff instead of a blank record. Emits no event;
-    /// callers announce the failure themselves.
+    /// Project a native failure into the task ledger and the existing UI event stream.
     pub(crate) fn fail_agent(
         &self,
         agent_id: &str,
         reason: String,
         summary: Option<String>,
     ) -> Result<()> {
-        self.store.transaction(|tx| {
+        let run_id = self.store.transaction(|tx| {
             let mut target: AgentRecord =
                 Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
             if target.status.terminal() {
-                return Ok(());
+                return Ok(None);
             }
             target.status = Status::Failed;
-            target.error = Some(reason);
+            target.error = Some(reason.clone());
             if let Some(summary) = &summary {
                 target.summary = Some(summary.clone());
             }
             target.updated_at = now();
             Store::tx_put(tx, "agent", agent_id, &target.run_id, &target)?;
             Coordinator::notify_terminal(tx, &target)?;
-            Ok(())
-        })
+            Ok(Some(target.run_id))
+        })?;
+        if let Some(run_id) = run_id {
+            self.emit(
+                &run_id,
+                Some(agent_id),
+                "agent.error",
+                json!({"message":reason}),
+            )?;
+        }
+        Ok(())
     }
 
     pub(crate) fn structured_summary(
@@ -496,6 +503,18 @@ mod tests {
             assert_eq!(drive_bounded(&runner, &run.id).await.status, expected);
             server.await.unwrap();
             if status == 401 {
+                assert!(
+                    runner
+                        .store
+                        .events(&run.id, 0, 100)
+                        .unwrap()
+                        .iter()
+                        .any(|event| event.kind == "agent.error"
+                            && event.data["message"]
+                                .as_str()
+                                .is_some_and(|text| text.contains("401"))),
+                    "native failure was not projected to the UI event stream"
+                );
                 assert_eq!(
                     runner
                         .store
