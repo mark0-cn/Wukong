@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -277,22 +277,23 @@ impl Store {
         let relative = format!("artifacts/{}/{}", &hash[..2], hash);
         let path = self.root.join(&relative);
         fs::create_dir_all(path.parent().context("artifact parent")?)?;
-        if path.exists() {
-            let existing = fs::read(&path)?;
-            if hex::encode(Sha256::digest(&existing)) != hash {
-                bail!("artifact integrity failure at {}", path.display());
-            }
-        } else {
-            let temp = path.with_extension(format!("{}.tmp", id("write")));
-            fs::write(&temp, bytes)?;
-            // Another writer can have committed identical bytes meanwhile.
-            if let Err(e) = fs::rename(&temp, &path) {
-                if path.exists() {
-                    fs::remove_file(&temp)?;
-                } else {
-                    return Err(e.into());
+        if !path.exists() {
+            let parent = path.parent().context("artifact parent")?;
+            let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+            staged.write_all(bytes)?;
+            staged.as_file().sync_all()?;
+            if let Err(error) = staged.persist_noclobber(&path) {
+                if error.error.kind() != std::io::ErrorKind::AlreadyExists {
+                    return Err(error.error).context("publish evidence artifact");
                 }
             }
+            #[cfg(unix)]
+            fs::File::open(parent)?.sync_all()?;
+        }
+        // Verify both a newly published artifact and one won by another writer.
+        let existing = fs::read(&path)?;
+        if hex::encode(Sha256::digest(&existing)) != hash {
+            bail!("artifact integrity failure at {}", path.display());
         }
         let evidence = Evidence {
             id: id("ev"),
@@ -418,6 +419,59 @@ impl UtcTimestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_artifact_publication_never_overwrites_corrupt_content() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(directory.path())?;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        let writers: Vec<_> = (0..4)
+            .map(|index| {
+                let store = store.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.artifact(
+                        "run",
+                        "agent",
+                        &format!("call-{index}"),
+                        "test",
+                        b"same evidence",
+                        "text/plain",
+                        json!({}),
+                    )
+                })
+            })
+            .collect();
+        let evidence: Vec<_> = writers
+            .into_iter()
+            .map(|writer| writer.join().unwrap())
+            .collect::<Result<_>>()?;
+        assert!(
+            evidence
+                .iter()
+                .all(|entry| entry.relative_path == evidence[0].relative_path)
+        );
+        let path = store.root().join(&evidence[0].relative_path);
+        assert_eq!(fs::read(&path)?, b"same evidence");
+        assert_eq!(fs::read_dir(path.parent().unwrap())?.count(), 1);
+        fs::write(&path, b"corrupted")?;
+        assert!(
+            store
+                .artifact(
+                    "run",
+                    "agent",
+                    "next",
+                    "test",
+                    b"same evidence",
+                    "text/plain",
+                    json!({})
+                )
+                .is_err()
+        );
+        assert_eq!(fs::read(path)?, b"corrupted");
+        Ok(())
+    }
 
     #[test]
     fn range_reads_verify_the_streamed_digest_and_stay_bounded() -> Result<()> {

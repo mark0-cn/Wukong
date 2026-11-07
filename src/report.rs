@@ -466,8 +466,10 @@ pub fn export(store: &Store, run_id: &str, output: &Path) -> Result<ExportSummar
         .context("export destination must name a new directory")?;
     let final_path = parent.join(name);
     ensure!(!final_path.exists(), "export destination already exists");
-    let staging = parent.join(format!(".{}.tmp", id("export")));
-    fs::create_dir(&staging)?;
+    let staging_directory = tempfile::Builder::new()
+        .prefix(".export_")
+        .tempdir_in(&parent)?;
+    let staging = staging_directory.path();
     let result = (|| -> Result<ExportSummary> {
         let mut files = BTreeMap::new();
         let target_relative = "target/sample.bin";
@@ -542,17 +544,9 @@ pub fn export(store: &Store, run_id: &str, output: &Path) -> Result<ExportSummar
             target_sha256: target_hash,
         })
     })();
-    if result.is_err() && staging.is_dir() {
-        // Only this freshly created, canonical-parent child can be removed.
-        let checked = fs::canonicalize(&staging)?;
-        ensure!(
-            checked.parent() == Some(parent.as_path())
-                && checked
-                    .file_name()
-                    .is_some_and(|name| name.to_string_lossy().starts_with(".export_")),
-            "refuse cleanup outside export staging directory"
-        );
-        fs::remove_dir_all(checked)?;
+    if result.is_ok() {
+        // Publication moved the directory; disarm cleanup of its former path.
+        let _ = staging_directory.keep();
     }
     result
 }
