@@ -653,6 +653,19 @@ impl ToolService {
             "tool.started",
             json!({"call_id":call_id,"name":name}),
         )?;
+        // wait_for_agents parks the agent and returns immediately today, but
+        // its schema allows waits up to 3600s. Size the protective outer
+        // timeout to the requested wait so a future blocking implementation
+        // cannot truncate a legitimate long wait into an uncertain outcome.
+        let outer_timeout = if name == "wait_for_agents" {
+            Duration::from_secs(
+                number(&args, "timeout_seconds", 300)
+                    .clamp(1, 3600)
+                    .saturating_add(10),
+            )
+        } else {
+            Duration::from_secs(self.config.tools.timeout_seconds)
+        };
         let result = async {
             ensure!(args.is_object(), "tool arguments must be a JSON object");
             ensure!(
@@ -676,11 +689,7 @@ impl ToolService {
             }
             self.dispatch(&agent, call_id, name, args).await
         };
-        let result = tokio::time::timeout(
-            Duration::from_secs(self.config.tools.timeout_seconds),
-            result,
-        )
-        .await;
+        let result = tokio::time::timeout(outer_timeout, result).await;
         match result {
             Ok(Ok(value))=>{let is_error=self.mcp.contains(name)&&value["isError"].as_bool()==Some(true);self.finish_raw(record,value,is_error,if is_error{CallState::Failed}else{CallState::Completed})},
             Ok(Err(error))=>{
