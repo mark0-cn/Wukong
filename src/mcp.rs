@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
     sync::Mutex,
 };
@@ -47,7 +47,12 @@ impl Connection {
         self.input.flush().await?;
         tokio::time::timeout(Duration::from_secs(self.timeout.clamp(1,600)),async{
             loop{
-                let mut line=String::new();ensure!(self.output.read_line(&mut line).await?>0,"MCP server closed stdout");ensure!(line.len()<=2*1024*1024,"MCP message exceeds 2 MiB");
+                let mut line=String::new();
+                // Bound the read itself: a misbehaving local server streaming
+                // bytes without a newline must not grow memory unbounded.
+                let mut bounded=(&mut self.output).take(2*1024*1024+1);
+                let count=bounded.read_line(&mut line).await?;
+                ensure!(count>0,"MCP server closed stdout");ensure!(line.len()<=2*1024*1024,"MCP message exceeds 2 MiB");
                 let message:Value=serde_json::from_str(&line).context("MCP stdout must contain JSON-RPC lines only")?;
                 if message.get("id")==Some(&json!(id))&&message.get("method").is_none(){if let Some(error)=message.get("error"){bail!("MCP {method} failed: {error}");}return message.get("result").cloned().context("MCP result missing");}
                 if let Some(request_id)=message.get("id").filter(|_|message.get("method").is_some()) {

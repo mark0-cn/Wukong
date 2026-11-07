@@ -601,6 +601,32 @@ for line in sys.stdin:
 }
 
 #[tokio::test]
+async fn runaway_mcp_stdout_is_bounded_by_the_line_cap() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let script = temp.path().join("runaway.py");
+    // Streams an endless line: the client must stop reading at the 2 MiB cap
+    // instead of buffering without bound.
+    std::fs::write(
+        &script,
+        "import sys\nsys.stdout.write('x'*100000000)\nsys.stdout.flush()\nimport time\ntime.sleep(60)\n",
+    )?;
+    let mut config = AppConfig::default();
+    config.mcp.push(McpServerConfig {
+        name: "runaway".into(),
+        command: "python".into(),
+        args: vec![script.to_string_lossy().into_owned()],
+        env: vec![],
+        timeout_seconds: 20,
+    });
+    let error = match ToolService::new(config, Store::open(temp.path().join("state"))?).await {
+        Ok(_) => panic!("an MCP server without a newline must not initialize"),
+        Err(error) => error,
+    };
+    assert!(format!("{error:#}").contains("2 MiB"), "{error:#}");
+    Ok(())
+}
+
+#[tokio::test]
 #[ignore = "requires a live configured Linux Docker worker; set RE_AGENT_TEST_DOCKER_CONTAINER"]
 async fn docker_independent_verification_uses_real_trials_and_limits_impact() -> Result<()> {
     let container = std::env::var("RE_AGENT_TEST_DOCKER_CONTAINER")?;
