@@ -102,7 +102,7 @@ async fn model_server() -> Result<(
                 ("root", 0) => vec![
                     call(
                         "root-model",
-                        "threat_model_save",
+                        "note_save",
                         json!({"title":"Fixture model","body":"Exact local binary; parsing only. No execution requested in this test."}),
                     ),
                     call(
@@ -128,8 +128,36 @@ async fn model_server() -> Result<(
                     "finish_scan",
                     json!({"summary":"Static inspection complete; no dynamic execution or verified vulnerability claimed."}),
                 )],
-                ("recon", 0) => vec![call("inspect", "binary_inspect", json!({}))],
+                ("recon", 0) => {
+                    ensure!(
+                        !names.contains(&"coverage_record") && !names.contains(&"debug_start"),
+                        "optional tools were eagerly exposed"
+                    );
+                    vec![
+                        call("inspect", "binary_inspect", json!({})),
+                        call(
+                            "discover-coverage",
+                            "tool_search",
+                            json!({"group":"coverage"}),
+                        ),
+                    ]
+                }
                 ("recon", 1) => {
+                    ensure!(
+                        !names.contains(&"coverage_record"),
+                        "search unexpectedly activated tools"
+                    );
+                    vec![call(
+                        "load-coverage",
+                        "tools_load",
+                        json!({"names":["coverage_record"]}),
+                    )]
+                }
+                ("recon", 2) => {
+                    ensure!(
+                        names.contains(&"coverage_record") && !names.contains(&"debug_start"),
+                        "selection was not applied to the next request"
+                    );
                     let evidence = tool_evidence(&request, "inspect")
                         .context("model did not receive inspect evidence")?;
                     vec![
@@ -294,13 +322,13 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         "coverage/evidence missing"
     );
     ensure!(
-        run.total_tokens == 75,
+        run.total_tokens == 90,
         "usage was lost or replayed: {}",
         run.total_tokens
     );
     let counts = counts.lock().await;
     ensure!(
-        counts.get("root") == Some(&3) && counts.get("recon") == Some(&2),
+        counts.get("root") == Some(&3) && counts.get("recon") == Some(&3),
         "model work duplicated on recovery"
     );
     let calls = store.list::<ToolCallRecord>("call", &run.id)?;

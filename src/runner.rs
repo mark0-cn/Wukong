@@ -361,6 +361,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_tool_discovery_loads_schemas_and_rig_rejects_unloaded_calls() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (_dir, mut runner, run) =
+            fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+        runner.config.execution.compact_after_chars = 100;
+        runner.config.execution.keep_recent_messages = 2;
+        let server = tokio::spawn(async move {
+            let mut inputs = Vec::new();
+            for (name, args) in [
+                ("tool_search", json!({"group":"coverage"})),
+                ("tools_load", json!({"names":["coverage_list"]})),
+                ("coverage_list", json!({})),
+                ("tools_load", json!({"names":[]})),
+                ("coverage_list", json!({})),
+                (
+                    "finish_scan",
+                    json!({"summary":"discovery lifecycle verified"}),
+                ),
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                inputs.push(request(&mut socket).await);
+                respond(&mut socket, reply(name, args)).await;
+            }
+            inputs
+        });
+        assert_eq!(
+            drive_bounded(&runner, &run.id).await.status,
+            Status::Completed
+        );
+        let inputs = server.await.unwrap();
+        for (turn, input) in inputs.iter().enumerate() {
+            let names = input["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tool| tool["function"]["name"].as_str().unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                names.contains(&"coverage_list"),
+                matches!(turn, 2 | 3),
+                "turn {turn}"
+            );
+            assert!(names.contains(&"tools_load") && names.contains(&"finish_scan"));
+            assert!(!names.contains(&"debug_start") && !names.contains(&"create_agent"));
+        }
+        let calls = runner
+            .store
+            .list::<ToolCallRecord>("call", &run.id)
+            .unwrap();
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|call| call.name == "coverage_list")
+                .count(),
+            1,
+            "unloaded call reached business execution"
+        );
+        assert!(
+            runner
+                .store
+                .events(&run.id, 0, 1000)
+                .unwrap()
+                .iter()
+                .any(|event| event.kind == "context.compacted")
+        );
+    }
+
+    #[tokio::test]
     async fn native_lifecycle_rejects_a_second_plain_answer() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let (dir, runner, run) =

@@ -171,6 +171,142 @@ async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()
 }
 
 #[tokio::test]
+async fn tool_selection_is_role_scoped_durable_atomic_and_generation_bound() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let mut config = AppConfig::default();
+    config.tools.max_output_bytes = 1024;
+    let service = ToolService::new(config.clone(), store.clone()).await?;
+    let root_search = service
+        .execute(
+            &run.root_id,
+            "root-tool-search",
+            "tool_search",
+            json!({"group":"ghidra"}),
+        )
+        .await?;
+    assert_eq!(result(&root_search)["total"], 0);
+    let root_load = service
+        .execute(
+            &run.root_id,
+            "root-tool-load",
+            "tools_load",
+            json!({"names":["function_decompile"]}),
+        )
+        .await?;
+    assert!(root_load.is_error);
+    let mut offset = 0;
+    let mut discovered = std::collections::BTreeSet::new();
+    loop {
+        let page = service
+            .execute(
+                &agent.id,
+                &format!("tool-search-{offset}"),
+                "tool_search",
+                json!({"group":"ghidra","offset":offset,"limit":10}),
+            )
+            .await?;
+        assert!(
+            !page.is_error && page.value["truncated"] == false,
+            "{page:?}"
+        );
+        assert_eq!(result(&page)["total"], 3);
+        for tool in result(&page)["tools"].as_array().unwrap() {
+            assert!(tool.get("parameters").is_none());
+            assert_eq!(tool["loaded"], false);
+            assert!(discovered.insert(tool["name"].as_str().unwrap().to_owned()));
+        }
+        let Some(next) = result(&page)["next_offset"].as_u64() else {
+            break;
+        };
+        assert!(next > offset);
+        offset = next;
+    }
+    assert_eq!(discovered.len(), 3);
+    let first_args = json!({"names":["function_decompile"]});
+    let first = service
+        .execute(&agent.id, "select-first", "tools_load", first_args.clone())
+        .await?;
+    assert!(!first.is_error);
+    let second = service
+        .execute(
+            &agent.id,
+            "select-second",
+            "tools_load",
+            json!({"names":["xrefs_query"]}),
+        )
+        .await?;
+    assert!(!second.is_error);
+    let replay = service
+        .execute(&agent.id, "select-first", "tools_load", first_args)
+        .await?;
+    assert_eq!(first.value, replay.value);
+    for forbidden in [
+        "poc_verify",
+        "verification_record",
+        "create_agent",
+        "does_not_exist",
+    ] {
+        let denied = service
+            .execute(
+                &agent.id,
+                &format!("invalid-{forbidden}"),
+                "tools_load",
+                json!({"names":["function_decompile",forbidden]}),
+            )
+            .await?;
+        assert!(denied.is_error, "{forbidden}");
+    }
+    service.close().await;
+    let reopened = Store::open(temp.path().join("state"))?;
+    let service = ToolService::new(config, reopened).await?;
+    let search = service
+        .execute(
+            &agent.id,
+            "after-reopen",
+            "tool_search",
+            json!({"query":"xrefs_query"}),
+        )
+        .await?;
+    assert_eq!(
+        result(&search)["tools"][0]["loaded"],
+        true,
+        "replay or failed selection overwrote the current selection"
+    );
+    let other = child(&coordinator, &run.root_id, Role::Reverse, "another task")?;
+    let search = service
+        .execute(
+            &other.id,
+            "isolated-selection",
+            "tool_search",
+            json!({"query":"xrefs_query"}),
+        )
+        .await?;
+    assert_eq!(result(&search)["tools"][0]["loaded"], false);
+    coordinator.finish(&agent.id, "initial task complete")?;
+    let follow = service
+        .execute(
+            &run.root_id,
+            "selection-followup",
+            "follow_up_agent",
+            json!({"agent_id":agent.id,"message":"additional analysis"}),
+        )
+        .await?;
+    assert!(!follow.is_error);
+    let search = service
+        .execute(
+            &agent.id,
+            "fresh-generation",
+            "tool_search",
+            json!({"query":"xrefs_query"}),
+        )
+        .await?;
+    assert_eq!(result(&search)["tools"][0]["loaded"], false);
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn activated_skills_are_exact_durable_snapshots_with_idempotent_receipts() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;
