@@ -73,7 +73,12 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
     }
 }
 
-fn builtins() -> Vec<Spec> {
+fn builtins() -> &'static [Spec] {
+    static CATALOG: std::sync::LazyLock<Vec<Spec>> = std::sync::LazyLock::new(build_catalog);
+    &CATALOG
+}
+
+fn build_catalog() -> Vec<Spec> {
     let mut specs = vec![
         spec::<args::CreateAgentArgs>(
             "create_agent",
@@ -421,16 +426,31 @@ impl ToolService {
             locks: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }
+    pub(crate) fn allows(&self, role: Role, name: &str) -> bool {
+        builtins()
+            .iter()
+            .find(|item| item.definition.name.as_str() == name)
+            .map_or_else(
+                || role != Role::Root && self.mcp.contains(name),
+                |item| {
+                    (!item.target || role != Role::Root)
+                        && (!item.verifier_only || role == Role::Verifier)
+                        && (!item.root_only || role == Role::Root)
+                        && (!item.child_only || role != Role::Root)
+                },
+            )
+    }
+
     pub fn definitions(&self, role: Role) -> Vec<ToolDefinition> {
         let mut definitions = builtins()
-            .into_iter()
+            .iter()
             .filter(|item| {
                 (!item.target || role != Role::Root)
                     && (!item.verifier_only || role == Role::Verifier)
                     && (!item.root_only || role == Role::Root)
                     && (!item.child_only || role != Role::Root)
             })
-            .map(|item| item.definition)
+            .map(|item| item.definition.clone())
             .collect::<Vec<_>>();
         if role != Role::Root {
             definitions.extend(self.mcp.definitions());
@@ -579,9 +599,7 @@ impl ToolService {
                 "a terminal assessment cannot start a new tool effect"
             );
             ensure!(
-                self.definitions(agent.role)
-                    .iter()
-                    .any(|item| item.name == name),
+                self.allows(agent.role, name),
                 "tool {name} is unavailable for role {}",
                 agent.role
             );

@@ -336,15 +336,8 @@ fn task_schema() -> Value {
 }
 
 fn allowed(runner: &AssessmentRunner, role: Role, name: &str) -> bool {
-    // Explicit follow_up_agent retains typed generations and provenance.
-    name == "task"
-        || name == "message"
-        || name == "wait"
-        || runner
-            .tools
-            .definitions(role)
-            .iter()
-            .any(|d| d.name.as_str() == name && name != "create_agent")
+    matches!(name, "task" | "message" | "wait")
+        || (name != "create_agent" && runner.tools.allows(role, name))
 }
 
 fn prepare_spawns(
@@ -1238,13 +1231,8 @@ fn reconcile_calls(
         let name = call.call.function.name.as_str();
         if name == "task"
             || name == "wait"
-            || application
-                .runner
-                .tools
-                .definitions(Role::Verifier)
-                .iter()
-                .chain(application.runner.tools.definitions(Role::Root).iter())
-                .any(|def| def.name.as_str() == name)
+            || application.runner.tools.allows(Role::Root, name)
+            || application.runner.tools.allows(Role::Verifier, name)
         {
             commands.entity(entity).remove::<Interrupted>();
         }
