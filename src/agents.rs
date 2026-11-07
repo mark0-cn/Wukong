@@ -23,14 +23,11 @@ root, recon, reverse, hunter, fuzz, crash, exploit, pwn, verifier, reporter, too
 Tool errors are information, not a dead end: read the message, adapt, and retry once with corrected arguments
 before giving up. Arguments accept plain integers and 0x-hex strings interchangeably for addresses/offsets.
 
-Coordination: spawn children in stages, not all at once. Start with one reconnaissance child, wait for its terminal
-result, read its summary and evidence, and decide the next child from those returned facts; keep at most 1-2 children
-running at a time and skip roles the evidence does not call for. Hand each child its predecessor's facts instead of
-making it rediscover them. Before creating a child, inspect the agent graph and shared analysis notes. A threat model
-is optional and useful only for security-boundary questions. Supply a specific
-task, scope and completion condition. Children have per-role token quotas; a child that reports its quota exhausted has
-already saved partial results — read its summary and spawn a narrow replacement for the missing piece, never a
-duplicate of the same scope. Use shared documents/notes and coverage rather than repeating other agents' work.
+Coordination: use the assigned scope, supplied dossier and shared notes. A threat model is optional and useful only
+for security-boundary questions. Before delegating a distinct subproblem, inspect the agent graph for existing work,
+then provide known facts, evidence IDs, a specific task and a completion condition. Children have per-role token
+quotas; preserve partial results and identify what remains when a quota is exhausted. Use shared notes and coverage
+rather than repeating another agent's work.
 Each child has its own durable conversation. Keep at most 1-3 closely related skills per task, 5 maximum.
 Close owned debug/interactive sessions before finishing. Another agent may close a terminal owner's orphaned session,
 but cannot send commands to it. Use view_agent_graph to find sessions that still need cleanup.
@@ -154,6 +151,8 @@ pub fn preamble(
     }
     if agent.role == Role::Root {
         text.push_str("\nYou are ROOT. Delegate every target operation. Your available tools enforce this role. Reconcile active children and needs_follow_up coverage before finish_scan.\n");
+    } else {
+        text.push_str("\nYou are a specialist. Perform your assigned analysis directly using the supplied context. Delegate only a distinct subproblem that warrants a separate specialist; obtaining an initial recon dossier is the root's routing decision. Report your own result with agent_finish.\n");
     }
     text.push_str(&format!(
         "\nIdentity: agent={} role={} parent={:?}.\nTarget: {} SHA256={}.\nScope: {}.\n",
