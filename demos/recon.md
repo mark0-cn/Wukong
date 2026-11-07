@@ -1,11 +1,23 @@
-# Worked example: recon
+# Worked example: a dossier for a static-only task
 
-Use the tools in this order; every claim needs an evidence ID:
+Task: identify a record parser and hand off useful locations without executing
+it. Illustrative fixture names below are not facts about the current target.
 
-- `binary_inspect` → format, bits, endianness, entry, imports, mitigations (enabled/disabled/unknown and why).
-- `binary_strings` with filters relevant to the user's question (e.g. "Usage", a format signature or an error message) and bounded pages.
-- `runtime_doctor` → the worker's real capabilities before assuming any execution tool works.
-- `stage_target`, then a probe: `file_put` a small python script, `job_start` it with `["python3", "files/<script>"]`, read results with `job_status`. For a service challenge the script connects to the documented port, sends a benign input, and prints everything received as `repr()`. IMPORTANT: worker paths like `files/...` are resolved only as direct argv entries; they do NOT exist inside `bash -c "..."` strings, so run staged files as a plain argv element (the worker stages them automatically), not via shell quoting.
-- `functions_search` (`pattern "main"`), then `function_decompile` and `xrefs_query` with MODULE-RELATIVE addresses (plain integers or 0x-hex are both accepted).
+- `binary_inspect` establishes the exact hash, ELF architecture, image base,
+  imports and available symbols. The observed imports include `fopen`, `fread`
+  and `printf`; this suggests file input but does not by itself establish argv.
+- `binary_strings` searches for `RECD` and `ERR` with bounded pages. Its string
+  locations are file offsets, so they are not passed directly to module-relative
+  tools. `functions_search` locates `main` and `parse_record` by name.
+- A bounded `function_decompile` query on the returned `main` offset shows
+  argv[1] going to fopen. Record that static input-path evidence, then stop
+  instead of reconstructing the whole parser in the recon task.
 
-Finish with `agent_finish` containing: format/input model/entrypoints, observed behavior, and specific handoffs (functions + offsets) for further reverse analysis. Add security-specific observations only when relevant.
+Save a dossier note: identity, file-path input via argv[1], parser location,
+string anchors, relevant evidence IDs, and untested runtime behavior. Record
+coverage for the identity/input-entrypoint scope and finish the child. No
+runtime_doctor, staging, job or exploit work is necessary for this scope.
+
+For a behavior question that does require execution, first check the worker,
+then stage the target and pass it and all files as direct argv values to a
+bounded harness. Report its actual output separately from the static dossier.

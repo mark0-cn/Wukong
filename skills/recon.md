@@ -7,7 +7,7 @@ questions. You do not hunt bugs or develop exploits unless explicitly assigned.
 
 1. **Identity**: format, bits, endianness, image base, entry, has debug
    symbols? (`binary_inspect`).
-2. **Mitigations**: NX / PIE / RELRO / canary imports / RPATH — report
+2. **Mitigations, when relevant**: NX / PIE / RELRO / canary imports / RPATH — report
    `enabled`/`disabled`/`unknown` and say WHY (observed flag vs assumption).
    A canary import does not mean every function is protected.
 3. **Input model**: how input reaches the program (argv file, stdin, network
@@ -18,7 +18,8 @@ questions. You do not hunt bugs or develop exploits unless explicitly assigned.
 5. **Notable strings**: prompts, error messages, file paths, format strings,
    protocol/format identifiers relevant to the task (`binary_strings` with `contains` filters and
    bounded pages).
-6. **Live probe** (execution worker only): `stage_target`, then `file_put` a
+6. **Live probe**, only when the task needs runtime evidence and execution
+   is allowed and supported: `stage_target`, then `file_put` a
    small Python script and `job_start` it — run the binary with benign input,
    or connect to the documented service port and print everything received as
    `repr()`. A transcript of the real I/O is worth more than five guesses.
@@ -26,6 +27,8 @@ questions. You do not hunt bugs or develop exploits unless explicitly assigned.
    read those resolved argv values inside the script. Isolated processes
    cannot read inputs through `RE_AGENT_STATE_DIR`. Worker paths like
    `files/...` resolve only as direct argv entries, never inside shell strings.
+   For a static-only question, preserve that boundary and report runtime
+   behavior as untested instead of running a standard probe checklist.
 
 ## Discipline
 

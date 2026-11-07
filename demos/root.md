@@ -1,9 +1,24 @@
-# Worked example: root orchestration
+# Worked example: static format reconstruction
 
-A focused, working decomposition for a single challenge binary:
+User request: "Recover this record header and rejection rules from the binary;
+keep the analysis static." The following is an illustrative fixture case.
 
-1. Read shared analysis notes and the user's questions; if entrypoints are unknown, spawn `recon` with a narrow scope: "establish format, input entrypoints and program behavior". Wait for it. A threat model is only needed for security-boundary questions.
-2. Read the recon result and decide the next spawn from it. Hand the facts to a focused `reverse` agent ("recover the file header layout and parsing steps; report module-relative addresses"). Add a `hunter` only for a requested vulnerability investigation. Each stage waits for the previous one; keep at most 1-2 children at a time and skip roles the evidence does not call for. When one child must not start before another finishes (e.g. runtime checks need the recovered layout), pass the predecessor's agent id in `wait_for_predecessors` — the runner gates the child until it is terminal.
-3. For behavior or format reconstruction, continue with focused reverse children until the user's questions are answered. For an explicitly requested exploit investigation, route confirmed hypotheses to `exploit` with the exact environment facts and require actual execution evidence.
-4. Record observed outputs and conclusions in shared notes with evidence IDs; label inferences and unresolved questions explicitly.
-5. Reconcile every `needs_follow_up` coverage row or mark it inconclusive before `finish_scan`.
+1. Read analysis notes and the graph. If identity is unknown, create one recon
+   child with a narrow identity/input-entrypoint scope and the explicit
+   static-only constraint. It reports ELF identity, the `parse_record` symbol
+   and `RECD` string evidence; it does not start a live probe.
+2. Create a reverse child with `skills=["formats"]`, those evidence IDs and
+   the question: recover field offsets, byte order, length/checksum logic and
+   error branches. Reuse the dossier instead of repeating recon.
+3. The reverse child saves the field table and distinguishes static parser
+   deductions from runtime observations. If a field remains ambiguous, send
+   a targeted follow-up to that child; wait for its new result. Do not create
+   a vulnerability finding for an ordinary length field.
+4. Reconcile coverage and answer each original question. The conclusion is
+   "layout inferred from these parser branches; dynamic rejection behavior
+   untested under the requested static-only scope", with evidence references.
+   Finish the scan when the requested static questions are answered.
+
+If the user later asks for runtime confirmation, assign a verifier the table,
+input channel and distinguishing test cases. That is a new scope decision;
+it does not retroactively turn static deductions into executed observations.

@@ -1,9 +1,34 @@
-# Worked example: reverse
+# Worked example: reconstruct a numeric transformation
 
-Goal: input/state → checks and transformations → output/state change, with module-relative addresses.
+Task: recover the fixture's numeric routine, not a vulnerability. The input
+channel (one decimal argv value) and `transform_word` location are already in
+recon evidence.
 
-1. `functions_search` with a pattern that matches the interesting logic (e.g. "main", "check", "verify"), bounded pages.
-2. `function_decompile` the candidates; compare what the DECOMPILER shows against `binary_strings` evidence (decompiler names are guesses).
-3. `xrefs_query` direction "to" on a relevant function or data address finds incoming references. Direction "from" inspects one specific instruction address, not the whole function's callees.
-4. Addresses: file offsets, module-relative offsets and runtime addresses are different spaces. Decompile/xrefs take module-relative values (image base from `binary_inspect`). Record which space every number belongs to.
-5. Report: the exact reachable path (entry → checks → operation), the size/type conversions involved, and a candidate input to test the path. Finish with `agent_finish`.
+1. Load `algorithms`, decompile the returned function offset and inspect its
+   relevant references. Recover a candidate multiply/add, 32-bit wrap,
+   rotate-left by 7 and final XOR. The constants are fixture-specific facts,
+   not values to assume for a new target.
+2. Write an independent checker such as the following, upload it with
+   `file_put`, then `job_start` with argv `["python3", <returned script path>,
+   "{target}"]`. The script receives the staged target in sys.argv[1].
+
+```python
+import json, subprocess, sys
+for x in [0, 1, 0x7fffffff, 0x80000000, 0xffffffff]:
+    mixed = (x * 1664525 + 1013904223) & 0xffffffff
+    expected = (((mixed << 7) | (mixed >> 25)) & 0xffffffff) ^ 0xa5a5a5a5
+    p = subprocess.run([sys.argv[1], str(x)], capture_output=True, timeout=2)
+    observed = p.stdout.decode().strip()
+    print(json.dumps({"x": x, "expected": f"{expected:08x}",
+                      "observed": observed, "exit_code": p.returncode}))
+    assert p.returncode == 0 and observed == f"{expected:08x}"
+```
+
+3. Read job_status and import artifacts. In this fixture, 0 -> 92dc0a3b,
+   1 -> e18913bb and 4294967295 -> 8f630cbb. Preserve disagreements instead
+   of editing expected values to fit the output.
+4. Save pseudocode, integer widths, decimal/hex I/O conventions and the
+   expected/observed vector table with static and execution evidence IDs.
+   Finish with the bounded conclusion: the recovered formula is consistent
+   with the inspected routine and tested vectors; untested environments and
+   inputs remain outside the observed execution coverage.
