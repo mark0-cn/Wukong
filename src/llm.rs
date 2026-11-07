@@ -45,6 +45,16 @@ pub enum Provider {
     Ollama,
 }
 
+/// Per-role model settings: the model name plus an optional per-request
+/// output budget. Provider, endpoint and credentials are inherited from the
+/// root settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleModelSpec {
+    pub model: String,
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+}
+
 /// Persistable model settings. `api_key_env` is a variable name, not a secret.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -55,17 +65,18 @@ pub struct ModelConfig {
     /// credentials are inherited from the root settings above; only the model
     /// name is swapped. When unset, role agents share the root model.
     pub role_model: Option<String>,
-    /// Per-role model-name overrides; a role present here wins over
-    /// `role_model`. Provider, endpoint and credentials are still inherited
-    /// from the root settings. A role mapped to the root model name runs with
-    /// the root settings (including `max_tokens`).
+    /// Per-role overrides; a role present here wins over `role_model`.
+    /// Provider, endpoint and credentials are still inherited from the root
+    /// settings. A role mapped to the root model name runs with the root
+    /// settings except its explicit `max_tokens`.
     #[serde(default)]
-    pub role_models: Option<HashMap<Role, String>>,
-    /// `max_tokens` override for role agents whose resolved model name
-    /// differs from the root model. Verbose role models (such as
-    /// deepseek-flash) can exhaust the root model's output budget and stop
-    /// with finish_reason=Length; raise it here. Only consulted when the
-    /// role resolves to a model other than the root model.
+    pub role_models: Option<HashMap<Role, RoleModelSpec>>,
+    /// `max_tokens` override for role agents with an explicit resolution
+    /// (role_models or role_model) that does not carry its own max_tokens,
+    /// even when they resolve to the root model name. Verbose role models
+    /// (such as deepseek-flash) can exhaust the root model's output budget
+    /// and stop with finish_reason=Length; raise it here. Unmapped roles
+    /// keep the root `max_tokens`.
     pub role_max_tokens: Option<u64>,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
@@ -100,8 +111,8 @@ impl ModelConfig {
         if role == Role::Root {
             return None;
         }
-        if let Some(name) = self.role_models.as_ref().and_then(|map| map.get(&role)) {
-            return Some(name);
+        if let Some(spec) = self.role_models.as_ref().and_then(|map| map.get(&role)) {
+            return Some(spec.model.as_str());
         }
         self.role_model.as_deref()
     }
@@ -109,15 +120,26 @@ impl ModelConfig {
     /// The model configuration for a role (non-root) agent: the root settings
     /// with the model name swapped when a role model is configured. A role
     /// with an explicit resolution (per-role map or `role_model`) receives
-    /// `role_max_tokens` when set, even when it resolves to the root model
-    /// name; roles without a resolution keep the root `max_tokens`.
+    /// its spec's `max_tokens` or the global `role_max_tokens` when set,
+    /// even when it resolves to the root model name; roles without a
+    /// resolution keep the root `max_tokens`.
     pub fn role_config_for(&self, role: Role) -> ModelConfig {
         let mut config = self.clone();
         config.role_model = None;
         config.role_models = None;
-        if let Some(name) = self.role_model_name(role) {
+        if role == Role::Root {
+            return config;
+        }
+        let explicit = self.role_models.as_ref().and_then(|map| map.get(&role));
+        let name = explicit
+            .map(|spec| spec.model.as_str())
+            .or(self.role_model.as_deref());
+        if let Some(name) = name {
             config.model = name.to_owned();
-            if let Some(max_tokens) = self.role_max_tokens {
+            let max_tokens = explicit
+                .and_then(|spec| spec.max_tokens)
+                .or(self.role_max_tokens);
+            if let Some(max_tokens) = max_tokens {
                 config.max_tokens = max_tokens;
             }
         }
@@ -133,11 +155,14 @@ impl ModelConfig {
             );
         }
         if let Some(role_models) = &self.role_models {
-            for name in role_models.values() {
+            for spec in role_models.values() {
                 ensure!(
-                    !name.trim().is_empty(),
-                    "role_models values must not be empty"
+                    !spec.model.trim().is_empty(),
+                    "role_models model must not be empty"
                 );
+                if let Some(max_tokens) = spec.max_tokens {
+                    ensure!(max_tokens > 0, "role_models max_tokens must be positive");
+                }
             }
         }
         if let Some(max_tokens) = self.role_max_tokens {

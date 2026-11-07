@@ -11,12 +11,12 @@ api_key_env = "OPENAI_API_KEY"
 # model. A cheaper/faster model keeps worker agents within their role token
 # quotas, e.g. "deepseek-flash" for DeepSeek endpoints.
 # role_model = "deepseek-flash"
-# Optional per-role overrides (win over role_model). Roles mapped to the root
-# model name run with the root settings, including max_tokens. Long-horizon
-# reasoning roles usually deserve the stronger model:
+# Optional per-role overrides (win over role_model). Each entry takes the
+# model name and an optional per-request output budget. Long-horizon
+# reasoning roles usually deserve the stronger model and a larger budget:
 # [model.role_models]
-# exploit = "deepseek-v4-pro"
-# verifier = "deepseek-v4-pro"
+# exploit = { model = "deepseek-v4-pro", max_tokens = 16384 }
+# verifier = { model = "deepseek-v4-pro", max_tokens = 16384 }
 # Optional: per-request output budget for role agents with an explicit
 # resolution (role_models or role_model), even when they resolve to the root
 # model name. Verbose role models can hit the root max_tokens and stop with

@@ -36,15 +36,17 @@ impl AssessmentRunner {
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
         let engine = Arc::new(DurableEngine::new(config.model.clone())?);
-        let mut explicit = HashSet::new();
+        let mut explicit: HashMap<String, Option<u64>> = HashMap::new();
         if let Some(map) = &config.model.role_models {
-            explicit.extend(map.values().cloned());
+            for spec in map.values() {
+                explicit.insert(spec.model.clone(), spec.max_tokens);
+            }
         }
         if let Some(name) = &config.model.role_model {
-            explicit.insert(name.clone());
+            explicit.entry(name.clone()).or_insert(None);
         }
         let mut role_engines = HashMap::new();
-        for name in explicit {
+        for (name, spec_max) in explicit {
             if role_engines.contains_key(&name) {
                 continue;
             }
@@ -52,7 +54,8 @@ impl AssessmentRunner {
             role.role_model = None;
             role.role_models = None;
             role.model = name.clone();
-            if let Some(max_tokens) = config.model.role_max_tokens {
+            let max_tokens = spec_max.or(config.model.role_max_tokens);
+            if let Some(max_tokens) = max_tokens {
                 role.max_tokens = max_tokens;
             }
             role_engines.insert(name, Arc::new(DurableEngine::new(role)?));
@@ -1153,8 +1156,8 @@ mod tests {
         config.model.provider = Provider::Ollama;
         config.model.base_url = Some(base);
         config.model.role_models = Some(HashMap::from([
-            (Role::Recon, "flash-fixture".to_string()),
-            (Role::Exploit, "pro-fixture".to_string()),
+            (Role::Recon, crate::llm::RoleModelSpec { model: "flash-fixture".into(), max_tokens: None }),
+            (Role::Exploit, crate::llm::RoleModelSpec { model: "pro-fixture".into(), max_tokens: None }),
         ]));
         config.execution.stream = false;
         config.execution.model_retries = 0;
@@ -1242,7 +1245,7 @@ mod tests {
         config.model.base_url = Some(base);
         config.model.role_models = Some(HashMap::from([(
             Role::Exploit,
-            config.model.model.clone(),
+            crate::llm::RoleModelSpec { model: config.model.model.clone(), max_tokens: None },
         )]));
         config.model.role_max_tokens = Some(4321);
         config.execution.stream = false;
