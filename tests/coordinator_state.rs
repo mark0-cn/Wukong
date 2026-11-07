@@ -139,6 +139,13 @@ fn concurrent_mailbox_delivery_and_checkpoint_ack_survive_restart() {
 fn wait_wakes_on_terminal_notification_and_completion_deduplicates() {
     let (_dir, store, c, run) = fixture();
     let child = c.create_child(&run.root_id, request("wait")).unwrap().agent;
+    // A large conversation checkpoint must never leak into the parent's
+    // wake-up message.
+    let mut child_record: AgentRecord = store.require("agent", &child.id).unwrap();
+    child_record.checkpoint = Some(json!({"transcript": "giant-checkpoint-marker-".repeat(2000)}));
+    store
+        .put("agent", &child.id, &run.id, &child_record)
+        .unwrap();
     assert_eq!(
         c.wait(&run.root_id, std::slice::from_ref(&child.id), 60)
             .unwrap()["parked"],
@@ -156,6 +163,17 @@ fn wait_wakes_on_terminal_notification_and_completion_deduplicates() {
         1
     );
     assert_eq!(c.wake_waiters(&run.id).unwrap(), 1);
+    let wake_message = store
+        .inbox(&run.root_id)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.sender == "coordinator")
+        .expect("wait_finished coordinator message");
+    assert!(
+        !wake_message.content.contains("giant-checkpoint-marker"),
+        "checkpoint data leaked into the parent context: {}",
+        wake_message.content.len()
+    );
     let root: AgentRecord = store.require("agent", &run.root_id).unwrap();
     assert_eq!(root.status, Status::Queued);
     assert!(c.finish(&run.root_id, "unread child results").is_err());
