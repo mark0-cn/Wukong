@@ -856,14 +856,8 @@ impl GhidraBackend {
         {
             cmd.creation_flags(0x08000000);
         }
-        #[cfg(unix)]
-        {
-            cmd.process_group(0);
-        }
-        let child = cmd
-            .spawn()
+        let mut killer = TreeKill::spawn(cmd)
             .with_context(|| format!("launch Ghidra {}", executable.display()))?;
-        let mut killer = TreeKill { child: Some(child) };
         let status = match tokio::time::timeout(
             Duration::from_secs(self.config.timeout_seconds),
             killer
@@ -965,37 +959,37 @@ impl Drop for ProjectLock {
 /// grandchild (a shell or cmd shim in between), which kill_on_drop alone
 /// would leave running after a cancellation.
 struct TreeKill {
-    child: Option<tokio::process::Child>,
+    child: Option<Box<dyn process_wrap::tokio::ChildWrapper>>,
 }
 impl TreeKill {
-    async fn terminate(&mut self) {
-        let Some(mut child) = self.child.take() else {
-            return;
-        };
-        #[cfg(windows)]
-        if let Some(pid) = child.id() {
-            let _ = tokio::process::Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .creation_flags(0x08000000)
-                .output()
-                .await;
-        }
+    fn spawn(command: tokio::process::Command) -> std::io::Result<Self> {
+        use process_wrap::tokio::*;
+        let mut command = CommandWrap::from(command);
+        command.wrap(KillOnDrop);
         #[cfg(unix)]
-        if let Some(pid) = child.id() {
-            let _ = tokio::process::Command::new("kill")
-                .args(["-KILL", "--", &format!("-{pid}")])
-                .output()
-                .await;
+        command.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        command.wrap(JobObject);
+        Ok(Self {
+            child: Some(command.spawn()?),
+        })
+    }
+
+    async fn terminate(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
         }
-        let _ = child.kill().await;
-        let _ = child.wait().await;
     }
 }
 impl Drop for TreeKill {
     fn drop(&mut self) {
-        if let Some(child) = self.child.take() {
-            let mut killer = TreeKill { child: Some(child) };
-            tokio::spawn(async move { killer.terminate().await });
+        if let Some(mut child) = self.child.take() {
+            // Signal the entire group/job synchronously; only reaping is deferred.
+            let _ = child.start_kill();
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+            });
         }
     }
 }
@@ -1004,6 +998,34 @@ impl Drop for TreeKill {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn process_wrap_cancels_descendants_after_the_launcher_exits() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let marker = directory.path().join("survived");
+        let ready = directory.path().join("ready");
+        let mut command = tokio::process::Command::new("python");
+        command.arg("-c").arg(r#"import subprocess,sys,pathlib
+subprocess.Popen([sys.executable,'-c',"import pathlib,time,sys;pathlib.Path(sys.argv[2]).write_text('ready');time.sleep(0.5);pathlib.Path(sys.argv[1]).write_text('alive')",sys.argv[1],sys.argv[2]])
+"#).arg(&marker).arg(&ready).stdout(Stdio::null()).stderr(Stdio::null());
+        let mut process = TreeKill::spawn(command)?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            process.child.as_mut().unwrap().wait().await?;
+            while !ready.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+        .await??;
+        drop(process);
+        tokio::time::sleep(Duration::from_millis(650)).await;
+        ensure!(
+            !marker.exists(),
+            "launcher exit left its descendant running"
+        );
+        Ok(())
+    }
 
     fn analysis_key(backend: &GhidraBackend, target: &Path) -> Result<String> {
         let hash = sha256_file(target)?;
