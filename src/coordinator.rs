@@ -383,6 +383,27 @@ impl Coordinator {
                     unresolved.join(", ")
                 );
             }
+            // Worker jobs (fuzz, replay, minimize, verification, angr) outlive
+            // their agents and keep running after finish_scan; completing the
+            // assessment while they run would strand them unaccounted.
+            let running_jobs: Vec<String> =
+                Store::tx_list::<serde_json::Value>(tx, "job", &agent.run_id)?
+                    .into_iter()
+                    .filter(|job| {
+                        let state = job["status"]["state"].as_str().unwrap_or_default();
+                        !matches!(
+                            state,
+                            "completed" | "failed" | "cancelled" | "timed_out" | "lost"
+                        )
+                    })
+                    .map(|job| job["id"].as_str().unwrap_or("unnamed").to_owned())
+                    .collect();
+            if !running_jobs.is_empty() {
+                bail!(
+                    "running worker jobs remain; wait for or cancel them before finish_scan: {}",
+                    running_jobs.join(", ")
+                );
+            }
         }
         agent.status = Status::Completed;
         agent.summary = Some(summary.to_owned());

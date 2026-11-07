@@ -51,6 +51,26 @@ fn child_creation_is_immediate_durable_and_scope_deduplicated() {
 }
 
 #[test]
+fn finish_scan_waits_for_running_worker_jobs() {
+    let (_dir, store, coordinator, run) = fixture();
+    let job = json!({"id":"job-1","run_id":run.id,"status":{"state":"running"}});
+    store.put("job", "job-1", &run.id, &job).unwrap();
+    let error = coordinator.finish(&run.root_id, "done").unwrap_err();
+    let message = format!("{error:#}");
+    assert!(message.contains("jobs remain"), "{message}");
+    // Polling job_status persists terminal states; only then can the root
+    // account for the job and finish.
+    let mut finished_job = job;
+    finished_job["status"]["state"] = json!("completed");
+    store.put("job", "job-1", &run.id, &finished_job).unwrap();
+    coordinator.finish(&run.root_id, "done").unwrap();
+    assert_eq!(
+        store.require::<RunRecord>("run", &run.id).unwrap().status,
+        Status::Completed
+    );
+}
+
+#[test]
 fn concurrent_spawns_have_a_single_scope_owner() {
     let (_dir, store, c, run) = fixture();
     let c = Arc::new(c);
