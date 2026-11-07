@@ -50,6 +50,11 @@ pub struct ModelConfig {
     /// credentials are inherited from the root settings above; only the model
     /// name is swapped. When unset, role agents share the root model.
     pub role_model: Option<String>,
+    /// `max_tokens` override for role agents. Verbose role models (such as
+    /// deepseek-flash) can exhaust the root model's output budget and stop
+    /// with finish_reason=Length; raise it here. Only consulted when
+    /// `role_model` is set.
+    pub role_max_tokens: Option<u64>,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
     pub max_tokens: u64,
@@ -64,6 +69,7 @@ impl Default for ModelConfig {
             provider: Provider::OpenAi,
             model: "gpt-5.2".into(),
             role_model: None,
+            role_max_tokens: None,
             base_url: None,
             api_key_env: None,
             max_tokens: 8192,
@@ -81,6 +87,9 @@ impl ModelConfig {
         let mut config = self.clone();
         if let Some(role_model) = &self.role_model {
             config.model = role_model.clone();
+            if let Some(max_tokens) = self.role_max_tokens {
+                config.max_tokens = max_tokens;
+            }
         }
         config
     }
@@ -92,6 +101,9 @@ impl ModelConfig {
                 !role_model.trim().is_empty(),
                 "role_model must not be empty when set"
             );
+        }
+        if let Some(max_tokens) = self.role_max_tokens {
+            ensure!(max_tokens > 0, "role_max_tokens must be positive");
         }
         ensure!(self.max_tokens > 0, "max_tokens must be positive");
         ensure!(
