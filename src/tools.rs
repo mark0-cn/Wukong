@@ -277,7 +277,7 @@ fn builtins() -> Vec<Spec> {
         ),
         spec(
             "think",
-            "Record private scratch reasoning (plans, notes, partial analysis). It is stored for audit but never read back into the conversation and never shown to other agents; keep conclusions in the conversation instead.",
+            "Record a concise audited scratch note for this agent. The original content remains in tool-call history and may be inherited by children; this is neither a private channel nor a context-saving mechanism. Use note_save for shared conclusions.",
             json!({"content":id}),
             &["content"],
             true,
