@@ -224,7 +224,9 @@ pub struct AgentRecord {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DependencyPolicy {
     #[default]
@@ -241,7 +243,7 @@ pub enum DependencyState {
     Blocked { reason: String },
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct TaskContract {
     pub objective: String,
@@ -253,7 +255,9 @@ pub struct TaskContract {
     pub completion_conditions: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    schemars::JsonSchema, Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskOutcome {
     #[default]
@@ -263,14 +267,14 @@ pub enum TaskOutcome {
     Cancelled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskArtifact {
     pub name: String,
     pub evidence_id: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskResult {
     pub outcome: TaskOutcome,
@@ -413,7 +417,7 @@ pub struct Evidence {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingStage {
     Suspected,
@@ -423,7 +427,7 @@ pub enum FindingStage {
     Inconclusive,
     Rejected,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
     Critical,
