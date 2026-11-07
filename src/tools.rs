@@ -37,6 +37,7 @@ pub struct ToolService {
 }
 
 mod args;
+mod discovery;
 
 struct Spec {
     parse: fn(Value) -> Result<Value>,
@@ -80,6 +81,18 @@ fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     let mut specs = vec![
+        spec::<args::ToolSearchArgs>(
+            "tool_search",
+            "Find permitted tools by group or whitespace-separated keywords in names/descriptions. Returns bounded catalog entries, not schemas. Use the deferred_groups directory in the prompt, follow next_offset, then tools_load exact names. Does not execute or activate tools.",
+            false,
+            false,
+        ),
+        spec::<args::ToolsLoadArgs>(
+            "tools_load",
+            "Replace this task generation's optional tool selection with up to 12 exact names from tool_search. Core tools stay available; full schemas appear on the NEXT fresh model request. An empty names list unloads optional tools. Selection never grants role permissions or executes a selected tool.",
+            true,
+            false,
+        ),
         spec::<args::CreateAgentArgs>(
             "create_agent",
             "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors gates admission with dependency_policy (default all_success). Failed requirements block execution and notify the parent.",
@@ -688,6 +701,8 @@ impl ToolService {
         args: Value,
     ) -> Result<Value> {
         match name {
+            "tool_search" => self.search_tools(agent, &args),
+            "tools_load" => self.load_tools(agent, call_id, &args),
             "create_agent" => self.create_agent(agent, call_id, &args),
             "view_agent_graph" => {
                 let mut sessions = Vec::new();

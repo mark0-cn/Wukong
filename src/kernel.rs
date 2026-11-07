@@ -250,7 +250,7 @@ pub(crate) fn drive(
             AgentId(run.root_id.clone()),
             connection.clone(),
             BusinessTask,
-            ToolAccess::All,
+            tool_access(&runner, &runner.store.require("agent", &run.root_id)?)?,
         ));
         app.world_mut()
             .entity_mut(root)
@@ -367,6 +367,12 @@ fn task_schema() -> Value {
 fn allowed(runner: &AssessmentRunner, role: Role, name: &str) -> bool {
     matches!(name, "task" | "message" | "wait")
         || (name != "create_agent" && runner.tools.allows(role, name))
+}
+
+fn tool_access(runner: &AssessmentRunner, agent: &AgentRecord) -> Result<ToolAccess> {
+    let mut names = runner.tools.model_tool_names(agent)?;
+    names.extend(["task", "message", "wait"].map(str::to_owned));
+    Ok(ToolAccess::Only(names.into_iter().collect()))
 }
 
 fn prepare_spawns(
@@ -512,9 +518,16 @@ fn configure_spawned(
                 .engine_for(child.role)
                 .connection(application.runner.config().execution.stream);
             let choice = ModelChoice(connection.spec.reference());
-            commands
-                .entity(spawned.0)
-                .insert((BusinessTask, ToolAccess::All, connection));
+            match tool_access(&application.runner, &child) {
+                Ok(access) => {
+                    commands
+                        .entity(spawned.0)
+                        .insert((BusinessTask, access, connection));
+                }
+                Err(error) => {
+                    fatal.0.get_or_insert(error);
+                }
+            }
             commands
                 .entity(spawned.0)
                 .insert(choice)
@@ -527,6 +540,7 @@ fn configure_agents(
     agents: Query<(Entity, &AgentId), (With<Agent>, Without<BusinessTask>)>,
     application: Res<Application>,
     mut commands: Commands,
+    mut fatal: ResMut<Fatal>,
 ) {
     for (entity, id) in &agents {
         if let Ok(Some(agent)) = application.runner.store.get::<AgentRecord>("agent", &id.0) {
@@ -535,9 +549,16 @@ fn configure_agents(
                 .engine_for(agent.role)
                 .connection(application.runner.config().execution.stream);
             let choice = ModelChoice(connection.spec.reference());
-            commands
-                .entity(entity)
-                .insert((BusinessTask, ToolAccess::All, connection));
+            match tool_access(&application.runner, &agent) {
+                Ok(access) => {
+                    commands
+                        .entity(entity)
+                        .insert((BusinessTask, access, connection));
+                }
+                Err(error) => {
+                    fatal.0.get_or_insert(error);
+                }
+            }
             commands
                 .entity(entity)
                 .insert(choice)
@@ -587,7 +608,8 @@ fn prepare_models(
             Without<BusinessPrepared>,
         ),
     >,
-    mut owners: Query<(&AgentId, &mut Conversation)>,
+    mut owners: Query<(&AgentId, &mut Conversation, &mut ToolAccess)>,
+    definitions: Query<&ToolDef>,
     application: Res<Application>,
     mut fatal: ResMut<Fatal>,
     mut commands: Commands,
@@ -596,7 +618,7 @@ fn prepare_models(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let (id, mut conversation) = owners.get_mut(from.0)?;
+                let (id, mut conversation, mut access) = owners.get_mut(from.0)?;
                 let agent: AgentRecord = application.runner.store.require("agent", &id.0)?;
                 if !agent.predecessors_released {
                     return Ok(());
@@ -611,6 +633,10 @@ fn prepare_models(
                     config.skills_dir.as_deref(),
                     config.demos_dir.as_deref(),
                 )?;
+                preamble.push_str(&format!(
+                    "\nTool directory (capability metadata):\n{}",
+                    serde_json::to_string(&application.runner.tools.discovery_context(&agent)?)?
+                ));
                 for skill in &agent.active_skills {
                     ensure!(
                         crate::binary::sha256_bytes(skill.content.as_bytes()) == skill.sha256,
@@ -650,9 +676,28 @@ fn prepare_models(
                 request.max_tokens = Some(model_config.max_tokens);
                 request.temperature = model_config.temperature;
                 request.additional_params = model_config.additional_params;
+                let mut names = application.runner.tools.model_tool_names(&agent)?;
+                names.extend(["task", "message", "wait"].map(str::to_owned));
+                // Rebuild from Rig's registry: its initial request was built
+                // with the previous selection, which can hide newly loaded tools.
+                request.tools = definitions
+                    .iter()
+                    .filter(|definition| {
+                        names.contains(definition.0.name.as_str())
+                            && allowed(&application.runner, agent.role, definition.0.name.as_str())
+                    })
+                    .map(|definition| definition.0.clone())
+                    .collect();
                 request
                     .tools
-                    .retain(|def| allowed(&application.runner, agent.role, def.name.as_str()));
+                    .sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+                *access = ToolAccess::Only(
+                    request
+                        .tools
+                        .iter()
+                        .map(|definition| definition.name.to_string())
+                        .collect(),
+                );
                 // Rig's retention and summary splice preserve tool pairing, author
                 // attribution and undo data. Full transcripts remain in its journal
                 // and in integrity-checked evidence.
@@ -1133,7 +1178,7 @@ impl Serve for BusinessTool {
             if !output.is_error
                 && !matches!(
                     name.as_str(),
-                    "load_skill" | "context_search" | "context_read"
+                    "load_skill" | "context_search" | "context_read" | "tool_search" | "tools_load"
                 )
                 && application.runner.config().execution.summarize_tool_outputs
                 && output.value.to_string().len()
