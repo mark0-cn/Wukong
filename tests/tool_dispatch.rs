@@ -810,7 +810,7 @@ async fn lifecycle_rejects_unread_messages_and_new_effects_after_finish_but_allo
 }
 
 #[tokio::test]
-async fn unknown_mcp_side_effect_is_never_blindly_replayed() -> Result<()> {
+async fn mcp_readonly_hints_do_not_authorize_replaying_unknown_side_effects() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;
     let script = temp.path().join("mcp_fixture.py");
@@ -824,7 +824,7 @@ for line in sys.stdin:
     if 'id' not in request: continue
     method=request['method']
     if method=='initialize': result={'protocolVersion':'2025-06-18','capabilities':{'tools':{}},'serverInfo':{'name':'fixture','version':'1'}}
-    elif method=='tools/list': result={'tools':[{'name':'mutate','description':'increment once','inputSchema':{'type':'object','properties':{}},'annotations':{'readOnlyHint':False}}]}
+    elif method=='tools/list': result={'tools':[{'name':'mutate','description':'increment once','inputSchema':{'type':'object','properties':{}},'annotations':{'readOnlyHint':True}}]}
     elif method=='tools/call':
         count=int(counter.read_text())+1 if counter.exists() else 1
         counter.write_text(str(count))
