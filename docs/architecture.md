@@ -1,6 +1,6 @@
 # Rust / Rig 二进制逆向 Agent 实现架构
 
-本项目按 Strix 的模块职责与运行语义重建：根 agent 调度、动态子 agent、消息、独立会话、沙箱工具、skills、证据与独立验证。`strix-rig-binary-agent-plan.md` 是需求基线，`implementation-contract.md` 记录验收不变量。控制端使用 Rust，模型循环固定使用 Rig 0.46.0。
+本项目按 Strix 的模块职责与运行语义重建：根 agent 编排、动态子 agent、消息、独立会话、沙箱工具、skills、证据与独立验证。`strix-rig-binary-agent-plan.md` 是历史需求基线，`implementation-contract.md` 记录验收不变量。控制端使用 Rust，生产执行循环固定使用 Rig 0.46.0 的 ECS 内核及原生 SubagentsPlugin。
 
 ## 模块与职责
 
@@ -8,24 +8,26 @@
 |---|---|
 | `domain` | run/agent/message/event/tool/evidence/finding/verification/coverage 的持久化记录 |
 | `store` | SQLite 事务、事件与邮箱、按内容哈希保存的原始产物 |
-| `coordinator` | 父子树、动态任务去重、状态转移、消息与等待唤醒、预算和完成门槛 |
-| `agents`、`skills/` | 根 agent 与领域角色提示词、继承上下文、角色能力范围 |
-| `llm` | provider 配置、Rig AgentRun、准备模型请求、工具结果回放、压缩与版本检查 |
-| `runner` | 调度可运行 agent，驱动模型效果与工具效果，保存恢复点 |
+| `coordinator` | 业务父子树、任务去重、契约、状态转移、消息账本、依赖和完成门槛 |
+| `agents`、`skills/` | 根 agent 与领域角色提示词、角色能力范围 |
+| `llm` | provider 配置与原生连接、结构化工具摘要及摘要用量 hook |
+| `runner` | 启动原生内核、租约、业务预算、事件与证据摘要 |
+| `kernel` | Rig 执行与日志、子任务及消息协议的业务接入，模型与工具准入、原生会话投影 |
 | `tools` | 类型化参数、权限/路径检查、工具调用记录、输出截断与证据引用 |
 | `binary` | ELF/PE/Mach-O 画像、SHA256、字符串、Ghidra headless 后端 |
 | `runtime`、`workers/runtime` | 隔离运行、持久化 worker、GDB/MI 会话、AFL++ 任务、崩溃重放与最小化 |
-| `mcp` | 第三方 MCP 工具扩展 |
+| `mcp` | rmcp 协议与 Rig 工具定义、命名空间、超时、环境变量及消息大小限制 |
 | `report`、`interface` | 报告导出、CLI、TUI、人工查询与干预 |
 
 ## 一次任务如何运行
 
 1. 导入目标并记录完整 SHA256、路径和配置，创建根 run 与根 agent。
-2. 根 agent 调用 `create_agent`，事务写入子任务后立即返回。子任务按角色、scope 去重，并受数量、并发、深度、时间和 token 预算约束。
-3. 每个 agent 有独立的 Rig `AgentRun` 检查点。模型请求与工具执行由控制端驱动，执行边界保存到 SQLite。
-4. 子 agent 通过持久化邮箱协作；等待时释放执行机会。子任务完成消息有去重键，父任务从消息或等待事件继续。
-5. 工具原始结果写入证据目录，模型只获取有界摘要和证据 ID。通用分析信息写入共享笔记、待办与 coverage；threat model 仅在安全边界分析中按需建立。压缩会话时保留这些共享资料及原始检查点的证据引用，协调消息进入可压缩的会话历史。
-6. 已确认影响必须关联独立 verifier 的验证记录。根任务完成前，活动后代和明确需要跟进的覆盖项必须得到处理。
+2. 根 agent 调用原生 `task`，使用 description、prompt、role、scope 及可选 contract 等字段。业务层事务写入子任务后，Rig 异步创建子 agent 并返回。按角色、scope 去重；前驱未完成时只阻止子任务的模型请求，不阻塞创建者。
+3. 每个 agent 有独立的原生 Conversation；AgentPlugin 驱动模型与工具效果，SessionLogPlugin 保存可恢复日志，EffectLogPlugin 保存效果记录。SQLite 保留业务账本与供 CLI/TUI 查询的会话投影。并发额度按在途模型请求计算，等待中的父任务不占模型名额。
+4. SubagentsPlugin 负责创建、请求、报告与取消。`wait` 等待一个可达 agent，`wait_for_agents` 提供业务成功条件。完成通知按 generation 去重，并绑定一次原生 Report。普通信息不释放等待；已完成任务的新工作必须使用 `follow_up_agent`。
+5. 工具 schema 和校验复用 Rig。原始结果写入证据目录，模型只获取有界摘要和证据 ID；摘要采用 AgentRunner 的类型化输出和 AgentHook 计量，身份及状态字段由宿主保留。通用分析信息写入共享笔记、待办与 coverage；threat model 仅在安全边界分析中按需建立。
+6. 会话保留、工具调用配对及摘要替换复用 rig-memory，保留共享资料和原始会话的证据引用。继承上下文只复制已闭合的父对话，不为尚未返回的工具调用制造结果。重试采用 Rig 的错误分类与 Retry-After；用量计价采用 Rig Pricing，业务层继续执行预算暂停。
+7. 已确认影响必须关联独立 verifier 的验证记录。`agent_finish` 与 `finish_scan` 先通过业务验收，包括契约、证据和会话清理，再由原生协议报告完成；普通文本答案不能绕过这些门槛。
 
 ## 状态与恢复
 
@@ -35,11 +37,13 @@ agent 状态包括 queued、running、waiting、budget_paused、completed、stop
 
 子 agent 完成前须关闭自己持有的调试和交互会话，根任务完成前须处理全部会话。停止或失败的 owner 遗留会话可以由同任务的其他子 agent 关闭；该权限不允许发送调试命令或交互输入。
 
-Rig 检查点序列化模型对话和 provider 原生状态，不包含模型客户端或凭据。检查点带 Rig 版本；跨版本恢复必须显式迁移。密钥由配置指定的环境变量提供。上下文压缩记录原始用量和压缩元数据，证据文件独立保留。
+Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，不迁移旧版自定义 AgentRun 检查点。
+
+业务工具调用标识由 agent、generation、已计量模型轮次与 provider tool-call ID 构成，不依赖恢复后会重新分配的 ECS 实体或效果 ID。中断后先重入业务调用账本，复用已完成结果或核对未决状态。原生效果及数据库变化唤醒执行循环；一秒心跳仅用于租约、时间预算及外部操作检查。
 
 `load_skill` 将本地 skill 的正文、SHA256 与原始证据引用保存为 agent 的活动指令快照，在下一次新模型请求的系统提示词中生效。已冻结的请求保持原样；源文件后续变化不会悄悄改写已加载的快照。动态指令不经过工具结果摘要，压缩和恢复保留其内容。单个 skill 上限为 64 KiB；root 编排规则只允许 root 角色加载。
 
-外部进程与模型状态分别恢复。worker 的 debugger/fuzz/job handle 需要重新核对存活状态；保存了 pid 或 SQLite 状态不等于进程仍在运行。已完成的有副作用工具调用复用记录，无法确定结果的调用不能盲目重放。GDB 同一会话只允许 owner 顺序修改；并行实验创建独立进程。
+外部进程与模型状态分别恢复。worker 的 debugger/fuzz/job handle 需要重新核对存活状态；保存了 pid 或 SQLite 状态不等于进程仍在运行。已完成的有副作用工具调用复用记录，无法确定结果的调用不能盲目重放。MCP 的 readOnlyHint 通过 Rig 的提示语义处理，不足以授权重放结果未知的远端调用。GDB 同一会话只允许 owner 顺序修改；并行实验创建独立进程。原生内核只注册配置允许的业务工具，不加载宿主 shell 或通用编码工具。
 
 ## 地址与静态分析
 
@@ -59,7 +63,7 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 
 `fixtures/` 包含符号/stripped 的本地漏洞、修复与正常样本。构建脚本生成 ELF，行为 harness 实际重放并保存哈希与退出结果；检测准确率由独立报告和显式复核标签计算，不从 crash 推断 agent 检测成功。详见 `fixtures/README.md`。
 
-首版动态工具集中在 Linux x86_64 ELF。控制端可以运行于 Windows；PE/Mach-O 静态画像可用，但本仓库未实现 Windows DbgEng 或 macOS LLDB 动态后端。外部工具与模型 provider 的环境依赖需要实际配置，缺少依赖会返回明确错误。
+首版动态工具集中在 Linux x86_64 ELF。PE/Mach-O 静态画像可用，但本仓库未实现 Windows DbgEng 或 macOS LLDB 动态后端。本轮原生内核验证在 macOS 完成，Windows 控制端尚未验证。外部工具与模型 provider 的环境依赖需要实际配置，缺少依赖会返回明确错误；本地协议测试不等同于线上 provider 或外部引擎验收。
 
 ## Typed coordination messages
 
@@ -69,19 +73,26 @@ information: it neither reopens completed work nor interrupts a wait. Questions,
 replies, results and blocked notices can interrupt a waiter without erasing its
 wait condition. Only explicit `follow_up_agent` reopens completed work.
 
-`queued` means durably enqueued; `included` means installed in a checkpointed
-provider request, not that the model has acted. `replied` records an explicit
+`queued` means durably enqueued; `included` means accepted into the native
+conversation/context and journal, not that a model request ran or acted on it.
+`replied` records an explicit
 correlated reply (not an assessment of correctness). Old-generation replies are
 retained as `stale` and never injected as current work. `message_status` exposes
-these states. Frozen model requests keep their original mailbox snapshot.
+these states. In-flight model requests keep their original mailbox snapshot.
 This increment uses a fresh schema 2 store; no old-database migration is provided.
 Informational mail left on completed work becomes
 stale when a new generation starts. CLI messages default to information; TUI
 operator input is a question and does not implicitly reopen completed work.
 
+The native `message` tool opens a request or sends a reply to a reachable active
+agent. Use typed `send_message_to_agent` for informational updates and correlated
+mail, and `follow_up_agent` for additional work after completion. Native wait
+delivery and typed mailbox receipts are projected together; receipt inclusion
+does not prove that the model processed or answered the message.
+
 ## Task contracts and results
 
-`create_agent.contract` optionally declares an objective, input evidence IDs,
+`task.contract` optionally declares an objective, input evidence IDs,
 constraints, required named deliverables and completion-condition labels. A task
 without extra requirements uses its task text as the objective.
 The contract is installed in the specialist prompt and survives checkpoints.
@@ -114,7 +125,8 @@ errors, never assumed successes.
 
 Before model scheduling, a transaction either releases the gate or records a
 blocked result, fails the unstarted child, archives its result and notifies the
-parent. Failure propagates through dependent children without model calls. The
+parent. Released models receive the predecessor results in their request context.
+Failure propagates through dependent children without model calls. The
 release event records producer generations/outcomes; once admitted, later producer
 follow-ups do not revoke the consumer. New dependent work evaluates the latest
 producer result. This is admission ordering, not automatic live dataflow: required

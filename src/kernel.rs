@@ -174,8 +174,19 @@ pub(crate) fn drive(
         .query::<&mut ToolDef>()
         .iter_mut(app.world_mut())
     {
-        if def.0.name.as_str() == "task" {
-            Arc::make_mut(&mut def.0).parameters = task_schema.clone();
+        let definition = Arc::make_mut(&mut def.0);
+        match definition.name.as_str() {
+            "task" => {
+                definition.parameters = task_schema.clone();
+                definition.description = "Start an asynchronous analysis subagent. Supply a short description, a full prompt, role and scope; include known evidence, constraints and expected outputs. Optional skills, inherit_context, contract, wait_for_predecessors and dependency_policy refine the assignment. The call returns before work finishes; predecessor gates hold the child's model requests until satisfied. Model choice and tool permissions come from controller configuration and the role. Inspect the agent graph before duplicating work. Use follow_up_agent for new work on a completed child, wait for one agent's report, or wait_for_agents for a group or success policy.".into();
+            }
+            "message" => {
+                definition.description = "Send a request, correction or reply to a reachable active agent using agent and text. Use send_message_to_agent with kind=information for progress-only updates, which must not release waits. New work on a completed agent requires follow_up_agent.".into();
+            }
+            "wait" => {
+                definition.description = "Wait for a requested reply or report from one reachable agent. Receiving a reply does not establish task success. Use wait_for_agents to collect multiple tasks or require all_success, all_terminal or any_success; inspect their structured outcomes.".into();
+            }
+            _ => {}
         }
     }
     let mut definitions = HashMap::new();

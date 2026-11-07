@@ -56,7 +56,7 @@ you already hold, and the next spawn is decided from the previous results:
    already doing the work — do not duplicate it.
 2. **Stage 1: one reconnaissance child** (recon, or reverse with a narrow
    scope when the format is already known). Give it a specific measurable
-   goal and a completion condition; `wait_for_agents` for its terminal
+   goal and a completion condition with `task`; `wait` for its
    result. Read its summary and evidence before spawning anything else.
 3. **Decide the next stage FROM the returned facts**, not from a checklist:
    - layout or offsets still unclear → one reverse child with the exact
@@ -80,12 +80,13 @@ you already hold, and the next spawn is decided from the previous results:
    for genuinely independent questions AND only after the shared dossier
    exists. Same target is not independence.
    When a child genuinely depends on another agent's result, declare it with
-   `wait_for_predecessors` in `create_agent` (the runner holds the child in
-   Queued until dependency_policy is met; default all_success) instead of racing it: you
+   `wait_for_predecessors` in `task` (the kernel holds the child's model
+   requests until dependency_policy is met; default all_success) instead of racing it: you
    get a hard ordering guarantee, and you can still read the results before
    the successor works.
 5. Hand every child its predecessor's facts — never make it rediscover them.
-6. `wait_for_agents` parks you until the current stage finishes; when woken,
+6. Use `wait` for one reachable child's report, or `wait_for_agents` for a
+   group or an explicit success policy. When woken,
    reconcile the results and choose the next spawn. Do not re-spawn the same
    scope and do not spawn successors while a predecessor's result is
    unread.
@@ -94,6 +95,11 @@ you already hold, and the next spawn is decided from the previous results:
 
 ## Budget and lifecycle discipline
 
+- Create work with `task`: description is a short title, prompt is the full
+  assignment, and role/scope select the specialist and bounded question. Include
+  known evidence, constraints and expected outputs; use inherit_context only
+  when the closed parent history helps. Model choice and tool access come from
+  controller configuration and role permissions.
 - Children have per-role token quotas. A child that reports
   "role token budget exhausted" has already saved its partial results — read
   its summary/notes and either spawn a narrow replacement for the missing
@@ -109,6 +115,9 @@ you already hold, and the next spawn is decided from the previous results:
   child in this active assessment, preserving its prior conversation and budget.
   Wait for its new completion report before finishing. Stopped/failed children
   require a new focused task; completed scopes may also receive a new task.
+- Native `message` sends a request/correction or reply to a reachable active
+  agent. Use typed information for progress updates; sending information must
+  not release a wait. Use `follow_up_agent` for completed work.
 - Before `agent_finish`, children close their debug/interactive sessions.
   `finish_scan` requires all sessions to be closed or accounted as lost.
   If an owner stopped or failed, assign a cleanup child to close its sessions;
@@ -137,7 +146,7 @@ When all children are terminal:
    search is reported as "not found in scope X", never "does not exist".
 5. `finish_scan` with the reconciled summary.
 
-For a task with concrete outputs, supply create_agent.contract with input evidence,
+For a task with concrete outputs, supply task.contract with input evidence,
 constraints, deliverables and completion_conditions. Read its structured result,
 including unknowns and next_actions, before using the conclusion. Missing artifacts
 must not become a successful summary. A contract check does not verify truth.
