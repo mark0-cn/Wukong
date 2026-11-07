@@ -851,6 +851,7 @@ class Runtime:
             meta["fuzzer_stats"] = stats
             meta["crashes"] = isolated_crashes if isolated_crashes is not None else [artifact(self.root, path) for path in sorted(out.glob("*/crashes/id*"))[:128] if path.is_file()]
             meta["crash_reporting_override"] = spec.get("env", {}).get("AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES") == "1"
+            meta["crash_collection_disabled"] = spec.get("env", {}).get("AFL_SKIP_CRASHES") == "1"
         return meta
 
     def dispatch(self, method, params):
@@ -997,8 +998,12 @@ class Runtime:
             timeout_ms = bounded_int(params.get("exec_timeout_ms"), 1000, 10, 60000)
             memory_mb = bounded_int(params.get("memory_mb"), 256, 16, 65536)
             argv = ["afl-fuzz", "-Q", "-i", str(seeds), "-o", str(output), "-V", str(seconds), "-t", str(timeout_ms), "-m", str(memory_mb), "--", str(target)] + params.get("args", ["@@"])
+            # Do not inject AFL_SKIP_CRASHES: crashing inputs are the campaign's
+            # product and must be saved under crashes/. Callers may still pass
+            # it (or any AFL_* override) explicitly via env, and fuzz.status
+            # reports that crash collection is disabled.
             spec = {**params, "argv": argv, "afl_output": output_relative, "timeout_secs": seconds + 15,
-                    "env": {**params.get("env", {}), "AFL_SKIP_CPUFREQ": "1", "AFL_NO_UI": "1", "AFL_SKIP_CRASHES": "1"}}
+                    "env": {**params.get("env", {}), "AFL_SKIP_CPUFREQ": "1", "AFL_NO_UI": "1"}}
             return self.start_job(spec, "fuzz")
         if method in {"crash.replay", "poc.verify", "input.minimize"}:
             return self.start_job(params, {"crash.replay": "replay", "poc.verify": "verify", "input.minimize": "minimize"}[method])
