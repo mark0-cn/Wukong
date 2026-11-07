@@ -38,7 +38,7 @@ struct Connection {
 #[derive(Clone, Default)]
 pub struct McpRegistry {
     connections: BTreeMap<String, Arc<Connection>>,
-    tools: BTreeMap<String, (String, String, ToolDefinition, bool)>,
+    tools: BTreeMap<String, (String, String, ToolDefinition)>,
 }
 impl McpRegistry {
     pub async fn connect(servers: &[McpServerConfig]) -> Result<Self> {
@@ -169,9 +169,12 @@ impl McpRegistry {
                     .as_ref()
                     .and_then(|annotations| annotations.read_only_hint)
                     .unwrap_or(false);
+                let definition = definition.with_annotations(
+                    rig::completion::ToolAnnotations::default().with_read_only(read_only),
+                );
                 registry
                     .tools
-                    .insert(name, (config.name.clone(), original, definition, read_only));
+                    .insert(name, (config.name.clone(), original, definition));
             }
             registry.connections.insert(
                 config.name.clone(),
@@ -185,18 +188,18 @@ impl McpRegistry {
         Ok(registry)
     }
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.values().map(|(_, _, d, _)| d.clone()).collect()
+        self.tools.values().map(|(_, _, d)| d.clone()).collect()
     }
     pub fn contains(&self, name: &str) -> bool {
         self.tools.contains_key(name)
     }
     pub fn side_effecting(&self, name: &str) -> bool {
-        self.tools
-            .get(name)
-            .is_none_or(|(_, _, _, readonly)| !*readonly)
+        self.tools.get(name).is_none_or(|(_, _, definition)| {
+            !rig_core::tool::Touches::from_hints(&definition.annotations).reads_only()
+        })
     }
     pub async fn call(&self, name: &str, arguments: Value) -> Result<Value> {
-        let (server, tool, _, _) = self.tools.get(name).context("unknown MCP tool")?;
+        let (server, tool, _) = self.tools.get(name).context("unknown MCP tool")?;
         let connection = self
             .connections
             .get(server)
