@@ -44,6 +44,78 @@ fn result(outcome: &ToolOutcome) -> &Value {
 }
 
 #[tokio::test]
+async fn activated_skills_are_exact_durable_snapshots_with_idempotent_receipts() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, run, agent) = fixture(temp.path())?;
+    let skills = temp.path().join("skills");
+    fs::create_dir(&skills)?;
+    let original = "# Custom method\nPreserve this precise instruction.\n".repeat(300);
+    fs::write(skills.join("method.md"), &original)?;
+    let config = AppConfig {
+        skills_dir: Some(skills.clone()),
+        ..AppConfig::default()
+    };
+    let service = ToolService::new(config, store.clone()).await?;
+    let activated = service
+        .execute(
+            &agent.id,
+            "activate",
+            "load_skill",
+            json!({"name":"method"}),
+        )
+        .await?;
+    assert!(!activated.is_error, "{activated:?}");
+    assert_eq!(result(&activated)["active"], true);
+    assert!(
+        activated.value.to_string().len() < 2000,
+        "activation must not expose a summarizable copy of the instructions"
+    );
+    let snapshot = store
+        .require::<AgentRecord>("agent", &agent.id)?
+        .active_skills
+        .remove(0);
+    assert_eq!(snapshot.content, original);
+    assert_eq!(
+        store.read_evidence(&run.id, &snapshot.evidence_id)?,
+        original.as_bytes()
+    );
+    fs::write(skills.join("method.md"), "changed on disk")?;
+    let replay = service
+        .execute(
+            &agent.id,
+            "activate",
+            "load_skill",
+            json!({"name":"method"}),
+        )
+        .await?;
+    assert_eq!(activated.value, replay.value);
+    let reopened = Store::open(temp.path().join("state"))?;
+    assert_eq!(
+        reopened
+            .require::<AgentRecord>("agent", &agent.id)?
+            .active_skills[0]
+            .content,
+        original
+    );
+    let denied = service
+        .execute(&agent.id, "root-role", "load_skill", json!({"name":"root"}))
+        .await?;
+    assert!(denied.is_error);
+    fs::write(skills.join("oversize.md"), "x".repeat(65537))?;
+    let oversize = service
+        .execute(
+            &agent.id,
+            "oversize",
+            "load_skill",
+            json!({"name":"oversize"}),
+        )
+        .await?;
+    assert!(oversize.is_error);
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn model_coordination_checks_dependencies_and_reopens_completed_children() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, agent) = fixture(temp.path())?;

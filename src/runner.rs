@@ -341,6 +341,9 @@ impl AssessmentRunner {
             if !self.reserve_budget(agent_id)? {
                 return Ok(());
             }
+            if !durable.has_prepared_model_call() {
+                durable.apply_active_skills(&agent.active_skills)?;
+            }
             // A queued note belongs to a fresh provider request. Pending tool
             // effects and replayed requests cannot observe newly arrived mail.
             let inbox = if durable.has_prepared_model_call() {
@@ -468,7 +471,7 @@ impl AssessmentRunner {
                         // with an LM summary. The call record is updated so
                         // every durable replay returns the same envelope the
                         // model actually saw.
-                        if self.config.execution.summarize_tool_outputs {
+                        if name != "load_skill" && self.config.execution.summarize_tool_outputs {
                             let size = serde_json::to_string(&output.value)?.len();
                             if size > self.config.execution.summarize_threshold_chars {
                                 let (summary, usage) = engine
@@ -894,6 +897,70 @@ mod tests {
                 .contains("Explain the length field in more detail")
         );
         runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn loaded_skill_instructions_reach_the_next_request_without_a_summary_call() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            request(&mut socket).await;
+            respond(&mut socket, reply("load_skill", json!({"name":"method"}))).await;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let next = request(&mut socket).await;
+            assert!(next["messages"].as_array().unwrap().iter().any(|message| {
+                message["role"] == "system"
+                    && message["content"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .contains("exact_skill_end_marker")
+            }));
+            assert!(!next.to_string().contains("replacement_disk_content"));
+            respond(
+                &mut socket,
+                reply("finish_scan", json!({"summary":"method verified"})),
+            )
+            .await;
+        });
+        let (dir, original, run) = fixture(base).await;
+        let skills = dir.path().join("skills");
+        std::fs::create_dir(&skills).unwrap();
+        let content = format!(
+            "{}\nexact_skill_end_marker",
+            "Preserve the exact method and its conditions.\n".repeat(500)
+        );
+        std::fs::write(skills.join("method.md"), &content).unwrap();
+        let mut config = original.config.clone();
+        config.skills_dir = Some(skills.clone());
+        let runner = AssessmentRunner::new(config, original.store.clone())
+            .await
+            .unwrap();
+        runner.slice(&run.root_id).await.unwrap();
+        runner.slice(&run.root_id).await.unwrap();
+        std::fs::write(skills.join("method.md"), "replacement_disk_content").unwrap();
+        runner.slice(&run.root_id).await.unwrap();
+        runner.slice(&run.root_id).await.unwrap();
+        assert_eq!(
+            runner
+                .store
+                .require::<RunRecord>("run", &run.id)
+                .unwrap()
+                .status,
+            Status::Completed
+        );
+        assert_eq!(
+            runner
+                .store
+                .require::<AgentRecord>("agent", &run.root_id)
+                .unwrap()
+                .active_skills[0]
+                .content,
+            content
+        );
+        server.await.unwrap();
+        runner.tools.close().await;
+        original.tools.close().await;
     }
 
     #[tokio::test]
