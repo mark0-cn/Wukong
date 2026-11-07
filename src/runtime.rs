@@ -1,7 +1,8 @@
 //! Credential-free transport to a persistent execution worker.
 //!
 //! The stdio bridge is only a transport. Its daemon and job runners survive this
-//! client being dropped; reconnect uses the same worker state directory.
+//! client being dropped, and a lost transport is replaced transparently on the
+//! next call; reconnect uses the same worker state directory.
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -92,6 +93,20 @@ impl RuntimeClient {
                 "Execution worker is disabled. Configure Docker/SSH, or explicitly select trusted_local for trusted fixtures."
             );
         }
+        let transport = Self::spawn_transport(&config)
+            .await
+            .context("start runtime bridge transport")?;
+        Ok(Self {
+            transport: Arc::new(Mutex::new(transport)),
+            config,
+        })
+    }
+
+    /// Build, spawn and handshake one stdio transport. The bridge daemon,
+    /// job supervisors and debugger sessions live in the shared state
+    /// directory, so a fresh transport observes the same jobs and sessions
+    /// as the one it replaces.
+    async fn spawn_transport(config: &RuntimeConfig) -> Result<Transport> {
         let mut cmd = match config.backend {
             RuntimeBackend::Disabled => unreachable!(),
             RuntimeBackend::TrustedLocal => {
@@ -172,24 +187,27 @@ impl RuntimeClient {
         {
             cmd.creation_flags(0x08000000);
         }
-        let mut child = cmd.spawn().context("start runtime bridge transport")?;
+        let mut child = cmd.spawn().context("spawn runtime bridge")?;
         let input = child.stdin.take().context("worker stdin unavailable")?;
         let output = BufReader::new(child.stdout.take().context("worker stdout unavailable")?);
-        let client = Self {
-            transport: Arc::new(Mutex::new(Transport {
-                child,
-                input,
-                output,
-                next_id: 1,
-                poisoned: false,
-            })),
-            config,
+        let mut transport = Transport {
+            child,
+            input,
+            output,
+            next_id: 1,
+            poisoned: false,
         };
-        client
-            .call("ping", json!({}))
-            .await
-            .context("runtime handshake")?;
-        Ok(client)
+        match request(&mut transport, config, "ping", json!({})).await {
+            Ok(_) => Ok(transport),
+            Err(RequestFailure::Worker(error)) => {
+                let _ = transport.child.kill().await;
+                Err(error).context("runtime handshake")
+            }
+            Err(RequestFailure::Transport { error, .. }) => {
+                let _ = transport.child.kill().await;
+                Err(error).context("runtime handshake")
+            }
+        }
     }
 
     pub fn config(&self) -> &RuntimeConfig {
@@ -199,69 +217,31 @@ impl RuntimeClient {
         self.call("doctor", json!({})).await
     }
 
-    /// Calls are serialized over stdio. Worker jobs and debug sessions have their
-    /// own ownership locks and may continue while this connection is absent.
+    /// Calls are serialized over stdio. A lost transport is replaced
+    /// transparently on the next call: the bridge daemon and job supervisors
+    /// live in the shared state directory and survive the stdio client. The
+    /// failed request itself is never re-sent, so a timed-out side effect
+    /// still follows the durable reconcile path instead of being replayed.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
         let mut transport = self.transport.lock().await;
         if transport.poisoned {
-            bail!("runtime transport lost; reconnect before another call");
+            *transport = Self::spawn_transport(&self.config)
+                .await
+                .context("runtime transport lost and reconnect failed")?;
         }
-        let id = transport.next_id;
-        transport.next_id += 1;
-        let payload =
-            serde_json::to_vec(&json!({"jsonrpc":"2.0", "id":id,"method":method,"params":params}))?;
-        if payload.len() > 48 * 1024 * 1024 {
-            bail!("runtime request exceeds 48 MiB");
-        }
-        let timeout = Duration::from_secs(self.config.request_timeout_secs.clamp(1, 300));
-        let response = tokio::time::timeout(timeout, async {
-            transport.input.write_all(&payload).await?;
-            transport.input.write_all(b"\n").await?;
-            transport.input.flush().await?;
-            let mut data = Vec::new();
-            // The controller enforces its own limit even for a broken worker.
-            let n = (&mut transport.output)
-                .take(48 * 1024 * 1024 + 1)
-                .read_until(b'\n', &mut data)
-                .await?;
-            if n == 0 {
-                return Err(anyhow!("runtime bridge closed the transport"));
-            }
-            if data.len() > 48 * 1024 * 1024 {
-                bail!("runtime response too large");
-            }
-            let response: Value =
-                serde_json::from_slice(&data).context("decode runtime response")?;
-            if response.get("id").and_then(Value::as_u64) != Some(id) {
-                bail!("runtime response ID mismatch");
-            }
-            Ok(response)
-        })
-        .await;
-        match response {
-            Ok(Ok(response)) => {
-                if let Some(error) = response.get("error") {
+        match request(&mut transport, &self.config, method, params).await {
+            Ok(result) => Ok(result),
+            Err(RequestFailure::Worker(error)) => Err(error),
+            Err(RequestFailure::Transport { timed_out, error }) => {
+                transport.poisoned = true;
+                let _ = transport.child.kill().await;
+                if timed_out {
                     bail!(
-                        "runtime {method}: {}",
-                        error.get("message").unwrap_or(error)
-                    );
+                        "runtime request timed out; the worker may have executed it — reconcile the durable call before retrying (the next call reconnects automatically)"
+                    )
                 }
-                response
-                    .get("result")
-                    .cloned()
-                    .context("runtime response has no result")
-            }
-            Ok(Err(error)) => {
-                transport.poisoned = true;
-                let _ = transport.child.kill().await;
                 Err(error)
-            }
-            Err(_) => {
-                transport.poisoned = true;
-                let _ = transport.child.kill().await;
-                bail!(
-                    "runtime request timed out; reconnect and reconcile the existing job before retrying"
-                )
+                    .context("runtime transport failed; the next call reconnects automatically")
             }
         }
     }
@@ -275,5 +255,87 @@ impl RuntimeClient {
             .kill()
             .await
             .context("close runtime transport")
+    }
+}
+
+enum RequestFailure {
+    /// The worker answered with an RPC error; the transport stays usable.
+    Worker(anyhow::Error),
+    /// The stdio channel is unusable and must be replaced.
+    Transport {
+        timed_out: bool,
+        error: anyhow::Error,
+    },
+}
+
+async fn request(
+    transport: &mut Transport,
+    config: &RuntimeConfig,
+    method: &str,
+    params: Value,
+) -> Result<Value, RequestFailure> {
+    let id = transport.next_id;
+    transport.next_id += 1;
+    let payload =
+        serde_json::to_vec(&json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params}))
+            .map_err(|error| RequestFailure::Transport {
+                timed_out: false,
+                error: error.into(),
+            })?;
+    if payload.len() > 48 * 1024 * 1024 {
+        return Err(RequestFailure::Transport {
+            timed_out: false,
+            error: anyhow!("runtime request exceeds 48 MiB"),
+        });
+    }
+    let timeout = Duration::from_secs(config.request_timeout_secs.clamp(1, 300));
+    let exchange = tokio::time::timeout(timeout, async {
+        transport.input.write_all(&payload).await?;
+        transport.input.write_all(b"\n").await?;
+        transport.input.flush().await?;
+        let mut data = Vec::new();
+        // The controller enforces its own limit even for a broken worker.
+        let n = (&mut transport.output)
+            .take(48 * 1024 * 1024 + 1)
+            .read_until(b'\n', &mut data)
+            .await?;
+        if n == 0 {
+            return Err(anyhow!("runtime bridge closed the transport"));
+        }
+        if data.len() > 48 * 1024 * 1024 {
+            return Err(anyhow!("runtime response too large"));
+        }
+        let response: Value = serde_json::from_slice(&data)
+            .map_err(|error| anyhow!("decode runtime response: {error}"))?;
+        if response.get("id").and_then(Value::as_u64) != Some(id) {
+            return Err(anyhow!("runtime response ID mismatch"));
+        }
+        Ok::<Value, anyhow::Error>(response)
+    })
+    .await;
+    match exchange {
+        Ok(Ok(response)) => {
+            if let Some(error) = response.get("error") {
+                return Err(RequestFailure::Worker(anyhow!(
+                    "runtime {method}: {}",
+                    error.get("message").unwrap_or(error)
+                )));
+            }
+            response
+                .get("result")
+                .cloned()
+                .ok_or_else(|| RequestFailure::Transport {
+                    timed_out: false,
+                    error: anyhow!("runtime response has no result"),
+                })
+        }
+        Ok(Err(error)) => Err(RequestFailure::Transport {
+            timed_out: false,
+            error,
+        }),
+        Err(_) => Err(RequestFailure::Transport {
+            timed_out: true,
+            error: anyhow!("runtime request timed out"),
+        }),
     }
 }

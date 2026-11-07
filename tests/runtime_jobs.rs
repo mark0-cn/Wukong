@@ -36,6 +36,50 @@ async fn disabled_backend_never_executes() {
 }
 
 #[tokio::test]
+async fn lost_transport_reconnects_and_timed_out_requests_are_not_replayed() -> Result<()> {
+    // A fake bridge that answers the handshake, hangs forever on the first
+    // "slow" request (forcing a controller timeout) and answers instantly
+    // once its marker file proves a fresh instance was spawned.
+    let root = tempfile::tempdir()?;
+    let bridge = root.path().join("fake_bridge.py");
+    std::fs::write(
+        &bridge,
+        r#"
+import json, sys, time, pathlib
+marker = pathlib.Path(sys.argv[sys.argv.index("--state") + 1]) / "slow-marker"
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "slow":
+        if not marker.exists():
+            marker.write_text("slow", encoding="utf-8")
+            time.sleep(60)
+        result = {"reconnected": True}
+    else:
+        result = {}
+    print(json.dumps({"id": request["id"], "result": result}), flush=True)
+"#,
+    )?;
+    let config = RuntimeConfig {
+        backend: RuntimeBackend::TrustedLocal,
+        state_dir: root.path().to_path_buf(),
+        bridge_path: bridge,
+        request_timeout_secs: 2,
+        ..Default::default()
+    };
+    let client = RuntimeClient::connect(config).await?;
+    let error = client.call("slow", json!({})).await.unwrap_err();
+    let message = format!("{error:#}");
+    assert!(message.contains("timed out"), "{message}");
+    // The next call replaces the poisoned transport; the hung first request
+    // is not re-sent, and the fresh bridge instance answers immediately.
+    let recovered = client.call("slow", json!({})).await?;
+    assert_eq!(recovered["reconnected"], true);
+    client.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn jobs_survive_transport_restart_and_idempotency_is_enforced() -> Result<()> {
     let root = tempfile::tempdir()?;
     let client = RuntimeClient::connect(config(root.path())).await?;
