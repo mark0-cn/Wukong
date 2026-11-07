@@ -54,16 +54,30 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     -i "$PIP_INDEX_URL" \
     "angr==9.2.78" "pyvex==9.2.131" "archinfo==9.2.102" "cle==9.2.78" \
     "claripy==9.2.101" "ailment==9.2.78" "pycparser==2.21" "bitstring==3.1.9" \
-    "z3-solver==4.13.4.0" "ply==3.11" "unicorn>=2" "itanium_demangler==1.1" \
-    "nampa" "cxxheaderparser" "dpkt" "mulpyplexer" "pypcode" "pefile" "networkx" \
+    "z3-solver==4.13.4.0" "ply==3.11" "unicorn==2.1.4" "itanium_demangler==1.1" \
+    "protobuf==5.29.4" "capstone==5.0.6" "nampa" "cxxheaderparser" "dpkt" "mulpyplexer" "pypcode" "pefile" "networkx" \
     "cachetools" "sortedcontainers" "pyelftools" "psutil" "requests" "future" "packaging" \
     && pip3 install --no-cache-dir --break-system-packages -i "$PIP_INDEX_URL" \
-    pwntools ropper
+    pwntools ropper \
+    && pip3 install --no-cache-dir --break-system-packages -i "$PIP_INDEX_URL" \
+    cffi progressbar2 rich sqlalchemy sympy
 
 ENV PATH="/opt/jdk-25/bin:/AFLplusplus:/usr/local/bin:${PATH}"
+# Bake the experiment-UID passwd range and its once-marker at build time: the
+# container root filesystem is read-only, so bridge.py cannot append them at
+# first use (isolation.py ensure_uid_entries). Numeric UIDs without passwd
+# entries break pyvex/getpass inside isolated jobs.
+RUN python3 -c "f=open('/etc/passwd','a');[f.write('re-agent-%d:x:%d:%d::/nonexistent:/bin/false\n'%(u,u,u)) for u in range(20000,20512)];f.close();open('/etc/re-agent-passwd.ready','w').close()"
+RUN python3 -c "import angr, claripy, pwn, z3; print('toolchain ok:', angr.__version__)"
 COPY workers/runtime /opt/re-agent/runtime
 COPY workers/ghidra /opt/re-agent/ghidra
 RUN useradd --create-home --uid 10001 worker && mkdir -p /state && chown worker:worker /state
+# Java derives user.home from the passwd entry (root -> /root), ignoring the
+# HOME env var, and Ghidra writes its app config under <user.home>/.config.
+# The runtime root filesystem is read-only, so point it at the state volume.
+RUN mkdir -p /state/home/.config /state/cache \
+    && rm -rf /root/.config \
+    && ln -s /state/home/.config /root/.config
 # Trusted metadata/supervisors remain root; each target gets a distinct numeric
 # UID/GID. Startup drops all caps except CHOWN/SETUID/SETGID/SYS_PTRACE.
 USER root
