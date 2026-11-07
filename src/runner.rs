@@ -36,16 +36,18 @@ impl AssessmentRunner {
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
         let engine = Arc::new(DurableEngine::new(config.model.clone())?);
-        let mut names = HashSet::new();
+        let mut explicit = HashSet::new();
         if let Some(map) = &config.model.role_models {
-            names.extend(map.values().cloned());
+            explicit.extend(map.values().cloned());
         }
         if let Some(name) = &config.model.role_model {
-            names.insert(name.clone());
+            explicit.insert(name.clone());
         }
-        names.remove(&config.model.model);
         let mut role_engines = HashMap::new();
-        for name in names {
+        for name in explicit {
+            if role_engines.contains_key(&name) {
+                continue;
+            }
             let mut role = config.model.clone();
             role.role_model = None;
             role.role_models = None;
@@ -69,12 +71,12 @@ impl AssessmentRunner {
     }
     /// The engine that serves an agent: role agents use their resolved role
     /// model (same provider/endpoint, different model name) when configured.
+    /// A role explicitly mapped to the root model name gets a dedicated
+    /// engine carrying `role_max_tokens`.
     fn engine_for(&self, role: Role) -> &DurableEngine {
         if let Some(name) = self.config.model.role_model_name(role) {
-            if name != self.config.model.model {
-                if let Some(engine) = self.role_engines.get(name) {
-                    return engine;
-                }
+            if let Some(engine) = self.role_engines.get(name) {
+                return engine;
             }
         }
         &self.engine
@@ -1207,6 +1209,72 @@ mod tests {
         let exploit: AgentRecord = runner.store.require("agent", &exploit.id).unwrap();
         assert!(recon.status.terminal());
         assert!(exploit.status.terminal());
+        server.await.unwrap();
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn role_mapped_to_root_model_keeps_root_name_with_role_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = request(&mut socket).await;
+            let text = body.to_string();
+            assert!(
+                text.contains("gpt-5.2"),
+                "role mapped to the root model name must keep it: {text}"
+            );
+            assert!(
+                text.contains("4321"),
+                "role mapped to the root name must carry role_max_tokens: {text}"
+            );
+            respond(&mut socket, reply_text("mapped root done")).await;
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.bin");
+        std::fs::write(&target, b"mapped root fixture").unwrap();
+        let mut config = AppConfig {
+            state_dir: dir.path().join("state"),
+            ..AppConfig::default()
+        };
+        config.model.provider = Provider::Ollama;
+        config.model.base_url = Some(base);
+        config.model.role_models = Some(HashMap::from([(
+            Role::Exploit,
+            config.model.model.clone(),
+        )]));
+        config.model.role_max_tokens = Some(4321);
+        config.execution.stream = false;
+        config.execution.model_retries = 0;
+        let store = Store::open(&config.state_dir).unwrap();
+        let runner = AssessmentRunner::new(config.clone(), store).await.unwrap();
+        let run = runner
+            .coordinator
+            .create_run(
+                &target,
+                "mapped root fixture task",
+                config.budget.clone(),
+                serde_json::to_value(config).unwrap(),
+            )
+            .unwrap();
+        let exploit = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "exploit-fixture".into(),
+                    role: Role::Exploit,
+                    task: "mapped root fixture task".into(),
+                    scope: "mapped root scope".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![],
+                },
+            )
+            .unwrap()
+            .agent;
+        runner.slice(&exploit.id).await.unwrap();
         server.await.unwrap();
         runner.tools.close().await;
     }
