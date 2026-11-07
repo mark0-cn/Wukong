@@ -98,8 +98,12 @@ pub fn load_skill(name: &str, custom_dir: Option<&Path>) -> Result<String> {
 }
 
 /// Optional per-role worked-example markdown (`<role>.md`) from `demos_dir`.
+/// A missing or unreadable directory degrades to no demos instead of failing
+/// the agent, so the shipped template can enable `demos_dir` by default.
 fn load_demo(dir: &Path, role: &str) -> Result<Option<String>> {
-    let base = fs::canonicalize(dir)?;
+    let Ok(base) = fs::canonicalize(dir) else {
+        return Ok(None);
+    };
     let path = base.join(format!("{role}.md"));
     if !path.is_file() {
         return Ok(None);
@@ -168,6 +172,11 @@ mod tests {
             Some("demo recon")
         );
         assert_eq!(load_demo(dir.path(), "reverse").unwrap(), None);
+        // A missing demos directory degrades to no demos, never an error.
+        assert_eq!(
+            load_demo(&dir.path().join("absent"), "recon").unwrap(),
+            None
+        );
     }
 
     #[test]
