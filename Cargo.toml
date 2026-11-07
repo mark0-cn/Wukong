@@ -48,6 +48,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tempfile = "3"
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
 jsonrpsee-core = { version = "0.26.0", features = ["async-client"] }
+askama = "0.14.0"
 
 [profile.release]
 lto = "thin"

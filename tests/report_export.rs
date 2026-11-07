@@ -156,7 +156,7 @@ fn exports_complete_original_bundle_redacts_config_and_does_not_assert_unverifie
     let html = fs::read_to_string(&summary.report_html).unwrap();
     assert!(!html.contains("<script>alert(1)</script>"));
     assert!(!html.contains("<img src=x"));
-    assert!(html.contains("&lt;script&gt;"));
+    assert!(html.contains("&#60;script&#62;"));
     assert!(html.contains("independent verification is missing"));
     let replay: serde_json::Value =
         serde_json::from_slice(&fs::read(output.join("replay.json")).unwrap()).unwrap();
@@ -222,4 +222,48 @@ fn missing_evidence_reference_is_rejected() {
         .put("finding", &finding.id, &run_id, &finding)
         .unwrap();
     assert!(report::export(&store, &run_id, &temp.path().join("bundle")).is_err());
+}
+
+#[test]
+fn template_escapes_verified_details_and_preserves_independent_replay_status() {
+    let directory = tempfile::tempdir().unwrap();
+    let (store, run_id, evidence_id) = fixture(directory.path());
+    let mut verifier: AgentRecord = store.require("agent", "agent_root").unwrap();
+    verifier.id = "independent_verifier".into();
+    verifier.role = Role::Verifier;
+    store
+        .put("agent", &verifier.id, &run_id, &verifier)
+        .unwrap();
+    let mut finding: Finding = store.require("finding", "finding_fixture").unwrap();
+    finding.root_cause = Some("<svg onload=alert(1)> & \"quoted\"".into());
+    finding.verification_id = Some("verification_fixture".into());
+    store
+        .put("finding", &finding.id, &run_id, &finding)
+        .unwrap();
+    let verification = Verification {
+        id: "verification_fixture".into(),
+        run_id: run_id.clone(),
+        finding_id: finding.id,
+        verifier_agent_id: verifier.id,
+        passed: true,
+        attempts: 1,
+        successes: 1,
+        impact: "Observed <img src=x onerror=alert(1)>".into(),
+        evidence_ids: vec![evidence_id],
+        environment: json!({}),
+        conditions: json!({}),
+        result: json!({}),
+        created_at: now(),
+    };
+    store
+        .put("verification", &verification.id, &run_id, &verification)
+        .unwrap();
+    let report = report::export(&store, &run_id, &directory.path().join("bundle")).unwrap();
+    let html = fs::read_to_string(report.report_html).unwrap();
+    assert!(html.contains("1 / 1 successful attempts"));
+    assert!(!html.contains("independent verification is missing"));
+    assert!(!html.contains("<svg"));
+    assert!(!html.contains("<img"));
+    assert!(html.contains("&#60;svg onload=alert(1)&#62; &#38; &#34;quoted&#34;"));
+    assert!(html.contains("Verified impact"));
 }
