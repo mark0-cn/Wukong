@@ -22,7 +22,7 @@ impl Store {
         fs::create_dir_all(root.as_ref())?;
         let root = fs::canonicalize(root.as_ref())?;
         fs::create_dir_all(root.join("artifacts"))?;
-        let conn = Connection::open(root.join("state.sqlite3"))?;
+        let mut conn = Connection::open(root.join("state.sqlite3"))?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
           CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -38,7 +38,21 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        if version != "1" {
+        if version == "1" {
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            // Recheck inside the write transaction: two controllers may open an old store.
+            let current: String = tx.query_row(
+                "SELECT value FROM meta WHERE key='schema_version'",
+                [],
+                |r| r.get(0),
+            )?;
+            if current == "1" {
+                tx.execute_batch("ALTER TABLE messages ADD COLUMN envelope TEXT NOT NULL DEFAULT '{}';
+                    UPDATE messages SET envelope=json_object('delivery',CASE WHEN acknowledged=1 THEN 'included' ELSE 'queued' END);
+                    UPDATE meta SET value='2' WHERE key='schema_version';")?;
+            }
+            tx.commit()?;
+        } else if version != "2" {
             bail!("unsupported state schema {version}");
         }
         Ok(Self {
@@ -174,13 +188,65 @@ impl Store {
         content: &str,
         key: Option<&str>,
     ) -> Result<bool> {
-        Ok(tx.execute("INSERT OR IGNORE INTO messages(run_id,sender,recipient,content,dedupe_key,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![run_id,sender,recipient,content,key,now().to_rfc3339()])?>0)
+        let target: AgentRecord =
+            Self::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
+        let envelope = MessageEnvelope {
+            options: MessageOptions {
+                kind: MessageKind::Result,
+                recipient_generation: Some(target.generation),
+                ..Default::default()
+            },
+            task_id: recipient.into(),
+            sender_generation: Self::tx_get::<AgentRecord>(tx, "agent", sender)?
+                .map(|agent| agent.generation),
+            ..Default::default()
+        };
+        let (_, inserted) =
+            Self::tx_enqueue_message(tx, run_id, sender, recipient, content, key, &envelope)?;
+        Ok(inserted)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn tx_enqueue_message(
+        tx: &Connection,
+        run_id: &str,
+        sender: &str,
+        recipient: &str,
+        content: &str,
+        key: Option<&str>,
+        envelope: &MessageEnvelope,
+    ) -> Result<(i64, bool)> {
+        let inserted = tx.execute("INSERT OR IGNORE INTO messages(run_id,sender,recipient,content,dedupe_key,created_at,envelope,acknowledged) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![run_id,sender,recipient,content,key,now().to_rfc3339(),serde_json::to_string(envelope)?,envelope.delivery == MessageDelivery::Stale])? > 0;
+        let mid = if inserted {
+            tx.last_insert_rowid()
+        } else {
+            tx.query_row("SELECT id FROM messages WHERE dedupe_key=?1", [key], |r| {
+                r.get(0)
+            })?
+        };
+        Ok((mid, inserted))
+    }
+    pub fn tx_messages(tx: &Connection, run_id: &str) -> Result<Vec<Message>> {
+        let mut query = tx.prepare("SELECT json_object('id',id,'run_id',run_id,'sender',sender,'recipient',recipient,'content',content,'acknowledged',json(CASE WHEN acknowledged=1 THEN 'true' ELSE 'false' END),'created_at',created_at,'envelope',json(envelope)) FROM messages WHERE run_id=?1 ORDER BY id")?;
+        let rows = query
+            .query_map([run_id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|value| Ok(serde_json::from_str(&value)?))
+            .collect()
     }
     pub fn inbox(&self, recipient: &str) -> Result<Vec<Message>> {
-        self.transaction(|tx|{
-            let mut q=tx.prepare("SELECT id,run_id,sender,content,created_at FROM messages WHERE recipient=?1 AND acknowledged=0 ORDER BY id")?;
-            let rows=q.query_map([recipient],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
-            rows.into_iter().map(|(id,run_id,sender,content,at)|Ok(Message{id,run_id,sender,recipient:recipient.to_owned(),content,acknowledged:false,created_at:at.parse()?})).collect()
+        self.transaction(|tx| {
+            let agent: AgentRecord =
+                Self::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
+            Ok(Self::tx_messages(tx, &agent.run_id)?
+                .into_iter()
+                .filter(|message| {
+                    message.recipient == recipient
+                        && !message.acknowledged
+                        && message.envelope.delivery != MessageDelivery::Stale
+                })
+                .collect())
         })
     }
     pub fn acquire_lease(&self, run_id: &str, owner: &str, seconds: i64) -> Result<bool> {
@@ -334,7 +400,7 @@ impl Store {
             Self::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
             for mid in message_ids {
                 tx.execute(
-                    "UPDATE messages SET acknowledged=1 WHERE id=?1 AND recipient=?2",
+                    "UPDATE messages SET acknowledged=1,envelope=json_set(envelope,'$.delivery',CASE WHEN json_extract(envelope,'$.delivery')='replied' THEN 'replied' ELSE 'included' END) WHERE id=?1 AND recipient=?2 AND COALESCE(json_extract(envelope,'$.delivery'),'queued')!='stale'",
                     params![mid, agent_id],
                 )?;
             }

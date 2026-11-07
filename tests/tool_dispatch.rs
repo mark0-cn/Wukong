@@ -139,18 +139,36 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
             .contains("deadlock")
     );
     coordinator.finish(&agent.id, "initial result")?;
-    let args = json!({"agent_id":agent.id,"message":"clarify the root cause"});
-    let sent = service
+    let info = service
         .execute(
             &run.root_id,
-            "follow-up",
+            "ordinary-info",
             "send_message_to_agent",
-            args.clone(),
+            json!({"agent_id":agent.id,"message":"background context"}),
         )
+        .await?;
+    assert!(!info.is_error);
+    assert_eq!(
+        store.require::<AgentRecord>("agent", &agent.id)?.status,
+        Status::Completed
+    );
+    let status = service
+        .execute(
+            &run.root_id,
+            "info-status",
+            "message_status",
+            json!({"message_id":result(&info)["message_id"]}),
+        )
+        .await?;
+    assert!(!status.is_error);
+    assert_eq!(result(&status)["envelope"]["delivery"], "queued");
+    let args = json!({"agent_id":agent.id,"message":"clarify the root cause"});
+    let sent = service
+        .execute(&run.root_id, "follow-up", "follow_up_agent", args.clone())
         .await?;
     assert!(!sent.is_error, "{sent:?}");
     service
-        .execute(&run.root_id, "follow-up", "send_message_to_agent", args)
+        .execute(&run.root_id, "follow-up", "follow_up_agent", args)
         .await?;
     let reopened: AgentRecord = store.require("agent", &agent.id)?;
     assert_eq!(reopened.status, Status::Queued);

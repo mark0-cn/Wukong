@@ -101,8 +101,9 @@ you already hold, and the next spawn is decided from the previous results:
 - `wait_for_agents` parks you until the selected agents finish or the timeout
   expires; with an empty list it waits for your children. Use the wakeup to
   reconcile, not to poll.
-- `send_message_to_agent` is for requests/answers and critical handoffs only;
-  routine status updates are noise. A targeted follow-up reopens a completed
+- `send_message_to_agent` queues typed information/questions/replies/results.
+  Information does not interrupt waits or reopen work. Use `reply_to` for replies;
+  queued/included is not proof the request was answered. `follow_up_agent` reopens a completed
   child in this active assessment, preserving its prior conversation and budget.
   Wait for its new completion report before finishing. Stopped/failed children
   require a new focused task; completed scopes may also receive a new task.

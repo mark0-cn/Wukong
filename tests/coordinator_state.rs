@@ -94,7 +94,7 @@ fn completed_children_accept_followups_and_notify_again_after_restart() {
         .checkpoint_and_ack(&child.id, json!({"old":"conversation"}), &[])
         .unwrap();
     c.finish(&child.id, "first result").unwrap();
-    c.message(&run.root_id, &child.id, "Please clarify the input boundary")
+    c.follow_up(&run.root_id, &child.id, "Please clarify the input boundary")
         .unwrap();
     let reopened: AgentRecord = store.require("agent", &child.id).unwrap();
     assert_eq!(reopened.status, Status::Queued);
@@ -211,7 +211,7 @@ fn descendant_followup_reopens_completed_ancestors_and_preserves_legacy_records(
         )
         .unwrap();
     c.finish(&parent.id, "initial parent result").unwrap();
-    c.message("operator", &child.id, "clarify nested result")
+    c.follow_up("operator", &child.id, "clarify nested result")
         .unwrap();
     for agent_id in [&parent.id, &child.id] {
         let reopened: AgentRecord = store.require("agent", agent_id).unwrap();
@@ -596,4 +596,177 @@ fn pause_resume_preserves_an_unfinished_wait() {
             .status,
         Status::Queued
     );
+}
+
+#[test]
+fn information_preserves_completed_tasks_and_wait_conditions() {
+    let (_dir, store, c, run) = fixture();
+    let child = c
+        .create_child(&run.root_id, request("information"))
+        .unwrap()
+        .agent;
+    c.wait(&run.root_id, std::slice::from_ref(&child.id), 60)
+        .unwrap();
+    c.message("operator", &run.root_id, "background only")
+        .unwrap();
+    assert_eq!(c.wake_waiters(&run.id).unwrap(), 0);
+    let root: AgentRecord = store.require("agent", &run.root_id).unwrap();
+    assert_eq!(root.status, Status::Waiting);
+    assert_eq!(root.wait_for, vec![child.id.clone()]);
+    c.send(
+        "operator",
+        &run.root_id,
+        "please clarify",
+        MessageOptions {
+            kind: MessageKind::Question,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let root: AgentRecord = store.require("agent", &run.root_id).unwrap();
+    assert_eq!(root.status, Status::Queued);
+    assert_eq!(root.wait_for, vec![child.id.clone()]);
+    c.finish(&child.id, "first answer").unwrap();
+    c.message("operator", &child.id, "background after completion")
+        .unwrap();
+    let completed: AgentRecord = store.require("agent", &child.id).unwrap();
+    assert_eq!(completed.status, Status::Completed);
+    assert_eq!(completed.generation, 0);
+    c.follow_up("operator", &child.id, "new assignment")
+        .unwrap();
+    assert_eq!(store.inbox(&child.id).unwrap().len(), 1);
+    assert!(
+        store
+            .transaction(|tx| Store::tx_messages(tx, &run.id))
+            .unwrap()
+            .iter()
+            .any(|message| message.content == "background after completion"
+                && message.envelope.delivery == MessageDelivery::Stale)
+    );
+}
+
+#[test]
+fn correlated_replies_track_delivery_and_late_generations_are_audited() {
+    let (dir, store, c, run) = fixture();
+    let sender = c
+        .create_child(&run.root_id, request("question sender"))
+        .unwrap()
+        .agent;
+    let recipient = c
+        .create_child(&run.root_id, request("question recipient"))
+        .unwrap()
+        .agent;
+    let question = c
+        .send(
+            &sender.id,
+            &recipient.id,
+            "which byte order?",
+            MessageOptions {
+                kind: MessageKind::Question,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(question.delivery, MessageDelivery::Queued);
+    store
+        .checkpoint_and_ack(&recipient.id, json!({}), &[question.message_id])
+        .unwrap();
+    let all = store
+        .transaction(|tx| Store::tx_messages(tx, &run.id))
+        .unwrap();
+    assert_eq!(all[0].envelope.delivery, MessageDelivery::Included);
+    let reply = c
+        .send(
+            &recipient.id,
+            &sender.id,
+            "little endian",
+            MessageOptions {
+                kind: MessageKind::Reply,
+                reply_to: Some(question.message_id),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(reply.correlation_id, question.correlation_id);
+    let all = store
+        .transaction(|tx| Store::tx_messages(tx, &run.id))
+        .unwrap();
+    assert_eq!(all[0].envelope.delivery, MessageDelivery::Replied);
+    assert_eq!(all[0].envelope.replied_by, Some(reply.message_id));
+    store
+        .checkpoint_and_ack(&sender.id, json!({}), &[reply.message_id])
+        .unwrap();
+    c.finish(&sender.id, "answer recorded").unwrap();
+    c.follow_up("operator", &sender.id, "next question")
+        .unwrap();
+    let stale = c
+        .send(
+            &recipient.id,
+            &sender.id,
+            "late old answer",
+            MessageOptions {
+                kind: MessageKind::Reply,
+                reply_to: Some(question.message_id),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(stale.delivery, MessageDelivery::Stale);
+    let guarded = c
+        .send(
+            "operator",
+            &sender.id,
+            "stale assignment",
+            MessageOptions {
+                kind: MessageKind::FollowUp,
+                recipient_generation: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(guarded.delivery, MessageDelivery::Stale);
+    drop(c);
+    drop(store);
+    let reopened = Store::open(dir.path().join("state")).unwrap();
+    assert_eq!(reopened.inbox(&sender.id).unwrap().len(), 1);
+    let all = reopened
+        .transaction(|tx| Store::tx_messages(tx, &run.id))
+        .unwrap();
+    assert_eq!(
+        all.iter()
+            .filter(|m| m.envelope.delivery == MessageDelivery::Stale)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn version_one_mailboxes_migrate_without_losing_delivery_or_content() {
+    let (dir, store, c, run) = fixture();
+    c.message("operator", &run.root_id, "legacy queued")
+        .unwrap();
+    c.message("operator", &run.root_id, "legacy included")
+        .unwrap();
+    let mail = store.inbox(&run.root_id).unwrap();
+    store
+        .checkpoint_and_ack(&run.root_id, json!({}), &[mail[1].id])
+        .unwrap();
+    drop(c);
+    drop(store);
+    let path = dir.path().join("state/state.sqlite3");
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute_batch("ALTER TABLE messages DROP COLUMN envelope; UPDATE meta SET value='1' WHERE key='schema_version';").unwrap();
+    drop(conn);
+    let migrated = Store::open(dir.path().join("state")).unwrap();
+    assert_eq!(
+        migrated.inbox(&run.root_id).unwrap()[0].content,
+        "legacy queued"
+    );
+    let all = migrated
+        .transaction(|tx| Store::tx_messages(tx, &run.id))
+        .unwrap();
+    assert_eq!(all[1].envelope.delivery, MessageDelivery::Included);
+    let legacy = json!({"id":1,"run_id":"run","sender":"a","recipient":"b","content":"old export","acknowledged":false,"created_at":now()});
+    let decoded: Message = serde_json::from_value(legacy).unwrap();
+    assert_eq!(decoded.envelope.options.kind, MessageKind::Information);
 }

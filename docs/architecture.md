@@ -31,7 +31,7 @@
 
 agent 状态包括 queued、running、waiting、budget_paused、completed、stopped、crashed、failed。完成/停止事件通知父任务。预算暂停保留检查点，恢复后继续调度。
 
-活动任务内，向 completed 子 agent 追加问题会保留其历史和累计用量，并开始新的 generation；工具调用与完成通知按 generation 区分。父任务已完成时一并唤醒，已停止或失败的分支需新建任务。显式前驱依赖与父子完成依赖合并检查，拒绝祖先依赖及间接循环。
+活动任务内，通过 `follow_up_agent`（CLI `message --kind follow_up`）向 completed 子 agent 追加任务会保留其历史和累计用量，并开始新的 generation；工具调用与完成通知按 generation 区分。父任务已完成时一并唤醒，已停止或失败的分支需新建任务。显式前驱依赖与父子完成依赖合并检查，拒绝祖先依赖及间接循环。
 
 子 agent 完成前须关闭自己持有的调试和交互会话，根任务完成前须处理全部会话。停止或失败的 owner 遗留会话可以由同任务的其他子 agent 关闭；该权限不允许发送调试命令或交互输入。
 
@@ -60,3 +60,21 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 `fixtures/` 包含符号/stripped 的本地漏洞、修复与正常样本。构建脚本生成 ELF，行为 harness 实际重放并保存哈希与退出结果；检测准确率由独立报告和显式复核标签计算，不从 crash 推断 agent 检测成功。详见 `fixtures/README.md`。
 
 首版动态工具集中在 Linux x86_64 ELF。控制端可以运行于 Windows；PE/Mach-O 静态画像可用，但本仓库未实现 Windows DbgEng 或 macOS LLDB 动态后端。外部工具与模型 provider 的环境依赖需要实际配置，缺少依赖会返回明确错误。
+
+## Typed coordination messages
+
+Messages carry kind, correlation/reply IDs, recipient generation, sender generation,
+current task identity and evidence references. `send_message_to_agent` defaults to
+information: it neither reopens completed work nor interrupts a wait. Questions,
+replies, results and blocked notices can interrupt a waiter without erasing its
+wait condition. Only explicit `follow_up_agent` reopens completed work.
+
+`queued` means durably enqueued; `included` means installed in a checkpointed
+provider request, not that the model has acted. `replied` records an explicit
+correlated reply (not an assessment of correctness). Old-generation replies are
+retained as `stale` and never injected as current work. `message_status` exposes
+these states. Frozen model requests keep their original mailbox snapshot.
+SQLite schema 2 transactionally migrates schema 1 messages; older exports without
+an envelope still deserialize. Informational mail left on completed work becomes
+stale when a new generation starts. CLI messages default to information; TUI
+operator input is a question and does not implicitly reopen completed work.

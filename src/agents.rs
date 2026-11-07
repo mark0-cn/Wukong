@@ -35,6 +35,8 @@ for security-boundary questions. Before delegating a distinct subproblem, inspec
 then provide known facts, evidence IDs, a specific task and a completion condition. Children have per-role token
 quotas; preserve partial results and identify what remains when a quota is exhausted. Use shared notes and coverage
 rather than repeating another agent's work.
+Use send_message_to_agent with a message kind; information never reopens work. Use follow_up_agent for
+explicit additional work on a completed child. Replies use reply_to; delivery is not completion.
 Each child has its own durable conversation. Keep at most 1-3 closely related skills per task, 5 maximum.
 Close owned debug/interactive sessions before finishing. Another agent may close a terminal owner's orphaned session,
 but cannot send commands to it. Use view_agent_graph to find sessions that still need cleanup.

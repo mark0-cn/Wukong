@@ -227,6 +227,60 @@ pub struct Message {
     pub content: String,
     pub acknowledged: bool,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub envelope: MessageEnvelope,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageKind {
+    #[default]
+    Information,
+    Question,
+    Reply,
+    FollowUp,
+    Result,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageDelivery {
+    #[default]
+    Queued,
+    Included,
+    Replied,
+    Stale,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MessageOptions {
+    pub kind: MessageKind,
+    pub correlation_id: Option<String>,
+    pub reply_to: Option<i64>,
+    pub recipient_generation: Option<u64>,
+    pub evidence_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MessageEnvelope {
+    #[serde(flatten)]
+    pub options: MessageOptions,
+    pub task_id: String,
+    pub sender_generation: Option<u64>,
+    pub delivery: MessageDelivery,
+    pub replied_by: Option<i64>,
+    pub stale_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageReceipt {
+    pub message_id: i64,
+    pub delivery: MessageDelivery,
+    pub recipient_generation: u64,
+    pub correlation_id: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
