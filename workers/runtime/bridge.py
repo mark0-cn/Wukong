@@ -819,6 +819,12 @@ class Runtime:
                 if current_identity == expected_identity and current_identity not in {"missing", "unknown"}:
                     meta["reconciliation"] = "supervisor_alive_heartbeat_stale"
                     live = True
+                elif "supervisor_pid" not in meta:
+                    # start_job wrote queued before spawning the supervisor; a
+                    # missing pid means the spawn raised and this job can never
+                    # start. It is lost, not merely unconfirmed.
+                    meta["reconciliation"] = "supervisor_never_created"
+                    live = False
                 elif current_identity == "unknown" or (expected_identity == "unknown" and current_identity != "missing"):
                     meta["reconciliation"] = "supervisor_liveness_unconfirmed"
                     live = True
@@ -827,7 +833,10 @@ class Runtime:
                 with self.lock:
                     fresh = load_json(directory / "status.json")
                     if fresh["state"] not in TERMINAL:
-                        fresh.update({"state": "lost", "error": "supervisor process creation identity is absent or changed; effects unknown", "finished_at": time.time()})
+                        reason = ("supervisor process was never created; effects unknown"
+                                  if "supervisor_pid" not in fresh
+                                  else "supervisor process creation identity is absent or changed; effects unknown")
+                        fresh.update({"state": "lost", "error": reason, "finished_at": time.time()})
                         atomic_json(directory / "status.json", fresh)
                     meta = fresh
         meta.pop("runner_token", None)
