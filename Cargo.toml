@@ -24,7 +24,8 @@ crossterm = "0.29"
 futures = "0.3"
 hex = "0.4"
 object = { version = "0.40", features = ["read", "std"] }
-ratatui = "0.29"
+ratatui = { version = "0.30.2", features = ["crossterm"] }
+ratatui-textarea = "0.9.4"
 regex = "1"
 rig = "=0.46.0"
 rusqlite = { version = "0.37", features = ["bundled"] }

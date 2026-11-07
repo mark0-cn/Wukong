@@ -10,6 +10,11 @@ use crate::{
 };
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
+use ratatui::{
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+};
 use serde_json::{Value, json};
 use std::{io, path::PathBuf, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -356,10 +361,9 @@ async fn drive_with_events(
 const DEFAULT_TASK: &str = "Analyze the binary, establish its input/trust boundaries, investigate concrete vulnerability hypotheses, independently verify reproducible findings and report evidence and limitations.";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum TuiInput {
-    None,
-    Task,
-    Message,
+enum Focus {
+    Editor,
+    Tree,
 }
 
 /// Validate a target path and drive a fresh assessment from the TUI,
@@ -426,42 +430,299 @@ fn banner_lines() -> Vec<ratatui::text::Line<'static>> {
     ]
 }
 
+fn spinner(frame: u64) -> &'static str {
+    const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    FRAMES[(frame % 10) as usize]
+}
+
+fn sweep_span(frame: u64) -> Span<'static> {
+    use ratatui::style::{Color, Style};
+    let lit = (frame / 4) as usize % 5;
+    let mut text = String::new();
+    for index in 0..5 {
+        text.push(if index == lit { '▪' } else { '·' });
+    }
+    Span::styled(text, Style::default().fg(Color::LightGreen))
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let width = area.width.saturating_mul(percent_x) / 100;
+    let height = area.height.saturating_mul(percent_y) / 100;
+    Rect::new(
+        area.x + (area.width.saturating_sub(width)) / 2,
+        area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    )
+}
+
+fn clear_editor(editor: &mut ratatui_textarea::TextArea<'_>) {
+    editor.clear();
+}
+
+fn help_lines() -> Vec<Line<'static>> {
+    vec![
+        Line::from("F1 close help · Ctrl+Q quit (pauses live runs) · Ctrl+P pause · Tab switch input/tree"),
+        Line::from(""),
+        Line::from("▸ Input (focused by default): type freely, Enter sends the message to the selected agent (or root), Esc clears."),
+        Line::from("▸ Tree: ↑/↓ select · Enter opens that agent's conversation · g returns to the live activity stream."),
+        Line::from("▸ Mouse: click an agent to view its conversation, click a finding to open its report, wheel scrolls."),
+        Line::from("▸ Welcome screen: type a target path and Enter starts a new assessment live in this terminal."),
+    ]
+}
+
+fn finding_modal_lines(finding: &Finding) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("title: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(finding.title.clone()),
+        ]),
+        Line::from(vec![
+            Span::styled("severity: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:?}", finding.severity)),
+            Span::styled("  stage: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:?}", finding.stage)),
+            Span::styled("  agent: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(short_id(&finding.agent_id).to_owned()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("description", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(finding.description.clone()),
+    ];
+    if let Some(root_cause) = &finding.root_cause {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("root cause", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+        lines.push(Line::from(root_cause.clone()));
+    }
+    if let Some(impact) = &finding.impact {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("impact", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+        lines.push(Line::from(impact.clone()));
+    }
+    if let Some(rationale) = &finding.severity_rationale {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("severity rationale", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))));
+        lines.push(Line::from(rationale.clone()));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("evidence: ", Style::default().fg(Color::DarkGray)),
+        Span::raw(finding.evidence_ids.join(", ")),
+    ]));
+    if let Some(verification) = &finding.verification_id {
+        lines.push(Line::from(vec![
+            Span::styled("verification: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(verification.clone()),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Esc or Enter closes", Style::default().fg(Color::DarkGray))));
+    lines
+}
+
+/// The selected agent's conversation: task, model text, reasoning, tool
+/// calls with their recorded results, and coordinator messages — read from
+/// the durable checkpoint and the tool-call ledger.
+fn agent_detail_lines(
+    store: &Store,
+    run_id: &str,
+    agent: &AgentRecord,
+) -> Vec<Line<'static>> {
+    use crate::llm::DurableRun;
+    use rig::completion::{AssistantContent, Message};
+    use rig::completion::message::UserContent;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled("task: ", Style::default().fg(Color::DarkGray)),
+        Span::raw(agent.task.clone()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("scope: ", Style::default().fg(Color::DarkGray)),
+        Span::raw(agent.scope.clone()),
+    ]));
+    lines.push(Line::from(""));
+    let Some(checkpoint) = &agent.checkpoint else {
+        lines.push(Line::from("no conversation yet"));
+        return lines;
+    };
+    let durable = match DurableRun::from_json(&checkpoint.to_string()) {
+        Ok(durable) => durable,
+        Err(error) => {
+            lines.push(Line::from(format!("checkpoint unreadable: {error}")));
+            return lines;
+        }
+    };
+    let calls = store.list::<ToolCallRecord>("call", run_id).unwrap_or_default();
+    let mut results: std::collections::HashMap<String, &ToolCallRecord> =
+        std::collections::HashMap::new();
+    for record in calls.iter().filter(|record| record.agent_id == agent.id) {
+        if let Some(call_id) = record.id.rsplit(':').next() {
+            results.insert(call_id.to_owned(), record);
+        }
+    }
+    for message in durable.history() {
+        match message {
+            Message::System { .. } => continue,
+            Message::User { content } => {
+                for part in content {
+                    if let UserContent::Text(text) = part {
+                        for line in text.text.lines() {
+                            lines.push(Line::from(vec![
+                                Span::styled("▸ ", Style::default().fg(Color::Cyan)),
+                                Span::raw(line.to_owned()),
+                            ]));
+                        }
+                    }
+                }
+            }
+            Message::Assistant(assistant) => {
+                for part in assistant.content {
+                    match part {
+                        AssistantContent::Text(text) => {
+                            for line in text.text.lines() {
+                                lines.push(Line::from(vec![
+                                    Span::styled("✶ ", Style::default().fg(Color::Green)),
+                                    Span::raw(line.to_owned()),
+                                ]));
+                            }
+                        }
+                        AssistantContent::Reasoning(reasoning) => {
+                            for line in reasoning.text.lines().take(12) {
+                                lines.push(Line::from(vec![
+                                    Span::styled("… ", Style::default().fg(Color::DarkGray)),
+                                    Span::styled(line.to_owned(), Style::default().fg(Color::DarkGray)),
+                                ]));
+                            }
+                        }
+                        AssistantContent::ToolCall(call) => {
+                            let args = serde_json::to_string(&call.function.arguments)
+                                .unwrap_or_default();
+                            let args: String = args.chars().take(110).collect();
+                            lines.push(Line::from(vec![
+                                Span::styled("⚙ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                                Span::styled(
+                                    format!("{} {}", call.function.name, args),
+                                    Style::default().fg(Color::Yellow),
+                                ),
+                            ]));
+                            match results.get(&call.id.to_string()) {
+                                Some(record) => {
+                                    let brief = tool_result_brief(record);
+                                    lines.push(Line::from(vec![
+                                        Span::styled("   ↳ ", Style::default().fg(Color::DarkGray)),
+                                        Span::styled(brief, Style::default().fg(Color::LightBlue)),
+                                    ]));
+                                }
+                                None => {
+                                    lines.push(Line::from(vec![Span::styled(
+                                        "   ↳ …",
+                                        Style::default().fg(Color::DarkGray),
+                                    )]));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    lines
+}
+
+fn tool_result_brief(record: &ToolCallRecord) -> String {
+    let mut brief = String::new();
+    if let Some(result) = &record.result {
+        if let Some(is_error) = result["is_error"].as_bool() {
+            if is_error {
+                brief.push_str("error: ");
+            }
+        }
+        if let Some(value) = result["value"]["result"].as_str() {
+            let text: String = value.chars().take(160).collect();
+            brief.push_str(&text);
+        } else if let Some(value) = result["value"]["result"].as_object() {
+            let mut parts: Vec<String> = Vec::new();
+            for key in ["state", "status", "job_id", "passed", "evidence_id"] {
+                if let Some(v) = value[key].as_str() {
+                    parts.push(format!("{key}={v}"));
+                } else if let Some(v) = value[key].as_bool() {
+                    parts.push(format!("{key}={v}"));
+                }
+            }
+            if parts.is_empty() {
+                let text = serde_json::to_string(value).unwrap_or_default();
+                brief.push_str(&text.chars().take(160).collect::<String>());
+            } else {
+                brief.push_str(&parts.join(" "));
+            }
+        } else {
+            let text = serde_json::to_string(result).unwrap_or_default();
+            brief.push_str(&text.chars().take(160).collect::<String>());
+        }
+    } else {
+        brief.push_str("pending");
+    }
+    brief
+}
+
 fn dashboard(
     store: &Store,
     run_id: Option<&str>,
     runner: Option<AssessmentRunner>,
 ) -> Result<()> {
     use crossterm::{
-        event::{self, Event as CEvent, KeyCode},
+        event::{
+            self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste,
+            EnableMouseCapture, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers,
+            MouseButton, MouseEventKind,
+        },
         execute,
         terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
     use ratatui::{
         Terminal,
         backend::CrosstermBackend,
-        layout::{Constraint, Direction, Layout},
+        layout::{Constraint, Direction, Layout, Rect},
         style::{Color, Modifier, Style},
         text::{Line, Span},
-        widgets::{Block, Borders, Paragraph, Wrap},
+        widgets::{Block, Borders, Clear, Paragraph, Wrap},
     };
+    use ratatui_textarea::TextArea;
     struct Restore;
     impl Drop for Restore {
         fn drop(&mut self) {
+            let _ = execute!(io::stdout(), DisableBracketedPaste, DisableMouseCapture);
             let _ = disable_raw_mode();
             let _ = execute!(io::stdout(), LeaveAlternateScreen);
         }
     }
     enable_raw_mode()?;
     let _restore = Restore;
-    execute!(io::stdout(), EnterAlternateScreen)?;
+    execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    let mut editor = TextArea::default();
+    let _ = editor.set_placeholder_text("▸ type a message (Enter sends, Esc clears)");
     let mut scroll: usize = 0;
+    let mut detail_scroll: usize = 0;
     let mut follow = true;
-    let mut input = TuiInput::None;
-    let mut buffer = String::new();
     let mut input_error: Option<String> = None;
     let mut drive_cancel: Option<CancellationToken> = None;
     let mut selected: Option<String> = run_id.map(str::to_owned);
+    let mut tree_cursor: usize = 0;
+    let mut detail_agent: Option<String> = None;
+    let mut modal: Option<Finding> = None;
+    let mut help_open = false;
+    let mut focus = Focus::Editor;
+    let mut frame_clock: u64 = 0;
+    let mut last_tree_rect: Option<Rect> = None;
+    let mut last_findings_rect: Option<Rect> = None;
+    let mut last_right_rect: Option<Rect> = None;
     loop {
         if selected.is_none() {
             if let Ok(mut runs) = store.runs() {
@@ -470,8 +731,9 @@ fn dashboard(
             }
         }
         let Some(selected_id) = selected.as_deref() else {
-            // Welcome state: no assessment exists yet. Typing starts the
-            // task input directly, Strix-style.
+            // Welcome state: no assessment exists yet. Typing goes straight
+            // into the task input, Strix-style.
+            let _ = editor.set_placeholder_text("▸ task: target path (Enter to start)");
             terminal.draw(|frame| {
                 let area = frame.area();
                 let mut lines = banner_lines();
@@ -481,9 +743,14 @@ fn dashboard(
                         "What do you want me to do? Type a target path and press Enter.",
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                     ),
+                    Span::raw("  "),
+                    Span::styled(
+                        spinner(frame_clock),
+                        Style::default().fg(Color::LightGreen),
+                    ),
                 ]));
                 lines.push(Line::from(Span::styled(
-                    "The run is driven live in this terminal; q pauses and exits.",
+                    "The run is driven live in this terminal; Ctrl+Q pauses and exits.",
                     Style::default().fg(Color::DarkGray),
                 )));
                 lines.push(Line::from(Span::styled(
@@ -495,16 +762,12 @@ fn dashboard(
                     Style::default().fg(if runner.is_some() { Color::Green } else { Color::Red }),
                 )));
                 lines.push(Line::from(""));
-                let mut prompt = vec![
-                    Span::styled(" ▸ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled("task: target path ", Style::default().fg(Color::Cyan)),
-                    Span::raw(&buffer),
-                    Span::styled("▌", Style::default().fg(Color::Yellow)),
-                ];
                 if let Some(error) = &input_error {
-                    prompt.push(Span::styled(format!("  {error}"), Style::default().fg(Color::Red)));
+                    lines.push(Line::from(Span::styled(
+                        format!("  {error}"),
+                        Style::default().fg(Color::Red),
+                    )));
                 }
-                lines.push(Line::from(prompt));
                 frame.render_widget(
                     Paragraph::new(lines).block(
                         Block::default().borders(Borders::ALL).title(" RE-AGENT "),
@@ -512,91 +775,101 @@ fn dashboard(
                     area,
                 );
             })?;
-            if event::poll(Duration::from_millis(250))?
+            if event::poll(Duration::from_millis(100))?
                 && let CEvent::Key(key) = event::read()?
             {
-                // Windows terminals report press and release as separate
-                // events; handle only presses so a keystroke never lands
-                // twice in the input buffer.
-                if key.kind != crossterm::event::KeyEventKind::Press {
+                if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                if input == TuiInput::Task {
-                    match key.code {
-                        KeyCode::Esc => {
-                            input = TuiInput::None;
-                            buffer.clear();
-                            input_error = None;
-                        }
-                        KeyCode::Enter => {
-                            if let Some(runner) = &runner {
-                                match start_task(runner, &buffer) {
-                                    Ok((run_id, cancel)) => {
-                                        drive_cancel = Some(cancel);
-                                        selected = Some(run_id);
-                                        follow = true;
-                                        scroll = 0;
-                                        input = TuiInput::None;
-                                        buffer.clear();
-                                        input_error = None;
-                                    }
-                                    Err(error) => input_error = Some(format!("{error:#}")),
-                                }
+                if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    break;
+                }
+                if key.code == KeyCode::Esc {
+                    if editor.is_empty() {
+                        break;
+                    }
+                    editor.clear();
+                    input_error = None;
+                    continue;
+                }
+                if key.code == KeyCode::Enter {
+                    if let Some(runner) = &runner {
+                        let text = editor.lines().join(" ").trim().to_owned();
+                        match start_task(runner, &text) {
+                            Ok((run_id, cancel)) => {
+                                drive_cancel = Some(cancel);
+                                selected = Some(run_id);
+                                detail_agent = None;
+                                follow = true;
+                                scroll = 0;
+                                input_error = None;
+                                editor.clear();
                             }
+                            Err(error) => input_error = Some(format!("{error:#}")),
                         }
-                        KeyCode::Backspace => {
-                            buffer.pop();
-                        }
-                        KeyCode::Char(c) => buffer.push(c),
-                        _ => {}
                     }
                     continue;
                 }
-                match key.code {
-                    KeyCode::Char('i') if runner.is_some() => input = TuiInput::Task,
-                    KeyCode::Char(c) if runner.is_some() && !c.is_control() => {
-                        input = TuiInput::Task;
-                        buffer.push(c);
-                    }
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    _ => {}
-                }
+                let input: ratatui_textarea::Input = key.into();
+                editor.input(input);
             }
             continue;
         };
+        frame_clock = frame_clock.wrapping_add(1);
         let run: RunRecord = store.require("run", selected_id)?;
         let agents = store.list::<AgentRecord>("agent", selected_id)?;
         let findings = store.list::<Finding>("finding", selected_id)?;
         let events = store.recent_events(selected_id, 600)?;
-        let tree_height = terminal.size()?.height.saturating_sub(14).max(4) as usize;
-        let event_height = tree_height;
-        if follow {
-            scroll = events.len().saturating_sub(event_height.saturating_sub(2));
+        if tree_cursor >= agents.len() {
+            tree_cursor = 0;
         }
+        if let Some(agent_id) = detail_agent.as_deref()
+            && !agents.iter().any(|agent| agent.id == agent_id)
+        {
+            detail_agent = None;
+        }
+        let right_height = terminal.size()?.height.saturating_sub(17).max(4) as usize;
+        if follow {
+            scroll = events.len().saturating_sub(right_height.saturating_sub(2));
+        }
+        let _ = editor.set_placeholder_text("▸ message (Enter sends, Esc clears)");
+        let detail_lines: Vec<Line> = match detail_agent.as_deref() {
+            Some(agent_id) => agents
+                .iter()
+                .find(|agent| agent.id == agent_id)
+                .map(|agent| agent_detail_lines(store, selected_id, agent))
+                .unwrap_or_default(),
+            None => Vec::new(),
+        };
         terminal.draw(|frame| {
             let areas = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(7),
-                    Constraint::Min(10),
+                    Constraint::Min(8),
                     Constraint::Length(6),
-                    Constraint::Length(if input != TuiInput::None { 1 } else { 0 }),
+                    Constraint::Length(3),
                     Constraint::Length(1),
                 ])
                 .split(frame.area());
+            last_findings_rect = Some(areas[2]);
             // ---- banner ----
             frame.render_widget(
                 Paragraph::new(banner_lines()).block(Block::default().borders(Borders::NONE)),
                 areas[0],
             );
-            // ---- middle: agent tree | activity ----
+            // ---- middle: agent tree | activity/detail ----
             let middle = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
                 .split(areas[1]);
+            last_tree_rect = Some(middle[0]);
+            last_right_rect = Some(middle[1]);
             let tree_lines: Vec<Line> = agents
                 .iter()
-                .map(|agent| {
+                .enumerate()
+                .map(|(index, agent)| {
                     let (glyph, status_color) = match agent.status {
                         Status::Running => ("◉", Color::Yellow),
                         Status::Queued => ("○", Color::DarkGray),
@@ -618,17 +891,37 @@ fn dashboard(
                         Role::Verifier => Color::LightBlue,
                         Role::Reporter => Color::LightGreen,
                     };
-                    Line::from(vec![
+                    let cursor = index == tree_cursor && focus == Focus::Tree;
+                    let mut spans = vec![
+                        Span::styled(
+                            if cursor { "▸" } else { " " },
+                            if cursor {
+                                Style::default().bg(Color::DarkGray)
+                            } else {
+                                Style::default()
+                            },
+                        ),
                         Span::raw("  ".repeat(agent.depth as usize)),
                         Span::styled(glyph, Style::default().fg(status_color)),
                         Span::raw(if agent.depth > 0 { "▸ " } else { " " }),
-                        Span::styled(&agent.name, Style::default().fg(role_color).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            &agent.name,
+                            Style::default()
+                                .fg(role_color)
+                                .add_modifier(Modifier::BOLD)
+                                .add_modifier(if cursor { Modifier::UNDERLINED } else { Modifier::empty() }),
+                        ),
                         Span::raw("  "),
                         Span::styled(
                             format!("{} t={} {}", agent.role, agent.turns, agent.status),
                             Style::default().fg(status_color),
                         ),
-                    ])
+                    ];
+                    if agent.status == Status::Running {
+                        spans.push(Span::raw("  "));
+                        spans.push(sweep_span(frame_clock));
+                    }
+                    Line::from(spans)
                 })
                 .collect();
             frame.render_widget(
@@ -637,46 +930,90 @@ fn dashboard(
                     .wrap(Wrap { trim: false }),
                 middle[0],
             );
-            let visible = events.iter().rev().skip(scroll).take(event_height).collect::<Vec<_>>();
-            let event_lines: Vec<Line> = visible
-                .iter()
-                .map(|event| {
-                    let role = store_agent_role(&agents, event.agent_id.as_deref());
-                    let color = match role {
-                        Some(Role::Root) => Color::Cyan,
-                        Some(Role::Recon) => Color::Blue,
-                        Some(Role::Reverse) => Color::Magenta,
-                        Some(Role::Hunter) => Color::Yellow,
-                        Some(Role::Fuzz) => Color::Green,
-                        Some(Role::Crash) => Color::Red,
-                        Some(Role::Exploit) => Color::LightRed,
-                        Some(Role::Verifier) => Color::LightBlue,
-                        Some(Role::Reporter) => Color::LightGreen,
-                        None => Color::DarkGray,
-                    };
-                    let stamp = event
-                        .created_at
-                        .with_timezone(&chrono::Local)
-                        .format("%H:%M:%S")
-                        .to_string();
-                    Line::from(vec![
-                        Span::styled(format!("{stamp} "), Style::default().fg(Color::DarkGray)),
-                        Span::styled(
-                            format!("[{}] ", event.agent_id.as_deref().map(short_id).unwrap_or("assessment")),
-                            Style::default().fg(color).add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(event_kind(&event.kind), Style::default().fg(color)),
-                        Span::raw("  "),
-                        Span::raw(event_brief(&event)),
-                    ])
-                })
-                .collect();
-            frame.render_widget(
-                Paragraph::new(event_lines)
-                    .block(Block::default().borders(Borders::ALL).title(format!(" ACTIVITY {} ", if follow { "· following" } else { "· scrolled" })))
-                    .wrap(Wrap { trim: false }),
-                middle[1],
-            );
+            if detail_agent.is_some() {
+                let detail_agent_name = detail_agent
+                    .as_deref()
+                    .and_then(|id| agents.iter().find(|agent| agent.id == id))
+                    .map(|agent| agent.name.clone())
+                    .unwrap_or_default();
+                let start = detail_lines
+                    .len()
+                    .saturating_sub(right_height.saturating_sub(2))
+                    .saturating_sub(detail_scroll);
+                let window = detail_lines
+                    .iter()
+                    .skip(start)
+                    .take(right_height.saturating_sub(2));
+                frame.render_widget(
+                    Paragraph::new(window.cloned().collect::<Vec<_>>())
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .title(format!(" {detail_agent_name} "))
+                                .border_style(Style::default().fg(Color::Cyan)),
+                        )
+                        .wrap(Wrap { trim: false }),
+                    middle[1],
+                );
+            } else {
+                let visible = events
+                    .iter()
+                    .rev()
+                    .skip(scroll)
+                    .take(right_height.saturating_sub(2))
+                    .collect::<Vec<_>>();
+                let event_lines: Vec<Line> = visible
+                    .iter()
+                    .map(|event| {
+                        let role = store_agent_role(&agents, event.agent_id.as_deref());
+                        let color = match role {
+                            Some(Role::Root) => Color::Cyan,
+                            Some(Role::Recon) => Color::Blue,
+                            Some(Role::Reverse) => Color::Magenta,
+                            Some(Role::Hunter) => Color::Yellow,
+                            Some(Role::Fuzz) => Color::Green,
+                            Some(Role::Crash) => Color::Red,
+                            Some(Role::Exploit) => Color::LightRed,
+                            Some(Role::Verifier) => Color::LightBlue,
+                            Some(Role::Reporter) => Color::LightGreen,
+                            None => Color::DarkGray,
+                        };
+                        let stamp = event
+                            .created_at
+                            .with_timezone(&chrono::Local)
+                            .format("%H:%M:%S")
+                            .to_string();
+                        Line::from(vec![
+                            Span::styled(format!("{stamp} "), Style::default().fg(Color::DarkGray)),
+                            Span::styled(
+                                format!(
+                                    "[{}] ",
+                                    event
+                                        .agent_id
+                                        .as_deref()
+                                        .map(short_id)
+                                        .unwrap_or("assessment")
+                                ),
+                                Style::default().fg(color).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(event_kind(&event.kind), Style::default().fg(color)),
+                            Span::raw("  "),
+                            Span::raw(event_brief(&event)),
+                        ])
+                    })
+                    .collect();
+                frame.render_widget(
+                    Paragraph::new(event_lines)
+                        .block(
+                            Block::default().borders(Borders::ALL).title(format!(
+                                " ACTIVITY {} ",
+                                if follow { "· following" } else { "· scrolled" }
+                            )),
+                        )
+                        .wrap(Wrap { trim: false }),
+                    middle[1],
+                );
+            }
             // ---- findings ----
             let finding_lines: Vec<Line> = if findings.is_empty() {
                 vec![Line::from(Span::styled(
@@ -696,7 +1033,14 @@ fn dashboard(
                         };
                         Line::from(vec![
                             Span::styled(
-                                format!("{} ", finding.severity.map(|s| format!("{s:?}")).unwrap_or_else(|| "??".into()).to_uppercase()),
+                                format!(
+                                    "{} ",
+                                    finding
+                                        .severity
+                                        .map(|s| format!("{s:?}"))
+                                        .unwrap_or_else(|| "??".into())
+                                        .to_uppercase()
+                                ),
                                 Style::default().fg(severity_color).add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(format!("{:?} ", finding.stage), Style::default().fg(Color::DarkGray)),
@@ -711,34 +1055,8 @@ fn dashboard(
                     .wrap(Wrap { trim: true }),
                 areas[2],
             );
-            // ---- input line ----
-            if input != TuiInput::None {
-                let label = match input {
-                    TuiInput::Task => " task: target path ",
-                    TuiInput::Message => " message to root ",
-                    TuiInput::None => "",
-                };
-                let mut spans = vec![
-                    Span::styled(" ▸ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled(label, Style::default().fg(Color::Cyan)),
-                    Span::raw(&buffer),
-                    Span::styled("▌", Style::default().fg(Color::Yellow)),
-                ];
-                if let Some(error) = &input_error {
-                    spans.push(Span::styled(
-                        format!("  {error}"),
-                        Style::default().fg(Color::Red),
-                    ));
-                }
-                frame.render_widget(
-                    Paragraph::new(Line::from(spans)).block(
-                        Block::default()
-                            .borders(Borders::TOP)
-                            .border_style(Style::default().fg(Color::Cyan)),
-                    ),
-                    areas[3],
-                );
-            }
+            // ---- editor ----
+            frame.render_widget(&editor, areas[3]);
             // ---- status bar ----
             let status_color = match run.status {
                 Status::Running => Color::Green,
@@ -762,61 +1080,56 @@ fn dashboard(
                     Span::styled(format!("cost ${:.4}  ", run.cost_usd), Style::default().fg(Color::Gray)),
                     Span::styled(format!("elapsed {elapsed}  "), Style::default().fg(Color::Gray)),
                     Span::styled(format!("agents {}  ", agents.len()), Style::default().fg(Color::Gray)),
-                    Span::styled("q quit · p pause · i task · m message · ↑/↓ scroll · f follow", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        if focus == Focus::Tree {
+                            "tree: ↑/↓ · Enter view · g stream · Tab input"
+                        } else {
+                            "input: Enter send · Ctrl+Q quit · Ctrl+P pause · F1 help · Tab tree"
+                        },
+                        Style::default().fg(Color::DarkGray),
+                    ),
                 ])),
                 areas[4],
             );
+            // ---- overlays ----
+            if let Some(finding) = &modal {
+                let rect = centered_rect(72, 70, frame.area());
+                frame.render_widget(Clear, rect);
+                frame.render_widget(
+                    Paragraph::new(finding_modal_lines(finding))
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .title(" FINDING ")
+                                .border_style(Style::default().fg(Color::LightRed)),
+                        )
+                        .wrap(Wrap { trim: true }),
+                    rect,
+                );
+            }
+            if help_open {
+                let rect = centered_rect(76, 55, frame.area());
+                frame.render_widget(Clear, rect);
+                frame.render_widget(
+                    Paragraph::new(help_lines())
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .title(" HELP ")
+                                .border_style(Style::default().fg(Color::Cyan)),
+                        )
+                        .wrap(Wrap { trim: true }),
+                    rect,
+                );
+            }
         })?;
-        if event::poll(Duration::from_millis(250))? && let CEvent::Key(key) = event::read()? {
-            // Press-only, as above: release events must not double the input.
-            if key.kind != crossterm::event::KeyEventKind::Press {
-                continue;
-            }
-            if input != TuiInput::None {
-                match key.code {
-                    KeyCode::Esc => {
-                        input = TuiInput::None;
-                        buffer.clear();
-                        input_error = None;
-                    }
-                    KeyCode::Enter => match input {
-                        TuiInput::Task => {
-                            if let Some(runner) = &runner {
-                                match start_task(runner, &buffer) {
-                                    Ok((created, cancel)) => {
-                                        drive_cancel = Some(cancel);
-                                        selected = Some(created);
-                                        follow = true;
-                                        scroll = 0;
-                                        input = TuiInput::None;
-                                        buffer.clear();
-                                        input_error = None;
-                                    }
-                                    Err(error) => input_error = Some(format!("{error:#}")),
-                                }
-                            }
-                        }
-                        TuiInput::Message => {
-                            if !run.status.terminal() && !buffer.trim().is_empty() {
-                                Coordinator::new(store.clone())
-                                    .message("operator", &run.root_id, buffer.trim())?;
-                            }
-                            input = TuiInput::None;
-                            buffer.clear();
-                            input_error = None;
-                        }
-                        TuiInput::None => {}
-                    },
-                    KeyCode::Backspace => {
-                        buffer.pop();
-                    }
-                    KeyCode::Char(c) => buffer.push(c),
-                    _ => {}
-                }
-                continue;
-            }
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => {
+        if !event::poll(Duration::from_millis(100))? {
+            continue;
+        }
+        match event::read()? {
+            CEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
                     if let Some(cancel) = &drive_cancel {
                         let _ = Coordinator::new(store.clone())
                             .pause_budget(selected_id, "operator quit TUI");
@@ -824,45 +1137,162 @@ fn dashboard(
                     }
                     break;
                 }
-                KeyCode::Char('p') if !run.status.terminal() => {
-                    Coordinator::new(store.clone())
-                        .pause_budget(selected_id, "operator paused in TUI")?;
+                if key.code == KeyCode::F(1) {
+                    help_open = !help_open;
+                    continue;
                 }
-                KeyCode::Char('i') if runner.is_some() => {
-                    input = TuiInput::Task;
-                    buffer.clear();
-                    input_error = None;
+                if key.code == KeyCode::Esc {
+                    if modal.take().is_some() {
+                        continue;
+                    }
+                    if detail_agent.take().is_some() {
+                        continue;
+                    }
+                    if !editor.is_empty() {
+                        clear_editor(&mut editor);
+                        continue;
+                    }
+                    break;
                 }
-                KeyCode::Char('m') if !run.status.terminal() => {
-                    input = TuiInput::Message;
-                    buffer.clear();
-                    input_error = None;
+                if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    if !run.status.terminal() {
+                        Coordinator::new(store.clone())
+                            .pause_budget(selected_id, "operator paused in TUI")?;
+                    }
+                    continue;
                 }
-                KeyCode::Char('f') => follow = true,
-                KeyCode::Up => {
-                    follow = false;
-                    scroll = scroll.saturating_add(1);
+                if modal.is_some() {
+                    if key.code == KeyCode::Enter {
+                        modal = None;
+                    }
+                    continue;
                 }
-                KeyCode::Down => {
-                    if scroll > 0 {
+                if help_open {
+                    continue;
+                }
+                if key.code == KeyCode::Tab {
+                    focus = if focus == Focus::Editor {
+                        Focus::Tree
+                    } else {
+                        Focus::Editor
+                    };
+                    continue;
+                }
+                match focus {
+                    Focus::Editor => {
+                        if key.code == KeyCode::Enter {
+                            let text = editor.lines().join(" ").trim().to_owned();
+                            clear_editor(&mut editor);
+                            if !text.is_empty() && !run.status.terminal() {
+                                let target = detail_agent
+                                    .clone()
+                                    .or_else(|| agents.get(tree_cursor).map(|agent| agent.id.clone()))
+                                    .unwrap_or_else(|| run.root_id.clone());
+                                Coordinator::new(store.clone())
+                                    .message("operator", &target, &text)?;
+                            }
+                            continue;
+                        }
+                        // Arrow keys scroll the panes even while typing.
+                        match key.code {
+                            KeyCode::Up => {
+                                follow = false;
+                                scroll = scroll.saturating_add(1);
+                                continue;
+                            }
+                            KeyCode::Down => {
+                                if scroll > 0 {
+                                    scroll -= 1;
+                                    if scroll == 0 {
+                                        follow = true;
+                                    }
+                                }
+                                continue;
+                            }
+                            KeyCode::PageUp => {
+                                follow = false;
+                                scroll = scroll.saturating_add(10);
+                                continue;
+                            }
+                            KeyCode::PageDown => {
+                                scroll = scroll.saturating_sub(10);
+                                if scroll == 0 {
+                                    follow = true;
+                                }
+                                continue;
+                            }
+                            _ => {}
+                        }
+                        let input: ratatui_textarea::Input = key.into();
+                        editor.input(input);
+                    }
+                    Focus::Tree => match key.code {
+                        KeyCode::Up => tree_cursor = tree_cursor.saturating_sub(1),
+                        KeyCode::Down => {
+                            tree_cursor = (tree_cursor + 1).min(agents.len().saturating_sub(1))
+                        }
+                        KeyCode::Enter => {
+                            if let Some(agent) = agents.get(tree_cursor) {
+                                detail_agent = Some(agent.id.clone());
+                                detail_scroll = 0;
+                            }
+                        }
+                        KeyCode::Char('g') => detail_agent = None,
+                        _ => {}
+                    },
+                }
+            }
+            CEvent::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if let Some(rect) = last_tree_rect {
+                        if rect.contains((mouse.column, mouse.row).into()) {
+                            let row = mouse.row.saturating_sub(rect.y + 1) as usize;
+                            if row < agents.len() {
+                                tree_cursor = row;
+                                detail_agent = Some(agents[row].id.clone());
+                                detail_scroll = 0;
+                                focus = Focus::Tree;
+                            }
+                        }
+                    }
+                    if let Some(rect) = last_findings_rect {
+                        if rect.contains((mouse.column, mouse.row).into()) {
+                            let row = mouse.row.saturating_sub(rect.y + 1) as usize;
+                            if row < findings.len() {
+                                modal = Some(findings[row].clone());
+                            }
+                        }
+                    }
+                }
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                    let up = matches!(mouse.kind, MouseEventKind::ScrollUp);
+                    let over_right = last_right_rect
+                        .is_some_and(|rect| rect.contains((mouse.column, mouse.row).into()));
+                    if detail_agent.is_some() && over_right {
+                        if up {
+                            detail_scroll = detail_scroll.saturating_add(1);
+                        } else {
+                            detail_scroll = detail_scroll.saturating_sub(1);
+                        }
+                    } else if up {
+                        follow = false;
+                        scroll = scroll.saturating_add(1);
+                    } else if scroll > 0 {
                         scroll -= 1;
                         if scroll == 0 {
                             follow = true;
                         }
                     }
                 }
-                KeyCode::PageUp => {
-                    follow = false;
-                    scroll = scroll.saturating_add(10);
-                }
-                KeyCode::PageDown => {
-                    scroll = scroll.saturating_sub(10);
-                    if scroll == 0 {
-                        follow = true;
-                    }
-                }
                 _ => {}
+            },
+            CEvent::Paste(text) => {
+                if focus == Focus::Editor {
+                    editor.insert_str(&text);
+                }
             }
+            _ => {}
         }
     }
     Ok(())
