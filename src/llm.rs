@@ -327,7 +327,6 @@ impl ModelEngine {
             .map(|resolved| resolved.spec.clone())
             .unwrap_or_else(|| ModelSpec::new(provider, &self.config.model));
         spec.tools = true;
-        spec.max_output_tokens = Some(self.config.max_tokens.min(u32::MAX as u64) as u32);
         let reference = spec.reference();
         rig_ecs::model::Connection {
             spec: Arc::new(spec),
