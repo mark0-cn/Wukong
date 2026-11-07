@@ -22,6 +22,8 @@ pub struct AssessmentRunner {
     pub tools: Arc<ToolService>,
     config: AppConfig,
     engine: Arc<DurableEngine>,
+    /// Engine for role (non-root) agents when `model.role_model` is set.
+    role_engine: Option<Arc<DurableEngine>>,
     events: broadcast::Sender<Value>,
 }
 
@@ -29,6 +31,11 @@ impl AssessmentRunner {
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
         let engine = Arc::new(DurableEngine::new(config.model.clone())?);
+        let role_engine = if config.model.role_model.is_some() {
+            Some(Arc::new(DurableEngine::new(config.model.role_config())?))
+        } else {
+            None
+        };
         let tools = Arc::new(ToolService::new(config.clone(), store.clone()).await?);
         let (events, _) = broadcast::channel(1024);
         Ok(Self {
@@ -37,8 +44,18 @@ impl AssessmentRunner {
             tools,
             config,
             engine,
+            role_engine,
             events,
         })
+    }
+    /// The engine that serves an agent: role agents use the configured role
+    /// model (same provider/endpoint, different model name) when set.
+    fn engine_for(&self, role: Role) -> &DurableEngine {
+        if role == Role::Root {
+            &self.engine
+        } else {
+            self.role_engine.as_deref().unwrap_or(&self.engine)
+        }
     }
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
@@ -167,6 +184,7 @@ impl AssessmentRunner {
             return Ok(());
         }
         let run: RunRecord = self.store.require("run", &agent.run_id)?;
+        let engine = self.engine_for(agent.role);
         let mut durable = if let Some(state) = &agent.checkpoint {
             DurableRun::from_json(&serde_json::to_string(state)?)?
         } else {
@@ -188,7 +206,7 @@ impl AssessmentRunner {
                 self.config.skills_dir.as_deref(),
                 self.config.demos_dir.as_deref(),
             )?;
-            self.engine.new_run_with_history(
+            engine.new_run_with_history(
                 &agent.task,
                 &preamble,
                 self.tools.definitions(agent.role),
@@ -258,7 +276,7 @@ impl AssessmentRunner {
                     )?;
                 }
             }
-            self.engine.prepare_model_call(&mut durable, &step)?;
+            engine.prepare_model_call(&mut durable, &step)?;
             self.store.checkpoint_and_ack(
                 agent_id,
                 serde_json::to_value(&durable)?,
@@ -276,7 +294,7 @@ impl AssessmentRunner {
                     let events = self.events.clone();
                     let rid = run.id.clone();
                     let aid = agent_id.to_owned();
-                    self.engine
+                    engine
                         .call_model_streaming(&mut durable, step.clone(), move |_| {
                             let _ = events.send(
                                 json!({"run_id":rid,"agent_id":aid,"kind":"model.stream_progress"}),
@@ -284,7 +302,7 @@ impl AssessmentRunner {
                         })
                         .await
                 } else {
-                    self.engine.call_model(&mut durable, step.clone()).await
+                    engine.call_model(&mut durable, step.clone()).await
                 };
                 match result {
                     Ok(usage) => break usage,
@@ -331,8 +349,7 @@ impl AssessmentRunner {
                         if self.config.execution.summarize_tool_outputs {
                             let size = serde_json::to_string(&output.value)?.len();
                             if size > self.config.execution.summarize_threshold_chars {
-                                let (summary, usage) = self
-                                    .engine
+                                let (summary, usage) = engine
                                     .summarize_tool_output(
                                         &name,
                                         &output.value,
@@ -882,6 +899,62 @@ mod tests {
                 .contains("role token budget exhausted")
         );
         // The provider was never called for this agent.
+        drop(server);
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn role_agents_use_the_configured_role_model() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let body = request(&mut socket).await;
+            assert!(
+                body.to_string().contains("flash-fixture"),
+                "role agent request must use the role model: {body}"
+            );
+            respond(&mut socket, reply_text("role model fixture done")).await;
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.bin");
+        std::fs::write(&target, b"role model fixture").unwrap();
+        let mut config = AppConfig {
+            state_dir: dir.path().join("state"),
+            ..AppConfig::default()
+        };
+        config.model.provider = Provider::Ollama;
+        config.model.base_url = Some(base);
+        config.model.role_model = Some("flash-fixture".into());
+        config.execution.stream = false;
+        config.execution.model_retries = 0;
+        let store = Store::open(&config.state_dir).unwrap();
+        let runner = AssessmentRunner::new(config.clone(), store).await.unwrap();
+        let run = runner
+            .coordinator
+            .create_run(
+                &target,
+                "role model fixture task",
+                config.budget.clone(),
+                serde_json::to_value(config).unwrap(),
+            )
+            .unwrap();
+        let spawned = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "recon-fixture".into(),
+                    role: Role::Recon,
+                    task: "role model fixture task".into(),
+                    scope: "fixture scope".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                },
+            )
+            .unwrap();
+        assert!(spawned.created);
+        runner.slice(&spawned.agent.id).await.unwrap();
         drop(server);
         runner.tools.close().await;
     }
