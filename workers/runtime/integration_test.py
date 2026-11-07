@@ -95,7 +95,7 @@ def main():
     assert run["class"] == "running", run
     for _ in range(100):
         events = client.call("debug.events", session_id=session_id)
-        if any("*stopped" in record for record in events["events"]):
+        if any(record.get("type") == "notify" and record.get("message") == "stopped" for record in events["events"]):
             break
         time.sleep(0.05)
     else:

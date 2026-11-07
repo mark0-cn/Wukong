@@ -34,6 +34,55 @@ class SessionLaunchTests(unittest.TestCase):
                 self.assertEqual(options["env"]["TMPDIR"], str(work))
 
 
+class GdbMiTests(unittest.TestCase):
+    def session(self, directory, output):
+        import bridge
+        import collections
+        import io
+        import queue
+        import threading
+        from types import SimpleNamespace
+        session = bridge.DebugSession.__new__(bridge.DebugSession)
+        session.id = "mi-fixture"
+        session.directory = Path(directory)
+        session.transcript_bytes = 0
+        session.dead = False
+        session.token = 0
+        session.isolated = False
+        session.lock = threading.Lock()
+        session.records = queue.Queue(maxsize=8)
+        session.events = collections.deque(maxlen=256)
+        session.process = SimpleNamespace(stdout=io.StringIO(output), stdin=io.StringIO(), poll=lambda: None)
+        return session
+
+    def test_nested_payloads_escaping_and_async_events(self):
+        records = r'''*stopped,reason="breakpoint-hit",frame={func="main",line="12"}
+1^done,bkpt={number="1",fullname="a\"b.c"},stack=[frame={level="0",func="main"}]
+(gdb)
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.session(directory, records)
+            session.read_records()
+            session.dead = False
+            result = session.command("-stack-list-frames", 1)
+            self.assertEqual(result["class"], "done")
+            self.assertEqual(result["payload"]["bkpt"]["fullname"], 'a"b.c')
+            self.assertEqual(result["payload"]["stack"][0]["func"], "main")
+            self.assertEqual(result["events"][0]["message"], "stopped")
+            self.assertEqual(result["events"][0]["payload"]["frame"]["line"], "12")
+            self.assertEqual((Path(directory) / "transcript.mi").read_text(), records)
+
+    def test_oversized_mi_records_invalidate_the_session(self):
+        import bridge
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.session(directory, '1^done,value="' + 'x' * 70000 + '"\n')
+            with patch.object(bridge, "terminate_tree") as terminate:
+                session.read_records()
+            terminate.assert_called_once_with(session.process)
+            self.assertTrue(session.dead)
+            self.assertTrue(session.records.empty())
+
+
 class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
