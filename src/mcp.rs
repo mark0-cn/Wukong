@@ -1,12 +1,18 @@
 //! MCP stdio clients. Server credentials are explicitly allowlisted env names.
-use anyhow::{Context, Result, bail, ensure};
-use rig::completion::ToolDefinition;
+use anyhow::{Context, Result, ensure};
+use futures::StreamExt;
+use rig::{
+    completion::ToolDefinition,
+    tool::rmcp::{
+        McpConnection,
+        rmcp::{self, ServiceExt},
+    },
+};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{collections::BTreeMap, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout, Command},
+    process::{Child, Command},
     sync::Mutex,
 };
 
@@ -25,47 +31,13 @@ fn timeout() -> u64 {
     60
 }
 struct Connection {
-    child: Child,
-    input: ChildStdin,
-    output: BufReader<ChildStdout>,
-    sequence: u64,
-    timeout: u64,
-}
-impl Connection {
-    async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
-        self.sequence += 1;
-        let id = self.sequence;
-        self.input
-            .write_all(
-                serde_json::to_string(
-                    &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
-                )?
-                .as_bytes(),
-            )
-            .await?;
-        self.input.write_all(b"\n").await?;
-        self.input.flush().await?;
-        tokio::time::timeout(Duration::from_secs(self.timeout.clamp(1,600)),async{
-            loop{
-                let mut line=String::new();
-                // Bound the read itself: a misbehaving local server streaming
-                // bytes without a newline must not grow memory unbounded.
-                let mut bounded=(&mut self.output).take(2*1024*1024+1);
-                let count=bounded.read_line(&mut line).await?;
-                ensure!(count>0,"MCP server closed stdout");ensure!(line.len()<=2*1024*1024,"MCP message exceeds 2 MiB");
-                let message:Value=serde_json::from_str(&line).context("MCP stdout must contain JSON-RPC lines only")?;
-                if message.get("id")==Some(&json!(id))&&message.get("method").is_none(){if let Some(error)=message.get("error"){bail!("MCP {method} failed: {error}");}return message.get("result").cloned().context("MCP result missing");}
-                if let Some(request_id)=message.get("id").filter(|_|message.get("method").is_some()) {
-                    let result=if message["method"]=="ping"{json!({"jsonrpc":"2.0","id":request_id,"result":{}})}else{json!({"jsonrpc":"2.0","id":request_id,"error":{"code":-32601,"message":"client method unavailable"}})};
-                    self.input.write_all(format!("{result}\n").as_bytes()).await?;self.input.flush().await?;
-                }
-            }
-        }).await.context("MCP request timed out")?
-    }
+    sdk: McpConnection,
+    child: Mutex<Child>,
+    timeout: Duration,
 }
 #[derive(Clone, Default)]
 pub struct McpRegistry {
-    connections: BTreeMap<String, Arc<Mutex<Connection>>>,
+    connections: BTreeMap<String, Arc<Connection>>,
     tools: BTreeMap<String, (String, String, ToolDefinition, bool)>,
 }
 impl McpRegistry {
@@ -113,77 +85,102 @@ impl McpRegistry {
             let mut child = command
                 .spawn()
                 .with_context(|| format!("start MCP server {}", config.name))?;
-            let mut connection = Connection {
-                input: child.stdin.take().context("MCP stdin missing")?,
-                output: BufReader::new(child.stdout.take().context("MCP stdout missing")?),
-                child,
-                sequence: 0,
-                timeout: config.timeout_seconds,
+            // Use rmcp's codec on bounded frames. An oversized/malformed line
+            // closes this transport immediately instead of discarding an
+            // endless stream until the request timeout.
+            use rmcp::{
+                service::{RoleClient, RxJsonRpcMessage, TxJsonRpcMessage},
+                transport::async_rw::JsonRpcMessageCodec,
             };
-            connection.request("initialize",json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"re-agent","version":env!("CARGO_PKG_VERSION")}})).await?;
-            connection
-                .input
-                .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
-                .await?;
-            connection.input.flush().await?;
-            let mut cursor: Option<String> = None;
-            loop {
-                let response = connection
-                    .request(
-                        "tools/list",
-                        cursor
-                            .as_ref()
-                            .map(|c| json!({"cursor":c}))
-                            .unwrap_or(json!({})),
-                    )
-                    .await?;
-                for tool in response["tools"]
-                    .as_array()
-                    .context("MCP tools/list has no tools array")?
-                {
-                    let original = tool["name"]
-                        .as_str()
-                        .context("MCP tool name missing")?
-                        .to_owned();
-                    let normalized: String = original
-                        .chars()
-                        .map(|c| {
-                            if c.is_ascii_alphanumeric() || c == '_' {
-                                c
-                            } else {
-                                '_'
-                            }
-                        })
-                        .collect();
-                    let name = format!("mcp_{}_{}", config.name, normalized);
-                    ensure!(
-                        !registry.tools.contains_key(&name),
-                        "MCP tool names collide after normalization: {name}"
-                    );
-                    let definition = ToolDefinition::new(
-                        rig::message::ToolName::new(name.clone())?,
-                        format!(
-                            "MCP {}: {}",
-                            config.name,
-                            tool["description"].as_str().unwrap_or(&original)
-                        ),
-                        tool["inputSchema"].clone(),
-                    );
-                    let read_only = tool["annotations"]["readOnlyHint"]
-                        .as_bool()
-                        .unwrap_or(false);
-                    registry
-                        .tools
-                        .insert(name, (config.name.clone(), original, definition, read_only));
-                }
-                cursor = response["nextCursor"].as_str().map(str::to_owned);
-                if cursor.is_none() {
-                    break;
-                }
+            let transport_error = Arc::new(std::sync::Mutex::new(None::<String>));
+            let read_error = transport_error.clone();
+            let read = tokio_util::codec::FramedRead::new(
+                child.stdout.take().context("MCP stdout missing")?,
+                JsonRpcMessageCodec::<RxJsonRpcMessage<RoleClient>>::new_with_max_length(
+                    2 * 1024 * 1024,
+                ),
+            )
+            .scan((), move |_, item| {
+                let message = match item {
+                    Ok(message) => Some(message),
+                    Err(error) => {
+                        *read_error
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            Some(format!("MCP stdio frame invalid or exceeds 2 MiB: {error}"));
+                        None
+                    }
+                };
+                std::future::ready(message)
+            });
+            let write = tokio_util::codec::FramedWrite::new(
+                child.stdin.take().context("MCP stdin missing")?,
+                JsonRpcMessageCodec::<TxJsonRpcMessage<RoleClient>>::new(),
+            );
+            let transport = (write, read);
+            let timeout = Duration::from_secs(config.timeout_seconds.clamp(1, 600));
+            let client = rmcp::model::ClientConfig::new(
+                rmcp::model::ClientCapabilities::default(),
+                rmcp::model::Implementation::new("re-agent", env!("CARGO_PKG_VERSION")),
+            );
+            let service = tokio::time::timeout(timeout, client.serve(transport))
+                .await
+                .context("MCP initialization timed out")?
+                .with_context(|| {
+                    transport_error
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone()
+                        .unwrap_or_else(|| "MCP initialization failed".into())
+                })?;
+            let sdk = McpConnection::new(service);
+            let tools = tokio::time::timeout(timeout, sdk.tools())
+                .await
+                .context("MCP tools/list timed out")??;
+            for tool in tools {
+                let tool = tool.definition();
+                let original = tool.name.to_string();
+                let normalized: String = original
+                    .chars()
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || c == '_' {
+                            c
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect();
+                let name = format!("mcp_{}_{}", config.name, normalized);
+                ensure!(
+                    !registry.tools.contains_key(&name),
+                    "MCP tool names collide after normalization: {name}"
+                );
+                let definition = ToolDefinition::new(
+                    rig::message::ToolName::new(name.clone())?,
+                    format!(
+                        "MCP {}: {}",
+                        config.name,
+                        tool.description.as_deref().unwrap_or(&original)
+                    ),
+                    Value::Object((*tool.input_schema).clone()),
+                );
+                let read_only = tool
+                    .annotations
+                    .as_ref()
+                    .and_then(|annotations| annotations.read_only_hint)
+                    .unwrap_or(false);
+                registry
+                    .tools
+                    .insert(name, (config.name.clone(), original, definition, read_only));
             }
-            registry
-                .connections
-                .insert(config.name.clone(), Arc::new(Mutex::new(connection)));
+            registry.connections.insert(
+                config.name.clone(),
+                Arc::new(Connection {
+                    sdk,
+                    child: Mutex::new(child),
+                    timeout,
+                }),
+            );
         }
         Ok(registry)
     }
@@ -200,17 +197,30 @@ impl McpRegistry {
     }
     pub async fn call(&self, name: &str, arguments: Value) -> Result<Value> {
         let (server, tool, _, _) = self.tools.get(name).context("unknown MCP tool")?;
-        self.connections
+        let connection = self
+            .connections
             .get(server)
-            .context("MCP connection missing")?
-            .lock()
-            .await
-            .request("tools/call", json!({"name":tool,"arguments":arguments}))
-            .await
+            .context("MCP connection missing")?;
+        let mut request = rmcp::model::CallToolRequestParams::new(tool.clone());
+        request.arguments = Some(
+            arguments
+                .as_object()
+                .context("MCP arguments must be an object")?
+                .clone(),
+        );
+        // A timed-out remote mutation is uncertain. The application ledger
+        // records that outcome and never blindly repeats it.
+        let result =
+            tokio::time::timeout(connection.timeout, connection.sdk.peer().call_tool(request))
+                .await
+                .context("MCP request timed out")??;
+        Ok(serde_json::to_value(result)?)
     }
+
     pub async fn close(&self) {
         for connection in self.connections.values() {
-            let _ = connection.lock().await.child.kill().await;
+            connection.sdk.close().await;
+            let _ = connection.child.lock().await.kill().await;
         }
     }
 }
