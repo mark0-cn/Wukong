@@ -9,7 +9,7 @@ use crate::{
     tools::ToolService,
 };
 use anyhow::{Context, Result, ensure};
-use rig::completion::Usage;
+use rig::completion::{Message, Usage};
 use serde_json::{Value, json};
 use std::{collections::HashSet, sync::Arc, time::Duration};
 use tokio::{sync::broadcast, task::JoinSet};
@@ -181,7 +181,11 @@ impl AssessmentRunner {
             }
         }
     }
-    /// Whether every declared predecessor of `agent` is terminal. A missing
+    /// Sentinel for the one-shot corrective note queued after a plain-text
+/// answer; a second prose answer fails the agent.
+const LIFECYCLE_NUDGE: &str = "LIFECYCLE_NUDGE";
+
+/// Whether every declared predecessor of `agent` is terminal. A missing
     /// predecessor id is treated as satisfied so a stale reference cannot
     /// deadlock the run.
     fn predecessors_satisfied(&self, agent: &AgentRecord) -> Result<bool> {
@@ -416,43 +420,82 @@ impl AssessmentRunner {
                 .checkpoint_and_ack(agent_id, serde_json::to_value(&durable)?, &[])?;
             let latest: AgentRecord = self.store.require("agent", agent_id)?;
             if !latest.status.terminal() {
-                // Lifecycle fallback: a free-text answer cannot silently end
-                // an assessment, but it must not kill sibling work either.
-                // Fail only this agent, retain its text as the partial
-                // summary, and let the parent receive the terminal notice.
                 let text = response.output().to_string();
                 let summary = text.chars().take(4000).collect::<String>();
-                let reason = "agent returned a plain-text answer without a lifecycle tool \
-                              (agent_finish/finish_scan); partial answer retained as summary"
-                    .to_string();
-                self.store.transaction(|tx| {
-                    let mut agent: AgentRecord =
-                        Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
-                    if agent.status.terminal() {
-                        return Ok(());
-                    }
-                    agent.status = Status::Failed;
-                    agent.summary = Some(summary);
-                    agent.error = Some(reason.clone());
-                    agent.updated_at = now();
-                    Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
-                    Coordinator::notify_terminal(tx, &agent)?;
-                    Store::tx_event(
-                        tx,
-                        &agent.run_id,
+                let history = serde_json::to_string(&durable.history()).unwrap_or_default();
+                if history.contains(Self::LIFECYCLE_NUDGE) {
+                    // Second prose answer after the corrective nudge: fail only
+                    // this agent, retain its text as the partial summary, and
+                    // let the parent receive the terminal notice.
+                    let reason = "agent returned a plain-text answer without a lifecycle tool \
+                                  (agent_finish/finish_scan); partial answer retained as summary"
+                        .to_string();
+                    self.store.transaction(|tx| {
+                        let mut agent: AgentRecord =
+                            Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+                        if agent.status.terminal() {
+                            return Ok(());
+                        }
+                        agent.status = Status::Failed;
+                        agent.summary = Some(summary);
+                        agent.error = Some(reason.clone());
+                        agent.updated_at = now();
+                        Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
+                        Coordinator::notify_terminal(tx, &agent)?;
+                        Store::tx_event(
+                            tx,
+                            &agent.run_id,
+                            Some(agent_id),
+                            "agent.lifecycle_fallback",
+                            json!({"reason":reason}),
+                        )?;
+                        Ok(())
+                    })?;
+                    self.emit(
+                        &run.id,
                         Some(agent_id),
                         "agent.lifecycle_fallback",
                         json!({"reason":reason}),
                     )?;
-                    Ok(())
-                })?;
+                    return Ok(());
+                }
+                // First prose answer: rebuild a fresh run seeded with the full
+                // history plus a corrective note, so the next slice asks the
+                // model to act. A second prose answer fails the agent above.
+                let preamble = agents::preamble(
+                    &agent,
+                    &run,
+                    &self.store,
+                    self.config.skills_dir.as_deref(),
+                    self.config.demos_dir.as_deref(),
+                )?;
+                let mut history = durable.history();
+                history.push(Message::user(format!(
+                    "LIFECYCLE_NUDGE: your previous turn answered in plain text. \
+                     Act now with a tool call — continue working with tools, or end \
+                     with finish_scan (root) / agent_finish (child). A plain-text \
+                     answer fails this agent."
+                )));
+                let rebuilt = engine.new_run_with_history(
+                    &agent.task,
+                    &preamble,
+                    self.tools.definitions(agent.role),
+                    run.budget.max_turns_per_agent,
+                    history,
+                )?;
+                self.store.checkpoint_and_ack(
+                    agent_id,
+                    serde_json::to_value(&rebuilt)?,
+                    &[],
+                )?;
                 self.emit(
                     &run.id,
                     Some(agent_id),
-                    "agent.lifecycle_fallback",
-                    json!({"reason":reason}),
+                    "agent.lifecycle_nudge",
+                    json!({"reason":"plain-text answer without a lifecycle tool"}),
                 )?;
-                return Ok(());
+                // Fall through to the maintenance tail: the next slice makes
+                // the follow-up model call.
             }
         }
         self.store.transaction(|tx| {
@@ -853,18 +896,23 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            request(&mut socket).await;
-            respond(
-                &mut socket,
-                reply_text("Partial analysis: input parsing is the boundary."),
-            )
-            .await;
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                request(&mut socket).await;
+                respond(
+                    &mut socket,
+                    reply_text("Partial analysis: input parsing is the boundary."),
+                )
+                .await;
+            }
         });
         let (_dir, runner, run) = fixture(base).await;
-        // A plain-text answer must not kill the run: the agent fails with its
+        // A plain-text answer must not kill the run: the agent gets one
+        // corrective nudge; only a second prose answer fails it with the
         // answer retained, and no error escapes the scheduler.
         runner.slice(&run.root_id).await.unwrap(); // model returns plain text
+        runner.slice(&run.root_id).await.unwrap(); // Done -> corrective nudge
+        runner.slice(&run.root_id).await.unwrap(); // nudged model call, prose again
         runner.slice(&run.root_id).await.unwrap(); // Done -> lifecycle fallback
         let agent: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
         assert_eq!(agent.status, Status::Failed);
@@ -879,6 +927,37 @@ mod tests {
                 .unwrap()
                 .contains("without a lifecycle tool")
         );
+        server.await.unwrap();
+        runner.tools.close().await;
+    }
+
+    #[tokio::test]
+    async fn lifecycle_nudge_recovers_a_wake_acknowledgment() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            request(&mut socket).await;
+            respond(&mut socket, reply_text("Acknowledged, continuing.")).await;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let req = request(&mut socket).await;
+            assert!(
+                req.to_string().contains("LIFECYCLE_NUDGE"),
+                "the corrective note must reach the model: {req}"
+            );
+            respond(
+                &mut socket,
+                reply("finish_scan", json!({"summary":"assessment complete"})),
+            )
+            .await;
+        });
+        let (_dir, runner, run) = fixture(base).await;
+        runner.slice(&run.root_id).await.unwrap(); // prose answer
+        runner.slice(&run.root_id).await.unwrap(); // nudge queued
+        runner.slice(&run.root_id).await.unwrap(); // follow-up call -> finish_scan
+        runner.slice(&run.root_id).await.unwrap(); // execute finish_scan
+        let run: RunRecord = runner.store.require("run", &run.id).unwrap();
+        assert_eq!(run.status, Status::Completed);
         server.await.unwrap();
         runner.tools.close().await;
     }

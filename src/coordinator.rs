@@ -321,7 +321,7 @@ impl Coordinator {
                         // AgentRecord would embed their conversation checkpoints
                         // into the parent's model context.
                         let states:Vec<_>=all.iter().filter(|a|agent.wait_for.contains(&a.id)).map(|a|json!({"id":a.id,"role":a.role,"status":a.status,"summary":a.summary,"error":a.error,"scope":a.scope})).collect();
-                        Store::tx_message(tx,run_id,"coordinator",&agent.id,&json!({"type":"wait_finished","timed_out":expired&&!ready,"agents":states}).to_string(),Some(&key))?;
+                        Store::tx_message(tx,run_id,"coordinator",&agent.id,&json!({"type":"wait_finished","timed_out":expired&&!ready,"agents":states,"instruction":"Your wait finished. Act now: inspect these agent states and continue with tool calls (reconcile, spawn the next stage, or finish). Never answer with plain text — end the turn with a tool call."}).to_string(),Some(&key))?;
                     }
                     agent.status=Status::Queued;agent.wait_for.clear();agent.wait_until=None;agent.updated_at=now();Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;changed+=1;
                 }
