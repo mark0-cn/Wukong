@@ -24,9 +24,10 @@ pub struct AssessmentRunner {
 }
 
 impl AssessmentRunner {
-    pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
+    pub async fn new(mut config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
         let engine = Arc::new(ModelEngine::new(config.model.clone())?);
+        config.model = engine.resolved_config().clone();
         let mut explicit: HashMap<String, Option<u64>> = HashMap::new();
         if let Some(map) = &config.model.role_models {
             for spec in map.values() {
@@ -510,8 +511,14 @@ mod tests {
     #[tokio::test]
     async fn native_messages_do_not_reopen_work_and_followups_keep_history() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (_dir, runner, run) =
+        let (_dir, mut runner, run) =
             fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+        runner.config.model.role_model = Some("role-fixture".into());
+        runner.config.model.role_max_tokens = Some(256);
+        runner.role_engines.insert(
+            "role-fixture".into(),
+            Arc::new(ModelEngine::new(runner.config.model.role_config_for(Role::Reverse)).unwrap()),
+        );
         let store = runner.store.clone();
         let rid = run.id.clone();
         let server = tokio::spawn(async move {
@@ -522,6 +529,7 @@ mod tests {
                 let input = request(&mut socket).await;
                 let root = input.to_string().contains("role=root");
                 let output = if root {
+                    assert_eq!(input["model"], "gpt-5.2");
                     let child = || {
                         store
                             .list::<AgentRecord>("agent", &rid)
@@ -555,6 +563,8 @@ mod tests {
                     roots += 1;
                     output
                 } else {
+                    assert_eq!(input["model"], "role-fixture");
+                    assert_eq!(input["options"]["num_predict"], 256);
                     if children == 1 {
                         assert!(input.to_string().contains("first format result"));
                         assert!(input.to_string().contains("Clarify the length field"));
