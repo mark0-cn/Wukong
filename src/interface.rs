@@ -775,9 +775,15 @@ fn dashboard(
                     area,
                 );
             })?;
-            if event::poll(Duration::from_millis(100))?
-                && let CEvent::Key(key) = event::read()?
-            {
+            if !event::poll(Duration::from_millis(100))? {
+                continue;
+            }
+            let Ok(read) = event::read() else {
+                // An unparseable terminal event (e.g. an unsupported mouse
+                // protocol sequence) must never take the dashboard down.
+                continue;
+            };
+            if let CEvent::Key(key) = read {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
@@ -1126,7 +1132,10 @@ fn dashboard(
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
-        match event::read()? {
+        // An unparseable terminal event (e.g. an unsupported mouse protocol
+        // sequence) must never take the dashboard down.
+        let Ok(read) = event::read() else { continue; };
+        match read {
             CEvent::Key(key) if key.kind == KeyEventKind::Press => {
                 if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL)
                 {
