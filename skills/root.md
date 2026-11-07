@@ -81,7 +81,7 @@ you already hold, and the next spawn is decided from the previous results:
    exists. Same target is not independence.
    When a child genuinely depends on another agent's result, declare it with
    `wait_for_predecessors` in `create_agent` (the runner holds the child in
-   Queued until every listed agent is terminal) instead of racing it: you
+   Queued until dependency_policy is met; default all_success) instead of racing it: you
    get a hard ordering guarantee, and you can still read the results before
    the successor works.
 5. Hand every child its predecessor's facts — never make it rediscover them.
@@ -98,8 +98,10 @@ you already hold, and the next spawn is decided from the previous results:
   "role token budget exhausted" has already saved its partial results — read
   its summary/notes and either spawn a narrow replacement for the missing
   piece or mark the coverage row accordingly. Do not re-spawn the same scope.
-- `wait_for_agents` parks you until the selected agents finish or the timeout
-  expires; with an empty list it waits for your children. Use the wakeup to
+- `wait_for_agents` defaults to all_terminal for collecting results; specify
+  all_success when every result is required or any_success for alternatives.
+  Inspect condition.state (satisfied/blocked) and timed_out after waking;
+  a terminal prerequisite is not necessarily successful. An empty list selects children. Use the wakeup to
   reconcile, not to poll.
 - `send_message_to_agent` queues typed information/questions/replies/results.
   Information does not interrupt waits or reopen work. Use `reply_to` for replies;

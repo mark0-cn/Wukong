@@ -150,6 +150,7 @@ impl AssessmentRunner {
                     self.coordinator
                         .pause_budget(run_id, "wall-clock budget reached")?;
                 } else {
+                    self.coordinator.release_dependencies(run_id)?;
                     self.coordinator.wake_waiters(run_id)?;
                     let agents = self.store.list::<AgentRecord>("agent", run_id)?;
                     for agent in agents
@@ -162,7 +163,7 @@ impl AssessmentRunner {
                         if active.contains(&agent.id) {
                             continue;
                         }
-                        if !self.predecessors_satisfied(&agent)? {
+                        if !agent.predecessors_released {
                             continue;
                         }
                         self.coordinator
@@ -259,19 +260,6 @@ impl AssessmentRunner {
             .map(|text| text.chars().take(4000).collect())
     }
 
-    /// Whether every declared predecessor of `agent` is terminal. A missing
-    /// predecessor id is treated as satisfied so a stale reference cannot
-    /// deadlock the run.
-    fn predecessors_satisfied(&self, agent: &AgentRecord) -> Result<bool> {
-        for id in &agent.wait_for_predecessors {
-            if let Ok(target) = self.store.require::<AgentRecord>("agent", id)
-                && !target.status.terminal()
-            {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
     async fn slice(&self, agent_id: &str) -> Result<()> {
         let agent: AgentRecord = self.store.require("agent", agent_id)?;
         if agent.status.terminal() || agent.status == Status::BudgetPaused {
@@ -826,6 +814,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    dependency_policy: Default::default(),
                     contract: Default::default(),
                 },
             )
@@ -1454,6 +1443,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    dependency_policy: Default::default(),
                     contract: Default::default(),
                 },
             )
@@ -1471,6 +1461,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    dependency_policy: Default::default(),
                     contract: Default::default(),
                 },
             )
@@ -1548,6 +1539,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    dependency_policy: Default::default(),
                     contract: Default::default(),
                 },
             )
@@ -1606,6 +1598,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    dependency_policy: Default::default(),
                     contract: Default::default(),
                 },
             )
@@ -1771,6 +1764,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![],
+                    dependency_policy: Default::default(),
                     contract: Default::default(),
                 },
             )
@@ -1788,6 +1782,7 @@ mod tests {
                     skills: vec![],
                     inherit_context: false,
                     wait_for_predecessors: vec![alpha.id.clone()],
+                    dependency_policy: Default::default(),
                     contract: Default::default(),
                 },
             )
@@ -1812,6 +1807,85 @@ mod tests {
         assert!(alpha.status.terminal());
         assert!(beta.status.terminal());
         server.await.unwrap();
+        runner.tools.close().await;
+    }
+    #[tokio::test]
+    async fn failed_predecessors_block_model_admission() {
+        let (_dir, runner, run) = fixture("http://127.0.0.1:1".into()).await;
+        let first = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "first".into(),
+                    role: Role::Reverse,
+                    task: "prerequisite".into(),
+                    scope: "prerequisite".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![],
+                    dependency_policy: DependencyPolicy::AllSuccess,
+                    contract: Default::default(),
+                },
+            )
+            .unwrap()
+            .agent;
+        let second = runner
+            .coordinator
+            .create_child(
+                &run.root_id,
+                crate::coordinator::ChildRequest {
+                    name: "second".into(),
+                    role: Role::Reverse,
+                    task: "must not execute".into(),
+                    scope: "consumer".into(),
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![first.id.clone()],
+                    dependency_policy: DependencyPolicy::AllSuccess,
+                    contract: Default::default(),
+                },
+            )
+            .unwrap()
+            .agent;
+        runner
+            .coordinator
+            .set_status(
+                &first.id,
+                Status::Failed,
+                Some("prerequisite failed".into()),
+            )
+            .unwrap();
+        runner
+            .coordinator
+            .set_status(&run.root_id, Status::Stopped, None)
+            .unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(3),
+            runner.drive(&run.id, CancellationToken::new()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.status, Status::Failed);
+        assert_eq!(
+            runner
+                .store
+                .require::<AgentRecord>("agent", &second.id)
+                .unwrap()
+                .task_result
+                .unwrap()
+                .outcome,
+            TaskOutcome::Blocked
+        );
+        assert!(
+            !runner
+                .store
+                .events(&run.id, 0, 100)
+                .unwrap()
+                .iter()
+                .any(|event| event.kind == "model.started")
+        );
         runner.tools.close().await;
     }
 }

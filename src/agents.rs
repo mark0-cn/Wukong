@@ -32,7 +32,9 @@ Arguments accept plain integers and 0x-hex strings interchangeably for addresses
 
 Coordination: use the assigned scope, supplied dossier and shared notes. A threat model is optional and useful only
 for security-boundary questions. Before delegating a distinct subproblem, inspect the agent graph for existing work,
-then provide known facts, evidence IDs, a specific task and a completion condition. Children have per-role token
+then provide known facts, evidence IDs, a specific task and a completion condition. Dependency admission defaults to all_success; use all_terminal for collection or any_success for alternatives.
+Wait results report satisfied/blocked separately from timeouts; choose a fallback for unmet requirements.
+Children have per-role token
 quotas; preserve partial results and identify what remains when a quota is exhausted. Use shared notes and coverage
 rather than repeating another agent's work.
 Use send_message_to_agent with a message kind; information never reopens work. Use follow_up_agent for
