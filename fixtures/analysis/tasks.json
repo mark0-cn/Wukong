@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "record-format",
+      "binary": "record-v1",
+      "task": "Recover the file format accepted by this program: field offsets and encodings, length relationships, checksum and rejection behavior. Produce a field table and decoded examples with evidence. Do not perform vulnerability hunting.",
+      "questions": ["field_layout", "length_semantics", "checksum", "rejection_controls"]
+    },
+    {
+      "id": "record-types",
+      "binary": "record-v1",
+      "task": "Recover the in-memory record layout used between parse_record and describe_record. Distinguish the wire format from object fields and pointers. State ABI assumptions and unknown ranges, with evidence.",
+      "questions": ["object_layout", "wire_vs_object", "abi_and_uncertainty"]
+    },
+    {
+      "id": "word-algorithm",
+      "binary": "transform",
+      "task": "Recover the numeric transformation and input/output encoding. Provide exact pseudocode and independently checked test vectors, including arithmetic boundaries. Do not classify it as a standard algorithm without evidence.",
+      "questions": ["transformation", "machine_arithmetic", "encoding", "independent_vectors"]
+    },
+    {
+      "id": "session-protocol",
+      "binary": "session",
+      "task": "Recover this program's stdin command protocol and state transitions. Test valid and invalid command orders and reset behavior. Provide a transition table, transcripts and remaining unknowns; close interactive sessions.",
+      "questions": ["transition_table", "invalid_sequences", "reset_boundary"]
+    },
+    {
+      "id": "record-version-diff",
+      "binary": "record-v2",
+      "baseline_binary": "record-v1",
+      "task": "Compare this record parser with the supplied baseline profile. Explain format and behavior changes, distinguish address/build changes from logic, and cite evidence on each side. If the baseline profile is absent, identify the missing data instead of inventing it.",
+      "questions": ["version_changes", "comparative_evidence", "scope_and_build_limits"]
+    }
+  ]
+}

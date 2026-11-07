@@ -1,5 +1,44 @@
 # 本地回归与评测集
 
+## 通用逆向分析样本
+
+`analysis/` 补充格式解析、对象布局、32 位变换、交互状态机和版本差异任务。
+`analysis/tasks.json` 定义用户问题与逐题评分项，不以漏洞发现或 flag 为完成条件。
+
+```sh
+python3 fixtures/analysis/evaluate.py --build-dir /tmp/re-agent-analysis-fixtures
+python3 fixtures/analysis/test_analysis.py
+```
+
+行为 harness 使用 C11 编译器构建四个可信程序，并检查有效/无效记录、整数边界和
+命令序列。`CC` 可指定编译器；这些检查可在本机运行，但要供当前动态分析后端使用，
+须在 Linux x86_64 环境构建目标。生成文件记录源码/目标哈希、编译命令与实际输出。
+`fixture_checks_passed` 只代表样本行为回归通过，`agent_accuracy` 保持 null。
+
+运行 agent 时只提供目标二进制和对应 task 文本；盲测不提供 C 源码、`results.json`
+或构建元数据。版本差异任务额外提供生成的 `baseline_profile.json` 内容作为分析上下文，
+它包含基线版本的原始输入与实际观察；缺少基线时应报告缺口。
+
+实际回答质量由独立复核逐题判定。报告映射仍为 case ID 到导出的 `report.json` 路径；
+复核文件示例（每个已运行任务的每道问题都须有标签）：
+
+```json
+{"labels":[{"case":"record-format","question_id":"field_layout","verdict":"correct","evidence_ids":["ev_actual_id"],"rationale":"独立对照实际 parser 与样本，字段边界和字节序一致"}]}
+```
+
+```sh
+python3 fixtures/analysis/score.py --build-dir /tmp/re-agent-analysis-fixtures \
+  --reports reports/analysis-index.json --adjudications reports/analysis-reviewed.json \
+  --output reports/analysis-metrics.json
+```
+
+评分器读取当前真实导出格式的 `snapshot`，核对样本哈希，要求正确标签关联该报告中的
+证据 ID；不检查标题关键词，也不要求创建漏洞 finding。指标包括逐题正确/错误/未解决数、
+有证据支撑的正确率、缺失任务和模型用量。未运行任务保持未解决；这些小样本不足以支持
+对真实软件逆向准确率的统计结论。
+
+## 漏洞与崩溃回归基线
+
 这套样本用于验证项目能力：有符号与 stripped ELF、一个有明确源码根因的栈越界样本、对应修复版本，以及正常程序。样本只接受本地文件输入；不包含网络目标或现成利用载荷。
 
 在 Linux x86_64 环境中执行：

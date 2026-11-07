@@ -12,10 +12,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Rust lint check failed.' }
     & cargo test --all-targets 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
-    & python -m py_compile workers/runtime/bridge.py fixtures/evaluate.py fixtures/score_reports.py 2>&1
+    & python -m py_compile workers/runtime/bridge.py fixtures/evaluate.py fixtures/score_reports.py fixtures/analysis/evaluate.py fixtures/analysis/score.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed.' }
     & python workers/runtime/test_bridge.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Worker integration tests failed.' }
+    & python fixtures/analysis/test_analysis.py 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'General analysis scoring tests failed.' }
     if ($DockerContainer) {
         $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
         $dockerExe = if ($dockerCommand) { $dockerCommand.Source } else { Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe' }
