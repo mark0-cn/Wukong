@@ -6,6 +6,9 @@ explain.
 
 ## Read the error before acting
 
+- A schema/argument rejection before dispatch has no execution effect: fix
+  the rejected arguments and try once. Do not apply this rule to worker or
+  transport errors, which may arrive after execution started.
 - `runtime_doctor` reports actual worker capabilities and paths. A capability
   error means the backend is fine but the operation is unsupported: adapt
   (the worker executes ELF only — PE/Mach-O targets are static-only), do not
@@ -27,10 +30,13 @@ explain.
 ## Never blindly repeat a mutating call
 
 - A timed-out or failed mutating request (job start, send, cancel, fuzz start,
-  file put) may or may not have happened. Do not re-send it unchanged —
-  duplicated side effects are worse than the timeout. Record the request
-  details and report to root; the operator can `reconcile` with a reviewed
-  result.
+  file put) may or may not have happened. Query the existing handle first.
+  Do not issue a new call or change arguments to escape an uncertain result:
+  a new model call gets a new call ID and may duplicate the effect. The
+  controller's exact-ID durable replay is separate from issuing another
+  model tool call. If no handle or definitive result can be recovered,
+  record the call ID and evidence, report to root, and leave the effect
+  unresolved for operator `reconcile`.
 - Read-only calls (status, list, evidence reads, doctor) are safe to retry
   once.
 
