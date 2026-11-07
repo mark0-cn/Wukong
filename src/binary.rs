@@ -811,14 +811,23 @@ impl GhidraBackend {
         fs::create_dir_all(&root)?;
         let root = fs::canonicalize(root)?;
         let cache = root.join("result.json");
-        if cache.is_file() {
-            let mut result: GhidraResult = serde_json::from_slice(&fs::read(cache)?)
-                .context("invalid Ghidra cache; remove entry and retry")?;
-            if result.target_sha256 != hash || result.cache_key != key {
-                bail!("Ghidra cache identity mismatch");
+        let cached = |root: &Path| -> Option<Result<GhidraResult>> {
+            let cache = root.join("result.json");
+            if !cache.is_file() {
+                return None;
             }
-            result.cached = true;
-            return Ok(result);
+            Some((|| {
+                let mut result: GhidraResult = serde_json::from_slice(&fs::read(cache)?)
+                    .context("invalid Ghidra cache; remove entry and retry")?;
+                if result.target_sha256 != hash || result.cache_key != key {
+                    bail!("Ghidra cache identity mismatch");
+                }
+                result.cached = true;
+                Ok(result)
+            })())
+        };
+        if let Some(result) = cached(&root) {
+            return result;
         }
         // Keep a single imported program per target/config/tool identity. Queries
         // share this project while a lock guards Ghidra's single-writer database.
@@ -826,27 +835,44 @@ impl GhidraBackend {
         fs::create_dir_all(&project)?;
         let project = fs::canonicalize(project)?;
         let lock_path = project.join("worker.lock");
-        let mut lock = None;
-        for _ in 0..100 {
+        // A holder keeps the lock for the whole Ghidra run, so waiting must
+        // span the configured query budget. Concurrent identical queries are
+        // served from the cache the moment the holder publishes its result,
+        // which usually ends the wait long before the deadline.
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_secs(self.config.timeout_seconds);
+        let lock = loop {
             match fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&lock_path)
             {
                 Ok(file) => {
-                    lock = Some(ProjectLock {
+                    break ProjectLock {
                         path: lock_path.clone(),
                         file: Some(file),
-                    });
-                    break;
+                    };
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    tokio::time::sleep(Duration::from_millis(100)).await
+                    if let Some(result) = cached(&root) {
+                        return result;
+                    }
+                    if tokio::time::Instant::now() >= deadline {
+                        bail!(
+                            "Ghidra project is busy or has a stale worker.lock; inspect worker state before removing the lock"
+                        );
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 Err(e) => return Err(e.into()),
             }
+        };
+        // The lock can be won between the last poll and the successful open;
+        // recheck once so a just-published result is not recomputed.
+        if let Some(result) = cached(&root) {
+            return result;
         }
-        let _lock = lock.context("Ghidra project is busy or has a stale worker.lock; inspect worker state before removing the lock")?;
+        let _lock = lock;
         let ready = project.join("analysis-complete.json");
         let snapshot = project.join("target.bin");
         if !ready.exists() {
@@ -994,5 +1020,100 @@ impl Drop for ProjectLock {
     fn drop(&mut self) {
         drop(self.file.take());
         let _ = fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn analysis_key(backend: &GhidraBackend, target: &Path) -> Result<String> {
+        let hash = sha256_file(target)?;
+        let executable = fs::canonicalize(&backend.config.executable)?;
+        let binding = json!({"schema":1,"target_sha256":hash,"tool_version":"unknown","tool_properties":sha256_bytes(b""),"launcher":sha256_file(&executable)?,"bridge":sha256_bytes(include_bytes!("../workers/ghidra/ReAgentBridge.java")),"analysis_timeout_seconds":backend.config.analysis_timeout_seconds,"max_cpu":backend.config.max_cpu});
+        Ok(sha256_bytes(&serde_json::to_vec(&binding)?))
+    }
+
+    fn query_key(backend: &GhidraBackend, target: &Path, query: &GhidraQuery) -> Result<String> {
+        let hash = sha256_file(target)?;
+        let executable = fs::canonicalize(&backend.config.executable)?;
+        let analysis_binding = json!({"schema":1,"target_sha256":hash,"tool_version":"unknown","tool_properties":sha256_bytes(b""),"launcher":sha256_file(&executable)?,"bridge":sha256_bytes(include_bytes!("../workers/ghidra/ReAgentBridge.java")),"analysis_timeout_seconds":backend.config.analysis_timeout_seconds,"max_cpu":backend.config.max_cpu});
+        Ok(sha256_bytes(&serde_json::to_vec(
+            &json!({"analysis":analysis_binding,"query":query}),
+        )?))
+    }
+
+    #[tokio::test]
+    async fn lock_wait_polls_the_cache_and_never_reruns_the_holder_work() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let executable = dir.path().join("fake-ghidra");
+        fs::write(&executable, b"exit 1")?;
+        let target = dir.path().join("sample.bin");
+        fs::write(&target, b"target bytes")?;
+        let backend = GhidraBackend::new(GhidraConfig {
+            executable,
+            cache_dir: dir.path().join("cache"),
+            script_dir: None,
+            timeout_seconds: 5,
+            analysis_timeout_seconds: 2,
+            max_cpu: 1,
+        })
+        .unwrap();
+        let query = GhidraQuery::Functions {
+            pattern: None,
+            offset: 0,
+            limit: 5,
+        };
+        let project = backend
+            .config
+            .cache_dir
+            .join("projects")
+            .join(analysis_key(&backend, &target)?);
+        fs::create_dir_all(&project)?;
+        // A concurrent holder already owns the project lock.
+        let lock_path = project.join("worker.lock");
+        fs::File::create(&lock_path)?;
+        let root = backend
+            .config
+            .cache_dir
+            .join("results")
+            .join(query_key(&backend, &target, &query)?);
+        fs::create_dir_all(&root)?;
+        // The holder publishes a valid cache result after a short delay; the
+        // waiting query must serve it instead of timing out or invoking the
+        // fake Ghidra executable.
+        let result = GhidraResult {
+            cache_key: query_key(&backend, &target, &query)?,
+            target_sha256: sha256_file(&target)?,
+            tool_version: "unknown".into(),
+            cached: false,
+            data: json!({"functions":[{"name":"main"}]}),
+            stdout_path: root.join("stdout.log"),
+            stderr_path: root.join("stderr.log"),
+        };
+        let holder_root = root.clone();
+        let holder_lock = lock_path.clone();
+        let holder = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let staged = holder_root.join("result.json.tmp");
+            fs::write(&staged, serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+            fs::rename(&staged, holder_root.join("result.json")).unwrap();
+            let _ = fs::remove_file(holder_lock);
+        });
+        let started = std::time::Instant::now();
+        let served = backend.query(&target, &query).await?;
+        assert!(served.cached);
+        assert_eq!(served.data["functions"][0]["name"], "main");
+        assert!(
+            started.elapsed() >= Duration::from_millis(200),
+            "the query should have waited for the holder"
+        );
+        assert!(
+            !root.join("response.json").exists(),
+            "the fake Ghidra executable must not have been invoked"
+        );
+        holder.await.unwrap();
+        Ok(())
     }
 }
