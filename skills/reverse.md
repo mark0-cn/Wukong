@@ -31,5 +31,7 @@ exact offsets involved, the conversions that matter, counterevidence, and one
 candidate input that would exercise the path. If the goal is to RECONSTRUCT
 an input that passes a chain of checks, load the `tooling` skill and hand the
 check addresses to `angr_solve` instead of solving byte by byte by hand.
+If the goal is a control-flow hijack, hand the layout facts (buffer size,
+saved-RIP offset, target address, mitigations) to a child that loads `pwn`.
 If you could not reach a conclusion, say exactly what blocked you and what
 to try next.
