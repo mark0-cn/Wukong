@@ -366,6 +366,12 @@ enum Focus {
     Tree,
 }
 
+enum TuiModal {
+    Finding(Finding),
+    StopAgent { agent_id: String, name: String },
+    Quit,
+}
+
 /// Validate a target path and drive a fresh assessment from the TUI,
 /// returning the new run id and its cancellation token.
 fn start_task(
@@ -462,11 +468,13 @@ fn clear_editor(editor: &mut ratatui_textarea::TextArea<'_>) {
 
 fn help_lines() -> Vec<Line<'static>> {
     vec![
-        Line::from("F1 close help · Ctrl+Q quit (pauses live runs) · Ctrl+P pause · Tab switch input/tree"),
+        Line::from("F1 close help · Ctrl+Q quit (confirm; pauses live runs) · Ctrl+P pause · Tab switch input/tree"),
         Line::from(""),
-        Line::from("▸ Input (focused by default): type freely, Enter sends the message to the selected agent (or root), Esc clears."),
+        Line::from("▸ Input (focused by default): type freely; Enter sends the message to the selected agent (or root), Shift+Enter inserts a newline, Esc clears."),
+        Line::from("▸ Esc with an agent selected opens the stop confirmation for that agent (running/waiting agents only)."),
         Line::from("▸ Tree: ↑/↓ select · Enter opens that agent's conversation · g returns to the live activity stream."),
         Line::from("▸ Mouse: click an agent to view its conversation, click a finding to open its report, wheel scrolls."),
+        Line::from("▸ New agents are selected automatically as they spawn; the view follows the latest activity."),
         Line::from("▸ Welcome screen: type a target path and Enter starts a new assessment live in this terminal."),
     ]
 }
@@ -542,7 +550,7 @@ fn agent_detail_lines(
     ]));
     lines.push(Line::from(""));
     let Some(checkpoint) = &agent.checkpoint else {
-        lines.push(Line::from("no conversation yet"));
+        lines.push(Line::from("Starting agent... no events yet"));
         return lines;
     };
     let durable = match DurableRun::from_json(&checkpoint.to_string()) {
@@ -716,10 +724,11 @@ fn dashboard(
     let mut selected: Option<String> = run_id.map(str::to_owned);
     let mut tree_cursor: usize = 0;
     let mut detail_agent: Option<String> = None;
-    let mut modal: Option<Finding> = None;
+    let mut modal: Option<TuiModal> = None;
     let mut help_open = false;
     let mut focus = Focus::Editor;
     let mut frame_clock: u64 = 0;
+    let mut known_agents: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Windows terminals can deliver a mouse click as a spurious Esc key
     // event (VT input translation); a bare Esc must never quit, and Esc
     // right after a mouse event is ignored entirely.
@@ -837,6 +846,25 @@ fn dashboard(
         if tree_cursor >= agents.len() {
             tree_cursor = 0;
         }
+        if known_agents.is_empty() {
+            // First pass: baseline the population without selecting, so
+            // attaching to an existing run does not jump views.
+            known_agents = agents.iter().map(|agent| agent.id.clone()).collect();
+        } else {
+            // Strix behavior: a newly spawned agent is selected automatically
+            // and the view follows it.
+            for (index, agent) in agents.iter().enumerate() {
+                if !known_agents.contains(&agent.id) {
+                    known_agents.insert(agent.id.clone());
+                    if agent.role != Role::Root {
+                        tree_cursor = index;
+                        detail_agent = Some(agent.id.clone());
+                        detail_scroll = 0;
+                        focus = Focus::Tree;
+                    }
+                }
+            }
+        }
         if let Some(agent_id) = detail_agent.as_deref()
             && !agents.iter().any(|agent| agent.id == agent_id)
         {
@@ -914,9 +942,12 @@ fn dashboard(
                                 Style::default()
                             },
                         ),
-                        Span::raw("  ".repeat(agent.depth as usize)),
+                        Span::styled(
+                            tree_guides(&agents, index),
+                            Style::default().fg(Color::DarkGray),
+                        ),
                         Span::styled(glyph, Style::default().fg(status_color)),
-                        Span::raw(if agent.depth > 0 { "▸ " } else { " " }),
+                        Span::raw(" "),
                         Span::styled(
                             &agent.name,
                             Style::default()
@@ -924,12 +955,19 @@ fn dashboard(
                                 .add_modifier(Modifier::BOLD)
                                 .add_modifier(if cursor { Modifier::UNDERLINED } else { Modifier::empty() }),
                         ),
-                        Span::raw("  "),
-                        Span::styled(
-                            format!("{} t={} {}", agent.role, agent.turns, agent.status),
-                            Style::default().fg(status_color),
-                        ),
                     ];
+                    let vulns = findings.iter().filter(|f| f.agent_id == agent.id).count();
+                    if vulns > 0 {
+                        spans.push(Span::styled(
+                            format!(" ({vulns})"),
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        ));
+                    }
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        format!("{} t={} {}", agent.role, agent.turns, agent.status),
+                        Style::default().fg(status_color),
+                    ));
                     if agent.status == Status::Running {
                         spans.push(Span::raw("  "));
                         spans.push(sweep_span(frame_clock));
@@ -943,29 +981,79 @@ fn dashboard(
                     .wrap(Wrap { trim: false }),
                 middle[0],
             );
-            if detail_agent.is_some() {
-                let detail_agent_name = detail_agent
-                    .as_deref()
-                    .and_then(|id| agents.iter().find(|agent| agent.id == id))
-                    .map(|agent| agent.name.clone())
-                    .unwrap_or_default();
+            if let Some(agent) = detail_agent
+                .as_deref()
+                .and_then(|id| agents.iter().find(|a| a.id == id))
+            {
+                // Strix-style status banner above the selected agent's chat.
+                let (glyph, status_color) = match agent.status {
+                    Status::Running => ("◉", Color::Yellow),
+                    Status::Queued => ("○", Color::DarkGray),
+                    Status::Waiting => ("◌", Color::LightYellow),
+                    Status::BudgetPaused => ("⏸", Color::Yellow),
+                    Status::Completed => ("✔", Color::Green),
+                    Status::Stopped => ("◼", Color::DarkGray),
+                    Status::Failed => ("✖", Color::Red),
+                    Status::Crashed => ("✖", Color::LightRed),
+                };
+                let mut banner_spans = vec![
+                    Span::styled(
+                        format!("{glyph} "),
+                        Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        &agent.name,
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(
+                            "  {}  {}  turns={}  tokens={}",
+                            agent.role, agent.status, agent.turns, agent.total_tokens
+                        ),
+                        Style::default().fg(status_color),
+                    ),
+                ];
+                if agent.status == Status::Running {
+                    banner_spans.push(Span::raw("  "));
+                    banner_spans.push(sweep_span(frame_clock));
+                }
+                let mut banner = vec![
+                    Line::from(banner_spans),
+                    Line::from(Span::styled(
+                        "─".repeat(48),
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ];
+                let banner_rows = banner.len();
                 let start = detail_lines
                     .len()
-                    .saturating_sub(right_height.saturating_sub(2))
+                    .saturating_sub(
+                        right_height
+                            .saturating_sub(2)
+                            .saturating_sub(banner_rows),
+                    )
                     .saturating_sub(detail_scroll);
                 let window = detail_lines
                     .iter()
                     .skip(start)
-                    .take(right_height.saturating_sub(2));
+                    .take(right_height.saturating_sub(2).saturating_sub(banner_rows));
+                let mut content = banner;
+                content.extend(window.cloned());
                 frame.render_widget(
-                    Paragraph::new(window.cloned().collect::<Vec<_>>())
+                    Paragraph::new(content)
                         .block(
                             Block::default()
                                 .borders(Borders::ALL)
-                                .title(format!(" {detail_agent_name} "))
+                                .title(format!(" {} ", agent.name))
                                 .border_style(Style::default().fg(Color::Cyan)),
                         )
                         .wrap(Wrap { trim: false }),
+                    middle[1],
+                );
+            } else if detail_agent.is_some() {
+                frame.render_widget(
+                    Paragraph::new(vec![Line::from("Loading...")])
+                        .block(Block::default().borders(Borders::ALL).title(" agent ")),
                     middle[1],
                 );
             } else {
@@ -1105,20 +1193,73 @@ fn dashboard(
                 areas[4],
             );
             // ---- overlays ----
-            if let Some(finding) = &modal {
-                let rect = centered_rect(72, 70, frame.area());
-                frame.render_widget(Clear, rect);
-                frame.render_widget(
-                    Paragraph::new(finding_modal_lines(finding))
-                        .block(
-                            Block::default()
-                                .borders(Borders::ALL)
-                                .title(" FINDING ")
-                                .border_style(Style::default().fg(Color::LightRed)),
-                        )
-                        .wrap(Wrap { trim: true }),
-                    rect,
-                );
+            if let Some(open) = &modal {
+                match open {
+                    TuiModal::Finding(finding) => {
+                        let rect = centered_rect(72, 70, frame.area());
+                        frame.render_widget(Clear, rect);
+                        frame.render_widget(
+                            Paragraph::new(finding_modal_lines(finding))
+                                .block(
+                                    Block::default()
+                                        .borders(Borders::ALL)
+                                        .title(" FINDING ")
+                                        .border_style(Style::default().fg(Color::LightRed)),
+                                )
+                                .wrap(Wrap { trim: true }),
+                            rect,
+                        );
+                    }
+                    TuiModal::StopAgent { name, .. } => {
+                        let rect = centered_rect(50, 22, frame.area());
+                        frame.render_widget(Clear, rect);
+                        frame.render_widget(
+                            Paragraph::new(vec![
+                                Line::from(vec![
+                                    Span::styled("Stop agent ", Style::default().fg(Color::Yellow)),
+                                    Span::styled(name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                                    Span::styled("? Its descendants stop with it.", Style::default().fg(Color::Yellow)),
+                                ]),
+                                Line::from(""),
+                                Line::from(Span::styled(
+                                    "Enter confirms · Esc cancels",
+                                    Style::default().fg(Color::DarkGray),
+                                )),
+                            ])
+                            .block(
+                                Block::default()
+                                    .borders(Borders::ALL)
+                                    .title(" STOP AGENT ")
+                                    .border_style(Style::default().fg(Color::Red)),
+                            ),
+                            rect,
+                        );
+                    }
+                    TuiModal::Quit => {
+                        let rect = centered_rect(55, 22, frame.area());
+                        frame.render_widget(Clear, rect);
+                        frame.render_widget(
+                            Paragraph::new(vec![
+                                Line::from(Span::styled(
+                                    "Quit? A live run pauses at its durable boundary.",
+                                    Style::default().fg(Color::Yellow),
+                                )),
+                                Line::from(""),
+                                Line::from(Span::styled(
+                                    "Enter confirms · Esc cancels",
+                                    Style::default().fg(Color::DarkGray),
+                                )),
+                            ])
+                            .block(
+                                Block::default()
+                                    .borders(Borders::ALL)
+                                    .title(" QUIT ")
+                                    .border_style(Style::default().fg(Color::Red)),
+                            ),
+                            rect,
+                        );
+                    }
+                }
             }
             if help_open {
                 let rect = centered_rect(76, 55, frame.area());
@@ -1146,12 +1287,8 @@ fn dashboard(
             CEvent::Key(key) if key.kind == KeyEventKind::Press => {
                 if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL)
                 {
-                    if let Some(cancel) = &drive_cancel {
-                        let _ = Coordinator::new(store.clone())
-                            .pause_budget(selected_id, "operator quit TUI");
-                        cancel.cancel();
-                    }
-                    break;
+                    modal = Some(TuiModal::Quit);
+                    continue;
                 }
                 if key.code == KeyCode::F(1) {
                     help_open = !help_open;
@@ -1169,7 +1306,21 @@ fn dashboard(
                     if modal.take().is_some() {
                         continue;
                     }
-                    if detail_agent.take().is_some() {
+                    // Strix behavior: Esc opens the stop confirmation for
+                    // the selected agent when it is stoppable.
+                    if let Some(agent_id) = detail_agent.clone() {
+                        if let Some(agent) = agents.iter().find(|a| a.id == agent_id) {
+                            if matches!(agent.status, Status::Running | Status::Waiting)
+                                && agent.checkpoint.is_some()
+                            {
+                                modal = Some(TuiModal::StopAgent {
+                                    agent_id: agent.id.clone(),
+                                    name: agent.name.clone(),
+                                });
+                                continue;
+                            }
+                        }
+                        detail_agent = None;
                         continue;
                     }
                     if !editor.is_empty() {
@@ -1185,9 +1336,27 @@ fn dashboard(
                     }
                     continue;
                 }
-                if modal.is_some() {
+                if let Some(open) = &modal {
                     if key.code == KeyCode::Enter {
-                        modal = None;
+                        match open {
+                            TuiModal::Finding(_) => modal = None,
+                            TuiModal::StopAgent { agent_id, .. } => {
+                                let _ = Coordinator::new(store.clone())
+                                    .stop(agent_id, "operator stopped in TUI");
+                                if detail_agent.as_deref() == Some(agent_id.as_str()) {
+                                    detail_agent = None;
+                                }
+                                modal = None;
+                            }
+                            TuiModal::Quit => {
+                                if let Some(cancel) = &drive_cancel {
+                                    let _ = Coordinator::new(store.clone())
+                                        .pause_budget(selected_id, "operator quit TUI");
+                                    cancel.cancel();
+                                }
+                                break;
+                            }
+                        }
                     }
                     continue;
                 }
@@ -1205,6 +1374,12 @@ fn dashboard(
                 match focus {
                     Focus::Editor => {
                         if key.code == KeyCode::Enter {
+                            // Strix behavior: Shift+Enter inserts a newline,
+                            // Enter submits.
+                            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                                editor.insert_str("\n");
+                                continue;
+                            }
                             let text = editor.lines().join(" ").trim().to_owned();
                             clear_editor(&mut editor);
                             if !text.is_empty() && !run.status.terminal() {
@@ -1285,7 +1460,7 @@ fn dashboard(
                         if rect.contains((mouse.column, mouse.row).into()) {
                             let row = mouse.row.saturating_sub(rect.y + 1) as usize;
                             if row < findings.len() {
-                                modal = Some(findings[row].clone());
+                                modal = Some(TuiModal::Finding(findings[row].clone()));
                             }
                         }
                     }
@@ -1322,6 +1497,25 @@ fn dashboard(
         }
     }
     Ok(())
+}
+
+fn tree_guides(agents: &[AgentRecord], index: usize) -> String {
+    let depth = agents[index].depth as usize;
+    if depth == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    for level in 1..depth {
+        let has_later = agents[index + 1..]
+            .iter()
+            .any(|agent| agent.depth as usize >= level);
+        out.push_str(if has_later { "│ " } else { "  " });
+    }
+    let last = !agents[index + 1..]
+        .iter()
+        .any(|agent| agent.depth as usize >= depth);
+    out.push_str(if last { "└─" } else { "├─" });
+    out
 }
 
 fn store_agent_role(agents: &[AgentRecord], agent_id: Option<&str>) -> Option<Role> {
