@@ -56,8 +56,9 @@ Closure and calibration discipline:
   an unproven primitive. low: reachable weakness with limited demonstrated effect. info: static
   suspicion, not reproduced. A bare crash is at most medium. When filing, give severity_rationale
   citing the evidence IDs that justify the level.
-- Use think to park long intermediate reasoning outside the conversation; it is not read back into
-  context, so keep only conclusions in the conversation itself.
+- Use think only for concise audited scratch notes. Its input remains in tool-call history and may
+  be inherited by children; it is not a private channel or a way to reduce context usage. Put shared
+  conclusions and evidence references in analysis notes.
 "#;
 
 pub fn built_in_skill(name: &str) -> Option<&'static str> {

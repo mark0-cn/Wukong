@@ -975,12 +975,12 @@ async fn docker_independent_verification_uses_real_trials_and_limits_impact() ->
 }
 
 #[tokio::test]
-async fn think_is_private_and_severity_is_gated_by_stage() -> Result<()> {
+async fn think_has_an_agent_scoped_audit_record_and_severity_is_gated_by_stage() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    // Scratch reasoning is recorded for audit, acknowledged minimally, and
-    // never replayed into context.
+    // Audit records have an agent owner and a small acknowledgment. The
+    // original tool-call arguments still belong to the model's history.
     let first = service
         .execute(
             &agent.id,
