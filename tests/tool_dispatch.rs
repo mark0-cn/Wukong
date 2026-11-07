@@ -419,7 +419,7 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
             .await?;
         assert!(outcome.is_error);
         let error = result(&outcome)["error"].as_str().unwrap().to_owned();
-        assert!(!error.contains("must have type integer"), "{error}");
+        assert!(!error.contains("expected an integer"), "{error}");
         assert!(error.contains("worker_file"), "{error}");
     }
     // Malformed spellings still fail schema validation before dispatch.
@@ -435,7 +435,7 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
         result(&bad)["error"]
             .as_str()
             .unwrap()
-            .contains("must have type integer")
+            .contains("expected an integer")
     );
     let negative = service
         .execute(
@@ -449,7 +449,7 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
         result(&negative)["error"]
             .as_str()
             .unwrap()
-            .contains("below its minimum")
+            .contains("at least")
     );
     let empty = service
         .execute(
@@ -710,7 +710,7 @@ async fn model_boolean_or_fake_verification_cannot_promote_a_finding() -> Result
         result(&boolean)["error"]
             .as_str()
             .unwrap()
-            .contains("unknown argument")
+            .contains("not allowed")
     );
     let fake_job = service
         .execute(
