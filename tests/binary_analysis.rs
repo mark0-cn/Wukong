@@ -254,3 +254,123 @@ async fn real_ghidra_import_decompile_xrefs_and_cache() {
     assert_eq!(first.target_sha256, code.target_sha256);
     assert_ne!(first.cache_key, code.cache_key);
 }
+
+#[test]
+fn elf_dynamic_flags_cover_both_widths_and_byte_orders() {
+    let directory = tempfile::tempdir().unwrap();
+    for wide in [false, true] {
+        for little in [false, true] {
+            let mut bytes = vec![0u8; 0x300];
+            bytes[..7].copy_from_slice(&[
+                0x7f,
+                b'E',
+                b'L',
+                b'F',
+                if wide { 2 } else { 1 },
+                if little { 1 } else { 2 },
+                1,
+            ]);
+            let mut put = |offset: usize, width: usize, value: u64| {
+                let encoded = if little {
+                    value.to_le_bytes()
+                } else {
+                    value.to_be_bytes()
+                };
+                bytes[offset..offset + width].copy_from_slice(if little {
+                    &encoded[..width]
+                } else {
+                    &encoded[8 - width..]
+                });
+            };
+            put(16, 2, 3);
+            put(18, 2, if wide { 62 } else { 3 });
+            put(20, 4, 1);
+            let header = if wide { 64 } else { 52 };
+            let entry = if wide { 56 } else { 32 };
+            put(
+                if wide { 32 } else { 28 },
+                if wide { 8 } else { 4 },
+                header as u64,
+            );
+            put(if wide { 52 } else { 40 }, 2, header as u64);
+            put(if wide { 54 } else { 42 }, 2, entry as u64);
+            put(if wide { 56 } else { 44 }, 2, 4);
+            put(if wide { 58 } else { 46 }, 2, if wide { 64 } else { 40 });
+            put(header, 4, 1); // PT_LOAD
+            put(
+                header + if wide { 32 } else { 16 },
+                if wide { 8 } else { 4 },
+                0x300,
+            );
+            put(header + entry, 4, 0x6474e551); // GNU_STACK RW
+            put(header + entry + if wide { 4 } else { 24 }, 4, 6);
+            put(header + entry * 2, 4, 0x6474e552); // GNU_RELRO
+            let dynamic = header + entry * 3;
+            put(dynamic, 4, 2);
+            put(
+                dynamic + if wide { 8 } else { 4 },
+                if wide { 8 } else { 4 },
+                0x200,
+            );
+            put(
+                dynamic + if wide { 32 } else { 16 },
+                if wide { 8 } else { 4 },
+                if wide { 32 } else { 16 },
+            );
+            let word = if wide { 8 } else { 4 };
+            put(0x200, word, 0x6ffffffb); // DT_FLAGS_1 = NOW | PIE
+            put(0x200 + word, word, 0x08000001);
+            let target = directory.path().join(format!("{wide}-{little}.elf"));
+            fs::write(&target, &bytes).unwrap();
+            let profile = binary::inspect(&target).unwrap();
+            assert_eq!(profile.mitigations["relro"].state, MitigationState::Enabled);
+            assert_eq!(
+                profile.mitigations["pie_aslr"].state,
+                MitigationState::Enabled
+            );
+            assert_eq!(profile.mitigations["nx"].state, MitigationState::Enabled);
+            // The typed segment reader must still reject a file-backed range outside the file.
+            bytes.truncate(0x210);
+            fs::write(&target, bytes).unwrap();
+            assert!(binary::inspect(&target).is_err());
+        }
+    }
+}
+
+#[test]
+fn pe_characteristics_are_read_from_typed_optional_headers() {
+    let directory = tempfile::tempdir().unwrap();
+    for wide in [false, true] {
+        let mut bytes = vec![0u8; 512];
+        bytes[..2].copy_from_slice(b"MZ");
+        put32(&mut bytes, 0x3c, 0x80);
+        bytes[0x80..0x84].copy_from_slice(b"PE\0\0");
+        put16(&mut bytes, 0x84, if wide { 0x8664 } else { 0x14c });
+        put16(&mut bytes, 0x94, if wide { 240 } else { 224 });
+        put16(&mut bytes, 0x96, 0x102);
+        let optional = 0x98;
+        put16(&mut bytes, optional, if wide { 0x20b } else { 0x10b });
+        if wide {
+            put64(&mut bytes, optional + 24, 0x140000000);
+        } else {
+            put32(&mut bytes, optional + 28, 0x400000);
+        }
+        put32(&mut bytes, optional + 32, 4096);
+        put32(&mut bytes, optional + 36, 512);
+        put32(&mut bytes, optional + 56, 4096);
+        put32(&mut bytes, optional + 60, 512);
+        put16(&mut bytes, optional + 70, 0x4140);
+        let target = directory.path().join(format!("{wide}.exe"));
+        fs::write(&target, &bytes).unwrap();
+        let profile = binary::inspect(&target).unwrap();
+        for key in ["nx", "pie_aslr", "control_flow_guard"] {
+            assert_eq!(profile.mitigations[key].state, MitigationState::Enabled);
+        }
+        put16(&mut bytes, optional + 70, 0);
+        fs::write(&target, bytes).unwrap();
+        assert_eq!(
+            binary::inspect(&target).unwrap().mitigations["nx"].state,
+            MitigationState::Disabled
+        );
+    }
+}

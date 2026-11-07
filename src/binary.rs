@@ -2,7 +2,7 @@
 //!
 //! All addresses carry their address space. Static inspection never pretends to
 //! know a process's ASLR load address; unsupported mitigation checks stay unknown.
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use object::{Object, ObjectSection, ObjectSegment, ObjectSymbol};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -185,9 +185,6 @@ pub fn inspect(path: impl AsRef<Path>) -> Result<BinaryProfile> {
     let file = object::File::parse(&*data).context(
         "unsupported or malformed native object (expected ELF, PE, Mach-O or supported object)",
     )?;
-    if data.starts_with(b"\x7fELF") {
-        validate_elf_segments(&data)?;
-    }
     let hash = sha256_bytes(&data);
     let image_base = match file.format() {
         object::BinaryFormat::Elf | object::BinaryFormat::MachO => file
@@ -201,30 +198,23 @@ pub fn inspect(path: impl AsRef<Path>) -> Result<BinaryProfile> {
     // object::Object::entry reports Mach-O LC_MAIN as a *file offset*, whereas
     // ELF/PE and Mach-O LC_UNIXTHREAD report virtual addresses. Normalize it.
     let mut entry_va = file.entry();
-    if file.format() == object::BinaryFormat::MachO {
-        let little = file.is_little_endian();
-        let mut at: usize = if file.is_64() { 32 } else { 28 };
-        let count = number(&data, 16, 4, little).unwrap_or(0);
-        for _ in 0..count.min(65536) {
-            let command = number(&data, at, 4, little).unwrap_or(0);
-            let size = number(&data, at + 4, 4, little).unwrap_or(0) as usize;
-            if size < 8 || at.checked_add(size).is_none_or(|end| end > data.len()) {
-                break;
-            }
-            if command == 0x80000028 {
-                let off = number(&data, at + 8, 8, little).unwrap_or(0);
-                if let Some(segment) = file.segments().find(|s| {
-                    let (start, size) = s.file_range();
-                    off >= start && off - start < size
-                }) {
-                    entry_va = segment
-                        .address()
-                        .saturating_add(off - segment.file_range().0);
-                }
-                break;
-            }
-            at += size;
-        }
+    let entry_offset = match &file {
+        object::File::MachO32(file) => macho_entry_offset(file)?,
+        object::File::MachO64(file) => macho_entry_offset(file)?,
+        _ => None,
+    };
+    if let Some(off) = entry_offset {
+        let segment = file
+            .segments()
+            .find(|s| {
+                let (start, size) = s.file_range();
+                off >= start && off - start < size
+            })
+            .context("Mach-O LC_MAIN entry offset is outside file-backed segments")?;
+        entry_va = segment
+            .address()
+            .checked_add(off - segment.file_range().0)
+            .context("Mach-O entry address overflow")?;
     }
     let addr = |a: u64| AddressRef::module_relative(&hash, a.saturating_sub(image_base));
     let mut warnings = Vec::new();
@@ -305,7 +295,7 @@ pub fn inspect(path: impl AsRef<Path>) -> Result<BinaryProfile> {
             warnings.push(format!("{label} truncated at {MAX_ITEMS} entries"));
         }
     }
-    let mitigations = mitigations(&data, &imports, &symbols);
+    let mitigations = mitigations(&file, &imports, &symbols)?;
     Ok(BinaryProfile {
         path: fs::canonicalize(path)?,
         sha256: hash.clone(),
@@ -327,83 +317,112 @@ pub fn inspect(path: impl AsRef<Path>) -> Result<BinaryProfile> {
     })
 }
 
-fn validate_elf_segments(data: &[u8]) -> Result<()> {
-    let wide = data.get(4) == Some(&2);
-    let little = data.get(5) == Some(&1);
-    let phoff = number(
-        data,
-        if wide { 32 } else { 28 },
-        if wide { 8 } else { 4 },
-        little,
-    )
-    .context("truncated ELF header")?;
-    let size =
-        number(data, if wide { 54 } else { 42 }, 2, little).context("truncated ELF header")?;
-    let count =
-        number(data, if wide { 56 } else { 44 }, 2, little).context("truncated ELF header")?;
-    if count == 0xffff {
-        bail!("ELF extended program-header count is not supported by inspection");
-    }
-    if count == 0 {
-        return Ok(());
-    }
-    if size < if wide { 56 } else { 32 }
-        || phoff
-            .checked_add(size.saturating_mul(count))
-            .is_none_or(|end| end > data.len() as u64)
-    {
-        bail!("truncated or malformed ELF program-header table");
-    }
-    for i in 0..count {
-        let at = (phoff + i * size) as usize;
-        let typ = number(data, at, 4, little).unwrap_or(0);
-        if typ != 1 && typ != 2 {
-            continue;
+fn macho_entry_offset<M: object::read::macho::MachHeader>(
+    file: &object::read::macho::MachOFile<'_, M>,
+) -> Result<Option<u64>> {
+    let mut commands = file.macho_load_commands()?;
+    while let Some(command) = commands.next()? {
+        if let Some(entry) = command.entry_point()? {
+            return Ok(Some(entry.entryoff.get(file.endian())));
         }
-        let offset = number(
-            data,
-            at + if wide { 8 } else { 4 },
-            if wide { 8 } else { 4 },
-            little,
-        )
-        .unwrap_or(u64::MAX);
-        let file_size = number(
-            data,
-            at + if wide { 32 } else { 16 },
-            if wide { 8 } else { 4 },
-            little,
-        )
-        .unwrap_or(u64::MAX);
-        if offset
-            .checked_add(file_size)
-            .is_none_or(|end| end > data.len() as u64)
-        {
-            bail!("ELF segment file range extends beyond target");
+    }
+    Ok(None)
+}
+
+fn elf_mitigations<Elf: object::read::elf::FileHeader>(
+    file: &object::read::elf::ElfFile<'_, Elf>,
+    set: &mut impl FnMut(&str, MitigationState, String),
+) -> Result<()> {
+    use MitigationState::*;
+    use object::{
+        elf,
+        read::elf::{Dyn, ProgramHeader},
+    };
+    let endian = file.endian();
+    ensure!(
+        file.elf_program_headers().len() <= 65536,
+        "too many ELF program headers"
+    );
+    let mut relro = false;
+    let mut bind_now = false;
+    let mut interpreter = false;
+    let mut pie_flag = false;
+    for segment in file.elf_program_headers() {
+        let typ = segment.p_type(endian);
+        if typ == elf::PT_LOAD || typ == elf::PT_DYNAMIC {
+            segment
+                .data(endian, file.data())
+                .map_err(|_| anyhow::anyhow!("ELF segment file range extends beyond target"))?;
         }
+        if typ == elf::PT_GNU_STACK {
+            let flags = segment.p_flags(endian);
+            set(
+                "nx",
+                if flags.contains(elf::PF_X) {
+                    Disabled
+                } else {
+                    Enabled
+                },
+                format!("PT_GNU_STACK p_flags={flags:#x}"),
+            );
+        }
+        relro |= typ == elf::PT_GNU_RELRO;
+        interpreter |= typ == elf::PT_INTERP;
+        if let Some(dynamic) = segment.dynamic(endian, file.data())? {
+            ensure!(dynamic.len() <= 65536, "too many ELF dynamic entries");
+            for entry in dynamic {
+                let tag = entry.d_tag(endian);
+                if tag == elf::DT_NULL {
+                    break;
+                }
+                let value = entry.d_val(endian).into();
+                bind_now |= tag == elf::DT_BIND_NOW
+                    || (tag == elf::DT_FLAGS
+                        && elf::DynamicFlags(value).contains(elf::DF_BIND_NOW))
+                    || (tag == elf::DT_FLAGS_1
+                        && elf::DynamicFlags1(value).contains(elf::DF_1_NOW));
+                pie_flag |=
+                    tag == elf::DT_FLAGS_1 && elf::DynamicFlags1(value).contains(elf::DF_1_PIE);
+            }
+        }
+    }
+    set(
+        "relro",
+        if relro && bind_now {
+            Enabled
+        } else if relro {
+            Partial
+        } else {
+            Disabled
+        },
+        format!("PT_GNU_RELRO={relro}; immediate binding={bind_now}"),
+    );
+    let typ = file.elf_header().e_type(endian);
+    if typ == elf::ET_EXEC {
+        set(
+            "pie_aslr",
+            Disabled,
+            "ELF ET_EXEC has fixed link addresses".into(),
+        );
+    } else if typ == elf::ET_DYN && (interpreter || pie_flag) {
+        set("pie_aslr", Enabled, "ELF ET_DYN executable (PT_INTERP or DF_1_PIE); runtime ASLR still depends on OS policy".into());
+    } else if typ == elf::ET_DYN {
+        set(
+            "pie_aslr",
+            Unknown,
+            "ELF ET_DYN without executable marker may be a shared library".into(),
+        );
     }
     Ok(())
 }
 
-fn number(data: &[u8], at: usize, width: usize, little: bool) -> Option<u64> {
-    let bytes = data.get(at..at.checked_add(width)?)?;
-    let mut n = 0u64;
-    if little {
-        for (i, b) in bytes.iter().enumerate() {
-            n |= u64::from(*b) << (8 * i);
-        }
-    } else {
-        for b in bytes {
-            n = (n << 8) | u64::from(*b);
-        }
-    }
-    Some(n)
-}
 fn mitigations(
-    data: &[u8],
+    file: &object::File<'_>,
     imports: &[ImportInfo],
     symbols: &[SymbolInfo],
-) -> BTreeMap<String, Mitigation> {
+) -> Result<BTreeMap<String, Mitigation>> {
     use MitigationState::*;
+    use object::read::pe::{ImageNtHeaders, ImageOptionalHeader};
     let mut result = BTreeMap::new();
     for key in [
         "nx",
@@ -423,13 +442,13 @@ fn mitigations(
     let mut set = |key: &str, state, evidence: String| {
         result.insert(key.into(), Mitigation { state, evidence });
     };
-    let canary = imports
+    if imports
         .iter()
         .any(|i| i.name.contains("stack_chk_fail") || i.name.contains("security_check_cookie"))
         || symbols
             .iter()
-            .any(|i| i.name.contains("stack_chk_fail") || i.name.contains("security_check_cookie"));
-    if canary {
+            .any(|i| i.name.contains("stack_chk_fail") || i.name.contains("security_check_cookie"))
+    {
         set(
             "stack_canary",
             Enabled,
@@ -437,160 +456,64 @@ fn mitigations(
                 .into(),
         );
     }
-    if data.starts_with(b"\x7fELF") {
-        let wide = data.get(4) == Some(&2);
-        let little = data.get(5) == Some(&1);
-        let et = number(data, 16, 2, little).unwrap_or(0);
-        let phoff = number(
-            data,
-            if wide { 32 } else { 28 },
-            if wide { 8 } else { 4 },
-            little,
-        )
-        .unwrap_or(0);
-        let entsize = number(data, if wide { 54 } else { 42 }, 2, little).unwrap_or(0);
-        let count = number(data, if wide { 56 } else { 44 }, 2, little).unwrap_or(0);
-        let mut relro = false;
-        let mut bind_now = false;
-        let mut interpreter = false;
-        let mut pie_flag = false;
-        for i in 0..count.min(65536) {
-            let Some(at) = phoff
-                .checked_add(i * entsize)
-                .and_then(|n| usize::try_from(n).ok())
-            else {
-                break;
-            };
-            if entsize < if wide { 56 } else { 32 } {
-                break;
-            }
-            let typ = number(data, at, 4, little).unwrap_or(0);
-            let flags = number(data, at + if wide { 4 } else { 24 }, 4, little).unwrap_or(0);
-            if typ == 0x6474e551 {
-                set(
-                    "nx",
-                    if flags & 1 == 0 { Enabled } else { Disabled },
-                    format!("PT_GNU_STACK p_flags={flags:#x}"),
-                );
-            }
-            if typ == 0x6474e552 {
-                relro = true;
-            }
-            if typ == 3 {
-                interpreter = true;
-            }
-            if typ == 2 {
-                let offset = number(
-                    data,
-                    at + if wide { 8 } else { 4 },
-                    if wide { 8 } else { 4 },
-                    little,
-                )
-                .unwrap_or(u64::MAX);
-                let size = number(
-                    data,
-                    at + if wide { 32 } else { 16 },
-                    if wide { 8 } else { 4 },
-                    little,
-                )
-                .unwrap_or(0);
-                let word = if wide { 8 } else { 4 };
-                for j in 0..(size / (word * 2) as u64).min(65536) {
-                    let Some(d) = offset
-                        .checked_add(j * (word * 2) as u64)
-                        .and_then(|n| usize::try_from(n).ok())
-                    else {
-                        break;
-                    };
-                    let Some(tag) = number(data, d, word, little) else {
-                        break;
-                    };
-                    let val = number(data, d + word, word, little).unwrap_or(0);
-                    if tag == 0 {
-                        break;
-                    }
-                    if tag == 24
-                        || (tag == 30 && val & 8 != 0)
-                        || (tag == 0x6ffffffb && val & 1 != 0)
-                    {
-                        bind_now = true;
-                    }
-                    if tag == 0x6ffffffb && val & 0x08000000 != 0 {
-                        pie_flag = true;
-                    }
-                }
-            }
-        }
-        set(
-            "relro",
-            if relro && bind_now {
-                Enabled
-            } else if relro {
-                Partial
-            } else {
-                Disabled
-            },
-            format!("PT_GNU_RELRO={relro}; immediate binding={bind_now}"),
-        );
-        if et == 2 {
-            set(
+    match file {
+        object::File::Elf32(file) => elf_mitigations(file, &mut set)?,
+        object::File::Elf64(file) => elf_mitigations(file, &mut set)?,
+        _ => {}
+    }
+    let dll_flags = match file {
+        object::File::Pe32(file) => Some(file.nt_headers().optional_header().dll_characteristics()),
+        object::File::Pe64(file) => Some(file.nt_headers().optional_header().dll_characteristics()),
+        _ => None,
+    };
+    if let Some(flags) = dll_flags {
+        for (key, bit, label) in [
+            (
+                "nx",
+                object::pe::IMAGE_DLLCHARACTERISTICS_NX_COMPAT,
+                "NX_COMPAT",
+            ),
+            (
                 "pie_aslr",
-                Disabled,
-                "ELF ET_EXEC has fixed link addresses".into(),
-            );
-        } else if et == 3 && (interpreter || pie_flag) {
-            set("pie_aslr", Enabled, "ELF ET_DYN executable (PT_INTERP or DF_1_PIE); runtime ASLR still depends on OS policy".into());
-        } else if et == 3 {
+                object::pe::IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE,
+                "DYNAMIC_BASE",
+            ),
+            (
+                "control_flow_guard",
+                object::pe::IMAGE_DLLCHARACTERISTICS_GUARD_CF,
+                "GUARD_CF",
+            ),
+        ] {
             set(
-                "pie_aslr",
-                Unknown,
-                "ELF ET_DYN without executable marker may be a shared library".into(),
-            );
-        }
-    } else if data.starts_with(b"MZ") {
-        if let Some(pe) = number(data, 0x3c, 4, true).and_then(|v| usize::try_from(v).ok())
-            && data.get(pe..pe.saturating_add(4)) == Some(b"PE\0\0".as_slice())
-            && let Some(flags) = number(data, pe + 24 + 70, 2, true)
-        {
-            for (key, bit, label) in [
-                ("nx", 0x100, "NX_COMPAT"),
-                ("pie_aslr", 0x40, "DYNAMIC_BASE"),
-                ("control_flow_guard", 0x4000, "GUARD_CF"),
-            ] {
-                set(
-                    key,
-                    if flags & bit != 0 { Enabled } else { Disabled },
-                    format!(
-                        "PE DLL characteristics {label}={}; loader policy may differ",
-                        flags & bit != 0
-                    ),
-                );
-            }
-        }
-    } else if data.len() >= 28 {
-        let magic = &data[..4];
-        let little = matches!(magic, [0xce, 0xfa, 0xed, 0xfe] | [0xcf, 0xfa, 0xed, 0xfe]);
-        let macho = little || matches!(magic, [0xfe, 0xed, 0xfa, 0xce] | [0xfe, 0xed, 0xfa, 0xcf]);
-        if macho && let Some(flags) = number(data, 24, 4, little) {
-            set(
-                "pie_aslr",
-                if flags & 0x200000 != 0 {
+                key,
+                if flags.contains(bit) {
                     Enabled
                 } else {
                     Disabled
                 },
-                format!("Mach-O MH_PIE={}", flags & 0x200000 != 0),
+                format!(
+                    "PE DLL characteristics {label}={}; loader policy may differ",
+                    flags.contains(bit)
+                ),
             );
-            if flags & 0x20000 != 0 {
-                set(
-                    "nx",
-                    Disabled,
-                    "Mach-O MH_ALLOW_STACK_EXECUTION present".into(),
-                );
-            }
         }
     }
-    result
+    if let object::FileFlags::MachO { flags } = file.flags() {
+        let pie = flags.contains(object::macho::MH_PIE);
+        set(
+            "pie_aslr",
+            if pie { Enabled } else { Disabled },
+            format!("Mach-O MH_PIE={pie}"),
+        );
+        if flags.contains(object::macho::MH_ALLOW_STACK_EXECUTION) {
+            set(
+                "nx",
+                Disabled,
+                "Mach-O MH_ALLOW_STACK_EXECUTION present".into(),
+            );
+        }
+    }
+    Ok(result)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
