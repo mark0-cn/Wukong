@@ -104,6 +104,22 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.client.call("interact.write", session_id="absent", data_base64="eA==")
 
+    def test_interactive_writes_are_ledger_deduplicated(self):
+        program = "import sys\nfor line in sys.stdin:\n    line=line.strip()\n    if line=='quit': break\n    print('echo:'+line, flush=True)\n"
+        started = self.client.call("interact.start", argv=[sys.executable, "-c", program], request_id="interact-start-dedup")
+        session_id = started["session_id"]
+        first = self.client.call("interact.write", session_id=session_id, data_base64="aGVsbG8K", read_timeout_secs=5, request_id="write-dedup-1")
+        self.assertIn("echo:hello", first["captured"])
+        # An identical replay must return the recorded result instead of
+        # writing the bytes a second time.
+        replay = self.client.call("interact.write", session_id=session_id, data_base64="aGVsbG8K", read_timeout_secs=5, request_id="write-dedup-1")
+        self.assertEqual(first, replay)
+        self.assertEqual(replay["captured"].count("echo:hello"), 1)
+        # A completed start replay returns the same session instead of
+        # launching a second process.
+        started_replay = self.client.call("interact.start", argv=[sys.executable, "-c", program], request_id="interact-start-dedup")
+        self.assertEqual(started_replay["session_id"], session_id)
+
     def test_angr_solve_validates_parameters(self):
         self.client.put("dummy.bin", b"not-an-elf")
         with self.assertRaises(AssertionError):

@@ -854,7 +854,9 @@ class Runtime:
         return meta
 
     def dispatch(self, method, params):
-        effects = {"job.start", "fuzz.start", "debug.start", "debug.command", "debug.close", "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop"}
+        effects = {"job.start", "fuzz.start", "debug.start", "debug.command", "debug.close",
+                   "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop",
+                   "interact.start", "interact.write", "interact.close"}
         request_id = params.get("request_id")
         if method not in effects or not request_id:
             return self.dispatch_inner(method, params)
@@ -863,7 +865,8 @@ class Runtime:
         fingerprint = hashlib.sha256(json.dumps({"method": method, "params": params}, sort_keys=True).encode()).hexdigest()
         ledger = self.root / "operations" / (hashlib.sha256(request_id.encode()).hexdigest() + ".json")
         # Reservation precedes the action. An owner death cannot cause an
-        # uncertain debugger command to be replayed on reconnect.
+        # uncertain debugger command or interactive write to be replayed on
+        # reconnect.
         with self.lock:
             if ledger.exists():
                 operation = load_json(ledger)
@@ -873,11 +876,13 @@ class Runtime:
                     result = operation["result"]
                     if method == "debug.start" and result["session_id"] not in self.debug:
                         return {**result, "state": "lost", "reason": "debugger owner daemon restarted"}
+                    if method == "interact.start" and result["session_id"] not in self.interact:
+                        return {**result, "state": "lost", "reason": "interactive session owner daemon restarted"}
                     return result
                 if operation["state"] == "failed":
                     raise ValueError(operation["error"])
                 if method not in {"job.start", "fuzz.start", "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop", "debug.close"}:
-                    raise ValueError("prior operation outcome is unknown; reconcile debugger state instead of replaying")
+                    raise ValueError("prior operation outcome is unknown; reconcile the affected worker state instead of replaying")
             atomic_json(ledger, {"fingerprint": fingerprint, "state": "pending", "method": method, "at": time.time()})
             try:
                 result = self.dispatch_inner(method, params)
