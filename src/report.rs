@@ -1,6 +1,7 @@
 //! Auditable reports and an integrity-checked, self-contained evidence bundle.
 use crate::{domain::*, store::Store};
 use anyhow::{Context, Result, ensure};
+use askama::Template;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -188,17 +189,13 @@ pub fn redact(value: &mut Value) {
     }
 }
 
-fn escaped(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-}
-
 fn markdown_text(value: &str) -> String {
-    escaped(value)
+    // Escape raw HTML inside Markdown separately from Markdown punctuation.
+    let escaped = match askama::filters::escape(value, askama::filters::Html) {
+        Ok(value) => value.to_string(),
+        Err(never) => match never {},
+    };
+    escaped
         .replace('\\', "\\\\")
         .replace('`', "\\`")
         .replace('*', "\\*")
@@ -239,7 +236,24 @@ fn validated_verification<'a>(
     })
 }
 
-fn readable_report(snapshot: &Snapshot) -> (String, String) {
+struct HtmlFinding<'a> {
+    finding: &'a Finding,
+    label: &'static str,
+    fields: Vec<(&'static str, &'a str)>,
+    verification: Option<&'a Verification>,
+    evidence: String,
+}
+
+#[derive(Template)]
+#[template(path = "report.html")]
+struct HtmlReport<'a> {
+    snapshot: &'a Snapshot,
+    findings: Vec<HtmlFinding<'a>>,
+    summary: &'a str,
+    cost: String,
+}
+
+fn readable_report(snapshot: &Snapshot) -> Result<(String, String)> {
     let run = &snapshot.run;
     let mut md = format!(
         "# Binary analysis report\n\nRun: `{}`\n\nTarget SHA256: `{}`\n\nStatus: {}\n\nTask: {}\n\n{}\n\n",
@@ -253,25 +267,12 @@ fn readable_report(snapshot: &Snapshot) -> (String, String) {
                 .unwrap_or("No final summary recorded.")
         )
     );
-    let mut html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; base-uri 'none'; form-action 'none'\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Binary analysis report</title><style>body{{max-width:1050px;margin:2rem auto;padding:0 1rem;font:16px/1.6 system-ui;color:#202a36}}code,pre{{background:#f1f4f7;overflow-wrap:anywhere}}pre{{padding:1rem;white-space:pre-wrap}}article{{border-top:1px solid #cbd2da;margin-top:2rem}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid #cbd2da;padding:.5rem;text-align:left}}.unconfirmed{{color:#874e00}}</style></head><body><h1>Binary analysis report</h1><p>Run: <code>{}</code></p><p>Target SHA256: <code>{}</code></p><p>Status: {}</p><h2>Task</h2><pre>{}</pre><h2>Summary</h2><pre>{}</pre>",
-        escaped(&run.id),
-        run.target_sha256,
-        run.status,
-        escaped(&run.task),
-        escaped(
-            run.summary
-                .as_deref()
-                .unwrap_or("No final summary recorded.")
-        )
-    );
+    let mut findings = Vec::new();
     md.push_str("## Findings\n\n");
-    html.push_str("<h2>Findings</h2>");
     if snapshot.findings.is_empty() {
         md.push_str(
             "No findings recorded. This does not prove the target is free of vulnerabilities.\n\n",
         );
-        html.push_str("<p>No findings recorded. This does not prove the target is free of vulnerabilities.</p>");
     }
     for finding in &snapshot.findings {
         let verification = validated_verification(snapshot, finding);
@@ -287,7 +288,7 @@ fn readable_report(snapshot: &Snapshot) -> (String, String) {
             label,
             markdown_text(&finding.description)
         ));
-        html.push_str(&format!("<article><h3>{}</h3><p>ID: <code>{}</code></p><p class=\"unconfirmed\">Recorded stage: {}</p><pre>{}</pre>",escaped(&finding.title),escaped(&finding.id),escaped(label),escaped(&finding.description)));
+        let mut fields = Vec::new();
         for (name, value) in [
             ("Root cause", finding.root_cause.as_deref()),
             ("Reported impact", finding.impact.as_deref()),
@@ -305,7 +306,7 @@ fn readable_report(snapshot: &Snapshot) -> (String, String) {
         ] {
             if let Some(value) = value {
                 md.push_str(&format!("**{name}:** {}\n\n", markdown_text(value)));
-                html.push_str(&format!("<h4>{name}</h4><pre>{}</pre>", escaped(value)));
+                fields.push((name, value));
             }
         }
         if let Some(verification) = verification {
@@ -315,7 +316,6 @@ fn readable_report(snapshot: &Snapshot) -> (String, String) {
                 verification.attempts,
                 markdown_text(&verification.impact)
             ));
-            html.push_str(&format!("<p>Independent replay: {} / {} successful attempts.</p><h4>Verified impact</h4><pre>{}</pre>",verification.successes,verification.attempts,escaped(&verification.impact)));
         }
         md.push_str("Evidence IDs: ");
         md.push_str(
@@ -327,13 +327,15 @@ fn readable_report(snapshot: &Snapshot) -> (String, String) {
                 .join(", "),
         );
         md.push_str("\n\n");
-        html.push_str(&format!(
-            "<p>Evidence IDs: {}</p></article>",
-            escaped(&finding.evidence_ids.join(", "))
-        ));
+        findings.push(HtmlFinding {
+            finding,
+            label,
+            fields,
+            verification,
+            evidence: finding.evidence_ids.join(", "),
+        });
     }
     md.push_str("## Coverage\n\n| Scope | Kind | Outcome | Notes |\n|---|---|---|---|\n");
-    html.push_str("<h2>Coverage</h2><table><thead><tr><th>Scope</th><th>Kind</th><th>Outcome</th><th>Notes</th></tr></thead><tbody>");
     for coverage in &snapshot.coverage {
         md.push_str(&format!(
             "| {} | {} | {} | {} |\n",
@@ -342,17 +344,20 @@ fn readable_report(snapshot: &Snapshot) -> (String, String) {
             markdown_text(&coverage.outcome),
             markdown_text(&coverage.notes).replace('\n', " ")
         ));
-        html.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-            escaped(&coverage.scope),
-            escaped(&coverage.kind),
-            escaped(&coverage.outcome),
-            escaped(&coverage.notes)
-        ));
     }
     md.push_str(&format!("\n## Accounting\n\n{} agents; {} tool calls; {} evidence records; {} tokens; USD {:.6}.\n\nSee `report.json` and `replay.json` for environment, conditions, exact tool arguments, and evidence references.\n",snapshot.agents.len(),snapshot.calls.len(),snapshot.evidence.len(),run.total_tokens,run.cost_usd));
-    html.push_str(&format!("</tbody></table><h2>Accounting</h2><p>{} agents; {} tool calls; {} evidence records; {} tokens; USD {:.6}.</p><p>See report.json and replay.json for environment, conditions, exact tool arguments, and evidence references.</p></body></html>",snapshot.agents.len(),snapshot.calls.len(),snapshot.evidence.len(),run.total_tokens,run.cost_usd));
-    (md, html)
+    let html = HtmlReport {
+        snapshot,
+        findings,
+        summary: run
+            .summary
+            .as_deref()
+            .unwrap_or("No final summary recorded."),
+        cost: format!("{:.6}", run.cost_usd),
+    }
+    .render()
+    .context("render HTML report")?;
+    Ok((md, html))
 }
 
 fn write_file(
@@ -514,7 +519,7 @@ pub fn export(store: &Store, run_id: &str, output: &Path) -> Result<ExportSummar
         let mut replay = json!({"schema_version":1,"target":{"original_path":snapshot.run.target_path,"bundle_path":target_relative,"sha256":target_hash},"config":"config.redacted.json","tool_calls":snapshot.calls,"verifications":snapshot.verifications,"jobs":snapshot.jobs,"evidence":evidence_index,"instructions":"Verify manifest before replay. Recreate the recorded runtime and dependencies, map the original target path to target/sample.bin, import required evidence by bundle_path, then replay the recorded tool arguments. Environment credentials must be supplied separately. Export itself executes no target code."});
         redact(&mut replay);
         write_json(&staging, "replay.json", &replay, &mut files)?;
-        let (md, html) = readable_report(&snapshot);
+        let (md, html) = readable_report(&snapshot)?;
         write_file(&staging, "report.md", md.as_bytes(), &mut files)?;
         write_file(&staging, "report.html", html.as_bytes(), &mut files)?;
         write_file(&staging,"README.txt",b"re-agent evidence bundle\n\nreport.md / report.html: human-readable recorded findings and verification status.\nreport.json: transactional run snapshot and original evidence index.\nreplay.json: exact recorded tool calls, verification environment and conditions.\nconfig.redacted.json: settings with credential fields redacted.\ntarget/sample.bin: original target bytes (not executed during export).\nevidence/: deduplicated original evidence bytes, addressed by SHA256.\nmanifest.json / SHA256SUMS: all payload digests. Use re-agent bundle-verify.\n\nA checksum verifies integrity, not publisher identity. Original evidence is not redacted.\nRedacted configuration and event metadata are not a credential backup.\n",&mut files)?;
