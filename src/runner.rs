@@ -84,6 +84,9 @@ impl AssessmentRunner {
         }
         &self.engine
     }
+    pub fn config(&self) -> &AppConfig {
+        &self.config
+    }
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
     }

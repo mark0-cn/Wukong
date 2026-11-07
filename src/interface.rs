@@ -103,9 +103,14 @@ pub enum Command {
         error: bool,
     },
     /// Strix-style live dashboard: agent tree, activity stream, findings and
-    /// budget status. q exits, p pauses, up/down scroll the activity, f follows.
+    /// budget status. Without a run id it opens an interactive terminal: type
+    /// a target path to start a new assessment, or watch the latest run.
+    /// q exits, p pauses, i starts a task, m messages the root, up/down
+    /// scroll the activity, f follows.
     Tui {
-        run_id: String,
+        /// Optional run to watch; omitted selects the latest run or the
+        /// interactive new-task prompt.
+        run_id: Option<String>,
     },
 }
 
@@ -274,7 +279,21 @@ pub async fn run(cli: Cli) -> Result<()> {
                 crate::tools::reconcile_record(&store, &call_id, result, &evidence_ids, error)?;
             print_json(&serde_json::to_value(outcome)?)?;
         }
-        Command::Tui { run_id } => dashboard(&store, &run_id)?,
+        Command::Tui { run_id } => {
+            // Watch-only mode stays available without model credentials; the
+            // interactive new-task prompt needs a working engine.
+            let runner = match AssessmentRunner::new(config.clone(), store.clone()).await {
+                Ok(runner) => Some(runner),
+                Err(error) => {
+                    eprintln!("re-agent: watch-only mode: {error:#}");
+                    None
+                }
+            };
+            dashboard(&store, run_id.as_deref(), runner.clone())?;
+            if let Some(runner) = runner {
+                runner.tools.close().await;
+            }
+        }
     }
     Ok(())
 }
@@ -323,7 +342,22 @@ async fn drive_with_events(
     result
 }
 
-fn dashboard(store: &Store, run_id: &str) -> Result<()> {
+/// The default analyze task, shared by the `analyze` command and the TUI's
+/// new-task prompt.
+const DEFAULT_TASK: &str = "Analyze the binary, establish its input/trust boundaries, investigate concrete vulnerability hypotheses, independently verify reproducible findings and report evidence and limitations.";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TuiInput {
+    None,
+    Task,
+    Message,
+}
+
+fn dashboard(
+    store: &Store,
+    run_id: Option<&str>,
+    runner: Option<AssessmentRunner>,
+) -> Result<()> {
     use crossterm::{
         event::{self, Event as CEvent, KeyCode},
         execute,
@@ -344,18 +378,67 @@ fn dashboard(store: &Store, run_id: &str) -> Result<()> {
             let _ = execute!(io::stdout(), LeaveAlternateScreen);
         }
     }
-    let run: RunRecord = store.require("run", run_id)?;
     enable_raw_mode()?;
     let _restore = Restore;
     execute!(io::stdout(), EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut scroll: usize = 0;
     let mut follow = true;
+    let mut input = TuiInput::None;
+    let mut buffer = String::new();
+    let mut input_error: Option<String> = None;
+    let mut drive_cancel: Option<CancellationToken> = None;
+    let mut selected: Option<String> = run_id.map(str::to_owned);
     loop {
-        let run: RunRecord = store.require("run", run_id)?;
-        let agents = store.list::<AgentRecord>("agent", run_id)?;
-        let findings = store.list::<Finding>("finding", run_id)?;
-        let events = store.recent_events(run_id, 600)?;
+        if selected.is_none() {
+            if let Ok(mut runs) = store.runs() {
+                runs.reverse();
+                selected = runs.into_iter().next().map(|run| run.id);
+            }
+        }
+        let Some(selected_id) = selected.as_deref() else {
+            // Welcome state: no assessment exists yet.
+            terminal.draw(|frame| {
+                let area = frame.area();
+                let lines = vec![
+                    Line::from(Span::styled(
+                        "No assessment yet. Press i, then type a target path (Enter to start).",
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(Span::styled(
+                        "The run is driven live in this terminal; q pauses and exits.",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    Line::from(Span::styled(
+                        if runner.is_some() {
+                            "Ready to start tasks."
+                        } else {
+                            "Watch-only: model credentials are missing, so new tasks cannot start."
+                        },
+                        Style::default().fg(if runner.is_some() { Color::Green } else { Color::Red }),
+                    )),
+                ];
+                frame.render_widget(
+                    Paragraph::new(lines)
+                        .block(Block::default().borders(Borders::ALL).title(" RE-AGENT ")),
+                    area,
+                );
+            })?;
+            if event::poll(Duration::from_millis(250))?
+                && let CEvent::Key(key) = event::read()?
+            {
+                match key.code {
+                    KeyCode::Char('i') if runner.is_some() => input = TuiInput::Task,
+                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    _ => {}
+                }
+            }
+            continue;
+        };
+        let run: RunRecord = store.require("run", selected_id)?;
+        let agents = store.list::<AgentRecord>("agent", selected_id)?;
+        let findings = store.list::<Finding>("finding", selected_id)?;
+        let events = store.recent_events(selected_id, 600)?;
         let tree_height = terminal.size()?.height.saturating_sub(14).max(4) as usize;
         let event_height = tree_height;
         if follow {
@@ -368,6 +451,7 @@ fn dashboard(store: &Store, run_id: &str) -> Result<()> {
                     Constraint::Length(7),
                     Constraint::Min(10),
                     Constraint::Length(6),
+                    Constraint::Length(if input != TuiInput::None { 1 } else { 0 }),
                     Constraint::Length(1),
                 ])
                 .split(frame.area());
@@ -530,6 +614,34 @@ fn dashboard(store: &Store, run_id: &str) -> Result<()> {
                     .wrap(Wrap { trim: true }),
                 areas[2],
             );
+            // ---- input line ----
+            if input != TuiInput::None {
+                let label = match input {
+                    TuiInput::Task => " task: target path ",
+                    TuiInput::Message => " message to root ",
+                    TuiInput::None => "",
+                };
+                let mut spans = vec![
+                    Span::styled(" ▸ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(label, Style::default().fg(Color::Cyan)),
+                    Span::raw(&buffer),
+                    Span::styled("▌", Style::default().fg(Color::Yellow)),
+                ];
+                if let Some(error) = &input_error {
+                    spans.push(Span::styled(
+                        format!("  {error}"),
+                        Style::default().fg(Color::Red),
+                    ));
+                }
+                frame.render_widget(
+                    Paragraph::new(Line::from(spans)).block(
+                        Block::default()
+                            .borders(Borders::TOP)
+                            .border_style(Style::default().fg(Color::Cyan)),
+                    ),
+                    areas[3],
+                );
+            }
             // ---- status bar ----
             let status_color = match run.status {
                 Status::Running => Color::Green,
@@ -553,16 +665,94 @@ fn dashboard(store: &Store, run_id: &str) -> Result<()> {
                     Span::styled(format!("cost ${:.4}  ", run.cost_usd), Style::default().fg(Color::Gray)),
                     Span::styled(format!("elapsed {elapsed}  "), Style::default().fg(Color::Gray)),
                     Span::styled(format!("agents {}  ", agents.len()), Style::default().fg(Color::Gray)),
-                    Span::styled("q quit · p pause · ↑/↓ scroll · f follow", Style::default().fg(Color::DarkGray)),
+                    Span::styled("q quit · p pause · i task · m message · ↑/↓ scroll · f follow", Style::default().fg(Color::DarkGray)),
                 ])),
-                areas[3],
+                areas[4],
             );
         })?;
         if event::poll(Duration::from_millis(250))? && let CEvent::Key(key) = event::read()? {
+            if input != TuiInput::None {
+                match key.code {
+                    KeyCode::Esc => {
+                        input = TuiInput::None;
+                        buffer.clear();
+                        input_error = None;
+                    }
+                    KeyCode::Enter => match input {
+                        TuiInput::Task => {
+                            if let Some(runner) = &runner {
+                                match std::fs::canonicalize(buffer.trim()) {
+                                    Ok(path) if path.is_file() => {
+                                        let config = runner.config();
+                                        let created = runner.coordinator.create_run(
+                                            &path,
+                                            DEFAULT_TASK,
+                                            config.budget.clone(),
+                                            serde_json::to_value(config.clone())?,
+                                        )?;
+                                        let cancel = CancellationToken::new();
+                                        let drive_runner = runner.clone();
+                                        let drive_id = created.id.clone();
+                                        let drive_token = cancel.clone();
+                                        tokio::spawn(async move {
+                                            let _ = drive_runner.drive(&drive_id, drive_token).await;
+                                        });
+                                        drive_cancel = Some(cancel);
+                                        selected = Some(created.id);
+                                        follow = true;
+                                        scroll = 0;
+                                        input = TuiInput::None;
+                                        buffer.clear();
+                                        input_error = None;
+                                    }
+                                    _ => {
+                                        input_error =
+                                            Some(format!("not a file: {}", buffer.trim()));
+                                    }
+                                }
+                            }
+                        }
+                        TuiInput::Message => {
+                            if !run.status.terminal() && !buffer.trim().is_empty() {
+                                Coordinator::new(store.clone())
+                                    .message("operator", &run.root_id, buffer.trim())?;
+                            }
+                            input = TuiInput::None;
+                            buffer.clear();
+                            input_error = None;
+                        }
+                        TuiInput::None => {}
+                    },
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) => buffer.push(c),
+                    _ => {}
+                }
+                continue;
+            }
             match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    if let Some(cancel) = &drive_cancel {
+                        let _ = Coordinator::new(store.clone())
+                            .pause_budget(selected_id, "operator quit TUI");
+                        cancel.cancel();
+                    }
+                    break;
+                }
                 KeyCode::Char('p') if !run.status.terminal() => {
-                    Coordinator::new(store.clone()).pause_budget(run_id, "operator paused in TUI")?;
+                    Coordinator::new(store.clone())
+                        .pause_budget(selected_id, "operator paused in TUI")?;
+                }
+                KeyCode::Char('i') if runner.is_some() => {
+                    input = TuiInput::Task;
+                    buffer.clear();
+                    input_error = None;
+                }
+                KeyCode::Char('m') if !run.status.terminal() => {
+                    input = TuiInput::Message;
+                    buffer.clear();
+                    input_error = None;
                 }
                 KeyCode::Char('f') => follow = true,
                 KeyCode::Up => {
