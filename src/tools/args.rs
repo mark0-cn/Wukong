@@ -198,6 +198,38 @@ pub(super) struct NoteSaveArgs {
 pub(super) struct NotesListArgs {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ContextKind {
+    Note,
+    Todo,
+    ThreatModel,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ContextSearchArgs {
+    pub query: Option<String>,
+    pub kind: Option<ContextKind>,
+    pub scope: Option<String>,
+    pub agent_id: Option<String>,
+    #[schemars(range(min = 0))]
+    pub offset: Option<usize>,
+    #[schemars(range(min = 1, max = 10))]
+    pub limit: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ContextReadArgs {
+    pub kind: ContextKind,
+    pub id: String,
+    #[schemars(range(min = 0))]
+    pub offset: Option<usize>,
+    #[schemars(range(min = 1, max = 12000))]
+    pub max_chars: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct TodoSaveArgs {
     #[schemars(length(min = 1))]

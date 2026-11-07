@@ -46,6 +46,131 @@ fn result(outcome: &ToolOutcome) -> &Value {
 }
 
 #[tokio::test]
+async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let unrelated = child(
+        &coordinator,
+        &run.root_id,
+        Role::Reverse,
+        "unrelated cryptography",
+    )?;
+    let before = re_agent::agents::preamble(&agent, &run, &store, None, None)?.len();
+    let mut wanted = None;
+    for index in 0..30 {
+        let own = index < 3;
+        let document = SharedDocument {
+            id: format!("context-{index}"),
+            run_id: run.id.clone(),
+            agent_id: if own {
+                agent.id.clone()
+            } else {
+                unrelated.id.clone()
+            },
+            kind: "note".into(),
+            title: format!("{} {index}", if own { "parser" } else { "crypto" }),
+            body: format!("{} END_OF_DOCUMENT", "字段😀\n\"\\".repeat(200)),
+            amendments: vec![json!({"body":"late correction: marker-amendment"})],
+            created_at: now(),
+            updated_at: now(),
+        };
+        if index == 0 {
+            wanted = Some(document.clone());
+        }
+        store.put("note", &document.id, &run.id, &document)?;
+    }
+    let prompt = re_agent::agents::preamble(&agent, &run, &store, None, None)?;
+    let context: Value =
+        serde_json::from_str(prompt.split("Assessment context (data):\n").nth(1).unwrap())?;
+    let shared = &context["shared_context"];
+    assert_eq!(shared["counts"]["note"], 30);
+    assert_eq!(shared["selected"].as_array().unwrap().len(), 3);
+    assert_eq!(shared["omitted"], 27);
+    assert!(
+        shared["selected"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|doc| doc["agent_id"] == agent.id)
+    );
+    assert!(!prompt.contains("END_OF_DOCUMENT"));
+    assert!(prompt.len() < before + 15000);
+
+    let mut config = AppConfig::default();
+    config.tools.max_output_bytes = 1024;
+    let service = ToolService::new(config, store.clone()).await?;
+    let mut offset = 0;
+    let mut found = std::collections::BTreeSet::new();
+    loop {
+        let page = service.execute(&agent.id, &format!("search-{offset}"), "context_search",
+            json!({"query":"marker-amendment","kind":"note","scope":"recon","agent_id":agent.id,"offset":offset,"limit":2})).await?;
+        assert!(
+            !page.is_error && page.value["truncated"] == false,
+            "{page:?}"
+        );
+        assert_eq!(result(&page)["total"], 3);
+        for doc in result(&page)["documents"].as_array().unwrap() {
+            assert!(found.insert(doc["id"].as_str().unwrap().to_owned()));
+        }
+        let Some(next) = result(&page)["next_offset"].as_u64() else {
+            break;
+        };
+        assert!(next > offset);
+        offset = next;
+    }
+    assert_eq!(found.len(), 3);
+    let wanted = wanted.unwrap();
+    let mut offset = 0;
+    let mut content = String::new();
+    loop {
+        let page = service
+            .execute(
+                &agent.id,
+                &format!("read-{offset}"),
+                "context_read",
+                json!({"id":wanted.id,"kind":"note","offset":offset,"max_chars":12000}),
+            )
+            .await?;
+        assert!(
+            !page.is_error && page.value["truncated"] == false,
+            "{page:?}"
+        );
+        content.push_str(result(&page)["content"]["text"].as_str().unwrap());
+        let Some(next) = result(&page)["content"]["next_offset"].as_u64() else {
+            break;
+        };
+        assert!(next > offset);
+        offset = next;
+    }
+    assert_eq!(
+        serde_json::from_str::<Value>(&content)?,
+        serde_json::to_value(&wanted)?
+    );
+    let other_run =
+        coordinator.create_run(&run.target_path, "other run", Budget::default(), json!({}))?;
+    let denied = service
+        .execute(
+            &other_run.root_id,
+            "context-cross-run",
+            "context_read",
+            json!({"id":wanted.id,"kind":"note"}),
+        )
+        .await?;
+    assert!(denied.is_error);
+    let bad_range = service
+        .execute(
+            &agent.id,
+            "context-invalid-offset",
+            "context_read",
+            json!({"id":wanted.id,"kind":"note","offset":content.chars().count()+1}),
+        )
+        .await?;
+    assert!(bad_range.is_error);
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn activated_skills_are_exact_durable_snapshots_with_idempotent_receipts() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;

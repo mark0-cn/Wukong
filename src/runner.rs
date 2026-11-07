@@ -168,18 +168,16 @@ impl AssessmentRunner {
         checkpoint_evidence: &str,
     ) -> Result<String> {
         self.store.transaction(|tx| {
-            let mut documents = Vec::new();
-            for kind in ["document", "threat_model", "note", "todo"] {
-                documents.extend(Store::tx_list::<SharedDocument>(tx, kind, &run.id)?);
-            }
             Ok(serde_json::to_string(&json!({
-                "notice":"Shared analysis checkpoint; retrieve the older transcript with evidence_read. Preserve unknowns.",
+                "notice":"Shared analysis checkpoint; retrieve the older transcript with evidence_read. Shared context is refreshed on each request. Use context_search/context_read, view_agent_graph, findings_list and coverage_list for omitted ledger entries. Preserve unknowns.",
                 "full_checkpoint_evidence_id":checkpoint_evidence,
                 "task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,
-                "documents":documents,
-                "tasks":Store::tx_list::<AgentRecord>(tx,"agent",&run.id)?.iter().map(|task|json!({"id":task.id,"role":task.role,"scope":task.scope,"contract":task.contract,"status":task.status,"result":task.task_result,"summary":task.summary,"error":task.error})).collect::<Vec<_>>(),
-                "findings":Store::tx_list::<Finding>(tx,"finding",&run.id)?,
-                "coverage":Store::tx_list::<Coverage>(tx,"coverage",&run.id)?
+                "shared_context":crate::context::snapshot(tx,agent)?,
+                "ledger_counts":{
+                    "tasks":Store::tx_list::<AgentRecord>(tx,"agent",&run.id)?.len(),
+                    "findings":Store::tx_list::<Finding>(tx,"finding",&run.id)?.len(),
+                    "coverage":Store::tx_list::<Coverage>(tx,"coverage",&run.id)?.len()
+                }
             }))?)
         })
     }
@@ -425,6 +423,21 @@ mod tests {
             fixture(format!("http://{}", listener.local_addr().unwrap())).await;
         runner.config.execution.compact_after_chars = 100;
         runner.config.execution.keep_recent_messages = 2;
+        let note = SharedDocument {
+            id: "compaction-shared-note".into(),
+            run_id: run.id.clone(),
+            agent_id: run.root_id.clone(),
+            kind: "note".into(),
+            title: "format dossier".into(),
+            body: format!(
+                "{} DO_NOT_INJECT_FULL_LEDGER",
+                "bounded format preview ".repeat(2000)
+            ),
+            amendments: vec![],
+            created_at: now(),
+            updated_at: now(),
+        };
+        runner.store.put("note", &note.id, &run.id, &note).unwrap();
         let server = tokio::spawn(async move {
             let mut inputs = vec![];
             for (name, args) in [
@@ -445,6 +458,11 @@ mod tests {
         assert_eq!(result.status, Status::Completed);
         assert_eq!(result.total_tokens, 36);
         let inputs = server.await.unwrap();
+        for input in &inputs {
+            let text = input.to_string();
+            assert!(text.contains("compaction-shared-note"));
+            assert!(!text.contains("DO_NOT_INJECT_FULL_LEDGER"));
+        }
         for input in &inputs[1..] {
             assert!(
                 input

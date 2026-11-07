@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod binary;
 pub mod config;
+mod context;
 pub mod coordinator;
 pub mod domain;
 pub mod interface;
