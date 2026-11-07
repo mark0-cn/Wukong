@@ -316,6 +316,20 @@ async fn real_angr_solve_reaches_a_module_relative_address() -> Result<()> {
         payload["solved"], true,
         "angr did not reach main: {payload}"
     );
+    // The solved input must be persisted as job artifacts, not only stdout.
+    let artifacts = client
+        .call("job.artifacts", json!({"job_id": solved["job_id"]}))
+        .await?;
+    let paths: Vec<&str> = artifacts
+        .as_array()
+        .context("artifact list missing")?
+        .iter()
+        .filter_map(|entry| entry["path"].as_str())
+        .collect();
+    assert!(
+        paths.iter().any(|path| path.contains("solved-input.bin")),
+        "solved input not persisted as an artifact: {paths:?}"
+    );
     client.call("worker.shutdown", json!({})).await?;
     client.close().await?;
     Ok(())

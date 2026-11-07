@@ -410,7 +410,12 @@ def supervise_job(root, directory):
                     argv = staged
                 isolation.seal(experiment)
                 atomic_json(directory / "experiment.json", experiment)
-            result = run_process(argv, cwd, safe_env(spec.get("env")), spec["timeout_secs"], spec["output_limit"], directory / "output", directory / "cancel", experiment)
+            job_env = safe_env(spec.get("env"))
+            # Jobs may persist their own outputs here; the directory belongs to
+            # this job and is collected by job.artifacts. Isolated jobs cannot
+            # write it and fall back to their sealed working directory.
+            job_env["RE_AGENT_JOB_DIR"] = str(directory)
+            result = run_process(argv, cwd, job_env, spec["timeout_secs"], spec["output_limit"], directory / "output", directory / "cancel", experiment)
             result["experiment_uid"] = experiment["uid"] if experiment else None
             result["metadata_protected"] = bool(experiment)
             if experiment and kind == "process":
