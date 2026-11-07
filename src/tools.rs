@@ -399,6 +399,10 @@ fn builtins() -> Vec<Spec> {
     }
     specs
 }
+pub(crate) fn child_schema() -> Value {
+    rig_core::tool::args_schema::<args::CreateAgentArgs>()
+}
+
 impl ToolService {
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
@@ -949,7 +953,12 @@ impl ToolService {
         bail!("only your own descendants may be controlled")
     }
 
-    fn create_agent(&self, agent: &AgentRecord, call_id: &str, args: &Value) -> Result<Value> {
+    pub(crate) fn create_agent(
+        &self,
+        agent: &AgentRecord,
+        call_id: &str,
+        args: &Value,
+    ) -> Result<Value> {
         let request: crate::coordinator::ChildRequest = serde_json::from_value(args.clone())?;
         ensure!(
             request.role != Role::Root && request.skills.len() <= 5,
@@ -2160,7 +2169,12 @@ pub fn reconcile_record(
 }
 
 fn stable(prefix: &str, value: &str) -> String {
-    format!("{prefix}_{}", hex::encode(Sha256::digest(value.as_bytes())))
+    let digest = hex::encode(Sha256::digest(value.as_bytes()));
+    if prefix == "agent" {
+        digest
+    } else {
+        format!("{prefix}_{digest}")
+    }
 }
 fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
     args[key]
@@ -2222,7 +2236,7 @@ fn prefix_utf8(bytes: &[u8], limit: usize) -> String {
 
 /// Preserve the project's numeric-address syntax before Rig validates JSON Schema.
 /// The original arguments stay in the call ledger; only dispatched values normalize.
-fn normalize_integer_arguments(value: &mut Value, schema: &Value) {
+pub(crate) fn normalize_integer_arguments(value: &mut Value, schema: &Value) {
     if schema["type"] == "integer" {
         if let Some(parsed) = value.as_str().and_then(parse_u64_text) {
             *value = json!(parsed);

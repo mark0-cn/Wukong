@@ -4,6 +4,7 @@ pub mod config;
 pub mod coordinator;
 pub mod domain;
 pub mod interface;
+mod kernel;
 pub mod llm;
 pub mod mcp;
 pub mod report;
