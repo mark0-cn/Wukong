@@ -5,7 +5,8 @@ use crate::{
     store::{LeaseToken, Store},
 };
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+#[cfg(test)]
+use serde_json::json;
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -56,6 +57,7 @@ impl RunSupervisor {
         let monitor_run = run_id.to_owned();
         let monitor_cancel = supervisor.cancel.clone();
         let monitor = tokio::spawn(async move {
+            let jobs = monitor_runner.tools.jobs();
             let mut timer = tokio::time::interval(Duration::from_secs(1));
             loop {
                 tokio::select! {
@@ -64,7 +66,7 @@ impl RunSupervisor {
                     _ = timer.tick() => {
                         tokio::select! {
                             _ = monitor_cancel.cancelled() => break,
-                            result = refresh_job_statuses(&monitor_runner, &monitor_run) => {
+                            result = jobs.refresh(&monitor_run) => {
                                 if let Err(error) = result { tracing::warn!(%error, "job monitor failed"); }
                             }
                         }
@@ -119,55 +121,6 @@ impl RunSupervisor {
     }
 }
 
-/// Poll each in-run job once per drive tick and record terminal results in
-/// the store, so the next model request injects them as a section instead of
-/// the agent spending a full turn on job_status.
-async fn refresh_job_statuses(runner: &AssessmentRunner, run_id: &str) -> Result<()> {
-    let Ok(runtime) = runner.tools.runtime() else {
-        return Ok(());
-    };
-    let jobs = runner.store.list::<Value>("job", run_id)?;
-    for job in jobs {
-        if job["delivered_to_model"].as_bool() == Some(true) {
-            continue;
-        }
-        let state = job["status"]["state"]
-            .as_str()
-            .unwrap_or("queued")
-            .to_owned();
-        if matches!(
-            state.as_str(),
-            "completed" | "failed" | "cancelled" | "timed_out"
-        ) {
-            // Already terminal from a manual poll; just mark it deliverable.
-            let mut record = job;
-            record["delivered_to_model"] = json!(true);
-            if let Some(job_id) = record["id"].as_str().map(str::to_owned) {
-                runner.store.put("job", &job_id, run_id, &record)?;
-            }
-            continue;
-        }
-        let Some(job_id) = job["id"].as_str().map(str::to_owned) else {
-            continue;
-        };
-        let Ok(status) = runtime.call("job.status", json!({"job_id": job_id})).await else {
-            continue;
-        };
-        let state = status["state"].as_str().unwrap_or("queued").to_owned();
-        if !matches!(
-            state.as_str(),
-            "completed" | "failed" | "cancelled" | "timed_out"
-        ) {
-            continue;
-        }
-        let mut record = job;
-        record["status"] = status;
-        record["delivered_to_model"] = json!(true);
-        runner.store.put("job", &job_id, run_id, &record)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,7 +173,7 @@ for line in sys.stdin:
                 "job",
                 "job",
                 &run.id,
-                &json!({"id":"job","agent_id":run.root_id,"status":{"state":"queued"}}),
+                &json!({"id":"job","run_id":run.id,"agent_id":run.root_id,"worker_id":runner.tools.worker_identity()?,"status":{"job_id":"job","state":"queued"}}),
             )?;
             let cancel = CancellationToken::new();
             let child_cancel = cancel.clone();

@@ -12,6 +12,15 @@ from integration_test import Client
 
 
 class SessionLaunchTests(unittest.TestCase):
+    def test_lost_session_error_kind_survives_durable_replay(self):
+        import bridge
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = bridge.Runtime(Path(directory), trusted=True)
+            for _ in range(2):
+                with self.assertRaises(bridge.WorkerError) as error:
+                    runtime.dispatch("debug.close", {"session_id": "missing", "request_id": "lost-debug"})
+                self.assertEqual(bridge.rpc_error(error.exception)["data"]["kind"], "session_lost")
+
     def test_isolated_interactive_launch_drops_credentials(self):
         import bridge
         import isolation
