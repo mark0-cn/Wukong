@@ -319,6 +319,16 @@ pub(crate) fn show(ui: &mut egui::Ui, text: &str) {
 mod tests {
     use super::*;
     #[test]
+    fn rich_documents_render_at_narrow_and_wide_widths() {
+        let ctx = egui::Context::default();
+        for width in [320.0, 900.0] {
+            let output=ctx.run(egui::RawInput { screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(width,900.0))),..Default::default() },|ctx| {
+                egui::CentralPanel::default().show(ctx,|ui| show(ui,"# Header\n\n- **bold** and *italic* [link](https://example.com)\n\n| Name | Value |\n|---|---|\n| a | `1` |\n\n```rust\nlet example = 1;\n```\n"));
+            });
+            assert!(!output.shapes.is_empty());
+        }
+    }
+    #[test]
     fn markdown_preserves_code_and_recognizes_tables_links_and_lists() {
         let nodes = parse(
             "# Title\n\n- **item** [link](https://example.com)\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```rust\nlet x = 1;\n```\n",

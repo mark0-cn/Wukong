@@ -193,10 +193,9 @@ impl AgentTree {
                                         "▼"
                                     })
                                     .clicked()
+                                    && !self.collapsed.remove(&agent.id)
                                 {
-                                    if !self.collapsed.remove(&agent.id) {
-                                        self.collapsed.insert(agent.id.clone());
-                                    }
+                                    self.collapsed.insert(agent.id.clone());
                                 }
                             } else {
                                 ui.add_space(22.0);
@@ -264,12 +263,12 @@ impl Workspace {
             self.composer = Composer::default();
             self.chat = ChatView::default();
         }
-        if let Some(key) = &key {
-            if let Some(mut context) = self.agent_contexts.remove(key) {
-                context.chat.chat_jump = false;
-                self.composer = context.composer;
-                self.chat = context.chat;
-            }
+        if let Some(key) = &key
+            && let Some(mut context) = self.agent_contexts.remove(key)
+        {
+            context.chat.chat_jump = false;
+            self.composer = context.composer;
+            self.chat = context.chat;
         }
         self.context_key = key;
     }

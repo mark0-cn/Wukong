@@ -9,6 +9,8 @@ pub(super) struct FindingsView {
     severity: Option<Severity>,
     revision: i64,
     loaded: Option<(String, i64)>,
+    loading: Option<(String, i64)>,
+    preview_loading: Option<(String, u64)>,
     details: Option<Box<FindingDetails>>,
     error: Option<String>,
     preview: Option<EvidencePreview>,
@@ -20,6 +22,7 @@ impl FindingsView {
     }
     pub fn loaded(&mut self, id: String, revision: i64, details: Box<FindingDetails>) {
         if self.selected.as_ref() == Some(&id) {
+            self.loading = None;
             self.loaded = Some((id, revision));
             self.details = Some(details);
             self.error = None;
@@ -27,12 +30,29 @@ impl FindingsView {
     }
     pub fn previewed(&mut self, preview: EvidencePreview) {
         if self.preview_target.as_ref() == Some(&(preview.evidence.id.clone(), preview.offset)) {
+            self.preview_loading = None;
+            self.error = None;
             self.preview = Some(preview);
         }
     }
-    pub fn failed(&mut self, error: String) {
-        self.error = Some(error);
-        self.loaded = self.selected.clone().map(|id| (id, self.revision));
+    pub fn failed(&mut self, key: &Key, error: String) {
+        match key {
+            Key::Finding => {
+                if let Some((id, revision)) = self.loading.take()
+                    && self.selected.as_ref() == Some(&id)
+                {
+                    self.error = Some(error);
+                    self.loaded = Some((id, revision));
+                }
+            }
+            Key::Evidence
+                if self.preview_loading.take().as_ref() == self.preview_target.as_ref()
+                    && self.preview_target.is_some() =>
+            {
+                self.error = Some(error);
+            }
+            _ => {}
+        }
     }
 }
 fn stage_label(stage: FindingStage) -> &'static str {
@@ -195,6 +215,7 @@ impl Workspace {
             && view.loaded.as_ref() != Some(&(id.clone(), view.revision))
             && !self.commands.contains(&Key::Finding)
         {
+            view.loading = Some((id.clone(), view.revision));
             command = Some(Command::Finding {
                 run: run.id.clone(),
                 id: id.clone(),
@@ -309,6 +330,7 @@ impl Workspace {
                             .clicked()
                         {
                             view.preview_target = Some((evidence.id.clone(), 0));
+                            view.preview_loading = view.preview_target.clone();
                             view.preview = None;
                             command = Some(Command::Evidence {
                                 run: run.id.clone(),
@@ -345,6 +367,7 @@ impl Workspace {
                                 .clicked()
                             {
                                 view.preview_target = Some((preview.evidence.id.clone(), offset));
+                                view.preview_loading = view.preview_target.clone();
                                 command = Some(Command::Evidence {
                                     run: run.id.clone(),
                                     id: preview.evidence.id.clone(),
@@ -384,5 +407,103 @@ impl Workspace {
             self.select_agent(id);
             self.selection.view = View::Agent;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test(flavor = "multi_thread")]
+    async fn populated_inspector_renders_evidence_and_verification() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(directory.path())?;
+        let run = crate::coordinator::Coordinator::new(store.clone()).create_run(
+            &std::env::current_exe()?,
+            "inspector",
+            Budget::default(),
+            serde_json::json!({}),
+        )?;
+        let evidence = store.artifact(
+            &run.id,
+            &run.root_id,
+            "call",
+            "stdout",
+            b"preview needle",
+            "text/plain",
+            serde_json::json!({}),
+        )?;
+        let finding: Finding = serde_json::from_value(
+            serde_json::json!({"id":"finding","run_id":run.id,"agent_id":run.root_id,"title":"Fixture finding","description":"**Description** with [link](https://example.com)","stage":"impact_verified","verification_id":"verification","evidence_ids":[evidence.id],"created_at":now(),"updated_at":now()}),
+        )?;
+        let verification = Verification {
+            id: "verification".into(),
+            run_id: run.id.clone(),
+            finding_id: finding.id.clone(),
+            verifier_agent_id: run.root_id.clone(),
+            passed: true,
+            attempts: 2,
+            successes: 2,
+            impact: "Verified impact".into(),
+            evidence_ids: vec![evidence.id.clone()],
+            environment: serde_json::json!({}),
+            conditions: serde_json::json!({"input":"fixture"}),
+            result: serde_json::json!({"exit_code":0}),
+            created_at: now(),
+        };
+        store.save_record(&finding)?;
+        store.save_record(&verification)?;
+        let mut app = Workspace::new(AppConfig::default(), store.clone(), Some(run.id.clone()));
+        app.apply_delta(gui_data::Reader::default().read(&store, Some(&run.id), None, 500)?);
+        app.findings_view.selected = Some(finding.id.clone());
+        let query = crate::queries::FindingQueries::new(&store);
+        app.findings_view.loaded(
+            finding.id.clone(),
+            app.findings_view.revision,
+            Box::new(query.details(&run.id, &finding.id)?),
+        );
+        app.findings_view.preview_target = Some((evidence.id.clone(), 0));
+        app.findings_view
+            .previewed(query.preview(&run.id, &evidence.id, 0)?);
+        let ctx = egui::Context::default();
+        let mut labels = String::new();
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 1600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| app.findings_view(ui, &app.data.runs[0].clone()));
+            },
+        );
+        for shape in output.shapes {
+            if let egui::Shape::Text(text) = shape.shape {
+                labels.push_str(&text.galley.job.text);
+            }
+        }
+        assert!(
+            labels.contains("Fixture finding")
+                && labels.contains("preview needle")
+                && labels.contains("Verified impact")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stale_inspector_failures_do_not_poison_new_selection() {
+        let mut view = FindingsView {
+            selected: Some("b".into()),
+            loading: Some(("a".into(), 1)),
+            revision: 1,
+            ..Default::default()
+        };
+        view.failed(&Key::Finding, "old failure".into());
+        assert!(view.error.is_none() && view.loaded.is_none());
+        view.loading = Some(("b".into(), 1));
+        view.failed(&Key::Finding, "current failure".into());
+        assert_eq!(view.error.as_deref(), Some("current failure"));
     }
 }

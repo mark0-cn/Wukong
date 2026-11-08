@@ -304,8 +304,16 @@ impl Workspace {
                 id,
                 revision,
                 details,
-            } => self.findings_view.loaded(id, revision, details),
-            Outcome::Evidence(preview) => self.findings_view.previewed(*preview),
+            } => {
+                if self.selection.selected.as_ref() == Some(&details.finding.run_id) {
+                    self.findings_view.loaded(id, revision, details);
+                }
+            }
+            Outcome::Evidence(preview) => {
+                if self.selection.selected.as_ref() == Some(&preview.evidence.run_id) {
+                    self.findings_view.previewed(*preview);
+                }
+            }
             Outcome::Paused(id) => {
                 if self.execution.run() == Some(&id)
                     && let Some(cancel) = self.execution.cancel()
@@ -414,7 +422,7 @@ impl Workspace {
                         Ok(outcome) => self.command_completed(outcome),
                         Err(error) => {
                             if matches!(key, Key::Finding | Key::Evidence) {
-                                self.findings_view.failed(format!("{error:#}"));
+                                self.findings_view.failed(&key, format!("{error:#}"));
                             } else {
                                 self.error(format!("{error:#}"));
                             }
