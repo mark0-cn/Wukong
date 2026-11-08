@@ -286,6 +286,9 @@ impl Workspace {
         }
     }
     fn select(&mut self, id: String) {
+        if self.selected.as_deref() == Some(id.as_str()) {
+            return;
+        }
         self.selected = Some(id);
         self.agent = None;
         self.conversation = None;
@@ -1324,6 +1327,73 @@ mod tests {
             Some(crate::interface::Command::Gui { run_id: Some(_) })
         ));
         assert!(crate::interface::Cli::try_parse_from(["re-agent", "tui"]).is_err());
+    }
+
+    #[tokio::test]
+    async fn reselecting_current_run_preserves_loaded_and_in_flight_data() -> Result<()> {
+        fn finish_refresh(app: &mut Workspace) -> Result<()> {
+            let Update::Loaded { reader, result, .. } =
+                app.rx.recv_timeout(Duration::from_secs(5))?
+            else {
+                anyhow::bail!("expected a background data refresh");
+            };
+            app.reader = Some(*reader);
+            app.apply_delta(*result?);
+            Ok(())
+        }
+
+        let dir = tempfile::tempdir()?;
+        let target = dir.path().join("sample");
+        std::fs::write(&target, b"fixture")?;
+        let store = Store::open(dir.path().join("state"))?;
+        let config = AppConfig::default();
+        let coordinator = Coordinator::new(store.clone());
+        let run = coordinator.create_run(
+            &target,
+            "selection regression fixture",
+            config.budget.clone(),
+            serde_json::to_value(&config)?,
+        )?;
+        let mut app = Workspace::new(config.clone(), store, Some(run.id.clone()));
+        finish_refresh(&mut app)?;
+        app.agent = Some(run.root_id.clone());
+        app.event_limit = 1_000;
+        app.refresh()?;
+        finish_refresh(&mut app)?;
+        assert_eq!(app.agents.len(), 1);
+        assert_eq!(app.events.len(), 1);
+        assert_eq!(app.conversation.as_ref().unwrap().id, run.root_id);
+        app.message = "unsent operator message".into();
+
+        for in_flight in [false, true] {
+            if in_flight {
+                app.refresh()?;
+            }
+            app.select(run.id.clone());
+            app.refresh()?;
+            finish_refresh(&mut app)?;
+            assert_eq!(app.agents.len(), 1);
+            assert_eq!(app.agents[0].id, run.root_id);
+            assert_eq!(app.events.len(), 1);
+            assert_eq!(app.agent.as_deref(), Some(run.root_id.as_str()));
+            assert_eq!(app.conversation.as_ref().unwrap().id, run.root_id);
+            assert_eq!(app.event_limit, 1_000);
+            assert_eq!(app.message, "unsent operator message");
+        }
+
+        let other = coordinator.create_run(
+            &target,
+            "another selection",
+            config.budget.clone(),
+            serde_json::to_value(&config)?,
+        )?;
+        app.select(other.id.clone());
+        finish_refresh(&mut app)?;
+        assert_eq!(app.selected.as_deref(), Some(other.id.as_str()));
+        assert_eq!(app.agents.len(), 1);
+        assert_eq!(app.agents[0].id, other.root_id);
+        assert!(app.agent.is_none() && app.conversation.is_none());
+        Ok(())
     }
 
     #[tokio::test]
