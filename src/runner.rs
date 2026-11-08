@@ -3,7 +3,7 @@ use crate::{
     config::AppConfig, coordinator::Coordinator, domain::*, llm::ModelEngine, store::Store,
     tools::ToolService,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use rig::completion::Usage;
 use serde_json::{Value, json};
 use std::{collections::HashMap, sync::Arc};
@@ -101,30 +101,15 @@ impl AssessmentRunner {
         Ok(())
     }
     pub async fn drive(&self, run_id: &str, cancel: CancellationToken) -> Result<RunRecord> {
-        let owner = id("controller");
-        ensure!(
-            self.store.acquire_lease(run_id, &owner, 20)?,
-            "another controller owns this run; wait for its live lease to expire"
-        );
-        let result = self.drive_owned(run_id, &owner, cancel).await;
-        let _ = self.store.release_lease(run_id, &owner);
-        result
+        crate::supervisor::RunSupervisor::drive(self.clone(), run_id, cancel).await
     }
-    async fn drive_owned(
-        &self,
-        run_id: &str,
-        owner: &str,
-        cancel: CancellationToken,
-    ) -> Result<RunRecord> {
-        let runner = self.clone();
-        let run_id = run_id.to_owned();
-        let owner = owner.to_owned();
-        let runtime = tokio::runtime::Handle::current();
-        tokio::task::spawn_blocking(move || {
-            crate::kernel::drive(runner, &run_id, &owner, cancel, runtime)
-        })
-        .await
-        .context("Rig kernel thread failed")?
+    pub(crate) fn with_store(&self, store: Store) -> Self {
+        Self {
+            coordinator: Coordinator::new(store.clone()),
+            tools: Arc::new(self.tools.with_store(store.clone())),
+            store,
+            ..self.clone()
+        }
     }
 
     /// Project a native failure into the task ledger and the existing UI event stream.

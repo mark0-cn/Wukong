@@ -12,6 +12,8 @@ use std::{
 };
 
 mod conversations;
+mod leases;
+pub(crate) use leases::LeaseToken;
 
 #[derive(Clone)]
 pub struct Store {
@@ -19,6 +21,7 @@ pub struct Store {
     reader: Arc<Mutex<Connection>>,
     root: Arc<PathBuf>,
     changes: tokio::sync::watch::Sender<u64>,
+    fence: Option<LeaseToken>,
 }
 
 impl Store {
@@ -46,6 +49,7 @@ impl Store {
           CREATE INDEX IF NOT EXISTS messages_inbox ON messages(recipient,acknowledged,id);
           CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL,agent_id TEXT,kind TEXT NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS leases(run_id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_at INTEGER NOT NULL);")?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS lease_epochs(run_id TEXT PRIMARY KEY,epoch INTEGER NOT NULL);")?;
         // A bounded change index, shared by all processes opening this store.
         // Replacing a row assigns a new monotonic revision without retaining
         // one change record per historical update.
@@ -78,6 +82,7 @@ impl Store {
             reader: Arc::new(Mutex::new(reader)),
             root: Arc::new(root),
             changes: tokio::sync::watch::channel(0).0,
+            fence: None,
         })
     }
     pub(crate) fn subscribe_changes(&self) -> tokio::sync::watch::Receiver<u64> {
@@ -109,6 +114,9 @@ impl Store {
             .map_err(|_| anyhow!("state database mutex poisoned"))?;
         let before = conn.total_changes();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(fence) = &self.fence {
+            leases::check(&tx, fence)?;
+        }
         let result = f(&tx)?;
         tx.commit()?;
         if conn.total_changes() != before {
@@ -407,10 +415,7 @@ impl Store {
         })
     }
     pub fn acquire_lease(&self, run_id: &str, owner: &str, seconds: i64) -> Result<bool> {
-        self.transaction(|tx|{
-            let timestamp=UtcTimestamp::get();
-            Ok(tx.execute("INSERT INTO leases(run_id,owner,expires_at) VALUES(?1,?2,?3) ON CONFLICT(run_id) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at WHERE leases.owner=excluded.owner OR leases.expires_at<?4",params![run_id,owner,timestamp+seconds,timestamp])?>0)
-        })
+        Ok(self.claim_lease(run_id, owner, seconds)?.is_some())
     }
     pub fn release_lease(&self, run_id: &str, owner: &str) -> Result<()> {
         self.transaction(|tx| {

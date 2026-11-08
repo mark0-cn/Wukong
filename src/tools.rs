@@ -93,6 +93,13 @@ pub fn builtin_catalog_markdown() -> String {
 }
 
 impl ToolService {
+    pub(crate) fn with_store(&self, store: Store) -> Self {
+        Self {
+            coordinator: Coordinator::new(store.clone()),
+            store,
+            ..self.clone()
+        }
+    }
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
         let runtime = if config.runtime.backend == RuntimeBackend::Disabled {

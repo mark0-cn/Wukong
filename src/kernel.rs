@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, mpsc},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -74,8 +74,7 @@ fn failed(app: &mut Fatal, result: Result<()>) {
     }
 }
 
-/// A windowless Rig app. Wakes come from its effects; the one-second heartbeat
-/// serves leases, wall-clock limits and externally submitted operator messages.
+/// A windowless Rig app. Supervision and worker IO run outside this loop.
 pub(crate) fn drive(
     runner: AssessmentRunner,
     run_id: &str,
@@ -269,39 +268,17 @@ pub(crate) fn drive(
         "controller.started",
         json!({"owner":owner,"runtime":"rig-ecs","subagents":"rig-basics"}),
     )?;
-    let started = Instant::now();
-    let mut renewed = Instant::now();
     let mut included = HashSet::new();
     loop {
-        if renewed.elapsed() >= Duration::from_secs(5) {
-            ensure!(
-                runner.store.acquire_lease(run_id, owner, 20)?,
-                "controller lease lost"
-            );
-            renewed = Instant::now();
-        }
         if cancel.is_cancelled() {
             runner
                 .coordinator
                 .pause_budget(run_id, "controller interrupted")?;
         }
-        let run: RunRecord = runner.store.require("run", run_id)?;
-        if !run.status.terminal()
-            && run.status != Status::BudgetPaused
-            && started.elapsed().as_secs() >= run.budget.max_wall_seconds
-        {
-            runner
-                .coordinator
-                .pause_budget(run_id, "wall-clock budget reached")?;
-        }
         runner.coordinator.release_dependencies(run_id)?;
         runner.coordinator.wake_waiters(run_id)?;
         deliver_mail(&mut app, &runner, run_id, &mut included)?;
         sync_statuses(&mut app, &runner, run_id)?;
-        // Push terminal job results into the store so the next model request
-        // injects them as a section instead of the agent polling job_status.
-        let handle = app.world().resource::<Application>().runtime.clone();
-        handle.block_on(refresh_job_statuses(&runner, run_id))?;
         app.update();
         if let Some(error) = app.world_mut().resource_mut::<Fatal>().0.take() {
             return Err(error);
@@ -320,6 +297,14 @@ pub(crate) fn drive(
             .iter(app.world())
             .count();
         if run.status == Status::BudgetPaused || cancel.is_cancelled() {
+            // Cancellation can arrive during this frame, after the check at
+            // its start. Persist the pause before reporting that drive ended.
+            if cancel.is_cancelled() && !run.status.terminal() && run.status != Status::BudgetPaused
+            {
+                runner
+                    .coordinator
+                    .pause_budget(run_id, "controller interrupted")?;
+            }
             // A subagent's initial brief is sent on the next harness frame.
             // Flush those messages before dropping the app. Gates hold model
             // and business tool IO while this run is paused.
@@ -331,7 +316,7 @@ pub(crate) fn drive(
                 run_id,
                 None,
                 "controller.finished",
-                json!({"status":run.status}),
+                json!({"status":runner.store.require::<RunRecord>("run", run_id)?.status}),
             )?;
             return runner.store.require("run", run_id);
         }

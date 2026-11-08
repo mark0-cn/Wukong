@@ -20,4 +20,5 @@ pub mod report;
 pub mod runner;
 pub mod runtime;
 pub mod store;
+mod supervisor;
 pub mod tools;
