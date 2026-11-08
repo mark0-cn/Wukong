@@ -22,3 +22,13 @@ __pycache__/
 # Host-cached worker image dependencies (fetched by scripts/fetch-worker-deps.ps1)
 /workers/deps/
 
+
+# Web desktop build artifacts
+/node_modules/
+/ui/node_modules/
+/ui/dist/
+/ui/*.tsbuildinfo
+/test-results/
+/playwright-report/
+
+/gen/schemas/
