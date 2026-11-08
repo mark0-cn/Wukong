@@ -36,7 +36,11 @@ impl Workspace {
                     )
                     .clicked()
                 {
-                    self.dispatch(Command::OpenSettings(Some(self.config_path.clone())));
+                    if let Some(editor) = &mut self.settings {
+                        editor.reopen();
+                    } else {
+                        self.dispatch(Command::OpenSettings(Some(self.config_path.clone())));
+                    }
                     self.dialogs.task = TaskDialog::None;
                 }
                 ui.add_space(18.0);

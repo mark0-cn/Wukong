@@ -20,9 +20,7 @@ impl Workspace {
             if let Some(path) = outcome.load {
                 self.dispatch(Command::OpenSettings(path));
             }
-            if outcome.open {
-                self.settings = Some(editor);
-            }
+            self.settings = Some(editor);
         }
 
         if matches!(self.dialogs.task, TaskDialog::New) {
