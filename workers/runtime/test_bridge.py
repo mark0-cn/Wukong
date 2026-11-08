@@ -161,6 +161,50 @@ class RuntimeTests(unittest.TestCase):
         result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import time;time.sleep(60)"], timeout_secs=1))
         self.assertEqual(result["state"], "timed_out")
 
+    def test_exec_run_sync_and_idempotent_replay(self):
+        result = self.client.call("exec.run", command="echo exec-ok", request_id="exec-1")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertIn("exec-ok", result["stdout"])
+        replay = self.client.call("exec.run", command="echo exec-ok", request_id="exec-1")
+        self.assertEqual(replay, result, "identical exec replay must return the recorded result")
+        with self.assertRaises(AssertionError):
+            self.client.call("exec.run", command="", request_id="exec-3")
+
+    @unittest.skipIf(os.name == "nt", "POSIX shell fixture")
+    def test_exec_run_timeout_kills_the_process(self):
+        timed = self.client.call("exec.run", command="sleep 60", timeout_secs=1, request_id="exec-2")
+        self.assertEqual(timed["state"], "timed_out")
+
+    @unittest.skipIf(os.name == "nt", "POSIX shell pipeline fixture")
+    def test_exec_run_pipes_payload_to_stdin(self):
+        command = "printf 'payload-bytes' | python3 -c 'import sys; print(sys.stdin.read().strip()+chr(45)+chr(101)+chr(99)+chr(104)+chr(111))'"
+        result = self.client.call("exec.run", command=command, request_id="exec-pipe")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertIn("payload-bytes-echo", result["stdout"])
+
+    @unittest.skipIf(os.name == "nt", "executable script fixture")
+    def test_poc_verify_stdin_mode_pipes_payload_bytes(self):
+        script = "#!/bin/sh\npython3 -c 'import sys; print(\"got\", len(sys.stdin.buffer.read()), flush=True)'\n"
+        self.client.put("stdin_target.sh", script.encode(), executable=True)
+        self.client.put("payload.bin", b"A" * 40 + b"B" * 8)
+        job = self.client.call(
+            "poc.verify",
+            target="files/stdin_target.sh",
+            input="files/payload.bin",
+            input_mode="stdin",
+            args=[],
+            trials=1,
+            expected={"stdout_contains": "got 48"},
+            request_id="poc-stdin",
+            verifier_agent_id="verifier-fixture",
+            producer_agent_id="producer-fixture",
+            call_id="stdin-call",
+        )
+        result = self.client.finish(job)
+        self.assertEqual(result["state"], "completed")
+        self.assertTrue(result["result"]["passed"], result["result"])
+        self.assertEqual(result["result"]["results"][0]["input_mode"], "stdin")
+
     def test_supervisor_survives_owner_daemon_restart(self):
         job = self.client.call("job.start", argv=[sys.executable, "-c", "import time;time.sleep(1);print('owner-recovered')"], request_id="owner-recovery")
         daemon_pid = self.client.call("ping")["daemon_pid"]
