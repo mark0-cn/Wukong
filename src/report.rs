@@ -505,24 +505,24 @@ pub fn export(store: &Store, run_id: &str, output: &Path) -> Result<ExportSummar
             );
             let relative = format!("evidence/{}/{}", &evidence.sha256[..2], evidence.sha256);
             if !files.contains_key(&relative) {
-                write_file(&staging, &relative, &bytes, &mut files)?;
+                write_file(staging, &relative, &bytes, &mut files)?;
             }
             evidence_index.push(json!({"record":evidence,"bundle_path":relative}));
         }
         let assessments:Vec<_>=snapshot.findings.iter().map(|finding|json!({"finding_id":finding.id,"recorded_stage":stage(finding.stage),"independent_verification_valid":validated_verification(&snapshot,finding).is_some()})).collect();
         let mut report = json!({"schema_version":1,"exported_at":now(),"snapshot":snapshot,"finding_assessments":assessments,"evidence_index":evidence_index});
         redact(&mut report);
-        write_json(&staging, "report.json", &report, &mut files)?;
+        write_json(staging, "report.json", &report, &mut files)?;
         let mut config = snapshot.run.config.clone();
         redact(&mut config);
-        write_json(&staging, "config.redacted.json", &config, &mut files)?;
+        write_json(staging, "config.redacted.json", &config, &mut files)?;
         let mut replay = json!({"schema_version":1,"target":{"original_path":snapshot.run.target_path,"bundle_path":target_relative,"sha256":target_hash},"config":"config.redacted.json","tool_calls":snapshot.calls,"verifications":snapshot.verifications,"jobs":snapshot.jobs,"evidence":evidence_index,"instructions":"Verify manifest before replay. Recreate the recorded runtime and dependencies, map the original target path to target/sample.bin, import required evidence by bundle_path, then replay the recorded tool arguments. Environment credentials must be supplied separately. Export itself executes no target code."});
         redact(&mut replay);
-        write_json(&staging, "replay.json", &replay, &mut files)?;
+        write_json(staging, "replay.json", &replay, &mut files)?;
         let (md, html) = readable_report(&snapshot)?;
-        write_file(&staging, "report.md", md.as_bytes(), &mut files)?;
-        write_file(&staging, "report.html", html.as_bytes(), &mut files)?;
-        write_file(&staging,"README.txt",b"re-agent evidence bundle\n\nreport.md / report.html: human-readable recorded findings and verification status.\nreport.json: transactional run snapshot and original evidence index.\nreplay.json: exact recorded tool calls, verification environment and conditions.\nconfig.redacted.json: settings with credential fields redacted.\ntarget/sample.bin: original target bytes (not executed during export).\nevidence/: deduplicated original evidence bytes, addressed by SHA256.\nmanifest.json / SHA256SUMS: all payload digests. Use re-agent bundle-verify.\n\nA checksum verifies integrity, not publisher identity. Original evidence is not redacted.\nRedacted configuration and event metadata are not a credential backup.\n",&mut files)?;
+        write_file(staging, "report.md", md.as_bytes(), &mut files)?;
+        write_file(staging, "report.html", html.as_bytes(), &mut files)?;
+        write_file(staging,"README.txt",b"re-agent evidence bundle\n\nreport.md / report.html: human-readable recorded findings and verification status.\nreport.json: transactional run snapshot and original evidence index.\nreplay.json: exact recorded tool calls, verification environment and conditions.\nconfig.redacted.json: settings with credential fields redacted.\ntarget/sample.bin: original target bytes (not executed during export).\nevidence/: deduplicated original evidence bytes, addressed by SHA256.\nmanifest.json / SHA256SUMS: all payload digests. Use re-agent bundle-verify.\n\nA checksum verifies integrity, not publisher identity. Original evidence is not redacted.\nRedacted configuration and event metadata are not a credential backup.\n",&mut files)?;
         let manifest = BundleManifest {
             schema_version: 1,
             run_id: run_id.into(),
@@ -535,8 +535,8 @@ pub fn export(store: &Store, run_id: &str, output: &Path) -> Result<ExportSummar
         fs::write(staging.join("manifest.json"), &manifest_bytes)?;
         let sums = checksum_text(&manifest, &manifest_bytes);
         fs::write(staging.join("SHA256SUMS"), sums)?;
-        verify_bundle(&staging)?;
-        fs::rename(&staging, &final_path).context("publish verified export bundle")?;
+        verify_bundle(staging)?;
+        fs::rename(staging, &final_path).context("publish verified export bundle")?;
         Ok(ExportSummary {
             output_dir: final_path.clone(),
             report_json: final_path.join("report.json"),

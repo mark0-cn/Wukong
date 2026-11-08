@@ -987,10 +987,10 @@ impl TreeKill {
     async fn terminate(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = child.start_kill();
-            if child.wait().await.is_ok() {
-                if let Some(project) = &self.project {
-                    let _ = project.finish();
-                }
+            if child.wait().await.is_ok()
+                && let Some(project) = &self.project
+            {
+                let _ = project.finish();
             }
         }
     }
@@ -1002,10 +1002,10 @@ impl Drop for TreeKill {
             let _ = child.start_kill();
             let project = self.project.take();
             tokio::spawn(async move {
-                if child.wait().await.is_ok() {
-                    if let Some(project) = &project {
-                        let _ = project.finish();
-                    }
+                if child.wait().await.is_ok()
+                    && let Some(project) = &project
+                {
+                    let _ = project.finish();
                 }
                 // Hold the kernel lock through cancellation and reaping.
                 drop(project);

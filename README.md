@@ -2,7 +2,7 @@
 
 基于 Strix 协作架构、使用 Rust 和 Rig 0.46.0 实现的二进制逆向与分析 agent，支持行为理解、格式与算法还原、调试，以及按需进行漏洞验证。首版动态分析后端面向 Linux x86_64 ELF。ELF、PE、Mach-O 的静态画像由 Rust 直接解析。
 
-需求基线在 [架构方案](docs/strix-rig-binary-agent-plan.md)，实现与验收约定在 [实现契约](docs/implementation-contract.md)。
+需求基线在 [架构方案](docs/strix-rig-binary-agent-plan.md)，实现与验收约定在 [实现契约](docs/implementation-contract.md)。维护与性能检查见 [维护约定](docs/maintenance.md)，内置工具见 [生成的工具目录](docs/tool-catalog.md)。
 
 ## 构建
 
@@ -100,7 +100,7 @@ re-agent verify-bundle .\reports\assessment-01
 re-agent reconcile CALL_ID --result-file .\reviewed-result.json --evidence-id EVIDENCE_ID
 ```
 
-省略 `--config` 时，桌面版优先使用可执行文件同目录的 `re-agent.toml`，再查找当前目录；CLI 命令优先查找当前目录，再查找可执行文件同目录。显式 `--config` 始终优先。`--state` 可选择已有状态目录。首次模型请求前会保存解析后的 endpoint，包括环境变量提供的默认值。`resume` 使用任务保存的模型与后端配置；原生 Rig 日志保存在状态目录的 `rig/RUN_ID`。活动控制端通过租约互斥。本次实现面向新任务，不迁移旧版自定义 AgentRun 检查点。
+省略 `--config` 时，桌面版优先使用可执行文件同目录的 `re-agent.toml`，再查找当前目录；CLI 命令优先查找当前目录，再查找可执行文件同目录。显式 `--config` 始终优先。`--state` 可选择已有状态目录。首次模型请求前会保存解析后的 endpoint，包括环境变量提供的默认值。`resume` 使用任务保存的模型与后端配置；原生 Rig 日志保存在状态目录的 `rig/RUN_ID`。活动控制端通过租约互斥。当前使用 schema 3 状态目录，不提供旧数据库迁移；旧状态目录会返回版本提示，新任务请选择新的状态目录。
 
 Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 jobs 和调试器分别核对：持久化检查点不能恢复已经消失的调试进程。有副作用且结果未知的第三方 MCP 调用保留未决状态，不能盲目重放。
 

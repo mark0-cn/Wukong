@@ -173,7 +173,7 @@ async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()
 #[tokio::test]
 async fn every_role_sees_the_full_catalog_with_only_lifecycle_split() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let (store, _, run, agent) = fixture(temp.path())?;
+    let (store, _, run, _agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
     // Strix-style visibility: the whole catalog is attached from the first
     // request; no model turn is spent discovering or loading tools.
@@ -377,7 +377,12 @@ async fn exec_command_routes_to_the_runtime_instead_of_unknown_tool() -> Result<
     // layer (which fails on the disabled backend here) rather than bail
     // with "unknown tool".
     let outcome = service
-        .execute(&agent.id, "shell-route", "exec_command", json!({"command":"echo hi"}))
+        .execute(
+            &agent.id,
+            "shell-route",
+            "exec_command",
+            json!({"command":"echo hi"}),
+        )
         .await?;
     assert!(outcome.is_error);
     let error = result(&outcome)["error"].as_str().unwrap().to_owned();
