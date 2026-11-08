@@ -11,7 +11,7 @@ use rig_basics::subagents::{
     OpenRequests, Report, Request, SpawnSubagent, SpawnedAgent, SubagentPolicy, SubagentsPlugin,
 };
 use rig_core::{
-    completion::{CompletionResponse, ToolDefinition, Usage},
+    completion::{AssistantContent, CompletionResponse, ToolDefinition, Usage},
     effect::{self, Answered, EffectKind, FamilyDescriptor, HandlerDescriptor},
     serve::{Dispatch, ErasedHandler, Reply, Serve},
     tool::{ToolExecutionError, ToolOutput},
@@ -956,9 +956,51 @@ fn account_replies(
             failed(
                 &mut fatal,
                 (|| -> Result<()> {
+                    let agent_id = ids.get(from.0)?.0.clone();
+                    let agent: AgentRecord =
+                        application.runner.store.require("agent", &agent_id)?;
                     application
                         .runner
-                        .account_usage(&ids.get(from.0)?.0, response.usage, true)
+                        .account_usage(&agent_id, response.usage, true)?;
+                    // Human-readable progress: each settled model turn emits a
+                    // bounded narration line so the activity stream reads like
+                    // an explanation, not just a tool log.
+                    let text = response
+                        .choice
+                        .iter()
+                        .filter_map(|part| match part {
+                            AssistantContent::Text(text) => Some(text.text.as_str()),
+                            AssistantContent::Reasoning(reasoning) => {
+                                Some(reasoning.text.as_str())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let excerpt: String = text.chars().take(400).collect();
+                    let narration = if excerpt.is_empty() {
+                        let tools = response
+                            .choice
+                            .iter()
+                            .filter_map(|part| match part {
+                                AssistantContent::ToolCall(call) => {
+                                    Some(call.function.name.as_str())
+                                }
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("requested tools: {tools}")
+                    } else {
+                        excerpt
+                    };
+                    application.runner.emit(
+                        &agent.run_id,
+                        Some(&agent_id),
+                        "model.text",
+                        json!({"text": narration}),
+                    )?;
+                    Ok(())
                 })(),
             );
         }

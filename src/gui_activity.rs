@@ -127,6 +127,10 @@ pub(crate) fn describe(event: &Event, call: Option<&ToolCallRecord>) -> (String,
             detail = field(data, "error").to_owned();
             "Agent 状态更新".into()
         }
+        "model.text" => {
+            detail = field(data, "text").to_owned();
+            "Agent 思考".into()
+        }
         "run.resumed" => "已恢复分析".into(),
         "context.compacted" => "已整理历史上下文并保留证据".into(),
         other => {
