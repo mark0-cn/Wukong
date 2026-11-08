@@ -106,7 +106,7 @@ impl<'a> DurableEffects<'a> {
             Finish(ToolCallRecord, Value, bool, CallState),
         }
         let decision = self.store.write(|tx| {
-            let existing: Option<ToolCallRecord> = tx.get("call", call)?;
+            let existing: Option<ToolCallRecord> = tx.get_record(call)?;
             if let Some(existing) = &existing {
                 ensure!(
                     existing.agent_id == agent.id
@@ -148,7 +148,7 @@ impl<'a> DurableEffects<'a> {
             });
             record.state = CallState::Running;
             record.updated_at = now();
-            tx.put("call", call, &agent.run_id, &record)?;
+            tx.save_record(&record)?;
             tx.event(&agent.run_id, Some(&agent.id), "tool.started", json!({"call_id":call,"name":name}))?;
             Ok(Decision::Execute(record))
         })?;
@@ -186,7 +186,7 @@ impl<'a> DurableEffects<'a> {
     }
     pub(crate) fn replace_result(&self, call: &str, value: &Value, is_error: bool) -> Result<()> {
         self.store.write(|tx| {
-            let mut record: ToolCallRecord = tx.get("call", call)?.context("tool call missing")?;
+            let mut record: ToolCallRecord = tx.get_record(call)?.context("tool call missing")?;
             ensure!(
                 matches!(record.state, CallState::Completed | CallState::Failed),
                 "only settled call results may be replaced"
@@ -196,7 +196,7 @@ impl<'a> DurableEffects<'a> {
                 is_error,
             })?);
             record.updated_at = now();
-            tx.put("call", call, &record.run_id, &record)
+            tx.save_record(&record)
         })
     }
     pub(crate) fn worker_reply(
@@ -303,7 +303,7 @@ fn finish_record(
     state: CallState,
 ) -> Result<EffectOutcome> {
     let bytes = serde_json::to_vec(&raw)?;
-    let run: RunRecord = store.require("run", &record.run_id)?;
+    let run: RunRecord = store.load(&record.run_id)?;
     let evidence=store.artifact(&record.run_id,&record.agent_id,&record.id,&record.name,&bytes,"application/json",json!({"raw_tool_output":true,"tool":record.name,"is_error":is_error,"target_sha256":run.target_sha256,"tool_protocol_version":1}))?;
     let envelope_overhead = serde_json::to_vec(&json!({"result":null,"evidence_id":evidence.id,"truncated":false,"total_bytes":bytes.len()}))?.len().saturating_sub(4);
     let truncated = bytes.len().saturating_add(envelope_overhead) > limit;
@@ -381,7 +381,7 @@ pub fn reconcile_record(
     evidence_ids: &[String],
     is_error: bool,
 ) -> Result<EffectOutcome> {
-    let record: ToolCallRecord = store.require("call", call_id)?;
+    let record: ToolCallRecord = store.load(call_id)?;
     ensure!(
         matches!(record.state, CallState::Running | CallState::Uncertain),
         "only an unresolved call can be reconciled"
@@ -398,7 +398,7 @@ pub fn reconcile_record(
     let fenced = store.fenced(token.clone());
     let result = (|| {
         let store = &fenced;
-        let record: ToolCallRecord = store.require("call", call_id)?;
+        let record: ToolCallRecord = store.load(call_id)?;
         ensure!(
             matches!(record.state, CallState::Running | CallState::Uncertain),
             "only an unresolved call can be reconciled"
@@ -460,7 +460,7 @@ mod tests {
             Budget::default(),
             json!({}),
         )?;
-        let agent = store.require_metadata("agent", &run.root_id)?;
+        let agent = store.load::<AgentMetadata>(&run.root_id)?;
         Ok((store, agent))
     }
 

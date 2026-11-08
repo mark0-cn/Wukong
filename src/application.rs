@@ -68,7 +68,7 @@ impl AssessmentService {
     }
 
     pub async fn resume(&self, run_id: &str, budget: Option<Budget>) -> Result<PreparedAssessment> {
-        let run: RunRecord = self.store.require("run", run_id)?;
+        let run: RunRecord = self.store.load(run_id)?;
         ensure!(!run.status.terminal(), "terminal run cannot be resumed");
         let mut saved: AppConfig = serde_json::from_value(run.config.clone())
             .context("saved run configuration invalid")?;

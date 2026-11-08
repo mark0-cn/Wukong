@@ -7,7 +7,7 @@ use crate::{
     domain::*,
     mcp::McpRegistry,
     runtime::RuntimeClient,
-    store::Store,
+    store::{DocumentKind, SessionKind, Store, StoredRecord},
 };
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -237,7 +237,7 @@ impl ToolService {
                 .clone()
         };
         let _guard = lock.lock().await;
-        let agent: AgentMetadata = self.store.require_metadata("agent", agent_id)?;
+        let agent: AgentMetadata = self.store.load::<AgentMetadata>(agent_id)?;
         let specs = builtins();
         let builtin = specs.iter().find(|item| item.definition.name == name);
         let policy = builtin.map(|spec| spec.policy).unwrap_or_else(|| {
@@ -270,7 +270,7 @@ impl ToolService {
                 !agent.status.terminal(),
                 "a terminal agent cannot start a new tool effect"
             );
-            let run: RunRecord = self.store.require("run", &agent.run_id)?;
+            let run: RunRecord = self.store.load(&agent.run_id)?;
             ensure!(
                 !run.status.terminal(),
                 "a terminal assessment cannot start a new tool effect"
@@ -463,22 +463,36 @@ fn validated_arguments(mut value: Value, schema: &Value) -> Result<Value> {
     Ok(value)
 }
 
-fn require_in_run<T: serde::de::DeserializeOwned + RunScoped>(
-    store: &Store,
-    kind: &str,
-    id: &str,
-    run_id: &str,
-) -> Result<T> {
-    let record: T = store.require(kind, id)?;
-    ensure!(record.run_id() == run_id, "{kind} belongs to another run");
+fn require_in_run<T: StoredRecord + RunScoped>(store: &Store, id: &str, run_id: &str) -> Result<T> {
+    let record: T = store.load(id)?;
+    ensure!(
+        record.run_id() == run_id,
+        "{} belongs to another run",
+        T::KIND
+    );
     Ok(record)
+}
+fn require_document(
+    store: &Store,
+    kind: DocumentKind,
+    id: &str,
+    run: &str,
+) -> Result<SharedDocument> {
+    let document = store.document(kind, id)?;
+    ensure!(document.run_id == run, "document belongs to another run");
+    Ok(document)
+}
+fn require_session(store: &Store, kind: SessionKind, id: &str, run: &str) -> Result<SessionRecord> {
+    let session = store.session(kind, id)?;
+    ensure!(session.run_id == run, "session belongs to another run");
+    Ok(session)
 }
 fn target(store: &Store, agent: &AgentMetadata) -> Result<RunRecord> {
     ensure!(
         agent.role != Role::Root,
         "root cannot operate on the target"
     );
-    let run: RunRecord = store.require("run", &agent.run_id)?;
+    let run: RunRecord = store.load(&agent.run_id)?;
     ensure!(
         binary::sha256_file(&run.target_path)? == run.target_sha256,
         "target SHA256 changed since run creation"

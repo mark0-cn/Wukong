@@ -71,7 +71,7 @@ impl ExecutionService {
             }
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
             | "angr_solve" => {
-                let run: RunRecord = self.store.require("run", &agent.run_id)?;
+                let run: RunRecord = self.store.load(&agent.run_id)?;
                 if name == "angr_solve" {
                     ensure!(
                         !address_list(&args, "find")?.is_empty(),
@@ -82,7 +82,6 @@ impl ExecutionService {
                 if name == "poc_verify" {
                     let finding: Finding = require_in_run(
                         &self.store,
-                        "finding",
                         finding_id.as_deref().context("finding_id missing")?,
                         &agent.run_id,
                     )?;
@@ -95,7 +94,7 @@ impl ExecutionService {
                     // verification_record, passed=true or a diagnosed false.
                     let used = self
                         .store
-                        .list::<JobRecord>("job", &agent.run_id)?
+                        .records::<JobRecord>(&agent.run_id)?
                         .into_iter()
                         .filter(|job| {
                             job.tool_name == "poc_verify"
@@ -130,7 +129,7 @@ impl ExecutionService {
                     let prefix = format!("{}/", seeds.trim_end_matches('/'));
                     ensure!(
                         self.store
-                            .list::<WorkerFileRecord>("worker_file", &agent.run_id)?
+                            .records::<WorkerFileRecord>(&agent.run_id)?
                             .iter()
                             .any(|file| file.worker_id
                                 == self.gateway.worker_identity().unwrap_or_default()
@@ -180,7 +179,7 @@ impl ExecutionService {
                     updated_at: now(),
                 };
                 self.store.write(|tx| {
-                    if let Some(previous) = tx.get::<JobRecord>("job", job_id)? {
+                    if let Some(previous) = tx.get_record::<JobRecord>(job_id)? {
                         ensure!(
                             previous.run_id == agent.run_id
                                 && previous.agent_id == agent.id
@@ -189,7 +188,7 @@ impl ExecutionService {
                         );
                         return Ok(());
                     }
-                    tx.put("job", job_id, &agent.run_id, &record)
+                    tx.save_record(&record)
                 })?;
                 Ok(raw)
             }

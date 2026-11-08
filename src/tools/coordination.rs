@@ -11,7 +11,7 @@ impl ToolService {
         if actor.role == Role::Root || actor.id == target.id {
             return Ok(());
         }
-        let all = self.store.list_metadata("agent", &actor.run_id)?;
+        let all = self.store.records::<AgentMetadata>(&actor.run_id)?;
         if TaskGraph::is_descendant(target, &actor.id, &all) {
             return Ok(());
         }
@@ -71,7 +71,7 @@ impl ToolService {
             json!({"name":name,"sha256":sha256}),
         )?;
         self.effect(agent,call_id,|tx| {
-            let mut current: AgentMetadata = tx.get_metadata("agent",&agent.id)?.context("agent missing")?;
+            let mut current: AgentMetadata = tx.get_record::<AgentMetadata>(&agent.id)?.context("agent missing")?;
             ensure!(current.generation == agent.generation, "agent activation changed before skill load");
             agents::validate_capabilities(current.skills.iter().map(String::as_str)
                 .chain(current.active_skills.iter().map(|skill| skill.name.as_str()))
@@ -81,7 +81,7 @@ impl ToolService {
                 *existing=snapshot;
             } else { current.active_skills.push(snapshot); }
             current.updated_at=now();
-            tx.put_metadata("agent",&agent.id,&agent.run_id,&current)?;
+            tx.save_record(&current)?;
             tx.event(&agent.run_id,Some(&agent.id),"skill.activated",json!({"name":name,"sha256":sha256,"evidence_id":evidence.id}))?;
             Ok(json!({"name":name,"sha256":sha256,"evidence_id":evidence.id,"active":true,"applies":"next fresh model request"}))
         })
@@ -143,7 +143,7 @@ impl ToolService {
                 created_at: now(),
                 updated_at: now(),
             };
-            tx.put(kind, &document.id, &agent.run_id, &document)?;
+            tx.save_document(&document)?;
             Ok(serde_json::to_value(document)?)
         })
     }
@@ -186,7 +186,7 @@ impl ToolService {
             }
             document.amendments.push(amendment);
             document.updated_at = now();
-            tx.put(kind, &document.id, &agent.run_id, &document)?;
+            tx.save_document(&document)?;
             Ok(serde_json::to_value(document)?)
         })
     }
@@ -203,7 +203,7 @@ impl ToolService {
         self.effect(agent, call_id, |tx| {
             let mut coverage = if name == "coverage_update" {
                 let record: Coverage = tx
-                    .get("coverage", text(args, "id")?)?
+                    .get_record(text(args, "id")?)?
                     .context("coverage missing")?;
                 ensure!(
                     record.run_id == agent.run_id,
@@ -232,7 +232,7 @@ impl ToolService {
                 coverage.evidence_ids = evidence;
             }
             coverage.updated_at = now();
-            tx.put("coverage", &coverage.id, &agent.run_id, &coverage)?;
+            tx.save_record(&coverage)?;
             Ok(serde_json::to_value(coverage)?)
         })
     }
@@ -249,7 +249,7 @@ impl ToolService {
         self.effect(agent, call_id, |tx| {
             let mut finding = if name == "finding_update" {
                 let record: Finding = tx
-                    .get("finding", text(args, "id")?)?
+                    .get_record(text(args, "id")?)?
                     .context("finding missing")?;
                 ensure!(
                     record.run_id == agent.run_id,
@@ -258,13 +258,13 @@ impl ToolService {
                 record
             } else {
                 ensure!(!evidence.is_empty(), "a finding requires original evidence");
-                if let Some(record) = tx
-                    .list::<Finding>("finding", &agent.run_id)?
-                    .into_iter()
-                    .find(|record| {
-                        record.title == args["title"]
-                            && record.location == args.get("location").cloned()
-                    })
+                if let Some(record) =
+                    tx.records::<Finding>(&agent.run_id)?
+                        .into_iter()
+                        .find(|record| {
+                            record.title == args["title"]
+                                && record.location == args.get("location").cloned()
+                        })
                 {
                     return Ok(json!({"duplicate":true,"finding":record}));
                 }
@@ -339,9 +339,8 @@ impl ToolService {
                     .verification_id
                     .as_ref()
                     .context("impact_verified requires an independent verification_id")?;
-                let verification: Verification = tx
-                    .get("verification", id)?
-                    .context("verification missing")?;
+                let verification: Verification =
+                    tx.get_record(id)?.context("verification missing")?;
                 ensure!(
                     verification.run_id == agent.run_id
                         && verification.finding_id == finding.id
@@ -353,12 +352,12 @@ impl ToolService {
                     "independent successful verification is required"
                 );
                 let _: AgentMetadata = tx
-                    .get_metadata("agent", &verification.verifier_agent_id)?
+                    .get_record::<AgentMetadata>(&verification.verifier_agent_id)?
                     .context("verifier agent missing")?;
                 finding.impact = Some(verification.impact);
             }
             finding.updated_at = now();
-            tx.put("finding", &finding.id, &agent.run_id, &finding)?;
+            tx.save_record(&finding)?;
             tx.event(
                 &agent.run_id,
                 Some(&agent.id),
