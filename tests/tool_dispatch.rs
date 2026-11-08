@@ -347,6 +347,60 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
 }
 
 #[tokio::test]
+async fn poc_verify_budget_enforces_closure_after_two_jobs() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let verifier = child(&coordinator, &run.root_id, Role::Verifier, "closure check")?;
+    let evidence = store.artifact(
+        &run.id,
+        &agent.id,
+        "closure evidence",
+        "fixture",
+        b"observed behavior",
+        "text/plain",
+        json!({}),
+    )?;
+    let filed = service
+        .execute(
+            &agent.id,
+            "closure-finding",
+            "finding_file",
+            json!({"title":"closure fixture","description":"bounded verification","stage":"suspected","evidence_ids":[evidence.id]}),
+        )
+        .await?;
+    assert!(!filed.is_error);
+    let finding_id = result(&filed)["finding"]["id"].as_str().unwrap().to_owned();
+    // Two recorded replay jobs exhaust the structural budget.
+    for index in 0..2 {
+        store.put(
+            "job",
+            &format!("closure-job-{index}"),
+            &run.id,
+            &json!({"id":format!("closure-job-{index}"),"run_id":run.id,"agent_id":verifier.id,"tool_name":"poc_verify","finding_id":finding_id,"status":{"state":"completed"}}),
+        )?;
+    }
+    let third = service
+        .execute(
+            &verifier.id,
+            "closure-third",
+            "poc_verify",
+            json!({"finding_id":finding_id,"target":"files/x","input":"files/y"}),
+        )
+        .await?;
+    assert!(third.is_error);
+    assert!(
+        result(&third)["error"]
+            .as_str()
+            .unwrap()
+            .contains("exhausted"),
+        "third replay must be rejected with closure guidance"
+    );
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn activated_skills_are_exact_durable_snapshots_with_idempotent_receipts() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;
