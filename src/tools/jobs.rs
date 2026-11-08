@@ -377,6 +377,7 @@ impl JobService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::RuntimeBackend;
 
     #[tokio::test]
     async fn automatic_and_manual_observations_share_evidence_and_nested_results() -> Result<()> {

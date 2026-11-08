@@ -1,13 +1,13 @@
 //! Admission systems for the Rig adapter.
 use super::*;
 
-pub(super) fn allowed(runner: &AssessmentRunner, role: Role, name: &str) -> bool {
+pub(super) fn allowed(runner: &KernelHost, role: Role, name: &str) -> bool {
     matches!(name, "task" | "message" | "wait")
-        || (name != "create_agent" && runner.tools.allows(role, name))
+        || (name != "create_agent" && runner.allows(role, name))
 }
 
-pub(super) fn tool_access(runner: &AssessmentRunner, agent: &AgentMetadata) -> Result<ToolAccess> {
-    let mut names = runner.tools.model_tool_names(agent)?;
+pub(super) fn tool_access(runner: &KernelHost, agent: &AgentMetadata) -> Result<ToolAccess> {
+    let mut names = runner.tool_names(agent)?;
     names.extend(["task", "message", "wait"].map(str::to_owned));
     Ok(ToolAccess::Only(names.into_iter().collect()))
 }
@@ -35,10 +35,7 @@ pub(super) fn prepare_spawns(
     for (entity, effect, from, mut request, parent_call) in &mut requests {
         let result = (|| -> Result<()> {
             let (_, parent) = ids.get(from.0)?;
-            let agent: AgentMetadata = application
-                .runner
-                .store
-                .require_metadata("agent", &parent.0)?;
+            let agent: AgentMetadata = application.runner.agent(&parent.0)?;
             let mut args = Value::Object(request.extra.clone());
             args["name"] = json!(request.title);
             args["task"] = json!(request.brief);
@@ -46,10 +43,7 @@ pub(super) fn prepare_spawns(
                 .and_then(|parent| calls.get(parent.parent()).ok())
                 .map(|call| business_call(&agent, &call.call.id.to_string()))
                 .unwrap_or_else(|| format!("rig-spawn:{}", effect.id()));
-            let result = application
-                .runner
-                .tools
-                .create_agent(&agent, &call_id, &args)?;
+            let result = application.runner.create_agent(&agent, &call_id, &args)?;
             let child: AgentMetadata = serde_json::from_value(result["agent"].clone())?;
             let existing = ids.iter().find(|(_, id)| id.0 == child.id);
             if let Some((existing, _)) = existing {
@@ -61,13 +55,11 @@ pub(super) fn prepare_spawns(
             request.id = Some(AgentId(child.id.clone()));
             request.model = None;
             request.tools = None;
-            request.system_prompt = Some(agents::preamble(
-                &child,
-                &application.runner.store.require("run", &child.run_id)?,
-                &application.runner.store,
-                application.runner.config().skills_dir.as_deref(),
-                application.runner.config().demos_dir.as_deref(),
-            )?);
+            request.system_prompt = Some(
+                application
+                    .runner
+                    .preamble(&child, &application.runner.run(&child.run_id)?)?,
+            );
             commands.entity(entity).insert(SpawnAdmission {
                 id: child.id,
                 fresh: existing.is_none(),
@@ -92,10 +84,7 @@ pub(super) fn admit_spawns(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let child: AgentMetadata = application
-                    .runner
-                    .store
-                    .require_metadata("agent", &admission.id)?;
+                let child: AgentMetadata = application.runner.agent(&admission.id)?;
                 if child.status.terminal() {
                     commands.entity(entity).insert(Outcome::refused(
                         child
@@ -123,10 +112,7 @@ pub(super) fn configure_spawned(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let child: AgentMetadata = application
-                    .runner
-                    .store
-                    .require_metadata("agent", &admission.id)?;
+                let child: AgentMetadata = application.runner.agent(&admission.id)?;
                 if child.inherit_context {
                     let parent = histories.get(from.0)?;
                     let pending = parent.pending_calls();
@@ -156,15 +142,11 @@ pub(super) fn configure_spawned(
                 Ok(())
             })(),
         );
-        if let Ok(child) = application
-            .runner
-            .store
-            .require_metadata("agent", &admission.id)
-        {
+        if let Ok(child) = application.runner.agent(&admission.id) {
             let connection = application
                 .runner
                 .engine_for(child.role)
-                .connection(application.runner.config().execution.stream);
+                .connection(application.runner.execution().stream);
             let choice = ModelChoice(connection.spec.reference());
             match tool_access(&application.runner, &child) {
                 Ok(access) => {
@@ -195,11 +177,11 @@ pub(super) fn configure_agents(
     mut fatal: ResMut<Fatal>,
 ) {
     for (entity, id) in &agents {
-        if let Ok(Some(agent)) = application.runner.store.get_metadata("agent", &id.0) {
+        if let Ok(Some(agent)) = application.runner.maybe_agent(&id.0) {
             let connection = application
                 .runner
                 .engine_for(agent.role)
-                .connection(application.runner.config().execution.stream);
+                .connection(application.runner.execution().stream);
             let choice = ModelChoice(connection.spec.reference());
             match tool_access(&application.runner, &agent) {
                 Ok(access) => {
@@ -236,7 +218,7 @@ pub(super) fn gate_tools(
     for (entity, from, request, mut decision) in &mut calls {
         let result = (|| -> Result<()> {
             let id = ids.get(from.0)?;
-            let agent: AgentMetadata = application.runner.store.require_metadata("agent", &id.0)?;
+            let agent: AgentMetadata = application.runner.agent(&id.0)?;
             ensure!(
                 allowed(
                     &application.runner,
@@ -250,10 +232,7 @@ pub(super) fn gate_tools(
                 let wanted = request.call.function.arguments["agent"]
                     .as_str()
                     .unwrap_or_default();
-                let targets = application
-                    .runner
-                    .store
-                    .list_metadata("agent", &agent.run_id)?;
+                let targets = application.runner.agents(&agent.run_id)?;
                 let matching: Vec<_> = targets
                     .iter()
                     .filter(|target| {
@@ -272,7 +251,7 @@ pub(super) fn gate_tools(
                     "unread native messages remain; continue at the next model boundary before finishing"
                 );
             }
-            let run: RunRecord = application.runner.store.require("run", &agent.run_id)?;
+            let run: RunRecord = application.runner.run(&agent.run_id)?;
             ensure!(!agent.status.terminal(), "task is not executable");
             if run.status == Status::BudgetPaused {
                 commands.spawn((HoldOf(entity), AdmissionHold));
@@ -302,9 +281,8 @@ pub(super) fn gate_models(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(from.0)?;
-                let agent: AgentMetadata =
-                    application.runner.store.require_metadata("agent", &id.0)?;
-                let run: RunRecord = application.runner.store.require("run", &agent.run_id)?;
+                let agent: AgentMetadata = application.runner.agent(&id.0)?;
+                let run: RunRecord = application.runner.run(&agent.run_id)?;
                 if agent.status == Status::Completed {
                     let response = CompletionResponse::new(
                         vec![AssistantContent::text(
@@ -335,7 +313,6 @@ pub(super) fn gate_models(
                 {
                     application
                         .runner
-                        .coordinator
                         .pause_budget(&run.id, "model token or USD budget reached")?;
                     commands.spawn((HoldOf(entity), AdmissionHold));
                 } else if agent.token_cap.is_some_and(|cap| agent.total_tokens >= cap)
@@ -353,7 +330,6 @@ pub(super) fn gate_models(
                     slots += 1;
                     application
                         .runner
-                        .coordinator
                         .set_status(&agent.id, Status::Running, None)?;
                 }
                 Ok(())
@@ -368,11 +344,7 @@ pub(super) fn release_model_slots(
     application: Res<Application>,
     mut commands: Commands,
 ) {
-    let Ok(run) = application
-        .runner
-        .store
-        .require::<RunRecord>("run", &application.run_id)
-    else {
+    let Ok(run) = application.runner.run(&application.run_id) else {
         return;
     };
     let available = run
@@ -396,8 +368,7 @@ pub(super) fn release_predecessors(
             && let Ok(id) = ids.get(owner.0)
             && application
                 .runner
-                .store
-                .require_metadata("agent", &id.0)
+                .agent(&id.0)
                 .is_ok_and(|agent| agent.predecessors_released || agent.status.terminal())
         {
             commands.entity(hold).despawn();

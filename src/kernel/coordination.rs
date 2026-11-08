@@ -9,15 +9,14 @@ pub(super) fn project_conversations(
     for (id, conversation) in &agents {
         if application
             .runner
-            .store
-            .get_metadata("agent", &id.0)
+            .maybe_agent(&id.0)
             .ok()
             .flatten()
             .is_some()
         {
             failed(
                 &mut fatal,
-                application.runner.store.checkpoint_and_ack(
+                application.runner.checkpoint_and_ack(
                     &id.0,
                     serde_json::to_value(&conversation.0).unwrap(),
                     &[],
@@ -29,7 +28,7 @@ pub(super) fn project_conversations(
 
 pub(super) fn deliver_mail(
     app: &mut App,
-    runner: &AssessmentRunner,
+    runner: &KernelHost,
     run_id: &str,
     included: &mut HashSet<i64>,
 ) -> Result<()> {
@@ -39,7 +38,7 @@ pub(super) fn deliver_mail(
         .iter(app.world())
         .map(|(entity, id)| (id.0.clone(), entity))
         .collect();
-    for agent in runner.store.list_metadata("agent", run_id)? {
+    for agent in runner.agents(run_id)? {
         let Some(&entity) = agents.get(&agent.id) else {
             continue;
         };
@@ -49,7 +48,6 @@ pub(super) fn deliver_mail(
             continue;
         }
         for mail in runner
-            .store
             .inbox(&agent.id)?
             .into_iter()
             .filter(|mail| !included.contains(&mail.id))
@@ -61,8 +59,7 @@ pub(super) fn deliver_mail(
                 .is_some_and(|value| value["type"] == "agent_finished")
                 && agents.contains_key(&mail.sender)
                 && runner
-                    .store
-                    .require_metadata("agent", &mail.sender)
+                    .agent(&mail.sender)
                     .is_ok_and(|sender| Some(sender.generation) == mail.envelope.sender_generation);
             // The native Report carries this ledger notification. Do not send
             // a second message that can race its parent's next model call.
@@ -121,10 +118,9 @@ pub(super) fn deliver_mail(
     Ok(())
 }
 
-pub(super) fn sync_statuses(app: &mut App, runner: &AssessmentRunner, run_id: &str) -> Result<()> {
+pub(super) fn sync_statuses(app: &mut App, runner: &KernelHost, run_id: &str) -> Result<()> {
     let records: HashMap<_, _> = runner
-        .store
-        .list_metadata("agent", run_id)?
+        .agents(run_id)?
         .into_iter()
         .map(|agent| (agent.id.clone(), agent))
         .collect();
@@ -171,7 +167,7 @@ pub(super) fn acknowledge_mail(
             &mut fatal,
             (|| -> Result<()> {
                 let (id, conversation) = agents.get(from.0)?;
-                application.runner.store.checkpoint_and_ack_generation(
+                application.runner.checkpoint_and_ack_generation(
                     &id.0,
                     serde_json::to_value(&conversation.0)?,
                     &[mail.id],
@@ -191,8 +187,7 @@ pub(super) fn inform_terminal(
         if let Ok(id) = ids.get(from.0)
             && application
                 .runner
-                .store
-                .require_metadata("agent", &id.0)
+                .agent(&id.0)
                 .is_ok_and(|agent| agent.status.terminal())
         {
             message.mode = DeliveryMode::Inform;
@@ -219,23 +214,19 @@ pub(super) fn bind_reports(
                 let Some(sender) = report.author.from.as_deref() else {
                     return Ok(());
                 };
-                let owner: AgentMetadata = application
-                    .runner
-                    .store
-                    .require_metadata("agent", &recipient.0)?;
-                let source: AgentMetadata =
-                    application.runner.store.require_metadata("agent", sender)?;
-                if let Some(mail) = application
-                    .runner
-                    .store
-                    .inbox(&recipient.0)?
-                    .into_iter()
-                    .find(|mail| {
-                        mail.sender == sender
-                            && mail.envelope.sender_generation == Some(source.generation)
-                            && serde_json::from_str::<Value>(&mail.content)
-                                .is_ok_and(|value| value["type"] == "agent_finished")
-                    })
+                let owner: AgentMetadata = application.runner.agent(&recipient.0)?;
+                let source: AgentMetadata = application.runner.agent(sender)?;
+                if let Some(mail) =
+                    application
+                        .runner
+                        .inbox(&recipient.0)?
+                        .into_iter()
+                        .find(|mail| {
+                            mail.sender == sender
+                                && mail.envelope.sender_generation == Some(source.generation)
+                                && serde_json::from_str::<Value>(&mail.content)
+                                    .is_ok_and(|value| value["type"] == "agent_finished")
+                        })
                 {
                     *report.text_mut() = mail.content;
                     commands.entity(entity).insert(MailDelivery {
@@ -260,8 +251,7 @@ pub(super) fn ensure_owner_requests(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let task: AgentMetadata =
-                    application.runner.store.require_metadata("agent", &id.0)?;
+                let task: AgentMetadata = application.runner.agent(&id.0)?;
                 if !task.status.terminal()
                     && let Some(owner) = task.parent_id
                     && !open.0.iter().any(|request| request.asker.0 == owner)

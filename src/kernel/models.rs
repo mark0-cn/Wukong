@@ -26,37 +26,18 @@ pub(super) fn prepare_models(
             &mut fatal,
             (|| -> Result<()> {
                 let (id, mut conversation, mut access) = owners.get_mut(from.0)?;
-                let agent: AgentMetadata =
-                    application.runner.store.require_metadata("agent", &id.0)?;
+                let agent: AgentMetadata = application.runner.agent(&id.0)?;
                 if !agent.predecessors_released {
                     return Ok(());
                 }
-                let run: RunRecord = application.runner.store.require("run", &agent.run_id)?;
+                let run: RunRecord = application.runner.run(&agent.run_id)?;
                 call.history = Some(conversation.request_view());
-                let config = application.runner.config();
-                let mut preamble = agents::preamble(
-                    &agent,
-                    &run,
-                    &application.runner.store,
-                    config.skills_dir.as_deref(),
-                    config.demos_dir.as_deref(),
-                )?;
-                for skill in &agent.active_skills {
-                    agents::validate_capability(&skill.name)?;
-                    ensure!(
-                        crate::binary::sha256_bytes(skill.content.as_bytes()) == skill.sha256,
-                        "active skill {} failed its content hash check",
-                        skill.name
-                    );
-                    preamble.push_str(&format!(
-                        "\n\n# Active controller skill: {} (SHA256 {})\n{}",
-                        skill.name, skill.sha256, skill.content
-                    ));
-                }
+                let config = application.runner.execution();
+                let preamble = application.runner.preamble(&agent, &run)?;
                 if let Some(prompt) = &mut call.prompt {
                     prompt.role = preamble;
                     if !agent.wait_for_predecessors.is_empty() {
-                        let results = agent.wait_for_predecessors.iter().map(|id| application.runner.store.require_metadata("agent",id).map(|predecessor| json!({"id":id,"status":predecessor.status,"result":predecessor.task_result,"summary":predecessor.summary,"error":predecessor.error}))).collect::<Result<Vec<_>>>()?;
+                        let results = agent.wait_for_predecessors.iter().map(|id| application.runner.agent(id).map(|predecessor| json!({"id":id,"status":predecessor.status,"result":predecessor.task_result,"summary":predecessor.summary,"error":predecessor.error}))).collect::<Result<Vec<_>>>()?;
                         prompt.sections.push(rig_core::completion::Section::new(
                             "dependency_results",
                             serde_json::to_string(&results)?,
@@ -74,14 +55,14 @@ pub(super) fn prepare_models(
                     application
                         .runner
                         .engine_for(agent.role)
-                        .connection(application.runner.config().execution.stream),
+                        .connection(application.runner.execution().stream),
                 );
-                let model_config = config.model.role_config_for(agent.role);
+                let model_config = application.runner.role_config(agent.role);
                 let request = call.request_mut();
                 request.max_tokens = Some(model_config.max_tokens);
                 request.temperature = model_config.temperature;
                 request.additional_params = model_config.additional_params;
-                let mut names = application.runner.tools.model_tool_names(&agent)?;
+                let mut names = application.runner.tool_names(&agent)?;
                 names.extend(["task", "message", "wait"].map(str::to_owned));
                 // Rebuild from Rig's registry: its initial request was built
                 // with the previous selection, which can hide newly loaded tools.
@@ -107,21 +88,18 @@ pub(super) fn prepare_models(
                 // attribution and undo data. Full transcripts remain in its journal
                 // and in integrity-checked evidence.
                 let chars = serde_json::to_vec(conversation.messages())?.len();
-                if chars > config.execution.compact_after_chars {
+                if chars > config.compact_after_chars {
                     let retained = rig::memory::recent::view(
                         conversation.messages(),
-                        &rig::memory::recent::LastMessages(config.execution.keep_recent_messages),
+                        &rig::memory::recent::LastMessages(config.keep_recent_messages),
                     );
                     let start = conversation.messages().len() - retained.len();
                     if start > 0 && !retained.is_empty() {
-                        let evidence = application.runner.store.artifact(
+                        let evidence = application.runner.checkpoint_evidence(
                             &run.id,
                             &agent.id,
                             &format!("rig-context:{effect:?}"),
-                            "context.checkpoint",
                             &serde_json::to_vec(&conversation.0)?,
-                            "application/json",
-                            json!({"native_rig_conversation":true}),
                         )?;
                         let keep_from = conversation.id(start);
                         let mut state = rig::memory::summary_state(&conversation.0);
@@ -153,10 +131,7 @@ pub(super) fn account_replies(
                 &mut fatal,
                 (|| -> Result<()> {
                     let agent_id = ids.get(from.0)?.0.clone();
-                    let agent: AgentMetadata = application
-                        .runner
-                        .store
-                        .require_metadata("agent", &agent_id)?;
+                    let agent: AgentMetadata = application.runner.agent(&agent_id)?;
                     application
                         .runner
                         .account_usage(&agent_id, response.usage, true)?;
@@ -211,8 +186,7 @@ pub(super) fn retry_policy(
     let policy = rig_ecs::retry::RetryPolicy {
         max_retries: application
             .runner
-            .config()
-            .execution
+            .execution()
             .model_retries
             .min(u32::MAX as usize) as u32,
         ..rig_ecs::retry::RetryPolicy::DEFAULT
@@ -241,8 +215,7 @@ pub(super) fn enforce_completion(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(of.0)?;
-                let agent: AgentMetadata =
-                    application.runner.store.require_metadata("agent", &id.0)?;
+                let agent: AgentMetadata = application.runner.agent(&id.0)?;
                 if !agent.status.terminal() && matches!(*outcome, TurnOutcome::Answered(_)) {
                     if nudges.get(of.0).is_ok_and(|nudge| nudge.0) {
                         application.runner.fail_agent(
@@ -279,8 +252,7 @@ pub(super) fn record_turn_end(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(from.0)?;
-                let record: AgentMetadata =
-                    application.runner.store.require_metadata("agent", &id.0)?;
+                let record: AgentMetadata = application.runner.agent(&id.0)?;
                 if !record.status.terminal()
                     && let TurnOutcome::Failed(reason) = outcome
                 {
