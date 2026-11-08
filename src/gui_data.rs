@@ -69,7 +69,7 @@ pub(crate) struct Delta {
     pub findings: Vec<Change<Finding>>,
     pub events: Option<Vec<Event>>,
     pub calls: Option<Vec<ToolCallRecord>>,
-    pub conversation: Option<Option<AgentRecord>>,
+    pub conversation: Option<Option<crate::gui_chat::Document>>,
 }
 
 #[derive(Default)]
@@ -78,6 +78,7 @@ pub(crate) struct Reader {
     revision: i64,
     selected: Option<String>,
     agent: Option<String>,
+    conversation: Option<crate::gui_chat::Document>,
     events: Vec<Event>,
     event_limit: usize,
     calls: BTreeMap<String, ToolCallRecord>,
@@ -179,10 +180,8 @@ impl Reader {
                 }
                 if reset || events.is_some() || ids.iter().any(|id|changed.contains(id)) {calls=Some(visible.into_values().collect());}
                 if reset || self.agent.as_deref()!=agent || agents.iter().any(|change|Some(change.id.as_str())==agent) {
-                    conversation=Some(agent.map(|id|Store::tx_get(tx,"agent",id)).transpose()?.flatten());
-                    if conversation.as_ref().and_then(Option::as_ref).is_some_and(|record: &AgentRecord| record.run_id != run) {
-                        conversation=Some(None);
-                    }
+                    let record=agent.map(|id|Store::tx_get::<AgentRecord>(tx,"agent",id)).transpose()?.flatten();
+                    conversation=Some(record.filter(|record|record.run_id==run).map(|record|crate::gui_chat::Document::prepare(&record,self.conversation.as_ref())));
                 }
             }
             Ok((Delta {selected,reset,runs,agents,notes,findings,events,calls,conversation},revision))
@@ -191,6 +190,9 @@ impl Reader {
         self.selected = delta.selected.clone();
         self.agent = agent.map(str::to_owned);
         self.event_limit = event_limit;
+        if let Some(conversation) = &delta.conversation {
+            self.conversation = conversation.clone();
+        }
         if let Some(events) = &delta.events {
             self.events = events.clone();
         }

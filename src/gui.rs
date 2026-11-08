@@ -154,7 +154,8 @@ struct Workspace {
     refreshed: Instant,
     resume_run: Option<RunSummary>,
     reader: Option<gui_data::Reader>,
-    conversation: Option<AgentRecord>,
+    conversation: Option<crate::gui_chat::Document>,
+    chat_layout: crate::gui_chat::Layout,
     event_limit: usize,
     confirm_stop: bool,
     confirm_close: bool,
@@ -202,6 +203,7 @@ impl Workspace {
             resume_run: None,
             reader: Some(gui_data::Reader::default()),
             conversation: None,
+            chat_layout: crate::gui_chat::Layout::default(),
             event_limit: 500,
             confirm_stop: false,
             confirm_close: false,
@@ -479,46 +481,63 @@ impl Workspace {
                 ui.add(egui::TextEdit::singleline(&mut self.filter).hint_text("搜索样本 / 任务"));
                 ui.separator();
                 let mut selected = None;
-                egui::ScrollArea::vertical().id_salt("runs").show(ui, |ui| {
-                    for run in &self.runs {
-                        let name = run
-                            .target_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy();
-                        if !format!("{name} {} {}", run.id, run.task)
-                            .to_lowercase()
-                            .contains(&self.filter.to_lowercase())
-                        {
-                            continue;
+                let filter = self.filter.to_lowercase();
+                let visible: Vec<_> = self
+                    .runs
+                    .iter()
+                    .filter(|run| {
+                        format!(
+                            "{} {} {}",
+                            run.target_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy(),
+                            run.id,
+                            run.task
+                        )
+                        .to_lowercase()
+                        .contains(&filter)
+                    })
+                    .collect();
+                egui::ScrollArea::vertical().id_salt("runs").show_rows(
+                    ui,
+                    64.0,
+                    visible.len(),
+                    |ui, range| {
+                        for run in &visible[range] {
+                            let name = run
+                                .target_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy();
+                            let label = format!(
+                                "{}\n{} · {}",
+                                name,
+                                status_label(run.status),
+                                run.created_at
+                                    .with_timezone(&chrono::Local)
+                                    .format("%m/%d %H:%M")
+                            );
+                            if ui
+                                .add_sized(
+                                    [ui.available_width(), 64.0],
+                                    egui::Button::new(label)
+                                        .selected(self.selected.as_ref() == Some(&run.id)),
+                                )
+                                .on_hover_text(&run.id)
+                                .clicked()
+                            {
+                                selected = Some(run.id.clone());
+                            }
                         }
-                        let label = format!(
-                            "{}\n{} · {}",
-                            name,
-                            status_label(run.status),
-                            run.created_at
-                                .with_timezone(&chrono::Local)
-                                .format("%m/%d %H:%M")
-                        );
-                        if ui
-                            .add_sized(
-                                [ui.available_width(), 64.0],
-                                egui::Button::new(label)
-                                    .selected(self.selected.as_ref() == Some(&run.id)),
-                            )
-                            .on_hover_text(&run.id)
-                            .clicked()
-                        {
-                            selected = Some(run.id.clone());
+                        if self.runs.is_empty() {
+                            ui.label(
+                                RichText::new("还没有分析任务\n选择样本，开始第一次分析。")
+                                    .color(MUTED),
+                            );
                         }
-                    }
-                    if self.runs.is_empty() {
-                        ui.label(
-                            RichText::new("还没有分析任务\n选择样本，开始第一次分析。")
-                                .color(MUTED),
-                        );
-                    }
-                });
+                    },
+                );
                 if let Some(id) = selected {
                     self.select(id);
                 }
@@ -878,7 +897,13 @@ impl Workspace {
                                 if let Some(conversation) = &self.conversation
                                     && conversation.id == agent.id
                                 {
-                                    crate::gui_chat::show(ui, conversation, self.chat_details);
+                                    crate::gui_chat::show(
+                                        ui,
+                                        conversation,
+                                        &agent.name,
+                                        &mut self.chat_layout,
+                                        self.chat_details,
+                                    );
                                 } else {
                                     ui.spinner();
                                 }
