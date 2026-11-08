@@ -1841,6 +1841,40 @@ impl ToolService {
                         "angr_solve requires at least one find address"
                     );
                 }
+                let finding_id = args["finding_id"].as_str().map(str::to_owned);
+                if name == "poc_verify" {
+                    let finding: Finding = self.require_in_run(
+                        "finding",
+                        finding_id.as_deref().context("finding_id missing")?,
+                        &agent.run_id,
+                    )?;
+                    ensure!(
+                        finding.agent_id != agent.id,
+                        "the verifier must differ from the finding producer"
+                    );
+                    // Structural closure budget: at most two replay jobs per
+                    // (verifier, finding). The verdict then belongs in
+                    // verification_record, passed=true or a diagnosed false.
+                    let used = self
+                        .store
+                        .list::<Value>("job", &agent.run_id)?
+                        .into_iter()
+                        .filter(|job| {
+                            job["tool_name"].as_str() == Some("poc_verify")
+                                && job["agent_id"].as_str() == Some(agent.id.as_str())
+                                && job["finding_id"].as_str() == Some(finding.id.as_str())
+                        })
+                        .count();
+                    ensure!(
+                        used < 2,
+                        "poc_verify budget for this finding is exhausted ({used}/2 jobs used); record your verdict with verification_record now — passed=false with a diagnosis is a complete outcome"
+                    );
+                    args.as_object_mut()
+                        .context("arguments not an object")?
+                        .remove("finding_id");
+                    args["producer_agent_id"] = json!(finding.agent_id);
+                    args["verifier_agent_id"] = json!(agent.id);
+                }
                 if name != "job_start" {
                     self.known_file(agent, text(&args, "target")?, true)?;
                     if !matches!(name, "fuzz_start" | "angr_solve") {
@@ -1866,23 +1900,6 @@ impl ToolService {
                                     .is_some_and(|path| path.starts_with(&prefix))),
                         "seed directory must contain staged in-run files"
                     );
-                }
-                let finding_id = args["finding_id"].as_str().map(str::to_owned);
-                if name == "poc_verify" {
-                    let finding: Finding = self.require_in_run(
-                        "finding",
-                        finding_id.as_deref().context("finding_id missing")?,
-                        &agent.run_id,
-                    )?;
-                    ensure!(
-                        finding.agent_id != agent.id,
-                        "the verifier must differ from the finding producer"
-                    );
-                    args.as_object_mut()
-                        .context("arguments not an object")?
-                        .remove("finding_id");
-                    args["producer_agent_id"] = json!(finding.agent_id);
-                    args["verifier_agent_id"] = json!(agent.id);
                 }
                 let method = match name {
                     "job_start" => "job.start",

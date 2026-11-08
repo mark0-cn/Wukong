@@ -961,7 +961,7 @@ mod tests {
     }
     #[tokio::test]
     async fn missing_usage_with_flat_pricing_does_not_pause() {
-        let (_dir, mut runner, run) = fixture("http://127.0.0.1:1".into()).await;
+        let (_dir, runner, run) = fixture("http://127.0.0.1:1".into()).await;
         // Default pricing is zero-rate: cost stays complete even when the
         // provider omits usage, so a single provider hiccup must not pause
         // the whole assessment.
