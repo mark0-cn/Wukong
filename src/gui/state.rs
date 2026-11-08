@@ -8,6 +8,7 @@ pub(super) struct WorkspaceData {
     pub calls: Vec<ToolCallRecord>,
     pub notes: Vec<SharedDocument>,
     pub findings: Vec<Finding>,
+    pub operator_messages: Vec<Message>,
     pub conversation: Option<crate::gui_chat::Document>,
 }
 pub(super) struct Selection {

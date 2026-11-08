@@ -129,6 +129,7 @@ impl Workspace {
             self.selection.selection_epoch += 1;
             self.selection.agent = Some(id);
             self.data.conversation = None;
+            self.data.operator_messages.clear();
             self.bind_recipient();
         }
     }
@@ -150,6 +151,7 @@ impl Workspace {
             self.data.events.clear();
             self.data.calls.clear();
             self.data.conversation = None;
+            self.data.operator_messages.clear();
         }
         self.selection.selected = delta.selected;
         for change in &mut delta.agents {
@@ -176,6 +178,9 @@ impl Workspace {
         if let Some(calls) = delta.calls {
             self.data.calls = calls;
         }
+        if let Some(messages) = delta.operator_messages {
+            self.data.operator_messages = messages;
+        }
         if let Some(conversation) = delta.conversation {
             self.data.conversation = conversation;
         }
@@ -195,6 +200,7 @@ impl Workspace {
         self.selection.selected = Some(id);
         self.selection.agent = None;
         self.data.conversation = None;
+        self.data.operator_messages.clear();
         self.data.events.clear();
         self.data.calls.clear();
         self.data.agents.clear();

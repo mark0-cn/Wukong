@@ -133,7 +133,7 @@ impl Activity {
                     card().show(ui, |ui| {
                         ui.colored_label(ACCENT, &row.author);
                         ui.label(RichText::new(&row.title).strong());
-                        selectable_text(ui, &row.detail);
+                        crate::gui_markdown::show(ui, &row.detail);
                         if let Some(agent) = &row.agent
                             && ui.small_button("查看 Agent 会话").clicked()
                         {

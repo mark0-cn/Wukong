@@ -200,29 +200,7 @@ fn arguments(value: &Value) -> String {
     String::new()
 }
 fn body(ui: &mut egui::Ui, text: &str) {
-    let mut code = false;
-    for paragraph in text.split('\n') {
-        if paragraph.starts_with("```") {
-            code = !code;
-            continue;
-        }
-        if paragraph.trim().is_empty() {
-            ui.add_space(4.0);
-            continue;
-        }
-        let label = if code {
-            RichText::new(paragraph)
-                .monospace()
-                .color(Color32::from_rgb(182, 203, 220))
-        } else if paragraph.starts_with('#') {
-            RichText::new(paragraph.trim_start_matches('#').trim())
-                .strong()
-                .size(17.0)
-        } else {
-            RichText::new(paragraph).size(15.0)
-        };
-        ui.add(egui::Label::new(label).wrap().selectable(true));
-    }
+    crate::gui_markdown::show(ui, text);
 }
 /// Parsed once by the background reader. No raw checkpoint is kept by the GUI.
 #[derive(Clone)]
@@ -438,14 +416,16 @@ fn render_turn(ui: &mut egui::Ui, index: usize, turn: &Turn, name: &str, verbose
                                 }
                             }
                             egui::CollapsingHeader::new("参数与完整结果").show(ui, |ui| {
-                                body(
+                                crate::gui_markdown::code(
                                     ui,
+                                    "json",
                                     &serde_json::to_string_pretty(&operation.args)
                                         .unwrap_or_default(),
                                 );
                                 if let Some(result) = &operation.result {
-                                    body(
+                                    crate::gui_markdown::code(
                                         ui,
+                                        "json",
                                         &serde_json::to_string_pretty(result).unwrap_or_default(),
                                     );
                                 }
@@ -460,8 +440,9 @@ fn render_turn(ui: &mut egui::Ui, index: usize, turn: &Turn, name: &str, verbose
         if verbose && !turn.details.is_empty() {
             egui::CollapsingHeader::new("模型附加记录").show(ui, |ui| {
                 for detail in &turn.details {
-                    body(
+                    crate::gui_markdown::code(
                         ui,
+                        "json",
                         &serde_json::to_string_pretty(detail).unwrap_or_default(),
                     );
                 }

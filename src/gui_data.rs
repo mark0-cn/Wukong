@@ -25,6 +25,7 @@ pub(crate) struct Delta {
     pub findings: Vec<Change<Finding>>,
     pub events: Option<Vec<Event>>,
     pub calls: Option<Vec<ToolCallRecord>>,
+    pub operator_messages: Option<Vec<Message>>,
     pub conversation: Option<Option<crate::gui_chat::Document>>,
 }
 
@@ -74,6 +75,7 @@ impl Reader {
             findings: data.findings,
             events: data.events,
             calls: data.calls,
+            operator_messages: data.operator_messages,
             conversation,
         })
     }
@@ -84,6 +86,57 @@ mod tests {
     use super::*;
     use crate::coordinator::Coordinator;
     use serde_json::json;
+
+    #[test]
+    fn operator_delivery_is_projected_without_exposing_internal_mail() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(directory.path())?;
+        let coordinator = Coordinator::new(store.clone());
+        let run = coordinator.create_run(
+            &std::env::current_exe()?,
+            "mail",
+            Budget::default(),
+            json!({}),
+        )?;
+        let receipt = coordinator.send(
+            "operator",
+            &run.root_id,
+            "question",
+            MessageOptions::default(),
+        )?;
+        coordinator.send(
+            &run.root_id,
+            &run.root_id,
+            "internal",
+            MessageOptions::default(),
+        )?;
+        let mut reader = Reader::default();
+        let delta = reader.read(&store, Some(&run.id), Some(&run.root_id), 500)?;
+        let messages = delta.operator_messages.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "question");
+        assert_eq!(messages[0].envelope.delivery, MessageDelivery::Queued);
+        assert!(
+            reader
+                .read(&store, Some(&run.id), Some(&run.root_id), 500)?
+                .operator_messages
+                .is_none()
+        );
+        store.checkpoint_and_ack(&run.root_id, json!({"messages":[]}), &[receipt.message_id])?;
+        let messages = reader
+            .read(&store, Some(&run.id), Some(&run.root_id), 500)?
+            .operator_messages
+            .unwrap();
+        assert_eq!(messages[0].envelope.delivery, MessageDelivery::Included);
+        assert!(
+            reader
+                .read(&store, Some(&run.id), None, 500)?
+                .operator_messages
+                .unwrap()
+                .is_empty()
+        );
+        Ok(())
+    }
 
     #[test]
     #[ignore = "manual performance baseline; run with --ignored --nocapture"]
