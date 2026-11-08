@@ -42,6 +42,26 @@ pub(crate) struct AgentSummary {
     pub public_replies: Vec<String>,
 }
 
+impl From<AgentMetadata> for AgentSummary {
+    fn from(agent: AgentMetadata) -> Self {
+        Self {
+            id: agent.id,
+            name: agent.name,
+            role: agent.role,
+            generation: agent.generation,
+            task: agent.task,
+            status: agent.status,
+            depth: agent.depth,
+            created_at: agent.created_at,
+            turns: agent.turns,
+            total_tokens: agent.total_tokens,
+            summary: agent.summary,
+            error: agent.error,
+            public_replies: vec![],
+        }
+    }
+}
+
 pub(crate) struct Change<T> {
     id: String,
     pub value: Option<T>,
@@ -212,14 +232,14 @@ impl Reader {
                 for id in narrators {
                     if !delta.agents.iter().any(|change| &change.id == id)
                         && let Some(summary) = Store::tx_get_metadata(tx, "agent", id)? {
-                        delta.agents.push(Change { id: id.clone(), value: Some(summary) });
+                        delta.agents.push(Change { id: id.clone(), value: Some(summary.into()) });
                     }
                 }
                 for change in &mut delta.agents {
                     if let Some(summary) = &mut change.value {
                         summary.public_replies = read_reply_text(tx, run, &summary.id)?;
                         if reset && summary.public_replies.is_empty()
-                            && let Some(record) = Store::tx_get::<AgentRecord>(tx, "agent", &summary.id)? {
+                            && let Some(record) = Store::tx_agent_snapshot(tx, &summary.id)? {
                             legacy_replies.push(record);
                         }
                     }
@@ -230,7 +250,7 @@ impl Reader {
                 }
                 let deleted = delta.agents.iter().any(|change| Some(change.id.as_str()) == agent && change.value.is_none());
                 if reset || self.agent.as_deref() != agent || conversation_revision != self.conversation_revision || deleted {
-                    let record = agent.map(|id| Store::tx_get::<AgentRecord>(tx, "agent", id)).transpose()?.flatten();
+                    let record = agent.map(|id| Store::tx_agent_snapshot(tx, id)).transpose()?.flatten();
                     conversation = Some(record.filter(|record| record.run_id == run));
                 }
             }
@@ -407,7 +427,7 @@ mod tests {
                 .is_some()
         );
         store.transaction(|tx| {
-            let mut agent: AgentRecord =
+            let mut agent: AgentMetadata =
                 Store::tx_get_metadata(tx, "agent", &run.root_id)?.unwrap();
             agent.total_tokens += 1;
             Store::tx_put_metadata(tx, "agent", &agent.id, &run.id, &agent)

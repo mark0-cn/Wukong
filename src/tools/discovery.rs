@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 impl ToolService {
     /// Native task/message/wait are supplied separately by SubagentsPlugin.
-    pub(crate) fn model_tool_names(&self, agent: &AgentRecord) -> Result<BTreeSet<String>> {
+    pub(crate) fn model_tool_names(&self, agent: &AgentMetadata) -> Result<BTreeSet<String>> {
         Ok(self
             .definitions(agent.role)
             .into_iter()

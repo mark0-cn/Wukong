@@ -25,14 +25,14 @@ pub(super) fn prepare_calls(
             call_id: application
                 .runner
                 .store
-                .require_metadata::<AgentRecord>("agent", &id.0)
+                .require_metadata("agent", &id.0)
                 .ok()
                 .map(|agent| business_call(&agent, &request.call.id.to_string())),
         }));
     }
 }
 
-pub(super) fn business_call(agent: &AgentRecord, wire_call: &str) -> String {
+pub(super) fn business_call(agent: &AgentMetadata, wire_call: &str) -> String {
     format!(
         "{}:g{}:t{}:{}",
         agent.id, agent.generation, agent.turns, wire_call
@@ -123,7 +123,7 @@ impl Serve for BusinessTool {
                         .execution
                         .summarize_threshold_chars
             {
-                let agent: AgentRecord = application
+                let agent: AgentMetadata = application
                     .runner
                     .store
                     .require_metadata("agent", &agent_id)?;
@@ -150,7 +150,7 @@ impl Serve for BusinessTool {
             while application
                 .runner
                 .store
-                .require_metadata::<AgentRecord>("agent", &agent_id)?
+                .require_metadata("agent", &agent_id)?
                 .status
                 == Status::Waiting
             {

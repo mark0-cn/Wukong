@@ -6,7 +6,7 @@ pub(super) fn allowed(runner: &AssessmentRunner, role: Role, name: &str) -> bool
         || (name != "create_agent" && runner.tools.allows(role, name))
 }
 
-pub(super) fn tool_access(runner: &AssessmentRunner, agent: &AgentRecord) -> Result<ToolAccess> {
+pub(super) fn tool_access(runner: &AssessmentRunner, agent: &AgentMetadata) -> Result<ToolAccess> {
     let mut names = runner.tools.model_tool_names(agent)?;
     names.extend(["task", "message", "wait"].map(str::to_owned));
     Ok(ToolAccess::Only(names.into_iter().collect()))
@@ -35,7 +35,7 @@ pub(super) fn prepare_spawns(
     for (entity, effect, from, mut request, parent_call) in &mut requests {
         let result = (|| -> Result<()> {
             let (_, parent) = ids.get(from.0)?;
-            let agent: AgentRecord = application
+            let agent: AgentMetadata = application
                 .runner
                 .store
                 .require_metadata("agent", &parent.0)?;
@@ -50,7 +50,7 @@ pub(super) fn prepare_spawns(
                 .runner
                 .tools
                 .create_agent(&agent, &call_id, &args)?;
-            let child: AgentRecord = serde_json::from_value(result["agent"].clone())?;
+            let child: AgentMetadata = serde_json::from_value(result["agent"].clone())?;
             let existing = ids.iter().find(|(_, id)| id.0 == child.id);
             if let Some((existing, _)) = existing {
                 commands.entity(entity).insert((
@@ -92,7 +92,7 @@ pub(super) fn admit_spawns(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let child: AgentRecord = application
+                let child: AgentMetadata = application
                     .runner
                     .store
                     .require_metadata("agent", &admission.id)?;
@@ -123,7 +123,7 @@ pub(super) fn configure_spawned(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let child: AgentRecord = application
+                let child: AgentMetadata = application
                     .runner
                     .store
                     .require_metadata("agent", &admission.id)?;
@@ -159,7 +159,7 @@ pub(super) fn configure_spawned(
         if let Ok(child) = application
             .runner
             .store
-            .require_metadata::<AgentRecord>("agent", &admission.id)
+            .require_metadata("agent", &admission.id)
         {
             let connection = application
                 .runner
@@ -195,11 +195,7 @@ pub(super) fn configure_agents(
     mut fatal: ResMut<Fatal>,
 ) {
     for (entity, id) in &agents {
-        if let Ok(Some(agent)) = application
-            .runner
-            .store
-            .get_metadata::<AgentRecord>("agent", &id.0)
-        {
+        if let Ok(Some(agent)) = application.runner.store.get_metadata("agent", &id.0) {
             let connection = application
                 .runner
                 .engine_for(agent.role)
@@ -240,7 +236,7 @@ pub(super) fn gate_tools(
     for (entity, from, request, mut decision) in &mut calls {
         let result = (|| -> Result<()> {
             let id = ids.get(from.0)?;
-            let agent: AgentRecord = application.runner.store.require_metadata("agent", &id.0)?;
+            let agent: AgentMetadata = application.runner.store.require_metadata("agent", &id.0)?;
             ensure!(
                 allowed(
                     &application.runner,
@@ -257,7 +253,7 @@ pub(super) fn gate_tools(
                 let targets = application
                     .runner
                     .store
-                    .list_metadata::<AgentRecord>("agent", &agent.run_id)?;
+                    .list_metadata("agent", &agent.run_id)?;
                 let matching: Vec<_> = targets
                     .iter()
                     .filter(|target| {
@@ -306,7 +302,7 @@ pub(super) fn gate_models(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(from.0)?;
-                let agent: AgentRecord =
+                let agent: AgentMetadata =
                     application.runner.store.require_metadata("agent", &id.0)?;
                 let run: RunRecord = application.runner.store.require("run", &agent.run_id)?;
                 if agent.status == Status::Completed {
@@ -401,7 +397,7 @@ pub(super) fn release_predecessors(
             && application
                 .runner
                 .store
-                .require_metadata::<AgentRecord>("agent", &id.0)
+                .require_metadata("agent", &id.0)
                 .is_ok_and(|agent| agent.predecessors_released || agent.status.terminal())
         {
             commands.entity(hold).despawn();

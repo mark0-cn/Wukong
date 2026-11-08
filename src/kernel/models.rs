@@ -26,7 +26,7 @@ pub(super) fn prepare_models(
             &mut fatal,
             (|| -> Result<()> {
                 let (id, mut conversation, mut access) = owners.get_mut(from.0)?;
-                let agent: AgentRecord =
+                let agent: AgentMetadata =
                     application.runner.store.require_metadata("agent", &id.0)?;
                 if !agent.predecessors_released {
                     return Ok(());
@@ -63,7 +63,7 @@ pub(super) fn prepare_models(
                         ));
                     }
                     if !agent.wait_for_predecessors.is_empty() {
-                        let results = agent.wait_for_predecessors.iter().map(|id| application.runner.store.require_metadata::<AgentRecord>("agent",id).map(|predecessor| json!({"id":id,"status":predecessor.status,"result":predecessor.task_result,"summary":predecessor.summary,"error":predecessor.error}))).collect::<Result<Vec<_>>>()?;
+                        let results = agent.wait_for_predecessors.iter().map(|id| application.runner.store.require_metadata("agent",id).map(|predecessor| json!({"id":id,"status":predecessor.status,"result":predecessor.task_result,"summary":predecessor.summary,"error":predecessor.error}))).collect::<Result<Vec<_>>>()?;
                         prompt.sections.push(rig_core::completion::Section::new(
                             "dependency_results",
                             serde_json::to_string(&results)?,
@@ -160,7 +160,7 @@ pub(super) fn account_replies(
                 &mut fatal,
                 (|| -> Result<()> {
                     let agent_id = ids.get(from.0)?.0.clone();
-                    let agent: AgentRecord = application
+                    let agent: AgentMetadata = application
                         .runner
                         .store
                         .require_metadata("agent", &agent_id)?;
@@ -248,7 +248,7 @@ pub(super) fn enforce_completion(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(of.0)?;
-                let agent: AgentRecord =
+                let agent: AgentMetadata =
                     application.runner.store.require_metadata("agent", &id.0)?;
                 if !agent.status.terminal() && matches!(*outcome, TurnOutcome::Answered(_)) {
                     if nudges.get(of.0).is_ok_and(|nudge| nudge.0) {
@@ -286,7 +286,7 @@ pub(super) fn record_turn_end(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(from.0)?;
-                let record: AgentRecord =
+                let record: AgentMetadata =
                     application.runner.store.require_metadata("agent", &id.0)?;
                 if !record.status.terminal()
                     && let TurnOutcome::Failed(reason) = outcome

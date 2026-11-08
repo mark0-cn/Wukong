@@ -55,8 +55,8 @@ fn documents(tx: &Connection, run_id: &str) -> Result<Vec<SharedDocument>> {
 
 fn relevance(
     document: &SharedDocument,
-    agent: &AgentRecord,
-    authors: &BTreeMap<String, AgentRecord>,
+    agent: &AgentMetadata,
+    authors: &BTreeMap<String, AgentMetadata>,
     query: &BTreeSet<String>,
 ) -> usize {
     let mut score = 0;
@@ -89,7 +89,7 @@ fn relevance(
             .sum::<usize>()
 }
 
-fn preview(document: &SharedDocument, authors: &BTreeMap<String, AgentRecord>) -> Value {
+fn preview(document: &SharedDocument, authors: &BTreeMap<String, AgentMetadata>) -> Value {
     json!({
         "id":document.id,"kind":document.kind,"agent_id":document.agent_id,
         "scope":authors.get(&document.agent_id).map(|author| range(&author.scope,0,160)),
@@ -101,9 +101,9 @@ fn preview(document: &SharedDocument, authors: &BTreeMap<String, AgentRecord>) -
 
 /// Called for each fresh request and for a compacted checkpoint. Never copies
 /// whole documents or the unbounded run graph into a model context.
-pub(crate) fn snapshot(tx: &Connection, agent: &AgentRecord) -> Result<Value> {
+pub(crate) fn snapshot(tx: &Connection, agent: &AgentMetadata) -> Result<Value> {
     let documents = documents(tx, &agent.run_id)?;
-    let authors = Store::tx_list_metadata::<AgentRecord>(tx, "agent", &agent.run_id)?
+    let authors = Store::tx_list_metadata(tx, "agent", &agent.run_id)?
         .into_iter()
         .map(|author| (author.id.clone(), author))
         .collect::<BTreeMap<_, _>>();
@@ -147,7 +147,7 @@ pub(crate) fn snapshot(tx: &Connection, agent: &AgentRecord) -> Result<Value> {
 
 pub(crate) fn search(
     store: &Store,
-    agent: &AgentRecord,
+    agent: &AgentMetadata,
     args: &Value,
     max_bytes: usize,
 ) -> Result<Value> {
@@ -156,7 +156,7 @@ pub(crate) fn search(
     let query = args["query"].as_str().unwrap_or_default().to_lowercase();
     let words = query.split_whitespace().collect::<Vec<_>>();
     store.read_transaction(|tx| {
-        let authors = Store::tx_list_metadata::<AgentRecord>(tx, "agent", &agent.run_id)?
+        let authors = Store::tx_list_metadata(tx, "agent", &agent.run_id)?
             .into_iter().map(|author| (author.id.clone(), author)).collect::<BTreeMap<_, _>>();
         let documents = documents(tx, &agent.run_id)?;
         let mut matches = documents.iter().filter(|document| {
@@ -193,7 +193,7 @@ pub(crate) fn search(
 
 pub(crate) fn read(
     store: &Store,
-    agent: &AgentRecord,
+    agent: &AgentMetadata,
     args: &Value,
     max_bytes: usize,
 ) -> Result<Value> {

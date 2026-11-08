@@ -200,7 +200,7 @@ impl ToolService {
                 .clone()
         };
         let _guard = lock.lock().await;
-        let agent: AgentRecord = self.store.require_metadata("agent", agent_id)?;
+        let agent: AgentMetadata = self.store.require_metadata("agent", agent_id)?;
         let specs = builtins();
         let builtin = specs.iter().find(|item| item.definition.name == name);
         let side_effecting = builtin
@@ -341,7 +341,7 @@ impl ToolService {
 
     fn effect(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         action: impl FnOnce(&rusqlite::Connection) -> Result<Value>,
     ) -> Result<Value> {
@@ -369,7 +369,7 @@ impl ToolService {
         );
         Ok(record)
     }
-    fn target(&self, agent: &AgentRecord) -> Result<RunRecord> {
+    fn target(&self, agent: &AgentMetadata) -> Result<RunRecord> {
         ensure!(
             agent.role != Role::Root,
             "root cannot operate on the target"

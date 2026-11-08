@@ -162,7 +162,7 @@ pub struct ActiveSkill {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentRecord {
+pub struct AgentMetadata {
     pub id: String,
     pub run_id: String,
     pub parent_id: Option<String>,
@@ -183,8 +183,6 @@ pub struct AgentRecord {
     #[serde(default)]
     pub generation: u64,
     pub inherit_context: bool,
-    pub inherited_context: Option<Value>,
-    pub checkpoint: Option<Value>,
     pub wait_for: Vec<String>,
     pub wait_until: Option<DateTime<Utc>>,
     pub wait_policy: DependencyPolicy,
@@ -204,6 +202,51 @@ pub struct AgentRecord {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// Optional history is loaded only at explicit inheritance/recovery boundaries.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentConversation {
+    pub inherited_context: Option<Value>,
+    pub checkpoint: Option<Value>,
+}
+
+/// Flat serialization preserves report and checkpoint wire compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSnapshot {
+    #[serde(flatten)]
+    pub metadata: AgentMetadata,
+    pub inherited_context: Option<Value>,
+    pub checkpoint: Option<Value>,
+}
+
+impl AgentSnapshot {
+    pub fn from_parts(metadata: AgentMetadata, conversation: AgentConversation) -> Self {
+        Self {
+            metadata,
+            inherited_context: conversation.inherited_context,
+            checkpoint: conversation.checkpoint,
+        }
+    }
+    pub fn into_conversation(self) -> AgentConversation {
+        AgentConversation {
+            inherited_context: self.inherited_context,
+            checkpoint: self.checkpoint,
+        }
+    }
+}
+impl std::ops::Deref for AgentSnapshot {
+    type Target = AgentMetadata;
+    fn deref(&self) -> &Self::Target {
+        &self.metadata
+    }
+}
+impl std::ops::DerefMut for AgentSnapshot {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.metadata
+    }
+}
+/// Compatibility name for consumers of complete serialized agent records.
+pub type AgentRecord = AgentSnapshot;
 
 #[derive(
     schemars::JsonSchema, Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq,

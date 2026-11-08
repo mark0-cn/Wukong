@@ -9,7 +9,7 @@ impl ToolService {
         ))
     }
 
-    pub(super) fn request_identity(&self, agent: &AgentRecord, call_id: &str) -> String {
+    pub(super) fn request_identity(&self, agent: &AgentMetadata, call_id: &str) -> String {
         stable(
             "request",
             &format!("{}:{}:{call_id}", agent.run_id, agent.id),
@@ -18,7 +18,7 @@ impl ToolService {
 
     pub(super) async fn worker_call(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         method: &str,
         mut params: Value,
@@ -31,7 +31,7 @@ impl ToolService {
 
     pub(super) async fn runtime_tool(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
         mut args: Value,

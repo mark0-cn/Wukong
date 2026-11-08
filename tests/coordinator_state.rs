@@ -49,7 +49,7 @@ fn wait_for_predecessors_is_validated_and_persisted() {
     let created = c.create_child(&run.root_id, gated).unwrap();
     assert!(created.created);
     let stored: AgentRecord = store.require("agent", &created.agent.id).unwrap();
-    assert_eq!(stored.wait_for_predecessors, vec![first.agent.id]);
+    assert_eq!(stored.wait_for_predecessors, vec![first.agent.metadata.id]);
     assert_eq!(stored.status, Status::Queued);
 }
 
@@ -72,7 +72,7 @@ fn predecessor_graph_rejects_ancestors_and_transitive_completion_cycles() {
     after_parent.wait_for_predecessors = vec![parent.id.clone()];
     let sibling = c.create_child(&run.root_id, after_parent).unwrap().agent;
     let mut grandchild = request("indirect cycle");
-    grandchild.wait_for_predecessors = vec![sibling.id];
+    grandchild.wait_for_predecessors = vec![sibling.metadata.id];
     assert!(
         c.create_child(&parent.id, grandchild)
             .unwrap_err()
@@ -818,7 +818,10 @@ fn task_contract_requires_real_deliverables_and_preserves_each_generation_result
     answer.completed_conditions = task.contract.completion_conditions;
     c.finish_result(&child.id, answer).unwrap();
     let completed: AgentRecord = store.require("agent", &child.id).unwrap();
-    assert_eq!(completed.task_result.unwrap().outcome, TaskOutcome::Success);
+    assert_eq!(
+        completed.metadata.task_result.unwrap().outcome,
+        TaskOutcome::Success
+    );
     assert!(
         store.inbox(&run.root_id).unwrap()[0]
             .content
@@ -861,6 +864,7 @@ fn non_success_task_results_explain_the_gap_and_evidence_is_integrity_checked() 
         store
             .require::<AgentRecord>("agent", &child.id)
             .unwrap()
+            .metadata
             .task_result
             .unwrap()
             .outcome,
@@ -939,7 +943,10 @@ fn failed_requirements_block_successors_and_propagate_without_execution() {
     for id in [&second.id, &third.id] {
         let blocked: AgentRecord = store.require("agent", id).unwrap();
         assert_eq!(blocked.status, Status::Failed);
-        assert_eq!(blocked.task_result.unwrap().outcome, TaskOutcome::Blocked);
+        assert_eq!(
+            blocked.metadata.task_result.unwrap().outcome,
+            TaskOutcome::Blocked
+        );
         assert!(blocked.checkpoint.is_none());
     }
     assert_eq!(store.inbox(&run.root_id).unwrap().len(), 3);
@@ -999,7 +1006,7 @@ fn dependency_policies_distinguish_success_alternatives_and_terminal_collection(
             .predecessors_released
     );
     let mut exhausted = request("all alternatives failed");
-    exhausted.wait_for_predecessors = vec![failed.id];
+    exhausted.wait_for_predecessors = vec![failed.metadata.id];
     exhausted.dependency_policy = DependencyPolicy::AnySuccess;
     let exhausted = c.create_child(&run.root_id, exhausted).unwrap().agent;
     c.release_dependencies(&run.id).unwrap();
@@ -1071,7 +1078,7 @@ fn waits_report_unsatisfied_requirements_and_wake_on_any_success() {
         .unwrap();
     assert_eq!(rejected["parked"], false);
     assert_eq!(rejected["condition"]["state"], "blocked");
-    let ids = vec![failed.id, winner.id.clone()];
+    let ids = vec![failed.metadata.id, winner.id.clone()];
     assert_eq!(
         c.wait_with_policy(&waiter.id, &ids, 60, DependencyPolicy::AnySuccess)
             .unwrap()["parked"],
@@ -1107,5 +1114,5 @@ fn a_missing_dependency_is_not_assumed_successful() {
     c.release_dependencies(&run.id).unwrap();
     let consumer: AgentRecord = store.require("agent", &consumer.id).unwrap();
     assert_eq!(consumer.status, Status::Failed);
-    assert!(consumer.error.unwrap().contains("missing"));
+    assert!(consumer.metadata.error.unwrap().contains("missing"));
 }

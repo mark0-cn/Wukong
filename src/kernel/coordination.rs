@@ -10,7 +10,7 @@ pub(super) fn project_conversations(
         if application
             .runner
             .store
-            .get_metadata::<AgentRecord>("agent", &id.0)
+            .get_metadata("agent", &id.0)
             .ok()
             .flatten()
             .is_some()
@@ -39,7 +39,7 @@ pub(super) fn deliver_mail(
         .iter(app.world())
         .map(|(entity, id)| (id.0.clone(), entity))
         .collect();
-    for agent in runner.store.list_metadata::<AgentRecord>("agent", run_id)? {
+    for agent in runner.store.list_metadata("agent", run_id)? {
         let Some(&entity) = agents.get(&agent.id) else {
             continue;
         };
@@ -62,7 +62,7 @@ pub(super) fn deliver_mail(
                 && agents.contains_key(&mail.sender)
                 && runner
                     .store
-                    .require_metadata::<AgentRecord>("agent", &mail.sender)
+                    .require_metadata("agent", &mail.sender)
                     .is_ok_and(|sender| Some(sender.generation) == mail.envelope.sender_generation);
             // The native Report carries this ledger notification. Do not send
             // a second message that can race its parent's next model call.
@@ -124,7 +124,7 @@ pub(super) fn deliver_mail(
 pub(super) fn sync_statuses(app: &mut App, runner: &AssessmentRunner, run_id: &str) -> Result<()> {
     let records: HashMap<_, _> = runner
         .store
-        .list_metadata::<AgentRecord>("agent", run_id)?
+        .list_metadata("agent", run_id)?
         .into_iter()
         .map(|agent| (agent.id.clone(), agent))
         .collect();
@@ -192,7 +192,7 @@ pub(super) fn inform_terminal(
             && application
                 .runner
                 .store
-                .require_metadata::<AgentRecord>("agent", &id.0)
+                .require_metadata("agent", &id.0)
                 .is_ok_and(|agent| agent.status.terminal())
         {
             message.mode = DeliveryMode::Inform;
@@ -219,11 +219,11 @@ pub(super) fn bind_reports(
                 let Some(sender) = report.author.from.as_deref() else {
                     return Ok(());
                 };
-                let owner: AgentRecord = application
+                let owner: AgentMetadata = application
                     .runner
                     .store
                     .require_metadata("agent", &recipient.0)?;
-                let source: AgentRecord =
+                let source: AgentMetadata =
                     application.runner.store.require_metadata("agent", sender)?;
                 if let Some(mail) = application
                     .runner
@@ -260,7 +260,7 @@ pub(super) fn ensure_owner_requests(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let task: AgentRecord =
+                let task: AgentMetadata =
                     application.runner.store.require_metadata("agent", &id.0)?;
                 if !task.status.terminal()
                     && let Some(owner) = task.parent_id

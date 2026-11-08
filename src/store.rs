@@ -144,11 +144,12 @@ impl Store {
         row.map(|(data, checkpoint, inherited)| conversations::decode(data, checkpoint, inherited))
             .transpose()
     }
-    pub(crate) fn tx_get_metadata<T: DeserializeOwned>(
+    pub(crate) fn tx_get_metadata(
         tx: &Connection,
         kind: &str,
         id: &str,
-    ) -> Result<Option<T>> {
+    ) -> Result<Option<AgentMetadata>> {
+        anyhow::ensure!(kind == "agent", "metadata APIs accept only agent metadata");
         let data: Option<String> = tx
             .query_row(
                 "SELECT data FROM entities WHERE kind=?1 AND id=?2",
@@ -168,13 +169,17 @@ impl Store {
     ) -> Result<()> {
         Self::tx_write(tx, kind, id, run_id, value, true)
     }
-    pub(crate) fn tx_put_metadata<T: Serialize>(
+    pub(crate) fn tx_put_metadata(
         tx: &Connection,
         kind: &str,
         id: &str,
         run_id: &str,
-        value: &T,
+        value: &AgentMetadata,
     ) -> Result<()> {
+        anyhow::ensure!(
+            kind == "agent" && id == value.id && run_id == value.run_id,
+            "agent metadata identity mismatch"
+        );
         Self::tx_write(tx, kind, id, run_id, value, false)
     }
     fn tx_write<T: Serialize>(
@@ -222,11 +227,12 @@ impl Store {
         })
         .collect()
     }
-    pub(crate) fn tx_list_metadata<T: DeserializeOwned>(
+    pub(crate) fn tx_list_metadata(
         tx: &Connection,
         kind: &str,
         run_id: &str,
-    ) -> Result<Vec<T>> {
+    ) -> Result<Vec<AgentMetadata>> {
+        anyhow::ensure!(kind == "agent", "metadata APIs accept only agent metadata");
         let mut query =
             tx.prepare("SELECT data FROM entities WHERE kind=?1 AND run_id=?2 ORDER BY rowid")?;
         let rows = query.query_map(params![kind, run_id], |row| row.get::<_, String>(0))?;
@@ -235,18 +241,45 @@ impl Store {
     pub fn get<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<Option<T>> {
         self.read_transaction(|tx| Self::tx_get(tx, kind, id))
     }
-    pub(crate) fn get_metadata<T: DeserializeOwned>(
-        &self,
-        kind: &str,
-        id: &str,
-    ) -> Result<Option<T>> {
+    pub fn agent_snapshot(&self, id: &str) -> Result<AgentSnapshot> {
+        self.read_transaction(|tx| Self::tx_agent_snapshot(tx, id))?
+            .with_context(|| format!("agent {id} does not exist"))
+    }
+    pub(crate) fn tx_agent_snapshot(tx: &Connection, id: &str) -> Result<Option<AgentSnapshot>> {
+        let Some(metadata) = Self::tx_get_metadata(tx, "agent", id)? else {
+            return Ok(None);
+        };
+        let conversation = Self::tx_agent_conversation(tx, id)?;
+        Ok(Some(AgentSnapshot::from_parts(metadata, conversation)))
+    }
+    pub(crate) fn tx_agent_conversation(tx: &Connection, id: &str) -> Result<AgentConversation> {
+        let payload: Option<(Option<String>, Option<String>)> = tx
+            .query_row(
+                "SELECT checkpoint,inherited_context FROM agent_conversations WHERE agent_id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((checkpoint, inherited)) = payload else {
+            return Ok(AgentConversation::default());
+        };
+        Ok(AgentConversation {
+            checkpoint: checkpoint
+                .map(|data| serde_json::from_str(&data))
+                .transpose()?,
+            inherited_context: inherited
+                .map(|data| serde_json::from_str(&data))
+                .transpose()?,
+        })
+    }
+    pub(crate) fn get_metadata(&self, kind: &str, id: &str) -> Result<Option<AgentMetadata>> {
         self.read_transaction(|tx| Self::tx_get_metadata(tx, kind, id))
     }
     pub fn require<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<T> {
         self.get(kind, id)?
             .ok_or_else(|| anyhow!("{kind} {id} does not exist"))
     }
-    pub(crate) fn require_metadata<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<T> {
+    pub(crate) fn require_metadata(&self, kind: &str, id: &str) -> Result<AgentMetadata> {
         self.get_metadata(kind, id)?
             .ok_or_else(|| anyhow!("{kind} {id} does not exist"))
     }
@@ -256,11 +289,7 @@ impl Store {
     pub fn list<T: DeserializeOwned>(&self, kind: &str, run_id: &str) -> Result<Vec<T>> {
         self.read_transaction(|tx| Self::tx_list(tx, kind, run_id))
     }
-    pub(crate) fn list_metadata<T: DeserializeOwned>(
-        &self,
-        kind: &str,
-        run_id: &str,
-    ) -> Result<Vec<T>> {
+    pub(crate) fn list_metadata(&self, kind: &str, run_id: &str) -> Result<Vec<AgentMetadata>> {
         self.read_transaction(|tx| Self::tx_list_metadata(tx, kind, run_id))
     }
     pub fn runs(&self) -> Result<Vec<RunRecord>> {
@@ -353,7 +382,7 @@ impl Store {
         content: &str,
         key: Option<&str>,
     ) -> Result<bool> {
-        let target: AgentRecord =
+        let target: AgentMetadata =
             Self::tx_get_metadata(tx, "agent", recipient)?.context("recipient missing")?;
         let envelope = MessageEnvelope {
             options: MessageOptions {
@@ -362,7 +391,7 @@ impl Store {
                 ..Default::default()
             },
             task_id: recipient.into(),
-            sender_generation: Self::tx_get_metadata::<AgentRecord>(tx, "agent", sender)?
+            sender_generation: Self::tx_get_metadata(tx, "agent", sender)?
                 .map(|agent| agent.generation),
             ..Default::default()
         };
@@ -402,7 +431,7 @@ impl Store {
     }
     pub fn inbox(&self, recipient: &str) -> Result<Vec<Message>> {
         self.read_transaction(|tx| {
-            let agent: AgentRecord =
+            let agent: AgentMetadata =
                 Self::tx_get_metadata(tx, "agent", recipient)?.context("recipient missing")?;
             Ok(Self::tx_messages(tx, &agent.run_id)?
                 .into_iter()
@@ -553,7 +582,7 @@ impl Store {
         generation: Option<u64>,
     ) -> Result<()> {
         self.transaction(|tx| {
-            let agent: AgentRecord =
+            let agent: AgentMetadata =
                 Self::tx_get_metadata(tx, "agent", agent_id)?.context("agent missing")?;
             if generation.is_some_and(|expected| expected != agent.generation) {
                 return Ok(());
@@ -629,9 +658,11 @@ mod tests {
         let before = revision()?;
         for _ in 0..20 {
             store.transaction(|tx| {
-                let mut agent: AgentRecord =
+                let mut agent: AgentMetadata =
                     Store::tx_get_metadata(tx, "agent", &run.root_id)?.context("missing")?;
-                assert!(agent.checkpoint.is_none());
+                let metadata = serde_json::to_value(&agent)?;
+                assert!(metadata.get("checkpoint").is_none());
+                assert!(metadata.get("inherited_context").is_none());
                 agent.total_tokens += 10;
                 Store::tx_put_metadata(tx, "agent", &agent.id, &run.id, &agent)
             })?;
@@ -644,9 +675,15 @@ mod tests {
             Some(42),
         )?;
         assert_eq!(revision()?, before);
-        let full: AgentRecord = store.require("agent", &run.root_id)?;
+        let full = store.agent_snapshot(&run.root_id)?;
         assert_eq!(full.checkpoint, Some(checkpoint));
         assert_eq!(full.total_tokens, 200);
+        let wire = serde_json::to_value(&full)?;
+        assert_eq!(wire["id"], run.root_id);
+        assert!(wire.get("metadata").is_none());
+        let restored: AgentSnapshot = serde_json::from_value(wire)?;
+        assert_eq!(restored.checkpoint, full.checkpoint);
+        assert_eq!(restored.metadata.total_tokens, full.metadata.total_tokens);
         Ok(())
     }
 

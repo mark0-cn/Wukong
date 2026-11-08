@@ -13,7 +13,7 @@ fn session_lost(error: &anyhow::Error) -> bool {
 impl ToolService {
     pub(super) fn authorize_session(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         session: &Value,
         closing: bool,
     ) -> Result<()> {
@@ -22,7 +22,7 @@ impl ToolService {
             "session belongs to another runtime"
         );
         if session["agent_id"] != agent.id {
-            let owner: AgentRecord =
+            let owner: AgentMetadata =
                 self.require_in_run("agent", text(session, "agent_id")?, &agent.run_id)?;
             ensure!(
                 closing && owner.status.terminal(),
@@ -34,7 +34,7 @@ impl ToolService {
 
     pub(super) async fn session_tool(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
         args: Value,

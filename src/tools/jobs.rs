@@ -15,7 +15,7 @@ impl JobService<'_> {
             if job["delivered_to_model"].as_bool() == Some(true) {
                 continue;
             }
-            let owner: AgentRecord =
+            let owner: AgentMetadata =
                 self.tools
                     .require_in_run("agent", text(&job, "agent_id")?, run)?;
             let job_id = text(&job, "id")?;
@@ -27,7 +27,7 @@ impl JobService<'_> {
 
     pub(crate) async fn observe(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call: &str,
         job_id: &str,
     ) -> Result<Value> {
@@ -110,7 +110,7 @@ impl JobService<'_> {
         Ok(raw)
     }
 
-    pub(crate) fn briefs(store: &Store, agent: &AgentRecord) -> Result<Vec<Value>> {
+    pub(crate) fn briefs(store: &Store, agent: &AgentMetadata) -> Result<Vec<Value>> {
         store.transaction(|tx| {
             let mut briefs = Vec::new();
             let mut bytes = 0;
@@ -144,7 +144,7 @@ impl ToolService {
     }
     pub(super) fn known_job(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         job_id: &str,
         owned: bool,
     ) -> Result<Value> {
@@ -164,7 +164,7 @@ impl ToolService {
 
     pub(super) async fn observe_job(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         job_id: &str,
     ) -> Result<Value> {
@@ -173,7 +173,7 @@ impl ToolService {
 
     pub(super) async fn import_job_artifacts(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         job_id: &str,
     ) -> Result<Value> {
@@ -223,7 +223,7 @@ impl ToolService {
 
     pub(super) async fn verification(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
@@ -366,7 +366,7 @@ mod tests {
         fs::write(&target, b"fixture")?;
         let coordinator = Coordinator::new(store.clone());
         let run = coordinator.create_run(&target, "fixture", Budget::default(), json!({}))?;
-        let owner: AgentRecord = store.require("agent", &run.root_id)?;
+        let owner: AgentMetadata = store.require("agent", &run.root_id)?;
         let mut config = AppConfig::default();
         config.runtime.backend = RuntimeBackend::TrustedLocal;
         config.runtime.state_dir = dir.path().join("worker");
