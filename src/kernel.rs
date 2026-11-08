@@ -241,7 +241,10 @@ pub(crate) fn drive(
             AgentId(run.root_id.clone()),
             connection.clone(),
             BusinessTask,
-            tool_access(&runner, &runner.store.require("agent", &run.root_id)?)?,
+            tool_access(
+                &runner,
+                &runner.store.require_metadata("agent", &run.root_id)?,
+            )?,
         ));
         app.world_mut()
             .entity_mut(root)
@@ -332,7 +335,7 @@ pub(crate) fn drive(
             )?;
             return runner.store.require("run", run_id);
         }
-        let agents = runner.store.list::<AgentRecord>("agent", run_id)?;
+        let agents = runner.store.list_metadata::<AgentRecord>("agent", run_id)?;
         if !run.status.terminal() && active == 0 && agents.iter().all(|a| a.status.terminal()) {
             let mut run = run;
             run.status = Status::Failed;
@@ -360,8 +363,14 @@ async fn refresh_job_statuses(runner: &AssessmentRunner, run_id: &str) -> Result
         if job["delivered_to_model"].as_bool() == Some(true) {
             continue;
         }
-        let state = job["status"]["state"].as_str().unwrap_or("queued").to_owned();
-        if matches!(state.as_str(), "completed" | "failed" | "cancelled" | "timed_out") {
+        let state = job["status"]["state"]
+            .as_str()
+            .unwrap_or("queued")
+            .to_owned();
+        if matches!(
+            state.as_str(),
+            "completed" | "failed" | "cancelled" | "timed_out"
+        ) {
             // Already terminal from a manual poll; just mark it deliverable.
             let mut record = job;
             record["delivered_to_model"] = json!(true);
@@ -377,7 +386,10 @@ async fn refresh_job_statuses(runner: &AssessmentRunner, run_id: &str) -> Result
             continue;
         };
         let state = status["state"].as_str().unwrap_or("queued").to_owned();
-        if !matches!(state.as_str(), "completed" | "failed" | "cancelled" | "timed_out") {
+        if !matches!(
+            state.as_str(),
+            "completed" | "failed" | "cancelled" | "timed_out"
+        ) {
             continue;
         }
         let mut record = job;
@@ -461,7 +473,10 @@ fn prepare_spawns(
     for (entity, effect, from, mut request, parent_call) in &mut requests {
         let result = (|| -> Result<()> {
             let (_, parent) = ids.get(from.0)?;
-            let agent: AgentRecord = application.runner.store.require("agent", &parent.0)?;
+            let agent: AgentRecord = application
+                .runner
+                .store
+                .require_metadata("agent", &parent.0)?;
             let mut args = Value::Object(request.extra.clone());
             args["name"] = json!(request.title);
             args["task"] = json!(request.brief);
@@ -515,8 +530,10 @@ fn admit_spawns(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let child: AgentRecord =
-                    application.runner.store.require("agent", &admission.id)?;
+                let child: AgentRecord = application
+                    .runner
+                    .store
+                    .require_metadata("agent", &admission.id)?;
                 if child.status.terminal() {
                     commands.entity(entity).insert(Outcome::refused(
                         child
@@ -544,8 +561,10 @@ fn configure_spawned(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let child: AgentRecord =
-                    application.runner.store.require("agent", &admission.id)?;
+                let child: AgentRecord = application
+                    .runner
+                    .store
+                    .require_metadata("agent", &admission.id)?;
                 if child.inherit_context {
                     let parent = histories.get(from.0)?;
                     let pending = parent.pending_calls();
@@ -578,7 +597,7 @@ fn configure_spawned(
         if let Ok(child) = application
             .runner
             .store
-            .require::<AgentRecord>("agent", &admission.id)
+            .require_metadata::<AgentRecord>("agent", &admission.id)
         {
             let connection = application
                 .runner
@@ -610,7 +629,11 @@ fn configure_agents(
     mut fatal: ResMut<Fatal>,
 ) {
     for (entity, id) in &agents {
-        if let Ok(Some(agent)) = application.runner.store.get::<AgentRecord>("agent", &id.0) {
+        if let Ok(Some(agent)) = application
+            .runner
+            .store
+            .get_metadata::<AgentRecord>("agent", &id.0)
+        {
             let connection = application
                 .runner
                 .engine_for(agent.role)
@@ -658,7 +681,7 @@ fn prepare_calls(
             call_id: application
                 .runner
                 .store
-                .require::<AgentRecord>("agent", &id.0)
+                .require_metadata::<AgentRecord>("agent", &id.0)
                 .ok()
                 .map(|agent| business_call(&agent, &request.call.id.to_string())),
         }));
@@ -686,7 +709,8 @@ fn prepare_models(
             &mut fatal,
             (|| -> Result<()> {
                 let (id, mut conversation, mut access) = owners.get_mut(from.0)?;
-                let agent: AgentRecord = application.runner.store.require("agent", &id.0)?;
+                let agent: AgentRecord =
+                    application.runner.store.require_metadata("agent", &id.0)?;
                 if !agent.predecessors_released {
                     return Ok(());
                 }
@@ -722,7 +746,7 @@ fn prepare_models(
                         ));
                     }
                     if !agent.wait_for_predecessors.is_empty() {
-                        let results = agent.wait_for_predecessors.iter().map(|id| application.runner.store.require::<AgentRecord>("agent",id).map(|predecessor| json!({"id":id,"status":predecessor.status,"result":predecessor.task_result,"summary":predecessor.summary,"error":predecessor.error}))).collect::<Result<Vec<_>>>()?;
+                        let results = agent.wait_for_predecessors.iter().map(|id| application.runner.store.require_metadata::<AgentRecord>("agent",id).map(|predecessor| json!({"id":id,"status":predecessor.status,"result":predecessor.task_result,"summary":predecessor.summary,"error":predecessor.error}))).collect::<Result<Vec<_>>>()?;
                         prompt.sections.push(rig_core::completion::Section::new(
                             "dependency_results",
                             serde_json::to_string(&results)?,
@@ -820,7 +844,7 @@ fn gate_tools(
     for (entity, from, request, mut decision) in &mut calls {
         let result = (|| -> Result<()> {
             let id = ids.get(from.0)?;
-            let agent: AgentRecord = application.runner.store.require("agent", &id.0)?;
+            let agent: AgentRecord = application.runner.store.require_metadata("agent", &id.0)?;
             ensure!(
                 allowed(
                     &application.runner,
@@ -837,7 +861,7 @@ fn gate_tools(
                 let targets = application
                     .runner
                     .store
-                    .list::<AgentRecord>("agent", &agent.run_id)?;
+                    .list_metadata::<AgentRecord>("agent", &agent.run_id)?;
                 let matching: Vec<_> = targets
                     .iter()
                     .filter(|target| {
@@ -886,7 +910,8 @@ fn gate_models(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(from.0)?;
-                let agent: AgentRecord = application.runner.store.require("agent", &id.0)?;
+                let agent: AgentRecord =
+                    application.runner.store.require_metadata("agent", &id.0)?;
                 let run: RunRecord = application.runner.store.require("run", &agent.run_id)?;
                 if agent.status == Status::Completed {
                     let response = CompletionResponse::new(
@@ -957,8 +982,10 @@ fn account_replies(
                 &mut fatal,
                 (|| -> Result<()> {
                     let agent_id = ids.get(from.0)?.0.clone();
-                    let agent: AgentRecord =
-                        application.runner.store.require("agent", &agent_id)?;
+                    let agent: AgentRecord = application
+                        .runner
+                        .store
+                        .require_metadata("agent", &agent_id)?;
                     application
                         .runner
                         .account_usage(&agent_id, response.usage, true)?;
@@ -970,9 +997,7 @@ fn account_replies(
                         .iter()
                         .filter_map(|part| match part {
                             AssistantContent::Text(text) => Some(text.text.as_str()),
-                            AssistantContent::Reasoning(reasoning) => {
-                                Some(reasoning.text.as_str())
-                            }
+                            AssistantContent::Reasoning(reasoning) => Some(reasoning.text.as_str()),
                             _ => None,
                         })
                         .collect::<Vec<_>>()
@@ -1045,7 +1070,8 @@ fn enforce_completion(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(of.0)?;
-                let agent: AgentRecord = application.runner.store.require("agent", &id.0)?;
+                let agent: AgentRecord =
+                    application.runner.store.require_metadata("agent", &id.0)?;
                 if !agent.status.terminal() && matches!(*outcome, TurnOutcome::Answered(_)) {
                     if nudges.get(of.0).is_ok_and(|nudge| nudge.0) {
                         application.runner.fail_agent(
@@ -1082,7 +1108,8 @@ fn record_turn_end(
             &mut fatal,
             (|| -> Result<()> {
                 let id = ids.get(from.0)?;
-                let record: AgentRecord = application.runner.store.require("agent", &id.0)?;
+                let record: AgentRecord =
+                    application.runner.store.require_metadata("agent", &id.0)?;
                 if !record.status.terminal()
                     && let TurnOutcome::Failed(reason) = outcome
                 {
@@ -1103,7 +1130,7 @@ fn project_conversations(
         if application
             .runner
             .store
-            .get::<AgentRecord>("agent", &id.0)
+            .get_metadata::<AgentRecord>("agent", &id.0)
             .ok()
             .flatten()
             .is_some()
@@ -1132,7 +1159,7 @@ fn deliver_mail(
         .iter(app.world())
         .map(|(entity, id)| (id.0.clone(), entity))
         .collect();
-    for agent in runner.store.list::<AgentRecord>("agent", run_id)? {
+    for agent in runner.store.list_metadata::<AgentRecord>("agent", run_id)? {
         let Some(&entity) = agents.get(&agent.id) else {
             continue;
         };
@@ -1155,7 +1182,7 @@ fn deliver_mail(
                 && agents.contains_key(&mail.sender)
                 && runner
                     .store
-                    .require::<AgentRecord>("agent", &mail.sender)
+                    .require_metadata::<AgentRecord>("agent", &mail.sender)
                     .is_ok_and(|sender| Some(sender.generation) == mail.envelope.sender_generation);
             // The native Report carries this ledger notification. Do not send
             // a second message that can race its parent's next model call.
@@ -1217,7 +1244,7 @@ fn deliver_mail(
 fn sync_statuses(app: &mut App, runner: &AssessmentRunner, run_id: &str) -> Result<()> {
     let records: HashMap<_, _> = runner
         .store
-        .list::<AgentRecord>("agent", run_id)?
+        .list_metadata::<AgentRecord>("agent", run_id)?
         .into_iter()
         .map(|agent| (agent.id.clone(), agent))
         .collect();
@@ -1301,7 +1328,10 @@ impl Serve for BusinessTool {
                         .execution
                         .summarize_threshold_chars
             {
-                let agent: AgentRecord = application.runner.store.require("agent", &agent_id)?;
+                let agent: AgentRecord = application
+                    .runner
+                    .store
+                    .require_metadata("agent", &agent_id)?;
                 let (value, usage) = application
                     .runner
                     .engine_for(agent.role)
@@ -1325,7 +1355,7 @@ impl Serve for BusinessTool {
             while application
                 .runner
                 .store
-                .require::<AgentRecord>("agent", &agent_id)?
+                .require_metadata::<AgentRecord>("agent", &agent_id)?
                 .status
                 == Status::Waiting
             {
@@ -1421,7 +1451,7 @@ fn inform_terminal(
             && application
                 .runner
                 .store
-                .require::<AgentRecord>("agent", &id.0)
+                .require_metadata::<AgentRecord>("agent", &id.0)
                 .is_ok_and(|agent| agent.status.terminal())
         {
             message.mode = DeliveryMode::Inform;
@@ -1474,8 +1504,12 @@ fn bind_reports(
                 let Some(sender) = report.author.from.as_deref() else {
                     return Ok(());
                 };
-                let owner: AgentRecord = application.runner.store.require("agent", &recipient.0)?;
-                let source: AgentRecord = application.runner.store.require("agent", sender)?;
+                let owner: AgentRecord = application
+                    .runner
+                    .store
+                    .require_metadata("agent", &recipient.0)?;
+                let source: AgentRecord =
+                    application.runner.store.require_metadata("agent", sender)?;
                 if let Some(mail) = application
                     .runner
                     .store
@@ -1529,7 +1563,7 @@ fn release_predecessors(
             && application
                 .runner
                 .store
-                .require::<AgentRecord>("agent", &id.0)
+                .require_metadata::<AgentRecord>("agent", &id.0)
                 .is_ok_and(|agent| agent.predecessors_released || agent.status.terminal())
         {
             commands.entity(hold).despawn();
@@ -1548,7 +1582,8 @@ fn ensure_owner_requests(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let task: AgentRecord = application.runner.store.require("agent", &id.0)?;
+                let task: AgentRecord =
+                    application.runner.store.require_metadata("agent", &id.0)?;
                 if !task.status.terminal()
                     && let Some(owner) = task.parent_id
                 {

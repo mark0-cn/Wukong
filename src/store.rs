@@ -11,6 +11,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod conversations;
+
 #[derive(Clone)]
 pub struct Store {
     connection: Arc<Mutex<Connection>>,
@@ -26,10 +28,19 @@ impl Store {
         fs::create_dir_all(root.join("artifacts"))?;
         let conn = Connection::open(root.join("state.sqlite3"))?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
           CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-          INSERT OR IGNORE INTO meta VALUES('schema_version','2');
-          CREATE TABLE IF NOT EXISTS entities(kind TEXT NOT NULL,id TEXT NOT NULL,run_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id));
+          INSERT OR IGNORE INTO meta VALUES('schema_version','3');
+          ",
+        )?;
+        let version: String = conn.query_row(
+            "SELECT value FROM meta WHERE key='schema_version'",
+            [],
+            |row| row.get(0),
+        )?;
+        conversations::initialize(&conn, &version)?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS entities(kind TEXT NOT NULL,id TEXT NOT NULL,run_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(kind,id));
           CREATE INDEX IF NOT EXISTS entities_run ON entities(run_id,kind);
           CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL,sender TEXT NOT NULL,recipient TEXT NOT NULL,content TEXT NOT NULL,acknowledged INTEGER NOT NULL DEFAULT 0,dedupe_key TEXT UNIQUE,created_at TEXT NOT NULL,envelope TEXT NOT NULL);
           CREATE INDEX IF NOT EXISTS messages_inbox ON messages(recipient,acknowledged,id);
@@ -56,14 +67,6 @@ impl Store {
           CREATE INDEX IF NOT EXISTS events_agent_kind ON events(run_id,agent_id,kind,seq);
           CREATE INDEX IF NOT EXISTS revisions_run_kind ON entity_revisions(kind,run_id,revision);",
         )?;
-        let version: String = conn.query_row(
-            "SELECT value FROM meta WHERE key='schema_version'",
-            [],
-            |r| r.get(0),
-        )?;
-        if version != "2" {
-            bail!("unsupported state schema {version}; use a fresh state directory");
-        }
         let reader = Connection::open_with_flags(
             root.join("state.sqlite3"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -115,14 +118,37 @@ impl Store {
         Ok(result)
     }
     pub fn tx_get<T: DeserializeOwned>(tx: &Connection, kind: &str, id: &str) -> Result<Option<T>> {
+        let row = tx
+            .query_row(
+                "SELECT e.data,c.checkpoint,c.inherited_context FROM entities e
+            LEFT JOIN agent_conversations c ON e.kind='agent' AND c.agent_id=e.id
+            WHERE e.kind=?1 AND e.id=?2",
+                params![kind, id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        row.map(|(data, checkpoint, inherited)| conversations::decode(data, checkpoint, inherited))
+            .transpose()
+    }
+    pub(crate) fn tx_get_metadata<T: DeserializeOwned>(
+        tx: &Connection,
+        kind: &str,
+        id: &str,
+    ) -> Result<Option<T>> {
         let data: Option<String> = tx
             .query_row(
                 "SELECT data FROM entities WHERE kind=?1 AND id=?2",
                 params![kind, id],
-                |r| r.get(0),
+                |row| row.get(0),
             )
             .optional()?;
-        data.map(|s| serde_json::from_str(&s).context("decode durable record"))
+        data.map(|data| Ok(serde_json::from_str(&data)?))
             .transpose()
     }
     pub fn tx_put<T: Serialize>(
@@ -132,7 +158,37 @@ impl Store {
         run_id: &str,
         value: &T,
     ) -> Result<()> {
-        tx.execute("INSERT INTO entities(kind,id,run_id,data) VALUES(?1,?2,?3,?4) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data",params![kind,id,run_id,serde_json::to_string(value)?])?;
+        Self::tx_write(tx, kind, id, run_id, value, true)
+    }
+    pub(crate) fn tx_put_metadata<T: Serialize>(
+        tx: &Connection,
+        kind: &str,
+        id: &str,
+        run_id: &str,
+        value: &T,
+    ) -> Result<()> {
+        Self::tx_write(tx, kind, id, run_id, value, false)
+    }
+    fn tx_write<T: Serialize>(
+        tx: &Connection,
+        kind: &str,
+        id: &str,
+        run_id: &str,
+        value: &T,
+        include_history: bool,
+    ) -> Result<()> {
+        let mut data = serde_json::to_value(value)?;
+        if kind == "agent" {
+            let object = data
+                .as_object_mut()
+                .context("agent metadata is not an object")?;
+            let checkpoint = object.remove("checkpoint");
+            let inherited = object.remove("inherited_context");
+            if include_history {
+                conversations::write(tx, id, run_id, checkpoint, inherited)?;
+            }
+        }
+        tx.execute("INSERT INTO entities(kind,id,run_id,data) VALUES(?1,?2,?3,?4) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data",params![kind,id,run_id,serde_json::to_string(&data)?])?;
         Ok(())
     }
     pub fn tx_list<T: DeserializeOwned>(
@@ -140,21 +196,50 @@ impl Store {
         kind: &str,
         run_id: &str,
     ) -> Result<Vec<T>> {
-        let mut q =
+        let mut query = tx.prepare(
+            "SELECT e.data,c.checkpoint,c.inherited_context FROM entities e
+            LEFT JOIN agent_conversations c ON e.kind='agent' AND c.agent_id=e.id
+            WHERE e.kind=?1 AND e.run_id=?2 ORDER BY e.rowid",
+        )?;
+        let rows = query.query_map(params![kind, run_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        rows.map(|row| {
+            let (data, checkpoint, inherited) = row?;
+            conversations::decode(data, checkpoint, inherited)
+        })
+        .collect()
+    }
+    pub(crate) fn tx_list_metadata<T: DeserializeOwned>(
+        tx: &Connection,
+        kind: &str,
+        run_id: &str,
+    ) -> Result<Vec<T>> {
+        let mut query =
             tx.prepare("SELECT data FROM entities WHERE kind=?1 AND run_id=?2 ORDER BY rowid")?;
-        let strings = q
-            .query_map(params![kind, run_id], |r| r.get::<_, String>(0))?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        strings
-            .into_iter()
-            .map(|s| Ok(serde_json::from_str(&s)?))
-            .collect()
+        let rows = query.query_map(params![kind, run_id], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
     pub fn get<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<Option<T>> {
         self.read_transaction(|tx| Self::tx_get(tx, kind, id))
     }
+    pub(crate) fn get_metadata<T: DeserializeOwned>(
+        &self,
+        kind: &str,
+        id: &str,
+    ) -> Result<Option<T>> {
+        self.read_transaction(|tx| Self::tx_get_metadata(tx, kind, id))
+    }
     pub fn require<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<T> {
         self.get(kind, id)?
+            .ok_or_else(|| anyhow!("{kind} {id} does not exist"))
+    }
+    pub(crate) fn require_metadata<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<T> {
+        self.get_metadata(kind, id)?
             .ok_or_else(|| anyhow!("{kind} {id} does not exist"))
     }
     pub fn put<T: Serialize>(&self, kind: &str, id: &str, run_id: &str, value: &T) -> Result<()> {
@@ -162,6 +247,13 @@ impl Store {
     }
     pub fn list<T: DeserializeOwned>(&self, kind: &str, run_id: &str) -> Result<Vec<T>> {
         self.read_transaction(|tx| Self::tx_list(tx, kind, run_id))
+    }
+    pub(crate) fn list_metadata<T: DeserializeOwned>(
+        &self,
+        kind: &str,
+        run_id: &str,
+    ) -> Result<Vec<T>> {
+        self.read_transaction(|tx| Self::tx_list_metadata(tx, kind, run_id))
     }
     pub fn runs(&self) -> Result<Vec<RunRecord>> {
         self.read_transaction(|tx| {
@@ -254,7 +346,7 @@ impl Store {
         key: Option<&str>,
     ) -> Result<bool> {
         let target: AgentRecord =
-            Self::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
+            Self::tx_get_metadata(tx, "agent", recipient)?.context("recipient missing")?;
         let envelope = MessageEnvelope {
             options: MessageOptions {
                 kind: MessageKind::Result,
@@ -262,7 +354,7 @@ impl Store {
                 ..Default::default()
             },
             task_id: recipient.into(),
-            sender_generation: Self::tx_get::<AgentRecord>(tx, "agent", sender)?
+            sender_generation: Self::tx_get_metadata::<AgentRecord>(tx, "agent", sender)?
                 .map(|agent| agent.generation),
             ..Default::default()
         };
@@ -303,7 +395,7 @@ impl Store {
     pub fn inbox(&self, recipient: &str) -> Result<Vec<Message>> {
         self.read_transaction(|tx| {
             let agent: AgentRecord =
-                Self::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
+                Self::tx_get_metadata(tx, "agent", recipient)?.context("recipient missing")?;
             Ok(Self::tx_messages(tx, &agent.run_id)?
                 .into_iter()
                 .filter(|message| {
@@ -456,14 +548,12 @@ impl Store {
         generation: Option<u64>,
     ) -> Result<()> {
         self.transaction(|tx| {
-            let mut agent: AgentRecord =
-                Self::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+            let agent: AgentRecord =
+                Self::tx_get_metadata(tx, "agent", agent_id)?.context("agent missing")?;
             if generation.is_some_and(|expected| expected != agent.generation) {
                 return Ok(());
             }
-            agent.checkpoint = Some(checkpoint);
-            agent.updated_at = now();
-            Self::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
+            conversations::write(tx,agent_id,&agent.run_id,Some(checkpoint),None)?;
             for mid in message_ids {
                 tx.execute(
                     "UPDATE messages SET acknowledged=1,envelope=json_set(envelope,'$.delivery',CASE WHEN json_extract(envelope,'$.delivery')='replied' THEN 'replied' ELSE 'included' END) WHERE id=?1 AND recipient=?2 AND COALESCE(json_extract(envelope,'$.delivery'),'queued')!='stale'",
@@ -487,6 +577,73 @@ impl UtcTimestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsupported_state_schema_is_rejected_without_rewriting_records() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let conn = Connection::open(directory.path().join("state.sqlite3"))?;
+        conn.execute_batch(
+            "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            INSERT INTO meta VALUES('schema_version','2');
+            CREATE TABLE legacy_history(data TEXT); INSERT INTO legacy_history VALUES('retained');",
+        )?;
+        let error = match Store::open(directory.path()) {
+            Ok(_) => panic!("old schema accepted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("expected 3"));
+        let history: String =
+            conn.query_row("SELECT data FROM legacy_history", [], |row| row.get(0))?;
+        assert_eq!(history, "retained");
+        Ok(())
+    }
+
+    #[test]
+    fn metadata_writes_and_duplicate_checkpoints_do_not_rewrite_conversations() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let target = directory.path().join("sample");
+        fs::write(&target, b"fixture")?;
+        let store = Store::open(directory.path().join("state"))?;
+        let run = crate::coordinator::Coordinator::new(store.clone()).create_run(
+            &target,
+            "fixture",
+            Budget::default(),
+            json!({}),
+        )?;
+        let checkpoint = json!({"messages":["x".repeat(500_000)]});
+        store.checkpoint_and_ack(&run.root_id, checkpoint.clone(), &[])?;
+        let revision = || {
+            store.read_transaction(|tx| {
+                Ok(tx.query_row(
+                    "SELECT revision FROM agent_conversations WHERE agent_id=?1",
+                    [&run.root_id],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+        };
+        let before = revision()?;
+        for _ in 0..20 {
+            store.transaction(|tx| {
+                let mut agent: AgentRecord =
+                    Store::tx_get_metadata(tx, "agent", &run.root_id)?.context("missing")?;
+                assert!(agent.checkpoint.is_none());
+                agent.total_tokens += 10;
+                Store::tx_put_metadata(tx, "agent", &agent.id, &run.id, &agent)
+            })?;
+        }
+        store.checkpoint_and_ack(&run.root_id, checkpoint.clone(), &[])?;
+        store.checkpoint_and_ack_generation(
+            &run.root_id,
+            json!({"wrong generation":true}),
+            &[],
+            Some(42),
+        )?;
+        assert_eq!(revision()?, before);
+        let full: AgentRecord = store.require("agent", &run.root_id)?;
+        assert_eq!(full.checkpoint, Some(checkpoint));
+        assert_eq!(full.total_tokens, 200);
+        Ok(())
+    }
 
     #[test]
     fn readers_see_committed_state_while_another_writer_is_active() -> Result<()> {
