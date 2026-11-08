@@ -395,6 +395,12 @@ enum TuiModal {
     Quit,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DragPane {
+    Tree,
+    Right,
+}
+
 /// Validate a target path and drive a fresh assessment from the TUI,
 /// returning the new run id and its cancellation token.
 fn start_task(runner: &AssessmentRunner, target: &str) -> Result<(String, CancellationToken)> {
@@ -492,6 +498,46 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         width,
         height,
     )
+}
+
+/// Strix-style vertical scrollbar: a dim track with a bright thumb whose
+/// position mirrors the viewport window. Returns the glyph per row, or None
+/// when the content fits (an empty track).
+fn scrollbar_rows(offset: usize, content: usize, viewport: usize, rows: u16) -> Vec<Line<'static>> {
+    let mut lines = Vec::with_capacity(rows as usize);
+    for row in 0..rows {
+        let glyph = if content <= viewport || viewport == 0 {
+            Span::styled("·", Style::default().fg(Color::DarkGray))
+        } else {
+            let track = viewport.min(rows as usize).max(1);
+            let thumb = ((viewport * track) / content.max(1)).max(1);
+            let max_offset = content - viewport;
+            let thumb_y = (offset.min(max_offset) * (track - thumb)) / max_offset.max(1);
+            if (row as usize) >= thumb_y && (row as usize) < thumb_y + thumb {
+                Span::styled("█", Style::default().fg(Color::Cyan))
+            } else {
+                Span::styled("│", Style::default().fg(Color::DarkGray))
+            }
+        };
+        lines.push(Line::from(vec![glyph]));
+    }
+    lines
+}
+
+/// Convert a pointer row inside the scrollbar track into the corresponding
+/// scroll offset (click-to-jump and drag use the same mapping).
+fn scrollbar_jump(row: u16, rect: Rect, content: usize, viewport: usize) -> usize {
+    let track = rect.height as usize;
+    if track == 0 || content <= viewport {
+        return 0;
+    }
+    let row = (row.saturating_sub(rect.y)).min(rect.height.saturating_sub(1)) as usize;
+    let thumb = ((viewport * track) / content.max(1)).max(1);
+    let span = track.saturating_sub(thumb);
+    if span == 0 {
+        return 0;
+    }
+    (row * (content - viewport) / span).min(content - viewport)
 }
 
 fn clear_editor(editor: &mut ratatui_textarea::TextArea<'_>) {
@@ -771,6 +817,8 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
     editor.set_placeholder_text("▸ type a message (Enter sends, Esc clears)");
     let mut scroll: usize = 0;
     let mut detail_scroll: usize = 0;
+    let mut tree_scroll: usize = 0;
+    let mut drag: Option<DragPane> = None;
     let mut follow = true;
     let mut input_error: Option<String> = None;
     let mut drive_cancel: Option<CancellationToken> = None;
@@ -787,8 +835,10 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
     // right after a mouse event is ignored entirely.
     let mut last_mouse_at: Option<std::time::Instant> = None;
     let mut last_tree_rect: Option<Rect> = None;
-    let mut last_findings_rect: Option<Rect> = None;
     let mut last_right_rect: Option<Rect> = None;
+    let mut last_tree_sb_rect: Option<Rect> = None;
+    let mut last_right_sb_rect: Option<Rect> = None;
+    let mut last_findings_rect: Option<Rect> = None;
     loop {
         if selected.is_none()
             && let Ok(mut runs) = store.runs()
@@ -957,10 +1007,17 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
             // ---- middle: agent tree | activity/detail ----
             let middle = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+                .constraints([
+                    Constraint::Percentage(37),
+                    Constraint::Length(1),
+                    Constraint::Percentage(61),
+                    Constraint::Length(1),
+                ])
                 .split(areas[1]);
             last_tree_rect = Some(middle[0]);
-            last_right_rect = Some(middle[1]);
+            last_tree_sb_rect = Some(middle[1]);
+            last_right_rect = Some(middle[2]);
+            last_right_sb_rect = Some(middle[3]);
             let tree_lines: Vec<Line> = agents
                 .iter()
                 .enumerate()
@@ -1027,11 +1084,25 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                     Line::from(spans)
                 })
                 .collect();
+            let tree_viewport = middle[0].height.saturating_sub(2) as usize;
+            let tree_visible = tree_lines
+                .iter()
+                .skip(tree_scroll.min(tree_lines.len().saturating_sub(1)))
+                .take(tree_viewport.max(1));
             frame.render_widget(
-                Paragraph::new(tree_lines)
+                Paragraph::new(tree_visible.cloned().collect::<Vec<_>>())
                     .block(Block::default().borders(Borders::ALL).title(" AGENT TREE "))
                     .wrap(Wrap { trim: false }),
                 middle[0],
+            );
+            frame.render_widget(
+                Paragraph::new(scrollbar_rows(
+                    tree_scroll,
+                    tree_lines.len(),
+                    tree_viewport,
+                    middle[1].height,
+                )),
+                middle[1],
             );
             if let Some(agent) = detail_agent
                 .as_deref()
@@ -1091,6 +1162,7 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                     .take(right_height.saturating_sub(2).saturating_sub(banner_rows));
                 let mut content = banner;
                 content.extend(window.cloned());
+                let detail_content_len = detail_lines.len().saturating_add(banner_rows);
                 frame.render_widget(
                     Paragraph::new(content)
                         .block(
@@ -1100,13 +1172,22 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                                 .border_style(Style::default().fg(Color::Cyan)),
                         )
                         .wrap(Wrap { trim: false }),
-                    middle[1],
+                    middle[2],
+                );
+                frame.render_widget(
+                    Paragraph::new(scrollbar_rows(
+                        detail_scroll,
+                        detail_content_len,
+                        right_height.saturating_sub(2),
+                        middle[3].height,
+                    )),
+                    middle[3],
                 );
             } else if detail_agent.is_some() {
                 frame.render_widget(
                     Paragraph::new(vec![Line::from("Loading...")])
                         .block(Block::default().borders(Borders::ALL).title(" agent ")),
-                    middle[1],
+                    middle[2],
                 );
             } else {
                 let visible = events
@@ -1160,7 +1241,16 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                             }
                         )))
                         .wrap(Wrap { trim: false }),
-                    middle[1],
+                    middle[2],
+                );
+                frame.render_widget(
+                    Paragraph::new(scrollbar_rows(
+                        scroll,
+                        events.len(),
+                        right_height.saturating_sub(2),
+                        middle[3].height,
+                    )),
+                    middle[3],
                 );
             }
             // ---- findings ----
@@ -1539,10 +1629,36 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                 last_mouse_at = Some(std::time::Instant::now());
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(rect) = last_tree_sb_rect
+                            && rect.contains((mouse.column, mouse.row).into())
+                        {
+                            drag = Some(DragPane::Tree);
+                            tree_scroll = scrollbar_jump(mouse.row, rect, agents.len(), right_height);
+                        }
+                        if let Some(rect) = last_right_sb_rect
+                            && rect.contains((mouse.column, mouse.row).into())
+                        {
+                            drag = Some(DragPane::Right);
+                            if detail_agent.is_some() {
+                                detail_scroll = scrollbar_jump(
+                                    mouse.row,
+                                    rect,
+                                    detail_lines.len().saturating_add(2),
+                                    right_height,
+                                );
+                            } else {
+                                follow = false;
+                                scroll = scrollbar_jump(mouse.row, rect, events.len(), right_height);
+                            }
+                        }
                         if let Some(rect) = last_tree_rect
                             && rect.contains((mouse.column, mouse.row).into())
                         {
-                            let row = mouse.row.saturating_sub(rect.y + 1) as usize;
+                            let row = mouse
+                                .row
+                                .saturating_sub(rect.y + 1)
+                                .saturating_add(tree_scroll as u16)
+                                as usize;
                             if row < agents.len() {
                                 tree_cursor = row;
                                 detail_agent = Some(agents[row].id.clone());
@@ -1559,11 +1675,56 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                             }
                         }
                     }
+                    MouseEventKind::Drag(MouseButton::Left) => {
+                        if let Some(pane) = drag {
+                            match pane {
+                                DragPane::Tree => {
+                                    if let Some(rect) = last_tree_sb_rect {
+                                        tree_scroll = scrollbar_jump(
+                                            mouse.row,
+                                            rect,
+                                            agents.len(),
+                                            right_height,
+                                        );
+                                    }
+                                }
+                                DragPane::Right => {
+                                    if let Some(rect) = last_right_sb_rect {
+                                        if detail_agent.is_some() {
+                                            detail_scroll = scrollbar_jump(
+                                                mouse.row,
+                                                rect,
+                                                detail_lines.len().saturating_add(2),
+                                                right_height,
+                                            );
+                                        } else {
+                                            follow = false;
+                                            scroll = scrollbar_jump(
+                                                mouse.row,
+                                                rect,
+                                                events.len(),
+                                                right_height,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => drag = None,
                     MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
                         let up = matches!(mouse.kind, MouseEventKind::ScrollUp);
+                        let over_tree = last_tree_rect
+                            .is_some_and(|rect| rect.contains((mouse.column, mouse.row).into()));
                         let over_right = last_right_rect
                             .is_some_and(|rect| rect.contains((mouse.column, mouse.row).into()));
-                        if detail_agent.is_some() && over_right {
+                        if over_tree {
+                            if up {
+                                tree_scroll = tree_scroll.saturating_add(1);
+                            } else {
+                                tree_scroll = tree_scroll.saturating_sub(1);
+                            }
+                        } else if detail_agent.is_some() && over_right {
                             if up {
                                 detail_scroll = detail_scroll.saturating_add(1);
                             } else {
