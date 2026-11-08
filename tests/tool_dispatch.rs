@@ -347,6 +347,28 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
 }
 
 #[tokio::test]
+async fn exec_command_routes_to_the_runtime_instead_of_unknown_tool() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, _run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    // The catalog advertises exec_command; dispatch must reach the runtime
+    // layer (which fails on the disabled backend here) rather than bail
+    // with "unknown tool".
+    let outcome = service
+        .execute(&agent.id, "shell-route", "exec_command", json!({"command":"echo hi"}))
+        .await?;
+    assert!(outcome.is_error);
+    let error = result(&outcome)["error"].as_str().unwrap().to_owned();
+    assert!(
+        error.contains("runtime is disabled") || error.contains("trusted_local"),
+        "exec_command did not reach the runtime layer: {error}"
+    );
+    assert!(!error.contains("unknown tool"), "{error}");
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn poc_verify_budget_enforces_closure_after_two_jobs() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, agent) = fixture(temp.path())?;

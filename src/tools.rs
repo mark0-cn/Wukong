@@ -932,7 +932,7 @@ impl ToolService {
             "job_start" | "job_status" | "job_cancel" | "job_artifacts" | "fuzz_start"
             | "fuzz_status" | "debug_start" | "debug_command" | "debug_close" | "crash_replay"
             | "input_minimize" | "poc_verify" | "angr_solve" | "interactive_start"
-            | "interactive_send" | "interactive_close" => {
+            | "interactive_send" | "interactive_close" | "exec_command" => {
                 self.runtime_tool(agent, call_id, name, args).await
             }
             _ if self.mcp.contains(name) => self.mcp.call(name, args).await,
