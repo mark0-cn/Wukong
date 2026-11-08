@@ -45,7 +45,7 @@ impl ToolService {
             .verify_evidence_links(&agent.run_id, &request.contract.input_evidence_ids)?;
         for skill in &request.skills {
             agents::validate_capability(skill)?;
-            agents::load_skill(skill, self.config.skills_dir.as_deref())?;
+            agents::load_skill(skill, self.skills_dir.as_deref())?;
         }
         self.effect(agent, call_id, |tx| {
             Ok(serde_json::to_value(Coordinator::tx_create_child(
@@ -71,7 +71,7 @@ impl ToolService {
                 .chain(agent.active_skills.iter().map(|skill| skill.name.as_str()))
                 .chain(std::iter::once(name)),
         )?;
-        let content = agents::load_skill(name, self.config.skills_dir.as_deref())?;
+        let content = agents::load_skill(name, self.skills_dir.as_deref())?;
         let sha256 = binary::sha256_bytes(content.as_bytes());
         let evidence = self.store.artifact(
             &agent.run_id,

@@ -1,7 +1,14 @@
 //! Analysis tool operations.
 use super::*;
 
-impl ToolService {
+#[derive(Clone)]
+pub(super) struct AnalysisService {
+    pub(super) store: Store,
+    pub(super) gateway: WorkerGateway,
+    pub(super) files: FilesService,
+    pub(super) config: crate::config::StaticConfig,
+}
+impl AnalysisService {
     pub(super) async fn ghidra(
         &self,
         agent: &AgentMetadata,
@@ -9,7 +16,7 @@ impl ToolService {
         name: &str,
         args: &Value,
     ) -> Result<Value> {
-        let run = self.target(agent)?;
+        let run = target(&self.store, agent)?;
         let query = match name {
             "functions_search" => GhidraQuery::Functions {
                 pattern: args["pattern"].as_str().map(str::to_owned),
@@ -31,15 +38,15 @@ impl ToolService {
         };
         let executable = self
             .config
-            .analysis
             .ghidra_executable
             .clone()
             .or_else(|| std::env::var_os("RE_AGENT_GHIDRA_HEADLESS").map(PathBuf::from));
-        if executable.is_none() && self.runtime.is_some() {
+        if executable.is_none() && self.gateway.client.is_some() {
             let staged = self
+                .files
                 .stage_target(agent, &format!("{call_id}:target"))
                 .await?;
-            let result=self.worker_call(agent,call_id,"ghidra.query",json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.analysis.timeout_seconds,"analysis_timeout_secs":self.config.analysis.analysis_timeout_seconds,"max_cpu":self.config.analysis.max_cpu})).await?;
+            let result=self.gateway.worker_call(agent,call_id,"ghidra.query",json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.timeout_seconds,"analysis_timeout_secs":self.config.analysis_timeout_seconds,"max_cpu":self.config.max_cpu})).await?;
             ensure!(
                 result["target_sha256"] == run.target_sha256,
                 "remote Ghidra analyzed another target"
@@ -49,6 +56,7 @@ impl ToolService {
             if let Some(artifacts) = result["artifacts"].as_array() {
                 for artifact in artifacts {
                     let raw = self
+                        .gateway
                         .runtime()?
                         .call(
                             "file.get",
@@ -59,7 +67,7 @@ impl ToolService {
                         raw["sha256"] == artifact["sha256"],
                         "remote Ghidra artifact changed during import"
                     );
-                    evidence_ids.push(self.import_file(agent, call_id, &raw)?.id);
+                    evidence_ids.push(self.files.import_file(agent, call_id, &raw)?.id);
                 }
             }
             // The per-artifact metadata (binding/execution/request/response
@@ -74,11 +82,11 @@ impl ToolService {
         let executable=executable.context("Ghidra is not configured; set analysis.ghidra_executable, RE_AGENT_GHIDRA_HEADLESS, or a worker with Ghidra")?;
         let backend = GhidraBackend::new(GhidraConfig {
             executable,
-            cache_dir: self.config.analysis.ghidra_cache_dir.clone(),
-            script_dir: self.config.analysis.ghidra_script_dir.clone(),
-            timeout_seconds: self.config.analysis.timeout_seconds,
-            analysis_timeout_seconds: self.config.analysis.analysis_timeout_seconds,
-            max_cpu: self.config.analysis.max_cpu,
+            cache_dir: self.config.ghidra_cache_dir.clone(),
+            script_dir: self.config.ghidra_script_dir.clone(),
+            timeout_seconds: self.config.timeout_seconds,
+            analysis_timeout_seconds: self.config.analysis_timeout_seconds,
+            max_cpu: self.config.max_cpu,
         })?;
         let result = backend.query(&run.target_path, &query).await?;
         let mut logs = Vec::new();

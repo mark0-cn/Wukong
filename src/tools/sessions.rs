@@ -10,20 +10,26 @@ fn session_lost(error: &anyhow::Error) -> bool {
     })
 }
 
-impl ToolService {
+#[derive(Clone)]
+pub(super) struct SessionsService {
+    pub(super) store: Store,
+    pub(super) gateway: WorkerGateway,
+    pub(super) files: FilesService,
+}
+impl SessionsService {
     pub(super) fn authorize_session(
         &self,
         agent: &AgentMetadata,
-        session: &Value,
+        session: &SessionRecord,
         closing: bool,
     ) -> Result<()> {
         ensure!(
-            session["worker_id"] == self.worker_identity()?,
+            session.worker_id == self.gateway.worker_identity()?,
             "session belongs to another runtime"
         );
-        if session["agent_id"] != agent.id {
+        if session.agent_id != agent.id {
             let owner: AgentMetadata =
-                self.require_in_run("agent", text(session, "agent_id")?, &agent.run_id)?;
+                require_in_run(&self.store, "agent", &session.agent_id, &agent.run_id)?;
             ensure!(
                 closing && owner.status.terminal(),
                 "session is owned by another active agent"
@@ -42,16 +48,16 @@ impl ToolService {
         match name {
             "debug_command" | "debug_close" => {
                 let session_id = text(&args, "session_id")?.to_owned();
-                let mut session: Value =
-                    self.require_in_run("debug_session", &session_id, &agent.run_id)?;
+                let mut session: SessionRecord =
+                    require_in_run(&self.store, "debug_session", &session_id, &agent.run_id)?;
                 self.authorize_session(agent, &session, name == "debug_close")?;
-                let current: SessionState = serde_json::from_value(session["state"].clone())?;
+                let current = session.state;
                 // Idempotent close, mirroring interactive_close: a closed/lost
                 // debug session closes again successfully.
                 if name == "debug_close"
                     && matches!(current, SessionState::Closed | SessionState::Lost)
                 {
-                    session["updated_at"] = json!(now());
+                    session.updated_at = now();
                     self.store
                         .put("debug_session", &session_id, &agent.run_id, &session)?;
                     return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
@@ -61,6 +67,7 @@ impl ToolService {
                     "debug session is closed or lost"
                 );
                 let raw = match self
+                    .gateway
                     .worker_call(
                         agent,
                         call_id,
@@ -78,8 +85,8 @@ impl ToolService {
                         // Worker lost the session (daemon restart): reconcile
                         // the local record so agent_finish is not blocked.
                         if name == "debug_close" && session_lost(&error) {
-                            session["state"] = json!("lost");
-                            session["updated_at"] = json!(now());
+                            session.state = SessionState::Lost;
+                            session.updated_at = now();
                             self.store.put(
                                 "debug_session",
                                 &session_id,
@@ -98,30 +105,42 @@ impl ToolService {
                     .map(str::to_owned)
                     .unwrap_or_else(|| format!("debug/{session_id}/transcript.mi"));
                 let transcript = self
+                    .gateway
                     .runtime()?
                     .call(
                         "file.get",
                         json!({"path":transcript,"max_bytes":8*1024*1024}),
                     )
                     .await?;
-                let evidence = self.import_file(agent, call_id, &transcript)?;
-                session["transcript_evidence_id"] = json!(evidence.id);
+                let evidence = self.files.import_file(agent, call_id, &transcript)?;
+                session.transcript_evidence_id = Some(evidence.id.clone());
                 if name == "debug_close" {
-                    session["state"] = json!("closed");
+                    session.state = SessionState::Closed;
                 }
-                session["updated_at"] = json!(now());
+                session.updated_at = now();
                 self.store
                     .put("debug_session", &session_id, &agent.run_id, &session)?;
                 Ok(json!({"response":raw,"transcript_evidence_id":evidence.id}))
             }
             "debug_start" => {
-                self.known_file(agent, text(&args, "target")?, true)?;
+                self.files.known_file(agent, text(&args, "target")?, true)?;
                 let raw = self
+                    .gateway
                     .worker_call(agent, call_id, "debug.start", args)
                     .await?;
                 let handle: SessionHandle = serde_json::from_value(raw.clone())?;
                 let session_id = handle.session_id.as_str();
-                let record = json!({"id":session_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"state":raw["state"],"worker":raw,"created_at":now(),"updated_at":now()});
+                let record = SessionRecord {
+                    id: session_id.into(),
+                    run_id: agent.run_id.clone(),
+                    agent_id: agent.id.clone(),
+                    worker_id: self.gateway.worker_identity()?,
+                    state: handle.state,
+                    worker: Some(raw.clone()),
+                    transcript_evidence_id: None,
+                    created_at: now(),
+                    updated_at: now(),
+                };
                 self.store
                     .put("debug_session", session_id, &agent.run_id, &record)?;
                 Ok(raw)
@@ -132,27 +151,38 @@ impl ToolService {
                     "interactive argv cannot be empty"
                 );
                 let raw = self
+                    .gateway
                     .worker_call(agent, call_id, "interact.start", args)
                     .await?;
                 let handle: SessionHandle = serde_json::from_value(raw.clone())?;
                 let session_id = handle.session_id.as_str();
-                let record = json!({"id":session_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"state":handle.state,"created_at":now(),"updated_at":now()});
+                let record = SessionRecord {
+                    id: session_id.into(),
+                    run_id: agent.run_id.clone(),
+                    agent_id: agent.id.clone(),
+                    worker_id: self.gateway.worker_identity()?,
+                    state: handle.state,
+                    worker: Some(raw.clone()),
+                    transcript_evidence_id: None,
+                    created_at: now(),
+                    updated_at: now(),
+                };
                 self.store
                     .put("interact_session", session_id, &agent.run_id, &record)?;
                 Ok(raw)
             }
             "interactive_send" | "interactive_close" => {
                 let session_id = text(&args, "session_id")?.to_owned();
-                let mut session: Value =
-                    self.require_in_run("interact_session", &session_id, &agent.run_id)?;
+                let mut session: SessionRecord =
+                    require_in_run(&self.store, "interact_session", &session_id, &agent.run_id)?;
                 self.authorize_session(agent, &session, name == "interactive_close")?;
-                let current: SessionState = serde_json::from_value(session["state"].clone())?;
+                let current = session.state;
                 // Closing is idempotent: an already closed/lost session closes
                 // again successfully instead of stranding the caller.
                 if name == "interactive_close"
                     && matches!(current, SessionState::Closed | SessionState::Lost)
                 {
-                    session["updated_at"] = json!(now());
+                    session.updated_at = now();
                     self.store
                         .put("interact_session", &session_id, &agent.run_id, &session)?;
                     return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
@@ -163,6 +193,7 @@ impl ToolService {
                     "interactive session is closed or lost"
                 );
                 let raw = match self
+                    .gateway
                     .worker_call(
                         agent,
                         call_id,
@@ -189,15 +220,15 @@ impl ToolService {
                     }
                 };
                 if name == "interactive_close" {
-                    session["state"] = json!(if raw["state"].as_str() == Some("lost") {
-                        "lost"
+                    session.state = if raw["state"].as_str() == Some("lost") {
+                        SessionState::Lost
                     } else {
-                        "closed"
-                    });
+                        SessionState::Closed
+                    };
                 } else if raw["state"].as_str() == Some("exited") {
-                    session["state"] = json!("exited");
+                    session.state = SessionState::Exited;
                 }
-                session["updated_at"] = json!(now());
+                session.updated_at = now();
                 self.store
                     .put("interact_session", &session_id, &agent.run_id, &session)?;
                 Ok(raw)

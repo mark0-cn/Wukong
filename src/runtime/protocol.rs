@@ -1,66 +1,8 @@
 //! Typed worker boundary. Unknown result fields are retained for raw evidence.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum JobState {
-    Queued,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-    TimedOut,
-    Lost,
-}
-impl JobState {
-    pub fn terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::TimedOut | Self::Lost
-        )
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct JobResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit_code: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub passed: Option<bool>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JobStatus {
-    pub job_id: String,
-    pub state: JobState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<JobResult>,
-    #[serde(default)]
-    pub stdout: String,
-    #[serde(default)]
-    pub stderr: String,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionState {
-    Running,
-    Exited,
-    Closed,
-    Lost,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SessionHandle {
-    pub session_id: String,
-    pub state: SessionState,
-}
+pub use crate::domain::{JobResult, JobState, JobStatus, SessionHandle, SessionState};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]

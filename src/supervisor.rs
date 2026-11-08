@@ -173,7 +173,7 @@ for line in sys.stdin:
                 "job",
                 "job",
                 &run.id,
-                &json!({"id":"job","run_id":run.id,"agent_id":run.root_id,"owner_generation":0,"worker_id":runner.tools.worker_identity()?,"status":{"job_id":"job","state":"queued"}}),
+                &json!({"id":"job","run_id":run.id,"agent_id":run.root_id,"owner_generation":0,"tool_name":"job_start","call_id":"fixture","worker_request_id":"fixture","parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"worker_id":runner.tools.worker_identity()?,"status":{"job_id":"job","state":"queued"}}),
             )?;
             let cancel = CancellationToken::new();
             let child_cancel = cancel.clone();

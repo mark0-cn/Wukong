@@ -15,7 +15,6 @@ use rig::{
     completion::{ToolAnnotations, ToolDefinition},
     message::ToolName,
 };
-use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc, time::Duration};
@@ -27,8 +26,10 @@ pub use crate::effects::{EffectOutcome as ToolOutcome, reconcile_record};
 pub struct ToolService {
     pub store: Store,
     pub coordinator: Coordinator,
-    pub config: AppConfig,
-    runtime: Option<RuntimeClient>,
+    limits: crate::config::ToolLimits,
+    skills_dir: Option<PathBuf>,
+    execution: ExecutionService,
+    analysis: AnalysisService,
     mcp: McpRegistry,
     locks: Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>,
 }
@@ -39,6 +40,13 @@ mod catalog;
 mod coordination;
 mod discovery;
 mod execution;
+mod gateway;
+use analysis::AnalysisService;
+use execution::ExecutionService;
+use files::FilesService;
+use gateway::WorkerGateway;
+use sessions::SessionsService;
+type ResourceLocks = Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>;
 mod files;
 mod handlers;
 mod jobs;
@@ -91,31 +99,67 @@ pub fn builtin_catalog_markdown() -> String {
 
 impl ToolService {
     pub(crate) fn effects(&self) -> DurableEffects<'_> {
-        DurableEffects::new(&self.store, self.config.tools.max_output_bytes)
+        DurableEffects::new(&self.store, self.limits.max_output_bytes)
     }
     pub(crate) fn with_store(&self, store: Store) -> Self {
+        let gateway = WorkerGateway {
+            store: store.clone(),
+            ..self.execution.gateway.clone()
+        };
+        let execution = ExecutionService::new(store.clone(), gateway.clone(), self.locks.clone());
+        let analysis = AnalysisService {
+            store: store.clone(),
+            files: execution.files.clone(),
+            gateway,
+            config: self.analysis.config.clone(),
+        };
         Self {
-            coordinator: Coordinator::new(store.clone()),
-            store,
+            store: store.clone(),
+            coordinator: Coordinator::new(store),
+            execution,
+            analysis,
             ..self.clone()
         }
     }
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
         config.validate()?;
-        let runtime = if config.runtime.backend == RuntimeBackend::Disabled {
+        let client = if config.runtime.backend == RuntimeBackend::Disabled {
             None
         } else {
             Some(RuntimeClient::connect(config.runtime.clone()).await?)
         };
         let mcp = McpRegistry::connect(&config.mcp).await?;
+        let locks = Arc::new(Mutex::new(BTreeMap::new()));
+        let gateway = WorkerGateway {
+            store: store.clone(),
+            client,
+            identity: stable("worker", &serde_json::to_string(&config.runtime)?),
+            output_limit: config.tools.max_output_bytes,
+        };
+        let execution = ExecutionService::new(store.clone(), gateway.clone(), locks.clone());
+        let analysis = AnalysisService {
+            store: store.clone(),
+            files: execution.files.clone(),
+            gateway,
+            config: config.analysis,
+        };
         Ok(Self {
-            coordinator: Coordinator::new(store.clone()),
-            store,
-            config,
-            runtime,
+            store: store.clone(),
+            coordinator: Coordinator::new(store),
+            limits: config.tools,
+            skills_dir: config.skills_dir,
+            execution,
+            analysis,
             mcp,
-            locks: Arc::new(Mutex::new(BTreeMap::new())),
+            locks,
         })
+    }
+    pub(crate) fn jobs(&self) -> &jobs::JobService {
+        &self.execution.jobs
+    }
+    #[cfg(test)]
+    pub(crate) fn worker_identity(&self) -> Result<String> {
+        self.execution.gateway.worker_identity()
     }
     pub(crate) fn allows(&self, role: Role, name: &str) -> bool {
         builtins()
@@ -145,12 +189,12 @@ impl ToolService {
     }
     pub async fn close(&self) {
         self.mcp.close().await;
-        if let Some(runtime) = &self.runtime {
+        if let Some(runtime) = &self.execution.gateway.client {
             let _ = runtime.close().await;
         }
     }
     pub async fn doctor(&self) -> Result<Value> {
-        if let Some(runtime) = &self.runtime {
+        if let Some(runtime) = &self.execution.gateway.client {
             runtime.doctor().await
         } else {
             Ok(
@@ -217,7 +261,7 @@ impl ToolService {
                     .saturating_add(10),
             )
         } else {
-            Duration::from_secs(self.config.tools.timeout_seconds)
+            Duration::from_secs(self.limits.timeout_seconds)
         };
         let result = async {
             ensure!(args.is_object(), "tool arguments must be a JSON object");
@@ -299,36 +343,9 @@ impl ToolService {
         self.effects().commit(agent, call_id, action)
     }
 
-    fn require_in_run<T: serde::de::DeserializeOwned + Serialize>(
-        &self,
-        kind: &str,
-        id: &str,
-        run_id: &str,
-    ) -> Result<T> {
-        let record: T = self.store.require(kind, id)?;
-        let value = serde_json::to_value(&record)?;
-        ensure!(
-            value["run_id"].as_str() == Some(run_id),
-            "{kind} belongs to another run"
-        );
-        Ok(record)
-    }
-    fn target(&self, agent: &AgentMetadata) -> Result<RunRecord> {
-        ensure!(
-            agent.role != Role::Root,
-            "root cannot operate on the target"
-        );
-        let run: RunRecord = self.store.require("run", &agent.run_id)?;
-        ensure!(
-            binary::sha256_file(&run.target_path)? == run.target_sha256,
-            "target SHA256 changed since run creation"
-        );
-        Ok(run)
-    }
+    #[cfg(test)]
     pub(crate) fn runtime(&self) -> Result<&RuntimeClient> {
-        self.runtime.as_ref().context(
-            "execution runtime is disabled; configure Docker/SSH or explicitly trusted_local",
-        )
+        self.execution.gateway.runtime()
     }
 }
 
@@ -443,6 +460,29 @@ fn validated_arguments(mut value: Value, schema: &Value) -> Result<Value> {
         )
     })?;
     Ok(value)
+}
+
+fn require_in_run<T: serde::de::DeserializeOwned + RunScoped>(
+    store: &Store,
+    kind: &str,
+    id: &str,
+    run_id: &str,
+) -> Result<T> {
+    let record: T = store.require(kind, id)?;
+    ensure!(record.run_id() == run_id, "{kind} belongs to another run");
+    Ok(record)
+}
+fn target(store: &Store, agent: &AgentMetadata) -> Result<RunRecord> {
+    ensure!(
+        agent.role != Role::Root,
+        "root cannot operate on the target"
+    );
+    let run: RunRecord = store.require("run", &agent.run_id)?;
+    ensure!(
+        binary::sha256_file(&run.target_path)? == run.target_sha256,
+        "target SHA256 changed since run creation"
+    );
+    Ok(run)
 }
 
 #[cfg(test)]
