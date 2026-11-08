@@ -29,6 +29,7 @@ pub(crate) struct AgentSummary {
     pub id: String,
     pub name: String,
     pub role: Role,
+    pub generation: u64,
     pub task: String,
     pub status: Status,
     pub depth: u32,
@@ -43,7 +44,7 @@ pub(crate) struct AgentSummary {
 
 pub(crate) struct Change<T> {
     id: String,
-    value: Option<T>,
+    pub value: Option<T>,
 }
 
 pub(crate) fn apply<T>(values: &mut Vec<T>, changes: Vec<Change<T>>, id: impl Fn(&T) -> &str) {
@@ -111,6 +112,63 @@ fn changes<T: DeserializeOwned>(
     .collect()
 }
 
+fn read_reply_text(tx: &Connection, run: &str, agent: &str) -> Result<Vec<String>> {
+    let mut query = tx.prepare(
+        "SELECT data FROM events WHERE run_id=?1 AND agent_id=?2
+        AND kind='model.text' ORDER BY seq DESC LIMIT 3",
+    )?;
+    let rows = query.query_map(params![run, agent], |row| row.get::<_, String>(0))?;
+    let mut replies = Vec::new();
+    for row in rows {
+        let value: serde_json::Value = serde_json::from_str(&row?)?;
+        if let Some(text) = value["text"].as_str() {
+            replies.push(text.to_owned());
+        }
+    }
+    replies.reverse();
+    Ok(replies)
+}
+
+fn visible_calls(
+    tx: &Connection,
+    run: &str,
+    after: i64,
+    events: &[Event],
+    previous: &BTreeMap<String, ToolCallRecord>,
+    reset: bool,
+) -> Result<Option<Vec<ToolCallRecord>>> {
+    let ids: BTreeSet<_> = events
+        .iter()
+        .filter_map(|event| event.data["call_id"].as_str().map(str::to_owned))
+        .collect();
+    let mut query = tx.prepare(
+        "SELECT id FROM entity_revisions WHERE kind='call' AND run_id=?1 AND revision>?2",
+    )?;
+    let changed: BTreeSet<String> = query
+        .query_map(params![run, after], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    if !reset
+        && ids.len() == previous.len()
+        && ids
+            .iter()
+            .all(|id| previous.contains_key(id) && !changed.contains(id))
+    {
+        return Ok(None);
+    }
+    let mut calls = Vec::with_capacity(ids.len());
+    for id in ids {
+        if !reset
+            && !changed.contains(&id)
+            && let Some(call) = previous.get(&id)
+        {
+            calls.push(call.clone());
+        } else if let Some(call) = Store::tx_get(tx, "call", &id)? {
+            calls.push(call);
+        }
+    }
+    Ok(Some(calls))
+}
+
 impl Reader {
     pub fn read(
         &mut self,
@@ -125,72 +183,80 @@ impl Reader {
                 ..Self::default()
             };
         }
-        // All cursors and data are observed together, including external CLI writes.
-        let (delta, revision, conversation_revision) = store.read_transaction(|tx| {
-            let revision: i64 = tx.query_row("SELECT COALESCE(MAX(revision),0) FROM entity_revisions",[],|row|row.get(0))?;
-            let runs = changes(tx,"run",None,self.revision,"json_remove(e.data,'$.config')")?;
-            let selected = selected.map(str::to_owned).or_else(|| {
-                tx.query_row("SELECT id FROM entities WHERE kind='run' ORDER BY rowid DESC LIMIT 1",[],|row|row.get::<_,String>(0)).ok()
-            });
+        // Cursor advancement and its rows share a snapshot, including external CLI writes.
+        let (mut delta, revision, conversation_revision, conversation, legacy_replies) = store.read_transaction(|tx| {
+            let revision: i64 = tx.query_row("SELECT COALESCE(MAX(revision),0) FROM entity_revisions", [], |row| row.get(0))?;
+            let runs = changes(tx, "run", None, self.revision, "json_remove(e.data,'$.config')")?;
+            let selected = match selected {
+                Some(id) => Some(id.to_owned()),
+                None => tx.query_row("SELECT id FROM entities WHERE kind='run' ORDER BY rowid DESC LIMIT 1", [], |row| row.get::<_, String>(0)).optional()?,
+            };
             let reset = self.selected != selected || self.revision == 0;
-            let after = if reset {0} else {self.revision};
-            let mut agents = vec![];
-            let mut notes = vec![];
-            let mut findings = vec![];
-            let mut events = None;
-            let mut calls = None;
+            let after = if reset { 0 } else { self.revision };
+            let mut delta = Delta { selected, reset, runs, agents: vec![], notes: vec![], findings: vec![], events: None, calls: None, conversation: None };
+            let mut conversation_revision = None;
             let mut conversation = None;
-            let mut conversation_revision=None;
-            if let Some(run) = selected.as_deref() {
-                agents = changes::<AgentSummary>(tx,"agent",Some(run),after,"json_remove(e.data,'$.checkpoint','$.inherited_context','$.active_skills')")?;
-                for change in &mut agents {
+            let mut legacy_replies = Vec::new();
+            if let Some(run) = delta.selected.as_deref() {
+                delta.agents = changes::<AgentSummary>(tx, "agent", Some(run), after, "json_remove(e.data,'$.active_skills')")?;
+                delta.notes = changes(tx, "note", Some(run), after, "e.data")?;
+                delta.findings = changes(tx, "finding", Some(run), after, "e.data")?;
+                let latest: i64 = tx.query_row("SELECT COALESCE(MAX(seq),0) FROM events WHERE run_id=?1", [run], |row| row.get(0))?;
+                let last = self.events.last().map_or(0, |event| event.seq);
+                if reset || latest != last || self.event_limit != event_limit {
+                    delta.events = Some(Store::tx_recent_events(tx, run, event_limit)?);
+                }
+                let window = delta.events.as_deref().unwrap_or(&self.events);
+                // Narration can arrive without a metadata mutation.
+                let narrators: BTreeSet<_> = window.iter().filter(|event| event.seq > last && event.kind == "model.text").filter_map(|event| event.agent_id.as_ref()).collect();
+                for id in narrators {
+                    if !delta.agents.iter().any(|change| &change.id == id)
+                        && let Some(summary) = Store::tx_get_metadata(tx, "agent", id)? {
+                        delta.agents.push(Change { id: id.clone(), value: Some(summary) });
+                    }
+                }
+                for change in &mut delta.agents {
                     if let Some(summary) = &mut change.value {
-                        let mut query = tx.prepare("SELECT data FROM events WHERE run_id=?1 AND agent_id=?2 AND kind='model.text' ORDER BY seq DESC LIMIT 3")?;
-                        let rows = query.query_map(params![run,summary.id],|row|row.get::<_,String>(0))?;
-                        for row in rows {
-                            let data: serde_json::Value=serde_json::from_str(&row?)?;
-                            if let Some(text)=data["text"].as_str() {summary.public_replies.push(text.to_owned());}
-                        }
-                        summary.public_replies.reverse();
-                        if reset && summary.public_replies.is_empty() {
-                            // Older runs predate model.text events. Read once on selection.
-                            if let Some(record)=Store::tx_get::<AgentRecord>(tx,"agent",&summary.id)? {
-                                summary.public_replies=crate::gui_activity::public_replies(&record).into_iter().rev().take(3).collect();
-                                summary.public_replies.reverse();
-                            }
+                        summary.public_replies = read_reply_text(tx, run, &summary.id)?;
+                        if reset && summary.public_replies.is_empty()
+                            && let Some(record) = Store::tx_get::<AgentRecord>(tx, "agent", &summary.id)? {
+                            legacy_replies.push(record);
                         }
                     }
                 }
-                notes=changes(tx,"note",Some(run),after,"e.data")?;
-                findings=changes(tx,"finding",Some(run),after,"e.data")?;
-                let latest: i64=tx.query_row("SELECT COALESCE(MAX(seq),0) FROM events WHERE run_id=?1",[run],|row|row.get(0))?;
-                if reset || latest != self.events.last().map_or(0,|event|event.seq) || self.event_limit != event_limit {
-                    events=Some(Store::tx_recent_events(tx,run,event_limit)?);
+                delta.calls = visible_calls(tx, run, after, window, &self.calls, reset)?;
+                if let Some(id) = agent {
+                    conversation_revision = tx.query_row("SELECT revision FROM agent_conversations WHERE agent_id=?1 AND run_id=?2", params![id, run], |row| row.get(0)).optional()?;
                 }
-                let window=events.as_ref().unwrap_or(&self.events);
-                let ids: BTreeSet<_>=window.iter().filter_map(|event|event.data["call_id"].as_str().map(str::to_owned)).collect();
-                let changed: BTreeSet<String> = {
-                    let mut query=tx.prepare("SELECT id FROM entity_revisions WHERE kind='call' AND run_id=?1 AND revision>?2")?;
-                    query.query_map(params![run,after],|row|row.get(0))?.collect::<rusqlite::Result<_>>()?
-                };
-                let mut visible=if reset {BTreeMap::new()} else {self.calls.clone()};
-                visible.retain(|id,_|ids.contains(id));
-                for id in &ids {
-                    if !visible.contains_key(id) || changed.contains(id) {
-                        if let Some(call)=Store::tx_get(tx,"call",id)? {visible.insert(id.clone(),call);}
-                    }
-                }
-                if reset || events.is_some() || ids.iter().any(|id|changed.contains(id)) {calls=Some(visible.into_values().collect());}
-                if let Some(id)=agent {
-                    conversation_revision=tx.query_row("SELECT revision FROM agent_conversations WHERE agent_id=?1 AND run_id=?2",params![id,run],|row|row.get(0)).optional()?;
-                }
-                if reset || self.agent.as_deref()!=agent || conversation_revision!=self.conversation_revision {
-                    let record=agent.map(|id|Store::tx_get::<AgentRecord>(tx,"agent",id)).transpose()?.flatten();
-                    conversation=Some(record.filter(|record|record.run_id==run).map(|record|crate::gui_chat::Document::prepare(&record,self.conversation.as_ref())));
+                let deleted = delta.agents.iter().any(|change| Some(change.id.as_str()) == agent && change.value.is_none());
+                if reset || self.agent.as_deref() != agent || conversation_revision != self.conversation_revision || deleted {
+                    let record = agent.map(|id| Store::tx_get::<AgentRecord>(tx, "agent", id)).transpose()?.flatten();
+                    conversation = Some(record.filter(|record| record.run_id == run));
                 }
             }
-            Ok((Delta {selected,reset,runs,agents,notes,findings,events,calls,conversation},revision,conversation_revision))
+            Ok((delta, revision, conversation_revision, conversation, legacy_replies))
         })?;
+        // Parsing and hashing large conversations must not hold a SQLite snapshot or reader lock.
+        if let Some(record) = conversation {
+            delta.conversation = Some(record.map(|record| {
+                crate::gui_chat::Document::prepare(&record, self.conversation.as_ref())
+            }));
+        }
+        for record in legacy_replies {
+            if let Some(summary) = delta
+                .agents
+                .iter_mut()
+                .find(|change| change.id == record.id)
+                .and_then(|change| change.value.as_mut())
+            {
+                summary.public_replies = crate::gui_activity::public_replies(&record)
+                    .into_iter()
+                    .rev()
+                    .take(3)
+                    .collect();
+                summary.public_replies.reverse();
+            }
+        }
         self.revision = revision;
         self.conversation_revision = conversation_revision;
         self.selected = delta.selected.clone();
@@ -217,6 +283,54 @@ mod tests {
     use super::*;
     use crate::coordinator::Coordinator;
     use serde_json::json;
+
+    #[test]
+    #[ignore = "manual performance baseline; run with --ignored --nocapture"]
+    fn workspace_history_performance_baseline() -> Result<()> {
+        for count in [1_000, 10_000, 100_000] {
+            let directory = tempfile::tempdir()?;
+            let target = directory.path().join("sample");
+            std::fs::write(&target, b"fixture")?;
+            let store = Store::open(directory.path().join("state"))?;
+            let run = Coordinator::new(store.clone()).create_run(
+                &target,
+                "benchmark",
+                Budget::default(),
+                json!({}),
+            )?;
+            store.transaction(|tx| {
+                for index in 0..count {
+                    Store::tx_event(
+                        tx,
+                        &run.id,
+                        Some(&run.root_id),
+                        "benchmark",
+                        json!({"index":index}),
+                    )?;
+                }
+                Ok(())
+            })?;
+            let mut reader = Reader::default();
+            let started = std::time::Instant::now();
+            let initial = reader.read(&store, Some(&run.id), None, 500)?;
+            let initial_ms = started.elapsed().as_secs_f64() * 1000.0;
+            assert_eq!(initial.events.as_ref().unwrap().len(), 500);
+            let started = std::time::Instant::now();
+            for _ in 0..100 {
+                let unchanged = reader.read(&store, Some(&run.id), None, 500)?;
+                assert!(
+                    unchanged.events.is_none()
+                        && unchanged.calls.is_none()
+                        && unchanged.agents.is_empty()
+                );
+            }
+            let idle_ms = started.elapsed().as_secs_f64() * 10.0;
+            println!(
+                "history={count} initial_ms={initial_ms:.3} idle_mean_ms={idle_ms:.3} loaded_events=500"
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn background_queries_deliver_only_changes_and_bounded_history() -> Result<()> {

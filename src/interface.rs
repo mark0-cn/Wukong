@@ -37,6 +37,8 @@ pub enum Command {
         #[arg(default_value = "re-agent.toml")]
         path: PathBuf,
     },
+    /// Print the built-in tool catalog without opening state or connecting to a model.
+    ToolCatalog,
     /// Inspect model settings and installed analysis capabilities without calling a model.
     Doctor,
     /// Parse a binary without running it or calling a model.
@@ -120,6 +122,16 @@ pub async fn run(cli: Cli) -> Result<()> {
         println!("{}", json!({"config":path}));
         return Ok(());
     }
+    if matches!(command, Command::ToolCatalog) {
+        if cli.json {
+            print_json(&serde_json::to_value(
+                crate::tools::builtin_tool_definitions(),
+            )?)?;
+        } else {
+            print!("{}", crate::tools::builtin_catalog_markdown());
+        }
+        return Ok(());
+    }
     // Desktop settings travel with the executable. CLI keeps its working-directory
     // convention, and an explicit --config always takes precedence.
     let path = config_path(
@@ -145,7 +157,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     let store = Store::open(&config.state_dir)?;
     let coordinator = Coordinator::new(store.clone());
     match command {
-        Command::Init { .. } | Command::Inspect { .. } => unreachable!(),
+        Command::Init { .. } | Command::Inspect { .. } | Command::ToolCatalog => unreachable!(),
         Command::Doctor => {
             let runtime = if config.runtime.backend == RuntimeBackend::Disabled {
                 json!({"available":false,"reason":"execution worker disabled; configure Docker/SSH or explicitly select trusted_local fixtures"})

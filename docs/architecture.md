@@ -37,7 +37,7 @@ agent 状态包括 queued、running、waiting、budget_paused、completed、stop
 
 子 agent 完成前须关闭自己持有的调试和交互会话，根任务完成前须处理全部会话。停止或失败的 owner 遗留会话可以由同任务的其他子 agent 关闭；该权限不允许发送调试命令或交互输入。
 
-Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，不迁移旧版自定义 AgentRun 检查点。
+Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，使用 schema 3 状态目录，不提供旧数据库或旧版自定义 AgentRun 检查点迁移。
 
 业务工具调用标识由 agent、generation、已计量模型轮次与 provider tool-call ID 构成，不依赖恢复后会重新分配的 ECS 实体或效果 ID。中断后先重入业务调用账本，复用已完成结果或核对未决状态。原生效果及数据库变化唤醒执行循环；一秒心跳仅用于租约、时间预算及外部操作检查。
 
@@ -53,9 +53,17 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 共享资料按需装配：每次新模型请求按作者、父任务、前驱、scope 和任务关键词选择最多 6 条笔记、待办或可选 threat model 的有界预览。选择属于启发式提示，不保证覆盖全部相关资料；提示词明确提供遗漏数量和检索入口。`context_search` 支持文本、kind、作者 scope、agent_id 和分页，`context_read` 按 Unicode 字符位置读取原始文档 JSON（含 amendments）。两者按工具输出字节限额自动缩小页面，并保留下一页位置，不经过模型摘要。所有读取限于当前 run；原始证据继续通过 `evidence_read` 读取。会话压缩只保存同样的有界预览、账本计数和完整会话证据引用，不重新注入全部文档或任务树。计划和约束仍来自任务契约，筛选不会替代验收。
 
-工具按需发现：完整定义仍注册在 Rig 工具注册表，模型默认只看到协调、生命周期、共享资料、证据、skill 和发现工具；analyst 另有 `binary_inspect` 作为初始画像入口。每轮提供角色允许的工具分组及数量，`tool_search` 仅返回有界的名称、说明和加载状态，不执行或加载工具。`tools_load` 用精确名称替换最多 12 个可选工具，空列表卸载；在下一次新模型请求中，从注册表重建定义并同步 Rig 原生 `ToolAccess::Only`。业务分派继续检查原有角色权限，因此搜索和加载不能给 root 增加目标操作能力，也不能绕过独立 verifier 限制；内部 `create_agent` 不进入发现目录，委派仍用原生 `task`。选择通过事务收据持久化，压缩或恢复不会丢失，同一次调用重放不重复改写后续选择；follow-up 的新 generation 从默认工具集合开始。发现与加载结果不经过模型摘要。MCP 工具遵循同样的角色筛选和加载规则，worker 能力仍需实际探测。
+内置工具由 `src/tools/catalog.rs` 统一注册，模型从第一轮获得角色可见的完整目录；原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；目标身份、证据、会话 owner 和独立复核仍由实际操作校验。工具定义直接用于执行、参数校验和[生成的工具目录](tool-catalog.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，实际能力仍需探测。运行 `re-agent tool-catalog` 重新生成 Markdown，`re-agent --json tool-catalog` 导出机器可读 schema。
 
 外部进程与模型状态分别恢复。worker 的 debugger/fuzz/job handle 需要重新核对存活状态；保存了 pid 或 SQLite 状态不等于进程仍在运行。已完成的有副作用工具调用复用记录，无法确定结果的调用不能盲目重放。MCP 的 readOnlyHint 通过 Rig 的提示语义处理，不足以授权重放结果未知的远端调用。GDB 同一会话只允许 owner 顺序修改；并行实验创建独立进程。原生内核只注册配置允许的业务工具，不加载宿主 shell 或通用编码工具。
+
+## 桌面读取与持久化边界
+
+`gui_data` 在后台读取轻量任务/Agent 摘要，按 `entity_revisions` 的递增修订号接收变化；该索引每个实体保留一行，能够观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。切换任务或存储目录后丢弃旧请求结果并重新建立读取游标。
+
+SQLite 使用 WAL、独立只读连接和单写入连接。普通查询以读事务观察一致快照，业务状态更新继续使用 IMMEDIATE 事务；索引覆盖按任务、Agent、事件种类和序号读取事件的路径。`entities` 中的 Agent JSON 只保存元数据，`agent_conversations` 独立保存 checkpoint、继承历史和会话修订号。预算与状态更新不读取或改写会话；完整读取接口在继承、follow-up、报告和恢复检查时组合两者，Rig 原生日志继续承担执行恢复。
+
+聊天展示在后台按 Agent、generation 和内容版本缓存。追加消息复用已解析的聊天块，工具结果仅更新对应调用所在的块；压缩后重新建立展示。界面缓存块高度，用前缀高度定位可见范围，只排版可见块及少量预留区域。窗口宽度、缩放和技术详情开关变化时重新测量。性能回归和模块边界见[维护约定](maintenance.md)。
 
 ## 地址与静态分析
 
@@ -91,7 +99,7 @@ conversation/context and journal, not that a model request ran or acted on it.
 correlated reply (not an assessment of correctness). Old-generation replies are
 retained as `stale` and never injected as current work. `message_status` exposes
 these states. In-flight model requests keep their original mailbox snapshot.
-This increment uses a fresh schema 2 store; no old-database migration is provided.
+This increment uses a fresh schema 3 store; no old-database migration is provided.
 Informational mail left on completed work becomes
 stale when a new generation starts. CLI messages default to information; GUI
 operator input defaults to information; the explicit follow-up option reopens completed work.

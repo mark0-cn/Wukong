@@ -442,10 +442,10 @@ impl Store {
             let mut staged = tempfile::NamedTempFile::new_in(parent)?;
             staged.write_all(bytes)?;
             staged.as_file().sync_all()?;
-            if let Err(error) = staged.persist_noclobber(&path) {
-                if error.error.kind() != std::io::ErrorKind::AlreadyExists {
-                    return Err(error.error).context("publish evidence artifact");
-                }
+            if let Err(error) = staged.persist_noclobber(&path)
+                && error.error.kind() != std::io::ErrorKind::AlreadyExists
+            {
+                return Err(error.error).context("publish evidence artifact");
             }
             #[cfg(unix)]
             fs::File::open(parent)?.sync_all()?;

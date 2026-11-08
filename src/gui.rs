@@ -107,7 +107,7 @@ enum Update {
         root: PathBuf,
         requested: Option<String>,
         reader: Box<gui_data::Reader>,
-        result: Result<gui_data::Delta>,
+        result: Result<Box<gui_data::Delta>>,
     },
 }
 #[derive(PartialEq)]
@@ -231,7 +231,9 @@ impl Workspace {
         let tx = self.tx.clone();
         self.refreshed = Instant::now();
         self.runtime.spawn_blocking(move || {
-            let result = reader.read(&store, requested.as_deref(), agent.as_deref(), limit);
+            let result = reader
+                .read(&store, requested.as_deref(), agent.as_deref(), limit)
+                .map(Box::new);
             let _ = tx.send(Update::Loaded {
                 root,
                 requested,
@@ -241,7 +243,7 @@ impl Workspace {
         });
         Ok(())
     }
-    fn apply_delta(&mut self, delta: gui_data::Delta) {
+    fn apply_delta(&mut self, mut delta: gui_data::Delta) {
         let was_empty = self.runs.is_empty();
         gui_data::apply(&mut self.runs, delta.runs, |run| &run.id);
         self.runs
@@ -255,6 +257,16 @@ impl Workspace {
             self.conversation = None;
         }
         self.selected = delta.selected;
+        for change in &mut delta.agents {
+            if let Some(agent) = change.value.as_mut()
+                && agent.public_replies.is_empty()
+                && let Some(previous) = self.agents.iter().find(|previous| {
+                    previous.id == agent.id && previous.generation == agent.generation
+                })
+            {
+                agent.public_replies = previous.public_replies.clone();
+            }
+        }
         gui_data::apply(&mut self.agents, delta.agents, |agent| &agent.id);
         self.agents
             .sort_by_key(|agent| (agent.depth, agent.created_at));
@@ -371,10 +383,10 @@ impl Workspace {
                 .pause_budget(id, "operator paused from desktop")
             {
                 Ok(()) => {
-                    if self.active_run.as_ref() == Some(id) {
-                        if let Some(c) = &self.cancel {
-                            c.cancel();
-                        }
+                    if self.active_run.as_ref() == Some(id)
+                        && let Some(c) = &self.cancel
+                    {
+                        c.cancel();
                     }
                     self.notice = Some((false, "已请求暂停，正在保存进行中的工作。".into()));
                 }
@@ -1027,10 +1039,10 @@ impl Workspace {
                             egui::TextEdit::singleline(&mut self.target)
                                 .hint_text("文件路径，或拖入文件"),
                         );
-                        if ui.button("浏览…").clicked() {
-                            if let Some(path) = rfd::FileDialog::new().pick_file() {
-                                self.target = path.display().to_string();
-                            }
+                        if ui.button("浏览…").clicked()
+                            && let Some(path) = rfd::FileDialog::new().pick_file()
+                        {
+                            self.target = path.display().to_string();
                         }
                     });
                     ui.label("分析目标");
@@ -1113,12 +1125,11 @@ impl Workspace {
                     ui.label("所选 Agent 及其子任务将停止。已有证据会保留。");
                     ui.horizontal(|ui| {
                         if ui.button("确认停止").clicked() {
-                            if let Some(id) = &self.agent {
-                                if let Err(e) = Coordinator::new(self.store.clone())
+                            if let Some(id) = &self.agent
+                                && let Err(e) = Coordinator::new(self.store.clone())
                                     .stop(id, "operator stopped from desktop")
-                                {
-                                    self.error(e);
-                                }
+                            {
+                                self.error(e);
                             }
                             self.confirm_stop = false;
                         }
@@ -1168,7 +1179,7 @@ impl eframe::App for Workspace {
                     self.reader = Some(*reader);
                     if root == self.store.root() && requested == self.selected {
                         match result {
-                            Ok(delta) => self.apply_delta(delta),
+                            Ok(delta) => self.apply_delta(*delta),
                             Err(error) => self.error(error),
                         }
                     } else {
@@ -1217,11 +1228,11 @@ impl eframe::App for Workspace {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm_close = true;
         }
-        if self.refreshed.elapsed() >= Duration::from_secs(1) {
-            if let Err(e) = self.refresh() {
-                self.error(e);
-                self.refreshed = Instant::now();
-            }
+        if self.refreshed.elapsed() >= Duration::from_secs(1)
+            && let Err(e) = self.refresh()
+        {
+            self.error(e);
+            self.refreshed = Instant::now();
         }
         let dropped = ctx.input(|i| i.raw.dropped_files.first().and_then(|f| f.path.clone()));
         if let Some(path) = dropped {
