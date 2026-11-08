@@ -90,14 +90,7 @@ impl WorkerError {
         let kind = data
             .and_then(|data| serde_json::from_str::<Value>(data).ok())
             .and_then(|data| serde_json::from_value(data["kind"].clone()).ok())
-            // Compatibility is confined to this boundary for an older worker.
-            .unwrap_or_else(|| {
-                if message.contains("absent or lost") {
-                    WorkerErrorKind::SessionLost
-                } else {
-                    WorkerErrorKind::Unknown
-                }
-            });
+            .unwrap_or_default();
         Self { kind, message }
     }
 }

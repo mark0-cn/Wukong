@@ -33,10 +33,7 @@ pub(super) fn prepare_calls(
 }
 
 pub(super) fn business_call(agent: &AgentMetadata, wire_call: &str) -> String {
-    format!(
-        "{}:g{}:t{}:{}",
-        agent.id, agent.generation, agent.turns, wire_call
-    )
+    crate::effects::DurableEffects::call_id(agent, wire_call)
 }
 
 /// Re-enter only idempotent framework operations or the application ledger.

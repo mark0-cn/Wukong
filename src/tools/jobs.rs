@@ -12,7 +12,7 @@ impl JobService<'_> {
             return Ok(());
         }
         for job in self.tools.store.list::<Value>("job", run)? {
-            if job["delivered_to_model"].as_bool() == Some(true) {
+            if job["notification_message_id"].is_i64() {
                 continue;
             }
             let owner: AgentMetadata =
@@ -103,38 +103,59 @@ impl JobService<'_> {
             self.tools.store.transaction(|tx| {
                 let mut current: Value =
                     Store::tx_get(tx, "job", job_id)?.context("job missing")?;
-                current["delivered_to_model"] = json!(true);
+                if current["notification_message_id"].is_i64() {
+                    return Ok(());
+                }
+                let owner_id = text(&current, "agent_id")?;
+                let owner =
+                    Store::tx_get_metadata(tx, "agent", owner_id)?.context("job owner missing")?;
+                let generation = current["owner_generation"]
+                    .as_u64()
+                    .context("job owner generation missing")?;
+                let stale = generation != owner.generation;
+                let envelope = MessageEnvelope {
+                    options: MessageOptions {
+                        kind: MessageKind::Information,
+                        recipient_generation: Some(generation),
+                        evidence_ids: vec![text(&current, "status_evidence_id")?.into()],
+                        ..Default::default()
+                    },
+                    task_id: owner_id.into(),
+                    delivery: if stale {
+                        MessageDelivery::Stale
+                    } else {
+                        MessageDelivery::Queued
+                    },
+                    stale_reason: stale
+                        .then(|| "job completed after its owning generation ended".into()),
+                    ..Default::default()
+                };
+                let brief = Self::brief(&current, &status);
+                let (mid, _) = Store::tx_enqueue_message(
+                    tx,
+                    &agent.run_id,
+                    "worker",
+                    owner_id,
+                    &serde_json::to_string(&brief)?,
+                    Some(&format!("job-completed:{job_id}")),
+                    &envelope,
+                )?;
+                current["notification_message_id"] = json!(mid);
                 Store::tx_put(tx, "job", job_id, &agent.run_id, &current)
             })?;
         }
         Ok(raw)
     }
 
-    pub(crate) fn briefs(store: &Store, agent: &AgentMetadata) -> Result<Vec<Value>> {
-        store.transaction(|tx| {
-            let mut briefs = Vec::new();
-            let mut bytes = 0;
-            for mut job in Store::tx_list::<Value>(tx,"job",&agent.run_id)? {
-                if job["agent_id"] != agent.id || job["delivered_to_model"] != true || job["injected"] == true { continue; }
-                let status: JobStatus = serde_json::from_value(job["status"].clone())?;
-                if !status.state.terminal() { continue; }
-                let result = status.result.as_ref();
-                let artifacts = job["imported_artifacts"]["artifacts"].as_array();
-                let brief = json!({"job_id":status.job_id,"tool":job["tool_name"],"state":status.state,
-                    "exit_code":result.and_then(|result|result.exit_code),"passed":result.and_then(|result|result.passed),
-                    "stdout":status.stdout.chars().take(400).collect::<String>(),"stderr":status.stderr.chars().take(200).collect::<String>(),
-                    "evidence_id":job["status_evidence_id"],"artifact_evidence_ids":artifacts.map(|items|items.iter().take(8).map(|item|item["evidence_id"].clone()).collect::<Vec<_>>()),
-                    "artifacts_total":artifacts.map_or(0,Vec::len),
-                    "note":"Completed job observation; use evidence_read for the full status."});
-                let size = serde_json::to_vec(&brief)?.len();
-                if briefs.len() >= 8 || bytes + size > 8192 { break; }
-                bytes += size;
-                briefs.push(brief);
-                job["injected"] = json!(true);
-                Store::tx_put(tx,"job",text(&job,"id")?,&agent.run_id,&job)?;
-            }
-            Ok(briefs)
-        })
+    fn brief(job: &Value, status: &JobStatus) -> Value {
+        let result = status.result.as_ref();
+        let artifacts = job["imported_artifacts"]["artifacts"].as_array();
+        json!({"type":"job_completed","job_id":status.job_id,"tool":job["tool_name"],"state":status.state,
+            "exit_code":result.and_then(|result|result.exit_code),"passed":result.and_then(|result|result.passed),
+            "stdout":status.stdout.chars().take(400).collect::<String>(),"stderr":status.stderr.chars().take(200).collect::<String>(),
+            "evidence_id":job["status_evidence_id"],"artifact_evidence_ids":artifacts.map(|items|items.iter().take(8).map(|item|item["evidence_id"].clone()).collect::<Vec<_>>()),
+            "artifacts_total":artifacts.map_or(0,Vec::len),
+            "note":"Completed job observation; use evidence_read for the full status."})
     }
 }
 
@@ -384,7 +405,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 tools.jobs().refresh(&run.id).await?;
-                if store.require::<Value>("job", job_id)?["delivered_to_model"] == true {
+                if store.require::<Value>("job", job_id)?["notification_message_id"].is_i64() {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
@@ -406,17 +427,76 @@ mod tests {
             store.require::<Value>("job", job_id)?["status_evidence_id"],
             automatic["status_evidence_id"]
         );
-        let brief = JobService::briefs(&store, &owner)?;
-        assert_eq!(brief[0]["exit_code"], 7);
-        assert_eq!(brief[0]["evidence_id"], automatic["status_evidence_id"]);
-        assert!(JobService::briefs(&store, &owner)?.is_empty());
+        let before_replay: Value = store.require("job", job_id)?;
+        store.transaction(|tx| {
+            let mut call: ToolCallRecord = Store::tx_get(tx, "call", "start")?.unwrap();
+            call.state = CallState::Running;
+            call.result = None;
+            Store::tx_put(tx, "call", "start", &run.id, &call)
+        })?;
+        let replay = tools
+            .execute(
+                &owner.id,
+                "start",
+                "job_start",
+                json!({"argv":["python","-c","import sys;print('observation');sys.exit(7)"]}),
+            )
+            .await?;
+        assert!(!replay.is_error, "{replay:?}");
+        assert_eq!(
+            store.require::<Value>("job", job_id)?,
+            before_replay,
+            "recovery cannot overwrite observations or delivery state with the original launch response"
+        );
+        let inbox = store.inbox(&owner.id)?;
+        assert_eq!(
+            inbox.len(),
+            1,
+            "automatic and manual observations enqueue one notice"
+        );
+        let brief: Value = serde_json::from_str(&inbox[0].content)?;
+        assert_eq!(brief["exit_code"], 7);
+        assert_eq!(brief["evidence_id"], automatic["status_evidence_id"]);
+        let reopened = Store::open(store.root())?;
+        assert_eq!(
+            reopened.inbox(&owner.id)?[0].id,
+            inbox[0].id,
+            "a restart preserves pending delivery"
+        );
+        reopened.checkpoint_and_ack_generation(
+            &owner.id,
+            json!({"fixture":true}),
+            &[inbox[0].id],
+            Some(owner.generation),
+        )?;
+        assert!(store.inbox(&owner.id)?.is_empty());
+        let mut next = owner.clone();
+        next.generation += 1;
+        store
+            .transaction(|tx| Store::tx_put_metadata(tx, "agent", &next.id, &next.run_id, &next))?;
         let mut lost = automatic;
         lost["id"] = json!("lost");
         lost["status"]["job_id"] = json!("lost");
         lost["status"]["state"] = json!("lost");
-        lost["injected"] = json!(false);
+        lost.as_object_mut()
+            .unwrap()
+            .remove("notification_message_id");
         store.put("job", "lost", &run.id, &lost)?;
-        assert_eq!(JobService::briefs(&store, &owner)?[0]["state"], "lost");
+        tools.jobs().refresh(&run.id).await?;
+        assert!(
+            store.inbox(&owner.id)?.is_empty(),
+            "old generation jobs cannot steer new work"
+        );
+        let messages = store.read_transaction(|tx| Store::tx_messages(tx, &run.id))?;
+        let stale = messages
+            .iter()
+            .find(|mail| {
+                serde_json::from_str::<Value>(&mail.content)
+                    .is_ok_and(|value| value["job_id"] == "lost")
+            })
+            .unwrap();
+        assert_eq!(stale.envelope.delivery, MessageDelivery::Stale);
+        assert!(stale.acknowledged);
         tools.runtime()?.call("worker.shutdown", json!({})).await?;
         tools.close().await;
         Ok(())

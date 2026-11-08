@@ -230,7 +230,7 @@ fn missing_evidence_reference_is_rejected() {
 fn template_escapes_verified_details_and_preserves_independent_replay_status() {
     let directory = tempfile::tempdir().unwrap();
     let (store, run_id, evidence_id) = fixture(directory.path());
-    let mut verifier: AgentRecord = store.require("agent", "agent_root").unwrap();
+    let mut verifier: AgentSnapshot = store.require("agent", "agent_root").unwrap();
     verifier.id = "independent_verifier".into();
     verifier.role = Role::Verifier;
     store

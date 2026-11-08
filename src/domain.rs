@@ -210,7 +210,7 @@ pub struct AgentConversation {
     pub checkpoint: Option<Value>,
 }
 
-/// Flat serialization preserves report and checkpoint wire compatibility.
+/// Complete metadata and history for recovery, inheritance and export.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSnapshot {
     #[serde(flatten)]
@@ -245,8 +245,6 @@ impl std::ops::DerefMut for AgentSnapshot {
         &mut self.metadata
     }
 }
-/// Compatibility name for consumers of complete serialized agent records.
-pub type AgentRecord = AgentSnapshot;
 
 #[derive(
     schemars::JsonSchema, Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq,

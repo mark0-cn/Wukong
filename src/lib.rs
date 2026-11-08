@@ -6,6 +6,7 @@ mod context;
 pub mod coordinator;
 mod credentials;
 pub mod domain;
+mod effects;
 mod gui;
 mod gui_activity;
 mod gui_chat;

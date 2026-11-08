@@ -4,7 +4,6 @@ use crate::{
     agents,
     domain::{self, AgentMetadata, Role, RunRecord, Status},
     runner::AssessmentRunner,
-    store::Store,
 };
 use anyhow::{Result, ensure};
 use rig_basics::subagents::{
@@ -32,8 +31,6 @@ mod models;
 use models::*;
 mod coordination;
 use coordination::*;
-mod jobs;
-use jobs::*;
 mod business_tools;
 use business_tools::*;
 
