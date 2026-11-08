@@ -966,7 +966,7 @@ impl ToolService {
         );
         Ok(run)
     }
-    fn runtime(&self) -> Result<&RuntimeClient> {
+    pub(crate) fn runtime(&self) -> Result<&RuntimeClient> {
         self.runtime.as_ref().context(
             "execution runtime is disabled; configure Docker/SSH or explicitly trusted_local",
         )
