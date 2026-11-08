@@ -4,6 +4,7 @@ impl Workspace {
     pub(super) fn content(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(12.0);
+            self.bind_recipient();
             let run = self
                 .data
                 .runs
@@ -152,39 +153,20 @@ impl Workspace {
                         self.select_agent(run.root_id.clone());
                     }
 
+                    let mut selected_agent = None;
                     egui::SidePanel::left("agents")
-                        .default_width(220.0)
+                        .default_width(250.0)
                         .resizable(true)
                         .show_inside(ui, |ui| {
-                            egui::ScrollArea::vertical()
-                                .id_salt("agent-list")
-                                .show(ui, |ui| {
-                                    for agent in &self.data.agents {
-                                        ui.horizontal(|ui| {
-                                            ui.add_space((agent.depth.min(5) * 10) as f32);
-                                            if ui
-                                                .selectable_label(
-                                                    self.selection.agent.as_ref()
-                                                        == Some(&agent.id),
-                                                    format!(
-                                                        "{}\n{} · {}",
-                                                        agent.name,
-                                                        agent.role,
-                                                        status_label(agent.status)
-                                                    ),
-                                                )
-                                                .clicked()
-                                            {
-                                                self.selection.selection_epoch += 1;
-                                                self.selection.agent = Some(agent.id.clone());
-                                                self.data.conversation = None;
-                                                self.chat.chat_jump = true;
-                                                self.chat.chat_follow = true;
-                                            }
-                                        });
-                                    }
-                                });
+                            selected_agent = self.agent_tree.show(
+                                ui,
+                                &self.data.agents,
+                                self.selection.agent.as_deref(),
+                            );
                         });
+                    if let Some(id) = selected_agent {
+                        self.select_agent(id);
+                    }
                     ui.horizontal_wrapped(|ui| {
                         if let Some(agent) = self
                             .data
@@ -215,7 +197,12 @@ impl Workspace {
                     let jump = std::mem::take(&mut self.chat.chat_jump);
                     crate::gui_chat::scroll(
                         ui,
-                        ("conversation-v2", &self.selection.agent),
+                        (
+                            "conversation-v3",
+                            self.store.root(),
+                            &self.selection.selected,
+                            &self.selection.agent,
+                        ),
                         &mut self.chat.chat_follow,
                         jump,
                         |ui| {

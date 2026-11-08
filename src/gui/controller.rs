@@ -15,6 +15,9 @@ impl Workspace {
             rx,
             data: WorkspaceData::default(),
             activity: activity::Activity::default(),
+            agent_tree: agents::AgentTree::default(),
+            context_key: None,
+            agent_contexts: Default::default(),
             last_loaded: None,
             selection: Selection {
                 selected,
@@ -126,8 +129,7 @@ impl Workspace {
             self.selection.selection_epoch += 1;
             self.selection.agent = Some(id);
             self.data.conversation = None;
-            self.chat.chat_jump = true;
-            self.chat.chat_follow = true;
+            self.bind_recipient();
         }
     }
     pub(super) fn apply_delta(&mut self, mut delta: gui_data::Delta) {
@@ -177,6 +179,7 @@ impl Workspace {
         if let Some(conversation) = delta.conversation {
             self.data.conversation = conversation;
         }
+        self.bind_recipient();
         if activity_changed {
             self.activity.rebuild(&self.data);
         }
@@ -199,7 +202,7 @@ impl Workspace {
         self.data.findings.clear();
         self.activity.rebuild(&self.data);
         self.selection.event_limit = 500;
-        self.composer.message.clear();
+        self.bind_recipient();
         if let Err(e) = self.refresh() {
             self.error(e);
         }
@@ -307,6 +310,14 @@ impl Workspace {
                 if current.as_ref() == Some(&recipient) && self.composer.message.trim() == text {
                     self.composer.message.clear();
                 }
+                for (key, context) in &mut self.agent_contexts {
+                    if key.root == self.store.root()
+                        && key.agent == recipient
+                        && context.composer.message.trim() == text
+                    {
+                        context.composer.message.clear();
+                    }
+                }
                 self.notice = Some((false, "消息已送入 Agent 收件箱。".into()));
             }
             Outcome::Exported(path) => {
@@ -346,7 +357,8 @@ impl Workspace {
                     self.data.calls.clear();
                     self.data.notes.clear();
                     self.data.findings.clear();
-                    self.composer.message.clear();
+                    self.bind_recipient();
+                    self.activity.rebuild(&self.data);
                     self.dialogs.task = TaskDialog::None;
                 }
                 self.notice = Some((
