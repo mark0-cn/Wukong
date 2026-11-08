@@ -1,14 +1,13 @@
 use crate::{
+    application::{AssessmentService, PreparedAssessment},
     binary,
     config::AppConfig,
-    coordinator::Coordinator,
     domain::*,
     report,
-    runner::AssessmentRunner,
     runtime::{RuntimeBackend, RuntimeClient},
     store::Store,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -155,7 +154,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
     let store = Store::open(&config.state_dir)?;
-    let coordinator = Coordinator::new(store.clone());
+    let service = AssessmentService::new(config.clone(), store.clone());
     match command {
         Command::Init { .. } | Command::Inspect { .. } | Command::ToolCatalog => unreachable!(),
         Command::Doctor => {
@@ -193,26 +192,19 @@ pub async fn run(cli: Cli) -> Result<()> {
             task,
             output,
         } => {
-            // Validate provider and worker before creating a durable assessment.
-            let runner = AssessmentRunner::new(config.clone(), store.clone()).await?;
-            let run = coordinator.create_run(
-                &target,
-                &task,
-                config.budget.clone(),
-                serde_json::to_value(&config)?,
-            )?;
+            let prepared = service.start(&target, &task).await?;
+            let run = prepared.run().clone();
             println!(
                 "{}",
                 json!({"run_id":run.id,"root_agent_id":run.root_id,"state_dir":store.root()})
             );
-            let result = drive_with_events(&runner, &run.id, cli.json).await?;
+            let result = drive_with_events(prepared, cli.json).await?;
             if let Some(path) = output {
                 print_json(&serde_json::to_value(report::export(
                     &store, &run.id, &path,
                 )?)?)?;
             }
             print_json(&serde_json::to_value(&result)?)?;
-            runner.tools.close().await;
             if result.status == Status::Failed {
                 anyhow::bail!("assessment failed; inspect stored errors and partial evidence");
             }
@@ -224,10 +216,6 @@ pub async fn run(cli: Cli) -> Result<()> {
             output,
         } => {
             let run: RunRecord = store.require("run", &run_id)?;
-            let mut saved: AppConfig = serde_json::from_value(run.config.clone())
-                .context("saved run configuration invalid")?;
-            // --state selects the durable store; all model/backend identities come from the checkpoint.
-            saved.state_dir = config.state_dir.clone();
             let mut budget = run.budget.clone();
             if let Some(tokens) = max_tokens {
                 budget.max_total_tokens = tokens;
@@ -235,24 +223,14 @@ pub async fn run(cli: Cli) -> Result<()> {
             if let Some(usd) = max_usd {
                 budget.max_usd = Some(usd);
             }
-            saved.budget = budget.clone();
-            saved.validate()?;
-            let runner = AssessmentRunner::new(saved, store.clone()).await?;
-            // Do not mutate a live controller's state while it owns this assessment.
-            let owner = id("resume");
-            if !store.acquire_lease(&run_id, &owner, 1)? {
-                anyhow::bail!("assessment has a live controller");
-            }
-            coordinator.resume(&run_id, Some(budget))?;
-            store.release_lease(&run_id, &owner)?;
-            let result = drive_with_events(&runner, &run_id, cli.json).await?;
+            let prepared = service.resume(&run_id, Some(budget)).await?;
+            let result = drive_with_events(prepared, cli.json).await?;
             if let Some(path) = output {
                 print_json(&serde_json::to_value(report::export(
                     &store, &run_id, &path,
                 )?)?)?;
             }
             print_json(&serde_json::to_value(&result)?)?;
-            runner.tools.close().await;
             if result.status == Status::Failed {
                 anyhow::bail!("assessment failed; inspect stored errors and partial evidence");
             }
@@ -273,8 +251,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             generation,
             correlation_id,
         } => {
-            let receipt = coordinator.send(
-                "operator",
+            let receipt = service.message(
                 &agent_id,
                 &text,
                 MessageOptions {
@@ -288,12 +265,12 @@ pub async fn run(cli: Cli) -> Result<()> {
             print_json(&serde_json::to_value(receipt)?)?;
         }
         Command::Pause { run_id } => {
-            coordinator.pause_budget(&run_id, "operator paused assessment")?;
+            service.pause(&run_id, "operator paused assessment")?;
             let run: RunRecord = store.require("run", &run_id)?;
             println!("{}", json!({"run_id":run_id,"status":run.status}));
         }
         Command::Stop { agent_id, reason } => {
-            print_json(&json!({"stopped_agents":coordinator.stop(&agent_id,&reason)?}))?
+            print_json(&json!({"stopped_agents":service.stop(&agent_id,&reason)?}))?
         }
         Command::Report { run_id, output } => print_json(&serde_json::to_value(report::export(
             &store, &run_id, &output,
@@ -320,11 +297,7 @@ fn print_json(value: &Value) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
-async fn drive_with_events(
-    runner: &AssessmentRunner,
-    run_id: &str,
-    json_events: bool,
-) -> Result<RunRecord> {
+async fn drive_with_events(prepared: PreparedAssessment, json_events: bool) -> Result<RunRecord> {
     let cancel = CancellationToken::new();
     let signal = cancel.clone();
     let signal_task = tokio::spawn(async move {
@@ -332,7 +305,7 @@ async fn drive_with_events(
             signal.cancel();
         }
     });
-    let mut events = runner.subscribe();
+    let mut events = prepared.subscribe();
     let printer = tokio::spawn(async move {
         loop {
             match events.recv().await {
@@ -355,7 +328,7 @@ async fn drive_with_events(
             }
         }
     });
-    let result = runner.drive(run_id, cancel).await;
+    let result = prepared.drive(cancel).await;
     signal_task.abort();
     printer.abort();
     result
