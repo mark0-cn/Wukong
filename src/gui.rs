@@ -1,4 +1,6 @@
 mod activity;
+mod agents;
+use agents::{AgentContext, ContextKey};
 mod commands;
 mod content;
 mod controller;
@@ -160,6 +162,9 @@ struct Workspace {
     commands: commands::Controller,
     data: WorkspaceData,
     activity: activity::Activity,
+    agent_tree: agents::AgentTree,
+    context_key: Option<ContextKey>,
+    agent_contexts: std::collections::BTreeMap<ContextKey, AgentContext>,
     last_loaded: Option<ReadRequest>,
     selection: Selection,
     composer: Composer,
@@ -304,6 +309,34 @@ mod tests {
             Some(crate::interface::Command::Gui { run_id: Some(_) })
         ));
         assert!(crate::interface::Cli::try_parse_from(["re-agent", "tui"]).is_err());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn agent_switching_restores_each_draft_and_reading_mode() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let store = Store::open(dir.path())?;
+        let run = Coordinator::new(store.clone()).create_run(
+            &std::env::current_exe()?,
+            "drafts",
+            Budget::default(),
+            serde_json::json!({}),
+        )?;
+        let mut app = Workspace::new(AppConfig::default(), store.clone(), Some(run.id.clone()));
+        let delta = gui_data::Reader::default().read(&store, Some(&run.id), None, 500)?;
+        app.apply_delta(delta);
+        app.select_agent("a".into());
+        app.composer.message = "draft A".into();
+        app.chat.chat_follow = false;
+        app.select_agent("b".into());
+        assert!(app.composer.message.is_empty());
+        app.composer.message = "draft B".into();
+        app.select_agent("a".into());
+        assert_eq!(app.composer.message, "draft A");
+        assert!(!app.chat.chat_follow);
+        assert!(!app.chat.chat_jump);
+        app.select_agent("b".into());
+        assert_eq!(app.composer.message, "draft B");
+        Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
