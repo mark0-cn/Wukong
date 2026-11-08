@@ -99,13 +99,29 @@ fn theme(ctx: &egui::Context) {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReadRequest {
+    root: PathBuf,
+    run: Option<String>,
+    agent: Option<String>,
+    epoch: u64,
+    serial: u64,
+    event_limit: usize,
+}
+#[derive(Clone)]
+struct StopTarget {
+    root: PathBuf,
+    run: String,
+    agent: String,
+    name: String,
+}
+
 enum Update {
     Started(String),
     Finished(Result<()>),
     Exported(Result<PathBuf>),
     Loaded {
-        root: PathBuf,
-        requested: Option<String>,
+        request: ReadRequest,
         reader: Box<gui_data::Reader>,
         result: Result<Box<gui_data::Delta>>,
     },
@@ -157,7 +173,9 @@ struct Workspace {
     conversation: Option<crate::gui_chat::Document>,
     chat_layout: crate::gui_chat::Layout,
     event_limit: usize,
-    confirm_stop: bool,
+    confirm_stop: Option<StopTarget>,
+    selection_epoch: u64,
+    request_serial: u64,
     confirm_close: bool,
     closing: bool,
     allow_close: bool,
@@ -205,7 +223,9 @@ impl Workspace {
             conversation: None,
             chat_layout: crate::gui_chat::Layout::default(),
             event_limit: 500,
-            confirm_stop: false,
+            confirm_stop: None,
+            selection_epoch: 0,
+            request_serial: 0,
             confirm_close: false,
             closing: false,
             allow_close: false,
@@ -224,24 +244,62 @@ impl Workspace {
             return Ok(());
         };
         let store = self.store.clone();
-        let root = store.root().to_owned();
-        let requested = self.selected.clone();
-        let agent = self.agent.clone();
-        let limit = self.event_limit;
+        self.request_serial += 1;
+        let request = self.read_request();
         let tx = self.tx.clone();
         self.refreshed = Instant::now();
         self.runtime.spawn_blocking(move || {
             let result = reader
-                .read(&store, requested.as_deref(), agent.as_deref(), limit)
+                .read(
+                    &store,
+                    request.run.as_deref(),
+                    request.agent.as_deref(),
+                    request.event_limit,
+                )
                 .map(Box::new);
             let _ = tx.send(Update::Loaded {
-                root,
-                requested,
+                request,
                 reader: Box::new(reader),
                 result,
             });
         });
         Ok(())
+    }
+    fn read_request(&self) -> ReadRequest {
+        ReadRequest {
+            root: self.store.root().to_owned(),
+            run: self.selected.clone(),
+            agent: self.agent.clone(),
+            epoch: self.selection_epoch,
+            serial: self.request_serial,
+            event_limit: self.event_limit,
+        }
+    }
+    fn loaded(
+        &mut self,
+        request: ReadRequest,
+        reader: gui_data::Reader,
+        result: Result<Box<gui_data::Delta>>,
+    ) {
+        self.reader = Some(reader);
+        if request == self.read_request() {
+            match result {
+                Ok(delta) => self.apply_delta(*delta),
+                Err(error) => self.error(error),
+            }
+        } else {
+            self.reader = Some(gui_data::Reader::default());
+            let _ = self.refresh();
+        }
+    }
+    fn select_agent(&mut self, id: String) {
+        if self.agent.as_ref() != Some(&id) {
+            self.selection_epoch += 1;
+            self.agent = Some(id);
+            self.conversation = None;
+            self.chat_jump = true;
+            self.chat_follow = true;
+        }
     }
     fn apply_delta(&mut self, mut delta: gui_data::Delta) {
         let was_empty = self.runs.is_empty();
@@ -289,6 +347,7 @@ impl Workspace {
         if self.selected.as_deref() == Some(id.as_str()) {
             return;
         }
+        self.selection_epoch += 1;
         self.selected = Some(id);
         self.agent = None;
         self.conversation = None;
@@ -684,7 +743,9 @@ impl Workspace {
                                             ui.add_space(8.0);
                                         }
                                         if ui.small_button("查看完整会话").clicked() {
+                                            self.selection_epoch += 1;
                                             self.agent = Some(agent.id.clone());
+                                            self.conversation = None;
                                             self.view = View::Agent;
                                         }
                                     });
@@ -772,9 +833,7 @@ impl Workspace {
                 }
                 View::Agent => {
                     if self.agent.is_none() {
-                        self.agent = Some(run.root_id.clone());
-                        self.chat_jump = true;
-                        self.chat_follow = true;
+                        self.select_agent(run.root_id.clone());
                     }
 
                     egui::SidePanel::left("agents")
@@ -799,7 +858,9 @@ impl Workspace {
                                                 )
                                                 .clicked()
                                             {
+                                                self.selection_epoch += 1;
                                                 self.agent = Some(agent.id.clone());
+                                                self.conversation = None;
                                                 self.chat_jump = true;
                                                 self.chat_follow = true;
                                             }
@@ -857,7 +918,12 @@ impl Workspace {
                                         )
                                         .clicked()
                                     {
-                                        self.confirm_stop = true;
+                                        self.confirm_stop = Some(StopTarget {
+                                            root: self.store.root().to_owned(),
+                                            run: run.id.clone(),
+                                            agent: agent.id.clone(),
+                                            name: agent.name.clone(),
+                                        });
                                     }
                                 });
                                 if let Some(error) = &agent.error {
@@ -953,6 +1019,8 @@ impl Workspace {
                 self.config_path = editor.path.clone();
                 self.store = store;
                 if changed_store {
+                    self.selection_epoch += 1;
+                    self.confirm_stop = None;
                     self.selected = None;
                     self.agent = None;
                     self.runs.clear();
@@ -1078,24 +1146,30 @@ impl Workspace {
                 self.resume_run = Some(run);
             }
         }
-        if self.confirm_stop {
+        if let Some(target) = self.confirm_stop.clone() {
             egui::Window::new("停止 Agent 分支？")
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
-                    ui.label("所选 Agent 及其子任务将停止。已有证据会保留。");
+                    ui.label(format!("停止 {} 及其子任务？已有证据会保留。", target.name));
+                    ui.label(
+                        RichText::new(format!("任务 {} · Agent {}", target.run, target.agent))
+                            .small(),
+                    );
                     ui.horizontal(|ui| {
                         if ui.button("确认停止").clicked() {
-                            if let Some(id) = &self.agent
-                                && let Err(e) =
-                                    self.service().stop(id, "operator stopped from desktop")
+                            if target.root != self.store.root() {
+                                self.error("工作区已切换，请重新选择停止对象。");
+                            } else if let Err(error) = self
+                                .service()
+                                .stop(&target.agent, "operator stopped from desktop")
                             {
-                                self.error(e);
+                                self.error(error);
                             }
-                            self.confirm_stop = false;
+                            self.confirm_stop = None;
                         }
                         if ui.button("取消").clicked() {
-                            self.confirm_stop = false;
+                            self.confirm_stop = None;
                         }
                     });
                 });
@@ -1132,22 +1206,10 @@ impl eframe::App for Workspace {
         while let Ok(update) = self.rx.try_recv() {
             match update {
                 Update::Loaded {
-                    root,
-                    requested,
+                    request,
                     reader,
                     result,
-                } => {
-                    self.reader = Some(*reader);
-                    if root == self.store.root() && requested == self.selected {
-                        match result {
-                            Ok(delta) => self.apply_delta(*delta),
-                            Err(error) => self.error(error),
-                        }
-                    } else {
-                        self.reader = Some(gui_data::Reader::default());
-                        let _ = self.refresh();
-                    }
-                }
+                } => self.loaded(request, *reader, result),
                 Update::Started(id) => {
                     self.active_run = Some(id.clone());
                     self.select(id);
@@ -1286,6 +1348,33 @@ mod tests {
             Some(crate::interface::Command::Gui { run_id: Some(_) })
         ));
         assert!(crate::interface::Cli::try_parse_from(["re-agent", "tui"]).is_err());
+    }
+
+    #[tokio::test]
+    async fn refresh_identity_includes_agent_and_selection_epoch() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut app = Workspace::new(
+            AppConfig::default(),
+            Store::open(dir.path())?,
+            Some("run".into()),
+        );
+        let request = app.read_request();
+        app.select_agent("agent-a".into());
+        assert_ne!(request, app.read_request());
+        let request = app.read_request();
+        app.select_agent("agent-b".into());
+        app.select_agent("agent-a".into());
+        assert_ne!(request, app.read_request());
+        let target = StopTarget {
+            root: app.store.root().to_owned(),
+            run: "run".into(),
+            agent: "agent-a".into(),
+            name: "A".into(),
+        };
+        app.confirm_stop = Some(target);
+        app.select_agent("agent-b".into());
+        assert_eq!(app.confirm_stop.as_ref().unwrap().agent, "agent-a");
+        Ok(())
     }
 
     #[tokio::test]
