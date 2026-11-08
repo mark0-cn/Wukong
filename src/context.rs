@@ -155,7 +155,7 @@ pub(crate) fn search(
     let limit = args["limit"].as_u64().unwrap_or(6).clamp(1, 10) as usize;
     let query = args["query"].as_str().unwrap_or_default().to_lowercase();
     let words = query.split_whitespace().collect::<Vec<_>>();
-    store.transaction(|tx| {
+    store.read_transaction(|tx| {
         let authors = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?
             .into_iter().map(|author| (author.id.clone(), author)).collect::<BTreeMap<_, _>>();
         let documents = documents(tx, &agent.run_id)?;

@@ -66,7 +66,7 @@ struct Snapshot {
 }
 
 fn snapshot(store: &Store, run_id: &str) -> Result<Snapshot> {
-    store.transaction(|tx| {
+    store.read_transaction(|tx| {
         let run = Store::tx_get(tx, "run", run_id)?.context("run does not exist")?;
         let mut query = tx.prepare(
             "SELECT seq,agent_id,kind,data,created_at FROM events WHERE run_id=?1 ORDER BY seq",
