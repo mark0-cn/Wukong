@@ -68,6 +68,8 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 内置工具由 `src/tools/catalog.rs` 统一注册，模型从第一轮获得角色可见的完整目录；原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；目标身份、证据、会话 owner 和独立复核仍由实际操作校验。工具定义直接用于执行、参数校验和[生成的工具目录](tool-catalog.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，实际能力仍需探测。运行 `re-agent tool-catalog` 重新生成 Markdown，`re-agent --json tool-catalog` 导出机器可读 schema。
 
+Python worker 的入口、传输、操作账本、任务管理、独立监督、调试、交互、文件和命令执行由独立组件负责。`Runtime` 仅装配和路由，操作账本通过回调执行及核对会话存活，不依赖具体运行时。
+
 外部进程与模型状态分别恢复。worker 的 debugger/fuzz/job handle 需要重新核对存活状态；保存了 pid 或 SQLite 状态不等于进程仍在运行。已完成的有副作用工具调用复用记录，无法确定结果的调用不能盲目重放。MCP 的 readOnlyHint 通过 Rig 的提示语义处理，不足以授权重放结果未知的远端调用。GDB 同一会话只允许 owner 顺序修改；并行实验创建独立进程。原生内核只注册配置允许的业务工具，不加载宿主 shell 或通用编码工具。
 
 ## 桌面读取与持久化边界

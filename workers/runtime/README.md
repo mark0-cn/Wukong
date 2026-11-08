@@ -224,3 +224,16 @@ an analyzer may own it. The lock covers analyzer execution, cancellation/reaping
 and cache publication. An `analysis.active.json` claim survives an owner crash
 or uncertain execution failure. Inspect and reconcile the analyzer before
 clearing that claim; absence of a lock owner alone does not prove its child exited.
+
+## Module boundaries
+
+`bridge.py` only selects stdio relay, daemon or detached job supervision. Deploy
+the complete `workers/runtime` directory; the Docker image already copies it as
+a unit. `worker_transport` owns authenticated framing and daemon startup;
+`worker_runtime` assembles and routes services. `worker_operations` owns durable
+reservation and replay, with session liveness supplied by `worker_sessions`.
+`worker_jobs` manages job records and cancellation; `worker_job_supervisor` owns
+detached execution. Debugger, interactive processes, files and synchronous
+commands have separate components. `worker_processes` contains bounded process
+IO and process-tree ownership; `worker_common` contains protocol values, confined
+paths and atomic metadata IO. Backend adapters import these components directly.
