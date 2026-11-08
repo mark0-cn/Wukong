@@ -1,3 +1,4 @@
+use crate::gui_data::{self, AgentSummary, RunSummary};
 use crate::{
     config::AppConfig, coordinator::Coordinator, domain::*, interface::DEFAULT_TASK, report,
     runner::AssessmentRunner, store::Store,
@@ -102,6 +103,12 @@ enum Update {
     Started(String),
     Finished(Result<()>),
     Exported(Result<PathBuf>),
+    Loaded {
+        root: PathBuf,
+        requested: Option<String>,
+        reader: Box<gui_data::Reader>,
+        result: Result<gui_data::Delta>,
+    },
 }
 #[derive(PartialEq)]
 enum View {
@@ -120,9 +127,9 @@ struct Workspace {
     runtime: tokio::runtime::Handle,
     tx: mpsc::Sender<Update>,
     rx: mpsc::Receiver<Update>,
-    runs: Vec<RunRecord>,
+    runs: Vec<RunSummary>,
     selected: Option<String>,
-    agents: Vec<AgentRecord>,
+    agents: Vec<AgentSummary>,
     events: Vec<Event>,
     calls: Vec<ToolCallRecord>,
     notes: Vec<SharedDocument>,
@@ -145,7 +152,10 @@ struct Workspace {
     exporting: bool,
     notice: Option<(bool, String)>,
     refreshed: Instant,
-    resume_run: Option<RunRecord>,
+    resume_run: Option<RunSummary>,
+    reader: Option<gui_data::Reader>,
+    conversation: Option<AgentRecord>,
+    event_limit: usize,
     confirm_stop: bool,
     confirm_close: bool,
     closing: bool,
@@ -190,6 +200,9 @@ impl Workspace {
             notice: None,
             refreshed: Instant::now(),
             resume_run: None,
+            reader: Some(gui_data::Reader::default()),
+            conversation: None,
+            event_limit: 500,
             confirm_stop: false,
             confirm_close: false,
             closing: false,
@@ -205,30 +218,75 @@ impl Workspace {
         self.notice = Some((true, error.to_string()));
     }
     fn refresh(&mut self) -> Result<()> {
-        self.runs = self.store.runs()?;
-        if self.selected.is_none() {
-            self.selected = self.runs.first().map(|r| r.id.clone());
-        }
-        if let Some(id) = &self.selected {
-            self.agents = self.store.list("agent", id)?;
-            self.agents.sort_by_key(|a| (a.depth, a.created_at));
-            self.events = self.store.recent_events(id, 500)?;
-            self.calls = self.store.list("call", id)?;
-            self.notes = self.store.list("note", id)?;
-            self.findings = self.store.list("finding", id)?;
-        }
+        let Some(mut reader) = self.reader.take() else {
+            return Ok(());
+        };
+        let store = self.store.clone();
+        let root = store.root().to_owned();
+        let requested = self.selected.clone();
+        let agent = self.agent.clone();
+        let limit = self.event_limit;
+        let tx = self.tx.clone();
         self.refreshed = Instant::now();
+        self.runtime.spawn_blocking(move || {
+            let result = reader.read(&store, requested.as_deref(), agent.as_deref(), limit);
+            let _ = tx.send(Update::Loaded {
+                root,
+                requested,
+                reader: Box::new(reader),
+                result,
+            });
+        });
         Ok(())
+    }
+    fn apply_delta(&mut self, delta: gui_data::Delta) {
+        let was_empty = self.runs.is_empty();
+        gui_data::apply(&mut self.runs, delta.runs, |run| &run.id);
+        self.runs
+            .sort_by_key(|run| std::cmp::Reverse(run.created_at));
+        if delta.reset {
+            self.agents.clear();
+            self.notes.clear();
+            self.findings.clear();
+            self.events.clear();
+            self.calls.clear();
+            self.conversation = None;
+        }
+        self.selected = delta.selected;
+        gui_data::apply(&mut self.agents, delta.agents, |agent| &agent.id);
+        self.agents
+            .sort_by_key(|agent| (agent.depth, agent.created_at));
+        gui_data::apply(&mut self.notes, delta.notes, |note| &note.id);
+        gui_data::apply(&mut self.findings, delta.findings, |finding| &finding.id);
+        if let Some(events) = delta.events {
+            self.events = events;
+        }
+        if let Some(calls) = delta.calls {
+            self.calls = calls;
+        }
+        if let Some(conversation) = delta.conversation {
+            self.conversation = conversation;
+        }
+        if was_empty && !self.runs.is_empty() {
+            self.new_task = false;
+        }
     }
     fn select(&mut self, id: String) {
         self.selected = Some(id);
         self.agent = None;
+        self.conversation = None;
+        self.events.clear();
+        self.calls.clear();
+        self.agents.clear();
+        self.notes.clear();
+        self.findings.clear();
+        self.event_limit = 500;
         self.message.clear();
         if let Err(e) = self.refresh() {
             self.error(e);
         }
     }
-    fn start(&mut self, resume: Option<RunRecord>) {
+    fn start(&mut self, resume: Option<RunSummary>) {
         if self.cancel.is_some() {
             return;
         }
@@ -246,7 +304,9 @@ impl Workspace {
         self.notice = Some((false, "正在连接分析引擎…".into()));
         self.runtime.spawn(async move {
             let result = async {
-                let (runner, run) = if let Some(run) = resume {
+                let (runner, run) = if let Some(summary) = resume {
+                    let mut run: RunRecord = store.require("run", &summary.id)?;
+                    run.budget = summary.budget;
                     let mut saved: AppConfig = serde_json::from_value(run.config.clone())
                         .context("saved run configuration invalid")?;
                     saved.state_dir = config.state_dir;
@@ -600,13 +660,20 @@ impl Workspace {
                         ui.checkbox(&mut self.technical_events, "显示技术事件");
                         ui.checkbox(&mut self.follow, "跟随最新");
                     });
+                    if self.events.len() >= self.event_limit
+                        && self.event_limit < 10_000
+                        && ui.button("加载更早活动").clicked()
+                    {
+                        self.event_limit = (self.event_limit + 500).min(10_000);
+                        let _ = self.refresh();
+                    }
                     egui::ScrollArea::vertical()
                         .id_salt(("events", &run.id))
                         .stick_to_bottom(self.follow)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             for agent in &self.agents {
-                                let replies = crate::gui_activity::public_replies(agent);
+                                let replies = &agent.public_replies;
                                 if !replies.is_empty() {
                                     card().show(ui, |ui| {
                                         ui.colored_label(
@@ -808,7 +875,13 @@ impl Workspace {
                                     selectable_text(ui, summary);
                                 }
                                 ui.add_space(10.0);
-                                crate::gui_chat::show(ui, agent, self.chat_details);
+                                if let Some(conversation) = &self.conversation
+                                    && conversation.id == agent.id
+                                {
+                                    crate::gui_chat::show(ui, conversation, self.chat_details);
+                                } else {
+                                    ui.spinner();
+                                }
                             }
                         },
                     );
@@ -884,6 +957,8 @@ impl Workspace {
                 if changed_store {
                     self.selected = None;
                     self.agent = None;
+                    self.runs.clear();
+                    self.conversation = None;
                     self.agents.clear();
                     self.events.clear();
                     self.calls.clear();
@@ -1059,6 +1134,23 @@ impl eframe::App for Workspace {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok(update) = self.rx.try_recv() {
             match update {
+                Update::Loaded {
+                    root,
+                    requested,
+                    reader,
+                    result,
+                } => {
+                    self.reader = Some(*reader);
+                    if root == self.store.root() && requested == self.selected {
+                        match result {
+                            Ok(delta) => self.apply_delta(delta),
+                            Err(error) => self.error(error),
+                        }
+                    } else {
+                        self.reader = Some(gui_data::Reader::default());
+                        let _ = self.refresh();
+                    }
+                }
                 Update::Started(id) => {
                     self.active_run = Some(id.clone());
                     self.select(id);
@@ -1139,6 +1231,9 @@ impl eframe::App for Workspace {
         self.sidebar(ctx);
         self.content(ctx);
         self.dialogs(ctx);
+        if self.agent.as_deref() != self.conversation.as_ref().map(|agent| agent.id.as_str()) {
+            let _ = self.refresh();
+        }
         ctx.request_repaint_after(Duration::from_millis(200));
     }
 }
@@ -1229,15 +1324,19 @@ mod tests {
         app.select(run.id.clone());
         app.new_task = false;
         app.agent = Some(run.root_id);
-        app.agents[0].checkpoint = Some(serde_json::json!({
+        let checkpoint = serde_json::json!({
             "messages": [
                 {"role":"user", "content":[{"type":"text", "text":"internal context"}]},
                 {"role":"assistant", "content":[{"type":"text", "text":"已确认文件格式，接下来检查输入处理。"}]}
             ],
             "asides": [], "meta": [{"id": 0}, {"id": 1}], "next_id": 2, "next_aside": 0
-        }));
+        });
+        store.checkpoint_and_ack(app.agent.as_deref().unwrap(), checkpoint, &[])?;
+        let mut reader = gui_data::Reader::default();
+        let delta = reader.read(&store, app.selected.as_deref(), app.agent.as_deref(), 500)?;
+        app.apply_delta(delta);
         assert_eq!(
-            crate::gui_activity::public_replies(&app.agents[0]),
+            app.agents[0].public_replies,
             vec!["已确认文件格式，接下来检查输入处理。"]
         );
 
@@ -1262,7 +1361,7 @@ mod tests {
         app.start(None);
         let update = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if let Ok(update) = app.rx.try_recv() {
+                if let Ok(update @ Update::Finished(_)) = app.rx.try_recv() {
                     break update;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
