@@ -5,6 +5,7 @@ mod commands;
 mod content;
 mod controller;
 mod dialogs;
+mod findings;
 mod sidebar;
 mod state;
 mod virtual_list;
@@ -163,6 +164,7 @@ struct Workspace {
     data: WorkspaceData,
     activity: activity::Activity,
     agent_tree: agents::AgentTree,
+    findings_view: findings::FindingsView,
     context_key: Option<ContextKey>,
     agent_contexts: std::collections::BTreeMap<ContextKey, AgentContext>,
     last_loaded: Option<ReadRequest>,

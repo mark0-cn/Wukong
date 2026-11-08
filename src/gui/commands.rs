@@ -10,8 +10,20 @@ pub(super) enum Key {
     Export,
     Target,
     Settings,
+    Finding,
+    Evidence,
 }
 pub(super) enum Command {
+    Finding {
+        run: String,
+        id: String,
+        revision: i64,
+    },
+    Evidence {
+        run: String,
+        id: String,
+        offset: u64,
+    },
     Pause(String),
     Stop(String),
     Message {
@@ -28,6 +40,12 @@ pub(super) enum Command {
     },
 }
 pub(super) enum Outcome {
+    Finding {
+        id: String,
+        revision: i64,
+        details: Box<crate::queries::FindingDetails>,
+    },
+    Evidence(Box<crate::queries::EvidencePreview>),
     Paused(String),
     Stopped,
     Sent {
@@ -46,6 +64,8 @@ pub(super) enum Outcome {
 impl Command {
     fn key(&self) -> Key {
         match self {
+            Self::Finding { .. } => Key::Finding,
+            Self::Evidence { .. } => Key::Evidence,
             Self::Pause(id) => Key::Pause(id.clone()),
             Self::Stop(id) => Key::Stop(id.clone()),
             Self::Message { recipient, .. } => Key::Message(recipient.clone()),
@@ -57,6 +77,14 @@ impl Command {
     fn execute(self, config: AppConfig, store: Store) -> Result<Outcome> {
         let service = AssessmentService::new(config, store.clone());
         Ok(match self {
+            Self::Finding { run, id, revision } => Outcome::Finding {
+                details: Box::new(crate::queries::FindingQueries::new(&store).details(&run, &id)?),
+                id,
+                revision,
+            },
+            Self::Evidence { run, id, offset } => Outcome::Evidence(Box::new(
+                crate::queries::FindingQueries::new(&store).preview(&run, &id, offset)?,
+            )),
             Self::Pause(id) => {
                 service.pause(&id, "operator paused from desktop")?;
                 Outcome::Paused(id)

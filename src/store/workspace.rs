@@ -109,11 +109,12 @@ impl WorkspaceQueries {
             };
             let reset = self.selected != selected || self.revision == 0;
             let after = if reset { 0 } else { self.revision };
-            let mut delta = WorkspaceDelta { selected, reset, runs, agents: vec![], notes: vec![], findings: vec![], events: None, calls: None, conversation: None, operator_messages: None, narration_snapshots:vec![] };
+            let mut delta = WorkspaceDelta { selected, reset, details_revision:0, runs, agents: vec![], notes: vec![], findings: vec![], events: None, calls: None, conversation: None, operator_messages: None, narration_snapshots:vec![] };
             let mut conversation_revision = None;
             let mut conversation = None;
             let mut narration_snapshots = Vec::new();
             if let Some(run) = delta.selected.as_deref() {
+                delta.details_revision = tx.query_row("SELECT COALESCE(MAX(revision),0) FROM entity_revisions WHERE run_id=?1 AND kind IN ('finding','evidence','verification','call')",[run],|row|row.get(0))?;
                 delta.agents = changes::<AgentSummary>(tx, "agent", Some(run), after, "json_remove(e.data,'$.active_skills')")?;
                 delta.notes = changes(tx, "note", Some(run), after, "e.data")?;
                 delta.findings = changes(tx, "finding", Some(run), after, "e.data")?;

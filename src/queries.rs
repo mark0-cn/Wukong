@@ -71,6 +71,7 @@ pub struct Change<T> {
 pub struct WorkspaceDelta {
     pub selected: Option<String>,
     pub reset: bool,
+    pub details_revision: i64,
     pub runs: Vec<Change<RunSummary>>,
     pub agents: Vec<Change<AgentSummary>>,
     pub notes: Vec<Change<SharedDocument>>,
@@ -164,5 +165,27 @@ mod tests {
         assert!(serde_json::to_value(status)?["run"].get("config").is_none());
         assert_eq!(ReportQueries::new(&store).snapshot(&run.id)?.run.id, run.id);
         Ok(())
+    }
+}
+
+#[derive(Serialize)]
+pub struct FindingDetails {
+    pub finding: Finding,
+    pub verification: Option<Verification>,
+    pub evidence: Vec<Evidence>,
+    pub calls: Vec<ToolCallRecord>,
+    pub missing_evidence: Vec<String>,
+}
+pub struct EvidencePreview {
+    pub evidence: Evidence,
+    pub offset: u64,
+    pub bytes: Vec<u8>,
+}
+pub struct FindingQueries<'a> {
+    pub(crate) store: &'a Store,
+}
+impl<'a> FindingQueries<'a> {
+    pub fn new(store: &'a Store) -> Self {
+        Self { store }
     }
 }

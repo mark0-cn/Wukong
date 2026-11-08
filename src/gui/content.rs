@@ -301,37 +301,7 @@ impl Workspace {
                     );
                 }
 
-                View::Findings => {
-                    egui::ScrollArea::vertical()
-                        .id_salt("findings")
-                        .show(ui, |ui| {
-                            if self.data.findings.is_empty() {
-                                ui.add_space(32.0);
-                                ui.heading("尚无分析发现");
-                                ui.label("发现将随分析推进显示；未验证的结论会保留其实际阶段。");
-                            }
-                            for finding in &self.data.findings {
-                                card().show(ui, |ui| {
-                                    ui.heading(&finding.title);
-                                    ui.colored_label(
-                                        ACCENT,
-                                        format!("{:?}  ·  {:?}", finding.stage, finding.severity),
-                                    );
-                                    selectable_text(ui, &finding.description);
-                                    egui::CollapsingHeader::new("根因、影响与证据")
-                                        .id_salt(&finding.id)
-                                        .show(ui, |ui| {
-                                            selectable_text(
-                                                ui,
-                                                &serde_json::to_string_pretty(finding)
-                                                    .unwrap_or_default(),
-                                            );
-                                        });
-                                });
-                                ui.add_space(8.0);
-                            }
-                        });
-                }
+                View::Findings => self.findings_view(ui, &run),
                 View::Overview => {
                     egui::ScrollArea::vertical()
                         .id_salt("overview")

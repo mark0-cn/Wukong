@@ -16,6 +16,7 @@ impl Workspace {
             data: WorkspaceData::default(),
             activity: activity::Activity::default(),
             agent_tree: agents::AgentTree::default(),
+            findings_view: findings::FindingsView::default(),
             context_key: None,
             agent_contexts: Default::default(),
             last_loaded: None,
@@ -145,6 +146,7 @@ impl Workspace {
             .runs
             .sort_by_key(|run| std::cmp::Reverse(run.created_at));
         if delta.reset {
+            self.findings_view = findings::FindingsView::default();
             self.data.agents.clear();
             self.data.notes.clear();
             self.data.findings.clear();
@@ -153,6 +155,7 @@ impl Workspace {
             self.data.conversation = None;
             self.data.operator_messages.clear();
         }
+        self.findings_view.revision(delta.details_revision);
         self.selection.selected = delta.selected;
         for change in &mut delta.agents {
             if let Some(agent) = change.value.as_mut()
@@ -198,6 +201,7 @@ impl Workspace {
         }
         self.selection.selection_epoch += 1;
         self.selection.selected = Some(id);
+        self.findings_view = findings::FindingsView::default();
         self.selection.agent = None;
         self.data.conversation = None;
         self.data.operator_messages.clear();
@@ -296,6 +300,12 @@ impl Workspace {
     }
     pub(super) fn command_completed(&mut self, outcome: Outcome) {
         match outcome {
+            Outcome::Finding {
+                id,
+                revision,
+                details,
+            } => self.findings_view.loaded(id, revision, details),
+            Outcome::Evidence(preview) => self.findings_view.previewed(*preview),
             Outcome::Paused(id) => {
                 if self.execution.run() == Some(&id)
                     && let Some(cancel) = self.execution.cancel()
@@ -402,7 +412,13 @@ impl Workspace {
                 if root == self.store.root() {
                     match result {
                         Ok(outcome) => self.command_completed(outcome),
-                        Err(error) => self.error(format!("{error:#}")),
+                        Err(error) => {
+                            if matches!(key, Key::Finding | Key::Evidence) {
+                                self.findings_view.failed(format!("{error:#}"));
+                            } else {
+                                self.error(format!("{error:#}"));
+                            }
+                        }
                     }
                     let _ = self.refresh();
                 }
