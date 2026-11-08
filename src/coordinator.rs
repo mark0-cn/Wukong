@@ -161,7 +161,8 @@ impl Coordinator {
         if request.contract.objective.trim().is_empty() {
             request.contract.objective = request.task.clone();
         }
-        Self::validate_contract(tx, &run.id, &request.contract)?;
+        CompletionRules::validate_contract(&request.contract)?;
+        Self::validate_evidence(tx, &run.id, &request.contract.input_evidence_ids)?;
         let agents = tx.list_metadata("agent", &run.id)?;
         if let Some(existing) = agents.iter().find(|a| {
             a.scope.trim() == request.scope.trim() && a.role == request.role && !a.status.terminal()
@@ -249,7 +250,7 @@ impl Coordinator {
         };
         let mut graph = agents;
         graph.push(agent.metadata.clone());
-        Self::validate_dependencies(&graph)?;
+        TaskGraph::validate(&graph)?;
         tx.put("agent", &agent.id, &run.id, &agent)?;
         tx.event(
             &run.id,
@@ -263,44 +264,6 @@ impl Coordinator {
         })
     }
 
-    /// Completion requires children to terminate, so parent -> child edges
-    /// participate in the same graph as explicit predecessor dependencies.
-    fn validate_dependencies(agents: &[AgentMetadata]) -> Result<()> {
-        fn visit<'a>(
-            id: &'a str,
-            agents: &'a [AgentMetadata],
-            visiting: &mut HashSet<&'a str>,
-            visited: &mut HashSet<&'a str>,
-        ) -> Result<()> {
-            if visited.contains(id) {
-                return Ok(());
-            }
-            ensure!(
-                visiting.insert(id),
-                "agent dependencies would deadlock (cycle at {id})"
-            );
-            if let Some(agent) = agents.iter().find(|a| a.id == id && !a.status.terminal()) {
-                for dependency in agents.iter().filter(|other| {
-                    !other.status.terminal()
-                        && (other.parent_id.as_deref() == Some(id)
-                            || (!agent.predecessors_released
-                                && agent.wait_for_predecessors.contains(&other.id))
-                            || agent.wait_for.contains(&other.id))
-                }) {
-                    visit(&dependency.id, agents, visiting, visited)?;
-                }
-            }
-            visiting.remove(id);
-            visited.insert(id);
-            Ok(())
-        }
-        let mut visiting = HashSet::new();
-        let mut visited = HashSet::new();
-        for agent in agents.iter().filter(|a| !a.status.terminal()) {
-            visit(&agent.id, agents, &mut visiting, &mut visited)?;
-        }
-        Ok(())
-    }
     /// Informational messages never reopen a completed task or interrupt a wait.
     pub fn message(&self, sender: &str, recipient: &str, content: &str) -> Result<()> {
         self.send(sender, recipient, content, MessageOptions::default())
@@ -336,14 +299,6 @@ impl Coordinator {
         mut options: MessageOptions,
         dedupe_key: Option<&str>,
     ) -> Result<MessageReceipt> {
-        ensure!(
-            !content.trim().is_empty() && content.len() <= 65536,
-            "message must be nonempty and at most 64 KiB"
-        );
-        ensure!(
-            options.evidence_ids.len() <= 32,
-            "at most 32 evidence references per message"
-        );
         let mut target: AgentMetadata = tx
             .get_metadata("agent", recipient)?
             .context("recipient missing")?;
@@ -375,74 +330,35 @@ impl Coordinator {
                 "cross-run evidence denied"
             );
         }
-        let mut stale = options
-            .recipient_generation
-            .is_some_and(|value| value != target.generation);
         let original = if options.kind == MessageKind::Reply {
             let mid = options.reply_to.context("reply requires reply_to")?;
-            let original = tx
-                .messages(&target.run_id)?
-                .into_iter()
-                .find(|message| message.id == mid)
-                .context("reply target not in this run")?;
-            ensure!(
-                original.envelope.options.kind == MessageKind::Question
-                    && original.sender == recipient
-                    && original.recipient == sender,
-                "reply must answer a question addressed to this sender"
-            );
-            stale |= original
-                .envelope
-                .sender_generation
-                .is_some_and(|generation| generation != target.generation)
-                || original.envelope.options.recipient_generation != sender_generation;
-            if let Some(correlation) = &options.correlation_id {
-                ensure!(
-                    Some(correlation) == original.envelope.options.correlation_id.as_ref(),
-                    "reply correlation mismatch"
-                );
-            }
-            options.correlation_id = original.envelope.options.correlation_id.clone();
-            Some(original)
+            Some(
+                tx.messages(&target.run_id)?
+                    .into_iter()
+                    .find(|message| message.id == mid)
+                    .context("reply target not in this run")?,
+            )
         } else {
-            ensure!(
-                options.reply_to.is_none(),
-                "reply_to is only valid for replies"
-            );
             None
         };
-        let correlation = options
-            .correlation_id
-            .get_or_insert_with(|| id("conversation"))
-            .clone();
-        ensure!(
-            !correlation.trim().is_empty() && correlation.len() <= 256,
-            "invalid correlation_id"
-        );
-        let generation = if options.kind == MessageKind::FollowUp
-            && target.status == Status::Completed
-            && !stale
-        {
-            target
-                .generation
-                .checked_add(1)
-                .context("agent generation exhausted")?
-        } else {
-            options.recipient_generation.unwrap_or(target.generation)
-        };
-        options.recipient_generation = Some(generation);
-        let envelope = MessageEnvelope {
-            options: options.clone(),
-            task_id: target.id.clone(),
+        let envelope = MessageRules::prepare(
+            sender,
+            &target,
             sender_generation,
-            delivery: if stale {
-                MessageDelivery::Stale
-            } else {
-                MessageDelivery::Queued
-            },
-            stale_reason: stale.then(|| "message belongs to a different task generation".into()),
-            ..Default::default()
-        };
+            content,
+            &mut options,
+            original.as_ref(),
+        )?;
+        let stale = envelope.delivery == MessageDelivery::Stale;
+        let generation = envelope
+            .options
+            .recipient_generation
+            .context("recipient generation missing")?;
+        let correlation = envelope
+            .options
+            .correlation_id
+            .clone()
+            .context("correlation missing")?;
         let (mid, inserted) = tx.enqueue_message(
             &target.run_id,
             sender,
@@ -528,7 +444,7 @@ impl Coordinator {
                     .map(|id| tx.get_metadata("agent", id)?.context("parent missing"))
                     .transpose()?;
             }
-            Self::validate_dependencies(&tx.list_metadata("agent", &target.run_id)?)?;
+            TaskGraph::validate(&tx.list_metadata("agent", &target.run_id)?)?;
         } else if target.status == Status::Waiting && options.kind != MessageKind::Information {
             target.status = Status::Queued;
             // A question/reply interrupts execution, not the declared wait condition.
@@ -547,56 +463,7 @@ impl Coordinator {
         )?;
         Ok(receipt)
     }
-    pub fn dependency_state(
-        policy: DependencyPolicy,
-        targets: &[String],
-        all: &[AgentMetadata],
-    ) -> DependencyState {
-        if targets.is_empty() {
-            return DependencyState::Satisfied;
-        }
-        let mut terminal = 0;
-        let mut successes = 0;
-        for target in targets {
-            let Some(agent) = all.iter().find(|agent| &agent.id == target) else {
-                return DependencyState::Blocked {
-                    reason: format!("dependency {target} is missing"),
-                };
-            };
-            let success = agent.status == Status::Completed
-                && agent
-                    .task_result
-                    .as_ref()
-                    .is_some_and(|result| result.outcome == TaskOutcome::Success);
-            if success {
-                successes += 1;
-            }
-            if agent.status.terminal() {
-                terminal += 1;
-            }
-            if policy == DependencyPolicy::AllSuccess && agent.status.terminal() && !success {
-                return DependencyState::Blocked {
-                    reason: format!(
-                        "dependency {target} ended without success ({})",
-                        agent.status
-                    ),
-                };
-            }
-        }
-        match policy {
-            DependencyPolicy::AllSuccess if successes == targets.len() => {
-                DependencyState::Satisfied
-            }
-            DependencyPolicy::AllTerminal if terminal == targets.len() => {
-                DependencyState::Satisfied
-            }
-            DependencyPolicy::AnySuccess if successes > 0 => DependencyState::Satisfied,
-            DependencyPolicy::AnySuccess if terminal == targets.len() => DependencyState::Blocked {
-                reason: "all dependency alternatives ended without success".into(),
-            },
-            _ => DependencyState::Pending,
-        }
-    }
+
     /// Resolve dependency admission once. Later follow-ups do not revoke work
     /// already admitted from the predecessor results recorded in this event.
     pub fn release_dependencies(&self, run_id: &str) -> Result<usize> {
@@ -608,7 +475,7 @@ impl Coordinator {
                 for index in 0..all.len() {
                     let mut agent=all[index].clone();
                     if agent.status!=Status::Queued || agent.predecessors_released {continue;}
-                    let state=Self::dependency_state(agent.dependency_policy,&agent.wait_for_predecessors,&all);
+                    let state=DependencyRules::evaluate(agent.dependency_policy,&agent.wait_for_predecessors,&all);
                     match &state {
                         DependencyState::Pending=>continue,
                         DependencyState::Satisfied=>agent.predecessors_released=true,
@@ -693,7 +560,7 @@ impl Coordinator {
                     .and_then(|other| other.parent_id.as_deref());
             }
         }
-        let state = Self::dependency_state(policy, &ids, &all);
+        let state = DependencyRules::evaluate(policy, &ids, &all);
         let states: Vec<_> = all
             .iter()
             .filter(|other| ids.contains(&other.id))
@@ -713,7 +580,7 @@ impl Coordinator {
             .position(|other| other.id == agent.id)
             .context("agent missing")?;
         graph[index] = agent.clone();
-        Self::validate_dependencies(&graph)?;
+        TaskGraph::validate(&graph)?;
         tx.put_metadata("agent", agent_id, &agent.run_id, &agent)?;
         tx.event(
             &agent.run_id,
@@ -732,7 +599,7 @@ impl Coordinator {
         self.store.write(|tx| {
             let all=tx.list_metadata("agent",run_id)?;let mut changed=0;
             for mut agent in all.iter().filter(|agent|agent.status==Status::Waiting).cloned() {
-                let condition=Self::dependency_state(agent.wait_policy,&agent.wait_for,&all);
+                let condition=DependencyRules::evaluate(agent.wait_policy,&agent.wait_for,&all);
                 let ready=condition!=DependencyState::Pending;
                 let expired=agent.wait_until.is_some_and(|at|at<=now());
                 let unread=tx.unread_messages(&agent.id,true)?;
@@ -821,73 +688,9 @@ impl Coordinator {
         if agent.status.terminal() {
             bail!("agent already terminated with {}", agent.status);
         }
-        Self::validate_result(tx, &agent, &result)?;
-        let unread = tx.unread_messages(agent_id, false)?;
-        if unread > 0 {
-            bail!(
-                "unread coordinator messages remain; read them at the next model boundary before finishing"
-            );
-        }
-        let all = tx.list_metadata("agent", &agent.run_id)?;
-        let active: Vec<_> = all
-            .iter()
-            .filter(|a| !a.status.terminal() && Self::is_descendant(a, agent_id, &all))
-            .map(|a| a.id.clone())
-            .collect();
-        if !active.is_empty() {
-            bail!("active descendants remain: {}", active.join(", "));
-        }
-        for kind in ["debug_session", "interact_session"] {
-            let open: Vec<_> = tx
-                .list::<Value>(kind, &agent.run_id)?
-                .into_iter()
-                .filter(|session| {
-                    (agent.role == Role::Root || session["agent_id"] == agent.id)
-                        && !matches!(session["state"].as_str(), Some("closed" | "lost"))
-                })
-                .map(|session| format!("{} (owner {})", session["id"], session["agent_id"]))
-                .collect();
-            ensure!(
-                open.is_empty(),
-                "open {kind} sessions remain; close them before finishing: {}",
-                open.join(", ")
-            );
-        }
-        if agent.role == Role::Root {
-            let unresolved = tx
-                .list::<Coverage>("coverage", &agent.run_id)?
-                .into_iter()
-                .filter(|c| c.outcome == "needs_follow_up")
-                .map(|c| c.id)
-                .collect::<Vec<_>>();
-            if !unresolved.is_empty() {
-                bail!(
-                    "coverage needs follow-up; resolve or mark inconclusive: {}",
-                    unresolved.join(", ")
-                );
-            }
-            // Worker jobs (fuzz, replay, minimize, verification, angr) outlive
-            // their agents and keep running after finish_scan; completing the
-            // assessment while they run would strand them unaccounted.
-            let running_jobs: Vec<String> = tx
-                .list::<serde_json::Value>("job", &agent.run_id)?
-                .into_iter()
-                .filter(|job| {
-                    let state = job["status"]["state"].as_str().unwrap_or_default();
-                    !matches!(
-                        state,
-                        "completed" | "failed" | "cancelled" | "timed_out" | "lost"
-                    )
-                })
-                .map(|job| job["id"].as_str().unwrap_or("unnamed").to_owned())
-                .collect();
-            if !running_jobs.is_empty() {
-                bail!(
-                    "running worker jobs remain; wait for or cancel them before finish_scan: {}",
-                    running_jobs.join(", ")
-                );
-            }
-        }
+        CompletionRules::validate_result(&agent, &result)?;
+        Self::validate_evidence(tx, &agent.run_id, &result.evidence_links())?;
+        CompletionRules::check_ready(&agent, &tx.completion_facts(&agent.run_id, &agent.id)?)?;
         agent.status = if result.outcome == TaskOutcome::Cancelled {
             Status::Stopped
         } else {
@@ -919,34 +722,7 @@ impl Coordinator {
         )?;
         Ok(())
     }
-    fn validate_contract(
-        tx: &crate::store::StateSession<'_>,
-        run_id: &str,
-        contract: &TaskContract,
-    ) -> Result<()> {
-        ensure!(
-            !contract.objective.trim().is_empty() && contract.objective.len() <= 65536,
-            "invalid contract objective"
-        );
-        for values in [
-            &contract.constraints,
-            &contract.deliverables,
-            &contract.completion_conditions,
-        ] {
-            ensure!(
-                values.len() <= 32
-                    && values
-                        .iter()
-                        .all(|value| !value.trim().is_empty() && value.len() <= 4096),
-                "invalid contract requirement"
-            );
-            ensure!(
-                values.iter().collect::<HashSet<_>>().len() == values.len(),
-                "duplicate contract requirement"
-            );
-        }
-        Self::validate_evidence(tx, run_id, &contract.input_evidence_ids)
-    }
+
     fn validate_evidence(
         tx: &crate::store::StateSession<'_>,
         run_id: &str,
@@ -962,92 +738,7 @@ impl Coordinator {
         }
         Ok(())
     }
-    fn validate_result(
-        tx: &crate::store::StateSession<'_>,
-        agent: &AgentMetadata,
-        result: &TaskResult,
-    ) -> Result<()> {
-        ensure!(
-            !result.answer.trim().is_empty() && result.answer.len() <= 65536,
-            "invalid result answer"
-        );
-        Self::validate_evidence(tx, &agent.run_id, &result.evidence_links())?;
-        ensure!(result.artifacts.len() <= 32, "too many task artifacts");
-        let names: HashSet<_> = result
-            .artifacts
-            .iter()
-            .map(|artifact| artifact.name.as_str())
-            .collect();
-        ensure!(
-            names.len() == result.artifacts.len()
-                && names
-                    .iter()
-                    .all(|name| !name.trim().is_empty() && name.len() <= 4096),
-            "invalid or duplicate artifact name"
-        );
-        for values in [
-            &result.completed_conditions,
-            &result.unknowns,
-            &result.next_actions,
-        ] {
-            ensure!(
-                values.len() <= 32
-                    && values
-                        .iter()
-                        .all(|value| !value.trim().is_empty() && value.len() <= 4096),
-                "invalid task result detail"
-            );
-        }
-        ensure!(
-            result
-                .completed_conditions
-                .iter()
-                .all(|condition| agent.contract.completion_conditions.contains(condition)),
-            "result claims an undeclared completion condition"
-        );
-        if result.outcome == TaskOutcome::Success {
-            ensure!(
-                agent
-                    .contract
-                    .deliverables
-                    .iter()
-                    .all(|name| names.contains(name.as_str())),
-                "required task deliverables missing; provide structured result artifacts"
-            );
-            ensure!(
-                agent
-                    .contract
-                    .completion_conditions
-                    .iter()
-                    .all(|condition| result.completed_conditions.contains(condition)),
-                "required completion conditions not accounted for"
-            );
-        } else {
-            ensure!(
-                !result.unknowns.is_empty() || !result.next_actions.is_empty(),
-                "non-success result requires unknowns or next_actions"
-            );
-        }
-        Ok(())
-    }
-    fn is_descendant(agent: &AgentMetadata, parent: &str, all: &[AgentMetadata]) -> bool {
-        let mut current = agent.parent_id.as_deref();
-        let mut traversed = 0;
-        while let Some(id) = current {
-            if id == parent {
-                return true;
-            }
-            current = all
-                .iter()
-                .find(|a| a.id == id)
-                .and_then(|a| a.parent_id.as_deref());
-            traversed += 1;
-            if traversed > all.len() {
-                break;
-            }
-        }
-        false
-    }
+
     pub fn stop(&self, agent_id: &str, reason: &str) -> Result<Vec<String>> {
         self.store.write(|tx| Self::tx_stop(tx, agent_id, reason))
     }
@@ -1066,7 +757,7 @@ impl Coordinator {
         let mut stopped = Vec::new();
         for mut agent in all
             .iter()
-            .filter(|a| a.id == agent_id || Self::is_descendant(a, agent_id, &all))
+            .filter(|a| a.id == agent_id || TaskGraph::is_descendant(a, agent_id, &all))
             .cloned()
         {
             if agent.status.terminal() {

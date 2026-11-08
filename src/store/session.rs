@@ -115,6 +115,48 @@ impl StateSession<'_> {
             |row| row.get(0),
         )?)
     }
+    pub(crate) fn completion_facts(&self, run: &str, agent: &str) -> Result<CompletionFacts> {
+        #[derive(serde::Deserialize)]
+        struct SessionView {
+            id: String,
+            agent_id: String,
+            state: SessionState,
+        }
+        #[derive(serde::Deserialize)]
+        struct JobView {
+            id: String,
+            status: JobViewStatus,
+        }
+        #[derive(serde::Deserialize)]
+        struct JobViewStatus {
+            state: JobState,
+        }
+        let mut open_sessions = Vec::new();
+        for kind in ["debug_session", "interact_session"] {
+            for session in self.list::<SessionView>(kind, run)? {
+                if !matches!(session.state, SessionState::Closed | SessionState::Lost) {
+                    open_sessions.push((kind.into(), session.id, session.agent_id));
+                }
+            }
+        }
+        Ok(CompletionFacts {
+            unread_messages: self.unread_messages(agent, false)?,
+            agents: self.list_metadata("agent", run)?,
+            open_sessions,
+            unresolved_coverage: self
+                .list::<Coverage>("coverage", run)?
+                .into_iter()
+                .filter(|coverage| coverage.outcome == "needs_follow_up")
+                .map(|coverage| coverage.id)
+                .collect(),
+            running_jobs: self
+                .list::<JobView>("job", run)?
+                .into_iter()
+                .filter(|job| !job.status.state.terminal())
+                .map(|job| job.id)
+                .collect(),
+        })
+    }
     #[cfg(test)]
     pub(crate) fn remove(&self, kind: &str, id: &str) -> Result<()> {
         self.connection.execute(

@@ -1,3 +1,5 @@
+mod rules;
+pub use rules::{CompletionFacts, CompletionRules, DependencyRules, MessageRules, TaskGraph};
 mod resources;
 use chrono::{DateTime, Utc};
 pub use resources::*;
