@@ -34,6 +34,7 @@ struct Connection {
     sdk: McpConnection,
     child: Mutex<Child>,
     timeout: Duration,
+    _stderr: crate::process_io::StderrCapture,
 }
 #[derive(Clone, Default)]
 pub struct McpRegistry {
@@ -78,13 +79,16 @@ impl McpRegistry {
             command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
+                .stderr(Stdio::piped())
                 .kill_on_drop(true);
             #[cfg(windows)]
             command.creation_flags(0x08000000);
             let mut child = command
                 .spawn()
                 .with_context(|| format!("start MCP server {}", config.name))?;
+            let stderr = crate::process_io::StderrCapture::new(
+                child.stderr.take().context("MCP stderr missing")?,
+            );
             // Use rmcp's codec on bounded frames. An oversized/malformed line
             // closes this transport immediately instead of discarding an
             // endless stream until the request timeout.
@@ -131,7 +135,7 @@ impl McpRegistry {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .clone()
-                        .unwrap_or_else(|| "MCP initialization failed".into())
+                        .unwrap_or_else(|| stderr.context("MCP initialization failed"))
                 })?;
             let sdk = McpConnection::new(service);
             let tools = tokio::time::timeout(timeout, sdk.tools())
@@ -182,6 +186,7 @@ impl McpRegistry {
                     sdk,
                     child: Mutex::new(child),
                     timeout,
+                    _stderr: stderr,
                 }),
             );
         }

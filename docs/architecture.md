@@ -17,13 +17,13 @@
 | `binary` | ELF/PE/Mach-O 画像、SHA256、字符串、Ghidra headless 后端 |
 | `runtime`、`workers/runtime` | 隔离运行、持久化 worker、GDB/MI 会话、AFL++ 任务、崩溃重放与最小化 |
 | `mcp` | rmcp 协议与 Rig 工具定义、命名空间、超时、环境变量及消息大小限制 |
-| `report`、`interface` | 报告导出、CLI、TUI、人工查询与干预 |
+| `report`、`interface` | 报告导出、CLI、GUI、人工查询与干预 |
 
 ## 一次任务如何运行
 
 1. 导入目标并记录完整 SHA256、路径和配置，创建根 run 与根 agent。
 2. 根 agent 调用原生 `task`，使用 description、prompt、role、scope 及可选 contract 等字段。业务层事务写入子任务后，Rig 异步创建子 agent 并返回。按角色、scope 去重；前驱未完成时只阻止子任务的模型请求，不阻塞创建者。
-3. 每个 agent 有独立的原生 Conversation；AgentPlugin 驱动模型与工具效果，SessionLogPlugin 保存可恢复日志，EffectLogPlugin 保存效果记录。SQLite 保留业务账本与供 CLI/TUI 查询的会话投影。并发额度按在途模型请求计算，等待中的父任务不占模型名额。
+3. 每个 agent 有独立的原生 Conversation；AgentPlugin 驱动模型与工具效果，SessionLogPlugin 保存可恢复日志，EffectLogPlugin 保存效果记录。SQLite 保留业务账本与供 CLI/GUI 查询的会话投影。并发额度按在途模型请求计算，等待中的父任务不占模型名额。
 4. SubagentsPlugin 负责创建、请求、报告与取消。`wait` 等待一个可达 agent，`wait_for_agents` 提供业务成功条件。完成通知按 generation 去重，并绑定一次原生 Report。普通信息不释放等待；已完成任务的新工作必须使用 `follow_up_agent`。
 5. 工具 schema 和校验复用 Rig。原始结果写入证据目录，模型只获取有界摘要和证据 ID；摘要采用 AgentRunner 的类型化输出和 AgentHook 计量，身份及状态字段由宿主保留。通用分析信息写入共享笔记、待办与 coverage；threat model 仅在安全边界分析中按需建立。
 6. 会话保留、工具调用配对及摘要替换复用 rig-memory，保留共享资料和原始会话的证据引用。继承上下文只复制已闭合的父对话，不为尚未返回的工具调用制造结果。重试采用 Rig 的错误分类与 Retry-After；用量计价采用 Rig Pricing，业务层继续执行预算暂停。
@@ -93,8 +93,8 @@ retained as `stale` and never injected as current work. `message_status` exposes
 these states. In-flight model requests keep their original mailbox snapshot.
 This increment uses a fresh schema 2 store; no old-database migration is provided.
 Informational mail left on completed work becomes
-stale when a new generation starts. CLI messages default to information; TUI
-operator input is a question and does not implicitly reopen completed work.
+stale when a new generation starts. CLI messages default to information; GUI
+operator input defaults to information; the explicit follow-up option reopens completed work.
 
 The native `message` tool opens a request or sends a reply to a reachable active
 agent. Use typed `send_message_to_agent` for informational updates and correlated

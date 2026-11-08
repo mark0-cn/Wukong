@@ -260,8 +260,8 @@ impl ModelEngine {
         config.base_url = Some(config.resolved_base_url()?);
         config.validate()?;
         let variable = config.key_environment();
-        let key = match std::env::var(variable) {
-            Ok(value) if !value.trim().is_empty() => value,
+        let key = match crate::credentials::lookup(variable) {
+            Some(value) => value,
             _ if config.provider == Provider::Ollama && config.api_key_env.is_none() => {
                 String::new()
             }
