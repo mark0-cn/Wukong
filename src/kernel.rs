@@ -623,10 +623,6 @@ fn prepare_models(
                     config.skills_dir.as_deref(),
                     config.demos_dir.as_deref(),
                 )?;
-                preamble.push_str(&format!(
-                    "\nTool directory (capability metadata):\n{}",
-                    serde_json::to_string(&application.runner.tools.discovery_context(&agent)?)?
-                ));
                 for skill in &agent.active_skills {
                     agents::validate_capability(&skill.name)?;
                     ensure!(

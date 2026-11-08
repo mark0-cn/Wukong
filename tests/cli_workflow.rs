@@ -87,8 +87,8 @@ async fn model_server() -> Result<(
                 .collect::<Vec<_>>();
             if role == "root" {
                 ensure!(
-                    !names.contains(&"binary_inspect"),
-                    "root received a target tool"
+                    names.contains(&"binary_inspect"),
+                    "root did not receive the full catalog"
                 );
             }
             let turn = {
@@ -130,33 +130,17 @@ async fn model_server() -> Result<(
                 )],
                 ("analyst", 0) => {
                     ensure!(
-                        !names.contains(&"coverage_record") && !names.contains(&"debug_start"),
-                        "optional tools were eagerly exposed"
+                        names.contains(&"coverage_record")
+                            && names.contains(&"debug_start")
+                            && names.contains(&"poc_verify"),
+                        "full catalog was not exposed from the first request"
                     );
-                    vec![
-                        call("inspect", "binary_inspect", json!({})),
-                        call(
-                            "discover-coverage",
-                            "tool_search",
-                            json!({"group":"coverage"}),
-                        ),
-                    ]
+                    vec![call("inspect", "binary_inspect", json!({}))]
                 }
                 ("analyst", 1) => {
                     ensure!(
-                        !names.contains(&"coverage_record"),
-                        "search unexpectedly activated tools"
-                    );
-                    vec![call(
-                        "load-coverage",
-                        "tools_load",
-                        json!({"names":["coverage_record"]}),
-                    )]
-                }
-                ("analyst", 2) => {
-                    ensure!(
-                        names.contains(&"coverage_record") && !names.contains(&"debug_start"),
-                        "selection was not applied to the next request"
+                        names.contains(&"coverage_record") && names.contains(&"debug_start"),
+                        "full catalog missing on a later request"
                     );
                     let evidence = tool_evidence(&request, "inspect")
                         .context("model did not receive inspect evidence")?;
@@ -322,13 +306,13 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         "coverage/evidence missing"
     );
     ensure!(
-        run.total_tokens == 90,
+        run.total_tokens == 75,
         "usage was lost or replayed: {}",
         run.total_tokens
     );
     let counts = counts.lock().await;
     ensure!(
-        counts.get("root") == Some(&3) && counts.get("analyst") == Some(&3),
+        counts.get("root") == Some(&3) && counts.get("analyst") == Some(&2),
         "model work duplicated on recovery"
     );
     let calls = store.list::<ToolCallRecord>("call", &run.id)?;
