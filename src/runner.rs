@@ -227,7 +227,12 @@ impl AssessmentRunner {
             Store::tx_event(tx,&run.id,Some(agent_id),if model_turn {"model.usage"} else {"model.usage_aux"},json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
             Ok(())
         })?;
-        if tokens.is_none() || !cost_known {
+        // A response without usage cannot be costed when pricing rates are
+        // configured: pause exactly then, keeping cost accounting exact.
+        // With flat zero pricing the cost is complete ($0) and only the
+        // token count drifts; the event above records the omission, and the
+        // kernel budget gate keeps enforcing on reported usage.
+        if !cost_known {
             let agent: AgentRecord = self.store.require("agent", agent_id)?;
             self.coordinator.pause_budget(
                 &agent.run_id,
@@ -453,8 +458,12 @@ mod tests {
     #[tokio::test]
     async fn native_unknown_usage_preserves_the_response_without_tool_io() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (_dir, runner, run) =
+        let (_dir, mut runner, run) =
             fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+        // With configured pricing a usage-less response cannot be costed, so
+        // the run pauses; the response itself must still be preserved.
+        runner.config.pricing.input_usd_per_million = 10.0;
+        runner.config.pricing.output_usd_per_million = 20.0;
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             request(&mut socket).await;
@@ -963,6 +972,27 @@ mod tests {
             .unwrap();
         assert!(usage.data["cost_estimate_usd"].is_null());
         assert_eq!(usage.data["tokens_reported"], true);
+    }
+    #[tokio::test]
+    async fn missing_usage_with_flat_pricing_does_not_pause() {
+        let (_dir, mut runner, run) = fixture("http://127.0.0.1:1".into()).await;
+        // Default pricing is zero-rate: cost stays complete even when the
+        // provider omits usage, so a single provider hiccup must not pause
+        // the whole assessment.
+        runner
+            .account_usage(&run.root_id, Usage::default(), true)
+            .unwrap();
+        let after: RunRecord = runner.store.require("run", &run.id).unwrap();
+        assert_ne!(after.status, Status::BudgetPaused);
+        assert_eq!(after.total_tokens, 0);
+        let usage = runner
+            .store
+            .events(&run.id, 0, 100)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.kind == "model.usage")
+            .unwrap();
+        assert_eq!(usage.data["tokens_reported"], false);
     }
     #[tokio::test]
     async fn informational_mail_from_the_awaited_agent_does_not_release_native_wait() {
