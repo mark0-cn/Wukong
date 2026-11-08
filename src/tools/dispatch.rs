@@ -4,7 +4,7 @@ use super::*;
 impl ToolService {
     pub(super) async fn dispatch(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
         args: Value,
@@ -19,7 +19,7 @@ impl ToolService {
                         .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
                 }
                 Ok(
-                    json!({"agents":self.store.list_metadata::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"dependency_policy":a.dependency_policy,"predecessors":a.wait_for_predecessors,"predecessors_released":a.predecessors_released,"wait_policy":a.wait_policy,"wait_for":a.wait_for,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
+                    json!({"agents":self.store.list_metadata("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"dependency_policy":a.dependency_policy,"predecessors":a.wait_for_predecessors,"predecessors_released":a.predecessors_released,"wait_policy":a.wait_policy,"wait_for":a.wait_for,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
                 )
             }
             "send_message_to_agent" | "follow_up_agent" => {
@@ -59,7 +59,7 @@ impl ToolService {
             }
             "stop_agent" => {
                 let target_id = {
-                    let target: AgentRecord =
+                    let target: AgentMetadata =
                         self.require_in_run("agent", text(&args, "agent_id")?, &agent.run_id)?;
                     self.authorize_control(agent, &target)?;
                     target.id.clone()

@@ -4,16 +4,14 @@ use super::*;
 impl ToolService {
     pub(super) fn authorize_control(
         &self,
-        actor: &AgentRecord,
-        target: &AgentRecord,
+        actor: &AgentMetadata,
+        target: &AgentMetadata,
     ) -> Result<()> {
         ensure!(actor.run_id == target.run_id, "cross-run control denied");
         if actor.role == Role::Root || actor.id == target.id {
             return Ok(());
         }
-        let all = self
-            .store
-            .list_metadata::<AgentRecord>("agent", &actor.run_id)?;
+        let all = self.store.list_metadata("agent", &actor.run_id)?;
         let mut parent = target.parent_id.as_deref();
         let mut count = 0;
         while let Some(id) = parent {
@@ -34,7 +32,7 @@ impl ToolService {
 
     pub(crate) fn create_agent(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
@@ -61,7 +59,7 @@ impl ToolService {
 
     pub(super) fn activate_skill(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
     ) -> Result<Value> {
@@ -85,7 +83,7 @@ impl ToolService {
             json!({"name":name,"sha256":sha256}),
         )?;
         self.effect(agent,call_id,|tx| {
-            let mut current: AgentRecord = Store::tx_get_metadata(tx,"agent",&agent.id)?.context("agent missing")?;
+            let mut current: AgentMetadata = Store::tx_get_metadata(tx,"agent",&agent.id)?.context("agent missing")?;
             ensure!(current.generation == agent.generation, "agent activation changed before skill load");
             agents::validate_capabilities(current.skills.iter().map(String::as_str)
                 .chain(current.active_skills.iter().map(|skill| skill.name.as_str()))
@@ -103,7 +101,7 @@ impl ToolService {
 
     pub(super) fn send_message(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         args: &Value,
         follow_up: bool,
@@ -131,7 +129,7 @@ impl ToolService {
 
     pub(super) fn save_document(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
         args: &Value,
@@ -164,7 +162,7 @@ impl ToolService {
 
     pub(super) fn amend_document(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
         args: &Value,
@@ -206,7 +204,7 @@ impl ToolService {
 
     pub(super) fn coverage(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
         args: &Value,
@@ -251,7 +249,7 @@ impl ToolService {
 
     pub(super) fn finding(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
         args: &Value,
@@ -361,7 +359,7 @@ impl ToolService {
                         && !verification.evidence_ids.is_empty(),
                     "independent successful verification is required"
                 );
-                let _: AgentRecord =
+                let _: AgentMetadata =
                     Store::tx_get_metadata(tx, "agent", &verification.verifier_agent_id)?
                         .context("verifier agent missing")?;
                 finding.impact = Some(verification.impact);

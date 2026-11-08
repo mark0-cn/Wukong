@@ -4,7 +4,7 @@ use super::*;
 impl ToolService {
     pub(super) fn register_file(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         raw: &Value,
         evidence_id: Option<&str>,
     ) -> Result<()> {
@@ -26,7 +26,7 @@ impl ToolService {
 
     pub(super) fn known_file(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         path: &str,
         require_target: bool,
     ) -> Result<Value> {
@@ -46,7 +46,7 @@ impl ToolService {
         Ok(record)
     }
 
-    pub(super) async fn stage_target(&self, agent: &AgentRecord, call_id: &str) -> Result<Value> {
+    pub(super) async fn stage_target(&self, agent: &AgentMetadata, call_id: &str) -> Result<Value> {
         let run = self.target(agent)?;
         let bytes = fs::read(&run.target_path)?;
         ensure!(
@@ -64,7 +64,7 @@ impl ToolService {
 
     pub(super) async fn file_put(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
@@ -107,7 +107,7 @@ impl ToolService {
 
     pub(super) async fn file_get(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
@@ -138,7 +138,7 @@ impl ToolService {
 
     pub(super) fn import_file(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         raw: &Value,
     ) -> Result<Evidence> {

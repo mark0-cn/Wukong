@@ -1606,6 +1606,7 @@ async fn contracted_tool_tasks_deliver_structured_results_without_vulnerability_
     assert_eq!(
         store
             .require::<AgentRecord>("agent", child_id)?
+            .metadata
             .task_result
             .unwrap()
             .answer,

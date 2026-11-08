@@ -1,5 +1,5 @@
 //! Conversation presentation: pair tool calls with results instead of exposing protocol messages.
-use crate::{domain::AgentRecord, gui_activity::tool_name};
+use crate::{domain::AgentSnapshot, gui_activity::tool_name};
 use eframe::egui::{self, Color32, RichText};
 use serde::Serialize;
 use serde_json::Value;
@@ -241,7 +241,7 @@ struct Parsed {
     error: Option<String>,
 }
 impl Document {
-    pub fn prepare(agent: &AgentRecord, previous: Option<&Self>) -> Self {
+    pub fn prepare(agent: &AgentSnapshot, previous: Option<&Self>) -> Self {
         let bytes = serde_json::to_vec(&agent.checkpoint).unwrap_or_default();
         let digest = hex::encode(Sha256::digest(&bytes));
         if let Some(previous) = previous

@@ -1,5 +1,5 @@
 use crate::{
-    domain::{AgentRecord, Role, RunRecord},
+    domain::{AgentMetadata, Role, RunRecord},
     store::Store,
 };
 use anyhow::{Context, Result, bail};
@@ -100,7 +100,7 @@ fn load_demo(dir: &Path, name: &str) -> Result<Option<String>> {
     Ok(Some(fs::read_to_string(canonical)?))
 }
 pub fn preamble(
-    agent: &AgentRecord,
+    agent: &AgentMetadata,
     run: &RunRecord,
     store: &Store,
     custom_dir: Option<&Path>,
@@ -181,6 +181,7 @@ pub fn preamble(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::AgentRecord;
 
     #[test]
     fn demo_loads_for_role_and_misses_are_none() {

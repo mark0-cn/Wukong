@@ -50,7 +50,7 @@ pub struct BundleVerification {
 #[derive(Serialize)]
 struct Snapshot {
     run: RunRecord,
-    agents: Vec<AgentRecord>,
+    agents: Vec<AgentSnapshot>,
     findings: Vec<Finding>,
     verifications: Vec<Verification>,
     coverage: Vec<Coverage>,

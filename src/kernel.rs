@@ -2,7 +2,7 @@
 //! This plugin supplies only application admission, evidence and completion gates.
 use crate::{
     agents,
-    domain::{self, AgentRecord, Role, RunRecord, Status},
+    domain::{self, AgentMetadata, Role, RunRecord, Status},
     runner::AssessmentRunner,
     store::Store,
 };
@@ -86,7 +86,7 @@ pub(crate) fn drive(
     ensure!(!run.status.terminal(), "cannot drive a terminal assessment");
     runner.coordinator.resume(run_id, None)?;
     let directory = runner.config().state_dir.join("rig").join(run_id);
-    let root: AgentRecord = runner.store.require("agent", &run.root_id)?;
+    let root = runner.store.agent_snapshot(&run.root_id)?;
     ensure!(
         root.checkpoint.is_none()
             || directory
@@ -331,7 +331,7 @@ pub(crate) fn drive(
             )?;
             return runner.store.require("run", run_id);
         }
-        let agents = runner.store.list_metadata::<AgentRecord>("agent", run_id)?;
+        let agents = runner.store.list_metadata("agent", run_id)?;
         if !run.status.terminal() && active == 0 && agents.iter().all(|a| a.status.terminal()) {
             let mut run = run;
             run.status = Status::Failed;

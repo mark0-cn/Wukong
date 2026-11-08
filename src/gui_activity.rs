@@ -1,8 +1,8 @@
 //! Human-readable projections of durable activity; raw evidence remains available.
-use crate::domain::{AgentRecord, Event, ToolCallRecord};
+use crate::domain::{AgentSnapshot, Event, ToolCallRecord};
 use serde_json::Value;
 
-pub(crate) fn public_replies(agent: &AgentRecord) -> Vec<String> {
+pub(crate) fn public_replies(agent: &AgentSnapshot) -> Vec<String> {
     use rig::completion::{AssistantContent, Message};
     let Some(checkpoint) = &agent.checkpoint else {
         return vec![];

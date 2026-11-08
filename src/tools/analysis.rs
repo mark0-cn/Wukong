@@ -4,7 +4,7 @@ use super::*;
 impl ToolService {
     pub(super) async fn ghidra(
         &self,
-        agent: &AgentRecord,
+        agent: &AgentMetadata,
         call_id: &str,
         name: &str,
         args: &Value,
