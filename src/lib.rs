@@ -5,6 +5,7 @@ pub mod config;
 mod context;
 pub mod coordinator;
 mod credentials;
+pub mod desktop;
 pub mod domain;
 mod effects;
 mod gui;

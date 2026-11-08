@@ -135,42 +135,21 @@ pub(super) fn account_replies(
                     application
                         .runner
                         .account_usage(&agent_id, response.usage, true)?;
-                    // Human-readable progress: each settled model turn emits a
-                    // bounded narration line so the activity stream reads like
-                    // an explanation, not just a tool log.
+                    // Only public assistant text is operator-facing progress.
                     let text = response
                         .choice
                         .iter()
                         .filter_map(|part| match part {
                             AssistantContent::Text(text) => Some(text.text.as_str()),
-                            AssistantContent::Reasoning(reasoning) => Some(reasoning.text.as_str()),
                             _ => None,
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    let excerpt: String = text.chars().take(400).collect();
-                    let narration = if excerpt.is_empty() {
-                        let tools = response
-                            .choice
-                            .iter()
-                            .filter_map(|part| match part {
-                                AssistantContent::ToolCall(call) => {
-                                    Some(call.function.name.as_str())
-                                }
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!("requested tools: {tools}")
-                    } else {
-                        excerpt
-                    };
-                    application.runner.emit(
-                        &agent.run_id,
-                        Some(&agent_id),
-                        "model.text",
-                        json!({"text": narration}),
-                    )?;
+                    if !text.trim().is_empty() {
+                        let excerpt: String = text.chars().take(64 * 1024).collect();
+                        application.runner.emit(&agent.run_id, Some(&agent_id), "model.text",
+                            json!({"text":excerpt,"truncated":text.chars().count()>64*1024,"public":true}))?;
+                    }
                     Ok(())
                 })(),
             );
