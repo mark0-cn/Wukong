@@ -380,7 +380,7 @@ mod tests {
         assert!(unchanged.runs.is_empty() && unchanged.agents.is_empty());
         assert!(unchanged.events.is_none() && unchanged.calls.is_none());
         let external = Store::open(directory.path())?;
-        let mut agent: AgentRecord = external.require("agent", &run.root_id)?;
+        let mut agent: AgentSnapshot = external.require("agent", &run.root_id)?;
         agent.name = "changed externally".into();
         external.put("agent", &agent.id, &run.id, &agent)?;
         let changed = reader.read(&store, Some(&run.id), None, 5)?;

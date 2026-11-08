@@ -39,13 +39,13 @@ agent 状态包括 queued、running、waiting、budget_paused、completed、stop
 
 Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，使用 schema 3 状态目录，不提供旧数据库或旧版自定义 AgentRun 检查点迁移。
 
-业务工具调用标识由 agent、generation、已计量模型轮次与 provider tool-call ID 构成，不依赖恢复后会重新分配的 ECS 实体或效果 ID。中断后先重入业务调用账本，复用已完成结果或核对未决状态。原生效果及数据库变化唤醒执行循环。
+`DurableEffects` 统一工具调用准入、稳定标识、事务回执、worker 成功回执和恢复决策。业务调用标识由 agent、generation、已计量模型轮次与 provider tool-call ID 构成，不依赖恢复后会重新分配的 ECS 实体或效果 ID。业务事务与回执一起提交；worker 回复在控制器后处理前持久化，若回复丢失则用同一请求标识查询 worker 的持久化操作账本。未决 MCP 写操作保留给操作员对账，不自动重放。操作员对账也使用带 epoch 的租约隔离。原生效果及数据库变化唤醒执行循环。
 
 `RunSupervisor` 独立管理控制端租约、时间预算和后台 worker 观察，Rig 帧不等待 worker RPC。租约带持久化递增版本；运行中的 runner、coordinator 和工具共享带该版本的存储句柄，每次业务写事务在提交修改前验证 owner、版本和有效期。租约失效后旧控制端停止执行，其迟到结果不能覆盖接管者。监督任务随运行结束或取消清理，释放租约时也核对版本。
 
 CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止及操作员消息。`PreparedAssessment` 保留已解析的运行配置与事件订阅，在执行完成或错误后关闭控制端工具连接；前端不自行编排租约或构造恢复配置。恢复准备不修改任务，预算修改在监督器取得正式租约后提交。
 
-`JobService` 统一自动监控和手动状态查询：检查任务归属、解析类型化 `JobStatus`、导入终止状态原始证据及产物后，发布可供模型读取的通知。同一任务的观察串行化，更新时合并最新账本，避免覆盖已导入产物或通知状态。`lost` 是终止状态，退出码和验证标志来自 `result`。worker 错误通过 RPC `error.data.kind` 携带类别，旧 worker 的文本兼容仅在协议入口处理；业务会话代码按错误类别对账。
+`JobService` 统一自动监控和手动状态查询：检查任务归属、解析类型化 `JobStatus`、导入终止状态原始证据及产物后，发布可供模型读取的通知。同一任务的观察串行化，更新时合并最新账本，避免覆盖已导入产物或通知状态。`lost` 是终止状态，退出码和验证标志来自 `result`。任务通知与完成标识在同一事务写入持久化邮箱，沿用会话检查点与消息确认的原子提交；重启后未确认消息继续投递，旧 generation 的迟到任务结果标记为 stale。worker 错误通过 RPC `error.data.kind` 携带类别，业务会话和恢复代码按错误类别对账。
 
 运行时角色只有 `root`、`analyst`、`verifier`。root 负责拆解、派单、证据协调和最终交付；analyst 负责目标分析；verifier 独立检查其他实例的结论。子任务的 `role` 只接受 analyst 或 verifier。模型、预算和工具权限由角色决定，`skills` 不授予新权限。
 
@@ -69,7 +69,7 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 SQLite 使用 WAL、独立只读连接和单写入连接。普通查询以读事务观察一致快照，业务状态更新继续使用 IMMEDIATE 事务；索引覆盖按任务、Agent、事件种类和序号读取事件的路径。`entities` 中的 Agent JSON 只保存元数据，`agent_conversations` 独立保存 checkpoint、继承历史和会话修订号。预算与状态更新不读取或改写会话；完整读取接口在继承、follow-up、报告和恢复检查时组合两者，Rig 原生日志继续承担执行恢复。
 
-类型边界与此对应：`AgentMetadata` 不含 checkpoint 或继承历史，元数据读取和写入接口使用该具体类型；`AgentConversation` 表示可选会话载荷，`AgentSnapshot` 在继承、恢复、报告和聊天展示时显式组合两者。完整快照保留原来的平铺 JSON 结构，`AgentRecord` 仅作为完整快照的兼容名称，业务热路径使用元数据类型。
+类型边界与此对应：`AgentMetadata` 不含 checkpoint 或继承历史，元数据读取和写入接口使用该具体类型；`AgentConversation` 表示可选会话载荷，`AgentSnapshot` 在继承、恢复、报告和聊天展示时显式组合两者。完整快照使用平铺 JSON 结构，业务热路径使用元数据类型。
 
 聊天展示在后台按 Agent、generation 和内容版本缓存。追加消息复用已解析的聊天块，工具结果仅更新对应调用所在的块；压缩后重新建立展示。界面缓存块高度，用前缀高度定位可见范围，只排版可见块及少量预留区域。窗口宽度、缩放和技术详情开关变化时重新测量。性能回归和模块边界见[维护约定](maintenance.md)。
 

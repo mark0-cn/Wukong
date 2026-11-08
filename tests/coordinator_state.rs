@@ -48,7 +48,7 @@ fn wait_for_predecessors_is_validated_and_persisted() {
     gated.wait_for_predecessors = vec![first.agent.id.clone()];
     let created = c.create_child(&run.root_id, gated).unwrap();
     assert!(created.created);
-    let stored: AgentRecord = store.require("agent", &created.agent.id).unwrap();
+    let stored: AgentSnapshot = store.require("agent", &created.agent.id).unwrap();
     assert_eq!(stored.wait_for_predecessors, vec![first.agent.metadata.id]);
     assert_eq!(stored.status, Status::Queued);
 }
@@ -80,7 +80,7 @@ fn predecessor_graph_rejects_ancestors_and_transitive_completion_cycles() {
             .contains("deadlock")
     );
     assert_eq!(
-        store.list::<AgentRecord>("agent", &run.id).unwrap().len(),
+        store.list::<AgentSnapshot>("agent", &run.id).unwrap().len(),
         3
     );
 }
@@ -98,7 +98,7 @@ fn completed_children_accept_followups_and_notify_again_after_restart() {
     c.finish(&child.id, "first result").unwrap();
     c.follow_up(&run.root_id, &child.id, "Please clarify the input boundary")
         .unwrap();
-    let reopened: AgentRecord = store.require("agent", &child.id).unwrap();
+    let reopened: AgentSnapshot = store.require("agent", &child.id).unwrap();
     assert_eq!(reopened.status, Status::Queued);
     assert_eq!(reopened.generation, 1);
     assert!(reopened.checkpoint.is_none());
@@ -198,7 +198,7 @@ fn descendant_followup_reopens_completed_ancestors_and_preserves_legacy_records(
     let mut legacy = serde_json::to_value(&child).unwrap();
     legacy.as_object_mut().unwrap().remove("generation");
     assert_eq!(
-        serde_json::from_value::<AgentRecord>(legacy)
+        serde_json::from_value::<AgentSnapshot>(legacy)
             .unwrap()
             .generation,
         0
@@ -216,7 +216,7 @@ fn descendant_followup_reopens_completed_ancestors_and_preserves_legacy_records(
     c.follow_up("operator", &child.id, "clarify nested result")
         .unwrap();
     for agent_id in [&parent.id, &child.id] {
-        let reopened: AgentRecord = store.require("agent", agent_id).unwrap();
+        let reopened: AgentSnapshot = store.require("agent", agent_id).unwrap();
         assert_eq!(reopened.status, Status::Queued);
         assert_eq!(reopened.generation, 1);
         assert!(!store.inbox(agent_id).unwrap().is_empty());
@@ -244,7 +244,7 @@ fn child_creation_is_immediate_durable_and_scope_deduplicated() {
     drop(c);
     drop(store);
     let reopened = Store::open(dir.path().join("state")).unwrap();
-    let child: AgentRecord = reopened.require("agent", &first.agent.id).unwrap();
+    let child: AgentSnapshot = reopened.require("agent", &first.agent.id).unwrap();
     assert_eq!(child.parent_id.as_deref(), Some(run.root_id.as_str()));
     assert_eq!(child.scope, "input parser");
 }
@@ -278,7 +278,7 @@ fn capability_changes_reuse_scope_owner_and_verification_stays_independent() {
         assert!(coordinator.create_child(&run.root_id, invalid).is_err());
     }
     assert_eq!(
-        store.list::<AgentRecord>("agent", &run.id).unwrap().len(),
+        store.list::<AgentSnapshot>("agent", &run.id).unwrap().len(),
         3
     );
 }
@@ -320,7 +320,7 @@ fn concurrent_spawns_have_a_single_scope_owner() {
         .collect::<Vec<_>>();
     assert_eq!(results.iter().filter(|r| r.created).count(), 1);
     assert_eq!(
-        store.list::<AgentRecord>("agent", &run.id).unwrap().len(),
+        store.list::<AgentSnapshot>("agent", &run.id).unwrap().len(),
         2
     );
 }
@@ -358,7 +358,7 @@ fn concurrent_mailbox_delivery_and_checkpoint_ack_survive_restart() {
     drop(store);
     let reopened = Store::open(dir.path().join("state")).unwrap();
     assert_eq!(reopened.inbox(&child.id).unwrap().len(), 60);
-    let child: AgentRecord = reopened.require("agent", &child.id).unwrap();
+    let child: AgentSnapshot = reopened.require("agent", &child.id).unwrap();
     assert_eq!(
         child.checkpoint.unwrap()["delivered"]
             .as_array()
@@ -374,7 +374,7 @@ fn wait_wakes_on_terminal_notification_and_completion_deduplicates() {
     let child = c.create_child(&run.root_id, request("wait")).unwrap().agent;
     // A large conversation checkpoint must never leak into the parent's
     // wake-up message.
-    let mut child_record: AgentRecord = store.require("agent", &child.id).unwrap();
+    let mut child_record: AgentSnapshot = store.require("agent", &child.id).unwrap();
     child_record.checkpoint = Some(json!({"transcript": "giant-checkpoint-marker-".repeat(2000)}));
     store
         .put("agent", &child.id, &run.id, &child_record)
@@ -407,7 +407,7 @@ fn wait_wakes_on_terminal_notification_and_completion_deduplicates() {
         "checkpoint data leaked into the parent context: {}",
         wake_message.content.len()
     );
-    let root: AgentRecord = store.require("agent", &run.root_id).unwrap();
+    let root: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
     assert_eq!(root.status, Status::Queued);
     assert!(c.finish(&run.root_id, "unread child results").is_err());
     let messages = store.inbox(&run.root_id).unwrap();
@@ -463,7 +463,7 @@ fn stop_propagates_and_terminal_state_cannot_be_overwritten() {
     assert_eq!(c.stop(&child.id, "operator cancellation").unwrap().len(), 2);
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", &grandchild.id)
+            .require::<AgentSnapshot>("agent", &grandchild.id)
             .unwrap()
             .status,
         Status::Stopped
@@ -482,7 +482,7 @@ fn budget_pause_is_distinct_and_resumable() {
     c.pause_budget(&run.id, "configured token limit").unwrap();
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", &child.id)
+            .require::<AgentSnapshot>("agent", &child.id)
             .unwrap()
             .status,
         Status::BudgetPaused
@@ -500,7 +500,7 @@ fn budget_pause_is_distinct_and_resumable() {
     );
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", &child.id)
+            .require::<AgentSnapshot>("agent", &child.id)
             .unwrap()
             .status,
         Status::Queued
@@ -615,10 +615,10 @@ fn pause_resume_preserves_an_unfinished_wait() {
         .agent;
     c.wait(&run.root_id, std::slice::from_ref(&child.id), 60)
         .unwrap();
-    let before: AgentRecord = store.require("agent", &run.root_id).unwrap();
+    let before: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
     c.pause_budget(&run.id, "operator pause").unwrap();
     c.resume(&run.id, None).unwrap();
-    let resumed: AgentRecord = store.require("agent", &run.root_id).unwrap();
+    let resumed: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
     assert_eq!(resumed.status, Status::Waiting);
     assert_eq!(resumed.wait_for, before.wait_for);
     assert_eq!(resumed.wait_until, before.wait_until);
@@ -627,7 +627,7 @@ fn pause_resume_preserves_an_unfinished_wait() {
     assert_eq!(c.wake_waiters(&run.id).unwrap(), 1);
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", &run.root_id)
+            .require::<AgentSnapshot>("agent", &run.root_id)
             .unwrap()
             .status,
         Status::Queued
@@ -646,7 +646,7 @@ fn information_preserves_completed_tasks_and_wait_conditions() {
     c.message("operator", &run.root_id, "background only")
         .unwrap();
     assert_eq!(c.wake_waiters(&run.id).unwrap(), 0);
-    let root: AgentRecord = store.require("agent", &run.root_id).unwrap();
+    let root: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
     assert_eq!(root.status, Status::Waiting);
     assert_eq!(root.wait_for, vec![child.id.clone()]);
     c.send(
@@ -659,13 +659,13 @@ fn information_preserves_completed_tasks_and_wait_conditions() {
         },
     )
     .unwrap();
-    let root: AgentRecord = store.require("agent", &run.root_id).unwrap();
+    let root: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
     assert_eq!(root.status, Status::Queued);
     assert_eq!(root.wait_for, vec![child.id.clone()]);
     c.finish(&child.id, "first answer").unwrap();
     c.message("operator", &child.id, "background after completion")
         .unwrap();
-    let completed: AgentRecord = store.require("agent", &child.id).unwrap();
+    let completed: AgentSnapshot = store.require("agent", &child.id).unwrap();
     assert_eq!(completed.status, Status::Completed);
     assert_eq!(completed.generation, 0);
     c.follow_up("operator", &child.id, "new assignment")
@@ -817,7 +817,7 @@ fn task_contract_requires_real_deliverables_and_preserves_each_generation_result
     assert!(c.finish_result(&child.id, answer.clone()).is_err());
     answer.completed_conditions = task.contract.completion_conditions;
     c.finish_result(&child.id, answer).unwrap();
-    let completed: AgentRecord = store.require("agent", &child.id).unwrap();
+    let completed: AgentSnapshot = store.require("agent", &child.id).unwrap();
     assert_eq!(
         completed.metadata.task_result.unwrap().outcome,
         TaskOutcome::Success
@@ -831,7 +831,7 @@ fn task_contract_requires_real_deliverables_and_preserves_each_generation_result
         .unwrap();
     assert!(
         store
-            .require::<AgentRecord>("agent", &child.id)
+            .require::<AgentSnapshot>("agent", &child.id)
             .unwrap()
             .task_result
             .is_none()
@@ -862,7 +862,7 @@ fn non_success_task_results_explain_the_gap_and_evidence_is_integrity_checked() 
     c.finish_result(&child.id, blocked).unwrap();
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", &child.id)
+            .require::<AgentSnapshot>("agent", &child.id)
             .unwrap()
             .metadata
             .task_result
@@ -909,7 +909,7 @@ fn non_success_task_results_explain_the_gap_and_evidence_is_integrity_checked() 
     .unwrap();
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", &other.id)
+            .require::<AgentSnapshot>("agent", &other.id)
             .unwrap()
             .status,
         Status::Stopped
@@ -941,7 +941,7 @@ fn failed_requirements_block_successors_and_propagate_without_execution() {
     .unwrap();
     assert_eq!(c.release_dependencies(&run.id).unwrap(), 2);
     for id in [&second.id, &third.id] {
-        let blocked: AgentRecord = store.require("agent", id).unwrap();
+        let blocked: AgentSnapshot = store.require("agent", id).unwrap();
         assert_eq!(blocked.status, Status::Failed);
         assert_eq!(
             blocked.metadata.task_result.unwrap().outcome,
@@ -976,13 +976,13 @@ fn dependency_policies_distinguish_success_alternatives_and_terminal_collection(
     c.release_dependencies(&run.id).unwrap();
     assert!(
         !store
-            .require::<AgentRecord>("agent", &any.id)
+            .require::<AgentSnapshot>("agent", &any.id)
             .unwrap()
             .predecessors_released
     );
     assert!(
         store
-            .require::<AgentRecord>("agent", &collect.id)
+            .require::<AgentSnapshot>("agent", &collect.id)
             .unwrap()
             .predecessors_released
     );
@@ -990,7 +990,7 @@ fn dependency_policies_distinguish_success_alternatives_and_terminal_collection(
     c.release_dependencies(&run.id).unwrap();
     assert!(
         store
-            .require::<AgentRecord>("agent", &any.id)
+            .require::<AgentSnapshot>("agent", &any.id)
             .unwrap()
             .predecessors_released
     );
@@ -1001,7 +1001,7 @@ fn dependency_policies_distinguish_success_alternatives_and_terminal_collection(
     c.release_dependencies(&run.id).unwrap();
     assert!(
         store
-            .require::<AgentRecord>("agent", &any.id)
+            .require::<AgentSnapshot>("agent", &any.id)
             .unwrap()
             .predecessors_released
     );
@@ -1012,7 +1012,7 @@ fn dependency_policies_distinguish_success_alternatives_and_terminal_collection(
     c.release_dependencies(&run.id).unwrap();
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", &exhausted.id)
+            .require::<AgentSnapshot>("agent", &exhausted.id)
             .unwrap()
             .status,
         Status::Failed
@@ -1037,7 +1037,7 @@ fn runtime_waits_share_cycle_detection_with_predecessor_gates() {
             .to_string()
             .contains("deadlock")
     );
-    let unchanged: AgentRecord = store.require("agent", &b.id).unwrap();
+    let unchanged: AgentSnapshot = store.require("agent", &b.id).unwrap();
     assert_eq!(unchanged.status, Status::Queued);
     assert!(unchanged.wait_for.is_empty());
     let mut gated = request("wait C");
@@ -1112,7 +1112,7 @@ fn a_missing_dependency_is_not_assumed_successful() {
         })
         .unwrap();
     c.release_dependencies(&run.id).unwrap();
-    let consumer: AgentRecord = store.require("agent", &consumer.id).unwrap();
+    let consumer: AgentSnapshot = store.require("agent", &consumer.id).unwrap();
     assert_eq!(consumer.status, Status::Failed);
     assert!(consumer.metadata.error.unwrap().contains("missing"));
 }

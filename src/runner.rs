@@ -423,7 +423,7 @@ mod tests {
         });
         let result = drive_bounded(&runner, &run.id).await;
         assert_eq!(result.status, Status::Failed);
-        let root: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        let root: AgentSnapshot = runner.store.require("agent", &run.root_id).unwrap();
         assert!(root.error.as_ref().unwrap().contains("lifecycle"));
         assert_eq!(root.summary.as_deref(), Some("still no accepted result"));
         assert_eq!(root.total_tokens, 24);
@@ -459,7 +459,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        let root: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        let root: AgentSnapshot = runner.store.require("agent", &run.root_id).unwrap();
         assert!(
             root.checkpoint
                 .unwrap()
@@ -487,7 +487,7 @@ mod tests {
         runner = AssessmentRunner::new(config, runner.store.clone())
             .await
             .unwrap();
-        let mut root: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        let mut root: AgentSnapshot = runner.store.require("agent", &run.root_id).unwrap();
         root.skills = vec!["formats".into()];
         runner.store.put("agent", &root.id, &run.id, &root).unwrap();
         runner.config.execution.compact_after_chars = 100;
@@ -548,7 +548,7 @@ mod tests {
                     .contains("Active controller skill: formats")
             );
         }
-        let root: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        let root: AgentSnapshot = runner.store.require("agent", &run.root_id).unwrap();
         let history: rig_core::conversation::Conversation =
             serde_json::from_value(root.checkpoint.unwrap()).unwrap();
         history.validate().unwrap();
@@ -661,7 +661,7 @@ mod tests {
                     assert_eq!(input["model"], "gpt-5.2");
                     let child = || {
                         store
-                            .list::<AgentRecord>("agent", &rid)
+                            .list::<AgentSnapshot>("agent", &rid)
                             .unwrap()
                             .into_iter()
                             .find(|agent| agent.role == Role::Analyst)
@@ -719,7 +719,7 @@ mod tests {
         server.await.unwrap();
         let child = runner
             .store
-            .list::<AgentRecord>("agent", &run.id)
+            .list::<AgentSnapshot>("agent", &run.id)
             .unwrap()
             .into_iter()
             .find(|agent| agent.role == Role::Analyst)
@@ -764,7 +764,7 @@ mod tests {
         );
         let checkpoint = runner
             .store
-            .require::<AgentRecord>("agent", &run.root_id)
+            .require::<AgentSnapshot>("agent", &run.root_id)
             .unwrap()
             .checkpoint
             .unwrap();
@@ -833,7 +833,7 @@ mod tests {
             assert!(
                 !runner
                     .store
-                    .require::<AgentRecord>("agent", &run.root_id)
+                    .require::<AgentSnapshot>("agent", &run.root_id)
                     .unwrap()
                     .checkpoint
                     .unwrap()
@@ -860,7 +860,7 @@ mod tests {
                 let input = request(&mut socket).await;
                 let text = input.to_string();
                 let output = if text.contains("role=root") {
-                    let tasks = store.list::<AgentRecord>("agent", &rid).unwrap();
+                    let tasks = store.list::<AgentSnapshot>("agent", &rid).unwrap();
                     let first = tasks.iter().find(|agent| agent.scope == "first");
                     let output = match roots {
                         0 => reply(
@@ -899,7 +899,7 @@ mod tests {
                     continue;
                 } else {
                     let first = store
-                        .list::<AgentRecord>("agent", &rid)
+                        .list::<AgentSnapshot>("agent", &rid)
                         .unwrap()
                         .into_iter()
                         .find(|agent| agent.scope == "first")
@@ -993,7 +993,7 @@ mod tests {
                         )
                     } else {
                         let child = store
-                            .list::<AgentRecord>("agent", &rid)
+                            .list::<AgentSnapshot>("agent", &rid)
                             .unwrap()
                             .into_iter()
                             .find(|agent| agent.role == Role::Analyst)
@@ -1065,7 +1065,7 @@ mod tests {
                 let text = input.to_string();
                 let lookup = |scope: &str| {
                     store
-                        .list::<AgentRecord>("agent", &rid)
+                        .list::<AgentSnapshot>("agent", &rid)
                         .unwrap()
                         .into_iter()
                         .find(|agent| agent.scope == scope)
@@ -1138,7 +1138,10 @@ mod tests {
             Status::Completed
         );
         server.await.unwrap();
-        let agents = runner.store.list::<AgentRecord>("agent", &run.id).unwrap();
+        let agents = runner
+            .store
+            .list::<AgentSnapshot>("agent", &run.id)
+            .unwrap();
         for scope in ["parent", "leaf"] {
             let agent = agents.iter().find(|agent| agent.scope == scope).unwrap();
             assert_eq!(agent.generation, 1);

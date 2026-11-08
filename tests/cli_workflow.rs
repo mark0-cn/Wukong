@@ -295,7 +295,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         run.status,
         String::from_utf8_lossy(&output.stderr)
     );
-    let agents = store.list::<AgentRecord>("agent", &run.id)?;
+    let agents = store.list::<AgentSnapshot>("agent", &run.id)?;
     ensure!(
         agents.len() == 2 && agents.iter().all(|a| a.status == Status::Completed),
         "agent lifecycle mismatch"

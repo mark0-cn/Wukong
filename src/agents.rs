@@ -181,7 +181,7 @@ pub fn preamble(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::AgentRecord;
+    use crate::domain::AgentSnapshot;
 
     #[test]
     fn demo_loads_for_role_and_misses_are_none() {
@@ -230,7 +230,7 @@ mod tests {
         let run = coordinator
             .create_run(&target, "task", crate::domain::Budget::default(), json!({}))
             .unwrap();
-        let mut root: AgentRecord = store.require("agent", &run.root_id).unwrap();
+        let mut root: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
         root.skills = vec!["reporter".into()];
         let custom = dir.path().join("custom");
         let examples = dir.path().join("examples");

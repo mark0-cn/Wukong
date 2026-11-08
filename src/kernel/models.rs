@@ -55,13 +55,6 @@ pub(super) fn prepare_models(
                 }
                 if let Some(prompt) = &mut call.prompt {
                     prompt.role = preamble;
-                    let job_briefs = collect_job_briefs(&application.runner.store, &agent)?;
-                    if !job_briefs.is_empty() {
-                        prompt.sections.push(rig_core::completion::Section::new(
-                            "job_results",
-                            serde_json::to_string(&job_briefs)?,
-                        ));
-                    }
                     if !agent.wait_for_predecessors.is_empty() {
                         let results = agent.wait_for_predecessors.iter().map(|id| application.runner.store.require_metadata("agent",id).map(|predecessor| json!({"id":id,"status":predecessor.status,"result":predecessor.task_result,"summary":predecessor.summary,"error":predecessor.error}))).collect::<Result<Vec<_>>>()?;
                         prompt.sections.push(rig_core::completion::Section::new(

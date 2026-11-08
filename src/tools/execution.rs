@@ -10,10 +10,7 @@ impl ToolService {
     }
 
     pub(super) fn request_identity(&self, agent: &AgentMetadata, call_id: &str) -> String {
-        stable(
-            "request",
-            &format!("{}:{}:{call_id}", agent.run_id, agent.id),
-        )
+        DurableEffects::worker_request_id(agent, call_id)
     }
 
     pub(super) async fn worker_call(
@@ -26,7 +23,25 @@ impl ToolService {
         let request_id = self.request_identity(agent, call_id);
         params["request_id"] = json!(request_id);
         params["call_id"] = json!(request_id);
-        self.runtime()?.call(method,params).await.with_context(||format!("worker dispatch {method}; reconcile stable request {request_id} before changing its arguments"))
+        if let Some(reply) = self
+            .effects()
+            .worker_reply(agent, call_id, method, &params)?
+        {
+            return Ok(reply);
+        }
+        let reply = self.runtime()?.call(method, params.clone()).await.context(
+            crate::effects::WorkerDispatch {
+                method: method.into(),
+                request_id: request_id.clone(),
+            },
+        )?;
+        self.effects()
+            .record_worker_reply(agent, call_id, method, params, reply.clone())
+            .context(crate::effects::WorkerDispatch {
+                method: method.into(),
+                request_id,
+            })?;
+        Ok(reply)
     }
 
     pub(super) async fn runtime_tool(
@@ -88,6 +103,7 @@ impl ToolService {
                         .filter(|job| {
                             job["tool_name"].as_str() == Some("poc_verify")
                                 && job["agent_id"].as_str() == Some(agent.id.as_str())
+                                && job["call_id"] != call_id
                                 && job["finding_id"].as_str() == Some(finding.id.as_str())
                         })
                         .count();
@@ -148,16 +164,19 @@ impl ToolService {
                     .worker_call(agent, call_id, method, params.clone())
                     .await?;
                 let job_id = raw["job_id"].as_str().context("worker job ID missing")?;
-                let record = json!({"id":job_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"tool_name":name,"finding_id":finding_id,"call_id":call_id,"worker_request_id":self.request_identity(agent,call_id),"parameters":params,"target_sha256":run.target_sha256,"status":raw,"created_at":now(),"updated_at":now()});
-                if let Some(previous) = self.store.get::<Value>("job", job_id)? {
-                    ensure!(
-                        previous["run_id"] == agent.run_id
-                            && previous["agent_id"] == agent.id
-                            && previous["call_id"] == call_id,
-                        "worker job identity is already bound to another request"
-                    );
-                }
-                self.store.put("job", job_id, &agent.run_id, &record)?;
+                let record = json!({"id":job_id,"run_id":agent.run_id,"agent_id":agent.id,"owner_generation":agent.generation,"worker_id":self.worker_identity()?,"tool_name":name,"finding_id":finding_id,"call_id":call_id,"worker_request_id":self.request_identity(agent,call_id),"parameters":params,"target_sha256":run.target_sha256,"status":raw,"created_at":now(),"updated_at":now()});
+                self.store.transaction(|tx| {
+                    if let Some(previous) = Store::tx_get::<Value>(tx, "job", job_id)? {
+                        ensure!(
+                            previous["run_id"] == agent.run_id
+                                && previous["agent_id"] == agent.id
+                                && previous["call_id"] == call_id,
+                            "worker job identity is already bound to another request"
+                        );
+                        return Ok(());
+                    }
+                    Store::tx_put(tx, "job", job_id, &agent.run_id, &record)
+                })?;
                 Ok(raw)
             }
             _ => bail!("unsupported runtime tool {name}"),

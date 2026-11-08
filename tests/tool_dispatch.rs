@@ -11,7 +11,7 @@ use re_agent::{
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, fs, path::Path, time::Duration};
 
-fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Result<AgentRecord> {
+fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Result<AgentSnapshot> {
     Ok(coordinator
         .create_child(
             root,
@@ -29,7 +29,7 @@ fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Resu
         )?
         .agent)
 }
-fn fixture(path: &Path) -> Result<(Store, Coordinator, RunRecord, AgentRecord)> {
+fn fixture(path: &Path) -> Result<(Store, Coordinator, RunRecord, AgentSnapshot)> {
     let store = Store::open(path.join("state"))?;
     let coordinator = Coordinator::new(store.clone());
     let target = path.join("sample.bin");
@@ -252,7 +252,7 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
             .await?;
         assert!(!loaded.is_error, "{loaded:?}");
     }
-    let current: AgentRecord = store.require("agent", &analyst.id)?;
+    let current: AgentSnapshot = store.require("agent", &analyst.id)?;
     assert_eq!(current.role, Role::Analyst);
     assert_eq!(current.status, analyst.status);
     assert_eq!(current.active_skills.len(), 2);
@@ -269,7 +269,7 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
     }
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", &analyst.id)?
+            .require::<AgentSnapshot>("agent", &analyst.id)?
             .active_skills
             .len(),
         2
@@ -295,7 +295,7 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
         )
         .await?;
     assert!(!report.is_error, "{report:?}");
-    let root: AgentRecord = store.require("agent", &run.root_id)?;
+    let root: AgentSnapshot = store.require("agent", &run.root_id)?;
     assert_eq!(root.role, Role::Root);
     assert_eq!(root.status, Status::Queued);
     let root_tools = service
@@ -362,7 +362,7 @@ async fn finish_result_accepts_a_differing_free_text_summary() -> Result<()> {
         )
         .await?;
     assert!(!finished.is_error, "{finished:?}");
-    let recorded: AgentRecord = store.require("agent", &agent.id)?;
+    let recorded: AgentSnapshot = store.require("agent", &agent.id)?;
     assert_eq!(recorded.summary.as_deref(), Some("canonical answer"));
     service.close().await;
     Ok(())
@@ -477,7 +477,7 @@ async fn activated_skills_are_exact_durable_snapshots_with_idempotent_receipts()
         "activation must not expose a summarizable copy of the instructions"
     );
     let snapshot = store
-        .require::<AgentRecord>("agent", &agent.id)?
+        .require::<AgentSnapshot>("agent", &agent.id)?
         .active_skills
         .remove(0);
     assert_eq!(snapshot.content, original);
@@ -498,7 +498,7 @@ async fn activated_skills_are_exact_durable_snapshots_with_idempotent_receipts()
     let reopened = Store::open(temp.path().join("state"))?;
     assert_eq!(
         reopened
-            .require::<AgentRecord>("agent", &agent.id)?
+            .require::<AgentSnapshot>("agent", &agent.id)?
             .active_skills[0]
             .content,
         original
@@ -555,7 +555,7 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
         .await?;
     assert!(!info.is_error);
     assert_eq!(
-        store.require::<AgentRecord>("agent", &agent.id)?.status,
+        store.require::<AgentSnapshot>("agent", &agent.id)?.status,
         Status::Completed
     );
     let status = service
@@ -576,7 +576,7 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
     service
         .execute(&run.root_id, "follow-up", "follow_up_agent", args)
         .await?;
-    let reopened: AgentRecord = store.require("agent", &agent.id)?;
+    let reopened: AgentSnapshot = store.require("agent", &agent.id)?;
     assert_eq!(reopened.status, Status::Queued);
     assert_eq!(reopened.generation, 1);
     assert_eq!(
@@ -1107,7 +1107,7 @@ async fn durable_receipts_prevent_repeated_messages_and_completed_results_replay
         result(&created)["agent"]["id"],
         result(&recovered)["agent"]["id"]
     );
-    assert_eq!(store.list::<AgentRecord>("agent", &run.id)?.len(), 4);
+    assert_eq!(store.list::<AgentSnapshot>("agent", &run.id)?.len(), 4);
     service.close().await;
     Ok(())
 }
@@ -1569,7 +1569,7 @@ async fn contracted_tool_tasks_deliver_structured_results_without_vulnerability_
     let created=service.execute(&run.root_id,"contract-create","create_agent",json!({"name":"format","role":"analyst","task":"recover header","scope":"contract-format","contract":{"constraints":["static only"],"deliverables":["table"],"completion_conditions":["fields covered"]}})).await?;
     assert!(!created.is_error, "{created:?}");
     let child_id = result(&created)["agent"]["id"].as_str().unwrap();
-    let child: AgentRecord = store.require("agent", child_id)?;
+    let child: AgentSnapshot = store.require("agent", child_id)?;
     let prompt = re_agent::agents::preamble(&child, &run, &store, None, None)?;
     assert!(prompt.contains("static only") && prompt.contains("fields covered"));
     let invalid = service
@@ -1605,7 +1605,7 @@ async fn contracted_tool_tasks_deliver_structured_results_without_vulnerability_
     assert!(store.list::<Finding>("finding", &run.id)?.is_empty());
     assert_eq!(
         store
-            .require::<AgentRecord>("agent", child_id)?
+            .require::<AgentSnapshot>("agent", child_id)?
             .metadata
             .task_result
             .unwrap()
@@ -1661,7 +1661,9 @@ async fn conditional_wait_receipts_survive_a_wakeup_without_reparking() -> Resul
     // transactional business result and wake deadline must stay identical.
     assert_eq!(result(&replay), result(&parked));
     assert_eq!(
-        store.require::<AgentRecord>("agent", &run.root_id)?.status,
+        store
+            .require::<AgentSnapshot>("agent", &run.root_id)?
+            .status,
         Status::Queued
     );
     assert_eq!(
