@@ -3,7 +3,7 @@
 ## 模块边界
 
 - `kernel` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果，`jobs` 处理后台任务观察。
-- `tools` 保留执行账本和共同校验入口；`catalog` 注册 schema，`dispatch` 路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`files`、`jobs`、`sessions` 各自管理资源。
+- `tools` 保留执行账本和共同校验入口；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`files`、`jobs`、`sessions` 各自管理资源。
 - `gui_data` 负责后台查询和展示数据；GUI 绘制只消费缓存。`gui_chat` 负责增量解析和可见聊天块布局。
 - `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 3，不提供旧数据库迁移。
 

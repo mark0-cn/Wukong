@@ -38,9 +38,9 @@ mod args;
 mod catalog;
 mod coordination;
 mod discovery;
-mod dispatch;
 mod execution;
 mod files;
+mod handlers;
 mod jobs;
 mod sessions;
 use catalog::builtins;
@@ -195,36 +195,13 @@ impl ToolService {
         let agent: AgentMetadata = self.store.require_metadata("agent", agent_id)?;
         let specs = builtins();
         let builtin = specs.iter().find(|item| item.definition.name == name);
-        let side_effecting = builtin
-            .map(|item| item.side_effecting)
-            .unwrap_or_else(|| self.mcp.side_effecting(name));
-        let policy = if !side_effecting {
-            ReplayPolicy::ReadOnly
-        } else if self.mcp.contains(name) {
-            ReplayPolicy::OperatorOnly
-        } else if matches!(
-            name,
-            "stage_target"
-                | "file_put"
-                | "exec_command"
-                | "job_start"
-                | "fuzz_start"
-                | "crash_replay"
-                | "input_minimize"
-                | "poc_verify"
-                | "angr_solve"
-                | "job_cancel"
-                | "debug_start"
-                | "debug_command"
-                | "debug_close"
-                | "interactive_start"
-                | "interactive_send"
-                | "interactive_close"
-        ) {
-            ReplayPolicy::WorkerIdempotent
-        } else {
-            ReplayPolicy::Transactional
-        };
+        let policy = builtin.map(|spec| spec.policy).unwrap_or_else(|| {
+            if self.mcp.side_effecting(name) {
+                ReplayPolicy::OperatorOnly
+            } else {
+                ReplayPolicy::ReadOnly
+            }
+        });
         let record = match self.effects().admit(&agent, call_id, name, &args, policy)? {
             Admission::Replay(outcome) => return Ok(outcome),
             Admission::Execute(record) => record,
@@ -263,7 +240,13 @@ impl ToolService {
             } else {
                 args
             };
-            self.dispatch(&agent, call_id, name, args).await
+            if let Some(spec) = builtin {
+                (spec.handler)(self, &agent, call_id, name, args).await
+            } else if self.mcp.contains(name) {
+                self.mcp.call(name, args).await
+            } else {
+                bail!("unknown tool {name}")
+            }
         };
         let result = tokio::time::timeout(outer_timeout, result).await;
         match result {
