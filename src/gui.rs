@@ -1,9 +1,11 @@
+mod commands;
 use crate::gui_data::{self, AgentSummary, RunSummary};
 use crate::{
     application::AssessmentService, config::AppConfig, domain::*, interface::DEFAULT_TASK, report,
     store::Store,
 };
 use anyhow::{Result, ensure};
+use commands::{Command, Key, Outcome};
 use eframe::egui::{self, Color32, RichText};
 use std::{
     path::PathBuf,
@@ -119,7 +121,11 @@ struct StopTarget {
 enum Update {
     Started(String),
     Finished(Result<()>),
-    Exported(Result<PathBuf>),
+    CommandFinished {
+        root: PathBuf,
+        key: Key,
+        result: Result<Outcome>,
+    },
     Loaded {
         request: ReadRequest,
         reader: Box<gui_data::Reader>,
@@ -135,6 +141,7 @@ enum View {
 }
 
 struct Workspace {
+    commands: commands::Controller,
     config_path: PathBuf,
     state_override: Option<PathBuf>,
     settings: Option<crate::gui_settings::ConfigEditor>,
@@ -185,6 +192,7 @@ impl Workspace {
     fn new(config: AppConfig, store: Store, selected: Option<String>) -> Self {
         let (tx, rx) = mpsc::channel();
         let mut app = Self {
+            commands: commands::Controller::new(tokio::runtime::Handle::current(), tx.clone()),
             config_path: PathBuf::from("re-agent.toml"),
             state_override: None,
             settings: None,
@@ -363,7 +371,7 @@ impl Workspace {
         }
     }
     fn start(&mut self, resume: Option<RunSummary>) {
-        if self.cancel.is_some() {
+        if self.cancel.is_some() || self.commands.busy() {
             return;
         }
         let config = self.config.clone();
@@ -398,43 +406,19 @@ impl Workspace {
             let _ = tx.send(Update::Finished(result));
         });
     }
-    fn service(&self) -> AssessmentService {
-        AssessmentService::new(self.config.clone(), self.store.clone())
+    fn dispatch(&mut self, command: Command) {
+        self.commands
+            .submit(command, self.config.clone(), self.store.clone());
     }
     fn pause(&mut self) {
-        if let Some(id) = &self.selected {
-            match self.service().pause(id, "operator paused from desktop") {
-                Ok(()) => {
-                    if self.active_run.as_ref() == Some(id)
-                        && let Some(c) = &self.cancel
-                    {
-                        c.cancel();
-                    }
-                    self.notice = Some((false, "已请求暂停，正在保存进行中的工作。".into()));
-                }
-                Err(e) => self.error(e),
-            }
+        if let Some(id) = self.selected.clone() {
+            self.dispatch(Command::Pause(id));
         }
     }
     fn export(&mut self) {
-        let Some(id) = self.selected.clone() else {
-            return;
-        };
-        if let Some(parent) = rfd::FileDialog::new()
-            .set_title("选择报告保存目录")
-            .pick_folder()
-        {
-            let path = parent.join(format!(
-                "{id}-{}",
-                chrono::Local::now().format("%Y%m%d-%H%M%S")
-            ));
-            let tx = self.tx.clone();
-            let store = self.store.clone();
+        if let Some(id) = self.selected.clone() {
             self.exporting = true;
-            self.runtime.spawn_blocking(move || {
-                let result = report::export(&store, &id, &path).map(|_| path);
-                let _ = tx.send(Update::Exported(result));
-            });
+            self.dispatch(Command::Export(id));
         }
     }
     fn send(&mut self) {
@@ -453,15 +437,80 @@ impl Workspace {
                 },
                 ..Default::default()
             };
-            match self
-                .service()
-                .message(&recipient, self.message.trim(), options)
-            {
-                Ok(_) => {
-                    self.message.clear();
-                    self.notice = Some((false, "消息已送入 Agent 收件箱。".into()));
+            self.dispatch(Command::Message {
+                recipient,
+                text: self.message.trim().to_owned(),
+                options,
+            });
+        }
+    }
+    fn command_completed(&mut self, outcome: Outcome) {
+        match outcome {
+            Outcome::Paused(id) => {
+                if self.active_run.as_ref() == Some(&id)
+                    && let Some(cancel) = &self.cancel
+                {
+                    cancel.cancel();
                 }
-                Err(e) => self.error(e),
+                self.notice = Some((false, "已请求暂停，正在保存进行中的工作。".into()));
+            }
+            Outcome::Stopped => self.notice = Some((false, "已停止指定 Agent 分支。".into())),
+            Outcome::Sent { recipient, text } => {
+                let current = self.agent.clone().or_else(|| {
+                    self.runs
+                        .iter()
+                        .find(|r| Some(&r.id) == self.selected.as_ref())
+                        .map(|r| r.root_id.clone())
+                });
+                if current.as_ref() == Some(&recipient) && self.message.trim() == text {
+                    self.message.clear();
+                }
+                self.notice = Some((false, "消息已送入 Agent 收件箱。".into()));
+            }
+            Outcome::Exported(path) => {
+                if let Some(path) = path {
+                    self.notice = Some((false, format!("报告已导出：{}", path.display())));
+                }
+            }
+            Outcome::Target(path) => {
+                if let Some(path) = path {
+                    self.target = path.display().to_string();
+                }
+            }
+            Outcome::SettingsOpened(editor) => {
+                if let Some(editor) = editor {
+                    self.settings = Some(*editor);
+                }
+            }
+            Outcome::SettingsSaved {
+                editor,
+                config,
+                store,
+            } => {
+                let changed_store = store.root() != self.store.root();
+                self.config = *config;
+                self.config_path = editor.path.clone();
+                self.store = store;
+                self.settings = Some(*editor);
+                if changed_store {
+                    self.selection_epoch += 1;
+                    self.confirm_stop = None;
+                    self.selected = None;
+                    self.agent = None;
+                    self.runs.clear();
+                    self.conversation = None;
+                    self.agents.clear();
+                    self.events.clear();
+                    self.calls.clear();
+                    self.notes.clear();
+                    self.findings.clear();
+                    self.message.clear();
+                    self.resume_run = None;
+                }
+                self.notice = Some((
+                    false,
+                    "配置已保存；新建分析使用新设置，恢复任务沿用历史配置。".into(),
+                ));
             }
         }
     }
@@ -500,13 +549,8 @@ impl Workspace {
                     )
                     .clicked()
                 {
-                    match crate::gui_settings::ConfigEditor::open(self.config_path.clone()) {
-                        Ok(editor) => {
-                            self.settings = Some(editor);
-                            self.new_task = false;
-                        }
-                        Err(e) => self.error(e),
-                    }
+                    self.dispatch(Command::OpenSettings(Some(self.config_path.clone())));
+                    self.new_task = false;
                 }
                 ui.add_space(18.0);
                 ui.label(RichText::new("分析任务").color(MUTED));
@@ -635,7 +679,9 @@ impl Workspace {
                     }
                     if ui
                         .add_enabled(
-                            !run.status.terminal() && self.cancel.is_none(),
+                            !run.status.terminal()
+                                && self.cancel.is_none()
+                                && !self.commands.busy(),
                             egui::Button::new("恢复"),
                         )
                         .clicked()
@@ -644,7 +690,9 @@ impl Workspace {
                     }
                     if ui
                         .add_enabled(
-                            !run.status.terminal() && run.status != Status::BudgetPaused,
+                            !run.status.terminal()
+                                && run.status != Status::BudgetPaused
+                                && !self.commands.contains(&Key::Pause(run.id.clone())),
                             egui::Button::new("暂停"),
                         )
                         .clicked()
@@ -697,7 +745,13 @@ impl Workspace {
                                 .hint_text("补充约束、提出问题，或指定下一步分析…"),
                         );
                         if ui
-                            .add_enabled(!self.message.trim().is_empty(), egui::Button::new("发送"))
+                            .add_enabled(
+                                !self.message.trim().is_empty()
+                                    && !self.commands.contains(&Key::Message(
+                                        self.agent.clone().unwrap_or_else(|| run.root_id.clone()),
+                                    )),
+                                egui::Button::new("发送"),
+                            )
                             .clicked()
                         {
                             self.send();
@@ -1010,36 +1064,18 @@ impl Workspace {
         if let Some(mut editor) = self.settings.take() {
             let outcome = editor.show(
                 ctx,
-                self.cancel.is_some() || self.exporting,
+                self.cancel.is_some() || self.exporting || self.commands.busy(),
+                self.commands.contains(&Key::Settings),
                 self.state_override.as_deref(),
             );
-            if let Some((config, store)) = outcome.applied {
-                let changed_store = store.root() != self.store.root();
-                self.config = config;
-                self.config_path = editor.path.clone();
-                self.store = store;
-                if changed_store {
-                    self.selection_epoch += 1;
-                    self.confirm_stop = None;
-                    self.selected = None;
-                    self.agent = None;
-                    self.runs.clear();
-                    self.conversation = None;
-                    self.agents.clear();
-                    self.events.clear();
-                    self.calls.clear();
-                    self.notes.clear();
-                    self.findings.clear();
-                    self.message.clear();
-                    self.resume_run = None;
-                }
-                if let Err(e) = self.refresh() {
-                    self.error(e);
-                }
-                self.notice = Some((
-                    false,
-                    "配置已保存，新建分析立即使用新设置；恢复任务仍使用其保存的配置。".into(),
-                ));
+            if outcome.save {
+                self.dispatch(Command::SaveSettings {
+                    editor: Box::new(editor.clone()),
+                    state_override: self.state_override.clone(),
+                });
+            }
+            if let Some(path) = outcome.load {
+                self.dispatch(Command::OpenSettings(path));
             }
             if outcome.open {
                 self.settings = Some(editor);
@@ -1068,10 +1104,14 @@ impl Workspace {
                             egui::TextEdit::singleline(&mut self.target)
                                 .hint_text("文件路径，或拖入文件"),
                         );
-                        if ui.button("浏览…").clicked()
-                            && let Some(path) = rfd::FileDialog::new().pick_file()
+                        if ui
+                            .add_enabled(
+                                !self.commands.contains(&Key::Target),
+                                egui::Button::new("浏览…"),
+                            )
+                            .clicked()
                         {
-                            self.target = path.display().to_string();
+                            self.dispatch(Command::Target);
                         }
                     });
                     ui.label("分析目标");
@@ -1092,6 +1132,7 @@ impl Workspace {
                     launch = ui
                         .add_enabled(
                             self.cancel.is_none()
+                                && !self.commands.busy()
                                 && !self.target.trim().is_empty()
                                 && !self.task.trim().is_empty(),
                             egui::Button::new(RichText::new("开始分析").color(Color32::BLACK))
@@ -1137,7 +1178,10 @@ impl Workspace {
                         );
                     }
                     resume = ui
-                        .add_enabled(self.cancel.is_none(), egui::Button::new("恢复分析"))
+                        .add_enabled(
+                            self.cancel.is_none() && !self.commands.busy(),
+                            egui::Button::new("恢复分析"),
+                        )
                         .clicked();
                 });
             if resume {
@@ -1160,11 +1204,8 @@ impl Workspace {
                         if ui.button("确认停止").clicked() {
                             if target.root != self.store.root() {
                                 self.error("工作区已切换，请重新选择停止对象。");
-                            } else if let Err(error) = self
-                                .service()
-                                .stop(&target.agent, "operator stopped from desktop")
-                            {
-                                self.error(error);
+                            } else {
+                                self.dispatch(Command::Stop(target.agent.clone()));
                             }
                             self.confirm_stop = None;
                         }
@@ -1203,6 +1244,7 @@ impl Workspace {
 
 impl eframe::App for Workspace {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.commands.context = Some(ctx.clone());
         while let Ok(update) = self.rx.try_recv() {
             match update {
                 Update::Loaded {
@@ -1229,24 +1271,28 @@ impl eframe::App for Workspace {
                         self.error(e);
                     }
                 }
-                Update::Exported(result) => {
-                    self.exporting = false;
-                    match result {
-                        Ok(path) => {
-                            self.notice = Some((false, format!("报告已导出：{}", path.display())))
+                Update::CommandFinished { root, key, result } => {
+                    self.commands.complete(&key);
+                    if key == Key::Export {
+                        self.exporting = false;
+                    }
+                    if root == self.store.root() {
+                        match result {
+                            Ok(outcome) => self.command_completed(outcome),
+                            Err(error) => self.error(format!("{error:#}")),
                         }
-                        Err(e) => self.error(format!("{e:#}")),
+                        let _ = self.refresh();
                     }
                 }
             }
         }
-        if self.closing && self.cancel.is_none() && !self.exporting {
+        if self.closing && self.cancel.is_none() && !self.exporting && !self.commands.busy() {
             self.allow_close = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if ctx.input(|i| i.viewport().close_requested())
             && !self.allow_close
-            && (self.cancel.is_some() || self.exporting)
+            && (self.cancel.is_some() || self.exporting || self.commands.busy())
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm_close = true;
@@ -1350,6 +1396,39 @@ mod tests {
         assert!(crate::interface::Cli::try_parse_from(["re-agent", "tui"]).is_err());
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn background_commands_deduplicate_and_preserve_newer_drafts() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let mut app = Workspace::new(AppConfig::default(), Store::open(dir.path())?, None);
+        app.dispatch(Command::Pause("missing".into()));
+        app.dispatch(Command::Pause("missing".into()));
+        assert!(app.commands.contains(&Key::Pause("missing".into())));
+        loop {
+            if let Update::CommandFinished { key, result, .. } =
+                app.rx.recv_timeout(Duration::from_secs(5))?
+            {
+                assert!(result.is_err());
+                app.commands.complete(&key);
+                break;
+            }
+        }
+        assert!(!app.commands.busy());
+        app.agent = Some("a".into());
+        app.message = "new draft".into();
+        app.command_completed(Outcome::Sent {
+            recipient: "a".into(),
+            text: "old draft".into(),
+        });
+        assert_eq!(app.message, "new draft");
+        app.agent = Some("b".into());
+        app.command_completed(Outcome::Sent {
+            recipient: "a".into(),
+            text: "new draft".into(),
+        });
+        assert_eq!(app.message, "new draft");
+        Ok(())
+    }
+
     #[tokio::test]
     async fn refresh_identity_includes_agent_and_selection_epoch() -> Result<()> {
         let dir = tempfile::tempdir()?;
@@ -1444,7 +1523,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn desktop_views_render_empty_and_saved_assessments() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let store = Store::open(dir.path())?;
@@ -1499,6 +1578,15 @@ mod tests {
             render(&mut app);
         }
         app.pause();
+        loop {
+            if let Update::CommandFinished { key, result, .. } =
+                app.rx.recv_timeout(Duration::from_secs(5))?
+            {
+                app.commands.complete(&key);
+                app.command_completed(result?);
+                break;
+            }
+        }
         assert_eq!(
             store.require::<RunRecord>("run", &run.id)?.status,
             Status::BudgetPaused
