@@ -192,24 +192,6 @@ pub(super) struct NoteSaveArgs {
 pub(super) struct NotesListArgs {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(super) struct ToolSearchArgs {
-    pub query: Option<String>,
-    pub group: Option<String>,
-    #[schemars(range(min = 0))]
-    pub offset: Option<usize>,
-    #[schemars(range(min = 1, max = 10))]
-    pub limit: Option<usize>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(super) struct ToolsLoadArgs {
-    #[schemars(length(max = 12))]
-    pub names: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum ContextKind {
     Note,

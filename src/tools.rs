@@ -44,7 +44,6 @@ struct Spec {
     definition: ToolDefinition,
     side_effecting: bool,
     target: bool,
-    verifier_only: bool,
     root_only: bool,
     child_only: bool,
 }
@@ -68,7 +67,6 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         parse: |value| Ok(serde_json::to_value(serde_json::from_value::<A>(value)?)?),
         side_effecting,
         target,
-        verifier_only: false,
         root_only: false,
         child_only: false,
     }
@@ -81,18 +79,6 @@ fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     let mut specs = vec![
-        spec::<args::ToolSearchArgs>(
-            "tool_search",
-            "Find permitted tools by group or whitespace-separated keywords in names/descriptions. Returns bounded catalog entries, not schemas. Use the deferred_groups directory in the prompt, follow next_offset, then tools_load exact names. Does not execute or activate tools.",
-            false,
-            false,
-        ),
-        spec::<args::ToolsLoadArgs>(
-            "tools_load",
-            "Replace this task generation's optional tool selection with up to 12 exact names from tool_search. Core tools stay available; full schemas appear on the NEXT fresh model request. An empty names list unloads optional tools. Selection never grants role permissions or executes a selected tool.",
-            true,
-            false,
-        ),
         spec::<args::CreateAgentArgs>(
             "create_agent",
             "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors gates admission with dependency_policy (default all_success). Failed requirements block execution and notify the parent.",
@@ -423,7 +409,6 @@ fn build_catalog() -> Vec<Spec> {
         match item.definition.name.as_str() {
             "finish_scan" => item.root_only = true,
             "agent_finish" => item.child_only = true,
-            "poc_verify" | "verification_record" => item.verifier_only = true,
             _ => {}
         }
     }
@@ -458,9 +443,7 @@ impl ToolService {
             .map_or_else(
                 || role != Role::Root && self.mcp.contains(name),
                 |item| {
-                    (!item.target || role != Role::Root)
-                        && (!item.verifier_only || role == Role::Verifier)
-                        && (!item.root_only || role == Role::Root)
+                    (!item.root_only || role == Role::Root)
                         && (!item.child_only || role != Role::Root)
                 },
             )
@@ -470,9 +453,7 @@ impl ToolService {
         let mut definitions = builtins()
             .iter()
             .filter(|item| {
-                (!item.target || role != Role::Root)
-                    && (!item.verifier_only || role == Role::Verifier)
-                    && (!item.root_only || role == Role::Root)
+                (!item.root_only || role == Role::Root)
                     && (!item.child_only || role != Role::Root)
             })
             .map(|item| item.definition.clone())
@@ -701,8 +682,6 @@ impl ToolService {
         args: Value,
     ) -> Result<Value> {
         match name {
-            "tool_search" => self.search_tools(agent, &args),
-            "tools_load" => self.load_tools(agent, call_id, &args),
             "create_agent" => self.create_agent(agent, call_id, &args),
             "view_agent_graph" => {
                 let mut sessions = Vec::new();
@@ -1331,10 +1310,6 @@ impl ToolService {
                 let verifier: AgentRecord =
                     Store::tx_get(tx, "agent", &verification.verifier_agent_id)?
                         .context("verifier agent missing")?;
-                ensure!(
-                    verifier.role == Role::Verifier,
-                    "verification agent role is invalid"
-                );
                 finding.impact = Some(verification.impact);
             }
             finding.updated_at = now();
@@ -1884,10 +1859,6 @@ impl ToolService {
                 }
                 let finding_id = args["finding_id"].as_str().map(str::to_owned);
                 if name == "poc_verify" {
-                    ensure!(
-                        agent.role == Role::Verifier,
-                        "poc_verify requires verifier role"
-                    );
                     let finding: Finding = self.require_in_run(
                         "finding",
                         finding_id.as_deref().context("finding_id missing")?,
@@ -1946,10 +1917,6 @@ impl ToolService {
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
-        ensure!(
-            agent.role == Role::Verifier,
-            "only a verifier may record independent verification"
-        );
         let finding: Finding =
             self.require_in_run("finding", text(args, "finding_id")?, &agent.run_id)?;
         ensure!(

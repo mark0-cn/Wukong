@@ -344,11 +344,12 @@ mod tests {
         let request = server.await.unwrap();
         assert!(request.to_string().contains("task"));
         assert!(
-            !request["tools"]
+            request["tools"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|tool| tool["function"]["name"] == "binary_inspect")
+                .any(|tool| tool["function"]["name"] == "binary_inspect"),
+            "full catalog is attached from the first request"
         );
     }
 
@@ -366,23 +367,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn native_tool_discovery_loads_schemas_and_rig_rejects_unloaded_calls() {
+    async fn native_full_catalog_is_visible_from_the_first_request() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (_dir, mut runner, run) =
+        let (_dir, runner, run) =
             fixture(format!("http://{}", listener.local_addr().unwrap())).await;
-        runner.config.execution.compact_after_chars = 100;
-        runner.config.execution.keep_recent_messages = 2;
         let server = tokio::spawn(async move {
             let mut inputs = Vec::new();
             for (name, args) in [
-                ("tool_search", json!({"group":"coverage"})),
-                ("tools_load", json!({"names":["coverage_list"]})),
-                ("coverage_list", json!({})),
-                ("tools_load", json!({"names":[]})),
                 ("coverage_list", json!({})),
                 (
                     "finish_scan",
-                    json!({"summary":"discovery lifecycle verified"}),
+                    json!({"summary":"full catalog verified"}),
                 ),
             ] {
                 let (mut socket, _) = listener.accept().await.unwrap();
@@ -403,13 +398,13 @@ mod tests {
                 .iter()
                 .map(|tool| tool["function"]["name"].as_str().unwrap())
                 .collect::<Vec<_>>();
-            assert_eq!(
-                names.contains(&"coverage_list"),
-                matches!(turn, 2 | 3),
+            assert!(names.contains(&"coverage_list"), "turn {turn}");
+            assert!(
+                names.contains(&"debug_start") && names.contains(&"poc_verify"),
                 "turn {turn}"
             );
-            assert!(names.contains(&"tools_load") && names.contains(&"finish_scan"));
-            assert!(!names.contains(&"debug_start") && !names.contains(&"create_agent"));
+            assert!(names.contains(&"finish_scan"));
+            assert!(!names.contains(&"create_agent"));
         }
         let calls = runner
             .store
@@ -420,16 +415,7 @@ mod tests {
                 .iter()
                 .filter(|call| call.name == "coverage_list")
                 .count(),
-            1,
-            "unloaded call reached business execution"
-        );
-        assert!(
-            runner
-                .store
-                .events(&run.id, 0, 1000)
-                .unwrap()
-                .iter()
-                .any(|event| event.kind == "context.compacted")
+            1
         );
     }
 

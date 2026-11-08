@@ -9,7 +9,7 @@ use re_agent::{
     tools::{ToolOutcome, ToolService},
 };
 use serde_json::{Value, json};
-use std::{fs, path::Path, time::Duration};
+use std::{collections::BTreeSet, fs, path::Path, time::Duration};
 
 fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Result<AgentRecord> {
     Ok(coordinator
@@ -171,137 +171,53 @@ async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()
 }
 
 #[tokio::test]
-async fn tool_selection_is_role_scoped_durable_atomic_and_generation_bound() -> Result<()> {
+async fn every_role_sees_the_full_catalog_with_only_lifecycle_split() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let (store, coordinator, run, agent) = fixture(temp.path())?;
-    let mut config = AppConfig::default();
-    config.tools.max_output_bytes = 1024;
-    let service = ToolService::new(config.clone(), store.clone()).await?;
-    let root_search = service
-        .execute(
-            &run.root_id,
-            "root-tool-search",
-            "tool_search",
-            json!({"group":"ghidra"}),
-        )
-        .await?;
-    assert_eq!(result(&root_search)["total"], 0);
-    let root_load = service
-        .execute(
-            &run.root_id,
-            "root-tool-load",
-            "tools_load",
-            json!({"names":["function_decompile"]}),
-        )
-        .await?;
-    assert!(root_load.is_error);
-    let mut offset = 0;
-    let mut discovered = std::collections::BTreeSet::new();
-    loop {
-        let page = service
-            .execute(
-                &agent.id,
-                &format!("tool-search-{offset}"),
-                "tool_search",
-                json!({"group":"ghidra","offset":offset,"limit":10}),
-            )
-            .await?;
-        assert!(
-            !page.is_error && page.value["truncated"] == false,
-            "{page:?}"
-        );
-        assert_eq!(result(&page)["total"], 3);
-        for tool in result(&page)["tools"].as_array().unwrap() {
-            assert!(tool.get("parameters").is_none());
-            assert_eq!(tool["loaded"], false);
-            assert!(discovered.insert(tool["name"].as_str().unwrap().to_owned()));
-        }
-        let Some(next) = result(&page)["next_offset"].as_u64() else {
-            break;
-        };
-        assert!(next > offset);
-        offset = next;
-    }
-    assert_eq!(discovered.len(), 3);
-    let first_args = json!({"names":["function_decompile"]});
-    let first = service
-        .execute(&agent.id, "select-first", "tools_load", first_args.clone())
-        .await?;
-    assert!(!first.is_error);
-    let second = service
-        .execute(
-            &agent.id,
-            "select-second",
-            "tools_load",
-            json!({"names":["xrefs_query"]}),
-        )
-        .await?;
-    assert!(!second.is_error);
-    let replay = service
-        .execute(&agent.id, "select-first", "tools_load", first_args)
-        .await?;
-    assert_eq!(first.value, replay.value);
-    for forbidden in [
+    let (store, _, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    // Strix-style visibility: the whole catalog is attached from the first
+    // request; no model turn is spent discovering or loading tools.
+    let analyst: BTreeSet<String> = service
+        .definitions(Role::Analyst)
+        .iter()
+        .map(|tool| tool.name.to_string())
+        .collect();
+    for expected in [
+        "function_decompile",
+        "stage_target",
+        "file_put",
+        "job_start",
+        "job_status",
+        "debug_start",
+        "interactive_start",
+        "fuzz_start",
+        "crash_replay",
         "poc_verify",
         "verification_record",
-        "create_agent",
-        "does_not_exist",
+        "coverage_record",
+        "finding_file",
+        "threat_model_save",
+        "angr_solve",
+        "binary_strings",
     ] {
-        let denied = service
-            .execute(
-                &agent.id,
-                &format!("invalid-{forbidden}"),
-                "tools_load",
-                json!({"names":["function_decompile",forbidden]}),
-            )
-            .await?;
-        assert!(denied.is_error, "{forbidden}");
+        assert!(analyst.contains(expected), "{expected} missing");
     }
-    service.close().await;
-    let reopened = Store::open(temp.path().join("state"))?;
-    let service = ToolService::new(config, reopened).await?;
-    let search = service
-        .execute(
-            &agent.id,
-            "after-reopen",
-            "tool_search",
-            json!({"query":"xrefs_query"}),
-        )
-        .await?;
-    assert_eq!(
-        result(&search)["tools"][0]["loaded"],
-        true,
-        "replay or failed selection overwrote the current selection"
-    );
-    let other = child(&coordinator, &run.root_id, Role::Analyst, "another task")?;
-    let search = service
-        .execute(
-            &other.id,
-            "isolated-selection",
-            "tool_search",
-            json!({"query":"xrefs_query"}),
-        )
-        .await?;
-    assert_eq!(result(&search)["tools"][0]["loaded"], false);
-    coordinator.finish(&agent.id, "initial task complete")?;
-    let follow = service
-        .execute(
-            &run.root_id,
-            "selection-followup",
-            "follow_up_agent",
-            json!({"agent_id":agent.id,"message":"additional analysis"}),
-        )
-        .await?;
-    assert!(!follow.is_error);
-    let search = service
-        .execute(
-            &agent.id,
-            "fresh-generation",
-            "tool_search",
-            json!({"query":"xrefs_query"}),
-        )
-        .await?;
-    assert_eq!(result(&search)["tools"][0]["loaded"], false);
+    // The lifecycle tool is the only per-role difference.
+    assert!(analyst.contains("agent_finish"));
+    assert!(!analyst.contains("finish_scan"));
+    let root: BTreeSet<String> = service
+        .definitions(Role::Root)
+        .iter()
+        .map(|tool| tool.name.to_string())
+        .collect();
+    assert!(root.contains("finish_scan"));
+    assert!(!root.contains("agent_finish"));
+    // No role wall: target tools are visible to the root as well.
+    assert!(root.contains("binary_inspect"));
+    assert!(root.contains("poc_verify"));
+    // (create_agent exclusion from the model toolset is covered by the
+    // native kernel test, which inspects the actual request tools.)
+    let _ = run;
     service.close().await;
     Ok(())
 }
@@ -362,6 +278,13 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
         .execute(&analyst.id, "self-certify", "poc_verify", json!({}))
         .await?;
     assert!(denied.is_error);
+    assert!(
+        !result(&denied)["error"]
+            .as_str()
+            .unwrap()
+            .contains("verifier role"),
+        "poc_verify is no longer role-gated"
+    );
 
     let report = service
         .execute(
@@ -380,18 +303,21 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
         .into_iter()
         .map(|tool| tool.name.to_string())
         .collect::<Vec<_>>();
-    assert!(!root_tools.iter().any(|name| name == "binary_inspect"));
+    assert!(root_tools.iter().any(|name| name == "binary_inspect"));
     assert!(!root_tools.iter().any(|name| name == "agent_finish"));
     assert!(root_tools.iter().any(|name| name == "finish_scan"));
-    let denied = service
-        .execute(
-            &root.id,
-            "report-target-denied",
-            "binary_inspect",
-            json!({}),
-        )
+    let outcome = service
+        .execute(&root.id, "report-target", "binary_inspect", json!({}))
         .await?;
-    assert!(denied.is_error);
+    if outcome.is_error {
+        assert!(
+            !result(&outcome)["error"]
+                .as_str()
+                .unwrap()
+                .contains("unavailable"),
+            "binary_inspect is no longer role-gated"
+        );
+    }
 
     request.scope = "independent check".into();
     request.role = Role::Verifier;
@@ -697,12 +623,11 @@ async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Re
 }
 
 #[tokio::test]
-async fn root_tools_are_restricted_at_advertisement_and_dispatch_and_failures_are_evidence()
--> Result<()> {
+async fn lifecycle_split_is_the_only_role_difference_and_failures_are_evidence() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    let names = service
+    let root_names = service
         .definitions(Role::Root)
         .iter()
         .map(|tool| tool.name.to_string())
@@ -713,24 +638,39 @@ async fn root_tools_are_restricted_at_advertisement_and_dispatch_and_failures_ar
         "stage_target",
         "job_start",
         "poc_verify",
+        "finish_scan",
     ] {
-        assert!(!names.iter().any(|entry| entry == name));
+        assert!(
+            root_names.iter().any(|entry| entry == name),
+            "{name} missing for root"
+        );
     }
-    let denied = service
-        .execute(&run.root_id, "root-denied", "binary_strings", json!({}))
+    assert!(!root_names.iter().any(|entry| entry == "agent_finish"));
+    let analyst_names = service
+        .definitions(Role::Analyst)
+        .iter()
+        .map(|tool| tool.name.to_string())
+        .collect::<Vec<_>>();
+    assert!(analyst_names.iter().any(|entry| entry == "agent_finish"));
+    assert!(!analyst_names.iter().any(|entry| entry == "finish_scan"));
+    // Failure paths still record evidence, whatever the caller's role.
+    let failed = service
+        .execute(&run.root_id, "root-strings", "binary_strings", json!({}))
         .await?;
-    assert!(denied.is_error);
-    assert!(
-        result(&denied)["error"]
-            .as_str()
-            .unwrap()
-            .contains("unavailable")
-    );
-    assert!(
-        !store
-            .read_evidence(&run.id, denied.value["evidence_id"].as_str().unwrap())?
-            .is_empty()
-    );
+    if failed.is_error {
+        assert!(
+            !result(&failed)["error"]
+                .as_str()
+                .unwrap()
+                .contains("unavailable"),
+            "binary_strings is no longer role-gated"
+        );
+        assert!(
+            !store
+                .read_evidence(&run.id, failed.value["evidence_id"].as_str().unwrap())?
+                .is_empty()
+        );
+    }
     let allowed = service
         .execute(
             &agent.id,
@@ -1096,7 +1036,7 @@ async fn model_boolean_or_fake_verification_cannot_promote_a_finding() -> Result
         )
         .await?;
     assert!(fake_job.is_error);
-    let unauthorized = service
+    let producer_verify = service
         .execute(
             &producer.id,
             "producer-verifies",
@@ -1104,7 +1044,14 @@ async fn model_boolean_or_fake_verification_cannot_promote_a_finding() -> Result
             json!({"finding_id":id,"target":"files/x","input":"files/y"}),
         )
         .await?;
-    assert!(unauthorized.is_error);
+    assert!(producer_verify.is_error);
+    assert!(
+        !result(&producer_verify)["error"]
+            .as_str()
+            .unwrap()
+            .contains("verifier role"),
+        "poc_verify is no longer role-gated"
+    );
     let finding: Finding = store.require("finding", id)?;
     assert_eq!(finding.stage, FindingStage::Suspected);
     assert!(finding.verification_id.is_none());
