@@ -1,7 +1,12 @@
 //! Files tool operations.
 use super::*;
 
-impl ToolService {
+#[derive(Clone)]
+pub(super) struct FilesService {
+    pub(super) store: Store,
+    pub(super) gateway: WorkerGateway,
+}
+impl FilesService {
     pub(super) fn register_file(
         &self,
         agent: &AgentMetadata,
@@ -10,18 +15,24 @@ impl ToolService {
     ) -> Result<()> {
         let path = raw["path"].as_str().context("worker file path missing")?;
         let file_id = stable("file", &format!("{}:{path}", agent.run_id));
-        let previous: Option<Value> = self.store.get("worker_file", &file_id)?;
+        let previous: Option<WorkerFileRecord> = self.store.get("worker_file", &file_id)?;
         let retained = previous
             .as_ref()
-            .filter(|record| record["sha256"] == raw["sha256"])
-            .and_then(|record| record["evidence_id"].as_str());
-        let record = json!({"id":file_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"path":path,"sha256":raw["sha256"],"size":raw["size"],"evidence_id":evidence_id.or(retained),"created_at":now()});
-        self.store.put(
-            "worker_file",
-            record["id"].as_str().context("file ID missing")?,
-            &agent.run_id,
-            &record,
-        )
+            .filter(|record| raw["sha256"].as_str() == Some(record.sha256.as_str()))
+            .and_then(|record| record.evidence_id.as_deref());
+        let record = WorkerFileRecord {
+            id: file_id,
+            run_id: agent.run_id.clone(),
+            agent_id: agent.id.clone(),
+            worker_id: self.gateway.worker_identity()?,
+            path: path.into(),
+            sha256: text(raw, "sha256")?.into(),
+            size: raw["size"].as_u64().context("worker file size missing")?,
+            evidence_id: evidence_id.or(retained).map(str::to_owned),
+            created_at: now(),
+        };
+        self.store
+            .put("worker_file", &record.id, &agent.run_id, &record)
     }
 
     pub(super) fn known_file(
@@ -29,17 +40,17 @@ impl ToolService {
         agent: &AgentMetadata,
         path: &str,
         require_target: bool,
-    ) -> Result<Value> {
+    ) -> Result<WorkerFileRecord> {
         let id = stable("file", &format!("{}:{path}", agent.run_id));
-        let record: Value = self.store.require("worker_file", &id)?;
+        let record: WorkerFileRecord = self.store.require("worker_file", &id)?;
         ensure!(
-            record["run_id"] == agent.run_id && record["worker_id"] == self.worker_identity()?,
+            record.run_id == agent.run_id && record.worker_id == self.gateway.worker_identity()?,
             "worker file belongs to another assessment or runtime"
         );
         if require_target {
             let run: RunRecord = self.store.require("run", &agent.run_id)?;
             ensure!(
-                record["sha256"] == run.target_sha256,
+                record.sha256 == run.target_sha256,
                 "worker target does not match this run's sample SHA256"
             );
         }
@@ -47,13 +58,13 @@ impl ToolService {
     }
 
     pub(super) async fn stage_target(&self, agent: &AgentMetadata, call_id: &str) -> Result<Value> {
-        let run = self.target(agent)?;
+        let run = target(&self.store, agent)?;
         let bytes = fs::read(&run.target_path)?;
         ensure!(
             bytes.len() <= 32 * 1024 * 1024,
             "worker staging currently supports samples up to 32 MiB"
         );
-        let raw=self.worker_call(agent,call_id,"file.put",json!({"path":format!("targets/{}/sample.bin",run.target_sha256),"data_base64":BASE64.encode(&bytes),"executable":true})).await?;
+        let raw=self.gateway.worker_call(agent,call_id,"file.put",json!({"path":format!("targets/{}/sample.bin",run.target_sha256),"data_base64":BASE64.encode(&bytes),"executable":true})).await?;
         ensure!(
             raw["sha256"] == run.target_sha256,
             "worker staged bytes differ from run target"
@@ -87,7 +98,7 @@ impl ToolService {
             bytes.len() <= 32 * 1024 * 1024,
             "file upload exceeds 32 MiB"
         );
-        let raw=self.worker_call(agent,call_id,"file.put",json!({"path":text(args,"path")?,"data_base64":BASE64.encode(&bytes),"executable":args["executable"].as_bool().unwrap_or(false)})).await?;
+        let raw=self.gateway.worker_call(agent,call_id,"file.put",json!({"path":text(args,"path")?,"data_base64":BASE64.encode(&bytes),"executable":args["executable"].as_bool().unwrap_or(false)})).await?;
         ensure!(
             raw["sha256"] == binary::sha256_bytes(&bytes),
             "worker upload hash mismatch"
@@ -115,17 +126,16 @@ impl ToolService {
         if self.known_file(agent, path, false).is_err() {
             let allowed = self
                 .store
-                .list::<Value>("job", &agent.run_id)?
+                .list::<JobRecord>("job", &agent.run_id)?
                 .iter()
                 .any(|job| {
-                    job["worker_id"] == self.worker_identity().unwrap_or_default()
-                        && job["id"]
-                            .as_str()
-                            .is_some_and(|id| path.starts_with(&format!("jobs/{id}/")))
+                    job.worker_id == self.gateway.worker_identity().unwrap_or_default()
+                        && path.starts_with(&format!("jobs/{}/", job.id))
                 });
             ensure!(allowed, "worker path has not been declared for this run");
         }
         let raw = self
+            .gateway
             .runtime()?
             .call(
                 "file.get",
@@ -161,7 +171,7 @@ impl ToolService {
             "runtime.file",
             &bytes,
             "application/octet-stream",
-            json!({"worker_path":raw["path"],"worker_id":self.worker_identity()?}),
+            json!({"worker_path":raw["path"],"worker_id":self.gateway.worker_identity()?}),
         )?;
         self.register_file(agent, raw, Some(&evidence.id))?;
         Ok(evidence)

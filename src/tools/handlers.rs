@@ -99,8 +99,12 @@ pub(super) fn handle_stop_agent<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
         let target_id = {
-            let target: AgentMetadata =
-                tools.require_in_run("agent", text(&args, "agent_id")?, &agent.run_id)?;
+            let target: AgentMetadata = require_in_run(
+                &tools.store,
+                "agent",
+                text(&args, "agent_id")?,
+                &agent.run_id,
+            )?;
             tools.authorize_control(agent, &target)?;
             target.id.clone()
         };
@@ -149,9 +153,12 @@ pub(super) fn handle_threat_model_get<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
         if let Some(id) = args["id"].as_str() {
-            Ok(serde_json::to_value(
-                tools.require_in_run::<SharedDocument>("threat_model", id, &agent.run_id)?,
-            )?)
+            Ok(serde_json::to_value(require_in_run::<SharedDocument>(
+                &tools.store,
+                "threat_model",
+                id,
+                &agent.run_id,
+            )?)?)
         } else {
             Ok(
                 json!({"documents":tools.store.list::<SharedDocument>("threat_model",&agent.run_id)?}),
@@ -200,12 +207,7 @@ pub(super) fn handle_context_search<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        crate::context::search(
-            &tools.store,
-            agent,
-            &args,
-            tools.config.tools.max_output_bytes,
-        )
+        crate::context::search(&tools.store, agent, &args, tools.limits.max_output_bytes)
     })
 }
 
@@ -217,12 +219,7 @@ pub(super) fn handle_context_read<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        crate::context::read(
-            &tools.store,
-            agent,
-            &args,
-            tools.config.tools.max_output_bytes,
-        )
+        crate::context::read(&tools.store, agent, &args, tools.limits.max_output_bytes)
     })
 }
 
@@ -291,11 +288,13 @@ pub(super) fn handle_finding_get<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
         let finding: Finding =
-            tools.require_in_run("finding", text(&args, "id")?, &agent.run_id)?;
+            require_in_run(&tools.store, "finding", text(&args, "id")?, &agent.run_id)?;
         let verification = finding
             .verification_id
             .as_ref()
-            .map(|id| tools.require_in_run::<Verification>("verification", id, &agent.run_id))
+            .map(|id| {
+                require_in_run::<Verification>(&tools.store, "verification", id, &agent.run_id)
+            })
             .transpose()?;
         Ok(json!({"finding":finding,"verification":verification}))
     })
@@ -308,7 +307,13 @@ pub(super) fn handle_verification_record<'a>(
     _name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.verification(agent, call_id, &args).await })
+    Box::pin(async move {
+        tools
+            .execution
+            .jobs
+            .verification(agent, call_id, &args)
+            .await
+    })
 }
 
 pub(super) fn handle_evidence_read<'a>(
@@ -320,12 +325,13 @@ pub(super) fn handle_evidence_read<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
         let evidence_id = text(&args, "evidence_id")?.to_owned();
-        let record: Evidence = tools.require_in_run("evidence", &evidence_id, &agent.run_id)?;
+        let record: Evidence =
+            require_in_run(&tools.store, "evidence", &evidence_id, &agent.run_id)?;
         let total = usize::try_from(record.size)?;
         let offset = usize::try_from(number(&args, "offset", 0))?;
         ensure!(offset <= total, "evidence offset is past end of file");
         let length = usize::try_from(number(&args, "length", 8192))?
-            .min(tools.config.tools.max_evidence_read_bytes);
+            .min(tools.limits.max_evidence_read_bytes);
         let part = if offset == total || length == 0 {
             Vec::new()
         } else {
@@ -395,7 +401,7 @@ pub(super) fn handle_binary_inspect<'a>(
     _args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let run = tools.target(agent)?;
+        let run = target(&tools.store, agent)?;
         let full = serde_json::to_value(binary::inspect(&run.target_path)?)?;
         let bytes = serde_json::to_vec(&full)?;
         let evidence = tools.store.artifact(
@@ -444,7 +450,7 @@ pub(super) fn handle_binary_strings<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let run = tools.target(agent)?;
+        let run = target(&tools.store, agent)?;
         let query: StringsQuery = serde_json::from_value(args)?;
         Ok(serde_json::to_value(binary::strings(
             &run.target_path,
@@ -460,7 +466,7 @@ pub(super) fn handle_functions_search<'a>(
     name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.ghidra(agent, call_id, name, &args).await })
+    Box::pin(async move { tools.analysis.ghidra(agent, call_id, name, &args).await })
 }
 
 pub(super) fn handle_runtime_doctor<'a>(
@@ -480,7 +486,7 @@ pub(super) fn handle_stage_target<'a>(
     _name: &'a str,
     _args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.stage_target(agent, call_id).await })
+    Box::pin(async move { tools.execution.files.stage_target(agent, call_id).await })
 }
 
 pub(super) fn handle_file_put<'a>(
@@ -490,7 +496,7 @@ pub(super) fn handle_file_put<'a>(
     _name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.file_put(agent, call_id, &args).await })
+    Box::pin(async move { tools.execution.files.file_put(agent, call_id, &args).await })
 }
 
 pub(super) fn handle_file_get<'a>(
@@ -500,7 +506,7 @@ pub(super) fn handle_file_get<'a>(
     _name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.file_get(agent, call_id, &args).await })
+    Box::pin(async move { tools.execution.files.file_get(agent, call_id, &args).await })
 }
 
 pub(super) fn handle_job_start<'a>(
@@ -510,5 +516,10 @@ pub(super) fn handle_job_start<'a>(
     name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.runtime_tool(agent, call_id, name, args).await })
+    Box::pin(async move {
+        tools
+            .execution
+            .runtime_tool(agent, call_id, name, args)
+            .await
+    })
 }

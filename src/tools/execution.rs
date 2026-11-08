@@ -1,49 +1,39 @@
-//! Execution tool operations.
+//! Worker execution use cases.
 use super::*;
 
-impl ToolService {
-    pub(crate) fn worker_identity(&self) -> Result<String> {
-        Ok(stable(
-            "worker",
-            &serde_json::to_string(&self.config.runtime)?,
-        ))
-    }
-
-    pub(super) fn request_identity(&self, agent: &AgentMetadata, call_id: &str) -> String {
-        DurableEffects::worker_request_id(agent, call_id)
-    }
-
-    pub(super) async fn worker_call(
-        &self,
-        agent: &AgentMetadata,
-        call_id: &str,
-        method: &str,
-        mut params: Value,
-    ) -> Result<Value> {
-        let request_id = self.request_identity(agent, call_id);
-        params["request_id"] = json!(request_id);
-        params["call_id"] = json!(request_id);
-        if let Some(reply) = self
-            .effects()
-            .worker_reply(agent, call_id, method, &params)?
-        {
-            return Ok(reply);
+#[derive(Clone)]
+pub(super) struct ExecutionService {
+    pub(super) store: Store,
+    pub(super) gateway: WorkerGateway,
+    pub(super) files: FilesService,
+    pub(super) jobs: jobs::JobService,
+    pub(super) sessions: SessionsService,
+}
+impl ExecutionService {
+    pub(super) fn new(store: Store, gateway: WorkerGateway, locks: ResourceLocks) -> Self {
+        let files = FilesService {
+            store: store.clone(),
+            gateway: gateway.clone(),
+        };
+        let jobs = jobs::JobService {
+            store: store.clone(),
+            gateway: gateway.clone(),
+            files: files.clone(),
+            locks,
+        };
+        let sessions = SessionsService {
+            store: store.clone(),
+            gateway: gateway.clone(),
+            files: files.clone(),
+        };
+        Self {
+            store,
+            gateway,
+            files,
+            jobs,
+            sessions,
         }
-        let reply = self.runtime()?.call(method, params.clone()).await.context(
-            crate::effects::WorkerDispatch {
-                method: method.into(),
-                request_id: request_id.clone(),
-            },
-        )?;
-        self.effects()
-            .record_worker_reply(agent, call_id, method, params, reply.clone())
-            .context(crate::effects::WorkerDispatch {
-                method: method.into(),
-                request_id,
-            })?;
-        Ok(reply)
     }
-
     pub(super) async fn runtime_tool(
         &self,
         agent: &AgentMetadata,
@@ -53,25 +43,31 @@ impl ToolService {
     ) -> Result<Value> {
         match name {
             "job_status" | "fuzz_status" => {
-                self.observe_job(agent, call_id, text(&args, "job_id")?)
+                self.jobs
+                    .observe(agent, call_id, text(&args, "job_id")?)
                     .await
             }
             "job_cancel" => {
                 let job_id = text(&args, "job_id")?;
-                self.known_job(agent, job_id, true)?;
-                self.worker_call(agent, call_id, "job.cancel", args).await
+                self.jobs.known_job(agent, job_id, true)?;
+                self.gateway
+                    .worker_call(agent, call_id, "job.cancel", args)
+                    .await
             }
             "job_artifacts" => {
-                self.import_job_artifacts(agent, call_id, text(&args, "job_id")?)
+                self.jobs
+                    .import_job_artifacts(agent, call_id, text(&args, "job_id")?)
                     .await
             }
             "debug_command" | "debug_close" | "debug_start" | "interactive_start"
             | "interactive_send" | "interactive_close" => {
-                self.session_tool(agent, call_id, name, args).await
+                self.sessions.session_tool(agent, call_id, name, args).await
             }
             "exec_command" => {
                 let _ = text(&args, "command")?;
-                self.worker_call(agent, call_id, "exec.run", args).await
+                self.gateway
+                    .worker_call(agent, call_id, "exec.run", args)
+                    .await
             }
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
             | "angr_solve" => {
@@ -84,7 +80,8 @@ impl ToolService {
                 }
                 let finding_id = args["finding_id"].as_str().map(str::to_owned);
                 if name == "poc_verify" {
-                    let finding: Finding = self.require_in_run(
+                    let finding: Finding = require_in_run(
+                        &self.store,
                         "finding",
                         finding_id.as_deref().context("finding_id missing")?,
                         &agent.run_id,
@@ -98,13 +95,13 @@ impl ToolService {
                     // verification_record, passed=true or a diagnosed false.
                     let used = self
                         .store
-                        .list::<Value>("job", &agent.run_id)?
+                        .list::<JobRecord>("job", &agent.run_id)?
                         .into_iter()
                         .filter(|job| {
-                            job["tool_name"].as_str() == Some("poc_verify")
-                                && job["agent_id"].as_str() == Some(agent.id.as_str())
-                                && job["call_id"] != call_id
-                                && job["finding_id"].as_str() == Some(finding.id.as_str())
+                            job.tool_name == "poc_verify"
+                                && job.agent_id == agent.id
+                                && job.call_id != call_id
+                                && job.finding_id.as_deref() == Some(finding.id.as_str())
                         })
                         .count();
                     ensure!(
@@ -118,9 +115,9 @@ impl ToolService {
                     args["verifier_agent_id"] = json!(agent.id);
                 }
                 if name != "job_start" {
-                    self.known_file(agent, text(&args, "target")?, true)?;
+                    self.files.known_file(agent, text(&args, "target")?, true)?;
                     if !matches!(name, "fuzz_start" | "angr_solve") {
-                        self.known_file(agent, text(&args, "input")?, false)?;
+                        self.files.known_file(agent, text(&args, "input")?, false)?;
                     }
                 } else {
                     ensure!(
@@ -133,13 +130,11 @@ impl ToolService {
                     let prefix = format!("{}/", seeds.trim_end_matches('/'));
                     ensure!(
                         self.store
-                            .list::<Value>("worker_file", &agent.run_id)?
+                            .list::<WorkerFileRecord>("worker_file", &agent.run_id)?
                             .iter()
-                            .any(|file| file["worker_id"]
-                                == self.worker_identity().unwrap_or_default()
-                                && file["path"]
-                                    .as_str()
-                                    .is_some_and(|path| path.starts_with(&prefix))),
+                            .any(|file| file.worker_id
+                                == self.gateway.worker_identity().unwrap_or_default()
+                                && file.path.starts_with(&prefix)),
                         "seed directory must contain staged in-run files"
                     );
                 }
@@ -161,16 +156,35 @@ impl ToolService {
                     args.clone()
                 };
                 let raw = self
+                    .gateway
                     .worker_call(agent, call_id, method, params.clone())
                     .await?;
                 let job_id = raw["job_id"].as_str().context("worker job ID missing")?;
-                let record = json!({"id":job_id,"run_id":agent.run_id,"agent_id":agent.id,"owner_generation":agent.generation,"worker_id":self.worker_identity()?,"tool_name":name,"finding_id":finding_id,"call_id":call_id,"worker_request_id":self.request_identity(agent,call_id),"parameters":params,"target_sha256":run.target_sha256,"status":raw,"created_at":now(),"updated_at":now()});
+                let record = JobRecord {
+                    id: job_id.into(),
+                    run_id: agent.run_id.clone(),
+                    agent_id: agent.id.clone(),
+                    worker_id: self.gateway.worker_identity()?,
+                    owner_generation: agent.generation,
+                    tool_name: name.into(),
+                    finding_id,
+                    call_id: call_id.into(),
+                    worker_request_id: self.gateway.request_identity(agent, call_id),
+                    parameters: params,
+                    target_sha256: run.target_sha256,
+                    status: serde_json::from_value(raw.clone())?,
+                    status_evidence_id: None,
+                    imported_artifacts: None,
+                    notification_message_id: None,
+                    created_at: now(),
+                    updated_at: now(),
+                };
                 self.store.write(|tx| {
-                    if let Some(previous) = tx.get::<Value>("job", job_id)? {
+                    if let Some(previous) = tx.get::<JobRecord>("job", job_id)? {
                         ensure!(
-                            previous["run_id"] == agent.run_id
-                                && previous["agent_id"] == agent.id
-                                && previous["call_id"] == call_id,
+                            previous.run_id == agent.run_id
+                                && previous.agent_id == agent.id
+                                && previous.call_id == call_id,
                             "worker job identity is already bound to another request"
                         );
                         return Ok(());

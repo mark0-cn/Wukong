@@ -1,4 +1,6 @@
+mod resources;
 use chrono::{DateTime, Utc};
+pub use resources::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fmt, path::PathBuf, str::FromStr};
@@ -525,3 +527,23 @@ pub struct SharedDocument {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// Records whose ownership can be checked without serializing their payload.
+pub trait RunScoped {
+    fn run_id(&self) -> &str;
+}
+macro_rules! run_scoped { ($($record:ty),+ $(,)?) => { $(impl RunScoped for $record { fn run_id(&self)->&str { &self.run_id } })+ }; }
+run_scoped!(
+    AgentMetadata,
+    AgentSnapshot,
+    JobRecord,
+    SessionRecord,
+    WorkerFileRecord,
+    Finding,
+    Verification,
+    Coverage,
+    Evidence,
+    SharedDocument,
+    ToolCallRecord,
+    Thought
+);

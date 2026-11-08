@@ -1,24 +1,26 @@
 //! Jobs tool operations.
 use super::*;
-use crate::runtime::protocol::{JobState, JobStatus};
+use crate::runtime::protocol::JobStatus;
 
-pub(crate) struct JobService<'a> {
-    tools: &'a ToolService,
+#[derive(Clone)]
+pub(crate) struct JobService {
+    pub(super) store: Store,
+    pub(super) gateway: WorkerGateway,
+    pub(super) files: FilesService,
+    pub(super) locks: ResourceLocks,
 }
 
-impl JobService<'_> {
+impl JobService {
     pub(crate) async fn refresh(&self, run: &str) -> Result<()> {
-        if self.tools.runtime.is_none() {
+        if self.gateway.client.is_none() {
             return Ok(());
         }
-        for job in self.tools.store.list::<Value>("job", run)? {
-            if job["notification_message_id"].is_i64() {
+        for job in self.store.list::<JobRecord>("job", run)? {
+            if job.notification_message_id.is_some() {
                 continue;
             }
-            let owner: AgentMetadata =
-                self.tools
-                    .require_in_run("agent", text(&job, "agent_id")?, run)?;
-            let job_id = text(&job, "id")?;
+            let owner: AgentMetadata = require_in_run(&self.store, "agent", &job.agent_id, run)?;
+            let job_id = &job.id;
             self.observe(&owner, &format!("job-observation:{job_id}"), job_id)
                 .await?;
         }
@@ -34,7 +36,7 @@ impl JobService<'_> {
         // Manual status calls and automatic observations share resource
         // serialization, evidence import and the same transactional update.
         let lock = {
-            let mut locks = self.tools.locks.lock().await;
+            let mut locks = self.locks.lock().await;
             if locks.len() >= 256 {
                 locks.retain(|_, held| Arc::strong_count(held) > 1);
             }
@@ -44,82 +46,82 @@ impl JobService<'_> {
                 .clone()
         };
         let _guard = lock.lock().await;
-        let job = self.tools.known_job(agent, job_id, false)?;
-        let cached = serde_json::from_value::<JobStatus>(job["status"].clone()).ok();
+        let job = self.known_job(agent, job_id, false)?;
+        let cached = Some(job.status.clone());
         let status = if let Some(status) = cached.filter(|status| status.state.terminal()) {
             status
         } else {
-            self.tools.runtime()?.job_status(job_id).await?
+            self.gateway.runtime()?.job_status(job_id).await?
         };
         let raw = serde_json::to_value(&status)?;
-        self.tools.store.write(|tx| {
-            let mut current: Value = tx.get("job", job_id)?.context("job missing")?;
-            current["status"] = raw.clone();
-            current["updated_at"] = json!(now());
+        self.store.write(|tx| {
+            let mut current: JobRecord = tx.get("job", job_id)?.context("job missing")?;
+            current.status = status.clone();
+            current.updated_at = now();
             tx.put("job", job_id, &agent.run_id, &current)
         })?;
         if let Some(crashes) = raw["crashes"].as_array() {
             for artifact in crashes {
-                self.tools.register_file(agent, artifact, None)?;
+                self.files.register_file(agent, artifact, None)?;
                 if let Some(path) = artifact["path"].as_str() {
-                    let existing = self.tools.known_file(agent, path, false)?;
-                    if existing["evidence_id"].is_null() {
+                    let existing = self.files.known_file(agent, path, false)?;
+                    if existing.evidence_id.is_none() {
                         let bytes = self
-                            .tools
+                            .gateway
                             .runtime()?
                             .call("file.get", json!({"path":path,"max_bytes":32*1024*1024}))
                             .await?;
-                        self.tools.import_file(agent, call, &bytes)?;
+                        self.files.import_file(agent, call, &bytes)?;
                     }
                 }
             }
         }
         if status.state.terminal() {
-            let evidence = if job["status_evidence_id"].is_string() {
-                job["status_evidence_id"].clone()
+            let evidence = if let Some(evidence) = &job.status_evidence_id {
+                evidence.clone()
             } else {
-                json!(
-                    self.tools
-                        .store
-                        .artifact(
-                            &agent.run_id,
-                            &agent.id,
-                            call,
-                            "job.raw_status",
-                            &serde_json::to_vec(&raw)?,
-                            "application/json",
-                            json!({"job_id":job_id})
-                        )?
-                        .id
-                )
+                self.store
+                    .artifact(
+                        &agent.run_id,
+                        &agent.id,
+                        call,
+                        "job.raw_status",
+                        &serde_json::to_vec(&raw)?,
+                        "application/json",
+                        json!({"job_id":job_id}),
+                    )?
+                    .id
             };
-            self.tools.store.write(|tx| {
-                let mut current: Value = tx.get("job", job_id)?.context("job missing")?;
-                current["status_evidence_id"] = evidence;
+            self.store.write(|tx| {
+                let mut current: JobRecord = tx.get("job", job_id)?.context("job missing")?;
+                current.status_evidence_id = Some(evidence);
                 tx.put("job", job_id, &agent.run_id, &current)
             })?;
-            self.tools.import_job_artifacts(agent, call, job_id).await?;
-            self.tools.store.write(|tx| {
-                let mut current: Value = tx.get("job", job_id)?.context("job missing")?;
-                if current["notification_message_id"].is_i64() {
+            self.import_job_artifacts(agent, call, job_id).await?;
+            self.store.write(|tx| {
+                let mut current: JobRecord = tx.get("job", job_id)?.context("job missing")?;
+                if current.notification_message_id.is_some() {
                     return Ok(());
                 }
-                let owner_id = text(&current, "agent_id")?;
+                let owner_id = &current.agent_id;
                 let owner = tx
                     .get_metadata("agent", owner_id)?
                     .context("job owner missing")?;
-                let generation = current["owner_generation"]
-                    .as_u64()
-                    .context("job owner generation missing")?;
+                let generation = current.owner_generation;
                 let stale = generation != owner.generation;
                 let envelope = MessageEnvelope {
                     options: MessageOptions {
                         kind: MessageKind::Information,
                         recipient_generation: Some(generation),
-                        evidence_ids: vec![text(&current, "status_evidence_id")?.into()],
+                        evidence_ids: vec![
+                            current
+                                .status_evidence_id
+                                .clone()
+                                .context("job status evidence missing")?,
+                        ],
                         ..Default::default()
                     },
-                    task_id: owner_id.into(),
+                    task_id: owner_id.clone(),
                     delivery: if stale {
                         MessageDelivery::Stale
                     } else {
@@ -138,56 +140,47 @@ impl JobService<'_> {
                     Some(&format!("job-completed:{job_id}")),
                     &envelope,
                 )?;
-                current["notification_message_id"] = json!(mid);
+                current.notification_message_id = Some(mid);
                 tx.put("job", job_id, &agent.run_id, &current)
             })?;
         }
         Ok(raw)
     }
 
-    fn brief(job: &Value, status: &JobStatus) -> Value {
+    fn brief(job: &JobRecord, status: &JobStatus) -> Value {
         let result = status.result.as_ref();
-        let artifacts = job["imported_artifacts"]["artifacts"].as_array();
-        json!({"type":"job_completed","job_id":status.job_id,"tool":job["tool_name"],"state":status.state,
+        let artifacts = job
+            .imported_artifacts
+            .as_ref()
+            .and_then(|value| value["artifacts"].as_array());
+        json!({"type":"job_completed","job_id":status.job_id,"tool":job.tool_name,"state":status.state,
             "exit_code":result.and_then(|result|result.exit_code),"passed":result.and_then(|result|result.passed),
             "stdout":status.stdout.chars().take(400).collect::<String>(),"stderr":status.stderr.chars().take(200).collect::<String>(),
-            "evidence_id":job["status_evidence_id"],"artifact_evidence_ids":artifacts.map(|items|items.iter().take(8).map(|item|item["evidence_id"].clone()).collect::<Vec<_>>()),
+            "evidence_id":job.status_evidence_id,"artifact_evidence_ids":artifacts.map(|items|items.iter().take(8).map(|item|item["evidence_id"].clone()).collect::<Vec<_>>()),
             "artifacts_total":artifacts.map_or(0,Vec::len),
             "note":"Completed job observation; use evidence_read for the full status."})
     }
 }
 
-impl ToolService {
-    pub(crate) fn jobs(&self) -> JobService<'_> {
-        JobService { tools: self }
-    }
+impl JobService {
     pub(super) fn known_job(
         &self,
         agent: &AgentMetadata,
         job_id: &str,
         owned: bool,
-    ) -> Result<Value> {
-        let job: Value = self.require_in_run("job", job_id, &agent.run_id)?;
+    ) -> Result<JobRecord> {
+        let job: JobRecord = require_in_run(&self.store, "job", job_id, &agent.run_id)?;
         ensure!(
-            job["worker_id"] == self.worker_identity()?,
+            job.worker_id == self.gateway.worker_identity()?,
             "job belongs to a different runtime configuration"
         );
         if owned {
             ensure!(
-                job["agent_id"] == agent.id,
+                job.agent_id == agent.id,
                 "this operation requires the job's owning agent"
             );
         }
         Ok(job)
-    }
-
-    pub(super) async fn observe_job(
-        &self,
-        agent: &AgentMetadata,
-        call_id: &str,
-        job_id: &str,
-    ) -> Result<Value> {
-        self.jobs().observe(agent, call_id, job_id).await
     }
 
     pub(super) async fn import_job_artifacts(
@@ -197,10 +190,11 @@ impl ToolService {
         job_id: &str,
     ) -> Result<Value> {
         let mut job = self.known_job(agent, job_id, false)?;
-        if let Some(imported) = job.get("imported_artifacts") {
+        if let Some(imported) = &job.imported_artifacts {
             return Ok(imported.clone());
         }
         let artifacts = self
+            .gateway
             .runtime()?
             .call("job.artifacts", json!({"job_id":job_id}))
             .await?;
@@ -216,6 +210,7 @@ impl ToolService {
                 "worker artifact exceeds 32 MiB import limit"
             );
             let raw = self
+                .gateway
                 .runtime()?
                 .call(
                     "file.get",
@@ -226,14 +221,14 @@ impl ToolService {
                 raw["sha256"] == artifact["sha256"],
                 "job artifact changed while being imported"
             );
-            let evidence = self.import_file(agent, call_id, &raw)?;
+            let evidence = self.files.import_file(agent, call_id, &raw)?;
             imported.push(json!({"artifact":artifact,"evidence_id":evidence.id}));
         }
         let result = json!({"job_id":job_id,"artifacts":imported});
-        if serde_json::from_value::<JobState>(job["status"]["state"].clone())?.terminal() {
+        if job.status.state.terminal() {
             self.store.write(|tx| {
                 job = tx.get("job", job_id)?.context("job missing")?;
-                job["imported_artifacts"] = result.clone();
+                job.imported_artifacts = Some(result.clone());
                 tx.put("job", job_id, &agent.run_id, &job)
             })?;
         }
@@ -246,8 +241,12 @@ impl ToolService {
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
-        let finding: Finding =
-            self.require_in_run("finding", text(args, "finding_id")?, &agent.run_id)?;
+        let finding: Finding = require_in_run(
+            &self.store,
+            "finding",
+            text(args, "finding_id")?,
+            &agent.run_id,
+        )?;
         ensure!(
             finding.agent_id != agent.id,
             "verification must be independent of the finding producer"
@@ -255,10 +254,10 @@ impl ToolService {
         let job_id = text(args, "job_id")?;
         let job = self.known_job(agent, job_id, true)?;
         ensure!(
-            job["tool_name"] == "poc_verify" && job["finding_id"] == finding.id,
+            job.tool_name == "poc_verify" && job.finding_id.as_deref() == Some(finding.id.as_str()),
             "job is not an independent verification of this finding"
         );
-        let status = self.observe_job(agent, call_id, job_id).await?;
+        let status = self.observe(agent, call_id, job_id).await?;
         ensure!(
             status["state"] == "completed" && status["kind"] == "verify",
             "verification job has not completed successfully"
@@ -267,13 +266,13 @@ impl ToolService {
         let run: RunRecord = self.store.require("run", &agent.run_id)?;
         ensure!(
             result["target"]["sha256"] == run.target_sha256
-                && job["target_sha256"] == run.target_sha256,
+                && job.target_sha256 == run.target_sha256,
             "verification target SHA256 differs from finding target"
         );
         ensure!(
             result["verifier_agent_id"] == agent.id
                 && result["producer_agent_id"] == finding.agent_id
-                && result["call_id"] == job["worker_request_id"],
+                && result["call_id"] == job.worker_request_id,
             "worker verification identity differs from its durable request"
         );
         ensure!(
@@ -307,12 +306,14 @@ impl ToolService {
             observations.len() as u64 == attempts,
             "worker trial observations do not match attempt count"
         );
-        let input = self.known_file(agent, text(&job["parameters"], "input")?, false)?;
+        let input = self
+            .files
+            .known_file(agent, text(&job.parameters, "input")?, false)?;
         ensure!(
-            result["input"]["sha256"] == input["sha256"]
+            result["input"]["sha256"] == input.sha256
                 && observations
                     .iter()
-                    .all(|trial| trial["input_sha256"] == input["sha256"]),
+                    .all(|trial| trial["input_sha256"] == input.sha256),
             "verification input identity mismatch"
         );
         let passed = result["passed"]
@@ -360,11 +361,11 @@ impl ToolService {
             impact: impact.into(),
             evidence_ids,
             environment: result["environment"].clone(),
-            conditions: json!({"worker_parameters":job["parameters"],"expected":result["expected"],"analyst_conditions":args.get("conditions"),"analyst_impact_claim":args.get("impact"),"observed_stage":observed_stage,"job_id":job_id}),
+            conditions: json!({"worker_parameters":job.parameters,"expected":result["expected"],"analyst_conditions":args.get("conditions"),"analyst_impact_claim":args.get("impact"),"observed_stage":observed_stage,"job_id":job_id}),
             result: status,
             created_at: now(),
         };
-        self.effect(agent,call_id,|tx|{
+        DurableEffects::new(&self.store,self.gateway.output_limit).commit(agent,call_id,|tx|{
             if let Some(existing)=tx.get::<Verification>("verification",&verification.id)?{return Ok(serde_json::to_value(existing)?);}
             tx.put("verification",&verification.id,&agent.run_id,&verification)?;
             tx.event(&agent.run_id,Some(&agent.id),"verification.recorded",json!({"verification_id":verification.id,"finding_id":finding.id,"passed":passed,"attempts":attempts,"successes":successes,"impact":verification.impact}))?;
@@ -419,7 +420,7 @@ mod tests {
                 .is_some_and(|artifacts| !artifacts.is_empty())
         );
         store.read_evidence(&run.id, text(&automatic, "status_evidence_id")?)?;
-        let manual = tools.observe_job(&owner, "manual", job_id).await?;
+        let manual = tools.jobs().observe(&owner, "manual", job_id).await?;
         assert_eq!(manual, automatic["status"]);
         assert_eq!(
             store.require::<Value>("job", job_id)?["status_evidence_id"],
