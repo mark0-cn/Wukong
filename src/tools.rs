@@ -294,7 +294,7 @@ impl ToolService {
         &self,
         agent: &AgentMetadata,
         call_id: &str,
-        action: impl FnOnce(&rusqlite::Connection) -> Result<Value>,
+        action: impl FnOnce(&crate::store::StateSession<'_>) -> Result<Value>,
     ) -> Result<Value> {
         self.effects().commit(agent, call_id, action)
     }

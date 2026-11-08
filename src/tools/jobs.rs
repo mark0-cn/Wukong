@@ -52,11 +52,11 @@ impl JobService<'_> {
             self.tools.runtime()?.job_status(job_id).await?
         };
         let raw = serde_json::to_value(&status)?;
-        self.tools.store.transaction(|tx| {
-            let mut current: Value = Store::tx_get(tx, "job", job_id)?.context("job missing")?;
+        self.tools.store.write(|tx| {
+            let mut current: Value = tx.get("job", job_id)?.context("job missing")?;
             current["status"] = raw.clone();
             current["updated_at"] = json!(now());
-            Store::tx_put(tx, "job", job_id, &agent.run_id, &current)
+            tx.put("job", job_id, &agent.run_id, &current)
         })?;
         if let Some(crashes) = raw["crashes"].as_array() {
             for artifact in crashes {
@@ -93,22 +93,21 @@ impl JobService<'_> {
                         .id
                 )
             };
-            self.tools.store.transaction(|tx| {
-                let mut current: Value =
-                    Store::tx_get(tx, "job", job_id)?.context("job missing")?;
+            self.tools.store.write(|tx| {
+                let mut current: Value = tx.get("job", job_id)?.context("job missing")?;
                 current["status_evidence_id"] = evidence;
-                Store::tx_put(tx, "job", job_id, &agent.run_id, &current)
+                tx.put("job", job_id, &agent.run_id, &current)
             })?;
             self.tools.import_job_artifacts(agent, call, job_id).await?;
-            self.tools.store.transaction(|tx| {
-                let mut current: Value =
-                    Store::tx_get(tx, "job", job_id)?.context("job missing")?;
+            self.tools.store.write(|tx| {
+                let mut current: Value = tx.get("job", job_id)?.context("job missing")?;
                 if current["notification_message_id"].is_i64() {
                     return Ok(());
                 }
                 let owner_id = text(&current, "agent_id")?;
-                let owner =
-                    Store::tx_get_metadata(tx, "agent", owner_id)?.context("job owner missing")?;
+                let owner = tx
+                    .get_metadata("agent", owner_id)?
+                    .context("job owner missing")?;
                 let generation = current["owner_generation"]
                     .as_u64()
                     .context("job owner generation missing")?;
@@ -131,8 +130,7 @@ impl JobService<'_> {
                     ..Default::default()
                 };
                 let brief = Self::brief(&current, &status);
-                let (mid, _) = Store::tx_enqueue_message(
-                    tx,
+                let (mid, _) = tx.enqueue_message(
                     &agent.run_id,
                     "worker",
                     owner_id,
@@ -141,7 +139,7 @@ impl JobService<'_> {
                     &envelope,
                 )?;
                 current["notification_message_id"] = json!(mid);
-                Store::tx_put(tx, "job", job_id, &agent.run_id, &current)
+                tx.put("job", job_id, &agent.run_id, &current)
             })?;
         }
         Ok(raw)
@@ -233,10 +231,10 @@ impl ToolService {
         }
         let result = json!({"job_id":job_id,"artifacts":imported});
         if serde_json::from_value::<JobState>(job["status"]["state"].clone())?.terminal() {
-            self.store.transaction(|tx| {
-                job = Store::tx_get(tx, "job", job_id)?.context("job missing")?;
+            self.store.write(|tx| {
+                job = tx.get("job", job_id)?.context("job missing")?;
                 job["imported_artifacts"] = result.clone();
-                Store::tx_put(tx, "job", job_id, &agent.run_id, &job)
+                tx.put("job", job_id, &agent.run_id, &job)
             })?;
         }
         Ok(result)
@@ -367,9 +365,9 @@ impl ToolService {
             created_at: now(),
         };
         self.effect(agent,call_id,|tx|{
-            if let Some(existing)=Store::tx_get::<Verification>(tx,"verification",&verification.id)?{return Ok(serde_json::to_value(existing)?);}
-            Store::tx_put(tx,"verification",&verification.id,&agent.run_id,&verification)?;
-            Store::tx_event(tx,&agent.run_id,Some(&agent.id),"verification.recorded",json!({"verification_id":verification.id,"finding_id":finding.id,"passed":passed,"attempts":attempts,"successes":successes,"impact":verification.impact}))?;
+            if let Some(existing)=tx.get::<Verification>("verification",&verification.id)?{return Ok(serde_json::to_value(existing)?);}
+            tx.put("verification",&verification.id,&agent.run_id,&verification)?;
+            tx.event(&agent.run_id,Some(&agent.id),"verification.recorded",json!({"verification_id":verification.id,"finding_id":finding.id,"passed":passed,"attempts":attempts,"successes":successes,"impact":verification.impact}))?;
             Ok(serde_json::to_value(verification)?)
         })
     }
@@ -428,11 +426,11 @@ mod tests {
             automatic["status_evidence_id"]
         );
         let before_replay: Value = store.require("job", job_id)?;
-        store.transaction(|tx| {
-            let mut call: ToolCallRecord = Store::tx_get(tx, "call", "start")?.unwrap();
+        store.write(|tx| {
+            let mut call: ToolCallRecord = tx.get("call", "start")?.unwrap();
             call.state = CallState::Running;
             call.result = None;
-            Store::tx_put(tx, "call", "start", &run.id, &call)
+            tx.put("call", "start", &run.id, &call)
         })?;
         let replay = tools
             .execute(
@@ -472,8 +470,7 @@ mod tests {
         assert!(store.inbox(&owner.id)?.is_empty());
         let mut next = owner.clone();
         next.generation += 1;
-        store
-            .transaction(|tx| Store::tx_put_metadata(tx, "agent", &next.id, &next.run_id, &next))?;
+        store.write(|tx| tx.put_metadata("agent", &next.id, &next.run_id, &next))?;
         let mut lost = automatic;
         lost["id"] = json!("lost");
         lost["status"]["job_id"] = json!("lost");
@@ -487,7 +484,7 @@ mod tests {
             store.inbox(&owner.id)?.is_empty(),
             "old generation jobs cannot steer new work"
         );
-        let messages = store.read_transaction(|tx| Store::tx_messages(tx, &run.id))?;
+        let messages = store.read(|tx| tx.messages(&run.id))?;
         let stale = messages
             .iter()
             .find(|mail| {

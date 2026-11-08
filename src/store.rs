@@ -11,6 +11,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod session;
+pub(crate) use session::StateSession;
 mod conversations;
 mod leases;
 pub(crate) use leases::LeaseToken;
