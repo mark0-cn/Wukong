@@ -4,7 +4,7 @@
 - 文档状态：历史需求与设计基线；当前实现以 [实现架构](architecture.md) 和 [实现契约](implementation-contract.md) 为准
 - Strix 参照基线：`06015506625a78b981ae0b34be40239fc1b389be`
 - Rig 参照基线：`v0.46.0`
-- 首版建议范围：Linux x86_64 ELF、无源码样本、CLI / TUI、本地实验环境
+- 首版建议范围：Linux x86_64 ELF、无源码样本、CLI / GUI、本地实验环境
 
 当前版本已改用 Rig ECS 原生执行、会话日志和 SubagentsPlugin。下文的自定义调度器、AgentRun 包装及 create_agent 接口描述保留为设计历史；模型侧创建接口现为 task，业务契约与证据验收仍由项目实现。本次重构不包含旧任务迁移。
 
@@ -22,7 +22,7 @@
 
 | Strix 模块 | Rust 对应模块 | 主要职责 |
 |---|---|---|
-| `interface/` | `interface` | CLI、TUI、运行查看、人工交互 |
+| `interface/` | `interface` | CLI、GUI、运行查看、人工交互 |
 | `agents/factory.py`、prompt | `agents` | 创建 agent、组合角色提示词与 skills |
 | `core/runner.py`、`core/execution.py` | `runner` | 启动任务、驱动 agent、重试与恢复 |
 | `core/agents.py` | `coordinator` | agent 树、状态、邮箱、父子关系 |
@@ -51,7 +51,7 @@ Rig 负责单个 agent 的推理与工具循环；项目自己的协调器负责
 
 ```mermaid
 flowchart TB
-    UI["CLI / TUI"] --> Runner["AssessmentRunner"]
+    UI["CLI / GUI"] --> Runner["AssessmentRunner"]
     Runner --> Coordinator["AgentCoordinator<br/>agent 树 / 邮箱 / 调度 / 预算"]
     Coordinator <--> Agents["Root + 动态子 agent<br/>Rig"]
     Agents --> Tools["工具调度层"]
@@ -195,7 +195,7 @@ Windows 后端参考：[DbgEng 能力说明](https://learn.microsoft.com/en-us/w
 | 2. Agent 内核 | Rig、动态子 agent、消息、预算、持久化 | 异步创建、消息唤醒、停止、重启恢复 |
 | 3. 逆向闭环 | 样本导入、Ghidra、GDB、证据查询 | 从函数分析推进到输入复现与根因定位 |
 | 4. 利用验证闭环 | fuzz、崩溃去重、最小化、PoC、Verifier | 独立复现并输出准确的影响等级 |
-| 5. 工具化交付 | TUI、报告、打包、评测集 | 可持续运行、可追踪、可重放 |
+| 5. 工具化交付 | GUI、报告、打包、评测集 | 可持续运行、可追踪、可重放 |
 
 第一阶段的具体产物为：
 

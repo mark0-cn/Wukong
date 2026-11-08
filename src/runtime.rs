@@ -78,6 +78,7 @@ struct Transport {
     child: Child,
     client: Client,
     poisoned: bool,
+    stderr: crate::process_io::StderrCapture,
 }
 #[derive(Clone)]
 pub struct RuntimeClient {
@@ -184,13 +185,16 @@ impl RuntimeClient {
         cmd.env_clear().envs(env).env("PYTHONUNBUFFERED", "1");
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         #[cfg(windows)]
         {
             cmd.creation_flags(0x08000000);
         }
         let mut child = cmd.spawn().context("spawn runtime bridge")?;
+        let stderr = crate::process_io::StderrCapture::new(
+            child.stderr.take().context("worker stderr unavailable")?,
+        );
         let input = child.stdin.take().context("worker stdin unavailable")?;
         let output = child.stdout.take().context("worker stdout unavailable")?;
         let client = ClientBuilder::default()
@@ -212,16 +216,19 @@ impl RuntimeClient {
             child,
             client,
             poisoned: false,
+            stderr,
         };
         match request(&mut transport, "ping", json!({})).await {
             Ok(_) => Ok(transport),
             Err(RequestFailure::Worker(error)) => {
                 let _ = transport.child.kill().await;
-                Err(error).context("runtime handshake")
+                transport.stderr.finish().await;
+                Err(error).context(transport.stderr.context("runtime handshake"))
             }
             Err(RequestFailure::Transport { error, .. }) => {
                 let _ = transport.child.kill().await;
-                Err(error).context("runtime handshake")
+                transport.stderr.finish().await;
+                Err(error).context(transport.stderr.context("runtime handshake"))
             }
         }
     }
@@ -251,13 +258,17 @@ impl RuntimeClient {
             Err(RequestFailure::Transport { timed_out, error }) => {
                 transport.poisoned = true;
                 let _ = transport.child.kill().await;
+                transport.stderr.finish().await;
                 if timed_out {
                     bail!(
                         "runtime request timed out; the worker may have executed it — reconcile the durable call before retrying (the next call reconnects automatically)"
                     )
                 }
-                Err(error)
-                    .context("runtime transport failed; the next call reconnects automatically")
+                Err(error).context(
+                    transport.stderr.context(
+                        "runtime transport failed; the next call reconnects automatically",
+                    ),
+                )
             }
         }
     }

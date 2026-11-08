@@ -74,3 +74,13 @@ Closure and calibration discipline:
 - Use think only for concise audited scratch notes. Its input remains in tool-call history and may
   be inherited by children; it is not a private channel or a way to reduce context usage. Put shared
   conclusions and evidence references in analysis notes.
+
+Operator-facing progress:
+- Alongside tool calls, provide a short public progress update when beginning a meaningful phase,
+  delegating work, obtaining a substantive result, or encountering a blocker. Do not narrate routine polls.
+- Explain the operation's purpose, the observed outcome, and the next step in plain language.
+  These are concise status summaries, not private reasoning or a chain-of-thought transcript.
+- Use the user's language for these updates; if none is specified, use Simplified Chinese.
+  Keep exact tool identifiers, addresses and evidence references unchanged where needed.
+- Do not invent findings to fill the activity feed. Distinguish attempted operations, observed facts
+  and unverified hypotheses. Continue the required tool/lifecycle calls; a progress note is not completion.

@@ -15,6 +15,31 @@ cargo test --all-targets
 
 Windows 可执行文件位于 `target/release/re-agent.exe`；Linux/macOS 为 `target/release/re-agent`。核心使用 Rig ECS 原生执行循环、会话日志和异步子 agent；模型接口测试通过本地 HTTP 服务验证实际 provider 协议。本轮验证在 macOS 上完成，Windows 控制端尚未验证。
 
+## 桌面工作区
+
+直接双击 `re-agent.exe`，或运行 `re-agent` / `re-agent gui` 打开原生桌面窗口。`re-agent gui RUN_ID` 可直接查看指定任务。GUI 不需要浏览器；未配置模型凭据时仍可查看已保存任务，启动分析时会显示具体错误。
+
+- 深色工作区、中文字体、可调整侧栏、任务搜索和可复制文本。
+- 浏览或拖入样本，编辑分析目标后开始分析。
+- 默认动态页展示 Agent 公开回复、共享分析笔记、可读的工具操作与暂停原因；技术事件和原始 JSON 可按需展开。
+- 查看 Agent 会话、发现及证据、任务总结与预算。会话直接显示公开回复，将工具调用和结果配对为紧凑卡片，参数与完整结果可展开；模型附加记录在“技术详情”中查看。新任务默认要求中文进展说明，已有记录保持原文。
+- 会话默认跟随最新消息；向上滚动查看历史时暂停跟随，点击“回到最新”或重新勾选“跟随最新”恢复。顶部状态、Agent 数量及预算合并为紧凑状态栏，为正文留出空间。
+- 向选中的 Agent（默认 root）发送信息，或勾选“作为后续任务”；暂停的任务需手动恢复。
+- 暂停、恢复、停止 Agent 分支，以及选择目录导出报告和证据包。
+- 每个窗口同时驱动一个任务，可浏览其他任务；关闭时等待本窗口任务暂停保存及报告导出完成。
+
+恢复使用任务保存的配置，并可在恢复对话框中调整 Token 与费用预算。左侧“设置 / 配置文件”可编辑模型、API 地址、凭据环境变量名、预算、价格、并发、Docker/SSH/本地后端和存储路径；“完整 TOML”可编辑角色模型、MCP 等全部字段。保存前校验配置，原文件注释及未修改字段会保留，若文件已被外部修改则拒绝覆盖。可打开另一份 TOML 并保存应用；新任务立即使用新配置，运行中的任务需先暂停保存后再应用设置。`--state` 临时覆盖仍然优先，且不写入配置文件。API key 内容不写入 TOML，Windows 下优先读取进程环境变量；缺失时读取用户、系统环境变量，因此桌面启动也能读取已保存的凭据。
+
+### Windows 发布与启动
+
+若构建目录位于带 Low 完整性标签的工作区，EXE 会继承该标签，启动后可能无法访问 Docker Desktop 的命名管道。使用发布脚本将程序复制到普通应用目录，并生成明确指向所选配置文件的快捷方式：
+
+```powershell
+.\scripts\publish-gui.ps1 -Destination D:\re-agent-bin\desktop-gui -ConfigPath .\target\debug\re-agent.toml
+```
+
+此后使用发布目录中的 `RE Agent.lnk` 启动。配置仍保存到指定的原始文件；脚本不修改工作区或 Docker 权限。重新构建后，关闭旧窗口并再次运行发布脚本即可更新。Windows 的进程完整性会受到可执行文件标签限制，见 [Microsoft MIC 文档](https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control)。
+
 ## 开始使用
 
 ```powershell
@@ -65,7 +90,7 @@ remote_state_dir = "/state"
 ```powershell
 re-agent runs
 re-agent status RUN_ID --events 30
-re-agent tui RUN_ID
+re-agent gui RUN_ID
 re-agent message AGENT_ID "请记录这条新的分析约束"
 re-agent pause RUN_ID
 re-agent resume RUN_ID --max-tokens 1000000
@@ -75,7 +100,7 @@ re-agent verify-bundle .\reports\assessment-01
 re-agent reconcile CALL_ID --result-file .\reviewed-result.json --evidence-id EVIDENCE_ID
 ```
 
-省略 `--config` 时，会使用当前目录的 `re-agent.toml`（如果存在）。`--state` 可选择已有状态目录。首次模型请求前会保存解析后的 endpoint，包括环境变量提供的默认值。`resume` 使用任务保存的模型与后端配置；原生 Rig 日志保存在状态目录的 `rig/RUN_ID`。活动控制端通过租约互斥。本次实现面向新任务，不迁移旧版自定义 AgentRun 检查点。
+省略 `--config` 时，桌面版优先使用可执行文件同目录的 `re-agent.toml`，再查找当前目录；CLI 命令优先查找当前目录，再查找可执行文件同目录。显式 `--config` 始终优先。`--state` 可选择已有状态目录。首次模型请求前会保存解析后的 endpoint，包括环境变量提供的默认值。`resume` 使用任务保存的模型与后端配置；原生 Rig 日志保存在状态目录的 `rig/RUN_ID`。活动控制端通过租约互斥。本次实现面向新任务，不迁移旧版自定义 AgentRun 检查点。
 
 Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 jobs 和调试器分别核对：持久化检查点不能恢复已经消失的调试进程。有副作用且结果未知的第三方 MCP 调用保留未决状态，不能盲目重放。
 
@@ -92,7 +117,7 @@ Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 
 | `tools` / `mcp` | 工具 schema、角色能力、调用去重、第三方工具 |
 | `binary` / `workers/ghidra` | 二进制画像、字符串、函数、反编译、交叉引用 |
 | `runtime` / `workers/runtime` | GDB/MI、进程/fuzz jobs、符号执行（angr）、交互会话、崩溃重放与独立复核 |
-| `report` / `interface` | CLI、TUI、JSON/Markdown/HTML 报告、证据包 |
+| `report` / `interface` / `gui` | CLI、原生桌面 GUI、JSON/Markdown/HTML 报告、证据包 |
 
 根 agent 专注编排，实际目标操作由动态子 agent 完成。分析笔记、待办、发现和覆盖记录在同一任务内共享；威胁模型仅在安全边界分析中按需使用。每个 agent 保留独立会话。活动任务内可向已完成的子 agent 追加问题，保留其历史和累计预算；同范围的新任务只与活动 agent 去重。完整工具输出保存为哈希产物，模型只接收有界结果及证据 ID。
 

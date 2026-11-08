@@ -20,12 +20,11 @@ async-trait = "0.1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.29"
 futures = "0.3"
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+rfd = "0.15"
 hex = "0.4"
 object = { version = "0.40", features = ["read", "std"] }
-ratatui = { version = "0.30.2", features = ["crossterm"] }
-ratatui-textarea = "0.9.4"
 regex = "1"
 rig = { version = "=0.46.0", features = ["memory", "rmcp"] }
 rig-core = "=0.46.0"
@@ -41,6 +40,7 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 toml = "0.9"
+toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -53,3 +53,6 @@ askama = "0.14.0"
 [profile.release]
 lto = "thin"
 strip = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Registry"] }

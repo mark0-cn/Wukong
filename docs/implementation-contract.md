@@ -4,7 +4,7 @@ The architecture in `strix-rig-binary-agent-plan.md` is the requirement baseline
 
 ## Module ownership
 
-`domain` defines durable records; `store` owns transactional SQLite persistence and content-addressed artifacts; `coordinator` implements business task, contract and mailbox semantics; `prompts` registers built-in metadata/resources and `agents` renders selected role/skill prompts; `llm` adapts provider connections and typed summaries; `runner` owns leases, usage accounting and events; `kernel` integrates the native Rig ECS execution, session logs and subagent protocol with business admission/completion gates; `tools` dispatches typed operations using Rig schemas; `binary` and `runtime` implement external backends; `mcp` uses rmcp for third-party protocol handling; `report` exports evidence-backed findings; `interface` exposes CLI and TUI.
+`domain` defines durable records; `store` owns transactional SQLite persistence and content-addressed artifacts; `coordinator` implements business task, contract and mailbox semantics; `prompts` registers built-in metadata/resources and `agents` renders selected role/skill prompts; `llm` adapts provider connections and typed summaries; `runner` owns leases, usage accounting and events; `kernel` integrates the native Rig ECS execution, session logs and subagent protocol with business admission/completion gates; `tools` dispatches typed operations using Rig schemas; `binary` and `runtime` implement external backends; `mcp` uses rmcp for third-party protocol handling; `report` exports evidence-backed findings; `interface` exposes CLI commands; `gui` provides the native desktop workspace.
 
 ## Required invariants
 
@@ -29,4 +29,4 @@ Use unit/integration tests for transactional lifecycle, concurrent messages, ded
 
 ## Delivery audit
 
-Track CLI/config, dynamic scheduling, persistence/resume, static analysis, Ghidra, GDB/MI, AFL++, crash reduction, independent verification, skills, MCP, TUI, JSON/Markdown/HTML reports, replayable artifacts, Docker runtime, evaluation fixtures and regression tests. Do not mark the project complete on compilation alone.
+Track CLI/config, dynamic scheduling, persistence/resume, static analysis, Ghidra, GDB/MI, AFL++, crash reduction, independent verification, skills, MCP, GUI, JSON/Markdown/HTML reports, replayable artifacts, Docker runtime, evaluation fixtures and regression tests. Do not mark the project complete on compilation alone.

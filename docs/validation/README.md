@@ -65,7 +65,7 @@ Mapping of the implementation-contract audit items to evidence:
 | Independent verification | `runtime-linux.json` `verification` (3/3 trials, distinct producer/verifier agent ids) |
 | Skills | Categorized `prompts/` resources registered in `src/prompts.rs` and composed by `agents.rs` |
 | MCP | `unknown_mcp_side_effect_is_never_blindly_replayed`, `worker_filters_model_credentials_and_declares_missing_capabilities` |
-| TUI | `interface.rs` TUI + CLI workflow tests |
+| GUI | `gui.rs` desktop views + CLI workflow tests |
 | JSON / Markdown / HTML reports | `tests/report_export.rs` (4): bundle integrity, redaction, no unverified impact claims, tamper rejection |
 | Replayable artifacts | report bundle + `replay.json` + `verify-bundle` command |
 | Docker runtime | `workers/Dockerfile` (pinned base + checked Ghidra/Temurin checksums), hardened container acceptance above |
@@ -80,7 +80,7 @@ Mapping of the implementation-contract audit items to evidence:
   Runs from a normal terminal do not need this.
 - **Execution policy:** `scripts/check.ps1` needs `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
   on hosts that block unsigned scripts.
-- **Worker capabilities:** the Linux worker requires `CAP_CHOWN/SETUID/SETGID/SYS_PTRACE/DAC_OVERRIDE`
+- **Worker capabilities:** the Linux worker requires `CAP_CHOWN/SEGUID/SETGID/SYS_PTRACE/DAC_OVERRIDE`
   with `no-new-privileges`; a container started without them reports a clear capability error
   instead of failing silently (see `workers/runtime/README.md`).
 - **AFL++ vs Docker Desktop core pattern:** Docker Desktop's host core pattern is an external

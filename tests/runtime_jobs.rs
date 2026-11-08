@@ -300,3 +300,101 @@ for line in sys.stdin:
     client.close().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn bridge_startup_error_includes_captured_stderr() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let bridge = root.path().join("failed_bridge.py");
+    std::fs::write(
+        &bridge,
+        "import sys\nsys.stderr.write('fixture: Docker engine unavailable\\n')\nsys.exit(1)\n",
+    )?;
+    let config = RuntimeConfig {
+        bridge_path: bridge,
+        request_timeout_secs: 2,
+        ..config(root.path())
+    };
+    let error = match RuntimeClient::connect(config).await {
+        Ok(client) => {
+            client.close().await?;
+            anyhow::bail!("failing bridge unexpectedly connected");
+        }
+        Err(error) => error,
+    };
+    assert!(
+        format!("{error:#}").contains("fixture: Docker engine unavailable"),
+        "{error:#}"
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn desktop_runtime_does_not_inherit_invalid_console_stderr() -> Result<()> {
+    use std::ffi::c_void;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetStdHandle(kind: u32) -> *mut c_void;
+        fn SetStdHandle(kind: u32, handle: *mut c_void) -> i32;
+    }
+    // Keep process-wide Win32 handle changes out of the parallel test runner.
+    if std::env::var_os("RE_AGENT_STDERR_TEST_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "desktop_runtime_does_not_inherit_invalid_console_stderr",
+                "--nocapture",
+            ])
+            .env("RE_AGENT_STDERR_TEST_CHILD", "1")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Ok(());
+    }
+    let root = tempfile::tempdir()?;
+    let bridge = root.path().join("desktop_bridge.py");
+    std::fs::write(
+        &bridge,
+        r#"
+import json, sys
+sys.stderr.write('x' * 131072)
+sys.stderr.flush()
+for line in sys.stdin:
+    request = json.loads(line)
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True}}), flush=True)
+"#,
+    )?;
+    let config = RuntimeConfig {
+        bridge_path: bridge,
+        request_timeout_secs: 3,
+        ..config(root.path())
+    };
+    let previous = unsafe { GetStdHandle((-12i32) as u32) };
+    assert_ne!(
+        unsafe { SetStdHandle((-12i32) as u32, 0x12345678usize as *mut c_void) },
+        0
+    );
+    // This models the stale standard handle left by the detached desktop console.
+    let legacy = std::process::Command::new("python")
+        .args(["-c", "pass"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn();
+    let result = RuntimeClient::connect(config).await;
+    unsafe {
+        SetStdHandle((-12i32) as u32, previous);
+    }
+    assert!(
+        legacy.is_err(),
+        "fixture must reproduce the inherited-handle failure"
+    );
+    let client = result?;
+    assert_eq!(client.call("doctor", json!({})).await?["ready"], true);
+    client.close().await?;
+    Ok(())
+}
