@@ -1,3 +1,4 @@
+pub(crate) mod desktop_queries;
 mod finding_queries;
 pub(crate) mod report_queries;
 mod workspace;
