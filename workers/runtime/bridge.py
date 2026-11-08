@@ -69,7 +69,16 @@ def atomic_json(path, data):
 
 
 def load_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    # Windows: a concurrent atomic replacement can fail the open with a
+    # transient sharing violation; retry briefly like atomic_json does.
+    path = Path(path)
+    for attempt in range(5):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def confined(root, relative, exists=False):

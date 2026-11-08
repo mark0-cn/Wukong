@@ -24,6 +24,12 @@ surgery and stdin-driven PoCs:
 
 For long-running or multi-step work, write a script with file_put and run it
 with job_start (argv ["python3", "files/<script>"]), then read job_status.
+Prefer `python3 files/<script>` over executing the script directly:
+file_put stages files without the executable bit unless executable=true, and
+a direct exec of a non-executable file fails with Permission denied.
+
+Terminal job results arrive automatically in the next request's
+`job_results` section — do not poll `job_status` unless a result is missing.
 
 ## Path discipline (worker layouts are not guessable)
 

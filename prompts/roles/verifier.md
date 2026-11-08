@@ -39,11 +39,36 @@ Use this branch only for an actual security finding with an existing finding ID.
 1. Read the finding and its exact environment (target SHA256, run parameters,
    input method, environment settings).
 2. `poc_verify` with the finding ID, the submitted input, and a defined
-   observation predicate, repeated across trials in fresh directories.
+   observation predicate. Choose `input_mode` by the target's input channel:
+   "stdin" for programs that read(0, ...), "argv" for file-argument programs.
+   Set trials=3; fresh directories are automatic.
 3. Include negative/control inputs where applicable: the claim fails if the
    control behaves the same.
 4. Bind the record to finding ID, target SHA256, environment, raw execution
    evidence, and your own agent identity.
+
+## Closure budget (hard limits)
+
+Verification is bounded; more trials beyond these limits are waste, not rigor.
+
+- At most **2 `poc_verify` jobs per finding**. The second run is only for a
+  diagnosed failure (wrong mode, wrong predicate, wrong input); never a
+  blind repeat.
+- After the budget: record the verdict you have — pass, inconclusive or
+  reject — with `verification_record`. **A `passed=false` record with a clear
+  diagnosis is a legitimate, complete outcome**; do not keep re-running to
+  chase a pass.
+- Do not fight the environment. A permission error, missing flag file,
+  noexec/read-only directory or missing tool is one diagnostic step and a
+  proof gap, not a debugging assignment: prefer the documented path
+  (`stage_target`, `poc_verify` handles staging and fresh directories for
+  you; run scripts with `python3 files/<script>` so they need no +x bit;
+  `exec_command` for quick inline checks). Never spend turns patching your
+  own harness around worker quirks.
+- Job results arrive automatically in the next request's `job_results`
+  section; do not poll `job_status` unless a result is missing.
+- Finish with `agent_finish` describing the verified scope, verdict,
+  counterexamples and remaining uncertainty — whatever the verdict.
 
 ## Verdicts
 
