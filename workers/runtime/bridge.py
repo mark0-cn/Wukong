@@ -55,7 +55,17 @@ def atomic_json(path, data):
     path = Path(path)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporary, path)
+    # Windows: a concurrent reader holds the destination without
+    # FILE_SHARE_DELETE, so os.replace fails transiently with WinError 5.
+    # Retry briefly; the replacement itself stays atomic.
+    for attempt in range(5):
+        try:
+            os.replace(temporary, path)
+            return
+        except OSError:
+            if attempt == 4:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def load_json(path):
