@@ -24,3 +24,8 @@ pub mod runtime;
 pub mod store;
 mod supervisor;
 pub mod tools;
+
+mod bootstrap;
+mod kernel_host;
+mod model_catalog;
+mod usage;

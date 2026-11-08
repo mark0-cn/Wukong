@@ -6,7 +6,7 @@ use crate::{
     coordinator::Coordinator,
     domain::*,
     mcp::McpRegistry,
-    runtime::{RuntimeBackend, RuntimeClient},
+    runtime::RuntimeClient,
     store::Store,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -122,13 +122,14 @@ impl ToolService {
         }
     }
     pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
-        config.validate()?;
-        let client = if config.runtime.backend == RuntimeBackend::Disabled {
-            None
-        } else {
-            Some(RuntimeClient::connect(config.runtime.clone()).await?)
-        };
-        let mcp = McpRegistry::connect(&config.mcp).await?;
+        crate::bootstrap::build_tools(config, store).await
+    }
+    pub(crate) fn from_dependencies(
+        config: AppConfig,
+        store: Store,
+        client: Option<RuntimeClient>,
+        mcp: McpRegistry,
+    ) -> Result<Self> {
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
         let gateway = WorkerGateway {
             store: store.clone(),

@@ -80,7 +80,7 @@ impl RunSupervisor {
         let owner = lease.owner.clone();
         let kernel_cancel = supervisor.cancel.clone();
         let mut kernel = tokio::task::spawn_blocking(move || {
-            crate::kernel::drive(runner, &run, &owner, kernel_cancel, runtime)
+            crate::kernel::drive(runner.kernel_host(), &run, &owner, kernel_cancel, runtime)
         });
         tokio::select! {
             result = &mut kernel => result.context("Rig kernel thread failed")?,

@@ -1,104 +1,36 @@
-//! Application facade for the native Rig runtime and business accounting.
+//! Assessment lifetime facade. Composition and kernel access use dedicated modules.
 use crate::{
-    config::AppConfig, coordinator::Coordinator, domain::*, llm::ModelEngine, store::Store,
-    tools::ToolService,
+    config::AppConfig, coordinator::Coordinator, domain::*, model_catalog::ModelCatalog,
+    store::Store, tools::ToolService, usage::UsageService,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
+#[cfg(test)]
 use rig::completion::Usage;
-use serde_json::{Value, json};
-use std::{collections::HashMap, sync::Arc};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-
 #[derive(Clone)]
 pub struct AssessmentRunner {
     pub store: Store,
     pub coordinator: Coordinator,
     pub tools: Arc<ToolService>,
-    config: AppConfig,
-    engine: Arc<ModelEngine>,
-    /// Engines for role (non-root) agents, keyed by resolved model name
-    /// (`model.role_models` entries plus the legacy `model.role_model`).
-    role_engines: HashMap<String, Arc<ModelEngine>>,
-    events: broadcast::Sender<Value>,
+    pub(crate) config: AppConfig,
+    pub(crate) models: Arc<ModelCatalog>,
+    pub(crate) usage: UsageService,
+    pub(crate) events: broadcast::Sender<Value>,
 }
-
 impl AssessmentRunner {
-    pub async fn new(mut config: AppConfig, store: Store) -> Result<Self> {
-        config.validate()?;
-        let engine = Arc::new(ModelEngine::new(config.model.clone())?);
-        config.model = engine.resolved_config().clone();
-        let mut explicit: HashMap<String, Option<u64>> = HashMap::new();
-        if let Some(map) = &config.model.role_models {
-            for spec in map.values() {
-                explicit.insert(spec.model.clone(), spec.max_tokens);
-            }
-        }
-        if let Some(name) = &config.model.role_model {
-            explicit.entry(name.clone()).or_insert(None);
-        }
-        let mut role_engines = HashMap::new();
-        for (name, spec_max) in explicit {
-            if role_engines.contains_key(&name) {
-                continue;
-            }
-            let mut role = config.model.clone();
-            role.role_model = None;
-            role.role_models = None;
-            role.model = name.clone();
-            let max_tokens = spec_max.or(config.model.role_max_tokens);
-            if let Some(max_tokens) = max_tokens {
-                role.max_tokens = max_tokens;
-            }
-            role_engines.insert(name, Arc::new(ModelEngine::new(role)?));
-        }
-        let tools = Arc::new(ToolService::new(config.clone(), store.clone()).await?);
-        let (events, _) = broadcast::channel(1024);
-        Ok(Self {
-            coordinator: Coordinator::new(store.clone()),
-            store,
-            tools,
-            config,
-            engine,
-            role_engines,
-            events,
-        })
-    }
-    /// The engine that serves an agent: role agents use their resolved role
-    /// model (same provider/endpoint, different model name) when configured.
-    /// A role explicitly mapped to the root model name gets a dedicated
-    /// engine carrying `role_max_tokens`.
-    pub(crate) fn engine_for(&self, role: Role) -> &ModelEngine {
-        if let Some(name) = self.config.model.role_model_name(role)
-            && let Some(engine) = self.role_engines.get(name)
-        {
-            return engine;
-        }
-        &self.engine
+    pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
+        crate::bootstrap::build_runner(config, store).await
     }
     pub fn config(&self) -> &AppConfig {
         &self.config
     }
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.events.subscribe()
-    }
-    pub(crate) fn stream_progress(&self, run_id: &str, agent_id: &str) {
-        let _ = self
-            .events
-            .send(json!({"run_id":run_id,"agent_id":agent_id,"kind":"model.stream_progress"}));
-    }
-    pub(crate) fn emit(
-        &self,
-        run_id: &str,
-        agent_id: Option<&str>,
-        kind: &str,
-        data: Value,
-    ) -> Result<()> {
-        let seq = self.store.event(run_id, agent_id, kind, data.clone())?;
-        let _ = self
-            .events
-            .send(json!({"seq":seq,"run_id":run_id,"agent_id":agent_id,"kind":kind,"data":data}));
-        Ok(())
     }
     pub async fn drive(&self, run_id: &str, cancel: CancellationToken) -> Result<RunRecord> {
         self.drive_with_budget(run_id, cancel, None).await
@@ -115,132 +47,28 @@ impl AssessmentRunner {
         Self {
             coordinator: Coordinator::new(store.clone()),
             tools: Arc::new(self.tools.with_store(store.clone())),
+            usage: self.usage.with_store(store.clone()),
             store,
             ..self.clone()
         }
     }
-
-    /// Project a native failure into the task ledger and the existing UI event stream.
-    pub(crate) fn fail_agent(
-        &self,
-        agent_id: &str,
-        reason: String,
-        summary: Option<String>,
-    ) -> Result<()> {
-        let run_id = self.store.write(|tx| {
-            let mut target: AgentMetadata = tx
-                .get_metadata("agent", agent_id)?
-                .context("agent missing")?;
-            if target.status.terminal() {
-                return Ok(None);
-            }
-            target.status = Status::Failed;
-            target.error = Some(reason.clone());
-            if let Some(summary) = &summary {
-                target.summary = Some(summary.clone());
-            }
-            target.updated_at = now();
-            tx.put_metadata("agent", agent_id, &target.run_id, &target)?;
-            Coordinator::notify_terminal(tx, &target)?;
-            Ok(Some(target.run_id))
-        })?;
-        if let Some(run_id) = run_id {
-            self.emit(
-                &run_id,
-                Some(agent_id),
-                "agent.error",
-                json!({"message":reason}),
-            )?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn structured_summary(
-        &self,
-        agent: &AgentMetadata,
-        run: &RunRecord,
-        checkpoint_evidence: &str,
-    ) -> Result<String> {
-        self.store.read(|tx| {
-            Ok(serde_json::to_string(&json!({
-                "notice":"Shared analysis checkpoint; retrieve the older transcript with evidence_read. Shared context is refreshed on each request. Use context_search/context_read, view_agent_graph, findings_list and coverage_list for omitted ledger entries. Preserve unknowns.",
-                "full_checkpoint_evidence_id":checkpoint_evidence,
-                "task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,
-                "shared_context":crate::context::snapshot(tx,agent)?,
-                "ledger_counts":{
-                    "tasks":tx.list_metadata("agent",&run.id)?.len(),
-                    "findings":tx.list::<Finding>("finding",&run.id)?.len(),
-                    "coverage":tx.list::<Coverage>("coverage",&run.id)?.len()
-                }
-            }))?)
-        })
-    }
-
-    /// Account auxiliary model usage (e.g. tool-output summarization) in the
-    /// agent and run totals without touching the conversation checkpoint.
-    pub(crate) fn account_usage(
-        &self,
-        agent_id: &str,
-        usage: Usage,
-        model_turn: bool,
-    ) -> Result<()> {
-        let tokens = usage.total_tokens.or_else(|| {
-            usage
-                .input_tokens
-                .zip(usage.output_tokens)
-                .map(|(i, o)| i.saturating_add(o))
-        });
-        // The configured rates are flat estimates for all input/output.
-        // Rig owns normalized cache counters and avoids double counting them.
-        let pricing = rig_core::catalog::Pricing::new(
-            self.config.pricing.input_usd_per_million,
-            self.config.pricing.output_usd_per_million,
+    pub(crate) fn kernel_host(&self) -> crate::kernel_host::KernelHost {
+        crate::kernel_host::KernelHost::new(
+            self.store.clone(),
+            self.tools.clone(),
+            self.config.clone(),
+            self.models.clone(),
+            self.usage.clone(),
+            self.events.clone(),
         )
-        .with_cache_read(self.config.pricing.input_usd_per_million)
-        .with_cache_write(self.config.pricing.input_usd_per_million);
-        let mut priced_usage = usage;
-        if pricing.input == 0.0 {
-            priced_usage.input_tokens.get_or_insert(0);
-        }
-        if pricing.output == 0.0 {
-            priced_usage.output_tokens.get_or_insert(0);
-        }
-        let estimate = pricing.cost(&priced_usage);
-        let cost_known = estimate.as_ref().is_some_and(|cost| cost.is_complete());
-        let cost = estimate.as_ref().map_or(0.0, |cost| cost.total);
-        self.store.write(|tx| {
-            let mut agent: AgentMetadata = tx.get_metadata("agent",agent_id)?.context("agent missing")?;
-            let mut run: RunRecord = tx.get("run",&agent.run_id)?.context("run missing")?;
-            agent.turns += usize::from(model_turn);
-            agent.total_tokens = agent.total_tokens.saturating_add(tokens.unwrap_or(0));
-            run.total_tokens = run.total_tokens.saturating_add(tokens.unwrap_or(0));
-            if cost_known { agent.cost_usd += cost; run.cost_usd += cost; }
-            agent.updated_at = now(); run.updated_at = now();
-            tx.put_metadata("agent",agent_id,&run.id,&agent)?;
-            tx.put("run",&run.id,&run.id,&run)?;
-            tx.event(&run.id,Some(agent_id),if model_turn {"model.usage"} else {"model.usage_aux"},json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
-            Ok(())
-        })?;
-        // A response without usage cannot be costed when pricing rates are
-        // configured: pause exactly then, keeping cost accounting exact.
-        // With flat zero pricing the cost is complete ($0) and only the
-        // token count drifts; the event above records the omission, and the
-        // kernel budget gate keeps enforcing on reported usage.
-        if !cost_known {
-            let agent: AgentMetadata = self.store.require_metadata("agent", agent_id)?;
-            self.coordinator.pause_budget(
-                &agent.run_id,
-                "provider omitted usage required for accounting; response retained in Rig journal",
-            )?;
-        }
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::Provider;
+    use crate::llm::{ModelEngine, Provider};
+    use std::collections::HashMap;
     use std::time::Duration;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -441,6 +269,7 @@ mod tests {
         // the run pauses; the response itself must still be preserved.
         runner.config.pricing.input_usd_per_million = 10.0;
         runner.config.pricing.output_usd_per_million = 20.0;
+        runner.usage = UsageService::new(runner.store.clone(), runner.config.pricing.clone());
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             request(&mut socket).await;
@@ -808,9 +637,14 @@ mod tests {
             runner.config.model.provider = provider;
             runner.config.model.model = model.into();
             runner.config.model.base_url = Some(base);
-            runner.engine = Arc::new(
-                ModelEngine::connect(runner.config.model.clone(), "fixture-not-a-secret".into())
+            runner.models = Arc::new(
+                runner.models.with_root_engine(
+                    ModelEngine::connect(
+                        runner.config.model.clone(),
+                        "fixture-not-a-secret".into(),
+                    )
                     .unwrap(),
+                ),
             );
             let server = tokio::spawn(async move {
                 let mut inputs = vec![];
@@ -933,9 +767,13 @@ mod tests {
         let (_dir, mut runner, run) = fixture("http://127.0.0.1:1".into()).await;
         runner.config.pricing.input_usd_per_million = 10.0;
         runner.config.pricing.output_usd_per_million = 20.0;
+        runner.usage = UsageService::new(runner.store.clone(), runner.config.pricing.clone());
         let mut usage = Usage::default();
         usage.total_tokens = Some(12);
-        runner.account_usage(&run.root_id, usage, true).unwrap();
+        runner
+            .usage
+            .account_usage(&run.root_id, usage, true)
+            .unwrap();
         let paused: RunRecord = runner.store.require("run", &run.id).unwrap();
         assert_eq!(paused.status, Status::BudgetPaused);
         assert_eq!(paused.total_tokens, 12);
@@ -957,6 +795,7 @@ mod tests {
         // provider omits usage, so a single provider hiccup must not pause
         // the whole assessment.
         runner
+            .usage
             .account_usage(&run.root_id, Usage::default(), true)
             .unwrap();
         let after: RunRecord = runner.store.require("run", &run.id).unwrap();

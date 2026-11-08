@@ -24,8 +24,7 @@ pub(super) fn prepare_calls(
             agent_id: Some(id.0.clone()),
             call_id: application
                 .runner
-                .store
-                .require_metadata("agent", &id.0)
+                .agent(&id.0)
                 .ok()
                 .map(|agent| business_call(&agent, &request.call.id.to_string())),
         }));
@@ -51,8 +50,8 @@ pub(super) fn reconcile_calls(
         let name = call.call.function.name.as_str();
         if name == "task"
             || name == "wait"
-            || application.runner.tools.allows(Role::Root, name)
-            || application.runner.tools.allows(Role::Verifier, name)
+            || application.runner.allows(Role::Root, name)
+            || application.runner.allows(Role::Verifier, name)
         {
             commands.entity(entity).remove::<Interrupted>();
         }
@@ -99,7 +98,6 @@ impl Serve for BusinessTool {
         let mut task = runtime.spawn(async move {
             let mut output = application
                 .runner
-                .tools
                 .execute(
                     &agent_id,
                     &call_id,
@@ -112,45 +110,30 @@ impl Serve for BusinessTool {
                     name.as_str(),
                     "load_skill" | "context_search" | "context_read"
                 )
-                && application.runner.config().execution.summarize_tool_outputs
+                && application.runner.execution().summarize_tool_outputs
                 && output.value.to_string().len()
-                    > application
-                        .runner
-                        .config()
-                        .execution
-                        .summarize_threshold_chars
+                    > application.runner.execution().summarize_threshold_chars
             {
-                let agent: AgentMetadata = application
-                    .runner
-                    .store
-                    .require_metadata("agent", &agent_id)?;
+                let agent: AgentMetadata = application.runner.agent(&agent_id)?;
                 let (value, usage) = application
                     .runner
                     .engine_for(agent.role)
                     .summarize_tool_output(
                         name.as_str(),
                         &output.value,
-                        application.runner.config().execution.summarize_max_tokens,
+                        application.runner.execution().summarize_max_tokens,
                     )
                     .await;
                 application.runner.account_usage(&agent_id, usage, false)?;
                 output.value = value;
-                application.runner.tools.replace_call_result(
-                    &call_id,
-                    &output.value,
-                    output.is_error,
-                )?;
+                application
+                    .runner
+                    .replace_call_result(&call_id, &output.value, output.is_error)?;
             }
             // Conditional task waits add domain predicates. Their open tool
             // effect belongs to Rig, so its cancellation drops this future.
-            let mut changes = application.runner.store.subscribe_changes();
-            while application
-                .runner
-                .store
-                .require_metadata("agent", &agent_id)?
-                .status
-                == Status::Waiting
-            {
+            let mut changes = application.runner.subscribe_changes();
+            while application.runner.agent(&agent_id)?.status == Status::Waiting {
                 changes.changed().await?;
             }
             let value = ToolOutput::json(output.value);

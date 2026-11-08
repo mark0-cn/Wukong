@@ -11,7 +11,8 @@
 | `coordinator` | 业务父子树、任务去重、契约、状态转移、消息账本、依赖和完成门槛 |
 | `agents`、`prompts/` | 角色与能力提示词装配；`src/prompts.rs` 统一维护内置目录 |
 | `llm` | provider 配置与原生连接、结构化工具摘要及摘要用量 hook |
-| `runner` | 启动原生内核、租约、业务预算、事件与证据摘要 |
+| `runner`、`bootstrap` | 运行生命周期与具体依赖装配 |
+| `kernel_host`、`model_catalog`、`usage` | 内核可调用的业务接口、角色模型选择、用量及预算记账 |
 | `kernel` | Rig 执行与日志、子任务及消息协议的业务接入，模型与工具准入、原生会话投影 |
 | `tools` | 类型化参数、权限/路径检查、工具调用记录、输出截断与证据引用 |
 | `binary` | ELF/PE/Mach-O 画像、SHA256、字符串、Ghidra headless 后端 |
@@ -42,6 +43,8 @@ agent 状态包括 queued、running、waiting、budget_paused、completed、stop
 Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，使用 schema 3 状态目录，不提供旧数据库或旧版自定义 AgentRun 检查点迁移。
 
 `DurableEffects` 统一工具调用准入、稳定标识、事务回执、worker 成功回执和恢复决策。业务调用标识由 agent、generation、已计量模型轮次与 provider tool-call ID 构成，不依赖恢复后会重新分配的 ECS 实体或效果 ID。业务事务与回执一起提交；worker 回复在控制器后处理前持久化，若回复丢失则用同一请求标识查询 worker 的持久化操作账本。未决 MCP 写操作保留给操作员对账，不自动重放。操作员对账也使用带 epoch 的租约隔离。原生效果及数据库变化唤醒执行循环。
+
+`KernelHost` 以具体业务操作连接 Rig 适配器，内核不访问 Store、Coordinator、ToolService 或完整配置。`ModelCatalog` 管理已解析的角色模型，`UsageService` 原子更新用量及预算状态，`bootstrap` 统一创建具体客户端和应用服务。
 
 `RunSupervisor` 独立管理控制端租约、时间预算和后台 worker 观察，Rig 帧不等待 worker RPC。租约带持久化递增版本；运行中的 runner、coordinator 和工具共享带该版本的存储句柄，每次业务写事务在提交修改前验证 owner、版本和有效期。租约失效后旧控制端停止执行，其迟到结果不能覆盖接管者。监督任务随运行结束或取消清理，释放租约时也核对版本。
 

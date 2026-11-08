@@ -1,9 +1,8 @@
 //! Rig owns execution, conversations, async subagents and effect cancellation.
 //! This plugin supplies only application admission, evidence and completion gates.
 use crate::{
-    agents,
     domain::{self, AgentMetadata, Role, RunRecord, Status},
-    runner::AssessmentRunner,
+    kernel_host::KernelHost,
 };
 use anyhow::{Result, ensure};
 use rig_basics::subagents::{
@@ -36,7 +35,7 @@ use business_tools::*;
 
 #[derive(Resource, Clone)]
 struct Application {
-    runner: AssessmentRunner,
+    runner: KernelHost,
     run_id: String,
     runtime: tokio::runtime::Handle,
 }
@@ -73,41 +72,18 @@ fn failed(app: &mut Fatal, result: Result<()>) {
 
 /// A windowless Rig app. Supervision and worker IO run outside this loop.
 pub(crate) fn drive(
-    runner: AssessmentRunner,
+    runner: KernelHost,
     run_id: &str,
     owner: &str,
     cancel: CancellationToken,
     runtime: tokio::runtime::Handle,
 ) -> Result<RunRecord> {
-    let mut run: RunRecord = runner.store.require("run", run_id)?;
-    ensure!(!run.status.terminal(), "cannot drive a terminal assessment");
-    runner.coordinator.resume(run_id, None)?;
-    let directory = runner.config().state_dir.join("rig").join(run_id);
-    let root = runner.store.agent_snapshot(&run.root_id)?;
-    ensure!(
-        root.checkpoint.is_none()
-            || directory
-                .join("logs")
-                .join(format!("{}.jsonl", run.root_id))
-                .is_file(),
-        "this run has no native Rig journal; start a new assessment"
-    );
-    if root.checkpoint.is_none() {
-        // Freeze the resolved endpoint, including environment fallback, before
-        // any model IO. Credentials remain environment-variable names only.
-        run.config = serde_json::to_value(runner.config())?;
-        runner.store.put("run", run_id, run_id, &run)?;
-    } else {
-        let saved: crate::config::AppConfig = serde_json::from_value(run.config.clone())?;
-        ensure!(
-            serde_json::to_value(&saved.model)? == serde_json::to_value(&runner.config().model)?,
-            "native session model configuration changed; use the saved provider/endpoint configuration"
-        );
-    }
+    let run = runner.prepare_run(run_id)?;
+    let directory = runner.journal_dir(run_id);
     let journal = rig::memory::DirStore::open(directory)?;
     let (wake_tx, wakes) = mpsc::channel();
     let store_wake = wake_tx.clone();
-    let mut changes = runner.store.subscribe_changes();
+    let mut changes = runner.subscribe_changes();
     let watcher = runtime.spawn(async move {
         while changes.changed().await.is_ok() {
             if store_wake.send(()).is_err() {
@@ -199,7 +175,7 @@ pub(crate) fn drive(
     }
     let mut definitions = HashMap::new();
     for role in [Role::Root, Role::Analyst, Role::Verifier] {
-        for definition in runner.tools.definitions(role) {
+        for definition in runner.definitions(role) {
             if definition.name.as_str() != "create_agent" {
                 definitions.insert(definition.name.to_string(), definition);
             }
@@ -243,15 +219,12 @@ pub(crate) fn drive(
     {
         let connection = runner
             .engine_for(Role::Root)
-            .connection(runner.config().execution.stream);
+            .connection(runner.execution().stream);
         app.world_mut().entity_mut(root).insert((
             AgentId(run.root_id.clone()),
             connection.clone(),
             BusinessTask,
-            tool_access(
-                &runner,
-                &runner.store.require_metadata("agent", &run.root_id)?,
-            )?,
+            tool_access(&runner, &runner.agent(&run.root_id)?)?,
         ));
         app.world_mut()
             .entity_mut(root)
@@ -268,12 +241,10 @@ pub(crate) fn drive(
     let mut included = HashSet::new();
     loop {
         if cancel.is_cancelled() {
-            runner
-                .coordinator
-                .pause_budget(run_id, "controller interrupted")?;
+            runner.pause_budget(run_id, "controller interrupted")?;
         }
-        runner.coordinator.release_dependencies(run_id)?;
-        runner.coordinator.wake_waiters(run_id)?;
+        runner.release_dependencies(run_id)?;
+        runner.wake_waiters(run_id)?;
         deliver_mail(&mut app, &runner, run_id, &mut included)?;
         sync_statuses(&mut app, &runner, run_id)?;
         app.update();
@@ -287,7 +258,7 @@ pub(crate) fn drive(
         {
             anyhow::bail!("Rig journal write failed: {failure}");
         }
-        let run: RunRecord = runner.store.require("run", run_id)?;
+        let run: RunRecord = runner.run(run_id)?;
         let active = app
             .world_mut()
             .query_filtered::<(), With<ActiveTurn>>()
@@ -298,9 +269,7 @@ pub(crate) fn drive(
             // its start. Persist the pause before reporting that drive ended.
             if cancel.is_cancelled() && !run.status.terminal() && run.status != Status::BudgetPaused
             {
-                runner
-                    .coordinator
-                    .pause_budget(run_id, "controller interrupted")?;
+                runner.pause_budget(run_id, "controller interrupted")?;
             }
             // A subagent's initial brief is sent on the next harness frame.
             // Flush those messages before dropping the app. Gates hold model
@@ -313,9 +282,9 @@ pub(crate) fn drive(
                 run_id,
                 None,
                 "controller.finished",
-                json!({"status":runner.store.require::<RunRecord>("run", run_id)?.status}),
+                json!({"status":runner.run(run_id)?.status}),
             )?;
-            return runner.store.require("run", run_id);
+            return runner.run(run_id);
         }
         if run.status.terminal() && active == 0 {
             app.world_mut().write_message(AppExit::Success);
@@ -326,15 +295,11 @@ pub(crate) fn drive(
                 "controller.finished",
                 json!({"status":run.status}),
             )?;
-            return runner.store.require("run", run_id);
+            return runner.run(run_id);
         }
-        let agents = runner.store.list_metadata("agent", run_id)?;
+        let agents = runner.agents(run_id)?;
         if !run.status.terminal() && active == 0 && agents.iter().all(|a| a.status.terminal()) {
-            let mut run = run;
-            run.status = Status::Failed;
-            run.summary = Some("All agents terminated without a successful finish_scan. Inspect errors and partial evidence.".into());
-            run.updated_at = domain::now();
-            runner.store.put("run", run_id, run_id, &run)?;
+            runner.fail_assessment(run,"All agents terminated without a successful finish_scan. Inspect errors and partial evidence.")?;
             continue;
         }
         // Complete all locally queued stages before waiting for async IO.
