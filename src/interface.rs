@@ -977,14 +977,8 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                     };
                     let role_color = match agent.role {
                         Role::Root => Color::Cyan,
-                        Role::Recon => Color::Blue,
-                        Role::Reverse => Color::Magenta,
-                        Role::Hunter => Color::Yellow,
-                        Role::Fuzz => Color::Green,
-                        Role::Crash => Color::Red,
-                        Role::Exploit => Color::LightRed,
+                        Role::Analyst => Color::Magenta,
                         Role::Verifier => Color::LightBlue,
-                        Role::Reporter => Color::LightGreen,
                     };
                     let cursor = index == tree_cursor && focus == Focus::Tree;
                     let mut spans = vec![
@@ -1127,14 +1121,8 @@ fn dashboard(store: &Store, run_id: Option<&str>, runner: Option<AssessmentRunne
                         let role = store_agent_role(&agents, event.agent_id.as_deref());
                         let color = match role {
                             Some(Role::Root) => Color::Cyan,
-                            Some(Role::Recon) => Color::Blue,
-                            Some(Role::Reverse) => Color::Magenta,
-                            Some(Role::Hunter) => Color::Yellow,
-                            Some(Role::Fuzz) => Color::Green,
-                            Some(Role::Crash) => Color::Red,
-                            Some(Role::Exploit) => Color::LightRed,
+                            Some(Role::Analyst) => Color::Magenta,
                             Some(Role::Verifier) => Color::LightBlue,
-                            Some(Role::Reporter) => Color::LightGreen,
                             None => Color::DarkGray,
                         };
                         let stamp = event

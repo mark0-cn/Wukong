@@ -105,7 +105,7 @@ impl Default for AppConfig {
             skills_dir: None,
             // The repository ships worked-example demos; a missing directory
             // simply skips them (see agents::load_demo).
-            demos_dir: Some(PathBuf::from("demos")),
+            demos_dir: Some(PathBuf::from(crate::prompts::EXAMPLES_DIR)),
             mcp: vec![],
             execution: ExecutionConfig::default(),
         }
@@ -229,6 +229,75 @@ impl AppConfig {
 mod tests {
     use super::*;
     use crate::runtime::RuntimeBackend;
+
+    #[test]
+    fn example_directories_are_top_level_overrides_resolved_from_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("re-agent.toml");
+        let mut example: toml::Value =
+            toml::from_str(include_str!("../re-agent.example.toml")).unwrap();
+        let table = example.as_table_mut().unwrap();
+        assert!(table.contains_key("demos_dir"));
+        table.insert(
+            "demos_dir".into(),
+            toml::Value::String("custom-examples".into()),
+        );
+        table.insert(
+            "skills_dir".into(),
+            toml::Value::String("custom-instructions".into()),
+        );
+        fs::write(&path, toml::to_string(&example).unwrap()).unwrap();
+        let config = AppConfig::load(Some(&path)).unwrap();
+        let base = fs::canonicalize(directory.path()).unwrap();
+        assert_eq!(config.demos_dir.unwrap(), base.join("custom-examples"));
+        assert_eq!(config.skills_dir.unwrap(), base.join("custom-instructions"));
+    }
+
+    #[test]
+    fn role_configuration_selects_analyst_and_verifier_models_and_budgets() {
+        let config: AppConfig = toml::from_str(
+            r#"
+            [model.role_models]
+            analyst = { model = "analysis-model", max_tokens = 16384 }
+            verifier = { model = "verification-model", max_tokens = 8192 }
+            [budget.role_token_shares]
+            analyst = 0.4
+            verifier = 0.2
+        "#,
+        )
+        .unwrap();
+        config.validate().unwrap();
+        assert_eq!(
+            config.model.role_model_name(crate::domain::Role::Analyst),
+            Some("analysis-model")
+        );
+        assert_eq!(
+            config.model.role_model_name(crate::domain::Role::Verifier),
+            Some("verification-model")
+        );
+        assert_eq!(
+            config.budget.role_token_cap(crate::domain::Role::Analyst),
+            200_000
+        );
+        assert_eq!(
+            config.budget.role_token_cap(crate::domain::Role::Verifier),
+            100_000
+        );
+        for name in [
+            "recon", "reverse", "hunter", "fuzz", "crash", "exploit", "reporter",
+        ] {
+            assert!(
+                toml::from_str::<AppConfig>(&format!(
+                    "[model.role_models]\n{name} = {{ model = 'fixture' }}"
+                ))
+                .is_err()
+            );
+            assert!(
+                toml::from_str::<AppConfig>(&format!("[budget.role_token_shares]\n{name} = 0.3"))
+                    .is_err()
+            );
+        }
+    }
 
     #[test]
     fn runtime_timeout_must_cover_worker_ghidra_queries() {

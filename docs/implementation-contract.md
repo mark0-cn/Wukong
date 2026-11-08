@@ -4,7 +4,7 @@ The architecture in `strix-rig-binary-agent-plan.md` is the requirement baseline
 
 ## Module ownership
 
-`domain` defines durable records; `store` owns transactional SQLite persistence and content-addressed artifacts; `coordinator` implements business task, contract and mailbox semantics; `agents` renders role/skill prompts; `llm` adapts provider connections and typed summaries; `runner` owns leases, usage accounting and events; `kernel` integrates the native Rig ECS execution, session logs and subagent protocol with business admission/completion gates; `tools` dispatches typed operations using Rig schemas; `binary` and `runtime` implement external backends; `mcp` uses rmcp for third-party protocol handling; `report` exports evidence-backed findings; `interface` exposes CLI and TUI.
+`domain` defines durable records; `store` owns transactional SQLite persistence and content-addressed artifacts; `coordinator` implements business task, contract and mailbox semantics; `prompts` registers built-in metadata/resources and `agents` renders selected role/skill prompts; `llm` adapts provider connections and typed summaries; `runner` owns leases, usage accounting and events; `kernel` integrates the native Rig ECS execution, session logs and subagent protocol with business admission/completion gates; `tools` dispatches typed operations using Rig schemas; `binary` and `runtime` implement external backends; `mcp` uses rmcp for third-party protocol handling; `report` exports evidence-backed findings; `interface` exposes CLI and TUI.
 
 ## Required invariants
 
@@ -21,6 +21,7 @@ The architecture in `strix-rig-binary-agent-plan.md` is the requirement baseline
 11. Task contracts declare inputs, constraints, deliverables and completion conditions. Successful results account for required outputs and link original evidence; non-success results explain gaps. Each generation's result is archived. Shape/provenance validation is not independent verification of truth. This increment targets fresh stores/tasks; no previous-schema migration is provided.
 12. Native task creation returns before predecessor completion; business dependency gates hold model IO and supply released predecessor results. Rig owns generic effects, retries, conversation pairing and subagent reports. Business tool reconciliation uses stable wire call identities, not restored ECS entity/effect IDs. Inherited context contains only closed parent turns.
 13. Resolved model endpoint/configuration is saved before model IO. Resume uses that configuration even if endpoint environment defaults change. Role output budgets remain distinct from model capacity. Missing usage/cost information preserves the response and pauses before tool IO. Remote MCP read-only hints cannot authorize replay of uncertain effects.
+14. Runtime roles are root, analyst and verifier. Capability skills supplement methods and artifacts without changing the assigned role, permissions or completion protocol. Role instructions cannot be added as skills. Analyst work in the same active scope shares a deduplication owner across capabilities; independent verification uses a separate verifier instance. Ordinary reporting belongs to root.
 
 ## Acceptance evidence
 

@@ -8,6 +8,7 @@ pub mod interface;
 mod kernel;
 pub mod llm;
 pub mod mcp;
+mod prompts;
 pub mod report;
 pub mod runner;
 pub mod runtime;

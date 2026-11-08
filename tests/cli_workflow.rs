@@ -74,8 +74,8 @@ async fn model_server() -> Result<(
                 .join("\n");
             let role = if system.contains("role=root") {
                 "root"
-            } else if system.contains("role=recon") {
-                "recon"
+            } else if system.contains("role=analyst") {
+                "analyst"
             } else {
                 anyhow::bail!("unrecognized agent identity")
             };
@@ -108,7 +108,7 @@ async fn model_server() -> Result<(
                     call(
                         "spawn-recon",
                         "task",
-                        json!({"description":"Fixture recon","role":"recon","prompt":"Inspect exact target, record static coverage with the output evidence ID, and finish.","scope":"fixture static inspection","skills":["recon"],"inherit_context":false}),
+                        json!({"description":"Fixture recon","role":"analyst","prompt":"Inspect exact target, record static coverage with the output evidence ID, and finish.","scope":"fixture static inspection","skills":["recon"],"inherit_context":false}),
                     ),
                 ],
                 ("root", 1) => vec![call("root-wait", "wait", {
@@ -128,7 +128,7 @@ async fn model_server() -> Result<(
                     "finish_scan",
                     json!({"summary":"Static inspection complete; no dynamic execution or verified vulnerability claimed."}),
                 )],
-                ("recon", 0) => {
+                ("analyst", 0) => {
                     ensure!(
                         !names.contains(&"coverage_record") && !names.contains(&"debug_start"),
                         "optional tools were eagerly exposed"
@@ -142,7 +142,7 @@ async fn model_server() -> Result<(
                         ),
                     ]
                 }
-                ("recon", 1) => {
+                ("analyst", 1) => {
                     ensure!(
                         !names.contains(&"coverage_record"),
                         "search unexpectedly activated tools"
@@ -153,7 +153,7 @@ async fn model_server() -> Result<(
                         json!({"names":["coverage_record"]}),
                     )]
                 }
-                ("recon", 2) => {
+                ("analyst", 2) => {
                     ensure!(
                         names.contains(&"coverage_record") && !names.contains(&"debug_start"),
                         "selection was not applied to the next request"
@@ -328,7 +328,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
     );
     let counts = counts.lock().await;
     ensure!(
-        counts.get("root") == Some(&3) && counts.get("recon") == Some(&3),
+        counts.get("root") == Some(&3) && counts.get("analyst") == Some(&3),
         "model work duplicated on recovery"
     );
     let calls = store.list::<ToolCallRecord>("call", &run.id)?;

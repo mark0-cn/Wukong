@@ -84,7 +84,7 @@ impl Coordinator {
                 ..Default::default()
             },
             task_result: None,
-            skills: vec!["root".into()],
+            skills: vec![],
             active_skills: vec![],
             status: Status::Queued,
             depth: 0,
@@ -146,6 +146,7 @@ impl Coordinator {
         if request.skills.len() > 5 {
             bail!("at most 5 related skills per agent");
         }
+        crate::agents::validate_capabilities(request.skills.iter().map(String::as_str))?;
         let parent: AgentRecord =
             Store::tx_get(tx, "agent", parent_id)?.context("parent agent missing")?;
         if parent.status.terminal() {

@@ -38,7 +38,7 @@ fn fixture(path: &Path) -> Result<(Store, Coordinator, RunRecord, AgentRecord)> 
         b"fixture parser string\0another printable string\0",
     )?;
     let run = coordinator.create_run(&target, "inspect", Budget::default(), json!({}))?;
-    let agent = child(&coordinator, &run.root_id, Role::Recon, "recon")?;
+    let agent = child(&coordinator, &run.root_id, Role::Analyst, "recon")?;
     Ok((store, coordinator, run, agent))
 }
 fn result(outcome: &ToolOutcome) -> &Value {
@@ -52,7 +52,7 @@ async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()
     let unrelated = child(
         &coordinator,
         &run.root_id,
-        Role::Reverse,
+        Role::Analyst,
         "unrelated cryptography",
     )?;
     let before = re_agent::agents::preamble(&agent, &run, &store, None, None)?.len();
@@ -273,7 +273,7 @@ async fn tool_selection_is_role_scoped_durable_atomic_and_generation_bound() -> 
         true,
         "replay or failed selection overwrote the current selection"
     );
-    let other = child(&coordinator, &run.root_id, Role::Reverse, "another task")?;
+    let other = child(&coordinator, &run.root_id, Role::Analyst, "another task")?;
     let search = service
         .execute(
             &other.id,
@@ -302,6 +302,120 @@ async fn tool_selection_is_role_scoped_durable_atomic_and_generation_bound() -> 
         )
         .await?;
     assert_eq!(result(&search)["tools"][0]["loaded"], false);
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, _) = fixture(temp.path())?;
+    let mut request = ChildRequest {
+        name: "boundary analyst".into(),
+        role: Role::Analyst,
+        task: "investigate the parser boundary".into(),
+        scope: "parser boundary".into(),
+        skills: vec!["reverse".into(), "hunter".into(), "crash".into()],
+        inherit_context: false,
+        wait_for_predecessors: vec![],
+        dependency_policy: Default::default(),
+        contract: Default::default(),
+    };
+    let analyst = coordinator
+        .create_child(&run.root_id, request.clone())?
+        .agent;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    for (index, name) in ["exploit", "recovery", "recovery"].into_iter().enumerate() {
+        let loaded = service
+            .execute(
+                &analyst.id,
+                &format!("cap-{index}"),
+                "load_skill",
+                json!({"name":name}),
+            )
+            .await?;
+        assert!(!loaded.is_error, "{loaded:?}");
+    }
+    let current: AgentRecord = store.require("agent", &analyst.id)?;
+    assert_eq!(current.role, Role::Analyst);
+    assert_eq!(current.status, analyst.status);
+    assert_eq!(current.active_skills.len(), 2);
+    for name in ["root", "analyst", "verifier", "reporter"] {
+        let denied = service
+            .execute(
+                &analyst.id,
+                &format!("denied-{name}"),
+                "load_skill",
+                json!({"name":name}),
+            )
+            .await?;
+        assert!(denied.is_error, "{name}");
+    }
+    assert_eq!(
+        store
+            .require::<AgentRecord>("agent", &analyst.id)?
+            .active_skills
+            .len(),
+        2
+    );
+    let denied = service
+        .execute(&analyst.id, "self-certify", "poc_verify", json!({}))
+        .await?;
+    assert!(denied.is_error);
+
+    let report = service
+        .execute(
+            &run.root_id,
+            "report-cap",
+            "load_skill",
+            json!({"name":"reporter"}),
+        )
+        .await?;
+    assert!(!report.is_error, "{report:?}");
+    let root: AgentRecord = store.require("agent", &run.root_id)?;
+    assert_eq!(root.role, Role::Root);
+    assert_eq!(root.status, Status::Queued);
+    let root_tools = service
+        .definitions(root.role)
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect::<Vec<_>>();
+    assert!(!root_tools.iter().any(|name| name == "binary_inspect"));
+    assert!(!root_tools.iter().any(|name| name == "agent_finish"));
+    assert!(root_tools.iter().any(|name| name == "finish_scan"));
+    let denied = service
+        .execute(
+            &root.id,
+            "report-target-denied",
+            "binary_inspect",
+            json!({}),
+        )
+        .await?;
+    assert!(denied.is_error);
+
+    request.scope = "independent check".into();
+    request.role = Role::Verifier;
+    request.skills.clear();
+    let verifier = coordinator.create_child(&run.root_id, request)?.agent;
+    assert!(
+        service
+            .definitions(verifier.role)
+            .iter()
+            .any(|tool| tool.name.as_str() == "poc_verify")
+    );
+    for old_role in [
+        "recon", "reverse", "hunter", "fuzz", "crash", "exploit", "reporter",
+    ] {
+        let denied = service
+            .execute(
+                &run.root_id,
+                &format!("old-role-{old_role}"),
+                "create_agent",
+                json!({"name":"invalid","role":old_role,"task":"inspect","scope":"invalid"}),
+            )
+            .await?;
+        assert!(denied.is_error, "{old_role}");
+    }
     service.close().await;
     Ok(())
 }
@@ -389,7 +503,7 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
             "cycle",
             "create_agent",
             json!({
-                "name":"blocked","role":"reverse","task":"inspect","scope":"new scope",
+                "name":"blocked","role":"analyst","task":"inspect","scope":"new scope",
                 "wait_for_predecessors":[run.root_id]
             }),
         )
@@ -449,7 +563,7 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
 async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, owner) = fixture(temp.path())?;
-    let cleaner = child(&coordinator, &run.root_id, Role::Recon, "session cleanup")?;
+    let cleaner = child(&coordinator, &run.root_id, Role::Analyst, "session cleanup")?;
     let mut config = AppConfig::default();
     config.runtime.backend = RuntimeBackend::TrustedLocal;
     config.runtime.state_dir = temp.path().join("worker");
@@ -807,7 +921,7 @@ async fn durable_receipts_prevent_repeated_messages_and_completed_results_replay
 -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, agent) = fixture(temp.path())?;
-    let recipient = child(&coordinator, &run.root_id, Role::Reverse, "reverse")?;
+    let recipient = child(&coordinator, &run.root_id, Role::Analyst, "reverse")?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
     let args = json!({"agent_id":recipient.id,"message":"Inspect parser"});
     let first = service
@@ -855,7 +969,7 @@ async fn durable_receipts_prevent_repeated_messages_and_completed_results_replay
             .await
             .is_err()
     );
-    let spawn = json!({"name":"Hunter","role":"hunter","task":"Inspect boundary","scope":"boundary","inherit_context":false});
+    let spawn = json!({"name":"Hunter","role":"analyst","task":"Inspect boundary","scope":"boundary","inherit_context":false});
     let created = service
         .execute(&run.root_id, "spawn-once", "create_agent", spawn.clone())
         .await?;
@@ -1180,7 +1294,7 @@ async fn docker_independent_verification_uses_real_trials_and_limits_impact() ->
         Budget::default(),
         json!({}),
     )?;
-    let producer = child(&coordinator, &run.root_id, Role::Hunter, "producer")?;
+    let producer = child(&coordinator, &run.root_id, Role::Analyst, "producer")?;
     let verifier = child(&coordinator, &run.root_id, Role::Verifier, "verifier")?;
     let mut config = AppConfig::default();
     config.runtime.backend = RuntimeBackend::Docker;
@@ -1322,7 +1436,7 @@ async fn contracted_tool_tasks_deliver_structured_results_without_vulnerability_
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, _) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    let created=service.execute(&run.root_id,"contract-create","create_agent",json!({"name":"format","role":"reverse","task":"recover header","scope":"contract-format","contract":{"constraints":["static only"],"deliverables":["table"],"completion_conditions":["fields covered"]}})).await?;
+    let created=service.execute(&run.root_id,"contract-create","create_agent",json!({"name":"format","role":"analyst","task":"recover header","scope":"contract-format","contract":{"constraints":["static only"],"deliverables":["table"],"completion_conditions":["fields covered"]}})).await?;
     assert!(!created.is_error, "{created:?}");
     let child_id = result(&created)["agent"]["id"].as_str().unwrap();
     let child: AgentRecord = store.require("agent", child_id)?;

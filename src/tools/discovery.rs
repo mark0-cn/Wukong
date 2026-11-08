@@ -54,7 +54,7 @@ fn group(name: &str) -> &'static str {
 }
 
 fn baseline(role: Role, name: &str) -> bool {
-    CORE.contains(&name) || (role == Role::Recon && name == "binary_inspect")
+    CORE.contains(&name) || (role == Role::Analyst && name == "binary_inspect")
 }
 
 impl ToolService {

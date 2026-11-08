@@ -45,5 +45,5 @@ expected stdout/stderr bytes.
   execution: only an actual run demonstrating the win marker counts.
 - Hand the final payload to a separate `verifier` agent with the predicate.
 
-Finish with `agent_finish` naming the payload bytes, offset, gadget/function
-addresses, and the verification evidence IDs.
+Save payload bytes, offset, gadget/function addresses and execution evidence IDs.
+Return to the primary assignment; only a separate verifier can certify the impact.

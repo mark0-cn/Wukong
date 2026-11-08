@@ -53,5 +53,7 @@ explain.
   effects are unknown): close the session and start a fresh one instead of
   continuing to drive it.
 
-Finish with `agent_finish` describing the blocker, what was retried, what
-remains uncertain, and the evidence IDs.
+After recovery, record what was retried and the resulting state, then resume the
+original assignment. If the blocker remains, preserve the call/job/session IDs,
+evidence and unresolved effects; report the limitation through the primary role's
+completion protocol. Recovery alone is not a reason to finish the task.

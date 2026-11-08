@@ -1,7 +1,7 @@
 # Worked example: a general-analysis report
 
 User question: "What is the record header, and how does rejection work?"
-The reverse and verifier notes support the following illustrative summary:
+The analyst's reverse-analysis notes and verifier's checks support this summary:
 
 | Question | Answer | Evidence class |
 |---|---|---|
@@ -15,5 +15,6 @@ sample hash; example IDs or fixture values are never reused as target facts.
 Include the field table, sample hex/decoded values, commands/input channel,
 expected and actual control results, and the scope of the observations.
 There is no vulnerability finding, severity or exploitability conclusion.
-Close the assigned reporting task once each question is answered or explicitly
-bounded as unresolved, then hand the reconciled result to root.
+Root incorporates the reconciled result into its final assessment. For a delegated
+writing task, the analyst returns the contracted artifact to root through its own
+completion workflow. The reporting capability does not finish a broader assignment.

@@ -1,5 +1,8 @@
 # Copy to re-agent.toml and set a model/endpoint available to your account.
 state_dir = ".re-agent"
+# Optional role/capability examples (<name>.md); missing directories skip examples.
+# Example values demonstrate methods and are never target facts.
+demos_dir = "prompts/examples"
 
 [model]
 provider = "openai_responses"
@@ -8,18 +11,14 @@ api_key_env = "OPENAI_API_KEY"
 # base_url = "https://your-provider.example/v1"
 # Optional: role (non-root) agents use this model name instead of `model`,
 # with the same provider/endpoint/credentials. Leave unset to share the root
-# model. A cheaper/faster model keeps worker agents within their role token
-# quotas, e.g. "deepseek-flash" for DeepSeek endpoints.
+# model. Choose a model appropriate for the analysis and verification required.
 # role_model = "deepseek-flash"
 # Optional per-role overrides (win over role_model). Each entry takes the
 # model name and an optional per-request output budget. Roles that need
-# discipline and long reasoning (recon/reverse/exploit/verifier) usually
-# deserve the stronger model; flash suits the mechanical roles
-# (hunter/fuzz/crash):
+# discipline and long reasoning include both analyst and verifier. Capability
+# skills (recon/reverse/hunter/fuzz/crash/exploit/reporter) do not select models:
 # [model.role_models]
-# recon = { model = "deepseek-v4-pro", max_tokens = 16384 }
-# reverse = { model = "deepseek-v4-pro", max_tokens = 16384 }
-# exploit = { model = "deepseek-v4-pro", max_tokens = 16384 }
+# analyst = { model = "deepseek-v4-pro", max_tokens = 16384 }
 # verifier = { model = "deepseek-v4-pro", max_tokens = 16384 }
 # Optional: per-request output budget for role agents with an explicit
 # resolution (role_models or role_model), even when they resolve to the root
@@ -42,11 +41,10 @@ max_wall_seconds = 3600
 # max_usd requires input/output prices below.
 # max_usd = 10.0
 # Optional per-role share of the run token budget for worker agents
-# (defaults are built in: recon 0.25, reverse 0.30, hunter 0.25, fuzz 0.25,
-# crash 0.20, exploit 0.45, verifier 0.30, reporter 0.15; floor 10k tokens).
+# (defaults are built in: analyst 0.45, verifier 0.30; floor 10k tokens).
 # The root agent is governed by the run budget alone and takes no quota.
 # [budget.role_token_shares]
-# exploit = 0.5
+# analyst = 0.5
 
 # Zero prices disable USD accounting. Set real USD-per-million prices to
 # enable max_usd budgets and cost estimates.
@@ -97,11 +95,6 @@ keep_recent_messages = 12
 summarize_tool_outputs = true
 summarize_threshold_chars = 6000
 summarize_max_tokens = 400
-
-# Per-role worked-example markdown (<role>.md), appended to each agent's
-# prompt as method demonstrations. Values shown are illustrative. The
-# repository ships these in demos/; a missing directory simply skips demos.
-demos_dir = "demos"
 
 # Third-party MCP stdio server, credentials are environment VARIABLE NAMES.
 # [[mcp]]
