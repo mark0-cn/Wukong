@@ -1,72 +1,7 @@
-//! Background desktop queries. The GUI receives bounded history and metadata
-//! changes; it never needs to scan tool history or deserialize every checkpoint.
-use crate::{domain::*, store::Store};
+//! Desktop projection adapter. Query cursors and SQL live in application queries.
+pub(crate) use crate::queries::{AgentSummary, Change, RunSummary};
+use crate::{domain::*, queries::WorkspaceQueries, store::Store};
 use anyhow::Result;
-use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, de::DeserializeOwned};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
-};
-
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct RunSummary {
-    pub id: String,
-    pub target_path: PathBuf,
-    pub target_sha256: String,
-    pub task: String,
-    pub status: Status,
-    pub root_id: String,
-    pub budget: Budget,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub total_tokens: u64,
-    pub cost_usd: f64,
-    pub summary: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct AgentSummary {
-    pub id: String,
-    pub name: String,
-    pub role: Role,
-    pub generation: u64,
-    pub task: String,
-    pub status: Status,
-    pub depth: u32,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub turns: usize,
-    pub total_tokens: u64,
-    pub summary: Option<String>,
-    pub error: Option<String>,
-    #[serde(default)]
-    pub public_replies: Vec<String>,
-}
-
-impl From<AgentMetadata> for AgentSummary {
-    fn from(agent: AgentMetadata) -> Self {
-        Self {
-            id: agent.id,
-            name: agent.name,
-            role: agent.role,
-            generation: agent.generation,
-            task: agent.task,
-            status: agent.status,
-            depth: agent.depth,
-            created_at: agent.created_at,
-            turns: agent.turns,
-            total_tokens: agent.total_tokens,
-            summary: agent.summary,
-            error: agent.error,
-            public_replies: vec![],
-        }
-    }
-}
-
-pub(crate) struct Change<T> {
-    id: String,
-    pub value: Option<T>,
-}
-
 pub(crate) fn apply<T>(values: &mut Vec<T>, changes: Vec<Change<T>>, id: impl Fn(&T) -> &str) {
     for change in changes {
         if let Some(index) = values.iter().position(|value| id(value) == change.id) {
@@ -95,100 +30,9 @@ pub(crate) struct Delta {
 
 #[derive(Default)]
 pub(crate) struct Reader {
-    root: PathBuf,
-    revision: i64,
-    selected: Option<String>,
-    agent: Option<String>,
+    queries: WorkspaceQueries,
     conversation: Option<crate::gui_chat::Document>,
-    events: Vec<Event>,
-    event_limit: usize,
-    conversation_revision: Option<i64>,
-    calls: BTreeMap<String, ToolCallRecord>,
 }
-
-fn changes<T: DeserializeOwned>(
-    tx: &Connection,
-    kind: &str,
-    run: Option<&str>,
-    after: i64,
-    expression: &str,
-) -> Result<Vec<Change<T>>> {
-    let sql = format!(
-        "SELECT r.id,{expression} FROM entity_revisions r
-        LEFT JOIN entities e ON e.kind=r.kind AND e.id=r.id
-        WHERE r.kind=?1 AND (?2 IS NULL OR r.run_id=?2) AND r.revision>?3 ORDER BY r.revision"
-    );
-    let mut query = tx.prepare(&sql)?;
-    let rows = query.query_map(params![kind, run, after], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-    })?;
-    rows.map(|row| {
-        let (id, data) = row?;
-        Ok(Change {
-            id,
-            value: data.map(|data| serde_json::from_str(&data)).transpose()?,
-        })
-    })
-    .collect()
-}
-
-fn read_reply_text(tx: &Connection, run: &str, agent: &str) -> Result<Vec<String>> {
-    let mut query = tx.prepare(
-        "SELECT data FROM events WHERE run_id=?1 AND agent_id=?2
-        AND kind='model.text' ORDER BY seq DESC LIMIT 3",
-    )?;
-    let rows = query.query_map(params![run, agent], |row| row.get::<_, String>(0))?;
-    let mut replies = Vec::new();
-    for row in rows {
-        let value: serde_json::Value = serde_json::from_str(&row?)?;
-        if let Some(text) = value["text"].as_str() {
-            replies.push(text.to_owned());
-        }
-    }
-    replies.reverse();
-    Ok(replies)
-}
-
-fn visible_calls(
-    tx: &Connection,
-    run: &str,
-    after: i64,
-    events: &[Event],
-    previous: &BTreeMap<String, ToolCallRecord>,
-    reset: bool,
-) -> Result<Option<Vec<ToolCallRecord>>> {
-    let ids: BTreeSet<_> = events
-        .iter()
-        .filter_map(|event| event.data["call_id"].as_str().map(str::to_owned))
-        .collect();
-    let mut query = tx.prepare(
-        "SELECT id FROM entity_revisions WHERE kind='call' AND run_id=?1 AND revision>?2",
-    )?;
-    let changed: BTreeSet<String> = query
-        .query_map(params![run, after], |row| row.get(0))?
-        .collect::<rusqlite::Result<_>>()?;
-    if !reset
-        && ids.len() == previous.len()
-        && ids
-            .iter()
-            .all(|id| previous.contains_key(id) && !changed.contains(id))
-    {
-        return Ok(None);
-    }
-    let mut calls = Vec::with_capacity(ids.len());
-    for id in ids {
-        if !reset
-            && !changed.contains(&id)
-            && let Some(call) = previous.get(&id)
-        {
-            calls.push(call.clone());
-        } else if let Some(call) = Store::tx_get(tx, "call", &id)? {
-            calls.push(call);
-        }
-    }
-    Ok(Some(calls))
-}
-
 impl Reader {
     pub fn read(
         &mut self,
@@ -197,73 +41,14 @@ impl Reader {
         agent: Option<&str>,
         event_limit: usize,
     ) -> Result<Delta> {
-        if self.root != store.root() {
-            *self = Self {
-                root: store.root().to_owned(),
-                ..Self::default()
-            };
-        }
-        // Cursor advancement and its rows share a snapshot, including external CLI writes.
-        let (mut delta, revision, conversation_revision, conversation, legacy_replies) = store.read_transaction(|tx| {
-            let revision: i64 = tx.query_row("SELECT COALESCE(MAX(revision),0) FROM entity_revisions", [], |row| row.get(0))?;
-            let runs = changes(tx, "run", None, self.revision, "json_remove(e.data,'$.config')")?;
-            let selected = match selected {
-                Some(id) => Some(id.to_owned()),
-                None => tx.query_row("SELECT id FROM entities WHERE kind='run' ORDER BY rowid DESC LIMIT 1", [], |row| row.get::<_, String>(0)).optional()?,
-            };
-            let reset = self.selected != selected || self.revision == 0;
-            let after = if reset { 0 } else { self.revision };
-            let mut delta = Delta { selected, reset, runs, agents: vec![], notes: vec![], findings: vec![], events: None, calls: None, conversation: None };
-            let mut conversation_revision = None;
-            let mut conversation = None;
-            let mut legacy_replies = Vec::new();
-            if let Some(run) = delta.selected.as_deref() {
-                delta.agents = changes::<AgentSummary>(tx, "agent", Some(run), after, "json_remove(e.data,'$.active_skills')")?;
-                delta.notes = changes(tx, "note", Some(run), after, "e.data")?;
-                delta.findings = changes(tx, "finding", Some(run), after, "e.data")?;
-                let latest: i64 = tx.query_row("SELECT COALESCE(MAX(seq),0) FROM events WHERE run_id=?1", [run], |row| row.get(0))?;
-                let last = self.events.last().map_or(0, |event| event.seq);
-                if reset || latest != last || self.event_limit != event_limit {
-                    delta.events = Some(Store::tx_recent_events(tx, run, event_limit)?);
-                }
-                let window = delta.events.as_deref().unwrap_or(&self.events);
-                // Narration can arrive without a metadata mutation.
-                let narrators: BTreeSet<_> = window.iter().filter(|event| event.seq > last && event.kind == "model.text").filter_map(|event| event.agent_id.as_ref()).collect();
-                for id in narrators {
-                    if !delta.agents.iter().any(|change| &change.id == id)
-                        && let Some(summary) = Store::tx_get_metadata(tx, "agent", id)? {
-                        delta.agents.push(Change { id: id.clone(), value: Some(summary.into()) });
-                    }
-                }
-                for change in &mut delta.agents {
-                    if let Some(summary) = &mut change.value {
-                        summary.public_replies = read_reply_text(tx, run, &summary.id)?;
-                        if reset && summary.public_replies.is_empty()
-                            && let Some(record) = Store::tx_agent_snapshot(tx, &summary.id)? {
-                            legacy_replies.push(record);
-                        }
-                    }
-                }
-                delta.calls = visible_calls(tx, run, after, window, &self.calls, reset)?;
-                if let Some(id) = agent {
-                    conversation_revision = tx.query_row("SELECT revision FROM agent_conversations WHERE agent_id=?1 AND run_id=?2", params![id, run], |row| row.get(0)).optional()?;
-                }
-                let deleted = delta.agents.iter().any(|change| Some(change.id.as_str()) == agent && change.value.is_none());
-                if reset || self.agent.as_deref() != agent || conversation_revision != self.conversation_revision || deleted {
-                    let record = agent.map(|id| Store::tx_agent_snapshot(tx, id)).transpose()?.flatten();
-                    conversation = Some(record.filter(|record| record.run_id == run));
-                }
-            }
-            Ok((delta, revision, conversation_revision, conversation, legacy_replies))
-        })?;
-        // Parsing and hashing large conversations must not hold a SQLite snapshot or reader lock.
-        if let Some(record) = conversation {
-            delta.conversation = Some(record.map(|record| {
+        let mut data = self.queries.read(store, selected, agent, event_limit)?;
+        let conversation = data.conversation.map(|record| {
+            record.map(|record| {
                 crate::gui_chat::Document::prepare(&record, self.conversation.as_ref())
-            }));
-        }
-        for record in legacy_replies {
-            if let Some(summary) = delta
+            })
+        });
+        for record in data.narration_snapshots {
+            if let Some(summary) = data
                 .agents
                 .iter_mut()
                 .find(|change| change.id == record.id)
@@ -277,24 +62,20 @@ impl Reader {
                 summary.public_replies.reverse();
             }
         }
-        self.revision = revision;
-        self.conversation_revision = conversation_revision;
-        self.selected = delta.selected.clone();
-        self.agent = agent.map(str::to_owned);
-        self.event_limit = event_limit;
-        if let Some(conversation) = &delta.conversation {
+        if let Some(conversation) = &conversation {
             self.conversation = conversation.clone();
         }
-        if let Some(events) = &delta.events {
-            self.events = events.clone();
-        }
-        if let Some(calls) = &delta.calls {
-            self.calls = calls
-                .iter()
-                .map(|call| (call.id.clone(), call.clone()))
-                .collect();
-        }
-        Ok(delta)
+        Ok(Delta {
+            selected: data.selected,
+            reset: data.reset,
+            runs: data.runs,
+            agents: data.agents,
+            notes: data.notes,
+            findings: data.findings,
+            events: data.events,
+            calls: data.calls,
+            conversation,
+        })
     }
 }
 

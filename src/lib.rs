@@ -29,3 +29,5 @@ mod bootstrap;
 mod kernel_host;
 mod model_catalog;
 mod usage;
+
+pub mod queries;
