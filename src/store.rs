@@ -34,6 +34,22 @@ impl Store {
           CREATE INDEX IF NOT EXISTS messages_inbox ON messages(recipient,acknowledged,id);
           CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,run_id TEXT NOT NULL,agent_id TEXT,kind TEXT NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS leases(run_id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_at INTEGER NOT NULL);")?;
+        // A bounded change index, shared by all processes opening this store.
+        // Replacing a row assigns a new monotonic revision without retaining
+        // one change record per historical update.
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS entity_revisions(
+          revision INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,id TEXT NOT NULL,
+          run_id TEXT NOT NULL,UNIQUE(kind,id));
+          INSERT OR IGNORE INTO entity_revisions(kind,id,run_id) SELECT kind,id,run_id FROM entities;
+          CREATE TRIGGER IF NOT EXISTS entities_revision_insert AFTER INSERT ON entities BEGIN
+            INSERT INTO entity_revisions(kind,id,run_id) VALUES(NEW.kind,NEW.id,NEW.run_id) ON CONFLICT(kind,id) DO UPDATE SET revision=excluded.revision,run_id=excluded.run_id;
+          END;
+          CREATE TRIGGER IF NOT EXISTS entities_revision_update AFTER UPDATE ON entities BEGIN
+            INSERT INTO entity_revisions(kind,id,run_id) VALUES(NEW.kind,NEW.id,NEW.run_id) ON CONFLICT(kind,id) DO UPDATE SET revision=excluded.revision,run_id=excluded.run_id;
+          END;
+          CREATE TRIGGER IF NOT EXISTS entities_revision_delete AFTER DELETE ON entities BEGIN
+            INSERT INTO entity_revisions(kind,id,run_id) VALUES(OLD.kind,OLD.id,OLD.run_id) ON CONFLICT(kind,id) DO UPDATE SET revision=excluded.revision,run_id=excluded.run_id;
+          END;")?;
         let version: String = conn.query_row(
             "SELECT value FROM meta WHERE key='schema_version'",
             [],
@@ -171,11 +187,38 @@ impl Store {
     }
     /// Latest events in ascending sequence order, without truncating to the oldest window.
     pub fn recent_events(&self, run_id: &str, limit: usize) -> Result<Vec<Event>> {
-        self.transaction(|tx|{
-            let mut q=tx.prepare("SELECT seq,agent_id,kind,data,created_at FROM events WHERE run_id=?1 ORDER BY seq DESC LIMIT ?2")?;
-            let rows=q.query_map(params![run_id,limit.min(10000) as i64],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
-            rows.into_iter().rev().map(|(seq,agent_id,kind,data,at)|Ok(Event{seq,run_id:run_id.to_owned(),agent_id,kind,data:serde_json::from_str(&data)?,created_at:at.parse()?})).collect()
-        })
+        self.transaction(|tx| Self::tx_recent_events(tx, run_id, limit))
+    }
+    pub(crate) fn tx_recent_events(
+        tx: &Connection,
+        run_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Event>> {
+        let mut q=tx.prepare("SELECT seq,agent_id,kind,data,created_at FROM events WHERE run_id=?1 ORDER BY seq DESC LIMIT ?2")?;
+        let rows = q
+            .query_map(params![run_id, limit.min(10000) as i64], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .rev()
+            .map(|(seq, agent_id, kind, data, at)| {
+                Ok(Event {
+                    seq,
+                    run_id: run_id.to_owned(),
+                    agent_id,
+                    kind,
+                    data: serde_json::from_str(&data)?,
+                    created_at: at.parse()?,
+                })
+            })
+            .collect()
     }
     pub fn tx_message(
         tx: &Connection,
