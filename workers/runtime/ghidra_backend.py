@@ -8,7 +8,8 @@ import time
 import uuid
 from contextlib import contextmanager
 from filelock import FileLock, Timeout
-import bridge as runtime
+from worker_common import artifact, atomic_json, bounded_int, confined, load_json, safe_env
+from worker_processes import run_process
 
 
 def digest(path):
@@ -35,12 +36,12 @@ def analysis_claim(project, argv):
     # Leave the claim on abnormal exit; never infer that a child exited from PID loss.
     require_idle(project)
     marker = project / "analysis.active.json"
-    runtime.atomic_json(marker, {"owner_pid": os.getpid(), "argv": argv, "created_at": time.time()})
+    atomic_json(marker, {"owner_pid": os.getpid(), "argv": argv, "created_at": time.time()})
     yield
     marker.unlink()
 
 def query(root, params):
-    target = runtime.confined(root, params["target"], True)
+    target = confined(root, params["target"], True)
     actual_hash = digest(target)
     if params.get("target_sha256") != actual_hash:
         raise ValueError("Ghidra target SHA256 does not match uploaded target")
@@ -52,16 +53,16 @@ def query(root, params):
     properties = headless.parent.parent / "Ghidra/application.properties"
     properties_text = properties.read_text(encoding="utf-8")
     version = next((line.split("=", 1)[1].strip() for line in properties_text.splitlines() if line.startswith("application.version=")), "unknown")
-    timeout = runtime.bounded_int(params.get("timeout_secs"), 110, 5, 590)
-    analysis_timeout = runtime.bounded_int(params.get("analysis_timeout_secs"), min(90, timeout - 1), 1, 290)
-    max_cpu = runtime.bounded_int(params.get("max_cpu"), 2, 1, 16)
+    timeout = bounded_int(params.get("timeout_secs"), 110, 5, 590)
+    analysis_timeout = bounded_int(params.get("analysis_timeout_secs"), min(90, timeout - 1), 1, 290)
+    max_cpu = bounded_int(params.get("max_cpu"), 2, 1, 16)
     operation = dict(params["query"])
     if operation.get("operation") not in {"functions", "decompile", "xrefs"}:
         raise ValueError("unsupported Ghidra operation")
     if operation["operation"] in {"functions", "xrefs"}:
-        operation["limit"] = runtime.bounded_int(operation.get("limit"), 25, 1, 5000)
+        operation["limit"] = bounded_int(operation.get("limit"), 25, 1, 5000)
     if operation["operation"] == "functions":
-        operation["offset"] = runtime.bounded_int(operation.get("offset"), 0, 0, 100000000)
+        operation["offset"] = bounded_int(operation.get("offset"), 0, 0, 100000000)
     binding = {"schema": 1, "target_sha256": actual_hash, "version": version, "properties_sha256": digest(properties),
                "launcher_sha256": digest(headless), "bridge_sha256": digest(script), "analysis_timeout_secs": analysis_timeout, "max_cpu": max_cpu}
     analysis_key = identity(binding)
@@ -70,7 +71,7 @@ def query(root, params):
     directory.mkdir(parents=True, exist_ok=True)
     cache = directory / "result.json"
     if cache.is_file():
-        result = runtime.load_json(cache)
+        result = load_json(cache)
         if result["target_sha256"] != actual_hash or result["cache_key"] != cache_key:
             raise ValueError("Ghidra cache identity mismatch")
         result["cached"] = True
@@ -85,7 +86,7 @@ def query(root, params):
             break
         except Timeout:
             if cache.is_file():
-                result = runtime.load_json(cache)
+                result = load_json(cache)
                 result["cached"] = True
                 return result
             if time.monotonic() >= deadline:
@@ -93,7 +94,7 @@ def query(root, params):
             time.sleep(0.1)
     try:
         if cache.is_file():
-            result = runtime.load_json(cache)
+            result = load_json(cache)
             result["cached"] = True
             return result
         require_idle(project)
@@ -109,8 +110,8 @@ def query(root, params):
         work = directory / uuid.uuid4().hex
         work.mkdir()
         request, response = work / "request.json", work / "response.json"
-        runtime.atomic_json(request, {"target_sha256": actual_hash, "query": operation})
-        runtime.atomic_json(work / "binding.json", {"analysis": binding, "query": operation})
+        atomic_json(request, {"target_sha256": actual_hash, "query": operation})
+        atomic_json(work / "binding.json", {"analysis": binding, "query": operation})
         argv = [str(headless), str(project), "analysis"]
         if ready.is_file():
             argv += ["-process", "target.bin", "-noanalysis"]
@@ -119,13 +120,13 @@ def query(root, params):
         argv += ["-analysisTimeoutPerFile", str(analysis_timeout), "-max-cpu", str(max_cpu), "-scriptPath", str(scripts),
                  "-postScript", "ReAgentBridge.java", str(request), str(response)]
         with analysis_claim(project, argv):
-            execution = runtime.run_process(argv, work, runtime.safe_env(), timeout, 4 * 1048576, work / "output")
-        runtime.atomic_json(work / "execution.json", execution)
+            execution = run_process(argv, work, safe_env(), timeout, 4 * 1048576, work / "output")
+        atomic_json(work / "execution.json", execution)
         if execution["state"] != "completed" or execution["exit_code"] != 0:
             raise ValueError("Ghidra execution failed: %s; logs: %s" % (execution["state"], work.relative_to(root).as_posix()))
         if not response.is_file() or response.stat().st_size > 16 * 1048576:
             raise ValueError("Ghidra response absent/too large; inspect " + work.relative_to(root).as_posix())
-        data = runtime.load_json(response)
+        data = load_json(response)
         if data.get("ok") is not True:
             raise ValueError("Ghidra bridge error: " + str(data.get("error", "unknown"))[:2048])
         if data.get("target_sha256") != actual_hash or digest(target) != actual_hash:
@@ -135,12 +136,12 @@ def query(root, params):
             if work not in path.parents or not path.is_file():
                 raise ValueError("Ghidra returned an invalid artifact path")
             data["artifact_path"] = path.relative_to(root).as_posix()
-        runtime.atomic_json(ready, binding)
-        artifacts = [runtime.artifact(root, path) for path in sorted(work.iterdir()) if path.is_file()]
+        atomic_json(ready, binding)
+        artifacts = [artifact(root, path) for path in sorted(work.iterdir()) if path.is_file()]
         result = {"cache_key": cache_key, "target_sha256": actual_hash, "tool_version": version, "cached": False,
                   "data": data, "artifacts": artifacts, "stdout_path": (work / "output.stdout").relative_to(root).as_posix(),
                   "stderr_path": (work / "output.stderr").relative_to(root).as_posix()}
-        runtime.atomic_json(cache, result)
+        atomic_json(cache, result)
         return result
     finally:
         lock.release()

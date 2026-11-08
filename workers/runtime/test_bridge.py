@@ -13,16 +13,17 @@ from integration_test import Client
 
 class SessionLaunchTests(unittest.TestCase):
     def test_lost_session_error_kind_survives_durable_replay(self):
-        import bridge
+        import worker_runtime as bridge
+        from worker_common import WorkerError,rpc_error
         with tempfile.TemporaryDirectory() as directory:
             runtime = bridge.Runtime(Path(directory), trusted=True)
             for _ in range(2):
-                with self.assertRaises(bridge.WorkerError) as error:
+                with self.assertRaises(WorkerError) as error:
                     runtime.dispatch("debug.close", {"session_id": "missing", "request_id": "lost-debug"})
-                self.assertEqual(bridge.rpc_error(error.exception)["data"]["kind"], "session_lost")
+                self.assertEqual(rpc_error(error.exception)["data"]["kind"], "session_lost")
 
     def test_isolated_interactive_launch_drops_credentials(self):
-        import bridge
+        import worker_interactive as bridge
         import isolation
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -45,7 +46,7 @@ class SessionLaunchTests(unittest.TestCase):
 
 class GdbMiTests(unittest.TestCase):
     def session(self, directory, output):
-        import bridge
+        import worker_debugger as bridge
         import collections
         import io
         import queue
@@ -82,7 +83,7 @@ class GdbMiTests(unittest.TestCase):
             self.assertEqual((Path(directory) / "transcript.mi").read_text(), records)
 
     def test_oversized_mi_records_invalidate_the_session(self):
-        import bridge
+        import worker_debugger as bridge
         with tempfile.TemporaryDirectory() as directory:
             session = self.session(directory, '1^done,value="' + 'x' * 70000 + '"\n')
             with patch.object(bridge, "terminate_tree") as terminate:
@@ -114,7 +115,7 @@ class GhidraProjectLockTests(unittest.TestCase):
             (scripts / "ReAgentBridge.java").write_text("fixture bridge")
             params = {"target": "files/sample", "target_sha256": hashlib.sha256(b"fixture").hexdigest(), "query": {"operation": "functions"}}
             with patch.dict(os.environ, {"RE_AGENT_GHIDRA_HEADLESS": str(headless), "RE_AGENT_GHIDRA_SCRIPT_DIR": str(scripts)}), \
-                    patch.object(ghidra_backend.runtime, "run_process", side_effect=RuntimeError("owner lost")) as execute:
+                    patch.object(ghidra_backend, "run_process", side_effect=RuntimeError("owner lost")) as execute:
                 with self.assertRaisesRegex(RuntimeError, "owner lost"):
                     ghidra_backend.query(root, params)
                 project = next((root / "ghidra/projects").iterdir())
@@ -319,18 +320,54 @@ class RuntimeTests(unittest.TestCase):
             self.client.call("angr.solve", target="files/dummy.bin", find=[4194304], avoid=["not-an-int"])
 
     def test_parse_address_accepts_integer_and_hex_spellings(self):
-        import bridge
-        self.assertEqual(bridge.parse_address(0), 0)
-        self.assertEqual(bridge.parse_address(4198400), 4198400)
-        self.assertEqual(bridge.parse_address("4198400"), 4198400)
-        self.assertEqual(bridge.parse_address("0x401000"), 0x401000)
-        self.assertEqual(bridge.parse_address(" 0X401000 "), 0x401000)
-        self.assertEqual(bridge.parse_address("1_000"), 1000)
+        from worker_common import parse_address
+        self.assertEqual(parse_address(0), 0)
+        self.assertEqual(parse_address(4198400), 4198400)
+        self.assertEqual(parse_address("4198400"), 4198400)
+        self.assertEqual(parse_address("0x401000"), 0x401000)
+        self.assertEqual(parse_address(" 0X401000 "), 0x401000)
+        self.assertEqual(parse_address("1_000"), 1000)
         for invalid in ["-1", "0x", "nope", "", 2**64, 1.5, True, None, [1]]:
             with self.assertRaises(ValueError, msg=repr(invalid)):
-                bridge.parse_address(invalid)
+                parse_address(invalid)
+
+
+
+
+class OperationLedgerTests(unittest.TestCase):
+    def test_completed_effect_replays_after_ledger_reconstruction(self):
+        from worker_operations import OperationLedger
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            def execute(method, params):
+                calls.append(params)
+                return {"value": "committed"}
+            params = {"request_id": "stable", "command": "fixture"}
+            reconcile = lambda method, result: result
+            first = OperationLedger(Path(directory)).invoke("exec.run", params, execute, reconcile)
+            replay = OperationLedger(Path(directory)).invoke("exec.run", params, execute, reconcile)
+            self.assertEqual(first, replay)
+            self.assertEqual(len(calls), 1)
+            with self.assertRaisesRegex(ValueError, "different operation"):
+                OperationLedger(Path(directory)).invoke("exec.run", {**params, "command": "changed"}, execute, reconcile)
+
+    def test_owner_death_does_not_repeat_an_unknown_interactive_write(self):
+        from worker_operations import OperationLedger
+        from worker_common import WorkerError
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            def execute(method, params):
+                calls.append(params)
+                raise SystemExit("owner died after reserving the operation")
+            params = {"request_id": "pending", "session_id": "session", "data": "once"}
+            reconcile = lambda method, result: result
+            with self.assertRaises(SystemExit):
+                OperationLedger(Path(directory)).invoke("interact.write", params, execute, reconcile)
+            with self.assertRaises(WorkerError) as error:
+                OperationLedger(Path(directory)).invoke("interact.write", params, execute, reconcile)
+            self.assertEqual(error.exception.kind, "outcome_unknown")
+            self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":
     unittest.main()
-
