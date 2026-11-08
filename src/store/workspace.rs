@@ -109,7 +109,7 @@ impl WorkspaceQueries {
             };
             let reset = self.selected != selected || self.revision == 0;
             let after = if reset { 0 } else { self.revision };
-            let mut delta = WorkspaceDelta { selected, reset, runs, agents: vec![], notes: vec![], findings: vec![], events: None, calls: None, conversation: None, narration_snapshots:vec![] };
+            let mut delta = WorkspaceDelta { selected, reset, runs, agents: vec![], notes: vec![], findings: vec![], events: None, calls: None, conversation: None, operator_messages: None, narration_snapshots:vec![] };
             let mut conversation_revision = None;
             let mut conversation = None;
             let mut narration_snapshots = Vec::new();
@@ -144,6 +144,16 @@ impl WorkspaceQueries {
                 if let Some(id) = agent {
                     conversation_revision = tx.query_row("SELECT revision FROM agent_conversations WHERE agent_id=?1 AND run_id=?2", params![id, run], |row| row.get(0)).optional()?;
                 }
+                let mut query = tx.prepare("SELECT id,content,acknowledged,created_at,envelope FROM messages WHERE run_id=?1 AND recipient=?2 AND sender='operator' ORDER BY id DESC LIMIT 500")?;
+                let records = query.query_map(params![run, agent.unwrap_or("")], |row| Ok((row.get::<_, i64>(0)?,row.get::<_,String>(1)?,row.get::<_,bool>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                let digest = serde_json::to_string(&records)?;
+                if reset || self.agent.as_deref() != agent || digest != self.operator_digest {
+                    let mut messages = Vec::with_capacity(records.len());
+                    for (id,content,acknowledged,created_at,envelope) in records.into_iter().rev() {
+                        messages.push(Message { id, run_id: run.into(), sender: "operator".into(), recipient: agent.unwrap_or("").into(), content, acknowledged, created_at: created_at.parse()?, envelope: serde_json::from_str(&envelope)? });
+                    }
+                    delta.operator_messages = Some(messages);
+                }
                 let deleted = delta.agents.iter().any(|change| Some(change.id.as_str()) == agent && change.value.is_none());
                 if reset || self.agent.as_deref() != agent || conversation_revision != self.conversation_revision || deleted {
                     let record = agent.map(|id| Store::tx_agent_snapshot(tx, id)).transpose()?.flatten();
@@ -154,6 +164,22 @@ impl WorkspaceQueries {
         })?;
         delta.conversation = conversation;
         delta.narration_snapshots = narration_snapshots;
+        if let Some(messages) = &delta.operator_messages {
+            let records = messages
+                .iter()
+                .rev()
+                .map(|message| {
+                    (
+                        message.id,
+                        message.content.clone(),
+                        message.acknowledged,
+                        message.created_at.to_rfc3339(),
+                        serde_json::to_string(&message.envelope).unwrap_or_default(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            self.operator_digest = serde_json::to_string(&records)?;
+        }
         self.revision = revision;
         self.conversation_revision = conversation_revision;
         self.selected = delta.selected.clone();

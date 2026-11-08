@@ -11,6 +11,7 @@ mod gui;
 mod gui_activity;
 mod gui_chat;
 mod gui_data;
+mod gui_markdown;
 mod gui_settings;
 pub mod interface;
 mod kernel;

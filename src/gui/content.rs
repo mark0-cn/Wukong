@@ -241,6 +241,48 @@ impl Workspace {
                                     selectable_text(ui, summary);
                                 }
                                 ui.add_space(10.0);
+                                if !self.data.operator_messages.is_empty() {
+                                    egui::CollapsingHeader::new(format!(
+                                        "操作员消息（{}，最多显示最近 500 条）",
+                                        self.data.operator_messages.len()
+                                    ))
+                                    .default_open(true)
+                                    .id_salt(("operator-mail", &agent.id))
+                                    .show(ui, |ui| {
+                                        for message in &self.data.operator_messages {
+                                            ui.push_id(message.id, |ui| {
+                                                card().show(ui, |ui| {
+                                                    ui.label(
+                                                        RichText::new(format!(
+                                                            "你 · {} · {}",
+                                                            message
+                                                                .created_at
+                                                                .with_timezone(&chrono::Local)
+                                                                .format("%H:%M:%S"),
+                                                            match message.envelope.delivery {
+                                                                MessageDelivery::Queued =>
+                                                                    "等待送达",
+                                                                MessageDelivery::Included =>
+                                                                    "已送达",
+                                                                MessageDelivery::Replied =>
+                                                                    "已回复",
+                                                                MessageDelivery::Stale => "已失效",
+                                                            }
+                                                        ))
+                                                        .small()
+                                                        .color(ACCENT),
+                                                    );
+                                                    crate::gui_markdown::show(ui, &message.content);
+                                                    if let Some(reason) =
+                                                        &message.envelope.stale_reason
+                                                    {
+                                                        ui.label(reason);
+                                                    }
+                                                });
+                                            });
+                                        }
+                                    });
+                                }
                                 if let Some(conversation) = &self.data.conversation
                                     && conversation.id == agent.id
                                 {

@@ -77,6 +77,7 @@ pub struct WorkspaceDelta {
     pub findings: Vec<Change<Finding>>,
     pub events: Option<Vec<Event>>,
     pub calls: Option<Vec<ToolCallRecord>>,
+    pub operator_messages: Option<Vec<Message>>,
     pub narration_snapshots: Vec<AgentSnapshot>,
     pub conversation: Option<Option<AgentSnapshot>>,
 }
@@ -91,6 +92,7 @@ pub struct WorkspaceQueries {
     pub(crate) event_limit: usize,
     pub(crate) conversation_revision: Option<i64>,
     pub(crate) calls: BTreeMap<String, ToolCallRecord>,
+    pub(crate) operator_digest: String,
 }
 
 #[derive(Serialize)]

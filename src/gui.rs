@@ -179,8 +179,6 @@ struct Workspace {
     reader: Option<gui_data::Reader>,
 }
 
-impl Workspace {}
-
 impl eframe::App for Workspace {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.commands.context = Some(ctx.clone());
