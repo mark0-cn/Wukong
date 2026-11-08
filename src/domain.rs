@@ -58,27 +58,15 @@ impl fmt::Display for Status {
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     Root,
-    Recon,
-    Reverse,
-    Hunter,
-    Fuzz,
-    Crash,
-    Exploit,
+    Analyst,
     Verifier,
-    Reporter,
 }
 impl Role {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Root => "root",
-            Self::Recon => "recon",
-            Self::Reverse => "reverse",
-            Self::Hunter => "hunter",
-            Self::Fuzz => "fuzz",
-            Self::Crash => "crash",
-            Self::Exploit => "exploit",
+            Self::Analyst => "analyst",
             Self::Verifier => "verifier",
-            Self::Reporter => "reporter",
         }
     }
 }
@@ -92,14 +80,8 @@ impl FromStr for Role {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "root" => Self::Root,
-            "recon" => Self::Recon,
-            "reverse" => Self::Reverse,
-            "hunter" => Self::Hunter,
-            "fuzz" => Self::Fuzz,
-            "crash" => Self::Crash,
-            "exploit" => Self::Exploit,
+            "analyst" => Self::Analyst,
             "verifier" => Self::Verifier,
-            "reporter" => Self::Reporter,
             _ => anyhow::bail!("unknown role {s}"),
         })
     }
@@ -118,23 +100,17 @@ pub struct Budget {
     /// Optional per-role share of the run token budget for worker agents;
     /// missing roles use [`Budget::role_share`] defaults. The root agent is
     /// governed by the run budget alone. Shares are not enforced to sum to 1.
-    pub role_token_shares: std::collections::HashMap<String, f64>,
+    pub role_token_shares: std::collections::HashMap<Role, f64>,
 }
 impl Budget {
     pub fn role_share(&self, role: Role) -> f64 {
         self.role_token_shares
-            .get(role.as_str())
+            .get(&role)
             .copied()
             .unwrap_or(match role {
                 Role::Root => 0.20,
-                Role::Recon => 0.25,
-                Role::Reverse => 0.30,
-                Role::Hunter => 0.25,
-                Role::Fuzz => 0.25,
-                Role::Crash => 0.20,
-                Role::Exploit => 0.45,
+                Role::Analyst => 0.45,
                 Role::Verifier => 0.30,
-                Role::Reporter => 0.15,
             })
     }
 

@@ -63,7 +63,7 @@ Mapping of the implementation-contract audit items to evidence:
 | AFL++ | `runtime-linux.json` `fuzz` section (QEMU mode, parsed `fuzzer_stats`) |
 | Crash reduction | `runtime-linux.json` `minimization` (delta debugging to 3 bytes) |
 | Independent verification | `runtime-linux.json` `verification` (3/3 trials, distinct producer/verifier agent ids) |
-| Skills | `skills/*.md` role prompts composed by `agents.rs` |
+| Skills | Categorized `prompts/` resources registered in `src/prompts.rs` and composed by `agents.rs` |
 | MCP | `unknown_mcp_side_effect_is_never_blindly_replayed`, `worker_filters_model_credentials_and_declares_missing_capabilities` |
 | TUI | `interface.rs` TUI + CLI workflow tests |
 | JSON / Markdown / HTML reports | `tests/report_export.rs` (4): bundle integrity, redaction, no unverified impact claims, tamper rejection |

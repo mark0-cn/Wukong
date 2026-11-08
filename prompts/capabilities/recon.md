@@ -1,5 +1,8 @@
 # Binary reconnaissance
 
+Use this capability to establish missing target facts and useful entry points.
+Reuse an existing dossier and inspect only gaps relevant to the assigned question.
+
 Goal: a factual dossier that supports the user's actual reverse-engineering
 questions. You do not hunt bugs or develop exploits unless explicitly assigned.
 
@@ -35,6 +38,7 @@ questions. You do not hunt bugs or develop exploits unless explicitly assigned.
 - Cite an evidence ID for every claim. "Probably" is fine in notes; in
   deliverables it must be labeled inferred.
 - `runtime_doctor` before assuming any execution tool works.
-- Hand off: note the exact promising functions with module-relative addresses
-  for reverse. Include security-specific handoffs only when requested.
-  Finish with `agent_finish`.
+- Record exact promising functions with module-relative addresses for subsequent
+  analysis. Include security-specific observations only when requested. Continue
+  the primary assignment when more analysis is needed; a dossier alone does not
+  finish a broader task.

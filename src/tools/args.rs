@@ -11,16 +11,7 @@ macro_rules! choices {
         pub(super) enum $name { $($variant),* }
     };
 }
-choices!(ChildRole {
-    Recon,
-    Reverse,
-    Hunter,
-    Fuzz,
-    Crash,
-    Exploit,
-    Verifier,
-    Reporter
-});
+choices!(ChildRole { Analyst, Verifier });
 choices!(InformationKind {
     Information,
     Question,
@@ -57,12 +48,15 @@ pub(super) struct Expected {
 pub(super) struct CreateAgentArgs {
     #[schemars(length(min = 1))]
     pub name: String,
+    /// Analyst performs the work; verifier independently checks another agent's claim.
     pub role: ChildRole,
     #[schemars(length(min = 1))]
     pub task: String,
     #[schemars(length(min = 1))]
     pub scope: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional capabilities, such as recon, reverse, hunter, fuzz, crash, exploit or reporter.
+    /// These supplement the assigned role and never change its permissions or lifecycle.
     pub skills: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherit_context: Option<bool>,

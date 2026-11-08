@@ -1,5 +1,8 @@
 # Reverse analysis
 
+Use this capability to recover the semantics needed by the assigned question.
+Reuse established layouts and locations; inspect missing or contradictory facts.
+
 Goal: reconstruct the behavior, data structures, formats, algorithms or input
 handling needed to answer the user's questions, with module-relative addresses.
 Investigate trust boundaries and candidate vulnerabilities when the task calls for them.
@@ -41,15 +44,15 @@ Load the relevant method when its detailed workflow is needed:
 
 ## Output
 
-Save the method-specific result in analysis notes with evidence IDs, then
-`agent_finish` with the answer to the assigned question, exact locations,
-supporting observations, conflicting evidence and remaining uncertainty.
+Save the method-specific result in analysis notes with evidence IDs: the answer,
+exact locations, supporting observations, conflicting evidence and uncertainty.
 For behavior/path analysis include entry -> checks -> operation and an
 input that would exercise the path. For input reconstruction, load
 `tooling` and choose symbolic execution only when its stdin model matches the
 target; otherwise use a suitable harness or explicit constraints.
-If the goal is a control-flow hijack, hand the layout facts (buffer size,
-saved-RIP offset, target address, mitigations) to a child that loads `pwn`.
+If the assigned goal is a control-flow hijack, load `exploit`/`pwn` as needed and
+reuse the layout facts (buffer size, saved-RIP offset, target address, mitigations).
+Delegate only a distinct subproblem, not the next technique in the same analysis.
 If you could not reach a conclusion, say exactly what blocked you and what
 to try next.
 

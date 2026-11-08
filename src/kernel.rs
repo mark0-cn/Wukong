@@ -178,7 +178,7 @@ pub(crate) fn drive(
         match definition.name.as_str() {
             "task" => {
                 definition.parameters = task_schema.clone();
-                definition.description = "Start an asynchronous analysis subagent. Supply a short description, a full prompt, role and scope; include known evidence, constraints and expected outputs. Optional skills, inherit_context, contract, wait_for_predecessors and dependency_policy refine the assignment. The call returns before work finishes; predecessor gates hold the child's model requests until satisfied. Model choice and tool permissions come from controller configuration and the role. Inspect the agent graph before duplicating work. Use follow_up_agent for new work on a completed child, wait for one agent's report, or wait_for_agents for a group or success policy.".into();
+                definition.description = "Start an asynchronous subagent: role=analyst performs analysis, role=verifier independently checks another agent's claim. Supply a short description, full prompt and scope, with known evidence, constraints and outputs. Select capabilities through skills (recon, reverse, hunter, fuzz, crash, exploit, reporter or task methods), never through role. Changing capabilities alone does not justify another agent. Optional inherit_context, contract, wait_for_predecessors and dependency_policy refine the assignment. Creation returns before work finishes; predecessor gates hold the child's model requests. Model choice and tool permissions come from controller configuration and the role. Inspect existing work first. Use follow_up_agent for completed work, wait for one report or wait_for_agents for a group/success policy.".into();
             }
             "message" => {
                 definition.description = "Send a request, correction or reply to a reachable active agent using agent and text. Use send_message_to_agent with kind=information for progress-only updates, which must not release waits. New work on a completed agent requires follow_up_agent.".into();
@@ -190,17 +190,7 @@ pub(crate) fn drive(
         }
     }
     let mut definitions = HashMap::new();
-    for role in [
-        Role::Root,
-        Role::Recon,
-        Role::Reverse,
-        Role::Hunter,
-        Role::Fuzz,
-        Role::Crash,
-        Role::Exploit,
-        Role::Verifier,
-        Role::Reporter,
-    ] {
+    for role in [Role::Root, Role::Analyst, Role::Verifier] {
         for definition in runner.tools.definitions(role) {
             if definition.name.as_str() != "create_agent" {
                 definitions.insert(definition.name.to_string(), definition);
@@ -638,6 +628,7 @@ fn prepare_models(
                     serde_json::to_string(&application.runner.tools.discovery_context(&agent)?)?
                 ));
                 for skill in &agent.active_skills {
+                    agents::validate_capability(&skill.name)?;
                     ensure!(
                         crate::binary::sha256_bytes(skill.content.as_bytes()) == skill.sha256,
                         "active skill {} failed its content hash check",

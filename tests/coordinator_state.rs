@@ -20,7 +20,7 @@ fn fixture() -> (tempfile::TempDir, Store, Coordinator, RunRecord) {
 fn request(scope: &str) -> ChildRequest {
     ChildRequest {
         name: "Recon".into(),
-        role: Role::Recon,
+        role: Role::Analyst,
         task: "inspect exact target".into(),
         scope: scope.into(),
         skills: vec!["recon".into()],
@@ -247,6 +247,40 @@ fn child_creation_is_immediate_durable_and_scope_deduplicated() {
     let child: AgentRecord = reopened.require("agent", &first.agent.id).unwrap();
     assert_eq!(child.parent_id.as_deref(), Some(run.root_id.as_str()));
     assert_eq!(child.scope, "input parser");
+}
+
+#[test]
+fn capability_changes_reuse_scope_owner_and_verification_stays_independent() {
+    let (_dir, store, coordinator, run) = fixture();
+    let mut analysis = request("parser boundary");
+    analysis.skills = vec!["reverse".into()];
+    let first = coordinator
+        .create_child(&run.root_id, analysis.clone())
+        .unwrap();
+    analysis.skills = vec!["hunter".into(), "crash".into()];
+    let reused = coordinator
+        .create_child(&run.root_id, analysis.clone())
+        .unwrap();
+    assert!(!reused.created);
+    assert_eq!(first.agent.id, reused.agent.id);
+
+    analysis.role = Role::Verifier;
+    analysis.task = "independently check the parser claim".into();
+    analysis.skills.clear();
+    let verifier = coordinator.create_child(&run.root_id, analysis).unwrap();
+    assert!(verifier.created);
+    assert_ne!(first.agent.id, verifier.agent.id);
+    assert_eq!(verifier.agent.scope, first.agent.scope);
+
+    for role_skill in ["root", "analyst", "verifier"] {
+        let mut invalid = request("role injection");
+        invalid.skills = vec![role_skill.into()];
+        assert!(coordinator.create_child(&run.root_id, invalid).is_err());
+    }
+    assert_eq!(
+        store.list::<AgentRecord>("agent", &run.id).unwrap().len(),
+        3
+    );
 }
 
 #[test]

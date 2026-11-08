@@ -32,7 +32,11 @@ $env:OPENAI_API_KEY = "your-provider-key"
 .\target\release\re-agent.exe --config .\re-agent.toml analyze .\sample.elf --task "分析输入边界，调查具体问题，独立复核并报告证据" --output .\reports\assessment-01
 ```
 
-支持 `openai`（Chat Completions）、`openai_responses`、`anthropic` 和 `ollama`。凭据通过环境变量注入，不写入配置或检查点。自定义 endpoint 通过 `model.base_url` 指定。`ollama` 默认本地 endpoint，可不配置凭据。根 agent 始终使用 `model.model`；设置 `model.role_model` 后，各角色（recon/reverse/crash/exploit 等）子 agent 改用该模型名（同一 provider/endpoint/凭据），例如 `role_model = "deepseek-flash"` 搭配根模型的 `"deepseek-v4-pro"`。啰嗦的角色模型可用 `model.role_max_tokens` 单独调大单轮输出预算，避免 `finish_reason=Length` 截断。
+支持 `openai`（Chat Completions）、`openai_responses`、`anthropic` 和 `ollama`。凭据通过环境变量注入，不写入配置或检查点。自定义 endpoint 通过 `model.base_url` 指定。`ollama` 默认本地 endpoint，可不配置凭据。根 agent 始终使用 `model.model`；设置 `model.role_model` 后，analyst 与 verifier 子 agent 改用该模型名（同一 provider/endpoint/凭据），例如 `role_model = "deepseek-flash"` 搭配根模型的 `"deepseek-v4-pro"`。可通过 `model.role_models.analyst` / `model.role_models.verifier` 分别配置模型。啰嗦的角色模型可用 `model.role_max_tokens` 单独调大单轮输出预算，避免 `finish_reason=Length` 截断。
+
+运行时只有 `root`、`analyst`、`verifier` 三类角色。创建子任务时用 `role="analyst"` 或 `role="verifier"`；通过 `skills=["recon", "reverse"]` 等组合专项能力。`hunter`、`fuzz`、`crash`、`exploit` 和 `reporter` 同样是能力名称。同一 analyst 可以在问题范围内切换方法，独立验证交给另一个 verifier；普通报告由 root 汇总。角色指令自动安装，不通过 `load_skill` 切换身份。
+
+提示词统一放在 `prompts/`，按 `roles`、`capabilities`、`methods`、`support` 和 `examples` 分类，公共规则位于 `base.md`。`src/prompts.rs` 是内置名称、用途、正文与示例引用的注册入口，模型只获取能力目录和已选中的正文。目录调整不改变 skill 调用名；自定义正文仍通过 `skills_dir/<name>.md` 覆盖，示例通过 `demos_dir/<name>.md` 提供，默认示例目录为 `prompts/examples`。
 
 ## 配置 Linux worker
 
@@ -83,7 +87,7 @@ Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 
 |---|---|
 | `kernel` | Rig 原生执行、子任务、消息与日志的业务适配 |
 | `coordinator` / `runner` | 任务契约、依赖、消息账本、预算与完成门槛 |
-| `llm` / `agents` / `skills` | provider 连接、结构化摘要、角色和上下文 |
+| `llm` / `agents` / `prompts` | provider 连接、结构化摘要、提示词注册与按需装配 |
 | `store` / `domain` | SQLite 事务、检查点、事件、内容哈希产物 |
 | `tools` / `mcp` | 工具 schema、角色能力、调用去重、第三方工具 |
 | `binary` / `workers/ghidra` | 二进制画像、字符串、函数、反编译、交叉引用 |

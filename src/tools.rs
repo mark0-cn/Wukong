@@ -258,7 +258,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::LoadSkillArgs>(
             "load_skill",
-            "Activate a named local analysis skill (built-in or configured custom skill). The controller persists its exact content/hash and installs its instructions at the next fresh model boundary; survives compaction and resume.",
+            "Activate a named capability or method (built-in or configured custom skill). Role instructions root/analyst/verifier are automatic and cannot be loaded here. Initial and active capabilities share a limit of 5 distinct names. Exact content/hash is persisted for the next fresh model boundary; replaces an initial copy of the same skill and survives compaction/resume. Loading never changes role, permissions or task completion criteria.",
             true,
             false,
         ),
@@ -1024,10 +1024,7 @@ impl ToolService {
         self.store
             .verify_evidence_links(&agent.run_id, &request.contract.input_evidence_ids)?;
         for skill in &request.skills {
-            ensure!(
-                skill != "root",
-                "root orchestration skill is only available to the root role"
-            );
+            agents::validate_capability(skill)?;
             agents::load_skill(skill, self.config.skills_dir.as_deref())?;
         }
         self.effect(agent, call_id, |tx| {
@@ -1040,10 +1037,14 @@ impl ToolService {
         })
     }
     fn activate_skill(&self, agent: &AgentRecord, call_id: &str, name: &str) -> Result<Value> {
-        ensure!(
-            name != "root" || agent.role == Role::Root,
-            "root orchestration skill is only available to the root role"
-        );
+        agents::validate_capabilities(
+            agent
+                .skills
+                .iter()
+                .map(String::as_str)
+                .chain(agent.active_skills.iter().map(|skill| skill.name.as_str()))
+                .chain(std::iter::once(name)),
+        )?;
         let content = agents::load_skill(name, self.config.skills_dir.as_deref())?;
         let sha256 = binary::sha256_bytes(content.as_bytes());
         let evidence = self.store.artifact(
@@ -1058,6 +1059,9 @@ impl ToolService {
         self.effect(agent,call_id,|tx| {
             let mut current: AgentRecord = Store::tx_get(tx,"agent",&agent.id)?.context("agent missing")?;
             ensure!(current.generation == agent.generation, "agent activation changed before skill load");
+            agents::validate_capabilities(current.skills.iter().map(String::as_str)
+                .chain(current.active_skills.iter().map(|skill| skill.name.as_str()))
+                .chain(std::iter::once(name)))?;
             let snapshot = ActiveSkill { name:name.into(),sha256:sha256.clone(),content,evidence_id:evidence.id.clone() };
             if let Some(existing) = current.active_skills.iter_mut().find(|skill|skill.name==name) {
                 *existing=snapshot;

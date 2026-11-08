@@ -487,8 +487,24 @@ mod tests {
     #[tokio::test]
     async fn native_skills_and_usage_survive_rig_memory_compaction() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (_dir, mut runner, run) =
+        let (dir, mut runner, run) =
             fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+        let skills = dir.path().join("skills");
+        std::fs::create_dir(&skills).unwrap();
+        let method_path = skills.join("formats.md");
+        std::fs::write(
+            &method_path,
+            "FROZEN_FORMAT_METHOD: preserve exact field evidence.",
+        )
+        .unwrap();
+        let mut config = runner.config.clone();
+        config.skills_dir = Some(skills);
+        runner = AssessmentRunner::new(config, runner.store.clone())
+            .await
+            .unwrap();
+        let mut root: AgentRecord = runner.store.require("agent", &run.root_id).unwrap();
+        root.skills = vec!["formats".into()];
+        runner.store.put("agent", &root.id, &run.id, &root).unwrap();
         runner.config.execution.compact_after_chars = 100;
         runner.config.execution.keep_recent_messages = 2;
         let note = SharedDocument {
@@ -518,6 +534,13 @@ mod tests {
             ] {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 inputs.push(request(&mut socket).await);
+                if name == "think" {
+                    std::fs::write(
+                        &method_path,
+                        "CHANGED_FORMAT_METHOD: must not replace the active snapshot.",
+                    )
+                    .unwrap();
+                }
                 respond(&mut socket, reply(name, args)).await;
             }
             inputs
@@ -526,6 +549,8 @@ mod tests {
         assert_eq!(result.status, Status::Completed);
         assert_eq!(result.total_tokens, 36);
         let inputs = server.await.unwrap();
+        assert!(inputs[2].to_string().contains("FROZEN_FORMAT_METHOD"));
+        assert!(!inputs[2].to_string().contains("CHANGED_FORMAT_METHOD"));
         for input in &inputs {
             let text = input.to_string();
             assert!(text.contains("compaction-shared-note"));
@@ -621,14 +646,14 @@ mod tests {
         let mut config = runner.config.clone();
         config.model.role_models = Some(HashMap::from([
             (
-                Role::Recon,
+                Role::Verifier,
                 crate::llm::RoleModelSpec {
                     model: "role-fixture".into(),
                     max_tokens: Some(128),
                 },
             ),
             (
-                Role::Reverse,
+                Role::Analyst,
                 crate::llm::RoleModelSpec {
                     model: "role-fixture".into(),
                     max_tokens: Some(256),
@@ -654,13 +679,13 @@ mod tests {
                             .list::<AgentRecord>("agent", &rid)
                             .unwrap()
                             .into_iter()
-                            .find(|agent| agent.role == Role::Reverse)
+                            .find(|agent| agent.role == Role::Analyst)
                             .unwrap()
                     };
                     let output = match roots {
                         0 => reply(
                             "task",
-                            json!({"description":"format analyst","prompt":"Explain the format","role":"reverse","scope":"input format","inherit_context":false}),
+                            json!({"description":"format analyst","prompt":"Explain the format","role":"analyst","scope":"input format","inherit_context":false}),
                         ),
                         1 => reply("wait", json!({"agent":child().id})),
                         2 => reply(
@@ -712,7 +737,7 @@ mod tests {
             .list::<AgentRecord>("agent", &run.id)
             .unwrap()
             .into_iter()
-            .find(|agent| agent.role == Role::Reverse)
+            .find(|agent| agent.role == Role::Analyst)
             .unwrap();
         assert_eq!(child.generation, 1);
         assert_eq!(child.summary.as_deref(), Some("clarified result"));
@@ -855,11 +880,11 @@ mod tests {
                     let output = match roots {
                         0 => reply(
                             "task",
-                            json!({"description":"first","prompt":"First task","scope":"first","role":"reverse","inherit_context":false}),
+                            json!({"description":"first","prompt":"First task","scope":"first","role":"analyst","inherit_context":false}),
                         ),
                         1 => reply(
                             "task",
-                            json!({"description":"second","prompt":"Second task","scope":"second","role":"reverse","inherit_context":false,"wait_for_predecessors":[first.unwrap().id]}),
+                            json!({"description":"second","prompt":"Second task","scope":"second","role":"analyst","inherit_context":false,"wait_for_predecessors":[first.unwrap().id]}),
                         ),
                         2 => {
                             assert!(
@@ -958,14 +983,14 @@ mod tests {
                     let output = if roots == 0 {
                         reply(
                             "task",
-                            json!({"description":"worker","prompt":"Analyze the format","scope":"format","role":"reverse","inherit_context":false}),
+                            json!({"description":"worker","prompt":"Analyze the format","scope":"format","role":"analyst","inherit_context":false}),
                         )
                     } else {
                         let child = store
                             .list::<AgentRecord>("agent", &rid)
                             .unwrap()
                             .into_iter()
-                            .find(|agent| agent.role == Role::Reverse)
+                            .find(|agent| agent.role == Role::Analyst)
                             .unwrap();
                         reply("wait", json!({"agent":child.id}))
                     };
@@ -1044,7 +1069,7 @@ mod tests {
                     let output = match roots {
                         0 => reply(
                             "task",
-                            json!({"description":"parent","prompt":"Parent objective","scope":"parent","role":"reverse","inherit_context":false}),
+                            json!({"description":"parent","prompt":"Parent objective","scope":"parent","role":"analyst","inherit_context":false}),
                         ),
                         1 | 3 => reply("wait", json!({"agent":lookup("parent").id})),
                         2 => reply(
@@ -1063,7 +1088,7 @@ mod tests {
                     let output = match parents {
                         0 => reply(
                             "task",
-                            json!({"description":"leaf","prompt":"Leaf objective","scope":"leaf","role":"reverse","inherit_context":true}),
+                            json!({"description":"leaf","prompt":"Leaf objective","scope":"leaf","role":"analyst","inherit_context":true}),
                         ),
                         1 | 3 => reply("wait", json!({"agent":lookup("leaf").id})),
                         2 => reply("agent_finish", json!({"summary":"parent original"})),

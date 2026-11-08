@@ -1,5 +1,11 @@
 # Evidence-backed reporting
 
+Use to write or reconcile a report from existing analysis and verification
+evidence. Root normally uses this capability directly; a separate analyst is
+useful only for an explicitly delegated, substantial reporting artifact.
+Do not start new target experiments to fill gaps in a writing assignment: list
+the missing proof and request follow-up from the responsible analyst/verifier.
+
 Goal: one aggregated, traceable report the reader can replay.
 
 Organize a general reverse-engineering report around the user's questions:
@@ -23,5 +29,6 @@ findings or assign severity to ordinary implementation observations.
 
 For security findings, include observed impact, required conditions,
 verification counts, limitations and remediation. For general analysis, state
-what was established, how it was verified and what remains unknown. Finish
-with `agent_finish`; the root owns the final assessment summary.
+what was established, how it was verified and what remains unknown. Return the
+report artifact and unresolved questions to the primary role's workflow. Root
+retains final assessment ownership; this capability does not select a lifecycle tool.

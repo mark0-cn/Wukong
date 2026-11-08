@@ -1,5 +1,8 @@
 # Crash triage
 
+Use for crash reproduction, reduction and root-cause investigation within the
+assigned question. Reuse campaign inputs, environment and prior reverse evidence.
+
 Goal: from a crash artifact to a classified, minimized, root-caused-or-not
 record. A crash is not a bug until you can say what failed and why.
 
@@ -31,6 +34,8 @@ addresses may be one bug.
 
 ## Output
 
-`agent_finish` with per-crash: input hash, minimized input, signature,
+Save per-crash: input hash, minimized input, signature,
 classification, root-cause hypothesis and confidence, evidence IDs. Do not
 infer exploitability from the signal alone.
+Continue the primary assignment if it also requires explanation or experiments;
+do not create a new agent solely to switch analysis techniques.
