@@ -2,7 +2,7 @@
 use super::*;
 
 impl ToolService {
-    pub(super) fn worker_identity(&self) -> Result<String> {
+    pub(crate) fn worker_identity(&self) -> Result<String> {
         Ok(stable(
             "worker",
             &serde_json::to_string(&self.config.runtime)?,

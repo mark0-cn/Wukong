@@ -649,6 +649,21 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
     assert!(!ghost.is_error, "{ghost:?}");
     let record: Value = store.require("interact_session", "ghost-session")?;
     assert_eq!(record["state"], "lost");
+    store.put("debug_session", "ghost-debug", &run.id,
+        &json!({"id":"ghost-debug","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"]}))?;
+    let debug = service
+        .execute(
+            &owner.id,
+            "idem:ghost-debug",
+            "debug_close",
+            json!({"session_id":"ghost-debug"}),
+        )
+        .await?;
+    assert!(!debug.is_error, "{debug:?}");
+    assert_eq!(
+        store.require::<Value>("debug_session", "ghost-debug")?["state"],
+        "lost"
+    );
     service.close().await;
     Ok(())
 }

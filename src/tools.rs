@@ -48,6 +48,7 @@ mod jobs;
 mod sessions;
 use catalog::builtins;
 pub(crate) use catalog::child_schema;
+pub(crate) use jobs::JobService;
 
 /// Machine-readable schemas from the same registry used for model requests.
 pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {

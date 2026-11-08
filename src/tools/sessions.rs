@@ -1,5 +1,14 @@
 //! Sessions tool operations.
 use super::*;
+use crate::runtime::protocol::{SessionHandle, SessionState, WorkerError, WorkerErrorKind};
+
+fn session_lost(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<WorkerError>()
+            .is_some_and(|error| error.kind == WorkerErrorKind::SessionLost)
+    })
+}
 
 impl ToolService {
     pub(super) fn authorize_session(
@@ -36,17 +45,19 @@ impl ToolService {
                 let mut session: Value =
                     self.require_in_run("debug_session", &session_id, &agent.run_id)?;
                 self.authorize_session(agent, &session, name == "debug_close")?;
-                let current = session["state"].as_str().unwrap_or_default().to_owned();
+                let current: SessionState = serde_json::from_value(session["state"].clone())?;
                 // Idempotent close, mirroring interactive_close: a closed/lost
                 // debug session closes again successfully.
-                if name == "debug_close" && matches!(current.as_str(), "closed" | "lost") {
+                if name == "debug_close"
+                    && matches!(current, SessionState::Closed | SessionState::Lost)
+                {
                     session["updated_at"] = json!(now());
                     self.store
                         .put("debug_session", &session_id, &agent.run_id, &session)?;
                     return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
                 }
                 ensure!(
-                    session["state"] == "running",
+                    current == SessionState::Running,
                     "debug session is closed or lost"
                 );
                 let raw = match self
@@ -66,7 +77,7 @@ impl ToolService {
                     Err(error) => {
                         // Worker lost the session (daemon restart): reconcile
                         // the local record so agent_finish is not blocked.
-                        if name == "debug_close" && error.to_string().contains("absent or lost") {
+                        if name == "debug_close" && session_lost(&error) {
                             session["state"] = json!("lost");
                             session["updated_at"] = json!(now());
                             self.store.put(
@@ -108,9 +119,8 @@ impl ToolService {
                 let raw = self
                     .worker_call(agent, call_id, "debug.start", args)
                     .await?;
-                let session_id = raw["session_id"]
-                    .as_str()
-                    .context("worker debug session ID missing")?;
+                let handle: SessionHandle = serde_json::from_value(raw.clone())?;
+                let session_id = handle.session_id.as_str();
                 let record = json!({"id":session_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"state":raw["state"],"worker":raw,"created_at":now(),"updated_at":now()});
                 self.store
                     .put("debug_session", session_id, &agent.run_id, &record)?;
@@ -124,10 +134,9 @@ impl ToolService {
                 let raw = self
                     .worker_call(agent, call_id, "interact.start", args)
                     .await?;
-                let session_id = raw["session_id"]
-                    .as_str()
-                    .context("worker interactive session ID missing")?;
-                let record = json!({"id":session_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"state":"running","created_at":now(),"updated_at":now()});
+                let handle: SessionHandle = serde_json::from_value(raw.clone())?;
+                let session_id = handle.session_id.as_str();
+                let record = json!({"id":session_id,"run_id":agent.run_id,"agent_id":agent.id,"worker_id":self.worker_identity()?,"state":handle.state,"created_at":now(),"updated_at":now()});
                 self.store
                     .put("interact_session", session_id, &agent.run_id, &record)?;
                 Ok(raw)
@@ -137,18 +146,20 @@ impl ToolService {
                 let mut session: Value =
                     self.require_in_run("interact_session", &session_id, &agent.run_id)?;
                 self.authorize_session(agent, &session, name == "interactive_close")?;
-                let current = session["state"].as_str().unwrap_or_default().to_owned();
+                let current: SessionState = serde_json::from_value(session["state"].clone())?;
                 // Closing is idempotent: an already closed/lost session closes
                 // again successfully instead of stranding the caller.
-                if name == "interactive_close" && matches!(current.as_str(), "closed" | "lost") {
+                if name == "interactive_close"
+                    && matches!(current, SessionState::Closed | SessionState::Lost)
+                {
                     session["updated_at"] = json!(now());
                     self.store
                         .put("interact_session", &session_id, &agent.run_id, &session)?;
                     return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
                 }
                 ensure!(
-                    session["state"] == "running"
-                        || (name == "interactive_close" && session["state"] == "exited"),
+                    current == SessionState::Running
+                        || (name == "interactive_close" && current == SessionState::Exited),
                     "interactive session is closed or lost"
                 );
                 let raw = match self
@@ -169,9 +180,7 @@ impl ToolService {
                         // The worker no longer knows the session (daemon
                         // restart): the local record must not stay "running"
                         // and block agent_finish forever.
-                        let lost = error
-                            .chain()
-                            .any(|cause| cause.to_string().contains("absent or lost"));
+                        let lost = session_lost(&error);
                         if name == "interactive_close" && lost {
                             json!({"session_id":session_id,"state":"lost","reconciled":true})
                         } else {

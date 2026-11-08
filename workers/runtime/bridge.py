@@ -36,6 +36,17 @@ TERMINAL = {"completed", "failed", "cancelled", "timed_out", "lost"}
 ENV_KEYS = {"PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC", "HOME", "USERPROFILE", "LANG", "LC_ALL", "JAVA_HOME", "RE_AGENT_GHIDRA_HEADLESS", "RE_AGENT_GHIDRA_SCRIPT_DIR"}
 
 
+class WorkerError(ValueError):
+    def __init__(self, kind, message):
+        super().__init__(message)
+        self.kind = kind
+
+
+def rpc_error(error):
+    kind = getattr(error, "kind", "invalid_request" if isinstance(error, (ValueError, KeyError, TypeError)) else "internal")
+    return {"code": -32000, "message": str(error)[:4096], "data": {"kind": kind}}
+
+
 def safe_env(extra=None):
     # Windows enumerates environment names in upper case; SYSTEMROOT is needed
     # by Winsock even when Python itself launches successfully without it.
@@ -973,14 +984,14 @@ class Runtime:
                         return {**result, "state": "lost", "reason": "interactive session owner daemon restarted"}
                     return result
                 if operation["state"] == "failed":
-                    raise ValueError(operation["error"])
+                    raise WorkerError(operation.get("error_kind", "invalid_request"), operation["error"])
                 if method not in {"job.start", "fuzz.start", "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop", "debug.close"}:
-                    raise ValueError("prior operation outcome is unknown; reconcile the affected worker state instead of replaying")
+                    raise WorkerError("outcome_unknown", "prior operation outcome is unknown; reconcile the affected worker state instead of replaying")
             atomic_json(ledger, {"fingerprint": fingerprint, "state": "pending", "method": method, "at": time.time()})
             try:
                 result = self.dispatch_inner(method, params)
             except Exception as error:
-                atomic_json(ledger, {"fingerprint": fingerprint, "state": "failed", "error": str(error)[:4096], "at": time.time()})
+                atomic_json(ledger, {"fingerprint": fingerprint, "state": "failed", "error": str(error)[:4096], "error_kind": rpc_error(error)["data"]["kind"], "at": time.time()})
                 raise
             atomic_json(ledger, {"fingerprint": fingerprint, "state": "completed", "result": result, "at": time.time()})
             return result
@@ -1003,7 +1014,7 @@ class Runtime:
         if method in {"interact.write", "interact.close"}:
             session = self.interact.get(params.get("session_id"))
             if session is None:
-                raise ValueError("interactive session absent or lost")
+                raise WorkerError("session_lost", "interactive session absent or lost")
             if method == "interact.close":
                 self.interact.pop(session.id, None)
                 return session.close()
@@ -1141,7 +1152,7 @@ class Runtime:
             with self.lock:
                 session = self.debug.get(params["session_id"])
             if not session:
-                raise ValueError("debug session not owned by this daemon; it is absent or lost")
+                raise WorkerError("session_lost", "debug session not owned by this daemon; it is absent or lost")
             if method == "debug.close":
                 return session.close()
             if method == "debug.events":
@@ -1176,7 +1187,7 @@ def serve(root, trusted):
                 result = runtime.dispatch(request["method"], request.get("params") or {})
                 response = {"jsonrpc": "2.0", "id": request.get("id"), "result": result}
             except Exception as error:
-                response = {"jsonrpc": "2.0", "id": locals().get("request", {}).get("id"), "error": {"code": -32000, "message": str(error)[:4096]}}
+                response = {"jsonrpc": "2.0", "id": locals().get("request", {}).get("id"), "error": rpc_error(error)}
             encoded = json.dumps(response, ensure_ascii=False).encode() + b"\n"
             if len(encoded) > MAX_RPC:
                 encoded = json.dumps({"jsonrpc": "2.0", "id": response.get("id"), "error": {"code": -32001, "message": "response exceeds size limit"}}).encode() + b"\n"
@@ -1293,7 +1304,7 @@ def main():
                 request = json.loads(raw)
                 response = relay_call(endpoint, request)
             except Exception as error:
-                response = {"jsonrpc": "2.0", "id": request.get("id"), "error": {"code": -32000, "message": str(error)[:4096]}}
+                response = {"jsonrpc": "2.0", "id": request.get("id"), "error": rpc_error(error)}
             # Explicit UTF-8 bytes, ASCII-escaped JSON: the console codec
             # (e.g. GBK on Windows) must never be able to break a frame when
             # a result carries replacement characters.

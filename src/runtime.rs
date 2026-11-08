@@ -17,6 +17,7 @@ use tokio::{
     sync::Mutex,
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
+pub mod protocol;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -260,17 +261,28 @@ impl RuntimeClient {
                 let _ = transport.child.kill().await;
                 transport.stderr.finish().await;
                 if timed_out {
-                    bail!(
-                        "runtime request timed out; the worker may have executed it — reconcile the durable call before retrying (the next call reconnects automatically)"
-                    )
+                    return Err(protocol::TransportFailure { timed_out:true, message:"runtime request timed out; the worker may have executed it — reconcile the durable call before retrying (the next call reconnects automatically)".into() }.into());
                 }
-                Err(error).context(
-                    transport.stderr.context(
-                        "runtime transport failed; the next call reconnects automatically",
+                Err(protocol::TransportFailure {
+                    timed_out: false,
+                    message: format!(
+                        "{}: {error:#}",
+                        transport.stderr.context(
+                            "runtime transport failed; the next call reconnects automatically"
+                        )
                     ),
-                )
+                }
+                .into())
             }
         }
+    }
+
+    pub async fn job_status(&self, job_id: &str) -> Result<protocol::JobStatus> {
+        let status: protocol::JobStatus =
+            serde_json::from_value(self.call("job.status", json!({"job_id":job_id})).await?)
+                .context("invalid worker job status")?;
+        anyhow::ensure!(status.job_id == job_id, "worker returned the wrong job");
+        Ok(status)
     }
 
     /// Closes only the transport. To stop work, call job.cancel/debug.close first.
@@ -344,9 +356,13 @@ async fn request(
         .ok_or_else(|| RequestFailure::Worker(anyhow!("runtime params must be an object")))?;
     match transport.client.request(method, params).await {
         Ok(result) => Ok(result),
-        Err(RpcError::Call(error)) => {
-            Err(RequestFailure::Worker(anyhow!("runtime {method}: {error}")))
-        }
+        Err(RpcError::Call(error)) => Err(RequestFailure::Worker(
+            protocol::WorkerError::from_rpc(
+                format!("runtime {method}: {}", error.message()),
+                error.data().map(|data| data.get()),
+            )
+            .into(),
+        )),
         Err(error) => Err(RequestFailure::Transport {
             timed_out: matches!(error, RpcError::RequestTimeout),
             error: error.into(),
