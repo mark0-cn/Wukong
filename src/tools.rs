@@ -1730,11 +1730,20 @@ impl ToolService {
                 let mut session: Value =
                     self.require_in_run("debug_session", &session_id, &agent.run_id)?;
                 self.authorize_session(agent, &session, name == "debug_close")?;
+                let current = session["state"].as_str().unwrap_or_default().to_owned();
+                // Idempotent close, mirroring interactive_close: a closed/lost
+                // debug session closes again successfully.
+                if name == "debug_close" && matches!(current.as_str(), "closed" | "lost") {
+                    session["updated_at"] = json!(now());
+                    self.store
+                        .put("debug_session", &session_id, &agent.run_id, &session)?;
+                    return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
+                }
                 ensure!(
                     session["state"] == "running",
                     "debug session is closed or lost"
                 );
-                let raw = self
+                let raw = match self
                     .worker_call(
                         agent,
                         call_id,
@@ -1745,7 +1754,24 @@ impl ToolService {
                         },
                         args,
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(raw) => raw,
+                    Err(error) => {
+                        // Worker lost the session (daemon restart): reconcile
+                        // the local record so agent_finish is not blocked.
+                        if name == "debug_close"
+                            && error.to_string().contains("absent or lost")
+                        {
+                            session["state"] = json!("lost");
+                            session["updated_at"] = json!(now());
+                            self.store
+                                .put("debug_session", &session_id, &agent.run_id, &session)?;
+                            return Ok(json!({"session_id":session_id,"state":"lost","reconciled":true}));
+                        }
+                        return Err(error);
+                    }
+                };
                 let transcript = raw["transcript"]
                     .as_str()
                     .map(str::to_owned)
@@ -1801,12 +1827,21 @@ impl ToolService {
                 let mut session: Value =
                     self.require_in_run("interact_session", &session_id, &agent.run_id)?;
                 self.authorize_session(agent, &session, name == "interactive_close")?;
+                let current = session["state"].as_str().unwrap_or_default().to_owned();
+                // Closing is idempotent: an already closed/lost session closes
+                // again successfully instead of stranding the caller.
+                if name == "interactive_close" && matches!(current.as_str(), "closed" | "lost") {
+                    session["updated_at"] = json!(now());
+                    self.store
+                        .put("interact_session", &session_id, &agent.run_id, &session)?;
+                    return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
+                }
                 ensure!(
                     session["state"] == "running"
                         || (name == "interactive_close" && session["state"] == "exited"),
                     "interactive session is closed or lost"
                 );
-                let raw = self
+                let raw = match self
                     .worker_call(
                         agent,
                         call_id,
@@ -1817,9 +1852,29 @@ impl ToolService {
                         },
                         args,
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(raw) => raw,
+                    Err(error) => {
+                        // The worker no longer knows the session (daemon
+                        // restart): the local record must not stay "running"
+                        // and block agent_finish forever.
+                        let lost = error
+                            .chain()
+                            .any(|cause| cause.to_string().contains("absent or lost"));
+                        if name == "interactive_close" && lost {
+                            json!({"session_id":session_id,"state":"lost","reconciled":true})
+                        } else {
+                            return Err(error);
+                        }
+                    }
+                };
                 if name == "interactive_close" {
-                    session["state"] = json!("closed");
+                    session["state"] = json!(if raw["state"].as_str() == Some("lost") {
+                        "lost"
+                    } else {
+                        "closed"
+                    });
                 } else if raw["state"].as_str() == Some("exited") {
                     session["state"] = json!("exited");
                 }
