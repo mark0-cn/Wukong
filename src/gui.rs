@@ -1,9 +1,11 @@
+mod activity;
 mod commands;
 mod content;
 mod controller;
 mod dialogs;
 mod sidebar;
 mod state;
+mod virtual_list;
 use crate::gui_data::{self, AgentSummary, RunSummary};
 use crate::{
     application::AssessmentService, config::AppConfig, domain::*, interface::DEFAULT_TASK, report,
@@ -157,6 +159,8 @@ struct Workspace {
     rx: mpsc::Receiver<Update>,
     commands: commands::Controller,
     data: WorkspaceData,
+    activity: activity::Activity,
+    last_loaded: Option<ReadRequest>,
     selection: Selection,
     composer: Composer,
     chat: ChatView,
@@ -197,7 +201,7 @@ impl eframe::App for Workspace {
                 self.dialogs.close = CloseState::Confirming;
             }
         }
-        if self.refreshed.elapsed() >= Duration::from_secs(1)
+        if self.refreshed.elapsed() >= self.refresh_interval()
             && let Err(e) = self.refresh()
         {
             self.error(e);
@@ -236,16 +240,16 @@ impl eframe::App for Workspace {
         self.sidebar(ctx);
         self.content(ctx);
         self.dialogs(ctx);
-        if self.selection.agent.as_deref()
-            != self
-                .data
-                .conversation
-                .as_ref()
-                .map(|agent| agent.id.as_str())
-        {
+        if self.last_loaded.as_ref() != Some(&self.read_request()) {
             let _ = self.refresh();
         }
-        ctx.request_repaint_after(Duration::from_millis(200));
+        let delay = if self.reader.is_none() {
+            self.refresh_interval()
+        } else {
+            self.refresh_interval()
+                .saturating_sub(self.refreshed.elapsed())
+        };
+        ctx.request_repaint_after(delay);
     }
 }
 
@@ -335,7 +339,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn refresh_identity_includes_agent_and_selection_epoch() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let mut app = Workspace::new(
@@ -362,7 +366,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn reselecting_current_run_preserves_loaded_and_in_flight_data() -> Result<()> {
         fn finish_refresh(app: &mut Workspace) -> Result<()> {
             let Update::Loaded { reader, result, .. } =
@@ -505,7 +509,7 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn invalid_target_reports_error_without_creating_run() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let store = Store::open(dir.path())?;

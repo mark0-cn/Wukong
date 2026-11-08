@@ -14,6 +14,8 @@ impl Workspace {
             tx,
             rx,
             data: WorkspaceData::default(),
+            activity: activity::Activity::default(),
+            last_loaded: None,
             selection: Selection {
                 selected,
                 ..Selection::default()
@@ -49,22 +51,40 @@ impl Workspace {
         let request = self.read_request();
         let tx = self.tx.clone();
         self.refreshed = Instant::now();
-        self.runtime.spawn_blocking(move || {
+        let context = self.commands.context.clone();
+        let work_request = request.clone();
+        let work = self.runtime.spawn_blocking(move || {
             let result = reader
                 .read(
                     &store,
-                    request.run.as_deref(),
-                    request.agent.as_deref(),
-                    request.event_limit,
+                    work_request.run.as_deref(),
+                    work_request.agent.as_deref(),
+                    work_request.event_limit,
                 )
                 .map(Box::new);
+            (reader, result)
+        });
+        self.runtime.spawn(async move {
+            let (reader, result) = work
+                .await
+                .unwrap_or_else(|error| (gui_data::Reader::default(), Err(error.into())));
             let _ = tx.send(Update::Loaded {
                 request,
                 reader: Box::new(reader),
                 result,
             });
+            if let Some(context) = context {
+                context.request_repaint();
+            }
         });
         Ok(())
+    }
+    pub(super) fn refresh_interval(&self) -> Duration {
+        if self.execution.busy() || self.commands.busy() {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_secs(3)
+        }
     }
     pub(super) fn read_request(&self) -> ReadRequest {
         ReadRequest {
@@ -85,8 +105,16 @@ impl Workspace {
         self.reader = Some(reader);
         if request == self.read_request() {
             match result {
-                Ok(delta) => self.apply_delta(*delta),
-                Err(error) => self.error(error),
+                Ok(delta) => {
+                    self.apply_delta(*delta);
+                    let mut request = request;
+                    request.run = self.selection.selected.clone();
+                    self.last_loaded = Some(request);
+                }
+                Err(error) => {
+                    self.last_loaded = Some(request);
+                    self.error(error);
+                }
             }
         } else {
             self.reader = Some(gui_data::Reader::default());
@@ -103,6 +131,11 @@ impl Workspace {
         }
     }
     pub(super) fn apply_delta(&mut self, mut delta: gui_data::Delta) {
+        let activity_changed = delta.reset
+            || !delta.agents.is_empty()
+            || !delta.notes.is_empty()
+            || delta.events.is_some()
+            || delta.calls.is_some();
         let was_empty = self.data.runs.is_empty();
         gui_data::apply(&mut self.data.runs, delta.runs, |run| &run.id);
         self.data
@@ -144,6 +177,9 @@ impl Workspace {
         if let Some(conversation) = delta.conversation {
             self.data.conversation = conversation;
         }
+        if activity_changed {
+            self.activity.rebuild(&self.data);
+        }
         if was_empty && !self.data.runs.is_empty() {
             self.dialogs.task = TaskDialog::None;
         }
@@ -161,6 +197,7 @@ impl Workspace {
         self.data.agents.clear();
         self.data.notes.clear();
         self.data.findings.clear();
+        self.activity.rebuild(&self.data);
         self.selection.event_limit = 500;
         self.composer.message.clear();
         if let Err(e) = self.refresh() {
@@ -183,6 +220,7 @@ impl Workspace {
         self.execution = Execution::Starting(cancel.clone());
         let tx = self.tx.clone();
         self.notice = Some((false, "正在连接分析引擎…".into()));
+        let context = self.commands.context.clone();
         self.runtime.spawn(async move {
             let result = async {
                 let service = AssessmentService::new(config, store);
@@ -192,6 +230,9 @@ impl Workspace {
                     service.start(std::path::Path::new(&target), &task).await?
                 };
                 let _ = tx.send(Update::Started(prepared.run().id.clone()));
+                if let Some(context) = &context {
+                    context.request_repaint();
+                }
                 let run = prepared.drive(cancel).await?;
                 ensure!(
                     run.status != Status::Failed,
@@ -201,6 +242,9 @@ impl Workspace {
             }
             .await;
             let _ = tx.send(Update::Finished(result));
+            if let Some(context) = context {
+                context.request_repaint();
+            }
         });
     }
     pub(super) fn dispatch(&mut self, command: Command) {
