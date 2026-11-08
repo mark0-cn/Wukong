@@ -347,6 +347,28 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
 }
 
 #[tokio::test]
+async fn finish_result_accepts_a_differing_free_text_summary() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, _run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    // A result plus a different free-text summary must succeed: result.answer
+    // is canonical and equality checks only burned retry turns.
+    let finished = service
+        .execute(
+            &agent.id,
+            "finish-differing",
+            "agent_finish",
+            json!({"result":{"outcome":"success","answer":"canonical answer"},"summary":"a different free text summary"}),
+        )
+        .await?;
+    assert!(!finished.is_error, "{finished:?}");
+    let recorded: AgentRecord = store.require("agent", &agent.id)?;
+    assert_eq!(recorded.summary.as_deref(), Some("canonical answer"));
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn exec_command_routes_to_the_runtime_instead_of_unknown_tool() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, _run, agent) = fixture(temp.path())?;

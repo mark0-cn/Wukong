@@ -123,7 +123,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::AgentFinishArgs>(
             "agent_finish",
-            "Finish a child task with a structured result accounting for its contract, evidence and gaps. summary is shorthand for tasks without required outputs. Active descendants must finish first.",
+            "Finish a child task with a structured result accounting for its contract, evidence and gaps. summary is shorthand for tasks without required outputs and is ignored when result is provided (result.answer is the canonical summary). Active descendants must finish first.",
             true,
             false,
         ),
@@ -748,11 +748,11 @@ impl ToolService {
             }
             "agent_finish" | "finish_scan" => {
                 let result: TaskResult = if let Some(result) = args.get("result") {
-                    let result: TaskResult = serde_json::from_value(result.clone())?;
-                    if let Some(summary) = args.get("summary").and_then(Value::as_str) {
-                        ensure!(summary == result.answer, "summary must match result.answer");
-                    }
-                    result
+                    // result.answer is the canonical summary; a free-text
+                    // summary argument is accepted but never cross-checked
+                    // (models reliably produce both, and equality checks
+                    // just burn retry turns).
+                    serde_json::from_value(result.clone())?
                 } else {
                     TaskResult {
                         answer: text(&args, "summary")?.into(),
