@@ -19,6 +19,7 @@ pub(crate) fn apply<T>(values: &mut Vec<T>, changes: Vec<Change<T>>, id: impl Fn
 pub(crate) struct Delta {
     pub selected: Option<String>,
     pub reset: bool,
+    pub details_revision: i64,
     pub runs: Vec<Change<RunSummary>>,
     pub agents: Vec<Change<AgentSummary>>,
     pub notes: Vec<Change<SharedDocument>>,
@@ -69,6 +70,7 @@ impl Reader {
         Ok(Delta {
             selected: data.selected,
             reset: data.reset,
+            details_revision: data.details_revision,
             runs: data.runs,
             agents: data.agents,
             notes: data.notes,

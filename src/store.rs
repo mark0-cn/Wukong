@@ -1,3 +1,4 @@
+mod finding_queries;
 pub(crate) mod report_queries;
 mod workspace;
 use crate::domain::*;
