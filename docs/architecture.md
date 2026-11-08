@@ -31,6 +31,8 @@
 
 ## 状态与恢复
 
+`TaskGraph`、`DependencyRules`、`CompletionRules` 和 `MessageRules` 是不依赖存储及执行框架的纯领域规则。协调应用服务在同一事务中加载事实、调用规则、提交任务和邮箱变化；数据库查询与 generation 归档留在事务会话实现中。
+
 agent 状态包括 queued、running、waiting、budget_paused、completed、stopped、crashed、failed。完成/停止事件通知父任务。预算暂停保留检查点，恢复后继续调度。
 
 活动任务内，通过 `follow_up_agent`（CLI `message --kind follow_up`）向 completed 子 agent 追加任务会保留其历史和累计用量，并开始新的 generation；工具调用与完成通知按 generation 区分。父任务已完成时一并唤醒，已停止或失败的分支需新建任务。显式前驱依赖与父子完成依赖合并检查，拒绝祖先依赖及间接循环。

@@ -12,20 +12,8 @@ impl ToolService {
             return Ok(());
         }
         let all = self.store.list_metadata("agent", &actor.run_id)?;
-        let mut parent = target.parent_id.as_deref();
-        let mut count = 0;
-        while let Some(id) = parent {
-            if id == actor.id {
-                return Ok(());
-            }
-            parent = all
-                .iter()
-                .find(|a| a.id == id)
-                .and_then(|a| a.parent_id.as_deref());
-            count += 1;
-            if count > all.len() {
-                break;
-            }
+        if TaskGraph::is_descendant(target, &actor.id, &all) {
+            return Ok(());
         }
         bail!("only your own descendants may be controlled")
     }
