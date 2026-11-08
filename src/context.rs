@@ -103,7 +103,7 @@ fn preview(document: &SharedDocument, authors: &BTreeMap<String, AgentRecord>) -
 /// whole documents or the unbounded run graph into a model context.
 pub(crate) fn snapshot(tx: &Connection, agent: &AgentRecord) -> Result<Value> {
     let documents = documents(tx, &agent.run_id)?;
-    let authors = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?
+    let authors = Store::tx_list_metadata::<AgentRecord>(tx, "agent", &agent.run_id)?
         .into_iter()
         .map(|author| (author.id.clone(), author))
         .collect::<BTreeMap<_, _>>();
@@ -156,7 +156,7 @@ pub(crate) fn search(
     let query = args["query"].as_str().unwrap_or_default().to_lowercase();
     let words = query.split_whitespace().collect::<Vec<_>>();
     store.read_transaction(|tx| {
-        let authors = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?
+        let authors = Store::tx_list_metadata::<AgentRecord>(tx, "agent", &agent.run_id)?
             .into_iter().map(|author| (author.id.clone(), author)).collect::<BTreeMap<_, _>>();
         let documents = documents(tx, &agent.run_id)?;
         let mut matches = documents.iter().filter(|document| {

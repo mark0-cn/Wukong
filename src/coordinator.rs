@@ -109,7 +109,7 @@ impl Coordinator {
         };
         self.store.transaction(|tx| {
             Store::tx_put(tx, "run", &run.id, &run.id, &run)?;
-            Store::tx_put(tx, "agent", &root.id, &run.id, &root)?;
+            Store::tx_put_metadata(tx, "agent", &root.id, &run.id, &root)?;
             Store::tx_event(
                 tx,
                 &run.id,
@@ -122,7 +122,7 @@ impl Coordinator {
         Ok(run)
     }
     pub fn create_child(&self, parent_id: &str, request: ChildRequest) -> Result<SpawnResult> {
-        let parent: AgentRecord = self.store.require("agent", parent_id)?;
+        let parent: AgentRecord = self.store.require_metadata("agent", parent_id)?;
         self.store
             .verify_evidence_links(&parent.run_id, &request.contract.input_evidence_ids)?;
         self.store
@@ -160,7 +160,7 @@ impl Coordinator {
             request.contract.objective = request.task.clone();
         }
         Self::validate_contract(tx, &run.id, &request.contract)?;
-        let agents = Store::tx_list::<AgentRecord>(tx, "agent", &run.id)?;
+        let agents = Store::tx_list_metadata::<AgentRecord>(tx, "agent", &run.id)?;
         if let Some(existing) = agents.iter().find(|a| {
             a.scope.trim() == request.scope.trim() && a.role == request.role && !a.status.terminal()
         }) {
@@ -342,7 +342,7 @@ impl Coordinator {
             "at most 32 evidence references per message"
         );
         let mut target: AgentRecord =
-            Store::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
+            Store::tx_get_metadata(tx, "agent", recipient)?.context("recipient missing")?;
         let run: RunRecord = Store::tx_get(tx, "run", &target.run_id)?.context("run missing")?;
         ensure!(!run.status.terminal(), "assessment is terminal");
         ensure!(
@@ -351,7 +351,7 @@ impl Coordinator {
         );
         let sender_generation = if sender != "operator" {
             let from: AgentRecord =
-                Store::tx_get(tx, "agent", sender)?.context("sender missing")?;
+                Store::tx_get_metadata(tx, "agent", sender)?.context("sender missing")?;
             ensure!(from.run_id == target.run_id, "cross-run message denied");
             ensure!(
                 !from.status.terminal(),
@@ -471,6 +471,10 @@ impl Coordinator {
                     ensure!(!agent.status.terminal(), "ancestor is stopped or failed");
                     break;
                 }
+                let history: AgentRecord =
+                    Store::tx_get(tx, "agent", &agent.id)?.context("agent missing")?;
+                agent.checkpoint = history.checkpoint;
+                agent.inherited_context = history.inherited_context;
                 agent.generation = agent
                     .generation
                     .checked_add(1)
@@ -515,10 +519,10 @@ impl Coordinator {
                 current = agent
                     .parent_id
                     .as_ref()
-                    .map(|id| Store::tx_get(tx, "agent", id)?.context("parent missing"))
+                    .map(|id| Store::tx_get_metadata(tx, "agent", id)?.context("parent missing"))
                     .transpose()?;
             }
-            Self::validate_dependencies(&Store::tx_list::<AgentRecord>(
+            Self::validate_dependencies(&Store::tx_list_metadata::<AgentRecord>(
                 tx,
                 "agent",
                 &target.run_id,
@@ -531,7 +535,7 @@ impl Coordinator {
                 target.wait_until = None;
             }
             target.updated_at = now();
-            Store::tx_put(tx, "agent", recipient, &target.run_id, &target)?;
+            Store::tx_put_metadata(tx, "agent", recipient, &target.run_id, &target)?;
         }
         Store::tx_event(
             tx,
@@ -596,7 +600,7 @@ impl Coordinator {
     /// already admitted from the predecessor results recorded in this event.
     pub fn release_dependencies(&self, run_id: &str) -> Result<usize> {
         self.store.transaction(|tx| {
-            let mut all=Store::tx_list::<AgentRecord>(tx,"agent",run_id)?;
+            let mut all=Store::tx_list_metadata::<AgentRecord>(tx,"agent",run_id)?;
             let mut count=0;
             loop {
                 let mut changed=false;
@@ -618,7 +622,7 @@ impl Coordinator {
                         }
                     }
                     agent.updated_at=now();
-                    Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;
+                    Store::tx_put_metadata(tx,"agent",&agent.id,run_id,&agent)?;
                     let predecessors:Vec<_>=all.iter().filter(|other|agent.wait_for_predecessors.contains(&other.id)).map(|other|json!({"id":other.id,"generation":other.generation,"status":other.status,"outcome":other.task_result.as_ref().map(|result|result.outcome)})).collect();
                     Store::tx_event(tx,run_id,Some(&agent.id),"agent.dependencies_resolved",json!({"policy":agent.dependency_policy,"result":state,"predecessors":predecessors}))?;
                     all[index]=agent;changed=true;count+=1;
@@ -654,9 +658,9 @@ impl Coordinator {
         policy: DependencyPolicy,
     ) -> Result<Value> {
         let mut agent: AgentRecord =
-            Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+            Store::tx_get_metadata(tx, "agent", agent_id)?.context("agent missing")?;
         ensure!(!agent.status.terminal(), "agent is terminal");
-        let all = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?;
+        let all = Store::tx_list_metadata::<AgentRecord>(tx, "agent", &agent.run_id)?;
         let ids: Vec<_> = if targets.is_empty() {
             all.iter()
                 .filter(|other| other.parent_id.as_deref() == Some(agent_id))
@@ -708,7 +712,7 @@ impl Coordinator {
             .context("agent missing")?;
         graph[index] = agent.clone();
         Self::validate_dependencies(&graph)?;
-        Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
+        Store::tx_put_metadata(tx, "agent", agent_id, &agent.run_id, &agent)?;
         Store::tx_event(
             tx,
             &agent.run_id,
@@ -725,7 +729,7 @@ impl Coordinator {
     }
     pub fn wake_waiters(&self, run_id: &str) -> Result<usize> {
         self.store.transaction(|tx| {
-            let all=Store::tx_list::<AgentRecord>(tx,"agent",run_id)?;let mut changed=0;
+            let all=Store::tx_list_metadata::<AgentRecord>(tx,"agent",run_id)?;let mut changed=0;
             for mut agent in all.iter().filter(|agent|agent.status==Status::Waiting).cloned() {
                 let condition=Self::dependency_state(agent.wait_policy,&agent.wait_for,&all);
                 let ready=condition!=DependencyState::Pending;
@@ -739,7 +743,7 @@ impl Coordinator {
                     agent.wait_for.clear();agent.wait_until=None;
                 }
                 agent.status=Status::Queued;agent.updated_at=now();
-                Store::tx_put(tx,"agent",&agent.id,run_id,&agent)?;changed+=1;
+                Store::tx_put_metadata(tx,"agent",&agent.id,run_id,&agent)?;changed+=1;
             }
             Ok(changed)
         })
@@ -747,14 +751,14 @@ impl Coordinator {
     pub fn set_status(&self, agent_id: &str, status: Status, error: Option<String>) -> Result<()> {
         self.store.transaction(|tx| {
             let mut agent: AgentRecord =
-                Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+                Store::tx_get_metadata(tx, "agent", agent_id)?.context("agent missing")?;
             if agent.status.terminal() {
                 bail!("cannot transition terminal agent {}", agent.id);
             }
             agent.status = status;
             agent.error = error;
             agent.updated_at = now();
-            Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
+            Store::tx_put_metadata(tx, "agent", agent_id, &agent.run_id, &agent)?;
             if status.terminal() {
                 Self::notify_terminal(tx, &agent)?;
             }
@@ -789,7 +793,7 @@ impl Coordinator {
         )
     }
     pub fn finish_result(&self, agent_id: &str, result: TaskResult) -> Result<()> {
-        let agent: AgentRecord = self.store.require("agent", agent_id)?;
+        let agent: AgentRecord = self.store.require_metadata("agent", agent_id)?;
         self.store
             .verify_evidence_links(&agent.run_id, &result.evidence_links())?;
         self.store
@@ -805,7 +809,7 @@ impl Coordinator {
             bail!("completion summary must be nonempty");
         }
         let mut agent: AgentRecord =
-            Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+            Store::tx_get_metadata(tx, "agent", agent_id)?.context("agent missing")?;
         if agent.status == Status::Completed {
             return Ok(());
         }
@@ -823,7 +827,7 @@ impl Coordinator {
                 "unread coordinator messages remain; read them at the next model boundary before finishing"
             );
         }
-        let all = Store::tx_list::<AgentRecord>(tx, "agent", &agent.run_id)?;
+        let all = Store::tx_list_metadata::<AgentRecord>(tx, "agent", &agent.run_id)?;
         let active: Vec<_> = all
             .iter()
             .filter(|a| !a.status.terminal() && Self::is_descendant(a, agent_id, &all))
@@ -896,7 +900,7 @@ impl Coordinator {
         )?;
         agent.summary = Some(summary.to_owned());
         agent.updated_at = now();
-        Store::tx_put(tx, "agent", agent_id, &agent.run_id, &agent)?;
+        Store::tx_put_metadata(tx, "agent", agent_id, &agent.run_id, &agent)?;
         Self::notify_terminal(tx, &agent)?;
         if agent.role == Role::Root {
             let mut run: RunRecord =
@@ -1053,8 +1057,9 @@ impl Coordinator {
         agent_id: &str,
         reason: &str,
     ) -> Result<Vec<String>> {
-        let root: AgentRecord = Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
-        let all = Store::tx_list::<AgentRecord>(tx, "agent", &root.run_id)?;
+        let root: AgentRecord =
+            Store::tx_get_metadata(tx, "agent", agent_id)?.context("agent missing")?;
+        let all = Store::tx_list_metadata::<AgentRecord>(tx, "agent", &root.run_id)?;
         let mut stopped = Vec::new();
         for mut agent in all
             .iter()
@@ -1067,7 +1072,7 @@ impl Coordinator {
             agent.status = Status::Stopped;
             agent.error = Some(reason.to_owned());
             agent.updated_at = now();
-            Store::tx_put(tx, "agent", &agent.id, &agent.run_id, &agent)?;
+            Store::tx_put_metadata(tx, "agent", &agent.id, &agent.run_id, &agent)?;
             Self::notify_terminal(tx, &agent)?;
             stopped.push(agent.id);
         }
@@ -1098,11 +1103,11 @@ impl Coordinator {
             run.status = Status::BudgetPaused;
             run.updated_at = now();
             Store::tx_put(tx, "run", run_id, run_id, &run)?;
-            for mut agent in Store::tx_list::<AgentRecord>(tx, "agent", run_id)? {
+            for mut agent in Store::tx_list_metadata::<AgentRecord>(tx, "agent", run_id)? {
                 if !agent.status.terminal() {
                     agent.status = Status::BudgetPaused;
                     agent.updated_at = now();
-                    Store::tx_put(tx, "agent", &agent.id, run_id, &agent)?;
+                    Store::tx_put_metadata(tx, "agent", &agent.id, run_id, &agent)?;
                 }
             }
             Store::tx_event(
@@ -1127,7 +1132,7 @@ impl Coordinator {
             run.status = Status::Running;
             run.updated_at = now();
             Store::tx_put(tx, "run", run_id, run_id, &run)?;
-            for mut a in Store::tx_list::<AgentRecord>(tx, "agent", run_id)? {
+            for mut a in Store::tx_list_metadata::<AgentRecord>(tx, "agent", run_id)? {
                 let mut changed = false;
                 if !a.status.terminal() && a.role != Role::Root {
                     // Role caps follow the run budget: a resumed run with an
@@ -1146,7 +1151,7 @@ impl Coordinator {
                 }
                 if changed {
                     a.updated_at = now();
-                    Store::tx_put(tx, "agent", &a.id, run_id, &a)?;
+                    Store::tx_put_metadata(tx, "agent", &a.id, run_id, &a)?;
                 }
             }
             Store::tx_event(tx, run_id, None, "run.resumed", json!({}))?;

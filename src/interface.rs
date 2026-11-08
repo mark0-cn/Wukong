@@ -247,7 +247,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Command::Runs => print_json(&serde_json::to_value(store.runs()?)?)?,
         Command::Status { run_id, events } => {
-            let agents = store.list::<AgentRecord>("agent", &run_id)?;
+            let agents = store.list_metadata::<AgentRecord>("agent", &run_id)?;
             let all_events = store.recent_events(&run_id, events.min(1000))?;
             print_json(
                 &json!({"run":store.require::<RunRecord>("run",&run_id)?,"agents":agents.iter().map(|a|json!({"id":a.id,"name":a.name,"role":a.role,"parent_id":a.parent_id,"status":a.status,"scope":a.scope,"turns":a.turns,"tokens":a.total_tokens,"error":a.error,"summary":a.summary})).collect::<Vec<_>>(),"events":all_events.iter().rev().take(events.min(1000)).collect::<Vec<_>>()}),

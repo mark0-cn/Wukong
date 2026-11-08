@@ -136,7 +136,7 @@ impl AssessmentRunner {
     ) -> Result<()> {
         let run_id = self.store.transaction(|tx| {
             let mut target: AgentRecord =
-                Store::tx_get(tx, "agent", agent_id)?.context("agent missing")?;
+                Store::tx_get_metadata(tx, "agent", agent_id)?.context("agent missing")?;
             if target.status.terminal() {
                 return Ok(None);
             }
@@ -146,7 +146,7 @@ impl AssessmentRunner {
                 target.summary = Some(summary.clone());
             }
             target.updated_at = now();
-            Store::tx_put(tx, "agent", agent_id, &target.run_id, &target)?;
+            Store::tx_put_metadata(tx, "agent", agent_id, &target.run_id, &target)?;
             Coordinator::notify_terminal(tx, &target)?;
             Ok(Some(target.run_id))
         })?;
@@ -174,7 +174,7 @@ impl AssessmentRunner {
                 "task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,
                 "shared_context":crate::context::snapshot(tx,agent)?,
                 "ledger_counts":{
-                    "tasks":Store::tx_list::<AgentRecord>(tx,"agent",&run.id)?.len(),
+                    "tasks":Store::tx_list_metadata::<AgentRecord>(tx,"agent",&run.id)?.len(),
                     "findings":Store::tx_list::<Finding>(tx,"finding",&run.id)?.len(),
                     "coverage":Store::tx_list::<Coverage>(tx,"coverage",&run.id)?.len()
                 }
@@ -215,14 +215,14 @@ impl AssessmentRunner {
         let cost_known = estimate.as_ref().is_some_and(|cost| cost.is_complete());
         let cost = estimate.as_ref().map_or(0.0, |cost| cost.total);
         self.store.transaction(|tx| {
-            let mut agent: AgentRecord = Store::tx_get(tx,"agent",agent_id)?.context("agent missing")?;
+            let mut agent: AgentRecord = Store::tx_get_metadata(tx,"agent",agent_id)?.context("agent missing")?;
             let mut run: RunRecord = Store::tx_get(tx,"run",&agent.run_id)?.context("run missing")?;
             agent.turns += usize::from(model_turn);
             agent.total_tokens = agent.total_tokens.saturating_add(tokens.unwrap_or(0));
             run.total_tokens = run.total_tokens.saturating_add(tokens.unwrap_or(0));
             if cost_known { agent.cost_usd += cost; run.cost_usd += cost; }
             agent.updated_at = now(); run.updated_at = now();
-            Store::tx_put(tx,"agent",agent_id,&run.id,&agent)?;
+            Store::tx_put_metadata(tx,"agent",agent_id,&run.id,&agent)?;
             Store::tx_put(tx,"run",&run.id,&run.id,&run)?;
             Store::tx_event(tx,&run.id,Some(agent_id),if model_turn {"model.usage"} else {"model.usage_aux"},json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
             Ok(())
@@ -233,7 +233,7 @@ impl AssessmentRunner {
         // token count drifts; the event above records the omission, and the
         // kernel budget gate keeps enforcing on reported usage.
         if !cost_known {
-            let agent: AgentRecord = self.store.require("agent", agent_id)?;
+            let agent: AgentRecord = self.store.require_metadata("agent", agent_id)?;
             self.coordinator.pause_budget(
                 &agent.run_id,
                 "provider omitted usage required for accounting; response retained in Rig journal",

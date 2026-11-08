@@ -459,8 +459,7 @@ impl ToolService {
         let mut definitions = builtins()
             .iter()
             .filter(|item| {
-                (!item.root_only || role == Role::Root)
-                    && (!item.child_only || role != Role::Root)
+                (!item.root_only || role == Role::Root) && (!item.child_only || role != Role::Root)
             })
             .map(|item| item.definition.clone())
             .collect::<Vec<_>>();
@@ -525,7 +524,7 @@ impl ToolService {
                 .clone()
         };
         let _guard = lock.lock().await;
-        let agent: AgentRecord = self.store.require("agent", agent_id)?;
+        let agent: AgentRecord = self.store.require_metadata("agent", agent_id)?;
         let specs = builtins();
         let builtin = specs.iter().find(|item| item.definition.name == name);
         let side_effecting = builtin
@@ -697,7 +696,7 @@ impl ToolService {
                         .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
                 }
                 Ok(
-                    json!({"agents":self.store.list::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"dependency_policy":a.dependency_policy,"predecessors":a.wait_for_predecessors,"predecessors_released":a.predecessors_released,"wait_policy":a.wait_policy,"wait_for":a.wait_for,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
+                    json!({"agents":self.store.list_metadata::<AgentRecord>("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"dependency_policy":a.dependency_policy,"predecessors":a.wait_for_predecessors,"predecessors_released":a.predecessors_released,"wait_policy":a.wait_policy,"wait_for":a.wait_for,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
                 )
             }
             "send_message_to_agent" | "follow_up_agent" => {
@@ -976,7 +975,9 @@ impl ToolService {
         if actor.role == Role::Root || actor.id == target.id {
             return Ok(());
         }
-        let all = self.store.list::<AgentRecord>("agent", &actor.run_id)?;
+        let all = self
+            .store
+            .list_metadata::<AgentRecord>("agent", &actor.run_id)?;
         let mut parent = target.parent_id.as_deref();
         let mut count = 0;
         while let Some(id) = parent {
@@ -1042,7 +1043,7 @@ impl ToolService {
             json!({"name":name,"sha256":sha256}),
         )?;
         self.effect(agent,call_id,|tx| {
-            let mut current: AgentRecord = Store::tx_get(tx,"agent",&agent.id)?.context("agent missing")?;
+            let mut current: AgentRecord = Store::tx_get_metadata(tx,"agent",&agent.id)?.context("agent missing")?;
             ensure!(current.generation == agent.generation, "agent activation changed before skill load");
             agents::validate_capabilities(current.skills.iter().map(String::as_str)
                 .chain(current.active_skills.iter().map(|skill| skill.name.as_str()))
@@ -1052,7 +1053,7 @@ impl ToolService {
                 *existing=snapshot;
             } else { current.active_skills.push(snapshot); }
             current.updated_at=now();
-            Store::tx_put(tx,"agent",&agent.id,&agent.run_id,&current)?;
+            Store::tx_put_metadata(tx,"agent",&agent.id,&agent.run_id,&current)?;
             Store::tx_event(tx,&agent.run_id,Some(&agent.id),"skill.activated",json!({"name":name,"sha256":sha256,"evidence_id":evidence.id}))?;
             Ok(json!({"name":name,"sha256":sha256,"evidence_id":evidence.id,"active":true,"applies":"next fresh model request"}))
         })
@@ -1314,7 +1315,7 @@ impl ToolService {
                     "independent successful verification is required"
                 );
                 let verifier: AgentRecord =
-                    Store::tx_get(tx, "agent", &verification.verifier_agent_id)?
+                    Store::tx_get_metadata(tx, "agent", &verification.verifier_agent_id)?
                         .context("verifier agent missing")?;
                 finding.impact = Some(verification.impact);
             }
@@ -1760,14 +1761,18 @@ impl ToolService {
                     Err(error) => {
                         // Worker lost the session (daemon restart): reconcile
                         // the local record so agent_finish is not blocked.
-                        if name == "debug_close"
-                            && error.to_string().contains("absent or lost")
-                        {
+                        if name == "debug_close" && error.to_string().contains("absent or lost") {
                             session["state"] = json!("lost");
                             session["updated_at"] = json!(now());
-                            self.store
-                                .put("debug_session", &session_id, &agent.run_id, &session)?;
-                            return Ok(json!({"session_id":session_id,"state":"lost","reconciled":true}));
+                            self.store.put(
+                                "debug_session",
+                                &session_id,
+                                &agent.run_id,
+                                &session,
+                            )?;
+                            return Ok(
+                                json!({"session_id":session_id,"state":"lost","reconciled":true}),
+                            );
                         }
                         return Err(error);
                     }

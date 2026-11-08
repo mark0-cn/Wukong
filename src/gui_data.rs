@@ -2,7 +2,7 @@
 //! changes; it never needs to scan tool history or deserialize every checkpoint.
 use crate::{domain::*, store::Store};
 use anyhow::Result;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -81,6 +81,7 @@ pub(crate) struct Reader {
     conversation: Option<crate::gui_chat::Document>,
     events: Vec<Event>,
     event_limit: usize,
+    conversation_revision: Option<i64>,
     calls: BTreeMap<String, ToolCallRecord>,
 }
 
@@ -125,7 +126,7 @@ impl Reader {
             };
         }
         // All cursors and data are observed together, including external CLI writes.
-        let (delta, revision) = store.read_transaction(|tx| {
+        let (delta, revision, conversation_revision) = store.read_transaction(|tx| {
             let revision: i64 = tx.query_row("SELECT COALESCE(MAX(revision),0) FROM entity_revisions",[],|row|row.get(0))?;
             let runs = changes(tx,"run",None,self.revision,"json_remove(e.data,'$.config')")?;
             let selected = selected.map(str::to_owned).or_else(|| {
@@ -139,6 +140,7 @@ impl Reader {
             let mut events = None;
             let mut calls = None;
             let mut conversation = None;
+            let mut conversation_revision=None;
             if let Some(run) = selected.as_deref() {
                 agents = changes::<AgentSummary>(tx,"agent",Some(run),after,"json_remove(e.data,'$.checkpoint','$.inherited_context','$.active_skills')")?;
                 for change in &mut agents {
@@ -179,14 +181,18 @@ impl Reader {
                     }
                 }
                 if reset || events.is_some() || ids.iter().any(|id|changed.contains(id)) {calls=Some(visible.into_values().collect());}
-                if reset || self.agent.as_deref()!=agent || agents.iter().any(|change|Some(change.id.as_str())==agent) {
+                if let Some(id)=agent {
+                    conversation_revision=tx.query_row("SELECT revision FROM agent_conversations WHERE agent_id=?1 AND run_id=?2",params![id,run],|row|row.get(0)).optional()?;
+                }
+                if reset || self.agent.as_deref()!=agent || conversation_revision!=self.conversation_revision {
                     let record=agent.map(|id|Store::tx_get::<AgentRecord>(tx,"agent",id)).transpose()?.flatten();
                     conversation=Some(record.filter(|record|record.run_id==run).map(|record|crate::gui_chat::Document::prepare(&record,self.conversation.as_ref())));
                 }
             }
-            Ok((Delta {selected,reset,runs,agents,notes,findings,events,calls,conversation},revision))
+            Ok((Delta {selected,reset,runs,agents,notes,findings,events,calls,conversation},revision,conversation_revision))
         })?;
         self.revision = revision;
+        self.conversation_revision = conversation_revision;
         self.selected = delta.selected.clone();
         self.agent = agent.map(str::to_owned);
         self.event_limit = event_limit;
@@ -260,6 +266,57 @@ mod tests {
         })?;
         let deleted = reader.read(&store, Some(&run.id), None, 10)?;
         assert!(deleted.agents[0].value.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn metadata_changes_do_not_reload_a_conversation_but_checkpoint_changes_do() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(directory.path())?;
+        let target = directory.path().join("sample");
+        std::fs::write(&target, b"fixture")?;
+        let run = Coordinator::new(store.clone()).create_run(
+            &target,
+            "fixture",
+            Budget::default(),
+            json!({}),
+        )?;
+        let checkpoint =
+            json!({"messages":[{"role":"assistant","content":[{"type":"text","text":"first"}]}]});
+        store.checkpoint_and_ack(&run.root_id, checkpoint.clone(), &[])?;
+        let mut reader = Reader::default();
+        assert!(
+            reader
+                .read(&store, Some(&run.id), Some(&run.root_id), 5)?
+                .conversation
+                .flatten()
+                .is_some()
+        );
+        store.transaction(|tx| {
+            let mut agent: AgentRecord =
+                Store::tx_get_metadata(tx, "agent", &run.root_id)?.unwrap();
+            agent.total_tokens += 1;
+            Store::tx_put_metadata(tx, "agent", &agent.id, &run.id, &agent)
+        })?;
+        assert!(
+            reader
+                .read(&store, Some(&run.id), Some(&run.root_id), 5)?
+                .conversation
+                .is_none()
+        );
+        let mut changed = checkpoint;
+        changed["messages"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"role":"assistant","content":[{"type":"text","text":"second"}]}));
+        store.checkpoint_and_ack(&run.root_id, changed, &[])?;
+        assert!(
+            reader
+                .read(&store, Some(&run.id), Some(&run.root_id), 5)?
+                .conversation
+                .flatten()
+                .is_some()
+        );
         Ok(())
     }
 }
