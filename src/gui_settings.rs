@@ -16,6 +16,11 @@ pub(crate) struct ConfigEditor {
     baseline: String,
     advanced: bool,
     error: Option<String>,
+    parsed: Option<(DocumentMut, AppConfig)>,
+    parsed_source: Option<String>,
+    visible: bool,
+    confirm_close: bool,
+    close_after_save: bool,
 }
 
 pub(crate) struct EditorOutcome {
@@ -42,9 +47,39 @@ impl ConfigEditor {
             original,
             advanced: false,
             error: None,
+            parsed: None,
+            parsed_source: None,
+            visible: true,
+            confirm_close: false,
+            close_after_save: false,
         })
     }
 
+    pub(crate) fn reopen(&mut self) {
+        self.visible = true;
+        self.confirm_close = false;
+    }
+    fn dirty(&self) -> bool {
+        self.source != self.baseline
+    }
+    fn request_close(&mut self) {
+        if self.dirty() {
+            self.confirm_close = true;
+        } else {
+            self.visible = false;
+        }
+    }
+    fn prepare(&mut self) {
+        if self.parsed_source.as_deref() == Some(&self.source) {
+            return;
+        }
+        self.parsed_source = Some(self.source.clone());
+        self.parsed = self
+            .source
+            .parse::<DocumentMut>()
+            .ok()
+            .zip(toml::from_str::<AppConfig>(&self.source).ok());
+    }
     pub(crate) fn save(&mut self, state_override: Option<&Path>) -> Result<(AppConfig, Store)> {
         let config: AppConfig = toml::from_str(&self.source).context("TOML 配置格式错误")?;
         config.validate()?;
@@ -72,6 +107,12 @@ impl ConfigEditor {
             .context("保存配置失败，原文件未替换")?;
         self.original = Some(self.source.clone());
         self.baseline = self.source.clone();
+        self.error = None;
+        if self.close_after_save {
+            self.visible = false;
+            self.close_after_save = false;
+            self.confirm_close = false;
+        }
         Ok((resolved, store))
     }
 
@@ -83,23 +124,27 @@ impl ConfigEditor {
         state_override: Option<&Path>,
     ) -> EditorOutcome {
         let mut outcome = EditorOutcome {
-            open: true,
+            open: self.visible,
             save: false,
             load: None,
         };
-        let dirty = self.source != self.baseline;
+        if !self.visible {
+            return outcome;
+        }
+        self.prepare();
+        let dirty = self.dirty();
         egui::Window::new("工作区设置").open(&mut outcome.open).default_width(740.0).default_height(590.0).resizable(true).collapsible(false).show(ctx, |ui| {
             if loading { ui.disable(); }
             ui.heading("配置分析工作区");
             ui.label(RichText::new(self.path.display().to_string()).small());
-            ui.label("保存后用于新任务。恢复任务沿用它的历史配置。关闭窗口会丢弃未保存修改。");
+            ui.label("保存后用于新任务。恢复任务沿用它的历史配置。未保存的编辑可保留为本窗口草稿。");
             if let Some(path) = state_override { ui.label(format!("本次 --state 覆盖生效：{}（不写入文件）", path.display())); }
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.advanced, false, "常用设置");
                 ui.selectable_value(&mut self.advanced, true, "完整 TOML");
                 if ui.add_enabled(!dirty, egui::Button::new("打开配置…")).on_hover_text("先保存或放弃当前修改，再打开其他配置。").clicked()
                 { outcome.load = Some(None); }
-                if ui.button("放弃修改 / 重新加载").clicked() {
+                if ui.add_enabled(!dirty, egui::Button::new("重新加载文件")).on_hover_text("有未保存修改时，请先保存或通过关闭窗口放弃修改。").clicked() {
                     outcome.load = Some(Some(self.path.clone()));
                 }
             });
@@ -109,12 +154,11 @@ impl ConfigEditor {
                     ui.label("可编辑全部配置，包括角色模型、MCP、Ghidra 和工具限制。API key 本身不要写入文件。");
                     ui.add(egui::TextEdit::multiline(&mut self.source).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY).desired_rows(22).code_editor());
                 } else {
-                    match (self.source.parse::<DocumentMut>(), toml::from_str::<AppConfig>(&self.source)) {
-                        (Ok(mut doc), Ok(config)) => {
-                            form(ui, &mut doc, &config);
-                            self.source = doc.to_string();
+                    match self.parsed.as_mut() {
+                        Some((doc, config)) => {
+                            if form(ui, doc, config) { self.source = doc.to_string(); self.parsed_source = None; }
                         }
-                        _ => { ui.colored_label(egui::Color32::LIGHT_RED, "配置格式无法解析，请切换“完整 TOML”修正，或重新加载文件。"); }
+                        None => { ui.colored_label(egui::Color32::LIGHT_RED, "配置格式无法解析，请切换“完整 TOML”修正，或重新加载文件。"); }
                     }
                 }
             });
@@ -132,18 +176,63 @@ impl ConfigEditor {
                 if self.source != self.baseline { ui.label("有未保存的修改"); }
             });
         });
+        if !outcome.open {
+            if loading {
+                outcome.open = true;
+            } else {
+                self.request_close();
+            }
+        }
+        if self.confirm_close {
+            egui::Modal::new(egui::Id::new("settings-unsaved")).show(ctx, |ui| {
+                ui.heading("配置有未保存修改");
+                ui.label("保存到配置文件，或保留草稿下次继续编辑。");
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(!busy && !loading, egui::Button::new("保存并关闭"))
+                        .clicked()
+                    {
+                        self.close_after_save = true;
+                        self.confirm_close = false;
+                        outcome.save = true;
+                    }
+                    if ui.button("保留草稿并关闭").clicked() {
+                        self.visible = false;
+                        self.confirm_close = false;
+                    }
+                    if ui.button("放弃修改并关闭").clicked() {
+                        self.source = self.baseline.clone();
+                        self.parsed_source = None;
+                        self.visible = false;
+                        self.confirm_close = false;
+                    }
+                    if ui.button("继续编辑").clicked() {
+                        self.confirm_close = false;
+                    }
+                });
+            });
+        }
+        outcome.open = self.visible;
         outcome
     }
 }
 
-fn set(doc: &mut DocumentMut, section: &str, key: &str, item: toml_edit::Item) {
+struct FormDocument<'a> {
+    document: &'a mut DocumentMut,
+    changed: bool,
+}
+fn set(doc: &mut FormDocument<'_>, section: &str, key: &str, item: toml_edit::Item) {
+    doc.changed = true;
+    let doc = &mut *doc.document;
     if section.is_empty() {
         doc[key] = item;
     } else {
         doc[section][key] = item;
     }
 }
-fn remove(doc: &mut DocumentMut, section: &str, key: &str) {
+fn remove(doc: &mut FormDocument<'_>, section: &str, key: &str) {
+    doc.changed = true;
+    let doc = &mut *doc.document;
     if section.is_empty() {
         doc.remove(key);
     } else if let Some(table) = doc
@@ -155,7 +244,7 @@ fn remove(doc: &mut DocumentMut, section: &str, key: &str) {
 }
 fn text(
     ui: &mut egui::Ui,
-    doc: &mut DocumentMut,
+    doc: &mut FormDocument<'_>,
     section: &str,
     key: &str,
     label: &str,
@@ -177,7 +266,7 @@ fn text(
 }
 fn number(
     ui: &mut egui::Ui,
-    doc: &mut DocumentMut,
+    doc: &mut FormDocument<'_>,
     section: &str,
     key: &str,
     label: &str,
@@ -200,7 +289,7 @@ fn number(
 }
 fn choice(
     ui: &mut egui::Ui,
-    doc: &mut DocumentMut,
+    doc: &mut FormDocument<'_>,
     section: &str,
     key: &str,
     label: &str,
@@ -227,7 +316,12 @@ fn choice(
         set(doc, section, key, value(selected));
     }
 }
-fn form(ui: &mut egui::Ui, doc: &mut DocumentMut, config: &AppConfig) {
+fn form(ui: &mut egui::Ui, doc: &mut DocumentMut, config: &AppConfig) -> bool {
+    let mut form_document = FormDocument {
+        document: doc,
+        changed: false,
+    };
+    let doc = &mut form_document;
     egui::CollapsingHeader::new("模型与连接")
         .default_open(true)
         .show(ui, |ui| {
@@ -568,11 +662,34 @@ fn form(ui: &mut egui::Ui, doc: &mut DocumentMut, config: &AppConfig) {
             config.analysis.timeout_seconds,
         );
     });
+    form_document.changed
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn closing_dirty_settings_preserves_draft_until_explicit_choice() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "state_dir = 'state'\n")?;
+        let mut editor = ConfigEditor::open(path.clone())?;
+        editor.source.push_str("# draft\n");
+        editor.prepare();
+        editor.request_close();
+        assert!(editor.visible && editor.confirm_close);
+        assert!(!std::fs::read_to_string(&path)?.contains("# draft"));
+        editor.visible = false;
+        editor.confirm_close = false;
+        editor.reopen();
+        assert!(editor.source.contains("# draft"));
+        editor.close_after_save = true;
+        editor.save(None)?;
+        assert!(!editor.visible && !editor.dirty());
+        assert!(std::fs::read_to_string(&path)?.contains("# draft"));
+        Ok(())
+    }
+
     #[test]
     fn settings_forms_and_raw_editor_render_without_changing_the_file() -> Result<()> {
         let dir = tempfile::tempdir()?;
@@ -611,7 +728,7 @@ mod tests {
         std::fs::write(&path, original)?;
         let mut editor = ConfigEditor::open(path.clone())?;
         let mut doc = editor.source.parse::<DocumentMut>()?;
-        set(&mut doc, "model", "model", value("after"));
+        doc["model"]["model"] = value("after");
         editor.source = doc.to_string();
         let (config, store) = editor.save(None)?;
         assert_eq!(config.model.model, "after");
