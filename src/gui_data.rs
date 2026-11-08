@@ -125,7 +125,7 @@ impl Reader {
             };
         }
         // All cursors and data are observed together, including external CLI writes.
-        let (delta, revision) = store.transaction(|tx| {
+        let (delta, revision) = store.read_transaction(|tx| {
             let revision: i64 = tx.query_row("SELECT COALESCE(MAX(revision),0) FROM entity_revisions",[],|row|row.get(0))?;
             let runs = changes(tx,"run",None,self.revision,"json_remove(e.data,'$.config')")?;
             let selected = selected.map(str::to_owned).or_else(|| {

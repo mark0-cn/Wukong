@@ -14,6 +14,7 @@ use std::{
 #[derive(Clone)]
 pub struct Store {
     connection: Arc<Mutex<Connection>>,
+    reader: Arc<Mutex<Connection>>,
     root: Arc<PathBuf>,
     changes: tokio::sync::watch::Sender<u64>,
 }
@@ -50,6 +51,11 @@ impl Store {
           CREATE TRIGGER IF NOT EXISTS entities_revision_delete AFTER DELETE ON entities BEGIN
             INSERT INTO entity_revisions(kind,id,run_id) VALUES(OLD.kind,OLD.id,OLD.run_id) ON CONFLICT(kind,id) DO UPDATE SET revision=excluded.revision,run_id=excluded.run_id;
           END;")?;
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS events_run_seq ON events(run_id,seq);
+          CREATE INDEX IF NOT EXISTS events_agent_kind ON events(run_id,agent_id,kind,seq);
+          CREATE INDEX IF NOT EXISTS revisions_run_kind ON entity_revisions(kind,run_id,revision);",
+        )?;
         let version: String = conn.query_row(
             "SELECT value FROM meta WHERE key='schema_version'",
             [],
@@ -58,8 +64,15 @@ impl Store {
         if version != "2" {
             bail!("unsupported state schema {version}; use a fresh state directory");
         }
+        let reader = Connection::open_with_flags(
+            root.join("state.sqlite3"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        reader.busy_timeout(std::time::Duration::from_secs(10))?;
+        reader.execute_batch("PRAGMA query_only=ON;")?;
         Ok(Self {
             connection: Arc::new(Mutex::new(conn)),
+            reader: Arc::new(Mutex::new(reader)),
             root: Arc::new(root),
             changes: tokio::sync::watch::channel(0).0,
         })
@@ -70,6 +83,18 @@ impl Store {
 
     pub fn root(&self) -> &Path {
         self.root.as_path()
+    }
+    /// A consistent WAL snapshot, without taking the writer mutex or reserving
+    /// a write transaction. The connection itself rejects accidental writes.
+    pub fn read_transaction<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        let mut reader = self
+            .reader
+            .lock()
+            .map_err(|_| anyhow!("state reader mutex poisoned"))?;
+        let tx = reader.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
+        let result = f(&tx)?;
+        tx.commit()?;
+        Ok(result)
     }
     pub fn transaction<T>(
         &self,
@@ -126,7 +151,7 @@ impl Store {
             .collect()
     }
     pub fn get<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<Option<T>> {
-        self.transaction(|tx| Self::tx_get(tx, kind, id))
+        self.read_transaction(|tx| Self::tx_get(tx, kind, id))
     }
     pub fn require<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<T> {
         self.get(kind, id)?
@@ -136,10 +161,10 @@ impl Store {
         self.transaction(|tx| Self::tx_put(tx, kind, id, run_id, value))
     }
     pub fn list<T: DeserializeOwned>(&self, kind: &str, run_id: &str) -> Result<Vec<T>> {
-        self.transaction(|tx| Self::tx_list(tx, kind, run_id))
+        self.read_transaction(|tx| Self::tx_list(tx, kind, run_id))
     }
     pub fn runs(&self) -> Result<Vec<RunRecord>> {
-        self.transaction(|tx| {
+        self.read_transaction(|tx| {
             let mut q =
                 tx.prepare("SELECT data FROM entities WHERE kind='run' ORDER BY rowid DESC")?;
             let rows = q
@@ -179,7 +204,7 @@ impl Store {
         self.transaction(|tx| Self::tx_event(tx, run_id, agent_id, kind, data))
     }
     pub fn events(&self, run_id: &str, after: i64, limit: usize) -> Result<Vec<Event>> {
-        self.transaction(|tx|{
+        self.read_transaction(|tx|{
             let mut q=tx.prepare("SELECT seq,agent_id,kind,data,created_at FROM events WHERE run_id=?1 AND seq>?2 ORDER BY seq LIMIT ?3")?;
             let rows=q.query_map(params![run_id,after,limit.min(10000) as i64],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
             rows.into_iter().map(|(seq,agent_id,kind,data,at)|Ok(Event{seq,run_id:run_id.to_owned(),agent_id,kind,data:serde_json::from_str(&data)?,created_at:at.parse()?})).collect()
@@ -187,7 +212,7 @@ impl Store {
     }
     /// Latest events in ascending sequence order, without truncating to the oldest window.
     pub fn recent_events(&self, run_id: &str, limit: usize) -> Result<Vec<Event>> {
-        self.transaction(|tx| Self::tx_recent_events(tx, run_id, limit))
+        self.read_transaction(|tx| Self::tx_recent_events(tx, run_id, limit))
     }
     pub(crate) fn tx_recent_events(
         tx: &Connection,
@@ -276,7 +301,7 @@ impl Store {
             .collect()
     }
     pub fn inbox(&self, recipient: &str) -> Result<Vec<Message>> {
-        self.transaction(|tx| {
+        self.read_transaction(|tx| {
             let agent: AgentRecord =
                 Self::tx_get(tx, "agent", recipient)?.context("recipient missing")?;
             Ok(Self::tx_messages(tx, &agent.run_id)?
@@ -462,6 +487,34 @@ impl UtcTimestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readers_see_committed_state_while_another_writer_is_active() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let store = Store::open(directory.path())?;
+        store.put("fixture", "item", "run", &json!({"value":"committed"}))?;
+        let mut external = Connection::open(directory.path().join("state.sqlite3"))?;
+        let tx = external.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute(
+            "UPDATE entities SET data=?1 WHERE kind='fixture' AND id='item'",
+            [json!({"value":"pending"}).to_string()],
+        )?;
+        let before: Value = store.require("fixture", "item")?;
+        assert_eq!(before["value"], "committed");
+        tx.commit()?;
+        let after: Value = store.require("fixture", "item")?;
+        assert_eq!(after["value"], "pending");
+        assert!(
+            store
+                .read_transaction(|tx| {
+                    tx.execute("DELETE FROM entities", [])?;
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert!(store.get::<Value>("fixture", "item")?.is_some());
+        Ok(())
+    }
 
     #[test]
     fn concurrent_artifact_publication_never_overwrites_corrupt_content() -> Result<()> {

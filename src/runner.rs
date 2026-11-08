@@ -167,7 +167,7 @@ impl AssessmentRunner {
         run: &RunRecord,
         checkpoint_evidence: &str,
     ) -> Result<String> {
-        self.store.transaction(|tx| {
+        self.store.read_transaction(|tx| {
             Ok(serde_json::to_string(&json!({
                 "notice":"Shared analysis checkpoint; retrieve the older transcript with evidence_read. Shared context is refreshed on each request. Use context_search/context_read, view_agent_graph, findings_list and coverage_list for omitted ledger entries. Preserve unknowns.",
                 "full_checkpoint_evidence_id":checkpoint_evidence,
@@ -375,10 +375,7 @@ mod tests {
             let mut inputs = Vec::new();
             for (name, args) in [
                 ("coverage_list", json!({})),
-                (
-                    "finish_scan",
-                    json!({"summary":"full catalog verified"}),
-                ),
+                ("finish_scan", json!({"summary":"full catalog verified"})),
             ] {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 inputs.push(request(&mut socket).await);
