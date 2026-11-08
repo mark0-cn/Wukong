@@ -1,9 +1,9 @@
 use crate::gui_data::{self, AgentSummary, RunSummary};
 use crate::{
-    config::AppConfig, coordinator::Coordinator, domain::*, interface::DEFAULT_TASK, report,
-    runner::AssessmentRunner, store::Store,
+    application::AssessmentService, config::AppConfig, domain::*, interface::DEFAULT_TASK, report,
+    store::Store,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use eframe::egui::{self, Color32, RichText};
 use std::{
     path::PathBuf,
@@ -321,55 +321,14 @@ impl Workspace {
         self.notice = Some((false, "正在连接分析引擎…".into()));
         self.runtime.spawn(async move {
             let result = async {
-                let (runner, run) = if let Some(summary) = resume {
-                    let mut run: RunRecord = store.require("run", &summary.id)?;
-                    run.budget = summary.budget;
-                    let mut saved: AppConfig = serde_json::from_value(run.config.clone())
-                        .context("saved run configuration invalid")?;
-                    saved.state_dir = config.state_dir;
-                    saved.budget = run.budget.clone();
-                    saved.validate()?;
-                    let runner = AssessmentRunner::new(saved, store.clone()).await?;
-                    let prepared = (|| -> Result<()> {
-                        let owner = id("gui_resume");
-                        ensure!(
-                            store.acquire_lease(&run.id, &owner, 1)?,
-                            "assessment has a live controller"
-                        );
-                        let resumed = runner.coordinator.resume(&run.id, Some(run.budget.clone()));
-                        let released = store.release_lease(&run.id, &owner);
-                        resumed?;
-                        released?;
-                        Ok(())
-                    })();
-                    if let Err(e) = prepared {
-                        runner.tools.close().await;
-                        return Err(e);
-                    }
-                    (runner, run)
+                let service = AssessmentService::new(config, store);
+                let prepared = if let Some(summary) = resume {
+                    service.resume(&summary.id, Some(summary.budget)).await?
                 } else {
-                    let path = std::fs::canonicalize(&target).context("无法读取样本路径")?;
-                    ensure!(path.is_file(), "目标必须是文件");
-                    let runner = AssessmentRunner::new(config.clone(), store.clone()).await?;
-                    let created = runner.coordinator.create_run(
-                        &path,
-                        &task,
-                        config.budget.clone(),
-                        serde_json::to_value(&config)?,
-                    );
-                    let run = match created {
-                        Ok(run) => run,
-                        Err(e) => {
-                            runner.tools.close().await;
-                            return Err(e);
-                        }
-                    };
-                    (runner, run)
+                    service.start(std::path::Path::new(&target), &task).await?
                 };
-                let _ = tx.send(Update::Started(run.id.clone()));
-                let result = runner.drive(&run.id, cancel).await;
-                runner.tools.close().await;
-                let run = result?;
+                let _ = tx.send(Update::Started(prepared.run().id.clone()));
+                let run = prepared.drive(cancel).await?;
                 ensure!(
                     run.status != Status::Failed,
                     "分析失败，请查看 Agent 错误和活动记录。"
@@ -380,11 +339,12 @@ impl Workspace {
             let _ = tx.send(Update::Finished(result));
         });
     }
+    fn service(&self) -> AssessmentService {
+        AssessmentService::new(self.config.clone(), self.store.clone())
+    }
     fn pause(&mut self) {
         if let Some(id) = &self.selected {
-            match Coordinator::new(self.store.clone())
-                .pause_budget(id, "operator paused from desktop")
-            {
+            match self.service().pause(id, "operator paused from desktop") {
                 Ok(()) => {
                     if self.active_run.as_ref() == Some(id)
                         && let Some(c) = &self.cancel
@@ -434,12 +394,10 @@ impl Workspace {
                 },
                 ..Default::default()
             };
-            match Coordinator::new(self.store.clone()).send(
-                "operator",
-                &recipient,
-                self.message.trim(),
-                options,
-            ) {
+            match self
+                .service()
+                .message(&recipient, self.message.trim(), options)
+            {
                 Ok(_) => {
                     self.message.clear();
                     self.notice = Some((false, "消息已送入 Agent 收件箱。".into()));
@@ -1129,8 +1087,8 @@ impl Workspace {
                     ui.horizontal(|ui| {
                         if ui.button("确认停止").clicked() {
                             if let Some(id) = &self.agent
-                                && let Err(e) = Coordinator::new(self.store.clone())
-                                    .stop(id, "operator stopped from desktop")
+                                && let Err(e) =
+                                    self.service().stop(id, "operator stopped from desktop")
                             {
                                 self.error(e);
                             }
@@ -1310,6 +1268,7 @@ fn status_color(status: Status) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coordinator::Coordinator;
     use clap::Parser;
 
     #[test]

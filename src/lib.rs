@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod application;
 pub mod binary;
 pub mod config;
 mod context;

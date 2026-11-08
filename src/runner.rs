@@ -101,7 +101,15 @@ impl AssessmentRunner {
         Ok(())
     }
     pub async fn drive(&self, run_id: &str, cancel: CancellationToken) -> Result<RunRecord> {
-        crate::supervisor::RunSupervisor::drive(self.clone(), run_id, cancel).await
+        self.drive_with_budget(run_id, cancel, None).await
+    }
+    pub(crate) async fn drive_with_budget(
+        &self,
+        run_id: &str,
+        cancel: CancellationToken,
+        budget: Option<Budget>,
+    ) -> Result<RunRecord> {
+        crate::supervisor::RunSupervisor::drive(self.clone(), run_id, cancel, budget).await
     }
     pub(crate) fn with_store(&self, store: Store) -> Self {
         Self {

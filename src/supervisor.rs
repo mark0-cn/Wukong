@@ -34,6 +34,7 @@ impl RunSupervisor {
         runner: AssessmentRunner,
         run_id: &str,
         cancel: CancellationToken,
+        budget: Option<Budget>,
     ) -> Result<RunRecord> {
         let lease = runner
             .store
@@ -46,6 +47,9 @@ impl RunSupervisor {
             tasks: vec![],
         };
         let runner = runner.with_store(runner.store.fenced(lease.clone()));
+        if let Some(budget) = budget {
+            runner.coordinator.resume(run_id, Some(budget))?;
+        }
         let mut heartbeat = supervisor.heartbeat(runner.clone());
         supervisor.tasks.push(heartbeat.abort_handle());
         let monitor_runner = runner.clone();
