@@ -8,6 +8,7 @@ use std::{
 };
 use toml_edit::{DocumentMut, value};
 
+#[derive(Clone)]
 pub(crate) struct ConfigEditor {
     pub path: PathBuf,
     source: String,
@@ -19,7 +20,8 @@ pub(crate) struct ConfigEditor {
 
 pub(crate) struct EditorOutcome {
     pub open: bool,
-    pub applied: Option<(AppConfig, Store)>,
+    pub save: bool,
+    pub load: Option<Option<PathBuf>>,
 }
 
 impl ConfigEditor {
@@ -43,7 +45,7 @@ impl ConfigEditor {
         })
     }
 
-    fn save(&mut self, state_override: Option<&Path>) -> Result<(AppConfig, Store)> {
+    pub(crate) fn save(&mut self, state_override: Option<&Path>) -> Result<(AppConfig, Store)> {
         let config: AppConfig = toml::from_str(&self.source).context("TOML 配置格式错误")?;
         config.validate()?;
         let parent = self.path.parent().context("配置目录不存在")?;
@@ -77,14 +79,17 @@ impl ConfigEditor {
         &mut self,
         ctx: &egui::Context,
         busy: bool,
+        loading: bool,
         state_override: Option<&Path>,
     ) -> EditorOutcome {
         let mut outcome = EditorOutcome {
             open: true,
-            applied: None,
+            save: false,
+            load: None,
         };
         let dirty = self.source != self.baseline;
         egui::Window::new("工作区设置").open(&mut outcome.open).default_width(740.0).default_height(590.0).resizable(true).collapsible(false).show(ctx, |ui| {
+            if loading { ui.disable(); }
             ui.heading("配置分析工作区");
             ui.label(RichText::new(self.path.display().to_string()).small());
             ui.label("保存后用于新任务。恢复任务沿用它的历史配置。关闭窗口会丢弃未保存修改。");
@@ -93,12 +98,9 @@ impl ConfigEditor {
                 ui.selectable_value(&mut self.advanced, false, "常用设置");
                 ui.selectable_value(&mut self.advanced, true, "完整 TOML");
                 if ui.add_enabled(!dirty, egui::Button::new("打开配置…")).on_hover_text("先保存或放弃当前修改，再打开其他配置。").clicked()
-                    && let Some(path) = rfd::FileDialog::new().add_filter("TOML", &["toml"]).pick_file()
-                {
-                    match Self::open(path) { Ok(editor) => *self = editor, Err(e) => self.error = Some(format!("{e:#}")) }
-                }
+                { outcome.load = Some(None); }
                 if ui.button("放弃修改 / 重新加载").clicked() {
-                    match Self::open(self.path.clone()) { Ok(editor) => *self = editor, Err(e) => self.error = Some(format!("{e:#}")) }
+                    outcome.load = Some(Some(self.path.clone()));
                 }
             });
             ui.separator();
@@ -121,10 +123,7 @@ impl ConfigEditor {
             if busy { ui.label("分析或导出进行中。可以编辑，等待当前操作完成后再保存应用。"); }
             ui.horizontal(|ui| {
                 if ui.add_enabled(!busy, egui::Button::new("保存并应用")).clicked() {
-                    match self.save(state_override) {
-                        Ok(applied) => { outcome.applied = Some(applied); self.error = None; }
-                        Err(e) => self.error = Some(format!("{e:#}")),
-                    }
+                    outcome.save = true;
                 }
                 if ui.button("校验配置").clicked() {
                     let result = toml::from_str::<AppConfig>(&self.source).map_err(anyhow::Error::from).and_then(|config| config.validate());
@@ -593,8 +592,8 @@ mod tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    let outcome = editor.show(ctx, true, None);
-                    assert!(outcome.applied.is_none());
+                    let outcome = editor.show(ctx, true, false, None);
+                    assert!(!outcome.save);
                 },
             );
             assert!(!output.shapes.is_empty());
