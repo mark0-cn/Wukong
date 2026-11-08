@@ -584,6 +584,71 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
 }
 
 #[tokio::test]
+async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _coordinator, run, owner) = fixture(temp.path())?;
+    let mut config = AppConfig::default();
+    config.runtime.backend = RuntimeBackend::TrustedLocal;
+    config.runtime.state_dir = temp.path().join("worker");
+    let service = ToolService::new(config, store.clone()).await?;
+    let program = "import sys\nfor line in sys.stdin:\n print('echo:'+line.strip(),flush=True)\n";
+    let started = service
+        .execute(
+            &owner.id,
+            "idem:start",
+            "interactive_start",
+            json!({"argv":["python","-u","-c",program]}),
+        )
+        .await?;
+    assert!(!started.is_error, "{started:?}");
+    let session_id = result(&started)["session_id"].as_str().unwrap().to_owned();
+    let closed = service
+        .execute(
+            &owner.id,
+            "idem:close",
+            "interactive_close",
+            json!({"session_id":session_id}),
+        )
+        .await?;
+    assert!(!closed.is_error, "{closed:?}");
+    // Closing the already-closed record succeeds idempotently.
+    let again = service
+        .execute(
+            &owner.id,
+            "idem:close-again",
+            "interactive_close",
+            json!({"session_id":session_id}),
+        )
+        .await?;
+    assert!(!again.is_error, "{again:?}");
+    let record: Value = store.require("interact_session", &session_id)?;
+    assert_eq!(record["state"], "closed");
+    // A session the worker lost (daemon restart): the local record says
+    // running but the bridge knows nothing; close must reconcile it to lost
+    // instead of stranding agent_finish.
+    let real: Value = store.require("interact_session", &session_id)?;
+    store.put(
+        "interact_session",
+        "ghost-session",
+        &run.id,
+        &json!({"id":"ghost-session","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}),
+    )?;
+    let ghost = service
+        .execute(
+            &owner.id,
+            "idem:ghost",
+            "interactive_close",
+            json!({"session_id":"ghost-session"}),
+        )
+        .await?;
+    assert!(!ghost.is_error, "{ghost:?}");
+    let record: Value = store.require("interact_session", "ghost-session")?;
+    assert_eq!(record["state"], "lost");
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, owner) = fixture(temp.path())?;
