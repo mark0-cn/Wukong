@@ -127,9 +127,10 @@ impl AssessmentRunner {
         reason: String,
         summary: Option<String>,
     ) -> Result<()> {
-        let run_id = self.store.transaction(|tx| {
-            let mut target: AgentMetadata =
-                Store::tx_get_metadata(tx, "agent", agent_id)?.context("agent missing")?;
+        let run_id = self.store.write(|tx| {
+            let mut target: AgentMetadata = tx
+                .get_metadata("agent", agent_id)?
+                .context("agent missing")?;
             if target.status.terminal() {
                 return Ok(None);
             }
@@ -139,7 +140,7 @@ impl AssessmentRunner {
                 target.summary = Some(summary.clone());
             }
             target.updated_at = now();
-            Store::tx_put_metadata(tx, "agent", agent_id, &target.run_id, &target)?;
+            tx.put_metadata("agent", agent_id, &target.run_id, &target)?;
             Coordinator::notify_terminal(tx, &target)?;
             Ok(Some(target.run_id))
         })?;
@@ -160,16 +161,16 @@ impl AssessmentRunner {
         run: &RunRecord,
         checkpoint_evidence: &str,
     ) -> Result<String> {
-        self.store.read_transaction(|tx| {
+        self.store.read(|tx| {
             Ok(serde_json::to_string(&json!({
                 "notice":"Shared analysis checkpoint; retrieve the older transcript with evidence_read. Shared context is refreshed on each request. Use context_search/context_read, view_agent_graph, findings_list and coverage_list for omitted ledger entries. Preserve unknowns.",
                 "full_checkpoint_evidence_id":checkpoint_evidence,
                 "task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,
                 "shared_context":crate::context::snapshot(tx,agent)?,
                 "ledger_counts":{
-                    "tasks":Store::tx_list_metadata(tx,"agent",&run.id)?.len(),
-                    "findings":Store::tx_list::<Finding>(tx,"finding",&run.id)?.len(),
-                    "coverage":Store::tx_list::<Coverage>(tx,"coverage",&run.id)?.len()
+                    "tasks":tx.list_metadata("agent",&run.id)?.len(),
+                    "findings":tx.list::<Finding>("finding",&run.id)?.len(),
+                    "coverage":tx.list::<Coverage>("coverage",&run.id)?.len()
                 }
             }))?)
         })
@@ -207,17 +208,17 @@ impl AssessmentRunner {
         let estimate = pricing.cost(&priced_usage);
         let cost_known = estimate.as_ref().is_some_and(|cost| cost.is_complete());
         let cost = estimate.as_ref().map_or(0.0, |cost| cost.total);
-        self.store.transaction(|tx| {
-            let mut agent: AgentMetadata = Store::tx_get_metadata(tx,"agent",agent_id)?.context("agent missing")?;
-            let mut run: RunRecord = Store::tx_get(tx,"run",&agent.run_id)?.context("run missing")?;
+        self.store.write(|tx| {
+            let mut agent: AgentMetadata = tx.get_metadata("agent",agent_id)?.context("agent missing")?;
+            let mut run: RunRecord = tx.get("run",&agent.run_id)?.context("run missing")?;
             agent.turns += usize::from(model_turn);
             agent.total_tokens = agent.total_tokens.saturating_add(tokens.unwrap_or(0));
             run.total_tokens = run.total_tokens.saturating_add(tokens.unwrap_or(0));
             if cost_known { agent.cost_usd += cost; run.cost_usd += cost; }
             agent.updated_at = now(); run.updated_at = now();
-            Store::tx_put_metadata(tx,"agent",agent_id,&run.id,&agent)?;
-            Store::tx_put(tx,"run",&run.id,&run.id,&run)?;
-            Store::tx_event(tx,&run.id,Some(agent_id),if model_turn {"model.usage"} else {"model.usage_aux"},json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
+            tx.put_metadata("agent",agent_id,&run.id,&agent)?;
+            tx.put("run",&run.id,&run.id,&run)?;
+            tx.event(&run.id,Some(agent_id),if model_turn {"model.usage"} else {"model.usage_aux"},json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
             Ok(())
         })?;
         // A response without usage cannot be costed when pricing rates are

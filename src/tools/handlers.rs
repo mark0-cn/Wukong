@@ -53,8 +53,9 @@ pub(super) fn handle_message_status<'a>(
         let mid = number(&args, "message_id", 0) as i64;
         let message = tools
             .store
-            .transaction(|tx| {
-                Ok(Store::tx_messages(tx, &agent.run_id)?
+            .write(|tx| {
+                Ok(tx
+                    .messages(&agent.run_id)?
                     .into_iter()
                     .find(|message| message.id == mid))
             })?

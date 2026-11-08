@@ -1,8 +1,8 @@
 //! Bounded, task-scoped views of the durable shared analysis ledger.
 //! Selection is a hint; every same-run document remains explicitly retrievable.
+use crate::store::StateSession;
 use crate::{domain::*, store::Store};
 use anyhow::{Context, Result, ensure};
-use rusqlite::Connection;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -45,10 +45,10 @@ pub(crate) fn range(text: &str, offset: usize, limit: usize) -> Value {
         "next_offset":(end < total_chars).then_some(end),"truncated":offset > 0 || end < total_chars})
 }
 
-fn documents(tx: &Connection, run_id: &str) -> Result<Vec<SharedDocument>> {
+fn documents(tx: &StateSession<'_>, run_id: &str) -> Result<Vec<SharedDocument>> {
     let mut documents = Vec::new();
     for kind in KINDS {
-        documents.extend(Store::tx_list::<SharedDocument>(tx, kind, run_id)?);
+        documents.extend(tx.list::<SharedDocument>(kind, run_id)?);
     }
     Ok(documents)
 }
@@ -101,9 +101,10 @@ fn preview(document: &SharedDocument, authors: &BTreeMap<String, AgentMetadata>)
 
 /// Called for each fresh request and for a compacted checkpoint. Never copies
 /// whole documents or the unbounded run graph into a model context.
-pub(crate) fn snapshot(tx: &Connection, agent: &AgentMetadata) -> Result<Value> {
+pub(crate) fn snapshot(tx: &StateSession<'_>, agent: &AgentMetadata) -> Result<Value> {
     let documents = documents(tx, &agent.run_id)?;
-    let authors = Store::tx_list_metadata(tx, "agent", &agent.run_id)?
+    let authors = tx
+        .list_metadata("agent", &agent.run_id)?
         .into_iter()
         .map(|author| (author.id.clone(), author))
         .collect::<BTreeMap<_, _>>();
@@ -155,8 +156,8 @@ pub(crate) fn search(
     let limit = args["limit"].as_u64().unwrap_or(6).clamp(1, 10) as usize;
     let query = args["query"].as_str().unwrap_or_default().to_lowercase();
     let words = query.split_whitespace().collect::<Vec<_>>();
-    store.read_transaction(|tx| {
-        let authors = Store::tx_list_metadata(tx, "agent", &agent.run_id)?
+    store.read(|tx| {
+        let authors = tx.list_metadata("agent", &agent.run_id)?
             .into_iter().map(|author| (author.id.clone(), author)).collect::<BTreeMap<_, _>>();
         let documents = documents(tx, &agent.run_id)?;
         let mut matches = documents.iter().filter(|document| {

@@ -83,7 +83,7 @@ impl ToolService {
             json!({"name":name,"sha256":sha256}),
         )?;
         self.effect(agent,call_id,|tx| {
-            let mut current: AgentMetadata = Store::tx_get_metadata(tx,"agent",&agent.id)?.context("agent missing")?;
+            let mut current: AgentMetadata = tx.get_metadata("agent",&agent.id)?.context("agent missing")?;
             ensure!(current.generation == agent.generation, "agent activation changed before skill load");
             agents::validate_capabilities(current.skills.iter().map(String::as_str)
                 .chain(current.active_skills.iter().map(|skill| skill.name.as_str()))
@@ -93,8 +93,8 @@ impl ToolService {
                 *existing=snapshot;
             } else { current.active_skills.push(snapshot); }
             current.updated_at=now();
-            Store::tx_put_metadata(tx,"agent",&agent.id,&agent.run_id,&current)?;
-            Store::tx_event(tx,&agent.run_id,Some(&agent.id),"skill.activated",json!({"name":name,"sha256":sha256,"evidence_id":evidence.id}))?;
+            tx.put_metadata("agent",&agent.id,&agent.run_id,&current)?;
+            tx.event(&agent.run_id,Some(&agent.id),"skill.activated",json!({"name":name,"sha256":sha256,"evidence_id":evidence.id}))?;
             Ok(json!({"name":name,"sha256":sha256,"evidence_id":evidence.id,"active":true,"applies":"next fresh model request"}))
         })
     }
@@ -155,7 +155,7 @@ impl ToolService {
                 created_at: now(),
                 updated_at: now(),
             };
-            Store::tx_put(tx, kind, &document.id, &agent.run_id, &document)?;
+            tx.put(kind, &document.id, &agent.run_id, &document)?;
             Ok(serde_json::to_value(document)?)
         })
     }
@@ -173,8 +173,9 @@ impl ToolService {
             "todo"
         };
         self.effect(agent, call_id, |tx| {
-            let mut document: SharedDocument =
-                Store::tx_get(tx, kind, text(args, "id")?)?.context("document missing")?;
+            let mut document: SharedDocument = tx
+                .get(kind, text(args, "id")?)?
+                .context("document missing")?;
             ensure!(
                 document.run_id == agent.run_id,
                 "document belongs to another run"
@@ -197,7 +198,7 @@ impl ToolService {
             }
             document.amendments.push(amendment);
             document.updated_at = now();
-            Store::tx_put(tx, kind, &document.id, &agent.run_id, &document)?;
+            tx.put(kind, &document.id, &agent.run_id, &document)?;
             Ok(serde_json::to_value(document)?)
         })
     }
@@ -213,7 +214,8 @@ impl ToolService {
         self.store.verify_evidence_links(&agent.run_id, &evidence)?;
         self.effect(agent, call_id, |tx| {
             let mut coverage = if name == "coverage_update" {
-                let record: Coverage = Store::tx_get(tx, "coverage", text(args, "id")?)?
+                let record: Coverage = tx
+                    .get("coverage", text(args, "id")?)?
                     .context("coverage missing")?;
                 ensure!(
                     record.run_id == agent.run_id,
@@ -242,7 +244,7 @@ impl ToolService {
                 coverage.evidence_ids = evidence;
             }
             coverage.updated_at = now();
-            Store::tx_put(tx, "coverage", &coverage.id, &agent.run_id, &coverage)?;
+            tx.put("coverage", &coverage.id, &agent.run_id, &coverage)?;
             Ok(serde_json::to_value(coverage)?)
         })
     }
@@ -258,8 +260,9 @@ impl ToolService {
         self.store.verify_evidence_links(&agent.run_id, &evidence)?;
         self.effect(agent, call_id, |tx| {
             let mut finding = if name == "finding_update" {
-                let record: Finding =
-                    Store::tx_get(tx, "finding", text(args, "id")?)?.context("finding missing")?;
+                let record: Finding = tx
+                    .get("finding", text(args, "id")?)?
+                    .context("finding missing")?;
                 ensure!(
                     record.run_id == agent.run_id,
                     "finding belongs to another run"
@@ -267,7 +270,8 @@ impl ToolService {
                 record
             } else {
                 ensure!(!evidence.is_empty(), "a finding requires original evidence");
-                if let Some(record) = Store::tx_list::<Finding>(tx, "finding", &agent.run_id)?
+                if let Some(record) = tx
+                    .list::<Finding>("finding", &agent.run_id)?
                     .into_iter()
                     .find(|record| {
                         record.title == args["title"]
@@ -347,8 +351,9 @@ impl ToolService {
                     .verification_id
                     .as_ref()
                     .context("impact_verified requires an independent verification_id")?;
-                let verification: Verification =
-                    Store::tx_get(tx, "verification", id)?.context("verification missing")?;
+                let verification: Verification = tx
+                    .get("verification", id)?
+                    .context("verification missing")?;
                 ensure!(
                     verification.run_id == agent.run_id
                         && verification.finding_id == finding.id
@@ -359,15 +364,14 @@ impl ToolService {
                         && !verification.evidence_ids.is_empty(),
                     "independent successful verification is required"
                 );
-                let _: AgentMetadata =
-                    Store::tx_get_metadata(tx, "agent", &verification.verifier_agent_id)?
-                        .context("verifier agent missing")?;
+                let _: AgentMetadata = tx
+                    .get_metadata("agent", &verification.verifier_agent_id)?
+                    .context("verifier agent missing")?;
                 finding.impact = Some(verification.impact);
             }
             finding.updated_at = now();
-            Store::tx_put(tx, "finding", &finding.id, &agent.run_id, &finding)?;
-            Store::tx_event(
-                tx,
+            tx.put("finding", &finding.id, &agent.run_id, &finding)?;
+            tx.event(
                 &agent.run_id,
                 Some(&agent.id),
                 "finding.updated",

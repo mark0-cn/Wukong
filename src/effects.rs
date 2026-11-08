@@ -105,8 +105,8 @@ impl<'a> DurableEffects<'a> {
             Replay(EffectOutcome),
             Finish(ToolCallRecord, Value, bool, CallState),
         }
-        let decision = self.store.transaction(|tx| {
-            let existing: Option<ToolCallRecord> = Store::tx_get(tx, "call", call)?;
+        let decision = self.store.write(|tx| {
+            let existing: Option<ToolCallRecord> = tx.get("call", call)?;
             if let Some(existing) = &existing {
                 ensure!(
                     existing.agent_id == agent.id
@@ -122,7 +122,7 @@ impl<'a> DurableEffects<'a> {
                 }
                 // The domain transition can have committed even when the final
                 // envelope was lost. Settle it before checking agent lifecycle.
-                if let Some(receipt) = Store::tx_get::<Value>(tx, "tool_receipt", call)? {
+                if let Some(receipt) = tx.get::<Value>("tool_receipt", call)? {
                     return Ok(Decision::Finish(existing.clone(), receipt, false, CallState::Completed));
                 }
                 if policy == ReplayPolicy::OperatorOnly {
@@ -148,8 +148,8 @@ impl<'a> DurableEffects<'a> {
             });
             record.state = CallState::Running;
             record.updated_at = now();
-            Store::tx_put(tx, "call", call, &agent.run_id, &record)?;
-            Store::tx_event(tx, &agent.run_id, Some(&agent.id), "tool.started", json!({"call_id":call,"name":name}))?;
+            tx.put("call", call, &agent.run_id, &record)?;
+            tx.event(&agent.run_id, Some(&agent.id), "tool.started", json!({"call_id":call,"name":name}))?;
             Ok(Decision::Execute(record))
         })?;
         Ok(match decision {
@@ -173,21 +173,20 @@ impl<'a> DurableEffects<'a> {
         &self,
         agent: &AgentMetadata,
         call: &str,
-        action: impl FnOnce(&rusqlite::Connection) -> Result<Value>,
+        action: impl FnOnce(&crate::store::StateSession<'_>) -> Result<Value>,
     ) -> Result<Value> {
-        self.store.transaction(|tx| {
-            if let Some(receipt) = Store::tx_get(tx, "tool_receipt", call)? {
+        self.store.write(|tx| {
+            if let Some(receipt) = tx.get("tool_receipt", call)? {
                 return Ok(receipt);
             }
             let value = action(tx)?;
-            Store::tx_put(tx, "tool_receipt", call, &agent.run_id, &value)?;
+            tx.put("tool_receipt", call, &agent.run_id, &value)?;
             Ok(value)
         })
     }
     pub(crate) fn replace_result(&self, call: &str, value: &Value, is_error: bool) -> Result<()> {
-        self.store.transaction(|tx| {
-            let mut record: ToolCallRecord =
-                Store::tx_get(tx, "call", call)?.context("tool call missing")?;
+        self.store.write(|tx| {
+            let mut record: ToolCallRecord = tx.get("call", call)?.context("tool call missing")?;
             ensure!(
                 matches!(record.state, CallState::Completed | CallState::Failed),
                 "only settled call results may be replaced"
@@ -197,7 +196,7 @@ impl<'a> DurableEffects<'a> {
                 is_error,
             })?);
             record.updated_at = now();
-            Store::tx_put(tx, "call", call, &record.run_id, &record)
+            tx.put("call", call, &record.run_id, &record)
         })
     }
     pub(crate) fn worker_reply(
@@ -230,8 +229,8 @@ impl<'a> DurableEffects<'a> {
     ) -> Result<()> {
         let id = Self::worker_request_id(agent, call);
         let arguments_sha256 = arguments_sha256(&args)?;
-        self.store.transaction(|tx| {
-            if let Some(previous) = Store::tx_get::<WorkerReceipt>(tx, "worker_receipt", &id)? {
+        self.store.write(|tx| {
+            if let Some(previous) = tx.get::<WorkerReceipt>("worker_receipt", &id)? {
                 ensure!(
                     previous.method == method
                         && previous.arguments_sha256 == arguments_sha256
@@ -240,8 +239,7 @@ impl<'a> DurableEffects<'a> {
                 );
                 return Ok(());
             }
-            Store::tx_put(
-                tx,
+            tx.put(
                 "worker_receipt",
                 &id,
                 &agent.run_id,
@@ -264,13 +262,9 @@ impl<'a> DurableEffects<'a> {
             return Ok(CallState::Failed);
         }
         if policy == ReplayPolicy::OperatorOnly
-            || self.store.read_transaction(|tx| {
-                Ok(tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM entities WHERE kind='worker_receipt' AND id=?1)",
-                    [Self::worker_request_id(agent, call)],
-                    |row| row.get::<_, bool>(0),
-                )?)
-            })?
+            || self
+                .store
+                .read(|tx| tx.contains("worker_receipt", &Self::worker_request_id(agent, call)))?
         {
             return Ok(CallState::Uncertain);
         }
@@ -476,14 +470,14 @@ mod tests {
         let (store, agent) = fixture(dir.path())?;
         let effects = DurableEffects::new(&store, 12000);
         let result = effects.commit(&agent, "call", |tx| {
-            Store::tx_put(tx, "fixture", "change", &agent.run_id, &json!(true))?;
+            tx.put("fixture", "change", &agent.run_id, &json!(true))?;
             anyhow::bail!("crash before committing receipt")
         });
         assert!(result.is_err());
         assert!(store.get::<Value>("fixture", "change")?.is_none());
         assert!(store.get::<Value>("tool_receipt", "call")?.is_none());
         effects.commit(&agent, "call", |tx| {
-            Store::tx_put(tx, "fixture", "change", &agent.run_id, &json!(true))?;
+            tx.put("fixture", "change", &agent.run_id, &json!(true))?;
             Ok(json!({"committed":true}))
         })?;
         assert_eq!(
@@ -569,17 +563,16 @@ mod tests {
         for lose_controller_receipt in [false, true] {
             // The worker committed, but the controller crashed before recording
             // its final envelope (and optionally before persisting the RPC reply).
-            store.transaction(|tx| {
-                let mut call: ToolCallRecord =
-                    Store::tx_get(tx, "call", "crash-boundary")?.unwrap();
+            store.write(|tx| {
+                let mut call: ToolCallRecord = tx.get("call", "crash-boundary")?.unwrap();
                 call.state = CallState::Running;
                 call.result = None;
                 call.evidence_id = None;
-                Store::tx_put(tx, "call", &call.id, &call.run_id, &call)?;
+                tx.put("call", &call.id, &call.run_id, &call)?;
                 if lose_controller_receipt {
-                    tx.execute(
-                        "DELETE FROM entities WHERE kind='worker_receipt' AND id=?1",
-                        [DurableEffects::worker_request_id(&agent, &call.id)],
+                    tx.remove(
+                        "worker_receipt",
+                        &DurableEffects::worker_request_id(&agent, &call.id),
                     )?;
                 }
                 Ok(())

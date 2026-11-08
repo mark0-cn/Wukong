@@ -165,8 +165,8 @@ impl ToolService {
                     .await?;
                 let job_id = raw["job_id"].as_str().context("worker job ID missing")?;
                 let record = json!({"id":job_id,"run_id":agent.run_id,"agent_id":agent.id,"owner_generation":agent.generation,"worker_id":self.worker_identity()?,"tool_name":name,"finding_id":finding_id,"call_id":call_id,"worker_request_id":self.request_identity(agent,call_id),"parameters":params,"target_sha256":run.target_sha256,"status":raw,"created_at":now(),"updated_at":now()});
-                self.store.transaction(|tx| {
-                    if let Some(previous) = Store::tx_get::<Value>(tx, "job", job_id)? {
+                self.store.write(|tx| {
+                    if let Some(previous) = tx.get::<Value>("job", job_id)? {
                         ensure!(
                             previous["run_id"] == agent.run_id
                                 && previous["agent_id"] == agent.id
@@ -175,7 +175,7 @@ impl ToolService {
                         );
                         return Ok(());
                     }
-                    Store::tx_put(tx, "job", job_id, &agent.run_id, &record)
+                    tx.put("job", job_id, &agent.run_id, &record)
                 })?;
                 Ok(raw)
             }
