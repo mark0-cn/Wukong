@@ -268,19 +268,37 @@ def public_file(root, relative):
     return path
 
 
-def run_process(argv, cwd, env, timeout_secs, output_limit, log_prefix, cancel_file=None, experiment=None):
+def run_process(argv, cwd, env, timeout_secs, output_limit, log_prefix, cancel_file=None, experiment=None, stdin_bytes=None):
     if not isinstance(argv, list) or not argv or len(argv) > 128 or any(not isinstance(a, str) or "\0" in a or len(a) > 65536 for a in argv):
         raise ValueError("argv must be an array of 1..128 bounded strings")
+    if stdin_bytes is not None and len(stdin_bytes) > MAX_FILE:
+        raise ValueError("stdin payload exceeds 32 MiB")
     start = time.monotonic()
     credential_options = {}
     if experiment:
         import isolation
         credential_options = isolation.credentials(experiment)
         env = {**env, "HOME": experiment["work"], "TMPDIR": experiment["work"]}
-    process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+    process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, **detached_options(), **credential_options)
     attach_windows_job(process)
     counts = {"stdout": 0, "stderr": 0}
+
+    def feed_stdin():
+        # Bounded best-effort write: a target that never reads must not wedge
+        # the call; the timeout and cancel paths own termination.
+        try:
+            process.stdin.write(stdin_bytes)
+            process.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+
+    if stdin_bytes is not None:
+        threading.Thread(target=feed_stdin, daemon=True).start()
 
     def drain(name, stream):
         with open(str(log_prefix) + "." + name, "wb") as log:
@@ -367,11 +385,21 @@ def replay(root, directory, spec, input_bytes, index):
         input_path = public_input
         isolation.seal(experiment)
         cwd = Path(experiment["work"])
-    argv = [str(target)] + [str(input_path) if arg == "@@" else str(arg) for arg in spec.get("args", ["@@"])]
-    result = run_process(argv, cwd, safe_env(spec.get("env")), spec["timeout_secs"], spec["output_limit"], sandbox / "output", directory / "cancel", experiment)
+    input_mode = spec.get("input_mode", "argv")
+    if input_mode not in {"argv", "stdin"}:
+        raise ValueError("input_mode must be 'argv' or 'stdin'")
+    if input_mode == "stdin":
+        # Pipe the payload bytes into the target's stdin; any extra args are
+        # passed through verbatim (no @@ file-path substitution).
+        argv = [str(target)] + [str(arg) for arg in spec.get("args", []) if arg != "@@"]
+        result = run_process(argv, cwd, safe_env(spec.get("env")), spec["timeout_secs"], spec["output_limit"], sandbox / "output", directory / "cancel", experiment, stdin_bytes=input_bytes)
+    else:
+        argv = [str(target)] + [str(input_path) if arg == "@@" else str(arg) for arg in spec.get("args", ["@@"])]
+        result = run_process(argv, cwd, safe_env(spec.get("env")), spec["timeout_secs"], spec["output_limit"], sandbox / "output", directory / "cancel", experiment)
     result["experiment_uid"] = experiment["uid"] if experiment else None
     result["metadata_protected"] = bool(experiment)
     result["input_sha256"] = hashlib.sha256(input_bytes).hexdigest()
+    result["input_mode"] = input_mode
     result["crash_signature"] = crash_signature(result)
     result["trial"] = index
     return result
@@ -781,7 +809,7 @@ class Runtime:
                 "metadata_protected_from_targets": self.isolated, "unique_experiment_uids": self.isolated,
                 "tools": tools, "capabilities": {"process_jobs": True, "persistent_jobs": True,
                 "debug_gdb_mi": tools["gdb"]["available"], "fuzz_qemu": linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
-                "crash_replay": True, "input_minimize": True, "poc_verify": True,
+                "crash_replay": True, "input_minimize": True, "poc_verify": True, "shell_exec": True,
                 "formats": ["ELF"] if linux else [], "native_target_execution": True}}
 
     def start_job(self, params, kind="process"):
@@ -912,7 +940,7 @@ class Runtime:
     def dispatch(self, method, params):
         effects = {"job.start", "fuzz.start", "debug.start", "debug.command", "debug.close",
                    "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop",
-                   "interact.start", "interact.write", "interact.close"}
+                   "interact.start", "interact.write", "interact.close", "exec.run"}
         request_id = params.get("request_id")
         if method not in effects or not request_id:
             return self.dispatch_inner(method, params)
@@ -1019,6 +1047,33 @@ class Runtime:
             if not path.is_file() or path.stat().st_size > maximum:
                 raise ValueError("file exceeds max_bytes or is not a regular file")
             return {**artifact(self.root, path), "data_base64": base64.b64encode(path.read_bytes()).decode()}
+        if method == "exec.run":
+            command = params.get("command")
+            if not isinstance(command, str) or not command.strip() or len(command) > 65536 or "\0" in command:
+                raise ValueError("command must be a nonempty string <=64KiB without NUL bytes")
+            if not self.trusted and not self.isolated:
+                raise ValueError("production shell execution requires a root Linux worker with isolated processes")
+            timeout_secs = bounded_int(params.get("timeout_secs"), 30, 1, 120)
+            output_limit = bounded_int(params.get("output_limit"), 1048576, 1024, 8 * 1048576)
+            # Synchronous, Strix-style shell execution: run in a fresh
+            # directory under the exec tmpfs (the state volume is data, not
+            # code), bounded output, hard timeout, optional uid isolation.
+            workdir = Path("/tmp") / "re-agent-exec" / uuid.uuid4().hex
+            workdir.mkdir(parents=True)
+            env = safe_env(params.get("env"))
+            env.update({"RE_AGENT_STATE_DIR": str(self.root), "RE_AGENT_JOB_DIR": str(workdir)})
+            experiment = None
+            cwd = workdir
+            if self.isolated:
+                import isolation
+                experiment = isolation.sandbox(self.root, isolation.allocate_uid(self.root))
+                isolation.seal(experiment)
+                cwd = Path(experiment["work"])
+            shell = ["bash", "-lc"] if os.name != "nt" else ["cmd", "/C"]
+            result = run_process([*shell, command], cwd, env, timeout_secs, output_limit,
+                                 workdir / "output", None, experiment)
+            result["command"] = command
+            return result
         if method == "job.start":
             return self.start_job(params)
         if method in {"job.status", "fuzz.status"}:
@@ -1230,8 +1285,11 @@ def main():
                 response = relay_call(endpoint, request)
             except Exception as error:
                 response = {"jsonrpc": "2.0", "id": request.get("id"), "error": {"code": -32000, "message": str(error)[:4096]}}
-            sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
-            sys.stdout.flush()
+            # Explicit UTF-8 bytes, ASCII-escaped JSON: the console codec
+            # (e.g. GBK on Windows) must never be able to break a frame when
+            # a result carries replacement characters.
+            sys.stdout.buffer.write(json.dumps(response, ensure_ascii=True).encode("utf-8") + b"\n")
+            sys.stdout.buffer.flush()
     else:
         parser.error("select --stdio, --daemon or --run-job")
 

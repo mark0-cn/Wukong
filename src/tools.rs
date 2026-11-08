@@ -308,6 +308,12 @@ fn build_catalog() -> Vec<Spec> {
             false,
             true,
         ),
+        spec::<args::ExecCommandArgs>(
+            "exec_command",
+            "Run ONE bounded shell command synchronously in the worker and return its stdout/stderr/exit code in the result. Prefer this for quick inspection and for stdin-driven PoCs: pipe the payload directly, e.g. \"printf '<payload>' | {target-path-or-command}\" or \"python3 -c '...'\". Long-running work must go to job_start with output redirected to a log file instead of blocking here. Reads RE_AGENT_STATE_DIR/RE_AGENT_JOB_DIR from the environment.",
+            true,
+            true,
+        ),
         spec::<args::JobStartArgs>(
             "job_start",
             "Start a persistent process job in the configured worker; returns a job_id immediately. argv entries may use {target} as a placeholder for the staged target path (resolved by the harness and staged in isolated jobs); worker paths like files/... resolve only as direct argv entries, never inside shell strings. Jobs may read RE_AGENT_STATE_DIR and RE_AGENT_JOB_DIR from the environment.",
@@ -400,7 +406,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::PocVerifyArgs>(
             "poc_verify",
-            "Verifier only: independently replay a finding's input in fresh directories. Worker observations determine trial success.",
+            "Independently replay a finding's input in fresh directories; worker observations determine trial success. input_mode selects delivery: \"argv\" (default, AFL-style @@ file path) or \"stdin\" (payload bytes piped to the target's stdin — use this for programs that read(0, ...)).",
             true,
             true,
         ),
@@ -1821,6 +1827,10 @@ impl ToolService {
                 self.store
                     .put("interact_session", &session_id, &agent.run_id, &session)?;
                 Ok(raw)
+            }
+            "exec_command" => {
+                let _ = text(&args, "command")?;
+                self.worker_call(agent, call_id, "exec.run", args).await
             }
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
             | "angr_solve" => {

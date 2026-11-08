@@ -2,9 +2,28 @@
 
 Use `runtime_doctor` to check the selected worker's actual capabilities.
 The bundled worker includes Python 3, pwntools, z3-solver, angr and ropper;
-other configured workers may not. Reach available tools through execution — write a script with
-file_put and run it with job_start (argv ["python3", "files/<script>"]),
-then read job_status.
+other configured workers may not. Reach available tools through execution.
+
+## exec_command — the default for quick work
+
+`exec_command` runs ONE bounded shell command synchronously and returns
+stdout/stderr/exit code in the result. Prefer it for inspection, file
+surgery and stdin-driven PoCs:
+
+- stdin delivery is plain shell syntax: `printf '<payload>' | {staged-target-path}`,
+  a heredoc, or `python3 -c '...'`. There is no separate input plumbing.
+- stage_target first and use the returned path (or pass `{target}` into the
+  command string) for the binary itself.
+- The call is capped (timeout_secs, default 30; output is bounded). Anything
+  longer goes to the background with its output redirected:
+  `cmd > /tmp/out.log 2>&1 &` — then read /tmp/out.log with a later
+  exec_command or file_get. Do not block exec_command on long work.
+- Multi-round interaction belongs to interactive_start/send, not exec_command.
+
+## job_start — persistent background jobs
+
+For long-running or multi-step work, write a script with file_put and run it
+with job_start (argv ["python3", "files/<script>"]), then read job_status.
 
 ## Path discipline (worker layouts are not guessable)
 
@@ -22,9 +41,11 @@ then read job_status.
   current working directory and collect them with `job_artifacts`.
 - Match the input channel: `job_start` itself has no stdin payload field.
   For stdin input, stage a wrapper and input file as argv, and let the wrapper
-  feed the file bytes to the target's stdin. Use `interactive_start/send` for
-  multi-round input. `crash_replay`/`poc_verify` currently pass an input file
-  through the `@@` argv placeholder; they do not feed stdin.
+  feed the file bytes to the target's stdin — or just use exec_command with a
+  pipe. `crash_replay`/`poc_verify` deliver the input file through the `@@`
+  argv placeholder by default; set `input_mode: "stdin"` to pipe the bytes
+  to the target's stdin instead. Use `interactive_start/send` for multi-round
+  input.
 
 ## angr (symbolic execution) — fastest path for input reconstruction
 

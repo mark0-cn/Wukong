@@ -657,6 +657,24 @@ pub(super) struct InputMinimizeArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(super) struct ExecCommandArgs {
+    #[schemars(length(min = 1, max = 65536))]
+    pub command: String,
+    pub cwd: Option<String>,
+    pub env: Option<Map<String, Value>>,
+    #[schemars(range(min = 1, max = 120))]
+    pub timeout_secs: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum InputMode {
+    Argv,
+    Stdin,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct PocVerifyArgs {
     #[schemars(length(min = 1))]
     pub finding_id: String,
@@ -664,6 +682,10 @@ pub(super) struct PocVerifyArgs {
     pub target: String,
     #[schemars(length(min = 1))]
     pub input: String,
+    /// How the input reaches the target: "argv" (AFL-style @@ file path,
+    /// default) or "stdin" (bytes piped to stdin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_mode: Option<InputMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
