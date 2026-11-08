@@ -15,11 +15,11 @@ impl JobService {
         if self.gateway.client.is_none() {
             return Ok(());
         }
-        for job in self.store.list::<JobRecord>("job", run)? {
+        for job in self.store.records::<JobRecord>(run)? {
             if job.notification_message_id.is_some() {
                 continue;
             }
-            let owner: AgentMetadata = require_in_run(&self.store, "agent", &job.agent_id, run)?;
+            let owner: AgentMetadata = require_in_run(&self.store, &job.agent_id, run)?;
             let job_id = &job.id;
             self.observe(&owner, &format!("job-observation:{job_id}"), job_id)
                 .await?;
@@ -55,10 +55,10 @@ impl JobService {
         };
         let raw = serde_json::to_value(&status)?;
         self.store.write(|tx| {
-            let mut current: JobRecord = tx.get("job", job_id)?.context("job missing")?;
+            let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
             current.status = status.clone();
             current.updated_at = now();
-            tx.put("job", job_id, &agent.run_id, &current)
+            tx.save_record(&current)
         })?;
         if let Some(crashes) = raw["crashes"].as_array() {
             for artifact in crashes {
@@ -93,19 +93,19 @@ impl JobService {
                     .id
             };
             self.store.write(|tx| {
-                let mut current: JobRecord = tx.get("job", job_id)?.context("job missing")?;
+                let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
                 current.status_evidence_id = Some(evidence);
-                tx.put("job", job_id, &agent.run_id, &current)
+                tx.save_record(&current)
             })?;
             self.import_job_artifacts(agent, call, job_id).await?;
             self.store.write(|tx| {
-                let mut current: JobRecord = tx.get("job", job_id)?.context("job missing")?;
+                let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
                 if current.notification_message_id.is_some() {
                     return Ok(());
                 }
                 let owner_id = &current.agent_id;
                 let owner = tx
-                    .get_metadata("agent", owner_id)?
+                    .get_record::<AgentMetadata>(owner_id)?
                     .context("job owner missing")?;
                 let generation = current.owner_generation;
                 let stale = generation != owner.generation;
@@ -141,7 +141,7 @@ impl JobService {
                     &envelope,
                 )?;
                 current.notification_message_id = Some(mid);
-                tx.put("job", job_id, &agent.run_id, &current)
+                tx.save_record(&current)
             })?;
         }
         Ok(raw)
@@ -169,7 +169,7 @@ impl JobService {
         job_id: &str,
         owned: bool,
     ) -> Result<JobRecord> {
-        let job: JobRecord = require_in_run(&self.store, "job", job_id, &agent.run_id)?;
+        let job: JobRecord = require_in_run(&self.store, job_id, &agent.run_id)?;
         ensure!(
             job.worker_id == self.gateway.worker_identity()?,
             "job belongs to a different runtime configuration"
@@ -227,9 +227,9 @@ impl JobService {
         let result = json!({"job_id":job_id,"artifacts":imported});
         if job.status.state.terminal() {
             self.store.write(|tx| {
-                job = tx.get("job", job_id)?.context("job missing")?;
+                job = tx.get_record(job_id)?.context("job missing")?;
                 job.imported_artifacts = Some(result.clone());
-                tx.put("job", job_id, &agent.run_id, &job)
+                tx.save_record(&job)
             })?;
         }
         Ok(result)
@@ -241,12 +241,8 @@ impl JobService {
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
-        let finding: Finding = require_in_run(
-            &self.store,
-            "finding",
-            text(args, "finding_id")?,
-            &agent.run_id,
-        )?;
+        let finding: Finding =
+            require_in_run(&self.store, text(args, "finding_id")?, &agent.run_id)?;
         ensure!(
             finding.agent_id != agent.id,
             "verification must be independent of the finding producer"
@@ -263,7 +259,7 @@ impl JobService {
             "verification job has not completed successfully"
         );
         let result = &status["result"];
-        let run: RunRecord = self.store.require("run", &agent.run_id)?;
+        let run: RunRecord = self.store.load(&agent.run_id)?;
         ensure!(
             result["target"]["sha256"] == run.target_sha256
                 && job.target_sha256 == run.target_sha256,
@@ -366,8 +362,8 @@ impl JobService {
             created_at: now(),
         };
         DurableEffects::new(&self.store,self.gateway.output_limit).commit(agent,call_id,|tx|{
-            if let Some(existing)=tx.get::<Verification>("verification",&verification.id)?{return Ok(serde_json::to_value(existing)?);}
-            tx.put("verification",&verification.id,&agent.run_id,&verification)?;
+            if let Some(existing)=tx.get_record::<Verification>(&verification.id)?{return Ok(serde_json::to_value(existing)?);}
+            tx.save_record(&verification)?;
             tx.event(&agent.run_id,Some(&agent.id),"verification.recorded",json!({"verification_id":verification.id,"finding_id":finding.id,"passed":passed,"attempts":attempts,"successes":successes,"impact":verification.impact}))?;
             Ok(serde_json::to_value(verification)?)
         })

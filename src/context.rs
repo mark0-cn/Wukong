@@ -1,7 +1,10 @@
 //! Bounded, task-scoped views of the durable shared analysis ledger.
 //! Selection is a hint; every same-run document remains explicitly retrievable.
 use crate::store::StateSession;
-use crate::{domain::*, store::Store};
+use crate::{
+    domain::*,
+    store::{DocumentKind, Store},
+};
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -48,7 +51,7 @@ pub(crate) fn range(text: &str, offset: usize, limit: usize) -> Value {
 fn documents(tx: &StateSession<'_>, run_id: &str) -> Result<Vec<SharedDocument>> {
     let mut documents = Vec::new();
     for kind in KINDS {
-        documents.extend(tx.list::<SharedDocument>(kind, run_id)?);
+        documents.extend(tx.documents(DocumentKind::try_from(kind)?, run_id)?);
     }
     Ok(documents)
 }
@@ -104,7 +107,7 @@ fn preview(document: &SharedDocument, authors: &BTreeMap<String, AgentMetadata>)
 pub(crate) fn snapshot(tx: &StateSession<'_>, agent: &AgentMetadata) -> Result<Value> {
     let documents = documents(tx, &agent.run_id)?;
     let authors = tx
-        .list_metadata("agent", &agent.run_id)?
+        .records::<AgentMetadata>(&agent.run_id)?
         .into_iter()
         .map(|author| (author.id.clone(), author))
         .collect::<BTreeMap<_, _>>();
@@ -157,7 +160,7 @@ pub(crate) fn search(
     let query = args["query"].as_str().unwrap_or_default().to_lowercase();
     let words = query.split_whitespace().collect::<Vec<_>>();
     store.read(|tx| {
-        let authors = tx.list_metadata("agent", &agent.run_id)?
+        let authors = tx.records::<AgentMetadata>(&agent.run_id)?
             .into_iter().map(|author| (author.id.clone(), author)).collect::<BTreeMap<_, _>>();
         let documents = documents(tx, &agent.run_id)?;
         let mut matches = documents.iter().filter(|document| {
@@ -201,7 +204,7 @@ pub(crate) fn read(
     let kind = args["kind"].as_str().context("document kind missing")?;
     ensure!(KINDS.contains(&kind), "unsupported document kind");
     let id = args["id"].as_str().context("document ID missing")?;
-    let document: SharedDocument = store.require(kind, id)?;
+    let document: SharedDocument = store.document(DocumentKind::try_from(kind)?, id)?;
     ensure!(
         document.run_id == agent.run_id,
         "document belongs to another run"

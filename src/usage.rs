@@ -49,15 +49,15 @@ impl UsageService {
         let cost_known = estimate.as_ref().is_some_and(|cost| cost.is_complete());
         let cost = estimate.as_ref().map_or(0.0, |cost| cost.total);
         self.store.write(|tx| {
-            let mut agent: AgentMetadata = tx.get_metadata("agent",agent_id)?.context("agent missing")?;
-            let mut run: RunRecord = tx.get("run",&agent.run_id)?.context("run missing")?;
+            let mut agent: AgentMetadata = tx.get_record::<AgentMetadata>(agent_id)?.context("agent missing")?;
+            let mut run: RunRecord = tx.get_record(&agent.run_id)?.context("run missing")?;
             agent.turns += usize::from(model_turn);
             agent.total_tokens = agent.total_tokens.saturating_add(tokens.unwrap_or(0));
             run.total_tokens = run.total_tokens.saturating_add(tokens.unwrap_or(0));
             if cost_known { agent.cost_usd += cost; run.cost_usd += cost; }
             agent.updated_at = now(); run.updated_at = now();
-            tx.put_metadata("agent",agent_id,&run.id,&agent)?;
-            tx.put("run",&run.id,&run.id,&run)?;
+            tx.save_record(&agent)?;
+            tx.save_record(&run)?;
             tx.event(&run.id,Some(agent_id),if model_turn {"model.usage"} else {"model.usage_aux"},json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
             Ok(())
         })?;
@@ -67,7 +67,7 @@ impl UsageService {
         // token count drifts; the event above records the omission, and the
         // kernel budget gate keeps enforcing on reported usage.
         if !cost_known {
-            let agent: AgentMetadata = self.store.require_metadata("agent", agent_id)?;
+            let agent: AgentMetadata = self.store.load::<AgentMetadata>(agent_id)?;
             Coordinator::new(self.store.clone()).pause_budget(
                 &agent.run_id,
                 "provider omitted usage required for accounting; response retained in Rig journal",

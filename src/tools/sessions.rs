@@ -29,7 +29,7 @@ impl SessionsService {
         );
         if session.agent_id != agent.id {
             let owner: AgentMetadata =
-                require_in_run(&self.store, "agent", &session.agent_id, &agent.run_id)?;
+                require_in_run(&self.store, &session.agent_id, &agent.run_id)?;
             ensure!(
                 closing && owner.status.terminal(),
                 "session is owned by another active agent"
@@ -48,8 +48,12 @@ impl SessionsService {
         match name {
             "debug_command" | "debug_close" => {
                 let session_id = text(&args, "session_id")?.to_owned();
-                let mut session: SessionRecord =
-                    require_in_run(&self.store, "debug_session", &session_id, &agent.run_id)?;
+                let mut session: SessionRecord = require_session(
+                    &self.store,
+                    SessionKind::Debugger,
+                    &session_id,
+                    &agent.run_id,
+                )?;
                 self.authorize_session(agent, &session, name == "debug_close")?;
                 let current = session.state;
                 // Idempotent close, mirroring interactive_close: a closed/lost
@@ -58,8 +62,7 @@ impl SessionsService {
                     && matches!(current, SessionState::Closed | SessionState::Lost)
                 {
                     session.updated_at = now();
-                    self.store
-                        .put("debug_session", &session_id, &agent.run_id, &session)?;
+                    self.store.save_session(SessionKind::Debugger, &session)?;
                     return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
                 }
                 ensure!(
@@ -87,12 +90,7 @@ impl SessionsService {
                         if name == "debug_close" && session_lost(&error) {
                             session.state = SessionState::Lost;
                             session.updated_at = now();
-                            self.store.put(
-                                "debug_session",
-                                &session_id,
-                                &agent.run_id,
-                                &session,
-                            )?;
+                            self.store.save_session(SessionKind::Debugger, &session)?;
                             return Ok(
                                 json!({"session_id":session_id,"state":"lost","reconciled":true}),
                             );
@@ -118,8 +116,7 @@ impl SessionsService {
                     session.state = SessionState::Closed;
                 }
                 session.updated_at = now();
-                self.store
-                    .put("debug_session", &session_id, &agent.run_id, &session)?;
+                self.store.save_session(SessionKind::Debugger, &session)?;
                 Ok(json!({"response":raw,"transcript_evidence_id":evidence.id}))
             }
             "debug_start" => {
@@ -141,8 +138,7 @@ impl SessionsService {
                     created_at: now(),
                     updated_at: now(),
                 };
-                self.store
-                    .put("debug_session", session_id, &agent.run_id, &record)?;
+                self.store.save_session(SessionKind::Debugger, &record)?;
                 Ok(raw)
             }
             "interactive_start" => {
@@ -167,14 +163,17 @@ impl SessionsService {
                     created_at: now(),
                     updated_at: now(),
                 };
-                self.store
-                    .put("interact_session", session_id, &agent.run_id, &record)?;
+                self.store.save_session(SessionKind::Interactive, &record)?;
                 Ok(raw)
             }
             "interactive_send" | "interactive_close" => {
                 let session_id = text(&args, "session_id")?.to_owned();
-                let mut session: SessionRecord =
-                    require_in_run(&self.store, "interact_session", &session_id, &agent.run_id)?;
+                let mut session: SessionRecord = require_session(
+                    &self.store,
+                    SessionKind::Interactive,
+                    &session_id,
+                    &agent.run_id,
+                )?;
                 self.authorize_session(agent, &session, name == "interactive_close")?;
                 let current = session.state;
                 // Closing is idempotent: an already closed/lost session closes
@@ -184,7 +183,7 @@ impl SessionsService {
                 {
                     session.updated_at = now();
                     self.store
-                        .put("interact_session", &session_id, &agent.run_id, &session)?;
+                        .save_session(SessionKind::Interactive, &session)?;
                     return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
                 }
                 ensure!(
@@ -230,7 +229,7 @@ impl SessionsService {
                 }
                 session.updated_at = now();
                 self.store
-                    .put("interact_session", &session_id, &agent.run_id, &session)?;
+                    .save_session(SessionKind::Interactive, &session)?;
                 Ok(raw)
             }
             _ => bail!("unknown session tool: {name}"),

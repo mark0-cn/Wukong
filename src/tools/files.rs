@@ -15,7 +15,7 @@ impl FilesService {
     ) -> Result<()> {
         let path = raw["path"].as_str().context("worker file path missing")?;
         let file_id = stable("file", &format!("{}:{path}", agent.run_id));
-        let previous: Option<WorkerFileRecord> = self.store.get("worker_file", &file_id)?;
+        let previous: Option<WorkerFileRecord> = self.store.get_record(&file_id)?;
         let retained = previous
             .as_ref()
             .filter(|record| raw["sha256"].as_str() == Some(record.sha256.as_str()))
@@ -31,8 +31,7 @@ impl FilesService {
             evidence_id: evidence_id.or(retained).map(str::to_owned),
             created_at: now(),
         };
-        self.store
-            .put("worker_file", &record.id, &agent.run_id, &record)
+        self.store.save_record(&record)
     }
 
     pub(super) fn known_file(
@@ -42,13 +41,13 @@ impl FilesService {
         require_target: bool,
     ) -> Result<WorkerFileRecord> {
         let id = stable("file", &format!("{}:{path}", agent.run_id));
-        let record: WorkerFileRecord = self.store.require("worker_file", &id)?;
+        let record: WorkerFileRecord = self.store.load(&id)?;
         ensure!(
             record.run_id == agent.run_id && record.worker_id == self.gateway.worker_identity()?,
             "worker file belongs to another assessment or runtime"
         );
         if require_target {
-            let run: RunRecord = self.store.require("run", &agent.run_id)?;
+            let run: RunRecord = self.store.load(&agent.run_id)?;
             ensure!(
                 record.sha256 == run.target_sha256,
                 "worker target does not match this run's sample SHA256"
@@ -126,7 +125,7 @@ impl FilesService {
         if self.known_file(agent, path, false).is_err() {
             let allowed = self
                 .store
-                .list::<JobRecord>("job", &agent.run_id)?
+                .records::<JobRecord>(&agent.run_id)?
                 .iter()
                 .any(|job| {
                     job.worker_id == self.gateway.worker_identity().unwrap_or_default()

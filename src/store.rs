@@ -13,6 +13,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod records;
+pub use records::{DocumentKind, SessionKind, StoredRecord};
 mod session;
 pub(crate) use session::StateSession;
 mod conversations;
@@ -173,6 +175,7 @@ impl Store {
     ) -> Result<()> {
         Self::tx_write(tx, kind, id, run_id, value, true)
     }
+    #[cfg(test)]
     pub(crate) fn tx_put_metadata(
         tx: &Connection,
         kind: &str,
@@ -276,26 +279,19 @@ impl Store {
                 .transpose()?,
         })
     }
-    pub(crate) fn get_metadata(&self, kind: &str, id: &str) -> Result<Option<AgentMetadata>> {
-        self.read_transaction(|tx| Self::tx_get_metadata(tx, kind, id))
-    }
+
     pub fn require<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<T> {
         self.get(kind, id)?
             .ok_or_else(|| anyhow!("{kind} {id} does not exist"))
     }
-    pub(crate) fn require_metadata(&self, kind: &str, id: &str) -> Result<AgentMetadata> {
-        self.get_metadata(kind, id)?
-            .ok_or_else(|| anyhow!("{kind} {id} does not exist"))
-    }
+
     pub fn put<T: Serialize>(&self, kind: &str, id: &str, run_id: &str, value: &T) -> Result<()> {
         self.transaction(|tx| Self::tx_put(tx, kind, id, run_id, value))
     }
     pub fn list<T: DeserializeOwned>(&self, kind: &str, run_id: &str) -> Result<Vec<T>> {
         self.read_transaction(|tx| Self::tx_list(tx, kind, run_id))
     }
-    pub(crate) fn list_metadata(&self, kind: &str, run_id: &str) -> Result<Vec<AgentMetadata>> {
-        self.read_transaction(|tx| Self::tx_list_metadata(tx, kind, run_id))
-    }
+
     pub fn runs(&self) -> Result<Vec<RunRecord>> {
         self.read_transaction(|tx| {
             let mut q =

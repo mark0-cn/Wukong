@@ -53,16 +53,16 @@ impl KernelHost {
         self.models.config().role_config_for(role)
     }
     pub(crate) fn agent(&self, id: &str) -> Result<AgentMetadata> {
-        self.store.require_metadata("agent", id)
+        self.store.load::<AgentMetadata>(id)
     }
     pub(crate) fn maybe_agent(&self, id: &str) -> Result<Option<AgentMetadata>> {
-        self.store.get_metadata("agent", id)
+        self.store.get_record::<AgentMetadata>(id)
     }
     pub(crate) fn agents(&self, run: &str) -> Result<Vec<AgentMetadata>> {
-        self.store.list_metadata("agent", run)
+        self.store.records::<AgentMetadata>(run)
     }
     pub(crate) fn run(&self, id: &str) -> Result<RunRecord> {
-        self.store.require("run", id)
+        self.store.load(id)
     }
     pub(crate) fn journal_dir(&self, run: &str) -> PathBuf {
         self.config.state_dir.join("rig").join(run)
@@ -83,7 +83,7 @@ impl KernelHost {
         );
         if root.checkpoint.is_none() {
             run.config = serde_json::to_value(&self.config)?;
-            self.store.put("run", run_id, run_id, &run)?;
+            self.store.save_record(&run)?;
         } else {
             let saved: AppConfig = serde_json::from_value(run.config.clone())?;
             ensure!(
@@ -222,7 +222,7 @@ impl KernelHost {
         run.status = Status::Failed;
         run.summary = Some(reason.into());
         run.updated_at = now();
-        self.store.put("run", &run.id, &run.id, &run)
+        self.store.save_record(&run)
     }
     pub(crate) fn stream_progress(&self, run_id: &str, agent_id: &str) {
         let _ = self
@@ -250,7 +250,7 @@ impl KernelHost {
     ) -> Result<()> {
         let run_id = self.store.write(|tx| {
             let mut target: AgentMetadata = tx
-                .get_metadata("agent", agent_id)?
+                .get_record::<AgentMetadata>(agent_id)?
                 .context("agent missing")?;
             if target.status.terminal() {
                 return Ok(None);
@@ -261,7 +261,7 @@ impl KernelHost {
                 target.summary = Some(summary.clone());
             }
             target.updated_at = now();
-            tx.put_metadata("agent", agent_id, &target.run_id, &target)?;
+            tx.save_record(&target)?;
             Coordinator::notify_terminal(tx, &target)?;
             Ok(Some(target.run_id))
         })?;
@@ -289,9 +289,9 @@ impl KernelHost {
                 "task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,
                 "shared_context":crate::context::snapshot(tx,agent)?,
                 "ledger_counts":{
-                    "tasks":tx.list_metadata("agent",&run.id)?.len(),
-                    "findings":tx.list::<Finding>("finding",&run.id)?.len(),
-                    "coverage":tx.list::<Coverage>("coverage",&run.id)?.len()
+                    "tasks":tx.records::<AgentMetadata>(&run.id)?.len(),
+                    "findings":tx.records::<Finding>(&run.id)?.len(),
+                    "coverage":tx.records::<Coverage>(&run.id)?.len()
                 }
             }))?)
         })

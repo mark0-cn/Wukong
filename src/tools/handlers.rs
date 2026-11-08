@@ -27,7 +27,7 @@ pub(super) fn handle_view_agent_graph<'a>(
                         .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
         }
         Ok(
-            json!({"agents":tools.store.list_metadata("agent",&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"dependency_policy":a.dependency_policy,"predecessors":a.wait_for_predecessors,"predecessors_released":a.predecessors_released,"wait_policy":a.wait_policy,"wait_for":a.wait_for,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
+            json!({"agents":tools.store.records::<AgentMetadata>(&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"dependency_policy":a.dependency_policy,"predecessors":a.wait_for_predecessors,"predecessors_released":a.predecessors_released,"wait_policy":a.wait_policy,"wait_for":a.wait_for,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
         )
     })
 }
@@ -99,12 +99,8 @@ pub(super) fn handle_stop_agent<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
         let target_id = {
-            let target: AgentMetadata = require_in_run(
-                &tools.store,
-                "agent",
-                text(&args, "agent_id")?,
-                &agent.run_id,
-            )?;
+            let target: AgentMetadata =
+                require_in_run(&tools.store, text(&args, "agent_id")?, &agent.run_id)?;
             tools.authorize_control(agent, &target)?;
             target.id.clone()
         };
@@ -153,16 +149,14 @@ pub(super) fn handle_threat_model_get<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
         if let Some(id) = args["id"].as_str() {
-            Ok(serde_json::to_value(require_in_run::<SharedDocument>(
+            Ok(serde_json::to_value(require_document(
                 &tools.store,
-                "threat_model",
+                DocumentKind::ThreatModel,
                 id,
                 &agent.run_id,
             )?)?)
         } else {
-            Ok(
-                json!({"documents":tools.store.list::<SharedDocument>("threat_model",&agent.run_id)?}),
-            )
+            Ok(json!({"documents":tools.store.documents(DocumentKind::ThreatModel,&agent.run_id)?}))
         }
     })
 }
@@ -195,7 +189,7 @@ pub(super) fn handle_notes_list<'a>(
     _args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        Ok(json!({"notes":tools.store.list::<SharedDocument>("note",&agent.run_id)?}))
+        Ok(json!({"notes":tools.store.documents(DocumentKind::Note,&agent.run_id)?}))
     })
 }
 
@@ -231,7 +225,7 @@ pub(super) fn handle_todos_list<'a>(
     _args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        Ok(json!({"todos":tools.store.list::<SharedDocument>("todo",&agent.run_id)?}))
+        Ok(json!({"todos":tools.store.documents(DocumentKind::Todo,&agent.run_id)?}))
     })
 }
 
@@ -252,9 +246,7 @@ pub(super) fn handle_coverage_list<'a>(
     _name: &'a str,
     _args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move {
-        Ok(json!({"coverage":tools.store.list::<Coverage>("coverage",&agent.run_id)?}))
-    })
+    Box::pin(async move { Ok(json!({"coverage":tools.store.records::<Coverage>(&agent.run_id)?})) })
 }
 
 pub(super) fn handle_finding_file<'a>(
@@ -274,9 +266,7 @@ pub(super) fn handle_findings_list<'a>(
     _name: &'a str,
     _args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move {
-        Ok(json!({"findings":tools.store.list::<Finding>("finding",&agent.run_id)?}))
-    })
+    Box::pin(async move { Ok(json!({"findings":tools.store.records::<Finding>(&agent.run_id)?})) })
 }
 
 pub(super) fn handle_finding_get<'a>(
@@ -287,14 +277,11 @@ pub(super) fn handle_finding_get<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let finding: Finding =
-            require_in_run(&tools.store, "finding", text(&args, "id")?, &agent.run_id)?;
+        let finding: Finding = require_in_run(&tools.store, text(&args, "id")?, &agent.run_id)?;
         let verification = finding
             .verification_id
             .as_ref()
-            .map(|id| {
-                require_in_run::<Verification>(&tools.store, "verification", id, &agent.run_id)
-            })
+            .map(|id| require_in_run::<Verification>(&tools.store, id, &agent.run_id))
             .transpose()?;
         Ok(json!({"finding":finding,"verification":verification}))
     })
@@ -325,8 +312,7 @@ pub(super) fn handle_evidence_read<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
         let evidence_id = text(&args, "evidence_id")?.to_owned();
-        let record: Evidence =
-            require_in_run(&tools.store, "evidence", &evidence_id, &agent.run_id)?;
+        let record: Evidence = require_in_run(&tools.store, &evidence_id, &agent.run_id)?;
         let total = usize::try_from(record.size)?;
         let offset = usize::try_from(number(&args, "offset", 0))?;
         ensure!(offset <= total, "evidence offset is past end of file");
@@ -382,13 +368,11 @@ pub(super) fn handle_think<'a>(
         };
         let thoughts = tools
             .store
-            .list::<crate::domain::Thought>("thought", &agent.run_id)?
+            .records::<crate::domain::Thought>(&agent.run_id)?
             .into_iter()
             .filter(|t| t.agent_id == agent.id)
             .count();
-        tools
-            .store
-            .put("thought", &thought.id, &agent.run_id, &thought)?;
+        tools.store.save_record(&thought)?;
         Ok(json!({"recorded":true,"chars":content.chars().count(),"thoughts":thoughts + 1}))
     })
 }

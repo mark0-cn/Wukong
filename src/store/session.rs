@@ -2,7 +2,7 @@
 use super::*;
 
 pub(crate) struct StateSession<'a> {
-    connection: &'a Connection,
+    pub(super) connection: &'a Connection,
 }
 impl Store {
     pub(crate) fn write<T>(
@@ -31,9 +31,8 @@ impl StateSession<'_> {
     pub(crate) fn list<T: DeserializeOwned>(&self, kind: &str, run: &str) -> Result<Vec<T>> {
         Store::tx_list(self.connection, kind, run)
     }
-    pub(crate) fn get_metadata(&self, kind: &str, id: &str) -> Result<Option<AgentMetadata>> {
-        Store::tx_get_metadata(self.connection, kind, id)
-    }
+
+    #[cfg(test)]
     pub(crate) fn put_metadata(
         &self,
         kind: &str,
