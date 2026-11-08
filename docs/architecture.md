@@ -72,6 +72,8 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 ## 桌面读取与持久化边界
 
+`queries` 提供 `WorkspaceQueries`、`AssessmentQueries` 和 `ReportQueries`，返回不依赖 GUI 的摘要、增量游标、会话快照和报告快照。SQL 实现位于 `store/workspace` 与 `store/report_queries`；CLI 与 GUI 共用查询模型，聊天解析和布局缓存只保留在 GUI 适配层。
+
 `gui_data` 在后台读取轻量任务/Agent 摘要，按 `entity_revisions` 的递增修订号接收变化；该索引每个实体保留一行，能够观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。切换任务或存储目录后丢弃旧请求结果并重新建立读取游标。
 
 业务写入通过 `StateSession` 事务会话提交，业务层不接收 SQLite 连接。消息替换、旧 generation 消息归档和未读计数封装在存储实现内；所有回执与业务更新共享同一次租约校验和 IMMEDIATE 事务。
