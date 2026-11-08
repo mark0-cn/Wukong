@@ -23,7 +23,7 @@ pub(crate) enum ReplayPolicy {
     OperatorOnly,
 }
 impl ReplayPolicy {
-    fn side_effecting(self) -> bool {
+    pub(crate) fn side_effecting(self) -> bool {
         self != Self::ReadOnly
     }
     pub(crate) fn interrupted_state(self) -> CallState {
