@@ -1,6 +1,7 @@
 """Build a declarative launch description without executing challenge code."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -16,6 +17,14 @@ def inside(root, name):
     return path
 
 
+def owned_mode(path, mode):
+    # Docker copies may retain a host UID. The trusted supervisor has CHOWN,
+    # but deliberately lacks FOWNER, so take ownership before changing mode.
+    if os.geteuid() == 0 and path.stat().st_uid != 0:
+        os.chown(path, 0, 0)
+    path.chmod(mode)
+
+
 def prepare(root):
     root=root.resolve()
     manifest=json.loads((root/"launch-request.json").read_text())
@@ -28,15 +37,15 @@ def prepare(root):
           "service":manifest["network"],"loader":None,"library_path":None}
     if target:
         binary=inside(root,target); spec["files"][target]=digest(binary)
-        binary.chmod(0o555)
+        owned_mode(binary,0o555)
     if runtime["kind"]=="loader" or runtime.get("libc") or runtime.get("loader"):
         if not target or not runtime.get("libc") or not runtime.get("loader"):
             raise ValueError("loader runtime requires target, libc and loader")
         library=root/"prepared"/"libraries"; library.mkdir(parents=True,exist_ok=True)
         for source,name in [(runtime["libc"],"libc.so.6"),(runtime["loader"],"ld.so")]:
             path=inside(root,source); output=library/name
-            if output.exists(): output.chmod(0o644)
-            shutil.copyfile(path,output); output.chmod(0o555)
+            if output.exists(): owned_mode(output,0o644)
+            shutil.copyfile(path,output); owned_mode(output,0o555)
             spec["files"][str(output.relative_to(root))]=digest(output)
         spec.update(loader="prepared/libraries/ld.so",library_path="prepared/libraries")
     inside(root,spec["cwd"])
