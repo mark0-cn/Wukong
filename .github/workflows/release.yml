@@ -80,6 +80,7 @@ jobs:
         if: steps.existing.outputs.digest == ''
         id: build
         with:
+          source: .
           files: docker-bake.hcl
           targets: workbench
           push: true
