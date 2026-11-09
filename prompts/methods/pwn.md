@@ -36,6 +36,43 @@ function produces — decompile it and cite the exact string. A prompt printed
 by the vulnerable function itself is not a win marker. Record the exact
 expected stdout/stderr bytes.
 
+## The staged checklists (follow these step by step; each step has a
+verification artifact)
+
+### ret2win
+0. Dossier facts: non-PIE win address (banner/leak), input channel, buffer.
+1. Offset empirically: cyclic(200) -> crash -> cyclic_find; confirm with
+   N 'A's crashing and N-8 not.
+2. Alignment: one plain ret gadget before win; run the naive no-ret
+   attempt and OBSERVE it fail before adding the ret.
+3. Payload = padding + ret + win.
+4. Controls: no-overflow, no-ret, wrong-target — all must fail.
+5. 3/3 reproductions against the real service; save the payload and
+   transcripts as evidence, then agent_finish.
+
+### ret2libc with canary
+0. Dossier facts: buffer size, canary offset, saved-RIP offset, non-PIE
+   base, the leak source (banner %p / dlsym reference).
+1. LEAK THE CANARY EMPIRICALLY: padding that reaches past the canary,
+   read the echo/leak, extract the 8 bytes at the canary offset. Never
+   assume a canary from static analysis.
+2. COMPUTE THE LIBC BASE: leak - symbol_offset (symbols from the worker's
+   own libc via pwn.ELF('/lib/x86_64-linux-gnu/libc.so.6')).
+3. ASSEMBLE: padding + canary + saved-RBP junk + pop_rdi + binsh + system
+   (or a write-wrapper syscall path when system misaligns).
+4. Controls: no-overflow, wrong-canary, wrong-base — all must fail.
+5. 3/3 reproductions -> agent_finish with evidence IDs.
+
+### Live service connection (protocol challenges)
+1. Find the bind in disassembly: socket()/bind()/listen() and the port
+   constant (or a getsockname/printf of the port). Do not port-scan.
+2. Run the binary yourself in the background (exec/py_run), then connect
+   with pwntools remote('127.0.0.1', port). Drive your OWN instance: any
+   other running instance may differ in state, user or file layout.
+3. Capture everything as repr(); derive the protocol state machine.
+4. The flag comes from the service's own output; the connection
+   transcript IS the evidence.
+
 ## Verify with the real binary
 
 - `angr_solve` (see tooling) produces a hypothesis input; replay it against
