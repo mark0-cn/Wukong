@@ -119,9 +119,9 @@ def resolve(root,params,isolated=False,input_path=None):
         cwd=Path(experiment["work"])/"cwd"
         staged_cwd.rename(cwd)
         for item in [cwd,*cwd.rglob("*")]:
-            os.chown(item,experiment["uid"],experiment["uid"])
             executable=item.is_dir() or (original_cwd/item.relative_to(cwd)).stat().st_mode&0o111
             item.chmod(0o755 if executable else 0o644)
+            os.chown(item,experiment["uid"],experiment["uid"])
         if loader:
             library=isolation.stage_directory(library,experiment,"libraries")
             loader=library/Path(spec["loader"]).name; loader.chmod(0o555)
