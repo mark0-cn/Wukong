@@ -151,10 +151,22 @@ pub(crate) static REGISTRY: &[Entry] = &[
         "Analyze glibc heap lifetimes and primitives using actual allocator identity and version-specific checks."
     ),
     entry!(
+        rop_analysis,
+        Kind::Method,
+        "methods",
+        "Check ABI, gadget semantics and prerequisites for a requested control-flow or ROP experiment."
+    ),
+    entry!(
+        format_string,
+        Kind::Method,
+        "methods",
+        "Establish printf format control, argument access and bounded read/write primitives with runtime evidence."
+    ),
+    entry!(
         pwn,
         Kind::Method,
         "methods",
-        "Build a requested control-flow payload using confirmed layouts and runtime checks."
+        "Route requested pwn work to heap, ROP or format-string methods and preserve shared evidence requirements."
     ),
     entry!(
         tooling,
