@@ -1,4 +1,10 @@
 .git
+.github
+.env
+re-agent.toml
+node_modules
+ui/node_modules
+ui/dist
 .re-agent
 target
 work

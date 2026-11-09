@@ -24,22 +24,21 @@ RUN --mount=type=cache,target=/var/cache/apt \
 # Set INSTALL_GHIDRA=0 for a smaller runtime-only worker.
 ARG INSTALL_GHIDRA=1
 ARG GHIDRA_SHA256=2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67
-COPY workers/deps/ghidra.zip /tmp/ghidra.zip
-RUN if [ "$INSTALL_GHIDRA" = "1" ]; then \
-      printf '%s  /tmp/ghidra.zip\n' "$GHIDRA_SHA256" | sha256sum --check - \
-      && unzip -q /tmp/ghidra.zip -d /opt \
+RUN --mount=type=bind,source=workers/deps,target=/deps,ro \
+    if [ "$INSTALL_GHIDRA" = "1" ]; then \
+      printf '%s  /deps/ghidra.zip\n' "$GHIDRA_SHA256" | sha256sum --check - \
+      && unzip -q /deps/ghidra.zip -d /opt \
       && mv /opt/ghidra_*_PUBLIC /opt/ghidra \
-      && rm /tmp/ghidra.zip; \
+      ; \
     fi
 ENV RE_AGENT_GHIDRA_HEADLESS=/opt/ghidra/support/analyzeHeadless
 
 # Ghidra 11.3+ no longer auto-detects java on PATH; the headless launcher
 # requires JAVA_HOME or it tries an interactive JDK prompt and fails.
 ARG TEMURIN_SHA256=68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb
-COPY workers/deps/temurin25.tar.gz /tmp/temurin25.tar.gz
-RUN printf '%s  /tmp/temurin25.tar.gz\n' "$TEMURIN_SHA256" | sha256sum --check - \
-    && mkdir -p /opt/jdk-25 && tar -xzf /tmp/temurin25.tar.gz -C /opt/jdk-25 --strip-components=1 \
-    && rm /tmp/temurin25.tar.gz
+RUN --mount=type=bind,source=workers/deps,target=/deps,ro \
+    printf '%s  /deps/temurin25.tar.gz\n' "$TEMURIN_SHA256" | sha256sum --check - \
+    && mkdir -p /opt/jdk-25 && tar -xzf /deps/temurin25.tar.gz -C /opt/jdk-25 --strip-components=1
 ENV JAVA_HOME=/opt/jdk-25
 
 # Python analysis toolchain used by the typed tools and by agent scripts
@@ -49,7 +48,7 @@ ENV JAVA_HOME=/opt/jdk-25
 # is bundled (angr 10 splits it into angr-data, which arrives broken in the
 # AFL base venv) and it pins pycparser<2.22, which Python 3.12's
 # "CLexer object is not callable" breakage makes mandatory.
-ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --force-reinstall --no-deps --no-cache-dir --break-system-packages \
     -i "$PIP_INDEX_URL" \

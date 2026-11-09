@@ -8,19 +8,21 @@ RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-in
     python3-venv xz-utils ruby ruby-dev build-essential && rm -rf /var/lib/apt/lists/*
 RUN gem install seccomp-tools --version 1.6.2 --no-document
 COPY workers/toolchain.lock.json /opt/re-agent/toolchain.lock.json
-COPY workers/deps/pwndbg.tar.xz /tmp/pwndbg.tar.xz
-COPY workers/deps/pwninit /usr/local/bin/pwninit
-RUN echo '17049a23ba8cbcf4780c4bc9b4aeb519f2801ceabe7304b55d3d622acca03b8c  /tmp/pwndbg.tar.xz' | sha256sum -c - \
+RUN --mount=type=bind,source=workers/deps,target=/deps,ro \
+    cp /deps/pwninit /usr/local/bin/pwninit \
+    && echo '17049a23ba8cbcf4780c4bc9b4aeb519f2801ceabe7304b55d3d622acca03b8c  /deps/pwndbg.tar.xz' | sha256sum -c - \
     && echo 'f124b6645b01b0fc4adacabe61438fe73eef517dc3e4696a08e1250a8f47eec3  /usr/local/bin/pwninit' | sha256sum -c - \
-    && mkdir -p /opt/pwndbg && tar -xJf /tmp/pwndbg.tar.xz -C /opt \
+    && mkdir -p /opt/pwndbg && tar -xJf /deps/pwndbg.tar.xz -C /opt \
     && chmod 755 /usr/local/bin/pwninit && ln -s /opt/pwndbg/bin/pwndbg /usr/local/bin/pwndbg \
-    && rm /tmp/pwndbg.tar.xz
+    && pwninit --version
 RUN apt-get update && apt-get install -y --no-install-recommends elfutils && rm -rf /var/lib/apt/lists/*
 COPY workers/runtime /opt/re-agent/runtime
 COPY workers/ghidra /opt/re-agent/ghidra
 COPY prompts /opt/re-agent/prompts
 ARG REVISION=development
-LABEL org.opencontainers.image.title="re-agent pwn workbench" org.opencontainers.image.revision=$REVISION
+ARG VERSION=development
+LABEL org.opencontainers.image.title="re-agent pwn workbench" org.opencontainers.image.revision=$REVISION \
+    org.opencontainers.image.version=$VERSION org.opencontainers.image.source="https://github.com/mark0-cn/re_agent"
 RUN python3 -m pip freeze > /opt/re-agent/python.freeze.txt \
     && dpkg-query -W > /opt/re-agent/debian-packages.txt \
     && python3 -c "import pwn,angr,elftools,pygdbmi; print('toolchain imports OK')" \
