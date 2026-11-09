@@ -32,3 +32,35 @@ pub fn environment(config: &AppConfig, command: EnvCommand) -> Result<Value> {
         }
     }
 }
+
+#[derive(Subcommand)]
+pub enum ChallengeCommand {
+    Import {
+        source: PathBuf,
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        binary: Option<String>,
+    },
+    List,
+    Show {
+        id: String,
+    },
+    Verify {
+        id: String,
+    },
+}
+pub fn challenge(config: &AppConfig, command: ChallengeCommand) -> Result<Value> {
+    let workbench = Workbench::open(config)?;
+    let _lock = workbench.lock()?;
+    match command {
+        ChallengeCommand::Import { source, id, binary } => {
+            workbench.import_challenge(&source, &id, binary.as_deref())
+        }
+        ChallengeCommand::List => workbench.challenges(),
+        ChallengeCommand::Show { id } => Ok(
+            json!({"challenge":workbench.challenge(&id)?,"directory":workbench.challenge_dir(&id)?}),
+        ),
+        ChallengeCommand::Verify { id } => workbench.verify_original(&id),
+    }
+}

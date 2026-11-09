@@ -36,6 +36,11 @@ pub enum Command {
         #[command(subcommand)]
         command: crate::workbench::cli::EnvCommand,
     },
+    /// Import and manage isolated Pwn challenges.
+    Challenge {
+        #[command(subcommand)]
+        command: crate::workbench::cli::ChallengeCommand,
+    },
     /// Write a configuration without overwriting an existing file.
     Init {
         #[arg(default_value = "re-agent.toml")]
@@ -162,13 +167,18 @@ pub async fn run(cli: Cli) -> Result<()> {
         print_json(&crate::workbench::cli::environment(&config, command)?)?;
         return Ok(());
     }
+    if let Command::Challenge { command } = command {
+        print_json(&crate::workbench::cli::challenge(&config, command)?)?;
+        return Ok(());
+    }
     let store = Store::open(&config.state_dir)?;
     let service = AssessmentService::new(config.clone(), store.clone());
     match command {
         Command::Init { .. }
         | Command::Inspect { .. }
         | Command::ToolCatalog
-        | Command::Env { .. } => unreachable!(),
+        | Command::Env { .. }
+        | Command::Challenge { .. } => unreachable!(),
         Command::Doctor => {
             let runtime = if config.runtime.backend == RuntimeBackend::Disabled {
                 json!({"available":false,"reason":"execution worker disabled; configure Docker/SSH or explicitly select trusted_local fixtures"})

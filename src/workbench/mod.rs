@@ -1,4 +1,5 @@
 //! Host-owned workbench lifecycle. Targets never receive the Docker socket.
+pub mod challenge;
 pub mod cli;
 mod docker;
 mod environment;
