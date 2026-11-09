@@ -224,3 +224,9 @@ re-agent verify-bundle ./reports/assessment-01
 ### 自定义 Skill 元数据
 
 `skills_dir` 中的自定义 `.md` 会自动出现在 Agent 的能力目录。可添加同名 `.json`，字段为 `description`、`applies_to`、`excludes`、`requires`、`deliverables`、`validation`、`version`；除说明和版本外均为字符串数组。目录标记有效正文的 SHA256 和来源，覆盖内置正文时使用覆盖后的哈希。元数据只指导路由，不授予工具权限；运行前仍须检查实际后端能力。每个元数据文件最多 16 KiB，目录最多 256 项。
+
+### 共用分析工具
+
+`function_instructions` 返回分页指令、所属基本块起点、分支／调用流和 fallthrough；所有地址携带模块 SHA256。Ghidra 查询可设置 `target_evidence_id` 使用本任务已有的另一个二进制证据作为基线，原任务目标保持不变。缺少基线必须显式报告，不能拿当前目标代替。
+
+`differential_test` 接收本任务已登记的 worker `target` 和 `reference` 文件、`reference_python`、`inputs_base64` 和每例 1–10 秒时限；最多 64 个 stdin 输入，每个最多 64 KiB。它通过现有隔离任务生命周期运行，`job_artifacts` 导入 `differential-results.json`，保留输入、原始输出、退出码、两侧哈希和差异。超时、输出截断、非零退出归为 inconclusive。当前协议只比较 stdin；argv／状态会话需单独 harness。

@@ -50,7 +50,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         parse: |value| Ok(serde_json::to_value(serde_json::from_value::<A>(value)?)?),
         side_effecting,
         root_only: matches!(visibility, Visibility::Root),
-        child_only: matches!(visibility, Visibility::Child) || target,
+        child_only: matches!(visibility, Visibility::Child) || (target && name != "runtime_doctor"),
     }
 }
 
@@ -61,6 +61,22 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::FunctionInstructionsArgs>(
+            "function_instructions",
+            "Ghidra: paginated function instructions and control-flow edges, including calls. Addresses are module-relative and bound to target SHA256. Optional target_evidence_id selects an in-run baseline binary.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_functions_search,
+            Visibility::Child,
+        ),
+        spec::<args::DifferentialTestArgs>(
+            "differential_test",
+            "Compare the staged target and reference on bounded stdin vectors in an isolated background job. Preserve raw outputs, hashes and mismatches as artifacts. Timeout or truncated output is inconclusive, never a match.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_differential_test,
+            Visibility::Child,
+        ),
         spec::<args::AnalysisVerifyArgs>(
             "analysis_verify",
             "Verifier only: record an independent general-analysis verdict with expected and observed results, scope, counterexamples and verifier-owned evidence. Does not promote security impact. Records are immutable and appear in shared notes.",

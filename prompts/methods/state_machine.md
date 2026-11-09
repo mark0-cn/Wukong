@@ -30,3 +30,4 @@ workflow and its distinguishing negative sequences are explained; a bounded
 trace does not prove the absence of additional states.
 
 When the contract requests `state_machine`, return a TaskArtifact named `state_machine` with original evidence_id and structured={kind:"state_machine",rows:[...]}. Every row must cite its own evidence_id; use the structured artifact fields documented in the completion tool schema and project contract.
+Each structured row requires from, action, to, expected, observed, and evidence_id.

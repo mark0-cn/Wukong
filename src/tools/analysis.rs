@@ -16,12 +16,30 @@ impl AnalysisService {
         name: &str,
         args: &Value,
     ) -> Result<Value> {
-        let run = target(&self.store, agent)?;
+        let mut run = target(&self.store, agent)?;
+        let mut secondary = None;
+        if let Some(id) = args["target_evidence_id"].as_str() {
+            let bytes = self.store.read_evidence(&agent.run_id, id)?;
+            ensure!(
+                bytes.len() <= 32 * 1024 * 1024,
+                "secondary binary exceeds 32 MiB"
+            );
+            let mut file = tempfile::NamedTempFile::new()?;
+            std::io::Write::write_all(&mut file, &bytes)?;
+            run.target_path = file.path().into();
+            run.target_sha256 = hex::encode(Sha256::digest(&bytes));
+            secondary = Some(file);
+        }
         let query = match name {
             "functions_search" => GhidraQuery::Functions {
                 pattern: args["pattern"].as_str().map(str::to_owned),
                 offset: number(args, "offset", 0) as usize,
                 limit: number(args, "limit", 25) as usize,
+            },
+            "function_instructions" => GhidraQuery::Instructions {
+                address: number(args, "address", 0),
+                offset: number(args, "offset", 0) as usize,
+                limit: number(args, "limit", 100) as usize,
             },
             "function_decompile" => GhidraQuery::Decompile {
                 address: number(args, "address", 0),
@@ -42,10 +60,13 @@ impl AnalysisService {
             .clone()
             .or_else(|| std::env::var_os("RE_AGENT_GHIDRA_HEADLESS").map(PathBuf::from));
         if executable.is_none() && self.gateway.client.is_some() {
-            let staged = self
-                .files
-                .stage_target(agent, &format!("{call_id}:target"))
-                .await?;
+            let staged = if secondary.is_some() {
+                self.files.file_put(agent, &format!("{call_id}:target"), &json!({"path":format!("files/{}.bin",run.target_sha256),"evidence_id":args["target_evidence_id"],"executable":false})).await?
+            } else {
+                self.files
+                    .stage_target(agent, &format!("{call_id}:target"))
+                    .await?
+            };
             let result=self.gateway.worker_call(agent,call_id,"ghidra.query",json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.timeout_seconds,"analysis_timeout_secs":self.config.analysis_timeout_seconds,"max_cpu":self.config.max_cpu})).await?;
             ensure!(
                 result["target_sha256"] == run.target_sha256,

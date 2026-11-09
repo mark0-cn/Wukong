@@ -194,3 +194,8 @@ For format, algorithm, state-machine and version-difference assignments, request
 canonical deliverable name (`formats`, `algorithms`, `state_machine`, `binary_diff`) in the task contract.
 These names require structured evidence-backed rows at completion. General verification must
 produce an `analysis_verify` record; inspect its scope and verdict before adopting the conclusion.
+
+Before assigning execution-dependent work call runtime_doctor and attach its observed capability
+availability to the dossier. Match skill requires to those observations; unknown availability
+is not support. Missing execution permits a bounded static task, not a promise of runtime proof.
+Do not repeat preflight for each child unless the backend configuration changes.

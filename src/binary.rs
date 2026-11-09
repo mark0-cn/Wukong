@@ -633,6 +633,11 @@ pub enum GhidraQuery {
     },
     /// Module-relative offset, not a runtime VA or file offset.
     Decompile { address: u64 },
+    Instructions {
+        address: u64,
+        offset: usize,
+        limit: usize,
+    },
     Xrefs {
         address: u64,
         direction: XrefDirection,
@@ -681,7 +686,9 @@ impl GhidraBackend {
         query: &GhidraQuery,
     ) -> Result<GhidraResult> {
         match query {
-            GhidraQuery::Functions { limit, .. } | GhidraQuery::Xrefs { limit, .. }
+            GhidraQuery::Functions { limit, .. }
+            | GhidraQuery::Xrefs { limit, .. }
+            | GhidraQuery::Instructions { limit, .. }
                 if *limit == 0 || *limit > 5000 =>
             {
                 bail!("Ghidra query limit must be 1..5000")

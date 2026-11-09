@@ -116,6 +116,33 @@ public class ReAgentBridge extends HeadlessScript {
                     out.addProperty("truncated", code.length() > 65536);
                     out.addProperty("artifact_path", artifact.toAbsolutePath().toString());
                 } finally { decompiler.dispose(); }
+            } else if ("instructions".equals(op)) {
+                Function f = currentProgram.getFunctionManager().getFunctionContaining(resolve(q));
+                if (f == null) throw new IllegalArgumentException("no containing function");
+                int limit = q.get("limit").getAsInt(); long offset = q.get("offset").getAsLong();
+                if (limit < 1 || limit > 5000 || offset < 0) throw new IllegalArgumentException("invalid pagination");
+                JsonArray items = new JsonArray(); long seen = 0; boolean more = false;
+                var blockModel = new ghidra.program.model.block.BasicBlockModel(currentProgram);
+                var iter = currentProgram.getListing().getInstructions(f.getBody(), true);
+                while (iter.hasNext()) {
+                    monitor.checkCancelled(); var instruction = iter.next();
+                    if (seen++ < offset) continue;
+                    if (items.size() == limit) { more = true; break; }
+                    JsonObject row = new JsonObject();
+                    row.add("address", address(instruction.getAddress()));
+                    row.addProperty("text", instruction.toString());
+                    var block = blockModel.getFirstCodeBlockContaining(instruction.getAddress(), monitor);
+                    if (block != null) row.add("block_start", address(block.getFirstStartAddress()));
+                    row.addProperty("flow_type", instruction.getFlowType().toString());
+                    JsonArray flows = new JsonArray();
+                    for (Address flow : instruction.getFlows()) flows.add(address(flow));
+                    row.add("flows", flows);
+                    if (instruction.getFallThrough() != null) row.add("fallthrough", address(instruction.getFallThrough()));
+                    items.add(row);
+                }
+                out.add("function", function(f)); out.add("instructions", items);
+                out.addProperty("truncated", more);
+                if (more) out.addProperty("next_offset", offset + items.size());
             } else if ("xrefs".equals(op)) {
                 Address a = resolve(q);
                 int limit = q.get("limit").getAsInt();

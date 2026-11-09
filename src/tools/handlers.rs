@@ -661,3 +661,50 @@ pub(super) fn handle_analysis_verify<'a>(
         })
     })
 }
+
+pub(super) fn handle_differential_test<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    call_id: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        let input: args::DifferentialTestArgs = serde_json::from_value(args)?;
+        ensure!(
+            (1..=64).contains(&input.inputs_base64.len())
+                && (1..=10).contains(&input.case_timeout_seconds),
+            "invalid differential budget"
+        );
+        for encoded in &input.inputs_base64 {
+            ensure!(
+                BASE64.decode(encoded)?.len() <= 65536,
+                "input vector too large"
+            );
+        }
+        tools
+            .execution
+            .files
+            .known_file(agent, &input.target, true)?;
+        tools
+            .execution
+            .files
+            .known_file(agent, &input.reference, false)?;
+        let config = serde_json::to_string(
+            &json!({"inputs":input.inputs_base64,"timeout":input.case_timeout_seconds,"python":input.reference_python}),
+        )?;
+        tools
+            .execution
+            .runtime_tool(
+                agent,
+                call_id,
+                "py_run",
+                json!({
+                    "source":include_str!("../../workers/runtime/differential_runner.py"),
+                    "argv":[input.reference,config], "target":input.target,
+                    "timeout_secs":(input.case_timeout_seconds*128+20).min(3600)
+                }),
+            )
+            .await
+    })
+}

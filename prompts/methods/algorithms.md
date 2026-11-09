@@ -32,3 +32,5 @@ once the discriminating vectors agree, or state which operation, parameter or
 environment dependency remains unresolved.
 
 When the contract requests `algorithms`, return a TaskArtifact named `algorithms` with original evidence_id and structured={kind:"algorithms",rows:[...]}. Every row must cite its own evidence_id; use the structured artifact fields documented in the completion tool schema and project contract.
+Each structured row requires input, expected, observed, arithmetic, and evidence_id.
+Use differential_test with staged target/reference files and base64 stdin vectors for reusable bounded comparison. Fetch differential-results.json via job_artifacts; mismatches and inconclusive cases must remain visible.
