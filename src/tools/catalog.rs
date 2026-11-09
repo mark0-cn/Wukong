@@ -61,6 +61,14 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::AnalysisVerifyArgs>(
+            "analysis_verify",
+            "Verifier only: record an independent general-analysis verdict with expected and observed results, scope, counterexamples and verifier-owned evidence. Does not promote security impact. Records are immutable and appear in shared notes.",
+            ReplayPolicy::Transactional,
+            false,
+            handlers::handle_analysis_verify,
+            Visibility::Child,
+        ),
         spec::<args::CreateAgentArgs>(
             "create_agent",
             "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors gates admission with dependency_policy (default all_success). Failed requirements block execution and notify the parent.",

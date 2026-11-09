@@ -757,3 +757,21 @@ pub(super) struct PocVerifyArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimize_timeout_secs: Option<u64>,
 }
+
+choices!(AnalysisVerdict {
+    Supported,
+    Refuted,
+    Inconclusive
+});
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct AnalysisVerifyArgs {
+    pub producer_id: String,
+    pub claim: String,
+    pub scope: String,
+    pub expected: String,
+    pub observed: String,
+    pub verdict: AnalysisVerdict,
+    pub evidence_ids: Vec<String>,
+    pub counterexamples: Vec<String>,
+}
