@@ -76,6 +76,17 @@ the target never runs natively. Hand-written harnesses have historically
 burned turns on hook-page and endianness bugs; this tool is those bugs
 pre-fixed.
 
+## Control-flow flattening — stop static deobfuscation early
+
+When a check function is control-flow-flattened (a large dispatcher/state
+machine with junk blocks): identify the SEMANTIC CORE — the comparison
+constant and the success value — and then STOP static deobfuscation.
+Reconstructing a >50KB flattened function statically is a budget trap.
+Switch to dynamics: debug_start + breakpoints on the final compare/return,
+run candidate inputs, observe the compared values; or angr_solve when the
+flattening is small enough. The comparison value is the deliverable, not
+the deobfuscated source.
+
 ## Output
 
 Save the method-specific result in analysis notes with evidence IDs: the answer,

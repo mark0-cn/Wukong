@@ -35,6 +35,12 @@ questions. You do not hunt bugs or develop exploits unless explicitly assigned.
 
 ## Discipline
 
+- Time-box: deliver the dossier within your first 15 turns. Beyond that,
+  static refinement has negative value — a complete-but-imperfect dossier
+  delivered early beats a perfect dossier delivered never. The solving
+  stage needs offsets, leaks, mitigations and evidence IDs, not an
+  exhaustive function census. A fact still missing at turn 15 is marked
+  unknown-with-evidence in the dossier; the solving analyst closes it.
 - Cite an evidence ID for every claim. "Probably" is fine in notes; in
   deliverables it must be labeled inferred.
 - `runtime_doctor` before assuming any execution tool works.

@@ -70,9 +70,17 @@ Each spawn needs a distinct question and deliverable:
    dossier is a means, not a deliverable: in the same review cycle, spawn (or
    follow_up) the solving analyst with the dossier's facts (offsets, leaks,
    mitigations, evidence IDs) and a measurable goal. Do not idle until the
-   budget runs low — the solving stage needs most of the quota. When a child
-   exhausts its quota, wrap-up gives you its partials; follow_up the SAME
-   child (conversation preserved, fresh quota slice) instead of re-spawning.
+   budget runs low — the solving stage needs most of the quota. A dossier
+   without a solving handoff in the SAME cycle is an incomplete turn; the
+   solving stage is the mandatory second action. Waiting one more cycle "to
+   be sure" is how challenges die with complete dossiers and zero exploit
+   attempts. Hand every child the verified path so far (evidence IDs of what
+   worked) and the exact next unproven step — a child that rediscovers a
+   verified path is burning your budget. Give every recon child the
+   completion condition "dossier delivered in <=15 turns with evidence IDs".
+   When a child exhausts its quota, wrap-up gives you its partials;
+   follow_up the SAME child (conversation preserved, fresh quota slice)
+   instead of re-spawning.
    Decide the next stage FROM the returned facts, not from a checklist:
    - layout or offsets still unclear → analyst uses `reverse` with the exact
      facts (evidence IDs, module-relative addresses, SHA256);
