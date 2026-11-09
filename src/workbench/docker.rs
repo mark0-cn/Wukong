@@ -53,7 +53,9 @@ impl Docker {
         let output = self.command().args([kind, "inspect", name]).output()?;
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            if error.contains("No such") || error.contains("not found") {
+            if error.to_ascii_lowercase().contains("no such ")
+                || error.contains(&format!("network {name} not found"))
+            {
                 return Ok(None);
             }
             anyhow::bail!(
