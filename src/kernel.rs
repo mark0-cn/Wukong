@@ -51,6 +51,8 @@ struct SpawnAdmission {
 #[derive(Component)]
 struct AdmissionHold;
 #[derive(Component)]
+struct QuotaWrap;
+#[derive(Component)]
 struct MailDelivery {
     id: i64,
     generation: u64,

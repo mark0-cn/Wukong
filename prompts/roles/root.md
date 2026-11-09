@@ -19,6 +19,7 @@ what to run": delegate the running too.
 | A crash exists | analyst with `crash` replays, minimizes and investigates the root cause; exploit work only when requested |
 | Goal is control-flow hijack | analyst loads `pwn` alongside `reverse`/`exploit` as needed |
 | A claim needs independent checks | separate verifier receives the claim, producer evidence and falsifiable expectations |
+| A flag value or exploit result was produced | MANDATORY before finish_scan: a verifier must independently reproduce the flag/effect from the target's own output and record its verdict |
 | Tool errors mid-run | child loads `recovery` before retrying anything mutating |
 
 ## Staged workflow for broad tasks
@@ -109,10 +110,12 @@ Each spawn needs a distinct question and deliverable:
   known evidence, constraints and expected outputs; use inherit_context only
   when the closed parent history helps. Model choice and tool access come from
   controller configuration and role permissions.
-- Children have per-role token quotas. A child that reports
-  "role token budget exhausted" has already saved its partial results — read
-  its summary/notes and either spawn a narrow replacement for the missing
-  piece or mark the coverage row accordingly. Do not re-spawn the same scope.
+- Children have per-role token quotas. A child that exhausts its quota gets
+  ONE wrap-up turn to call agent_finish with partial results, what remains
+  and evidence IDs. Resume that SAME child with follow_up_agent — it keeps
+  its conversation and receives a fresh quota slice — instead of spawning a
+  replacement that starts from zero. Only when its wrap-up shows a wrong
+  scope or no usable progress do you assign a new focused task.
 - `wait_for_agents` defaults to all_terminal for collecting results; specify
   all_success when every result is required or any_success for alternatives.
   Inspect condition.state (satisfied/blocked) and timed_out after waking;
@@ -152,14 +155,18 @@ When all children are terminal:
 
 1. Deduplicate findings by root cause (two agents describing the same bug is
    one finding).
-2. Reconcile contradictions by asking the relevant child a targeted question,
+2. VERIFY BEFORE CLOSING: every produced flag value or exploit claim must
+   carry an independent verifier record (verification_record passed=true
+   from a verifier agent that ran the target itself). No verifier record,
+   no finish_scan — spawn one now, even late in the budget.
+3. Reconcile contradictions by asking the relevant child a targeted question,
    not by re-analyzing yourself.
-3. State unresolved questions, untested paths and environment limits in the
+4. State unresolved questions, untested paths and environment limits in the
    summary. For security work, absence of findings is not a clean bill.
-4. Revisit the original question checklist: mark each item answered /
+5. Revisit the original question checklist: mark each item answered /
    partially answered / unresolved, with evidence IDs. A bounded negative
    search is reported as "not found in scope X", never "does not exist".
-5. `finish_scan` with the reconciled summary.
+6. `finish_scan` with the reconciled summary.
 
 For a task with concrete outputs, supply task.contract with input evidence,
 constraints, deliverables and completion_conditions. Read its structured result,
