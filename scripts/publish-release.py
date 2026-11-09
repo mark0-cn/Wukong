@@ -48,6 +48,11 @@ def publish(directory, tag):
     manifest = read_json(directory / "release.json")
     validation = read_json(directory / "validation-summary.json")
     revision = run(["git", "rev-parse", "HEAD"])
+    refs = run(["git", "ls-remote", "origin", "refs/tags/" + tag, "refs/tags/" + tag + "^{}"]).splitlines()
+    remote = {ref: sha for sha, ref in (line.split() for line in refs)}
+    tag_commit = remote.get("refs/tags/" + tag + "^{}", remote.get("refs/tags/" + tag))
+    if tag_commit != revision:
+        raise ValueError("Remote release tag moved or disappeared during the build")
     if manifest["source_revision"] != revision or manifest["version"] != number:
         raise ValueError("Release identity mismatch")
     if not validation.get("passed") or validation["source_revision"] != revision or validation["image"] != manifest["image"]:
