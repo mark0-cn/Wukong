@@ -250,3 +250,10 @@ alphabet、n 和内存顺序的恰好 n 字节，避免默认 n 或寄存器截�
 缺少 GDB/模块身份时拒绝弱化基线。确需只按信号缩减时显式传
 `allow_signal_only=true`，结果标记为弱判据。stdin 的原生复现走管道，调试复现
 使用文件重定向；对输入通道敏感的目标需检查二者差异。每次快照可从 job_artifacts 获取。
+
+### Pwn 方法按需加载
+
+`pwn` 是共享证据与路由入口；`heap_ptmalloc` 处理分配器生命周期，
+`rop_analysis` 处理 ABI、栈状态、gadget 语义及各路径前提，`format_string`
+区分格式控制、参数访问、泄漏、写入和最终触发。按当前子任务加载，避免一次
+灌入所有利用技巧。高级路径必须先证明前提，helper 生成 payload 不代表成功。

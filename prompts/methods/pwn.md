@@ -1,131 +1,39 @@
-# Pwn workflow
+# Pwn routing and evidence
 
-Goal: turn a confirmed overflow into a verified control-flow hijack with a
-minimal, reproducible payload. Load alongside `reverse` or `exploit`; keep the
-total skill count small.
+Use for a requested primitive or minimal PoC after the cause and input path are
+known. Load alongside the relevant capability; select only the method needed now.
 
-## Know the layout before writing bytes
+- Allocation/free lifetime or allocator metadata: `heap_ptmalloc`.
+- Saved return address, indirect control flow or gadget chain: `rop_analysis`.
+- Attacker bytes used as a printf-family format argument: `format_string`.
+- Uncertain RELRO, CET, seccomp or other runtime protection: inspect static and
+  live evidence before choosing a path; do not infer enablement from a name.
 
-- Buffer-to-saved-RIP offset: start from the reverse handoff, confirm at
-  runtime. Generate a cyclic pattern (pwntools `cyclic(N)` in a `file_put`
-  script), feed it via `job_start` or `crash_replay`, observe the faulting RIP
-  under `debug_start`/`debug_command`, and recover the offset with
-  `cyclic_find`. Cite both the static layout and the runtime observation.
-- Keep file offsets, module-relative offsets, link-time virtual addresses and runtime
-  addresses distinct. Ghidra queries use module-relative offsets even for non-PIE.
-  Derive runtime addresses from verified mappings/load bias; never guess bases.
-- A global canary import does not mean THIS function is protected: check the
-  actual prologue/epilogue of the vulnerable function before assuming no
-  canary.
+## Shared preconditions
 
-## Check the actual ABI and stack state
+Pin target/runtime hashes with `runtime_profile`. When a loader and libc are
+supplied, use `runtime_prepare` for immutable launch copies and check live
+mappings after startup. A library filename or page-aligned subtraction is not a
+match. Leaks and derived addresses belong to the observed process/session.
 
-Alignment is a property of the ABI and the observed call path, not a glibc release.
-Record SP at the relevant boundary and account for every gadget's stack consumption,
-register clobbers and memory operands. An extra ret changes alignment but is not a
-universal repair. Confirm an alignment fault from the actual instruction and operands;
-do not manufacture a failing attempt or require a no-ret control to fail when it works.
+Distinguish file offsets, module-relative offsets, link-time virtual addresses
+and runtime addresses. Ghidra queries use module-relative offsets even for
+non-PIE. Convert only with verified mapping/load-bias evidence.
 
-## Choose the win marker from the target's own output
+Use `crash_snapshot` for a stopped session and `cyclic_offset` for exact pattern
+parameters/bytes. A noncanonical return may leave PC at the ret instruction:
+inspect the saved slot and fault address before claiming PC control. Canary
+imports describe the binary, not every function; inspect the relevant prologue
+and epilogue. Do not invent a disclosure primitive from an echo or overwrite.
 
-The verification predicate must be an observation that ONLY the reached
-function produces — decompile it and cite the exact string. A prompt printed
-by the vulnerable function itself is not a win marker. Record the exact
-expected stdout/stderr bytes.
+## Demonstrate the requested effect
 
-## The staged checklists (follow these step by step; each step has a
-verification artifact)
+Define a predicate tied to the reached code or changed state. A startup prompt,
+crash, overwritten slot, changed PC and chosen behavior are different evidence
+levels. For protocol targets, drive your own launched instance, obtain its port
+from target facts, and preserve exact request/response bytes and session state.
 
-### ret2win
-0. Dossier facts: non-PIE win address (banner/leak), input channel, buffer.
-1. Offset empirically: cyclic(200) -> crash -> cyclic_find; confirm with
-   N 'A's crashing and N-8 not.
-2. Alignment: inspect ABI and SP; adjust only if the observed path requires it.
-3. Build the minimal payload from confirmed layout and target facts.
-4. Controls: no-overflow and wrong-target; interpret alignment controls from observation.
-5. 3/3 reproductions against the real service; save the payload and
-   transcripts as evidence, then agent_finish.
-
-### ret2libc with canary
-0. Dossier facts: buffer size, canary offset, saved-RIP offset, non-PIE
-   base, the leak source (banner %p / dlsym reference).
-1. Establish an actual disclosure primitive before claiming a canary value.
-   An overwrite or echo does not guarantee disclosure; preserve observed bytes,
-   width and process identity. If disclosure is absent, record the missing precondition.
-2. Derive a candidate base only from the actual mapped libc identity and symbol.
-   A page-aligned subtraction is a candidate, not proof of a library match.
-3. ASSEMBLE: padding + canary + saved-RBP junk + pop_rdi + binsh + system
-   (or a write-wrapper syscall path when system misaligns).
-4. Controls: no-overflow, wrong-canary, wrong-base — all must fail.
-5. 3/3 reproductions -> agent_finish with evidence IDs.
-
-### Live service connection (protocol challenges)
-1. Find the bind in disassembly: socket()/bind()/listen() and the port
-   constant (or a getsockname/printf of the port). Do not port-scan.
-2. Run the binary yourself in the background (exec/py_run), then connect
-   with pwntools remote('127.0.0.1', port). Drive your OWN instance: any
-   other running instance may differ in state, user or file layout.
-3. Capture everything as repr(); derive the protocol state machine.
-4. The flag comes from the service's own output; the connection
-   transcript IS the evidence.
-
-## Heap questions
-
-Load `heap_ptmalloc` when allocation/free lifetimes matter. Identify the actual allocator,
-ABI and version before interpreting chunks. Report the demonstrated primitive and failed
-preconditions; do not select a historical technique solely from a crash or a libc filename.
-
-## Format-string exploitation
-
-When user-controlled data reaches a printf-family format argument:
-
-1. Locate the offset: send `%p` probes (e.g. `%N$p` for N=1..20) and find
-   which positions echo your input bytes — that N is your write index.
-2. Choose the WRITE TARGET first: partial RELRO -> a GOT entry you can
-   trigger afterwards; full RELRO -> a writable data pointer used by a
-   later call, or a saved return address on the stack (the probe leak
-   reveals stack addresses).
-3. Write with `%N$hn` (2-byte) or `%N$n` chunks, splitting the target
-   value into ascending short writes; pad with `%<len>c` before each
-   `%hn`. Recompute the length after every chunk.
-4. Trigger the overwritten target and observe the win marker; record the
-   exact final format string as evidence.
-
-## ROP when gadgets are scarce
-
-- ret2csu: x86-64 binaries linked with __libc_csu_init expose a universal
-  gadget (the pop-rbx..r15 + call [r12+rbx*8] sequence) that sets rdi/rsi/
-  rdx and calls through a chosen pointer — enough for write/syscall chains
-  when pop-gadgets are missing. Confirm the sequence exists before
-  depending on it.
-- ret2dlresolve: resolve a symbol at runtime through the dynamic linker
-  (pwntools `Ret2dlresolvePayload`) when the PLT lacks the function you
-  need — no libc base required.
-- SROP: one `syscall; ret` gadget plus a crafted signal frame sets every
-  register at once; prefer when a single gadget and a readable stack are
-  all you have.
-
-## Partial RELRO GOT overwrite
-
-Absence of BIND_NOW alone does not establish partial RELRO or a writable slot.
-Inspect PT_GNU_RELRO and the selected relocation's actual mapping permissions.
-The PLT portion can remain writable under partial RELRO; do not generalize to
-the whole GOT. Only after proving the selected slot writable can an
-arbitrary-write primitive (overflow, format string, uninitialized index)
-can repoint a later-called import to a chosen address. Chain: find the
-write -> pick the GOT entry of a function called AFTER the write -> set it
--> trigger. Full RELRO removes this option; use the format-string or
-heap paths instead.
-
-## Verify with the real binary
-
-- `angr_solve` (see tooling) produces a hypothesis input; replay it against
-  the real target with `job_start`/`crash_replay` and cite BOTH the solver
-  job and the replay job.
-- A controlled saved return address, a changed PC and executed chosen behavior
-  are different evidence levels. Record each honestly; register control alone
-  does not establish successful arbitrary code execution.
-- Hand the final payload to a separate `verifier` agent with the predicate.
-
-Save payload bytes, offset, gadget/function addresses and execution evidence IDs.
-Return to the primary assignment; only a separate verifier can certify the impact.
+Preserve input bytes, runtime identities, address conversions, observations and
+controls that distinguish the hypothesis. `angr_solve` output is a hypothesis
+until replayed. Hand the final artifact and predicate to an independent verifier;
+report failed or unknown preconditions instead of upgrading partial control.

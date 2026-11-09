@@ -7,6 +7,7 @@ Reviewed 2026-11-09. These sources inform conditional methods, not unconditional
 - how2heap: https://github.com/shellphish/how2heap — version-scoped allocator demonstrations and patch references.
 - pwntools Corefile: https://docs.pwntools.com/en/stable/elf/corefile.html
 - pwntools cyclic: https://docs.pwntools.com/en/stable/util/cyclic.html
+- pwntools dynamic resolution: https://docs.pwntools.com/en/stable/rop/ret2dlresolve.html — record staging and reliability caveats.
 - pwntools ROP: https://docs.pwntools.com/en/stable/rop/rop.html
 - pwntools format strings: https://docs.pwntools.com/en/stable/fmtstr.html
 - pwninit: https://github.com/io12/pwninit — matching loader/libc environment concepts.
