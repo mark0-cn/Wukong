@@ -69,28 +69,11 @@ verification artifact)
 4. The flag comes from the service's own output; the connection
    transcript IS the evidence.
 
-## Heap exploitation basics (tcache era)
+## Heap questions
 
-When the target uses heap allocations, keep these facts and primitives in
-mind; verify each layout observation against the actual allocator version:
-
-- Chunk layout: size/prev_size header precedes user data; freed chunks
-  contain allocator metadata whose layout depends on bin, ABI and version.
-  Tcache arrived in upstream glibc 2.26; upstream 2.32 already includes
-  Safe-Linking for singly-linked lists, alignment and duplicate-free checks.
-  Never assume all freed chunks have the same two-pointer layout.
-- The most common primitives, in order of usefulness:
-  1. tcache poisoning: corrupt a freed chunk's next pointer so the next
-     malloc of that size returns an arbitrary address (overwrite a target
-     pointer, e.g. a function pointer or GOT entry when writable).
-  2. Use-after-free: a dangling pointer is reused after free — turn it
-     into a double-free or an overlapping chunk to build a poisoning
-     write.
-  3. Double-free (or overlapping free) of the same chunk, then reallocate
-     over it to forge the forward pointer.
-- Debug with the worker's gdb (gef: `heap chunks`, `heap bins`, `tcache
-  bins`) rather than reasoning from prints. Confirm the allocator version
-  from the target's actual mapped allocator, not build hints or the worker default.
+Load `heap_ptmalloc` when allocation/free lifetimes matter. Identify the actual allocator,
+ABI and version before interpreting chunks. Report the demonstrated primitive and failed
+preconditions; do not select a historical technique solely from a crash or a libc filename.
 
 ## Format-string exploitation
 
