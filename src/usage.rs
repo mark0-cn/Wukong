@@ -61,12 +61,15 @@ impl UsageService {
             tx.event(&run.id,Some(agent_id),if model_turn {"model.usage"} else {"model.usage_aux"},json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
             Ok(())
         })?;
-        // A response without usage cannot be costed when pricing rates are
-        // configured: pause exactly then, keeping cost accounting exact.
+        // A MAIN model response without usage cannot be costed when pricing
+        // rates are configured: pause exactly then, keeping cost accounting
+        // exact. Auxiliary calls (the summarizer) never pause the run: their
+        // cost is a bounded fraction of a turn, rig's hook does not reliably
+        // surface their usage, and the event above records the omission.
         // With flat zero pricing the cost is complete ($0) and only the
-        // token count drifts; the event above records the omission, and the
-        // kernel budget gate keeps enforcing on reported usage.
-        if !cost_known {
+        // token count drifts; the kernel budget gate keeps enforcing on
+        // reported usage.
+        if model_turn && !cost_known {
             let agent: AgentMetadata = self.store.load::<AgentMetadata>(agent_id)?;
             Coordinator::new(self.store.clone()).pause_budget(
                 &agent.run_id,
