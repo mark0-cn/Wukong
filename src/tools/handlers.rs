@@ -110,8 +110,39 @@ pub(super) fn handle_stop_agent<'a>(
     })
 }
 
-pub(super) fn handle_agent_finish<'a>(
-    tools: &'a ToolService,
+/// Literal placeholder flags — `flag{...}`, `Flag{.}`, `flag{AAAA...}`,
+/// `flag{test}` and escaped variants — must never pass as a submitted result.
+fn placeholder_flag_claim(answer: &str) -> bool {
+    let lower = answer.to_lowercase();
+    for (_, rest) in lower.match_indices("flag") {
+        let Some(after) = rest.strip_prefix("{") else {
+            continue;
+        };
+        let Some(close) = after.find('}') else {
+            continue;
+        };
+        let core: String = after[..close]
+            .chars()
+            .filter(|c| !matches!(c, '\\' | '_'))
+            .collect();
+        let placeholder = core.is_empty()
+            || core
+                .chars()
+                .all(|c| matches!(c, '.' | '…' | '+' | '-' | ' ' | '*' | 'x' | 'a'))
+            || core == "test"
+            || (core.len() >= 3
+                && core
+                    .chars()
+                    .next()
+                    .is_some_and(|first| core.chars().all(|c| c == first)));
+        if placeholder {
+            return true;
+        }
+    }
+    false
+}
+
+pub(super) fn handle_agent_finish<'a>(    tools: &'a ToolService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -130,6 +161,10 @@ pub(super) fn handle_agent_finish<'a>(
                 ..Default::default()
             }
         };
+        ensure!(
+            !placeholder_flag_claim(&result.answer),
+            "the answer contains a placeholder flag (flag{{...}}, Flag{{.}} and similar). Submit only a value observed in the target's own output, with its evidence id in evidence_ids; a bounded negative result is 'not found in scope X'."
+        );
         tools
             .store
             .verify_evidence_links(&agent.run_id, &result.evidence_links())?;

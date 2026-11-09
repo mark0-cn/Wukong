@@ -50,7 +50,14 @@ impl std::fmt::Display for WorkerDispatch {
             out,
             "worker dispatch {}; reconcile stable request {} before changing its arguments",
             self.method, self.request_id
-        )
+        )?;
+        if self.method.starts_with("debug.") || self.method == "interact.start" {
+            write!(
+                out,
+                " (this is a stateful session: to re-run with different arguments, close the session and open a new one instead of re-issuing the same request)"
+            )?;
+        }
+        Ok(())
     }
 }
 impl std::error::Error for WorkerDispatch {}

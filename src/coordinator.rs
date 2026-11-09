@@ -100,7 +100,11 @@ impl Coordinator {
                 turns: 0,
                 total_tokens: 0,
                 cost_usd: 0.0,
-                token_cap: None, // root is governed by the run budget, not a role quota
+                token_cap: run
+                    .budget
+                    .role_token_shares
+                    .contains_key(&Role::Root)
+                    .then(|| run.budget.role_token_cap(Role::Root)), // root is governed by the run budget alone unless an explicit root share is configured
                 summary: None,
                 error: None,
                 created_at: timestamp,
@@ -411,6 +415,17 @@ impl Coordinator {
                 agent.predecessors_released = true;
                 agent.error = None;
                 agent.task_result = None;
+                // Resuming the SAME agent must give it headroom: a fresh
+                // role-quota slice on top of what it already spent, so a
+                // quota-exhausted child continues instead of dying again on
+                // its first request.
+                if agent.token_cap.is_some() {
+                    agent.token_cap = Some(
+                        agent
+                            .total_tokens
+                            .saturating_add(run.budget.role_token_cap(agent.role)),
+                    );
+                }
                 agent.updated_at = now();
                 tx.save_record(&AgentSnapshot::from_parts(agent.clone(), conversation))?;
                 tx.event(
