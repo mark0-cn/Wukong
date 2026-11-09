@@ -474,7 +474,9 @@ pub(super) fn handle_binary_inspect<'a>(
             "sections_count": count("sections"),
             "symbols_count": count("symbols"),
             "full_evidence_id": evidence.id,
-            "full_bytes": bytes.len(),
+            "full_bytes": std::fs::metadata(&run.target_path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0),
         }))
     })
 }

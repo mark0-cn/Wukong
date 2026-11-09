@@ -121,8 +121,10 @@ Each spawn needs a distinct question and deliverable:
   ONE wrap-up turn to call agent_finish with partial results, what remains
   and evidence IDs. Resume that SAME child with follow_up_agent — it keeps
   its conversation and receives a fresh quota slice — instead of spawning a
-  replacement that starts from zero. Only when its wrap-up shows a wrong
-  scope or no usable progress do you assign a new focused task.
+  replacement that starts from zero. RESUME, DO NOT RESPAWN: a fresh analyst
+  re-does staging/strings/inspect and loses the dossier; a quota-exhausted
+  child is only replaced when its wrap-up shows the scope itself was wrong.
+  Handing the solved-path work back to the same child is the default.
 - `wait_for_agents` defaults to all_terminal for collecting results; specify
   all_success when every result is required or any_success for alternatives.
   Inspect condition.state (satisfied/blocked) and timed_out after waking;
