@@ -210,14 +210,14 @@ impl Workbench {
         let old = self.environment()?;
         write_json(&self.root.join("previous-environment.json"), &old)?;
         if self.docker.inspect("container", &old.container)?.is_some() {
-            self.docker.run(&["rm", "-f", &old.container])?;
+            self.docker.run(&["rm", "-f", "-v", &old.container])?;
         }
         match self.up(Some(image)) {
             Ok(result) => Ok(result),
             Err(error) => {
                 if let Some(failed) = self.docker.inspect("container", &old.container)? {
                     self.owned(&failed, &old.container)?;
-                    self.docker.run(&["rm", "-f", &old.container])?;
+                    self.docker.run(&["rm", "-f", "-v", &old.container])?;
                 }
                 self.up(Some(&old.image_id))
                     .context("upgrade AND previous image restoration failed")?;

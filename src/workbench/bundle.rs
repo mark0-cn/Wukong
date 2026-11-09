@@ -282,19 +282,36 @@ impl Workbench {
                 "import volume already exists"
             );
         }
-        self.docker.logged(
-            &[
-                "image",
-                "load",
-                "-i",
-                &source.join("images.tar").to_string_lossy(),
-            ],
-            &self.root.join("logs/image-import.log"),
-        )?;
+        let images: Vec<String> = serde_json::from_value(manifest["image_ids"].clone())?;
         ensure!(
-            self.docker.inspect("image", image)?.is_some(),
-            "bundle did not load the declared tool image"
+            images.iter().any(|id| id == image),
+            "tool image absent from bundle image list"
         );
+        let mut missing = false;
+        for id in &images {
+            ensure!(
+                id.starts_with("sha256:") && id.len() == 71,
+                "invalid bundled image ID"
+            );
+            missing |= self.docker.inspect("image", id)?.is_none();
+        }
+        if missing {
+            self.docker.logged(
+                &[
+                    "image",
+                    "load",
+                    "-i",
+                    &source.join("images.tar").to_string_lossy(),
+                ],
+                &self.root.join("logs/image-import.log"),
+            )?;
+        }
+        for id in &images {
+            ensure!(
+                self.docker.inspect("image", id)?.is_some(),
+                "bundle did not load declared image {id}"
+            );
+        }
         for suffix in &suffixes {
             let volume = self.name(suffix);
             self.docker.run(&[

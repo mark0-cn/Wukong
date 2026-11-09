@@ -234,7 +234,7 @@ impl Workbench {
         }
         if let Some(existing) = self.docker.inspect("container", service)? {
             self.owned(&existing, service)?;
-            self.docker.run(&["rm", "-f", service])?;
+            self.docker.run(&["rm", "-f", "-v", service])?;
         }
         self.docker.run(&[
             "create",
@@ -288,7 +288,7 @@ impl Workbench {
         for name in [self.name(&format!("{id}-service")), env.container.clone()] {
             if let Some(existing) = self.docker.inspect("container", &name)? {
                 self.owned(&existing, &name)?;
-                self.docker.run(&["rm", "-f", &name])?;
+                self.docker.run(&["rm", "-f", "-v", &name])?;
             }
         }
         for name in [env.network, self.name(&format!("{id}-egress"))] {
@@ -332,7 +332,7 @@ impl Workbench {
             ],
             &root.join("results/export-rootfs.log"),
         );
-        let cleanup = self.docker.run(&["rm", &name]);
+        let cleanup = self.docker.run(&["rm", "-v", &name]);
         result?;
         cleanup?;
         let digest = crate::binary::sha256_file(&output)?;
@@ -376,7 +376,7 @@ impl Workbench {
             &image,
         ])?;
         let result = self.docker.copy_from(&name, path, &output);
-        let cleanup = self.docker.run(&["rm", &name]);
+        let cleanup = self.docker.run(&["rm", "-v", &name]);
         result?;
         cleanup?;
         ensure!(
@@ -495,7 +495,7 @@ impl Workbench {
                 json!({"directory":output,"files":files,"note":"downloaded symbols may change libc bytes; originals and selected runtime remain unchanged"}),
             )
         })();
-        let cleanup = self.docker.run(&["rm", "-f", &name]);
+        let cleanup = self.docker.run(&["rm", "-f", "-v", &name]);
         result.and_then(|value| {
             cleanup?;
             Ok(value)
