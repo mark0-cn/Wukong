@@ -36,6 +36,7 @@ pub(crate) fn snapshot(store: &Store, run_id: &str) -> Result<ReportSnapshot> {
             documents.extend(Store::tx_list::<SharedDocument>(tx, kind, run_id)?);
         }
         Ok(ReportSnapshot {
+            analysis_verifications: Store::tx_list(tx, "analysis_verification", run_id)?,
             run,
             agents: Store::tx_list(tx, "agent", run_id)?,
             findings: Store::tx_list(tx, "finding", run_id)?,

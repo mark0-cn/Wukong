@@ -20,6 +20,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Worker integration tests failed.' }
     & python fixtures/analysis/test_analysis.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'General analysis scoring tests failed.' }
+    & python fixtures/analysis/test_compare_runs.py 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Agent experiment scoring tests failed.' }
+    & python workers/runtime/test_differential.py 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Differential harness tests failed.' }
     if ($DockerContainer) {
         $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
         $dockerExe = if ($dockerCommand) { $dockerCommand.Source } else { Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe' }
