@@ -1,0 +1,202 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    # Manual runs exercise builds and upload candidate artifacts, without publishing a Release.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workbench-release
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      image: ${{ steps.meta.outputs.image }}
+      candidate: ${{ steps.meta.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Validate version and source
+        id: meta
+        env:
+          NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+          USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [[ "$NAMESPACE" =~ ^[a-z0-9][a-z0-9_-]*$ && -n "$USERNAME" ]]
+          git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            version=$(python scripts/release.py check --tag "$GITHUB_REF_NAME")
+          else
+            version=$(python scripts/release.py check)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=$NAMESPACE/re-agent-workbench" >> "$GITHUB_OUTPUT"
+          echo "candidate=$NAMESPACE/re-agent-workbench:build-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+  checks:
+    needs: metadata
+    uses: ./.github/workflows/ci.yml
+    with:
+      release: true
+
+  image:
+    needs: metadata
+    runs-on: ${{ vars.WORKBENCH_LINUX_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 120
+    outputs:
+      digest: ${{ steps.digest.outputs.value }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Reuse candidate on retries
+        id: existing
+        env:
+          CANDIDATE: ${{ needs.metadata.outputs.candidate }}
+        run: echo "digest=$(python scripts/publish-release.py --inspect-image "$CANDIDATE")" >> "$GITHUB_OUTPUT"
+      - name: Prepare disk and locked inputs
+        if: steps.existing.outputs.digest == ''
+        run: |
+          bash scripts/prepare-ci-disk.sh 25
+          python scripts/fetch-worker-deps.py
+      - uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        if: steps.existing.outputs.digest == ''
+        id: build
+        with:
+          files: docker-bake.hcl
+          targets: workbench
+          push: true
+          provenance: mode=max
+          sbom: true
+          set: |
+            workbench.tags=${{ needs.metadata.outputs.candidate }}
+            workbench.args.REVISION=${{ github.sha }}
+            workbench.args.VERSION=${{ needs.metadata.outputs.version }}
+            *.cache-from=type=registry,ref=${{ needs.metadata.outputs.image }}:buildcache
+            workbench.cache-to=type=registry,ref=${{ needs.metadata.outputs.image }}:buildcache,mode=max
+      - name: Resolve uploaded digest
+        id: digest
+        env:
+          CANDIDATE: ${{ needs.metadata.outputs.candidate }}
+        run: |
+          digest=$(python scripts/publish-release.py --inspect-image "$CANDIDATE")
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "value=$digest" >> "$GITHUB_OUTPUT"
+          df -h /
+
+  acceptance:
+    needs: [metadata, image, checks]
+    runs-on: ${{ vars.WORKBENCH_LINUX_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-acceptance-client
+          path: acceptance-client
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Pull candidate into a fresh runner
+        env:
+          IMAGE: ${{ needs.metadata.outputs.image }}@${{ needs.image.outputs.digest }}
+        run: |
+          bash scripts/prepare-ci-disk.sh 20
+          docker pull --platform linux/amd64 "$IMAGE"
+          chmod +x acceptance-client/re-agent
+      - name: Container and CLI acceptance
+        env:
+          IMAGE: ${{ needs.metadata.outputs.image }}@${{ needs.image.outputs.digest }}
+        run: |
+          mkdir -p validation
+          python scripts/check-workbench.py --image "$IMAGE" | tee validation/networks.txt
+          python scripts/check-release-image.py --image "$IMAGE" --revision "$GITHUB_SHA" --client acceptance-client/re-agent --output validation
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: image-validation
+          path: validation/
+          retention-days: 14
+          if-no-files-found: warn
+
+  package:
+    needs: [metadata, acceptance, checks]
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-client
+          path: client
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: image-validation
+          path: validation
+      - name: Package and verify
+        shell: pwsh
+        env:
+          RELEASE_TAG: v${{ needs.metadata.outputs.version }}
+        run: |
+          ./scripts/package-workbench.ps1 -Destination dist -ImageMetadata validation/image.json -Tag $env:RELEASE_TAG -BinaryPath client/re-agent.exe
+          Copy-Item validation/validation-summary.json, validation/doctor.json -Destination dist
+          python scripts/release.py checksums dist
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Expand-Archive -LiteralPath "dist/re-agent-$env:RELEASE_TAG-windows-amd64.zip" -DestinationPath package-check
+          ./package-check/install-workbench.ps1 -ValidateOnly
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: online-release
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [metadata, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: online-release
+          path: dist
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Publish accepted version, then advance latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/publish-release.py --directory dist --tag "$GITHUB_REF_NAME"
