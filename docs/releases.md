@@ -68,6 +68,6 @@ Actions → Release → Run workflow，选择默认分支。手动演练会推�
 
 ## 验收边界
 
-Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改拒绝；Linux runner 执行真实 Docker 集成测试。标准 Windows runner 不等同于用户 Docker Desktop + WSL2 桌面，不能声称完成了该环境的全自动端到端验收。首次及关键安装器改动应在真实 Windows 桌面补充安装/升级确认。当前 Windows 文件未做 Authenticode 签名。
+Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改拒绝，并用独立进程夹具验证首次安装、doctor 失败后的恢复、升级成功和手动回滚；这些安装器事务测试不调用真实 Docker。Linux runner 执行真实 Docker 集成测试。标准 Windows runner 不等同于用户 Docker Desktop + WSL2 桌面，不能声称完成了该环境的全自动端到端验收。首次及关键安装器改动应在真实 Windows 桌面补充安装/升级确认。当前 Windows 文件未做 Authenticode 签名。
 
 用户安装方法见 [在线安装](online-install.md)。发布包不包含镜像 tar、模型密钥、用户配置或题目数据；原有工作区导入/导出功能与 CI 在线发行独立。
