@@ -179,6 +179,7 @@ jobs:
           docker pull --platform linux/amd64 "$IMAGE"
           chmod +x acceptance-client/re-agent
       - name: Container and CLI acceptance
+        shell: bash # Explicit Bash enables pipefail so tee cannot hide a failed network check.
         env:
           IMAGE: ${{ needs.metadata.outputs.image }}@${{ needs.image.outputs.digest }}
         run: |
