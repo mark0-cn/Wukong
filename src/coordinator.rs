@@ -166,6 +166,18 @@ impl Coordinator {
         CompletionRules::validate_contract(&request.contract)?;
         Self::validate_evidence(tx, &run.id, &request.contract.input_evidence_ids)?;
         let agents = tx.records::<AgentMetadata>(&run.id)?;
+        if let Some(failed) = agents.iter().find(|a| {
+            a.scope.trim() == request.scope.trim()
+                && a.role == request.role
+                && a.status.terminal()
+                && a.error.as_deref().is_some_and(|error| error.contains("budget"))
+        }) {
+            bail!(
+                "scope '{}' belongs to a quota-exhausted child ({}): resume it with follow_up_agent instead of spawning a replacement — its conversation and dossier are preserved",
+                request.scope.trim(),
+                failed.id
+            );
+        }
         if let Some(existing) = agents.iter().find(|a| {
             a.scope.trim() == request.scope.trim() && a.role == request.role && !a.status.terminal()
         }) {

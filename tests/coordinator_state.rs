@@ -32,8 +32,32 @@ fn request(scope: &str) -> ChildRequest {
 }
 
 #[test]
-fn wait_for_predecessors_is_validated_and_persisted() {
+fn quota_exhausted_scope_requires_followup_instead_of_respawn() {
     let (_dir, store, c, run) = fixture();
+    let child = c.create_child(&run.root_id, request("recon-scope")).unwrap();
+    assert!(child.created);
+    store
+        .write(|tx| {
+            let mut agent: AgentMetadata = tx.get_record(&child.agent.id).unwrap();
+            agent.status = Status::Failed;
+            agent.error = Some("agent model budget reached".into());
+            tx.save_record(&agent)
+        })
+        .unwrap();
+    let error = c
+        .create_child(&run.root_id, request("recon-scope"))
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("follow_up_agent"),
+        "{error:#}"
+    );
+    // A DIFFERENT scope stays spawnable.
+    let other = c.create_child(&run.root_id, request("other-scope")).unwrap();
+    assert!(other.created);
+}
+
+#[test]
+fn wait_for_predecessors_is_validated_and_persisted() {    let (_dir, store, c, run) = fixture();
     let mut blocked = request("gated child");
     blocked.wait_for_predecessors = vec!["agent-does-not-exist".into()];
     let error = c.create_child(&run.root_id, blocked).unwrap_err();
