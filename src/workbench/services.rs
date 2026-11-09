@@ -465,6 +465,7 @@ impl Workbench {
                 "/work",
                 &name,
                 "timeout",
+                "--kill-after=5s",
                 "180",
                 "pwninit",
                 "--bin",
@@ -482,6 +483,32 @@ impl Workbench {
             // Root changes only disposable copies. Downloads/parsing run unprivileged.
             self.docker
                 .run(&["exec", &name, "chmod", "-R", "a+rwX", "/work"])?;
+            // Match the immutable image's symbol cache by Build-ID before downloading.
+            let cached_symbols = r#"import sys,re,json,subprocess
+from pathlib import Path
+sys.path.insert(0,'/opt/re-agent/runtime')
+from worker_profile import file_identity
+identity=file_identity('libc.so.6'); build=identity.get('build_id') or ''
+source='pwninit_download'
+if re.fullmatch('[0-9a-fA-F]{4,128}',build):
+    symbols=Path('/usr/lib/debug/.build-id')/build[:2]/(build[2:]+'.debug')
+    if symbols.is_file():
+        subprocess.run(['eu-unstrip','-o','libc.symbols.so','libc.so.6',str(symbols)],check=True,timeout=30)
+        Path('libc.symbols.so').replace('libc.so.6')
+        source='tool_image_build_id_cache'
+Path('symbols-source.json').write_text(json.dumps({'source':source,'build_id':build,'source_sha256':identity['sha256']}))
+"#;
+            self.docker.run(&[
+                "exec",
+                "--user",
+                "65534:65534",
+                "--workdir",
+                "/work",
+                &name,
+                "python3",
+                "-c",
+                cached_symbols,
+            ])?;
             let execution = self.docker.logged(&args, &root.join("results/pwninit.log"));
             fs::create_dir_all(&output)?;
             self.docker.copy_from(&name, "/work/.", &output)?;
