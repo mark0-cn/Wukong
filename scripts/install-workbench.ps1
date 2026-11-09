@@ -46,7 +46,12 @@ if (Get-Process -Name re-agent -ErrorAction SilentlyContinue | Where-Object { $_
 $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($destinationPath))
 if ($drive.AvailableFreeSpace -lt 1GB) { throw 'At least 1 GiB free space is required on the installation drive. Docker image storage needs additional space.' }
 $config = Join-Path $destinationPath 're-agent.toml'
-$newExe = Join-Path $PSScriptRoot 're-agent.exe'
+# Publish the candidate into the normal application directory before invoking it.
+# A source/extraction folder can carry a Low integrity label that denies Docker pipe access.
+$stage = Join-Path $destinationPath ('.staging\' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $stage -Force | Out-Null
+$newExe = Join-Path $stage 're-agent.exe'
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 're-agent.exe') -Destination $newExe
 function Invoke-WorkbenchJson([string[]]$Arguments) {
     $result = & $newExe --config $config @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Workbench command failed: $($Arguments -join ' ')" }
@@ -58,7 +63,7 @@ $switched = $false
 Push-Location -LiteralPath $destinationPath
 try {
     if (Test-Path -LiteralPath $config) {
-        $status = Invoke-WorkbenchJson @('env','status')
+        $status = Invoke-WorkbenchJson -Arguments @('env','status')
         if ($status.environment) { $previousImage = $status.environment.image_id }
         $backup = Join-Path $destinationPath ('.previous\' + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $backup -Force | Out-Null
@@ -113,4 +118,8 @@ image = $image
         foreach ($file in Get-ChildItem -LiteralPath $backup -File) { Copy-Item -LiteralPath $file.FullName -Destination $destinationPath -Force }
     }
     throw $originalError
-} finally { Pop-Location }
+} finally {
+    Pop-Location
+    Remove-Item -LiteralPath $newExe -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stage -ErrorAction SilentlyContinue
+}
