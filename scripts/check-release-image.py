@@ -91,8 +91,17 @@ def main():
             checks["debug_attach"] = True
             cli("challenge", "verify", "release-check")
             cli("challenge", "down", "release-check")
-            cli("env", "update", "--image", args.image)
+            # A distinct image ID catches upgrades that accidentally keep the old worker.
+            update_dockerfile = fixture / "Dockerfile.update"
+            update_dockerfile.write_text(f'FROM {args.image}\nLABEL re-agent.acceptance="{workspace_id}"\n')
+            update_tag = "re-agent-release-update:" + workspace_id
+            docker("build", "-f", update_dockerfile, "-t", update_tag, fixture)
+            updated_id = json.loads(docker("image", "inspect", update_tag))[0]["Id"]
+            assert updated_id != image["image_id"]
+            cli("env", "update", "--image", update_tag)
+            assert cli("env", "status")["environment"]["image_id"] == updated_id
             cli("env", "rollback")
+            assert cli("env", "status")["environment"]["image_id"] == image["image_id"]
             assert cli("env", "doctor")["passed"]
             checks["update_rollback"] = True
         save("validation-summary.json", {"passed": True, "source_revision": args.revision, "image": args.image, "checks": checks, "windows_docker_desktop_e2e": "not covered by hosted runners"})
