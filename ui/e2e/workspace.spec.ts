@@ -1,4 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { agents, budget, finding, host, tool, workspace } from '../src/test/fixtures';
 
 async function mockDesktop(page: Page) {
@@ -59,7 +61,7 @@ test('shows public progress and paired tool results without raw JSON', async ({ 
   await expect(page.getByText(/visible-on-demand/)).toBeVisible();
   await expect(page.locator('.agent-card')).toHaveCount(3);
   expect(errors).toEqual([]);
-  await page.screenshot({ path: '/private/tmp/re-agent-web-transcript.png', fullPage: true });
+  await page.screenshot({ path: join(tmpdir(), 're-agent-web-transcript.png'), fullPage: true });
 });
 test('retains per-agent drafts and targets message delivery after navigation', async ({ page }) => {
   await page.goto('/');
