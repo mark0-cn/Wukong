@@ -306,9 +306,16 @@ impl Coordinator {
             .context("recipient missing")?;
         let run: RunRecord = tx.get_record(&target.run_id)?.context("run missing")?;
         ensure!(!run.status.terminal(), "assessment is terminal");
+        let quota_failed_target = target.status == Status::Failed
+            && target
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("budget"));
         ensure!(
-            !target.status.terminal() || target.status == Status::Completed,
-            "recipient is stopped or failed; create a new focused task"
+            !target.status.terminal()
+                || target.status == Status::Completed
+                || (quota_failed_target && options.kind == MessageKind::FollowUp),
+            "recipient is stopped or failed; create a new focused task (quota-exhausted children resume with follow_up_agent)"
         );
         let sender_generation = if sender != "operator" {
             let from: AgentMetadata = tx
@@ -383,12 +390,21 @@ impl Coordinator {
             original.envelope.replied_by = Some(mid);
             tx.replace_envelope(&original)?;
         }
-        if target.status == Status::Completed && options.kind == MessageKind::FollowUp {
+        let quota_failed = target.status == Status::Failed
+            && target
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("budget"));
+        if options.kind == MessageKind::FollowUp && (target.status == Status::Completed || quota_failed) {
             // Keep the old conversation as background, but start a new
             // Rig run so its lifecycle call cannot be replayed as new work.
             let mut current = Some(target.clone());
             while let Some(mut agent) = current {
-                if agent.status != Status::Completed {
+                let reopen_this = agent.status == Status::Completed
+                    || (agent.id == target.id
+                        && quota_failed
+                        && target.error.as_deref() == agent.error.as_deref());
+                if !reopen_this {
                     ensure!(!agent.status.terminal(), "ancestor is stopped or failed");
                     break;
                 }
@@ -681,7 +697,44 @@ impl Coordinator {
         self.store
             .write(|tx| Self::tx_finish_result(tx, agent_id, result))
     }
-    pub(crate) fn tx_finish_result(
+    /// A flag-looking token in a result that is NOT a literal placeholder
+/// (`flag{...}`, `Flag{.}`, `flag{AAAA}`) — the kind of claim an independent
+/// verifier must reproduce before the root closes the assessment.
+fn contains_flag_claim(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let mut rest = lower.as_str();
+    while let Some(index) = rest.find("flag") {
+        let after = &rest[index + 4..];
+        let Some(body) = after.strip_prefix('{') else {
+            rest = after;
+            continue;
+        };
+        let Some(close) = body.find('}') else {
+            break;
+        };
+        let core: String = body[..close]
+            .chars()
+            .filter(|c| !matches!(c, '\\' | '_'))
+            .collect();
+        let placeholder = core.is_empty()
+            || core
+                .chars()
+                .all(|c| matches!(c, '.' | '…' | '+' | '-' | ' ' | '*' | 'x' | 'a'))
+            || core == "test"
+            || (core.len() >= 3
+                && core
+                    .chars()
+                    .next()
+                    .is_some_and(|first| core.chars().all(|c| c == first)));
+        if !placeholder {
+            return true;
+        }
+        rest = &body[close..];
+    }
+    false
+}
+
+pub(crate) fn tx_finish_result(
         tx: &crate::store::StateSession<'_>,
         agent_id: &str,
         result: TaskResult,
@@ -714,6 +767,24 @@ impl Coordinator {
         tx.save_record(&agent)?;
         Self::notify_terminal(tx, &agent)?;
         if agent.role == Role::Root {
+            // Independent verification gate: a flag value in any child's
+            // accepted result must be reproduced by a verifier before the
+            // assessment can close.
+            let others: Vec<AgentMetadata> = tx.records::<AgentMetadata>(&agent.run_id)?;
+            let claim = others.iter().any(|other| {
+                other.id != agent.id
+                    && other
+                        .task_result
+                        .as_ref()
+                        .is_some_and(|result| Self::contains_flag_claim(&result.answer))
+            });
+            if claim {
+                let verifications: Vec<Verification> = tx.records::<Verification>(&agent.run_id)?;
+                ensure!(
+                    verifications.iter().any(|verification| verification.passed),
+                    "a child reported a flag value that no verifier has independently reproduced; spawn a verifier for the claim and record verification_record passed=true before finish_scan"
+                );
+            }
             let mut run: RunRecord = tx.get_record(&agent.run_id)?.context("run missing")?;
             run.status = agent.status;
             run.summary = Some(summary.to_owned());
