@@ -17,6 +17,11 @@ try:  # GDB/MI parsing is optional: the bridge must serve jobs without it.
 except ImportError:
     parse_mi_response = None
 
+def load_launch_environment(root,params):
+    from worker_launch import load
+    spec,_,_,_,_=load(root,params)
+    return spec.get("env",{})
+
 class DebugSession:
     """One lock and one result-token queue own each GDB/MI process."""
     def __init__(self, root, params, isolated=False):
@@ -34,7 +39,14 @@ class DebugSession:
         self.experiment = None
         args = list(params.get("args", []))
         self.stdin_path = confined(root, params["_stdin"], True) if params.get("_stdin") else None
-        if isolated:
+        launch = None
+        if params.get("launch_spec"):
+            from worker_launch import resolve
+            launch=resolve(root,params,isolated,self.stdin_path or (confined(root,params["input"],True) if params.get("input") else None))
+            if launch["input_mode"]=="pty": raise ValueError("PTY debugging needs an external terminal; use interactive PTY or a debug container")
+            target,args,self.experiment=launch["target"],launch["args"],launch["experiment"]
+            self.stdin_path=launch["stdin_path"] if launch["input_mode"]=="stdin_pipe" else None
+        elif isolated:
             import isolation
             self.experiment = isolation.sandbox(root, isolation.allocate_uid(root))
             target = isolation.stage_file(target, self.experiment, "target.bin", True)
@@ -53,15 +65,27 @@ class DebugSession:
         self.command("-gdb-set pagination off", 10, True)
         self.command("-gdb-set mi-async on", 10, True)
         self.command("-gdb-set disable-randomization off", 10, True)
-        if self.experiment:
+        if launch:
+            import shlex
+            wrapper=[]
+            if self.experiment:
+                uid=str(self.experiment["uid"])
+                wrapper=["setpriv","--reuid="+uid,"--regid="+uid,"--clear-groups","--no-new-privs"]
+            if launch["loader"]: wrapper += [str(launch["loader"]),"--library-path",str(launch["library_path"])]
+            if wrapper: self.command("-gdb-set exec-wrapper " + shlex.join(wrapper),10,True)
+            self.command("-environment-cd " + json.dumps(str(launch["cwd"])),10,True)
+            for key,value in load_launch_environment(root,params).items():
+                self.command("-gdb-set environment " + json.dumps(key+"="+value),10,True)
+        elif self.experiment:
             uid = str(self.experiment["uid"])
             self.command("-gdb-set exec-wrapper setpriv --reuid=" + uid + " --regid=" + uid + " --clear-groups --no-new-privs", 10, True)
             self.command("-environment-cd " + json.dumps(self.experiment["work"]), 10, True)
+        self.launch_identity=launch["identity"] if launch else None
         self.persist("running")
 
     def persist(self, state):
         atomic_json(self.directory / "session.json", {"session_id": self.id, "state": state, "gdb_pid": self.process.pid,
-                    "daemon_pid": os.getpid(), "updated_at": time.time()})
+                    "daemon_pid": os.getpid(), "launch_identity":self.launch_identity, "updated_at": time.time()})
 
     def read_records(self):
         with (self.directory / "transcript.mi").open("w", encoding="utf-8") as transcript:
@@ -136,7 +160,7 @@ class DebugSession:
             groups = self.command("-list-thread-groups", 10, True)
             candidates = [g for g in (groups.get("payload") or {}).get("groups", []) if g.get("pid")]
             if len(candidates) != 1: raise ValueError("runtime profile requires exactly one live inferior")
-            return {"session_id":self.id, "process":process_profile(candidates[0]["pid"]),
+            return {"session_id":self.id, "launch_identity":self.launch_identity, "process":process_profile(candidates[0]["pid"]),
                     "transcript":"debug/" + self.id + "/transcript.mi"}
 
     def close(self):

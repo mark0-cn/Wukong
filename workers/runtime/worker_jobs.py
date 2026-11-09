@@ -24,6 +24,12 @@ class JobManager:
         if not self.trusted and not self.isolated:
             raise ValueError("production execution requires a root Linux worker with UID/GID/CHOWN capabilities; use explicit trusted_local only for trusted fixtures")
         spec = dict(params)
+        if spec.get("launch_spec"):
+            from worker_launch import load
+            launch,_,_,_,_=load(self.root,spec)
+            spec["input_mode"]="stdin" if launch["input_mode"]=="stdin_pipe" else "argv"
+            if launch["input_mode"]=="pty": raise ValueError("PTY replay is not supported; use interact.start and verify the delivery mode explicitly")
+            spec.setdefault("timeout_secs",launch["timeout_secs"])
         spec["isolated"] = self.isolated
         spec["call_id"] = spec.get("call_id") or spec.get("request_id")
         spec["kind"] = kind
