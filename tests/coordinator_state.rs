@@ -33,16 +33,10 @@ fn request(scope: &str) -> ChildRequest {
 
 #[test]
 fn quota_exhausted_scope_requires_followup_instead_of_respawn() {
-    let (_dir, store, c, run) = fixture();
+    let (_dir, _store, c, run) = fixture();
     let child = c.create_child(&run.root_id, request("recon-scope")).unwrap();
     assert!(child.created);
-    store
-        .write(|tx| {
-            let mut agent: AgentMetadata = tx.get_record(&child.agent.id).unwrap();
-            agent.status = Status::Failed;
-            agent.error = Some("agent model budget reached".into());
-            tx.save_record(&agent)
-        })
+    c.set_status(&child.agent.id, Status::Failed, Some("agent model budget reached".into()))
         .unwrap();
     let error = c
         .create_child(&run.root_id, request("recon-scope"))
