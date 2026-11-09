@@ -1,6 +1,7 @@
 """Commands."""
 from pathlib import Path
 import os
+import shutil
 import threading
 import uuid
 from worker_common import bounded_int, safe_env
@@ -25,10 +26,21 @@ class CommandService:
             # Synchronous, Strix-style shell execution: run in a fresh
             # directory under the exec tmpfs (the state volume is data, not
             # code), bounded output, hard timeout, optional uid isolation.
-            workdir = Path("/tmp") / "re-agent-exec" / uuid.uuid4().hex
+            if os.name == "nt":
+                # Trusted-local Windows host: the system temp directory, since
+                # "/tmp" does not exist and the state root may be read-only.
+                base = Path(os.environ.get("TEMP") or os.environ.get("TMP") or str(self.root))
+            else:
+                base = Path("/tmp")
+            workdir = base / "re-agent-exec" / uuid.uuid4().hex
             workdir.mkdir(parents=True)
             env = safe_env(params.get("env"))
-            env.update({"RE_AGENT_STATE_DIR": str(self.root), "RE_AGENT_JOB_DIR": str(workdir)})
+            state_value, job_value = str(self.root), str(workdir)
+            if os.name == "nt":
+                # MSYS bash handles drive-letter paths in forward-slash form.
+                state_value = state_value.replace("\\", "/")
+                job_value = job_value.replace("\\", "/")
+            env.update({"RE_AGENT_STATE_DIR": state_value, "RE_AGENT_JOB_DIR": job_value})
             experiment = None
             cwd = workdir
             if self.isolated:
@@ -36,7 +48,20 @@ class CommandService:
                 experiment = isolation.sandbox(self.root, isolation.allocate_uid(self.root))
                 isolation.seal(experiment)
                 cwd = Path(experiment["work"])
-            shell = ["bash", "-lc"] if os.name != "nt" else ["cmd", "/C"]
+            if os.name != "nt":
+                shell = ["bash", "-lc"]
+            elif git := shutil.which("git"):
+                # Prefer the bash that ships with Git for Windows; the WSL
+                # launcher at system32/bash.exe may have no usable distro.
+                candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe"
+                if candidate.is_file():
+                    shell = [str(candidate), "-lc"]
+                else:
+                    shell = ["cmd", "/C"]
+            elif shutil.which("bash"):
+                shell = ["bash", "-lc"]
+            else:
+                shell = ["cmd", "/C"]
             result = run_process([*shell, command], cwd, env, timeout_secs, output_limit,
                                  workdir / "output", None, experiment)
             result["command"] = command

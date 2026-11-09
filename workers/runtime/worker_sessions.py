@@ -4,6 +4,7 @@ import os
 import shutil
 import threading
 from worker_common import WorkerError, atomic_json, bounded_int, load_json
+import worker_debugger
 from worker_debugger import DebugSession
 from worker_interactive import InteractSession
 
@@ -70,6 +71,8 @@ class SessionManager:
                 raise ValueError("production debugger requires a root Linux worker with isolated inferiors")
             if not shutil.which("gdb"):
                 raise ValueError("GDB is unavailable in this worker")
+            if worker_debugger.parse_mi_response is None:
+                raise ValueError("pygdbmi is not installed in this worker; GDB debug is unavailable")
             session = DebugSession(self.root, params, self.isolated)
             with self.lock:
                 self.debug[session.id] = session

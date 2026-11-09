@@ -3,7 +3,6 @@ from pathlib import Path
 import collections
 import json
 import os
-from pygdbmi.gdbmiparser import parse_response as parse_mi_response
 import queue
 import re
 import subprocess
@@ -12,6 +11,11 @@ import time
 import uuid
 from worker_common import atomic_json, confined, safe_env
 from worker_processes import detached_options, terminate_tree
+
+try:  # GDB/MI parsing is optional: the bridge must serve jobs without it.
+    from pygdbmi.gdbmiparser import parse_response as parse_mi_response
+except ImportError:
+    parse_mi_response = None
 
 class DebugSession:
     """One lock and one result-token queue own each GDB/MI process."""
@@ -68,6 +72,8 @@ class DebugSession:
                     transcript.flush()
                     self.transcript_bytes += len(line.encode("utf-8"))
                 try:
+                    if parse_mi_response is None:
+                        raise ValueError("pygdbmi is not installed")
                     parsed = parse_mi_response(line)
                 except Exception:
                     self.dead = True

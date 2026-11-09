@@ -45,6 +45,12 @@ class SessionLaunchTests(unittest.TestCase):
 
 
 class GdbMiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import worker_debugger
+        if worker_debugger.parse_mi_response is None:
+            raise unittest.SkipTest("pygdbmi is not installed; GDB/MI parsing tests skipped")
+
     def session(self, directory, output):
         import worker_debugger as bridge
         import collections

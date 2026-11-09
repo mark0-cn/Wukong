@@ -45,6 +45,16 @@ def allocate_uid(root):
         temporary.chmod(0o600)
         os.replace(temporary, path)
         ensure_uid_entries()
+        # The batch registration covers only the first 512 allocations; the
+        # allocator itself is unbounded. Register every allocated uid so
+        # pwd.getpwuid-based tooling (pyvex/getpass) keeps working forever.
+        try:
+            import pwd
+            pwd.getpwuid(value)
+        except (ImportError, KeyError):
+            with open("/etc/passwd", "a", encoding="utf-8") as entries:
+                entries.write("re-agent-%d:x:%d:%d::/nonexistent:/bin/false\n"
+                              % (value, value, value))
         return value
 
 
