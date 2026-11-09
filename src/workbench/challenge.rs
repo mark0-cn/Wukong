@@ -340,14 +340,15 @@ impl Workbench {
         if challenge.target.binary.is_none() {
             let mut candidates = vec![];
             for (path, _) in files.as_object().unwrap() {
-                if path.contains("libc") || path.split('/').last().unwrap_or("").starts_with("ld-")
+                if path.contains("libc")
+                    || path.split('/').next_back().unwrap_or("").starts_with("ld-")
                 {
                     continue;
                 }
-                if let Ok(profile) = crate::binary::inspect(original.join(path)) {
-                    if profile.format == "Elf" {
-                        candidates.push(path.clone());
-                    }
+                if let Ok(profile) = crate::binary::inspect(original.join(path))
+                    && profile.format == "Elf"
+                {
+                    candidates.push(path.clone());
                 }
             }
             ensure!(
