@@ -169,6 +169,12 @@ pub(crate) static REGISTRY: &[Entry] = &[
         "Establish printf format control, argument access and bounded read/write primitives with runtime evidence."
     ),
     entry!(
+        pwn_environment,
+        Kind::Method,
+        "methods",
+        "Use prepared challenge LaunchSpecs, sibling Docker services and runtime identity when reproducing Pwn environments."
+    ),
+    entry!(
         pwn,
         Kind::Method,
         "methods",
