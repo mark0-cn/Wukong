@@ -3,6 +3,12 @@ use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum EnvCommand {
+    Export {
+        destination: PathBuf,
+    },
+    Import {
+        source: PathBuf,
+    },
     Up {
         #[arg(long)]
         image: Option<String>,
@@ -20,6 +26,8 @@ pub fn environment(config: &AppConfig, command: EnvCommand) -> Result<Value> {
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     match command {
+        EnvCommand::Export { destination } => workbench.export_bundle(&destination),
+        EnvCommand::Import { source } => workbench.import_bundle(&source),
         EnvCommand::Up { image } => workbench.up(image.as_deref()),
         EnvCommand::Status => workbench.status(),
         EnvCommand::Doctor => workbench.doctor(),
