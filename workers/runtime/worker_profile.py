@@ -16,6 +16,9 @@ def file_identity(path, expected_inode=None):
         if stat.st_size > MAX_FILE: raise ValueError("identity file exceeds 32 MiB")
         data = stream.read(MAX_FILE + 1)
         if len(data) > MAX_FILE: raise ValueError("identity file exceeds 32 MiB")
+        after = os.fstat(stream.fileno())
+        if (stat.st_size,stat.st_mtime_ns,stat.st_ctime_ns) != (after.st_size,after.st_mtime_ns,after.st_ctime_ns):
+            raise ValueError("file changed during identity observation")
     result = {"path":str(path), "sha256":hashlib.sha256(data).hexdigest(), "size":len(data),
               "build_id":None, "architecture":None, "bits":None, "interpreter":None}
     if data[:4] == b"\x7fELF":
@@ -24,12 +27,14 @@ def file_identity(path, expected_inode=None):
             import io
             elf = ELFFile(io.BytesIO(data))
             result.update(architecture=elf.get_machine_arch(), bits=elf.elfclass)
+            from worker_mitigations import declared_cet
+            result["elf_properties"] = declared_cet(elf)
             for segment in elf.iter_segments():
                 if segment["p_type"] == "PT_INTERP": result["interpreter"] = segment.get_interp_name()
                 if segment["p_type"] == "PT_NOTE":
                     for note in segment.iter_notes():
                         if note["n_type"] == "NT_GNU_BUILD_ID": result["build_id"] = str(note["n_desc"])
-        except (ImportError, ValueError, OSError) as error:
+        except Exception as error:
             result["elf_metadata_error"] = str(error)[:256]
     else:
         result["elf_metadata_error"] = "not ELF"
@@ -74,9 +79,12 @@ def process_profile(pid):
             module.update(file_identity(candidate, key))
         except (OSError, ValueError) as error: module["identity_error"] = str(error)[:256]
         modules.append(module)
+    from worker_mitigations import thread_observations, read_bounded
+    protections = thread_observations(proc)
     if before != identity(): raise ValueError("process identity changed during observation")
+    if read_bounded(proc / "maps",1048576) != raw: raise ValueError("process mappings changed during observation; retry at a stable stop")
     return {"pid":int(pid),"start_time_ticks":before,"maps":maps,"modules":modules,
-            "maps_text":raw,"status":"observed","complete_modules":len(seen)<=64}
+            "maps_text":raw,"status":"observed","complete_modules":len(seen)<=64, "protections":protections}
 
 
 class ProfileService:
@@ -90,7 +98,8 @@ class ProfileService:
         for key in ["target", "libc", "loader"]:
             if params.get(key): identities[key] = file_identity(confined(self.root, params[key], True))
         if "target" not in identities: raise ValueError("target required")
-        result = {"files":identities,"status":"declared_files_only","mapped_match":False,
+        from worker_mitigations import environment_support
+        result = {"environment_support":environment_support(), "files":identities,"status":"declared_files_only","mapped_match":False,
                   "note":"File identity is not proof that the target loaded this runtime."}
         if method == "runtime.profile": return result
         if set(identities) != {"target", "libc", "loader"}: raise ValueError("prepare requires target, libc and loader")

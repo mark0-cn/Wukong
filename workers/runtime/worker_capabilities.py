@@ -36,6 +36,8 @@ def doctor(root, trusted, isolated):
             pass
     python_toolchain = {
         "pwntools": _python_module("pwn"),
+        "pyelftools": _python_module("elftools"),
+        "pygdbmi": _python_module("pygdbmi"),
         "z3": _python_module("z3"),
         "angr": _python_module("angr"),
         "unicorn": _python_module("unicorn"),
@@ -47,8 +49,12 @@ def doctor(root, trusted, isolated):
             "metadata_protected_from_targets": isolated, "unique_experiment_uids": isolated,
             "tools": tools, "python_toolchain": python_toolchain,
             "capabilities": {"process_jobs": True, "persistent_jobs": True,
-            "debug_gdb_mi": tools["gdb"]["available"], "fuzz_qemu": linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
-            "crash_replay": True, "input_minimize": True, "poc_verify": True, "shell_exec": True,
+            "debug_gdb_mi": tools["gdb"]["available"] and python_toolchain["pygdbmi"], "fuzz_qemu": linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
+            "crash_replay": True, "input_minimize": tools["gdb"]["available"] and python_toolchain["pygdbmi"] and linux,
+            "input_minimize_signal_only": True, "runtime_profile": True,
+            "runtime_prepare": python_toolchain["pyelftools"], "mitigation_profile": True,
+            "process_mapping_observations": linux, "core_snapshot": python_toolchain["pwntools"],
+            "cyclic_offset": python_toolchain["pwntools"], "poc_verify": True, "shell_exec": True,
             "py_run": True, "emulation": python_toolchain["unicorn"],
             "symbolic_execution": python_toolchain["angr"],
             "formats": ["ELF"] if linux else [], "native_target_execution": True}}

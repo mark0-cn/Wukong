@@ -193,3 +193,12 @@ module identity remains unknown. `cyclic_offset` requires the original `pattern`
 `alphabet`, `n`, and exactly n `observed_base64` bytes. `input_minimize` requires
 GDB and matching location signatures by default; the explicit `allow_signal_only`
 fallback labels weaker results. Both replay and minimization support `input_mode`.
+
+### Protection observations
+
+`mitigation_profile` separates static target declarations, worker environment
+support and owned process observations. Use `session_id` or
+`interactive_session_id`, never a raw PID. Optional `address` returns the exact
+containing mapping's permissions. SHSTK status is per-thread; IBT and seccomp
+policy remain unknown unless separate evidence establishes them. See
+`mitigation_analysis` when those protections determine the next experiment.

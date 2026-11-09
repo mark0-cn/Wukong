@@ -787,6 +787,12 @@ pub(super) fn handle_runtime_profile<'a>(
                     );
                 }
             }
+            raw["mapped_match"] = json!(
+                !matches.is_empty()
+                    && matches
+                        .values()
+                        .all(|value| value == "mapped_hash_confirmed")
+            );
             raw["mapped_files"] = Value::Object(matches);
             raw["observation"] = observation;
             raw["status"] = json!("process_observed");
@@ -835,5 +841,43 @@ pub(super) fn handle_crash_snapshot<'a>(
                 .worker_call(agent, call_id, "core.snapshot", args)
                 .await
         }
+    })
+}
+
+pub(super) fn handle_mitigation_profile<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    call_id: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        let runtime =
+            handle_runtime_profile(tools, agent, call_id, "runtime_profile", args.clone()).await?;
+        let run = target(&tools.store, agent)?;
+        let binary = binary::inspect(&run.target_path)?;
+        let process = &runtime["observation"]["response"]["process"];
+        let mapping = args["address"].as_u64().and_then(|address| {
+            process["maps"]
+                .as_array()?
+                .iter()
+                .find(|m| {
+                    m["start"].as_u64().is_some_and(|start| start <= address)
+                        && m["end"].as_u64().is_some_and(|end| address < end)
+                })
+                .cloned()
+        });
+        Ok(json!({
+            "static_declarations":{"target_sha256":binary.sha256,"format":binary.format,
+                "mitigations":binary.mitigations,"elf_properties":runtime["files"]["target"]["elf_properties"]},
+            "environment_support":runtime["environment_support"],
+            "runtime_observation":runtime["observation"],
+            "mapped_files":runtime["mapped_files"],
+            "selected_address":args["address"], "selected_address_mapping":mapping,
+            "limits":["Static declarations and CPU/kernel support do not prove process enablement.",
+                "Thread observations are time-scoped; unknown and absent fields are not disabled.",
+                "Seccomp mode does not reveal allowed syscalls. No filter policy was extracted.",
+                "A selected mapping describes its current permissions, not the entire GOT or all future mappings."]
+        }))
     })
 }

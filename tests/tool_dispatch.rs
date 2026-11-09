@@ -1720,3 +1720,94 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
     service.close().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn mitigation_profiles_separate_static_unknown_runtime_and_session_ownership() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let store = Store::open(temp.path().join("state"))?;
+    let coordinator = Coordinator::new(store.clone());
+    // A small, parseable declaration fixture; it is never executed.
+    let target = temp.path().join("declarations.elf");
+    let mut elf = vec![0u8; 64];
+    elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    for (offset, value) in [(16, 2u16), (18, 62), (52, 64), (54, 56), (58, 64)] {
+        elf[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+    elf[20..24].copy_from_slice(&1u32.to_le_bytes());
+    fs::write(&target, elf)?;
+    let run =
+        coordinator.create_run(&target, "inspect protections", Budget::default(), json!({}))?;
+    let owner = child(
+        &coordinator,
+        &run.root_id,
+        Role::Analyst,
+        "protection owner",
+    )?;
+    let other = child(
+        &coordinator,
+        &run.root_id,
+        Role::Analyst,
+        "independent reader",
+    )?;
+    let mut config = AppConfig::default();
+    config.runtime.backend = RuntimeBackend::TrustedLocal;
+    config.runtime.state_dir = temp.path().join("worker");
+    let service = ToolService::new(config, store).await?;
+    let staged = service
+        .execute(&owner.id, "mitigation:stage", "stage_target", json!({}))
+        .await?;
+    assert!(!staged.is_error, "{staged:?}");
+    let path = result(&staged)["path"].as_str().unwrap();
+    let profile = service
+        .execute(
+            &owner.id,
+            "mitigation:static",
+            "mitigation_profile",
+            json!({"target":path,"address":4096}),
+        )
+        .await?;
+    assert!(!profile.is_error, "{profile:?}");
+    assert_eq!(
+        result(&profile)["static_declarations"]["target_sha256"],
+        run.target_sha256
+    );
+    assert!(result(&profile)["runtime_observation"].is_null());
+    assert!(result(&profile)["selected_address_mapping"].is_null());
+    assert!(result(&profile)["environment_support"].is_object());
+    let started = service
+        .execute(
+            &owner.id,
+            "mitigation:start",
+            "interactive_start",
+            json!({"argv":["python","-u","-c","import sys; sys.stdin.read()"]}),
+        )
+        .await?;
+    assert!(!started.is_error, "{started:?}");
+    let session = result(&started)["session_id"].as_str().unwrap();
+    let denied = service
+        .execute(
+            &other.id,
+            "mitigation:foreign",
+            "mitigation_profile",
+            json!({"target":path,"interactive_session_id":session}),
+        )
+        .await?;
+    assert!(denied.is_error, "{denied:?}");
+    assert!(
+        result(&denied)["error"]
+            .as_str()
+            .unwrap()
+            .contains("owned by another")
+    );
+    let closed = service
+        .execute(
+            &owner.id,
+            "mitigation:close",
+            "interactive_close",
+            json!({"session_id":session}),
+        )
+        .await?;
+    assert!(!closed.is_error, "{closed:?}");
+    service.close().await;
+    Ok(())
+}

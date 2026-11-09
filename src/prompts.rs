@@ -151,6 +151,12 @@ pub(crate) static REGISTRY: &[Entry] = &[
         "Analyze glibc heap lifetimes and primitives using actual allocator identity and version-specific checks."
     ),
     entry!(
+        mitigation_analysis,
+        Kind::Method,
+        "methods",
+        "Distinguish static protection declarations, environment support and actual process/thread enablement."
+    ),
+    entry!(
         rop_analysis,
         Kind::Method,
         "methods",

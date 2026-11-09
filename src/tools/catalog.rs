@@ -61,6 +61,14 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::MitigationProfileArgs>(
+            "mitigation_profile",
+            "Separate binary declarations, worker environment support and owned process/thread protection observations; optional address checks the actual containing mapping.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_mitigation_profile,
+            Visibility::Child,
+        ),
         spec::<args::CrashSnapshotArgs>(
             "crash_snapshot",
             "Capture registers, PC/SP, fault address, instructions, stack and module identities from an owned stopped debugger; alternatively inspect an in-run core file. Strong signatures require observed module hashes. Unknown identity remains unresolved.",
