@@ -25,6 +25,7 @@ impl Workbench {
         self.require_idle()?;
         let containers = self.managed_containers()?;
         let mut running = vec![];
+        let mut namespace_dependents = BTreeSet::new();
         for name in &containers {
             let container = self
                 .docker
@@ -46,11 +47,19 @@ impl Workbench {
                         "close active work in {name} before exporting"
                     );
                 }
+                if container["HostConfig"]["PidMode"]
+                    .as_str()
+                    .is_some_and(|p| p.starts_with("container:"))
+                {
+                    namespace_dependents.insert(name.clone());
+                }
                 running.push(name.clone());
             }
         }
+        // A debug companion cannot start before its service's PID namespace exists.
+        running.sort_by_key(|name| namespace_dependents.contains(name));
         // Stop before snapshotting; even an idle bridge can mutate journals.
-        for name in &running {
+        for name in running.iter().rev() {
             self.docker.run(&["stop", name])?;
         }
         let result = self.export_stopped(destination);
