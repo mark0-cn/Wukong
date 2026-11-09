@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "platform": "linux/amd64",
+  "pwndbg": {
+    "version": "2026.10.28",
+    "url": "https://github.com/pwndbg/pwndbg/releases/download/2026.10.28/pwndbg_2026.10.28_x86_64-portable.tar.xz",
+    "sha256": "17049a23ba8cbcf4780c4bc9b4aeb519f2801ceabe7304b55d3d622acca03b8c",
+    "file": "pwndbg.tar.xz"
+  },
+  "pwninit": {
+    "version": "3.3.3",
+    "url": "https://github.com/io12/pwninit/releases/download/3.3.3/pwninit",
+    "sha256": "f124b6645b01b0fc4adacabe61438fe73eef517dc3e4696a08e1250a8f47eec3",
+    "file": "pwninit"
+  }
+}
