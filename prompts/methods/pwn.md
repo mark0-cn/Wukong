@@ -11,23 +11,20 @@ total skill count small.
   script), feed it via `job_start` or `crash_replay`, observe the faulting RIP
   under `debug_start`/`debug_command`, and recover the offset with
   `cyclic_find`. Cite both the static layout and the runtime observation.
-- Non-PIE: use the link-time address from `function_decompile` directly.
-  PIE/ASLR: leak a pointer or use partial overwrites — never guess bases.
+- Keep file offsets, module-relative offsets, link-time virtual addresses and runtime
+  addresses distinct. Ghidra queries use module-relative offsets even for non-PIE.
+  Derive runtime addresses from verified mappings/load bias; never guess bases.
 - A global canary import does not mean THIS function is protected: check the
   actual prologue/epilogue of the vulnerable function before assuming no
   canary.
 
-## The stack-alignment trap (glibc 2.35+, incl. Ubuntu 24.04)
+## Check the actual ABI and stack state
 
-Entering a function via a corrupted `ret` leaves rsp 8 bytes off the ABI's
-call-entry alignment (a `call` would have pushed a return address). Modern
-glibc's `system()` (posix_spawn path) and several libm/libc helpers execute
-`movaps` against the stack and SIGSEGV on misalignment: the payload reaches
-the function, prints its first output, then dies INSIDE libc. Fix: prepend a
-single `ret` gadget before the target address (padding + ret_gadget +
-target). Find gadgets with ropper (see tooling); one `ret` is enough to
-realign. Confirm the fix with a real run, not by reasoning about the crash
-site.
+Alignment is a property of the ABI and the observed call path, not a glibc release.
+Record SP at the relevant boundary and account for every gadget's stack consumption,
+register clobbers and memory operands. An extra ret changes alignment but is not a
+universal repair. Confirm an alignment fault from the actual instruction and operands;
+do not manufacture a failing attempt or require a no-ret control to fail when it works.
 
 ## Choose the win marker from the target's own output
 
@@ -43,21 +40,20 @@ verification artifact)
 0. Dossier facts: non-PIE win address (banner/leak), input channel, buffer.
 1. Offset empirically: cyclic(200) -> crash -> cyclic_find; confirm with
    N 'A's crashing and N-8 not.
-2. Alignment: one plain ret gadget before win; run the naive no-ret
-   attempt and OBSERVE it fail before adding the ret.
-3. Payload = padding + ret + win.
-4. Controls: no-overflow, no-ret, wrong-target — all must fail.
+2. Alignment: inspect ABI and SP; adjust only if the observed path requires it.
+3. Build the minimal payload from confirmed layout and target facts.
+4. Controls: no-overflow and wrong-target; interpret alignment controls from observation.
 5. 3/3 reproductions against the real service; save the payload and
    transcripts as evidence, then agent_finish.
 
 ### ret2libc with canary
 0. Dossier facts: buffer size, canary offset, saved-RIP offset, non-PIE
    base, the leak source (banner %p / dlsym reference).
-1. LEAK THE CANARY EMPIRICALLY: padding that reaches past the canary,
-   read the echo/leak, extract the 8 bytes at the canary offset. Never
-   assume a canary from static analysis.
-2. COMPUTE THE LIBC BASE: leak - symbol_offset (symbols from the worker's
-   own libc via pwn.ELF('/lib/x86_64-linux-gnu/libc.so.6')).
+1. Establish an actual disclosure primitive before claiming a canary value.
+   An overwrite or echo does not guarantee disclosure; preserve observed bytes,
+   width and process identity. If disclosure is absent, record the missing precondition.
+2. Derive a candidate base only from the actual mapped libc identity and symbol.
+   A page-aligned subtraction is a candidate, not proof of a library match.
 3. ASSEMBLE: padding + canary + saved-RBP junk + pop_rdi + binsh + system
    (or a write-wrapper syscall path when system misaligns).
 4. Controls: no-overflow, wrong-canary, wrong-base — all must fail.
@@ -79,10 +75,10 @@ When the target uses heap allocations, keep these facts and primitives in
 mind; verify each layout observation against the actual allocator version:
 
 - Chunk layout: size/prev_size header precedes user data; freed chunks
-  store forward/back pointers in the first 16 bytes of user space. glibc
-  2.26+ keeps small chunks in per-thread tcache (LIFO, no integrity checks
-  beyond a count), 2.35+ adds safe-linking (pointers stored XOR'd with the
-  heap address).
+  contain allocator metadata whose layout depends on bin, ABI and version.
+  Tcache arrived in upstream glibc 2.26; upstream 2.32 already includes
+  Safe-Linking for singly-linked lists, alignment and duplicate-free checks.
+  Never assume all freed chunks have the same two-pointer layout.
 - The most common primitives, in order of usefulness:
   1. tcache poisoning: corrupt a freed chunk's next pointer so the next
      malloc of that size returns an arbitrary address (overwrite a target
@@ -94,7 +90,7 @@ mind; verify each layout observation against the actual allocator version:
      over it to forge the forward pointer.
 - Debug with the worker's gdb (gef: `heap chunks`, `heap bins`, `tcache
   bins`) rather than reasoning from prints. Confirm the allocator version
-  from the worker libc, not the target's build hints.
+  from the target's actual mapped allocator, not build hints or the worker default.
 
 ## Format-string exploitation
 
@@ -128,7 +124,10 @@ When user-controlled data reaches a printf-family format argument:
 
 ## Partial RELRO GOT overwrite
 
-When BIND_NOW is absent (partial RELRO), GOT entries are writable: an
+Absence of BIND_NOW alone does not establish partial RELRO or a writable slot.
+Inspect PT_GNU_RELRO and the selected relocation's actual mapping permissions.
+The PLT portion can remain writable under partial RELRO; do not generalize to
+the whole GOT. Only after proving the selected slot writable can an
 arbitrary-write primitive (overflow, format string, uninitialized index)
 can repoint a later-called import to a chosen address. Chain: find the
 write -> pick the GOT entry of a function called AFTER the write -> set it
@@ -140,8 +139,9 @@ heap paths instead.
 - `angr_solve` (see tooling) produces a hypothesis input; replay it against
   the real target with `job_start`/`crash_replay` and cite BOTH the solver
   job and the replay job.
-- "RIP points where I want" is not control-flow evidence and not code
-  execution: only an actual run demonstrating the win marker counts.
+- A controlled saved return address, a changed PC and executed chosen behavior
+  are different evidence levels. Record each honestly; register control alone
+  does not establish successful arbitrary code execution.
 - Hand the final payload to a separate `verifier` agent with the predicate.
 
 Save payload bytes, offset, gadget/function addresses and execution evidence IDs.
