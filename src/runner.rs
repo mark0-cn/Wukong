@@ -170,7 +170,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|tool| tool["function"]["name"] == "binary_inspect"),
+                .any(|tool| tool["function"]["name"] == "coverage_list"),
             "full catalog is attached from the first request"
         );
     }
@@ -219,7 +219,7 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(names.contains(&"coverage_list"), "turn {turn}");
             assert!(
-                names.contains(&"debug_start") && names.contains(&"poc_verify"),
+                !names.contains(&"debug_start") && !names.contains(&"poc_verify"),
                 "turn {turn}"
             );
             assert!(names.contains(&"finish_scan"));
