@@ -12,6 +12,8 @@ def crash_signature(result):
     code = result.get("exit_code")
     if result.get("state") != "completed":
         return None
+    if result.get("location_signature"):
+        return result["location_signature"]
     if result.get("signal"):
         return "signal:" + str(result["signal"])
     if os.name == "nt" and code is not None and (code & 0xFFFFFFFF) in {0xC0000005, 0xC000001D, 0xC0000094, 0xC00000FD, 0xC0000409}:
@@ -63,6 +65,17 @@ def replay(root, directory, spec, input_bytes, index):
     result["metadata_protected"] = bool(experiment)
     result["input_sha256"] = hashlib.sha256(input_bytes).hexdigest()
     result["input_mode"] = input_mode
+    if spec.get("kind") == "minimize" and not spec.get("allow_signal_only", False) and crash_signature(result):
+        from worker_crash import replay_snapshot
+        try:
+            snapshot = replay_snapshot(root, spec, sandbox / "input.bin", directory / "cancel")
+        except Exception as error:
+            snapshot = {"signature_strength":"unresolved", "error":str(error)[:1024]}
+        atomic_json(sandbox / "crash-snapshot.json", snapshot)
+        # A debugger-only failure is not evidence for the original native crash.
+        if snapshot.get("signal_number") == result.get("signal"):
+            result["location_signature"] = snapshot.get("location_signature")
+        result["snapshot"] = artifact(root, sandbox / "crash-snapshot.json")
     result["crash_signature"] = crash_signature(result)
     result["trial"] = index
     return result
@@ -155,12 +168,14 @@ def supervise_job(root, directory):
             meta["state"] = "cancelled" if (directory / "cancel").exists() else "completed"
         elif kind == "minimize":
             data = confined(root, spec["input"], True).read_bytes()
+            deadline = time.monotonic() + spec["minimize_timeout_secs"]
             baseline = replay(root, directory, spec, data, 0)
             signature = crash_signature(baseline)
             if not signature:
                 raise ValueError("input does not reproduce a crash; minimization requires a stable crash signature")
+            if not spec.get("allow_signal_only", False) and not baseline.get("location_signature"):
+                raise ValueError("location signature unavailable; inspect trial-0000/crash-snapshot.json. Install GDB/pygdbmi or explicitly opt into allow_signal_only (weak crash equivalence).")
             attempts, granularity, index = 1, 2, 1
-            deadline = time.monotonic() + spec["minimize_timeout_secs"]
             while len(data) > 1 and attempts < spec["max_attempts"] and time.monotonic() < deadline and not (directory / "cancel").exists():
                 chunk = max(1, (len(data) + granularity - 1) // granularity)
                 reduced = False
@@ -182,6 +197,7 @@ def supervise_job(root, directory):
             minimized.write_bytes(data)
             result = {"artifact": artifact(root, minimized), "original_size": confined(root, spec["input"], True).stat().st_size,
                       "minimized_size": len(data), "attempts": attempts, "crash_signature": signature,
+                      "signature_strength": "signal_only" if spec.get("allow_signal_only", False) else "location_and_frames",
                       "complete": attempts < spec["max_attempts"] and time.monotonic() < deadline and not (directory / "cancel").exists()}
             meta["state"] = "cancelled" if (directory / "cancel").exists() else "completed"
         else:

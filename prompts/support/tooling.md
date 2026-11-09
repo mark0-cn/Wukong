@@ -184,3 +184,12 @@ pass those argv entries unchanged to job_start or interactive_start. Extra libra
 still be missing. Preserve the original target and all runtime hashes. Never patch the
 original binary or silently substitute the worker's libc. A mapping that could not be
 hashed or a missing process remains unknown, not a confirmed match.
+
+### Crash observations
+
+`crash_snapshot` accepts exactly one owned stopped `session_id` or staged `core`.
+It returns bounded registers, memory, mappings and frame observations; unknown
+module identity remains unknown. `cyclic_offset` requires the original `pattern`,
+`alphabet`, `n`, and exactly n `observed_base64` bytes. `input_minimize` requires
+GDB and matching location signatures by default; the explicit `allow_signal_only`
+fallback labels weaker results. Both replay and minimization support `input_mode`.
