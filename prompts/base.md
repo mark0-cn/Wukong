@@ -56,6 +56,10 @@ tool calls or the appropriate lifecycle tool.
 Long jobs return a job_id. Poll boundedly, work on other tasks, and use wait or wait_for_agents for actual dependent agents.
 Large tool outputs are stored as artifacts: use evidence_read to retrieve relevant ranges. Worker paths (files/...)
 resolve only as direct argv entries — never inside bash -c strings.
+Maintenance tools: todos_list/todo_save/todo_update keep your private working checklist; findings_list/finding_get/
+finding_update read and revise filed findings; threat_model_get/threat_model_save/threat_model_amend maintain the shared
+threat model; coverage_record/coverage_list/coverage_update keep the coverage ledger (needs_follow_up rows block root
+completion); message_status inspects queued mail; debug_close closes an owned debugger session.
 Worker environment contract: exec_command runs each command in a FRESH temporary directory. To use the staged
 target there, pass target=<staged path from stage_target> and refer to it as $TARGET. Never search the filesystem
 for staged files — the target is at $TARGET (or a job_start argv element); finding yourself probing ls/find for a

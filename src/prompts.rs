@@ -168,8 +168,33 @@ pub(crate) fn find(name: &str) -> Option<&'static Entry> {
     REGISTRY.iter().find(|entry| entry.name == name)
 }
 
-pub(crate) fn discovery_prompt() -> String {
-    let roles = REGISTRY
+/// The complete built-in tool directory, generated from the executable
+/// registry: every tool name with its first-sentence description. Injected
+/// into every preamble so newly added tools are visible to agents without
+/// prose updates; a test asserts the directory covers the full registry.
+pub(crate) fn tool_directory_prompt() -> String {
+    let mut definitions = crate::tools::builtin_tool_definitions();
+    definitions.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+    let mut text = String::from(
+        "\n\nTool directory (every built-in tool; per-request schemas arrive with the model request):\n",
+    );
+    for definition in definitions {
+        let mut short = definition
+            .description
+            .split(". ")
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if short.chars().count() > 110 {
+            short = short.chars().take(107).collect::<String>() + "…";
+        }
+        text.push_str(&format!("- {}: {}\n", definition.name, short));
+    }
+    text
+}
+
+pub(crate) fn discovery_prompt() -> String {    let roles = REGISTRY
         .iter()
         .filter_map(|entry| match entry.kind {
             Kind::Role(role) => Some(role.as_str()),
@@ -197,6 +222,21 @@ pub(crate) fn discovery_prompt() -> String {
 mod tests {
     use super::*;
     use std::{collections::BTreeSet, fs, path::Path};
+
+    #[test]
+    fn tool_directory_covers_the_full_registry() {
+        // Structural guarantee: every built-in tool is advertised to agents
+        // through the generated directory, so adding a tool can never be
+        // "forgotten" at the prompt layer.
+        let directory = tool_directory_prompt();
+        for definition in crate::tools::builtin_tool_definitions() {
+            assert!(
+                directory.contains(definition.name.as_str()),
+                "tool {} is missing from the generated tool directory",
+                definition.name
+            );
+        }
+    }
 
     #[test]
     fn prompt_resources_and_examples_have_registry_owners() {

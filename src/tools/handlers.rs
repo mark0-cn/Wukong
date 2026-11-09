@@ -160,6 +160,21 @@ pub(super) fn handle_emulate_run<'a>(
     })
 }
 
+pub(super) fn handle_libc_identify<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    call_id: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        tools.execution
+            .gateway
+            .worker_call(agent, call_id, "libc.identify", args)
+            .await
+    })
+}
+
 pub(super) fn handle_agent_finish<'a>(    tools: &'a ToolService,
     agent: &'a AgentMetadata,
     call_id: &'a str,

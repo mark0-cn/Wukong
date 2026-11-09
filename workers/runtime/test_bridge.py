@@ -314,6 +314,14 @@ class RuntimeTests(unittest.TestCase):
         time.sleep(1.5)
         self.assertFalse(marker.exists(), "closing an exited leader left its child running")
 
+    def test_doctor_declares_worker_capabilities(self):
+        reply = self.client.call("doctor")
+        for key in ["emulation", "symbolic_execution", "py_run"]:
+            self.assertIn(key, reply["capabilities"], reply)
+        self.assertIn("python_toolchain", reply, reply)
+        for key in ["pwntools", "z3", "angr", "unicorn", "capstone"]:
+            self.assertIn(key, reply["python_toolchain"], reply)
+
     def test_angr_solve_validates_parameters(self):
         self.client.put("dummy.bin", b"not-an-elf")
         with self.assertRaises(AssertionError):

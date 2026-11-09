@@ -115,10 +115,14 @@ pub fn preamble(
     )?;
     let mut text = crate::prompts::BASE.to_owned();
     text.push_str(&crate::prompts::discovery_prompt());
-    // Stable shared prefix first (BASE + role skills + demos) so consecutive
-    // runs share the same cached prompt prefix; everything per-run (identity,
-    // target, budget, documents) is appended at the end, mirroring Strix's
-    // cache-point ordering.
+    // The complete built-in tool directory is generated from the registry and
+    // always injected: a tool added to the catalog is visible to every agent
+    // without anyone remembering to mention it in prose (guarded by a test).
+    text.push_str(&crate::prompts::tool_directory_prompt());
+    // Stable shared prefix first (BASE + tool directory + role skills + demos)
+    // so consecutive runs share the same cached prompt prefix; everything
+    // per-run (identity, target, budget, documents) is appended at the end,
+    // mirroring Strix's cache-point ordering.
     text.push_str(&load_skill(agent.role.as_str(), custom_dir)?);
     for skill in &agent.skills {
         validate_capability(skill)?;
