@@ -30,12 +30,11 @@ pub fn skill_catalog(custom_dir: Option<&Path>) -> Result<serde_json::Value> {
     if let Some(dir) = custom_dir.filter(|dir| dir.exists()) {
         for file in fs::read_dir(dir)? {
             let path = file?.path();
-            if path.extension().is_some_and(|ext| ext == "md") {
-                if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                    if validate_capability(name).is_ok() {
-                        names.insert(name.to_owned());
-                    }
-                }
+            if path.extension().is_some_and(|ext| ext == "md")
+                && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+                && validate_capability(name).is_ok()
+            {
+                names.insert(name.to_owned());
             }
         }
     }
@@ -46,6 +45,20 @@ pub fn skill_catalog(custom_dir: Option<&Path>) -> Result<serde_json::Value> {
         let mut manifest = SkillManifest::default();
         if let Some(entry) = crate::prompts::find(&name) {
             manifest.description = entry.description.into();
+            manifest.version = "1".into();
+            manifest.applies_to = vec![entry.description.into()];
+            if ["formats", "algorithms", "state_machine", "binary_diff"].contains(&name.as_str()) {
+                manifest.deliverables = vec![name.clone()];
+                manifest.validation = vec![
+                    "Independent discriminating cases; preserve counterexamples and unknowns"
+                        .into(),
+                ];
+                manifest.requires = vec![
+                    "Static analysis evidence; execution backend when claiming runtime behavior"
+                        .into(),
+                ];
+                manifest.excludes = vec!["Do not infer execution from static evidence".into()];
+            }
         }
         let custom = custom_dir.is_some_and(|dir| dir.join(format!("{name}.md")).exists());
         if let Some(dir) = custom_dir.filter(|_| custom) {

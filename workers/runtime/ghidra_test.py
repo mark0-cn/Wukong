@@ -96,6 +96,17 @@ def main():
     assert any(ref["type"] == "UNCONDITIONAL_CALL" and main_address <= ref["from"]["value"] < main_end
                for ref in xrefs["data"]["references"]), xrefs
 
+    instructions = client.call("ghidra.query", target="files/fixture", target_sha256=target_sha256,
+                               query={"operation":"instructions", "address":str(main_address), "offset":0, "limit":2},
+                               timeout_secs=200, analysis_timeout_secs=120, max_cpu=2)
+    page = instructions["data"]
+    assert len(page["instructions"]) == 2 and page["next_offset"] == 2, page
+    assert all(row["address"]["module_sha256"] == target_sha256 and "block_start" in row for row in page["instructions"]), page
+    next_page = client.call("ghidra.query", target="files/fixture", target_sha256=target_sha256,
+                           query={"operation":"instructions", "address":str(main_address), "offset":2, "limit":2},
+                           timeout_secs=200, analysis_timeout_secs=120, max_cpu=2)["data"]
+    assert page["instructions"][-1]["address"] != next_page["instructions"][0]["address"]
+
     # Identical repeat queries must hit the identity-bound cache, not re-import.
     cached = client.call("ghidra.query", target="files/fixture", target_sha256=target_sha256,
                          query={"operation": "functions", "pattern": "main", "offset": 0, "limit": 100},
