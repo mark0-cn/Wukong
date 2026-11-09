@@ -390,7 +390,10 @@ impl Workbench {
         );
         let mut challenge = self.challenge(id)?;
         match role {
-            "binary" => challenge.target.binary = Some(relative.clone()),
+            "binary" => {
+                challenge.target.binary = Some(relative.clone());
+                challenge.architecture = profile.architecture.clone();
+            }
             "libc" => challenge.runtime.libc = Some(relative.clone()),
             _ => challenge.runtime.loader = Some(relative.clone()),
         };
