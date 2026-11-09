@@ -123,8 +123,7 @@ class ProfileService:
                     with destination.open("xb") as stream: stream.write(data)
                     destination.chmod(0o444 if key == "libc" else 0o555)
                 files.append(artifact(self.root,destination))
-        relative = bundle.relative_to(self.root).as_posix()
         result.update(bundle_id=digest,artifacts=files,
-            launch_argv=[relative+"/loader","--library-path",relative+"/lib",relative+"/target.bin"],
+            launch_argv=[str(bundle/"loader"),"--library-path",str(bundle/"lib"),str(bundle/"target.bin")],
             note="Run these direct argv entries through job_start or interactive_start. Original files are unchanged. Recheck actual mappings; dependencies beyond libc may still be missing.")
         return result

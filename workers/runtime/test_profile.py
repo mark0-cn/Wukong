@@ -33,6 +33,9 @@ class ProfileTests(unittest.TestCase):
                 self.assertEqual(result,service.dispatch("runtime.prepare",{"target":"target","libc":"libc","loader":"loader"}))
             self.assertEqual((root/"target").read_bytes(),b"target")
             self.assertEqual(len(result["artifacts"]),3)
+            # Interactive sessions launch in fresh directories; argv must not
+            # depend on the current directory even on trusted-local workers.
+            for index in [0,2,3]: self.assertTrue(Path(result["launch_argv"][index]).is_absolute())
             self.assertEqual((root/result["launch_argv"][2]/"libc.so.6").read_bytes(),b"libc")
 
 if __name__ == "__main__": unittest.main()
