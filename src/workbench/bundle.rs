@@ -342,20 +342,34 @@ impl Workbench {
 mod tests {
     use super::*;
     #[test]
-    fn history_snapshot_copies_wal_and_refuses_active_leases()->Result<()> {
-        let temp=tempfile::tempdir()?;
-        let mut config=AppConfig::default();
-        config.state_dir=temp.path().join("state");config.workbench.root=temp.path().join("workbench");
-        let _store=crate::store::Store::open(&config.state_dir)?;
-        let source=rusqlite::Connection::open(config.state_dir.join("state.sqlite3"))?;
-        source.execute("INSERT INTO events(run_id,kind,data,created_at) VALUES('test','snapshot','{}','now')",[])?;
-        let workbench=Workbench::open(&config)?;
-        let dest=temp.path().join("archive");
+    fn history_snapshot_copies_wal_and_refuses_active_leases() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let mut config = AppConfig::default();
+        config.state_dir = temp.path().join("state");
+        config.workbench.root = temp.path().join("workbench");
+        let _store = crate::store::Store::open(&config.state_dir)?;
+        let source = rusqlite::Connection::open(config.state_dir.join("state.sqlite3"))?;
+        source.execute(
+            "INSERT INTO events(run_id,kind,data,created_at) VALUES('test','snapshot','{}','now')",
+            [],
+        )?;
+        let workbench = Workbench::open(&config)?;
+        let dest = temp.path().join("archive");
         assert!(workbench.snapshot_history(&dest)?);
-        let snapshot=rusqlite::Connection::open(dest.join("state.sqlite3"))?;
-        assert_eq!(snapshot.query_row("SELECT COUNT(*) FROM events",[],|r|r.get::<_,i64>(0))?,1);
-        source.execute("INSERT INTO leases VALUES('test','worker',unixepoch()+60)",[])?;
-        assert!(workbench.snapshot_history(&temp.path().join("blocked")).is_err());
+        let snapshot = rusqlite::Connection::open(dest.join("state.sqlite3"))?;
+        assert_eq!(
+            snapshot.query_row("SELECT COUNT(*) FROM events", [], |r| r.get::<_, i64>(0))?,
+            1
+        );
+        source.execute(
+            "INSERT INTO leases VALUES('test','worker',unixepoch()+60)",
+            [],
+        )?;
+        assert!(
+            workbench
+                .snapshot_history(&temp.path().join("blocked"))
+                .is_err()
+        );
         Ok(())
     }
 }

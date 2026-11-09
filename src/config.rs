@@ -133,7 +133,7 @@ impl AppConfig {
         config.validate()?;
         Ok(config)
     }
-    fn resolve_paths(&mut self, base: &Path) {
+    pub(crate) fn resolve_paths(&mut self, base: &Path) {
         fn resolve(base: &Path, path: &mut PathBuf) {
             if path.is_relative() {
                 *path = base.join(&*path);
