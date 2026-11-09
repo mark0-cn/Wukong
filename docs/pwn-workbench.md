@@ -16,12 +16,13 @@ flowchart LR
 
 ## 首次使用
 
-普通使用只需要 Docker 和预编译客户端，不需要在宿主机安装 Python、GDB 或 pwntools。Windows 的发布包可用 `install-workbench.ps1` 安装到用户应用目录；它校验客户端和可选镜像包的 SHA-256。
+普通使用只需要 Docker 和预编译客户端，不需要在宿主机安装 Python、GDB 或 pwntools。Windows 在线发布包可用 `install-workbench.ps1` 安装到用户应用目录；它校验包内文件，并从 Docker Hub 拉取固定 digest 的镜像。私有仓库需要先登录有读取权限的账号。见 [在线安装](online-install.md)。
 
-从源码构建时：先按 `workers/Dockerfile` 构建基础镜像，再运行 `python scripts/fetch-pwn-tools.py`，最后：
+从源码构建时，先下载锁定依赖，再通过 Bake 一起构建基础镜像和工具镜像：
 
 ```powershell
-docker build -f workers/Dockerfile.workbench -t re-agent-workbench:0.1 .
+python scripts/fetch-worker-deps.py
+docker buildx bake --load --set workbench.tags=re-agent-workbench:0.1
 re-agent init re-agent.toml
 re-agent --config re-agent.toml env up
 re-agent --config re-agent.toml env doctor
