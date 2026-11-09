@@ -27,6 +27,16 @@ class LaunchTests(unittest.TestCase):
         self.params={"target":"files/challenge/original/probe","launch_spec":"files/challenge/launch.json"}
         self.isolated=os.geteuid()==0
     def tearDown(self): self.temp.cleanup()
+    @unittest.skipUnless(hasattr(os,"geteuid") and os.geteuid()==0,"requires the trusted root supervisor")
+    def test_prepare_imported_files_owned_by_another_uid(self):
+        paths=[self.base/"original/probe",self.base/"prepared/libraries/libc.so.6",self.base/"prepared/libraries/ld.so"]
+        for path in paths: os.chown(path,20000,20000)
+        # check-workbench runs this with CHOWN and without FOWNER, like the app.
+        prepare(self.base)
+        prepare(self.base)
+        for path in paths:
+            self.assertEqual(path.stat().st_uid,0)
+            self.assertEqual(path.stat().st_mode & 0o777,0o555)
     def test_interaction_and_replay_share_loader_cwd_and_env(self):
         from worker_interactive import InteractSession
         session=InteractSession(self.root,{**self.params,"argv":["unused"]},self.isolated)
