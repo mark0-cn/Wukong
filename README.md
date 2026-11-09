@@ -1,79 +1,180 @@
-# re-agent
+<p align="center">
+  <img src="icons/icon.png" width="88" alt="re-agent 标志">
+</p>
 
-基于 Strix 协作架构、使用 Rust 和 Rig 0.46.0 实现的二进制逆向与分析 agent，支持行为理解、格式与算法还原、调试，以及按需进行漏洞验证。首版动态分析后端面向 Linux x86_64 ELF。ELF、PE、Mach-O 的静态画像由 Rust 直接解析。
+<h1 align="center">re-agent</h1>
 
-需求基线在 [架构方案](docs/strix-rig-binary-agent-plan.md)，实现与验收约定在 [实现契约](docs/implementation-contract.md)。维护与性能检查见 [维护约定](docs/maintenance.md)，内置工具见 [生成的工具目录](docs/tool-catalog.md)。
+<p align="center">
+  <strong>面向二进制逆向与分析的多 Agent 工作区</strong><br>
+  行为理解 · 格式与算法还原 · 动态调试 · 独立验证
+</p>
 
-## 构建
+<p align="center">
+  <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-1.97.1%2B-DEA584?logo=rust" alt="Rust 1.97.1+"></a>
+  <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rig-0.46.0-7EE0C3" alt="Rig 0.46.0"></a>
+  <a href="tauri.conf.json"><img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri" alt="Tauri 2"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+</p>
 
-需要 Rust 1.97.1 或更新版本：
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="docs/usage.md">使用指南</a> ·
+  <a href="#文档">文档导航</a> ·
+  <a href="https://github.com/mark0-cn/re_agent/issues">反馈问题</a>
+</p>
 
-```powershell
-cargo build --release
-cargo test --all-targets
+re-agent 使用 Rust 与 Rig 构建分析核心，通过 Tauri + React 提供桌面工作区，同时保留完整 CLI。描述分析目标后，根 Agent 拆解任务，由分析与验证 Agent 协作完成调查，并交付可追溯的结论、原始证据和报告。
+
+## 目录
+
+- [项目特性](#项目特性)
+- [快速开始](#快速开始)
+- [使用方式](#使用方式)
+- [配置执行环境](#配置执行环境)
+- [文档](#文档)
+- [项目结构](#项目结构)
+- [参与贡献](#参与贡献)
+- [致谢](#致谢)
+- [许可证](#许可证)
+
+## 项目特性
+
+| 能力 | 说明 |
+| --- | --- |
+| 二进制分析 | 直接解析 ELF、PE、Mach-O 画像与字符串；通过 Ghidra 查询函数、反编译和交叉引用 |
+| 多 Agent 协作 | 根 Agent 编排任务，分析 Agent 调查问题，独立验证 Agent 复核结论；共享笔记、待办和证据 |
+| 动态分析 | 隔离 worker 提供 GDB/MI、持久化进程、交互会话、AFL++ QEMU、angr、崩溃重放与输入最小化 |
+| 桌面与命令行 | 桌面查看会话、协作任务、发现与证据；CLI 支持启动、干预、恢复和导出 |
+| 持久化与预算 | SQLite 状态、检查点与 Rig 会话日志；支持暂停恢复、并发控制、Token 与费用预算 |
+| 证据交付 | 导出 JSON、Markdown、HTML 报告、样本快照、原始证据及 SHA256 清单，并校验报告包完整性 |
+
+> 当前动态分析后端面向 **Linux x86_64 ELF**。PE、Mach-O 支持静态画像；Windows DbgEng 与 macOS LLDB 动态后端尚未实现。
+
+## 快速开始
+
+### 1. 准备环境
+
+- **Rust 1.97.1+**。
+- **Node.js 22.12+ 与 npm**，用于桌面前端构建。
+- 对应操作系统的 [Tauri 2 系统依赖](https://v2.tauri.app/start/prerequisites/)。
+- 调用模型所需的服务、模型名和凭据；动态分析另需 [执行 worker](#配置执行环境)。
+
+### 2. 获取源码并构建
+
+```sh
+git clone https://github.com/mark0-cn/re_agent.git
+cd re_agent
+npm ci
+npm run desktop:build
 ```
 
-Windows 可执行文件位于 `target/release/re-agent.exe`；Linux/macOS 为 `target/release/re-agent`。核心使用 Rig ECS 原生执行循环、会话日志和异步子 agent；模型接口测试通过本地 HTTP 服务验证实际 provider 协议。本轮验证在 macOS 上完成，Windows 控制端尚未验证。
+桌面构建会先生成前端资源，再编译 Rust 程序。可执行文件位于：
 
-## 桌面工作区
+| 平台 | 路径 |
+| --- | --- |
+| Windows | `target/release/re-agent.exe` |
+| Linux / macOS | `target/release/re-agent` |
 
-直接双击 `re-agent.exe`，或运行 `re-agent` / `re-agent gui` 打开原生桌面窗口。`re-agent gui RUN_ID` 可直接查看指定任务。GUI 不需要浏览器；未配置模型凭据时仍可查看已保存任务，启动分析时会显示具体错误。
+安装包输出到 `target/release/bundle/`。下文使用 `re-agent` 表示该可执行文件：可将其所在目录加入 `PATH`，或替换为完整路径，例如 PowerShell 中的 `.\target\release\re-agent.exe`。
 
-- 深色工作区、中文字体、可调整侧栏、任务搜索和可复制文本。
-- 浏览或拖入样本，编辑分析目标后开始分析。
-- 默认动态页展示 Agent 公开回复、共享分析笔记、可读的工具操作与暂停原因；技术事件和原始 JSON 可按需展开。
-- 查看 Agent 会话、发现及证据、任务总结与预算。会话直接显示公开回复，将工具调用和结果配对为紧凑卡片，参数与完整结果可展开；模型附加记录在“技术详情”中查看。新任务默认要求中文进展说明，已有记录保持原文。
-- 会话默认跟随最新消息；向上滚动查看历史时暂停跟随，点击“回到最新”或重新勾选“跟随最新”恢复。顶部状态、Agent 数量及预算合并为紧凑状态栏，为正文留出空间。
-- 向选中的 Agent（默认 root）发送信息，或勾选“作为后续任务”；暂停的任务需手动恢复。
-- 暂停、恢复、停止 Agent 分支，以及选择目录导出报告和证据包。
-- 每个窗口同时驱动一个任务，可浏览其他任务；关闭时等待本窗口任务暂停保存及报告导出完成。
+<details>
+<summary>仅构建 CLI</summary>
 
-恢复使用任务保存的配置，并可在恢复对话框中调整 Token 与费用预算。左侧“设置 / 配置文件”可编辑模型、API 地址、凭据环境变量名、预算、价格、并发、Docker/SSH/本地后端和存储路径；“完整 TOML”可编辑角色模型、MCP 等全部字段。保存前校验配置，原文件注释及未修改字段会保留，若文件已被外部修改则拒绝覆盖。可打开另一份 TOML 并保存应用；新任务立即使用新配置，运行中的任务需先暂停保存后再应用设置。`--state` 临时覆盖仍然优先，且不写入配置文件。API key 内容不写入 TOML，Windows 下优先读取进程环境变量；缺失时读取用户、系统环境变量，因此桌面启动也能读取已保存的凭据。
+不需要桌面界面时，可以跳过 Node.js 与前端构建：
 
-### Windows 发布与启动
-
-若构建目录位于带 Low 完整性标签的工作区，EXE 会继承该标签，启动后可能无法访问 Docker Desktop 的命名管道。使用发布脚本将程序复制到普通应用目录，并生成明确指向所选配置文件的快捷方式：
-
-```powershell
-.\scripts\publish-gui.ps1 -Destination D:\re-agent-bin\desktop-gui -ConfigPath .\target\debug\re-agent.toml
+```sh
+cargo build --release --no-default-features
 ```
 
-此后使用发布目录中的 `RE Agent.lnk` 启动。配置仍保存到指定的原始文件；脚本不修改工作区或 Docker 权限。重新构建后，关闭旧窗口并再次运行发布脚本即可更新。Windows 的进程完整性会受到可执行文件标签限制，见 [Microsoft MIC 文档](https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control)。
+此构建支持 CLI 命令，`gui` 入口不可用。
 
-## 开始使用
+</details>
 
-```powershell
-.\target\release\re-agent.exe init
-.\target\release\re-agent.exe doctor
-.\target\release\re-agent.exe inspect .\sample.exe --strings
+### 3. 配置模型
+
+```sh
+re-agent init
 ```
 
-`inspect` 不执行样本，也不调用模型。`init` 写入配置，已有文件不会被覆盖。配置可参考 [re-agent.example.toml](re-agent.example.toml)；相对文件路径按配置文件所在目录解析。
+编辑生成的 `re-agent.toml`，设置 `[model]` 中的模型与服务信息，保留其他配置。`init` 不会覆盖已有文件；完整字段见 [配置示例](re-agent.example.toml)。
 
-选择模型、endpoint 和凭据环境变量后启动分析，例如：
+```toml
+[model]
+provider = "openai_responses"
+model = "your-model-name"
+api_key_env = "OPENAI_API_KEY"
+# 使用兼容服务时指定 API 地址：
+# base_url = "https://your-provider.example/v1"
+```
+
+将密钥设置到对应的环境变量中：
 
 ```powershell
+# Windows PowerShell
 $env:OPENAI_API_KEY = "your-provider-key"
-.\target\release\re-agent.exe --config .\re-agent.toml analyze .\sample.elf --task "分析输入边界，调查具体问题，独立复核并报告证据" --output .\reports\assessment-01
 ```
 
-支持 `openai`（Chat Completions）、`openai_responses`、`anthropic` 和 `ollama`。凭据通过环境变量注入，不写入配置或检查点。自定义 endpoint 通过 `model.base_url` 指定。`ollama` 默认本地 endpoint，可不配置凭据。根 agent 始终使用 `model.model`；设置 `model.role_model` 后，analyst 与 verifier 子 agent 改用该模型名（同一 provider/endpoint/凭据），例如 `role_model = "deepseek-flash"` 搭配根模型的 `"deepseek-v4-pro"`。可通过 `model.role_models.analyst` / `model.role_models.verifier` 分别配置模型。啰嗦的角色模型可用 `model.role_max_tokens` 单独调大单轮输出预算，避免 `finish_reason=Length` 截断。
+```sh
+# Linux / macOS
+export OPENAI_API_KEY="your-provider-key"
+```
 
-运行时只有 `root`、`analyst`、`verifier` 三类角色。创建子任务时用 `role="analyst"` 或 `role="verifier"`；通过 `skills=["recon", "reverse"]` 等组合专项能力。`hunter`、`fuzz`、`crash`、`exploit` 和 `reporter` 同样是能力名称。同一 analyst 可以在问题范围内切换方法，独立验证交给另一个 verifier；普通报告由 root 汇总。角色指令自动安装，不通过 `load_skill` 切换身份。
+支持 `openai`（Chat Completions）、`openai_responses`、`anthropic` 和 `ollama`。凭据通过环境变量读取，不写入配置或检查点；本地 Ollama 可使用无凭据配置。角色模型与配置查找规则见 [使用指南](docs/usage.md#配置与模型)。
 
-提示词统一放在 `prompts/`，按 `roles`、`capabilities`、`methods`、`support` 和 `examples` 分类，公共规则位于 `base.md`。`src/prompts.rs` 是内置名称、用途、正文与示例引用的注册入口，模型只获取能力目录和已选中的正文。目录调整不改变 skill 调用名；自定义正文仍通过 `skills_dir/<name>.md` 覆盖，示例通过 `demos_dir/<name>.md` 提供，默认示例目录为 `prompts/examples`。
+### 4. 检查环境并开始分析
 
-## 配置 Linux worker
+```sh
+re-agent doctor
+re-agent inspect ./sample.exe --strings
+re-agent gui
+```
 
-执行工具默认关闭。启用 Docker 或 SSH worker 后，可以使用调试、持久化进程、AFL++ QEMU、崩溃重放、输入最小化和独立验证。
+`doctor` 检查配置与已安装能力；`inspect` 直接读取二进制，不执行样本，也不调用模型。在桌面工作区选择“新建分析”，选择样本并描述任务即可开始。
 
-Windows Docker Desktop 可使用：
+## 使用方式
+
+### 桌面工作区
+
+双击 `re-agent.exe` 或运行 `re-agent gui` 打开工作区，无需另开浏览器。
+
+- 搜索任务记录，选择或拖入目标，编辑分析任务。
+- 查看 Agent 会话、工具操作、协作任务、发现与证据。
+- 向选中的 Agent 补充信息或安排后续任务。
+- 暂停、调整预算后恢复、停止分支，以及导出报告与证据包。
+- 在“工作区设置”中编辑模型、预算与后端，或切换到 TOML 源码编辑完整配置。
+
+详细操作与 Windows 发布说明见 [桌面工作区指南](docs/usage.md#桌面工作区)。
+
+### 命令行
+
+```sh
+# 启动分析并导出到一个新目录
+re-agent analyze ./sample.elf --task "还原输入格式与关键算法，给出可复核的证据" --output ./reports/analysis-01
+
+# 查看任务与最近事件
+re-agent runs
+re-agent status RUN_ID --events 30
+
+# 暂停与恢复
+re-agent pause RUN_ID
+re-agent resume RUN_ID --max-tokens 1000000
+
+# 导出与校验报告包
+re-agent report RUN_ID --output ./reports/analysis-02
+re-agent verify-bundle ./reports/analysis-02
+```
+
+`RUN_ID` 为任务 ID。完整选项可通过 `re-agent --help` 或 `re-agent <command> --help` 查看；消息、分支停止与恢复约定见 [任务管理指南](docs/usage.md#任务管理与恢复)。
+
+## 配置执行环境
+
+执行工具默认关闭。启用 Docker 或 SSH worker 后，可使用调试、模糊测试、崩溃重放和独立验证。Windows Docker Desktop 可在仓库根目录运行：
 
 ```powershell
 .\scripts\start-worker.ps1
 ```
 
-该脚本构建 `workers/Dockerfile` 并创建独立 worker 容器和持久化卷。模型凭据留在控制端。详细配置、协议和调试能力见 [worker 文档](workers/runtime/README.md)。Ghidra 本地后端见 [Ghidra 文档](workers/ghidra/README.md)。
+脚本构建 worker 镜像，创建独立容器与持久化卷。随后修改 `re-agent.toml` 中的 `[runtime]`：
 
 ```toml
 [runtime]
@@ -83,56 +184,69 @@ remote_bridge_path = "/opt/re-agent/runtime/bridge.py"
 remote_state_dir = "/state"
 ```
 
-`trusted_local` 仅适合明确选择的可信测试样本；该后端直接在所在机器运行进程。日常分析使用隔离 worker。
+运行 `re-agent doctor` 确认实际可用能力。模型凭据留在控制端；`trusted_local` 会直接在本机运行进程，仅适用于可信测试样本。
 
-## 管理与恢复
+- [执行 worker](workers/runtime/README.md)：Docker、SSH / VM 部署、协议与验收。
+- [Ghidra 后端](workers/ghidra/README.md)：本地 Ghidra / JDK 配置、查询与缓存。
 
-```powershell
-re-agent runs
-re-agent status RUN_ID --events 30
-re-agent gui RUN_ID
-re-agent message AGENT_ID "请记录这条新的分析约束"
-re-agent pause RUN_ID
-re-agent resume RUN_ID --max-tokens 1000000
-re-agent stop AGENT_ID --reason "停止该分支"
-re-agent report RUN_ID --output .\reports\assessment-01
-re-agent verify-bundle .\reports\assessment-01
-re-agent reconcile CALL_ID --result-file .\reviewed-result.json --evidence-id EVIDENCE_ID
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [使用指南](docs/usage.md) | 桌面操作、模型配置、任务恢复、预算与 Agent 协作 |
+| [配置示例](re-agent.example.toml) | 模型、角色、预算、worker 与工具配置 |
+| [工具目录](docs/tool-catalog.md) | 从工具注册表生成的完整工具与参数说明 |
+| [实现架构](docs/architecture.md) | 模块边界、执行循环、状态与协作语义 |
+| [架构方案](docs/strix-rig-binary-agent-plan.md) / [实现契约](docs/implementation-contract.md) | 需求基线与验收约定 |
+| [报告格式](docs/report-format.md) | 报告包结构、证据、完整性校验与复现 |
+| [维护约定](docs/maintenance.md) | 开发检查、工具文档生成与性能基准 |
+| [评测夹具](fixtures/README.md) / [验收记录](docs/validation/README.md) | 本地行为回归、独立复核与已有验证证据 |
+
+## 项目结构
+
+```text
+re_agent/
+├── src/                    # Rust 分析核心、CLI 与桌面宿主
+├── ui/                     # React + TypeScript 桌面界面
+├── prompts/                # 角色、能力、方法与示例提示词
+├── workers/                # Python 执行 worker 与 Ghidra 桥接
+├── templates/              # 报告模板
+├── tests/                  # Rust 集成测试
+├── fixtures/               # 可信回归样本与评测脚本
+├── scripts/                # 检查、worker 启动与 Windows 发布脚本
+├── docs/                   # 使用、架构与验收文档
+└── re-agent.example.toml    # 配置示例
 ```
 
-省略 `--config` 时，桌面版优先使用可执行文件同目录的 `re-agent.toml`，再查找当前目录；CLI 命令优先查找当前目录，再查找可执行文件同目录。显式 `--config` 始终优先。`--state` 可选择已有状态目录。首次模型请求前会保存解析后的 endpoint，包括环境变量提供的默认值。`resume` 使用任务保存的模型与后端配置；原生 Rig 日志保存在状态目录的 `rig/RUN_ID`。活动控制端通过租约互斥。当前使用 schema 3 状态目录，不提供旧数据库迁移；旧状态目录会返回版本提示，新任务请选择新的状态目录。
+## 参与贡献
 
-Ctrl+C 请求在持久化边界停止调度，状态保留以便恢复。外部 jobs 和调试器分别核对：持久化检查点不能恢复已经消失的调试进程。有副作用且结果未知的第三方 MCP 调用保留未决状态，不能盲目重放。
+欢迎通过 [Issue](https://github.com/mark0-cn/re_agent/issues) 报告问题、讨论功能，或提交 [Pull Request](https://github.com/mark0-cn/re_agent/pulls)。问题报告请包含复现步骤、操作系统、构建方式与相关日志。
 
-预算按 provider 返回的用量累计。缺少必要用量时，系统保存响应并暂停，避免把未知消耗计成零。已经发出的并行请求仍可能使观测用量超过阈值；取消或重发的请求也可能产生 provider 未回报的费用。配置的 USD 单价用于估算，并非账单保证。
+桌面开发模式：
 
-## 结构
+```sh
+npm ci
+npm run desktop:dev
+```
 
-| 模块 | 职责 |
-|---|---|
-| `kernel` | Rig 原生执行、子任务、消息与日志的业务适配 |
-| `coordinator` / `runner` | 任务契约、依赖、消息账本、预算与完成门槛 |
-| `llm` / `agents` / `prompts` | provider 连接、结构化摘要、提示词注册与按需装配 |
-| `store` / `domain` | SQLite 事务、检查点、事件、内容哈希产物 |
-| `tools` / `mcp` | 工具 schema、角色能力、调用去重、第三方工具 |
-| `binary` / `workers/ghidra` | 二进制画像、字符串、函数、反编译、交叉引用 |
-| `runtime` / `workers/runtime` | GDB/MI、进程/fuzz jobs、符号执行（angr）、交互会话、崩溃重放与独立复核 |
-| `report` / `interface` / `gui` | CLI、原生桌面 GUI、JSON/Markdown/HTML 报告、证据包 |
+提交代码改动前运行相关检查。Rust 检查使用默认桌面特性时，先生成前端资源：
 
-根 agent 专注编排，实际目标操作由动态子 agent 完成。分析笔记、待办、发现和覆盖记录在同一任务内共享；威胁模型仅在安全边界分析中按需使用。每个 agent 保留独立会话。活动任务内可向已完成的子 agent 追加问题，保留其历史和累计预算；同范围的新任务只与活动 agent 去重。完整工具输出保存为哈希产物，模型只接收有界结果及证据 ID。
+```sh
+npm run build
+npm run check
+npm test
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+```
 
-使用 `task` 创建异步子任务，`wait` 等待单个可达 agent 的报告，`wait_for_agents` 按成功或终止条件收集结果。普通信息使用 `send_message_to_agent`，不会提前结束等待或重开任务；已完成任务的新工作使用 `follow_up_agent`。工具参数校验、结构化输出、上下文保留与压缩、重试分类及用量计价复用 Rig，MCP 协议复用 rmcp；证据、权限和 worker 会话清理仍由业务层验收。
+worker 测试、环境依赖和性能检查见 [维护约定](docs/maintenance.md)；评测时应区分样本行为回归与 Agent 分析质量，独立复核须关联实际证据。
 
-子 agent 完成前须关闭自己的调试和交互会话；根任务完成前须处理全部遗留会话。`view_agent_graph` 会列出待清理会话，其他子 agent 可以关闭已终止 owner 遗留的会话，但不能向它发送命令。
+## 致谢
 
-## 报告与评测
+- [Strix](https://github.com/usestrix/strix)：参考其模块职责与协调语义，基线 commit 为 `06015506625a78b981ae0b34be40239fc1b389be`。
+- [Rig](https://github.com/0xPlaygrounds/rig)：模型连接、ECS 执行循环、会话日志与异步子 Agent 支持，当前固定使用 `0.46.0`。
 
-报告包包含目标快照、原始证据、配置和复现元数据、JSON、Markdown、HTML 及 SHA256 清单。导出不执行目标，完整性检查通过 `verify-bundle` 运行。详见 [报告格式](docs/report-format.md)。
+## 许可证
 
-`fixtures/` 提供本地评测构建与行为回归定义；它区分样本真值、执行观察和 agent 检测结论。独立复核必须来自不同 agent，并关联实际 worker 结果。静态可疑特征或单纯崩溃不会自动升级为已验证影响。
-
-首版动态后端以 Linux ELF 为范围。Windows DbgEng 与 macOS LLDB 动态后端属于后续扩展。模型 provider 的实时可用性和外部引擎依赖取决于实际配置，缺少能力会返回明确错误。
-
-## 来源
-
-参照 [Strix](https://github.com/usestrix/strix) commit `06015506625a78b981ae0b34be40239fc1b389be` 的模块职责与协调语义；Rust 实现使用 [Rig v0.46.0](https://github.com/0xPlaygrounds/rig/releases/tag/v0.46.0)。
+本项目采用 [Apache License 2.0](LICENSE)。来源与第三方声明见 [NOTICE](NOTICE)；外部分析引擎遵循各自的上游许可证。
