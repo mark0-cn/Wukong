@@ -39,6 +39,18 @@ Optional `argv` entries arrive as `sys.argv[1..]`; an optional
 `target=<staged path>` is appended LAST and staged automatically — read it
 from `sys.argv[-1]`. Read stdout/stderr via job_status.
 
+## emulate_run — bounded Unicorn emulation
+
+For VM-style or hand-crafted code (interpreter loops, x87/FPU blocks,
+self-decoding payloads), prefer `emulate_run` over hand-building a
+Unicorn harness in py_run: it maps the ELF segments plus a stack, runs
+from `start` for up to `count` instructions or until the PC reaches
+`until`, and returns registers plus requested `dump` ranges. Hand-built
+harnesses historically burned turns on hook-page and endianness bugs —
+this tool is those bugs pre-fixed. It is a pure simulation: the target
+never runs natively. Use `init_regs` for register preconditions and
+`memory` to inject bytes at addresses.
+
 ## one_gadget and libc offsets
 
 - `one_gadget` (ruby) is in the worker: `one_gadget -l 1 /lib/x86_64-linux-gnu/libc.so.6`

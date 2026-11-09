@@ -622,6 +622,28 @@ pub(super) struct PyRunArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(super) struct EmulateRunArgs {
+    #[schemars(length(min = 1))]
+    pub target: String,
+    pub start: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<u64>,
+    #[schemars(range(min = 1, max = 10000000))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub init_regs: Option<Map<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<Vec<Map<String, Value>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dump: Option<Vec<Map<String, Value>>>,
+    #[schemars(range(min = 1, max = 600))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct CrashReplayArgs {
     #[schemars(length(min = 1))]
     pub target: String,
