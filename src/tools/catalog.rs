@@ -50,7 +50,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         parse: |value| Ok(serde_json::to_value(serde_json::from_value::<A>(value)?)?),
         side_effecting,
         root_only: matches!(visibility, Visibility::Root),
-        child_only: matches!(visibility, Visibility::Child),
+        child_only: matches!(visibility, Visibility::Child) || target,
     }
 }
 
@@ -537,4 +537,35 @@ fn build_catalog() -> Vec<Spec> {
 }
 pub(crate) fn child_schema() -> Value {
     rig_core::tool::args_schema::<args::CreateAgentArgs>()
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+    #[test]
+    fn target_operations_are_never_root_tools() {
+        for name in [
+            "binary_inspect",
+            "function_decompile",
+            "exec_command",
+            "py_run",
+            "debug_start",
+            "poc_verify",
+        ] {
+            let spec = builtins()
+                .iter()
+                .find(|s| s.definition.name.as_str() == name)
+                .unwrap();
+            assert!(spec.child_only, "{name} must be delegated");
+        }
+        for name in ["view_agent_graph", "note_save", "evidence_read"] {
+            assert!(
+                !builtins()
+                    .iter()
+                    .find(|s| s.definition.name.as_str() == name)
+                    .unwrap()
+                    .child_only
+            );
+        }
+    }
 }

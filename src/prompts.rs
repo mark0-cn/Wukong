@@ -176,7 +176,7 @@ pub(crate) fn tool_directory_prompt() -> String {
     let mut definitions = crate::tools::builtin_tool_definitions();
     definitions.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
     let mut text = String::from(
-        "\n\nTool directory (every built-in tool; per-request schemas arrive with the model request):\n",
+        "\n\nTool directory (built-in purposes; only role-permitted schemas may be called):\n",
     );
     for definition in definitions {
         let mut short = definition
@@ -194,7 +194,8 @@ pub(crate) fn tool_directory_prompt() -> String {
     text
 }
 
-pub(crate) fn discovery_prompt() -> String {    let roles = REGISTRY
+pub(crate) fn discovery_prompt() -> String {
+    let roles = REGISTRY
         .iter()
         .filter_map(|entry| match entry.kind {
             Kind::Role(role) => Some(role.as_str()),
