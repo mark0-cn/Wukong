@@ -1,6 +1,17 @@
 //! Models systems for the Rig adapter.
 use super::*;
 
+fn public_text<'a>(parts: impl IntoIterator<Item = &'a AssistantContent>) -> String {
+    parts
+        .into_iter()
+        .filter_map(|part| match part {
+            AssistantContent::Text(text) => Some(text.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[expect(
     clippy::type_complexity,
     reason = "Keep Bevy query components and filters visible in system signatures"
@@ -136,15 +147,7 @@ pub(super) fn account_replies(
                         .runner
                         .account_usage(&agent_id, response.usage, true)?;
                     // Only public assistant text is operator-facing progress.
-                    let text = response
-                        .choice
-                        .iter()
-                        .filter_map(|part| match part {
-                            AssistantContent::Text(text) => Some(text.text.as_str()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    let text = public_text(response.choice.iter());
                     if !text.trim().is_empty() {
                         let excerpt: String = text.chars().take(64 * 1024).collect();
                         application.runner.emit(&agent.run_id, Some(&agent_id), "model.text",
@@ -256,5 +259,19 @@ pub(super) fn stream_progress(
                 .runner
                 .stream_progress(&application.run_id, &id.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod public_progress_tests {
+    use super::*;
+    #[test]
+    fn narration_uses_public_text_and_never_reasoning() {
+        let parts = [
+            AssistantContent::reasoning("private reasoning"),
+            AssistantContent::text("公开进展"),
+        ];
+        assert_eq!(public_text(&parts), "公开进展");
+        assert!(public_text(&parts[..1]).is_empty());
     }
 }

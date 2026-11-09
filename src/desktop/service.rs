@@ -156,8 +156,9 @@ impl Service {
     pub fn busy(&self) -> bool {
         self.active.lock().unwrap().is_some() || self.operations.load(Ordering::SeqCst) > 0
     }
-    pub fn read(&self, request: WorkspaceRequest) -> Result<WorkspaceEnvelope> {
+    pub fn read(&self, mut request: WorkspaceRequest) -> Result<WorkspaceEnvelope> {
         let context = self.state.lock().unwrap().clone();
+        request.run = request.run.or_else(|| context.selected.clone());
         let workspace = workspace::read(&context.store, context.epoch, &request)?;
         let host = self.status();
         ensure!(

@@ -32,7 +32,7 @@ pub(crate) fn read(
             data.has_earlier=events.len()>limit;events.truncate(limit);events.reverse();
             let events=events.into_iter().map(|(seq,agent_id,kind,raw,created)|Ok(Event{seq,run_id:run.clone(),agent_id,kind,data:serde_json::from_str(&raw)?,created_at:created.parse()?})).collect::<Result<Vec<_>>>()?;
             let ids:BTreeSet<_>=events.iter().filter_map(|event|event.data["call_id"].as_str()).collect();
-            let mut calls=Vec::new();for id in ids {if let Some(call)=Store::tx_get::<ToolCallRecord>(tx,"call",id)? {if call.run_id==*run {calls.push(call);}}}
+            let mut calls=Vec::new();for id in ids {if let Some(call)=Store::tx_get::<ToolCallRecord>(tx,"call",id)? && call.run_id==*run {calls.push(call);}}
             let mut active_query=tx.prepare("SELECT data FROM entities WHERE kind='call' AND run_id=?1 AND json_extract(data,'$.state') IN ('prepared','running','uncertain') AND (?2 IS NULL OR json_extract(data,'$.agent_id')=?2) ORDER BY rowid")?;
             for raw in active_query.query_map(params![run,request.agent],|row|row.get::<_,String>(0))? {let call:ToolCallRecord=serde_json::from_str(&raw?)?;let agent=data.agents.iter().find(|agent|agent.id==call.agent_id);let display=presentation::tool_display(&call,agent);if matches!(display.state.as_str(),"queued"|"running"|"uncertain") {data.active_tools.push(display);}}
             let mail=mail.into_iter().map(|raw|Ok(serde_json::from_str::<Message>(&raw)?)).collect::<Result<Vec<_>>>()?;

@@ -287,7 +287,15 @@ pub async fn run(cli: Cli) -> Result<()> {
                 crate::tools::reconcile_record(&store, &call_id, result, &evidence_ids, error)?;
             print_json(&serde_json::to_value(outcome)?)?;
         }
-        Command::Gui { run_id } => crate::gui::run(config, store, run_id, path, cli.state)?,
+        Command::Gui { run_id } => {
+            #[cfg(feature = "desktop")]
+            crate::desktop::host::run(config, store, run_id, path, cli.state)?;
+            #[cfg(not(feature = "desktop"))]
+            {
+                let _ = (config, store, run_id, path);
+                anyhow::bail!("此构建仅包含 CLI；桌面版本请使用 npm run desktop:build 构建。");
+            }
+        }
     }
     Ok(())
 }
