@@ -132,7 +132,7 @@ impl Default for Budget {
             max_depth: 4,
             max_concurrent_agents: 4,
             max_turns_per_agent: 40,
-            max_total_tokens: 1_000_000,
+            max_total_tokens: 1_600_000,
             max_usd: None,
             max_wall_seconds: 3600,
             role_token_shares: std::collections::HashMap::new(),

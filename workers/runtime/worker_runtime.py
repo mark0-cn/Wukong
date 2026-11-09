@@ -4,6 +4,7 @@ import sys
 from worker_capabilities import doctor
 from worker_commands import CommandService
 from worker_common import PROTOCOL, TERMINAL
+from worker_emu import EmuService
 from worker_files import FileService
 from worker_jobs import JobManager
 from worker_operations import OperationLedger
@@ -17,9 +18,10 @@ class Runtime:
         self.sessions = SessionManager(self.root, trusted, self.isolated)
         self.files = FileService(self.root, trusted, self.isolated)
         self.commands = CommandService(self.root, trusted, self.isolated)
+        self.emu = EmuService(self.root, trusted, self.isolated)
         self.operations = OperationLedger(self.root)
         self.handlers = {}
-        for service in [self.jobs, self.sessions, self.files, self.commands]:
+        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu]:
             for name in service.methods:
                 if name in self.handlers:
                     raise ValueError("duplicate worker method: " + name)

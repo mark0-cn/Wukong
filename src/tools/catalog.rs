@@ -493,6 +493,14 @@ fn build_catalog() -> Vec<Spec> {
             handlers::handle_job_start,
             Visibility::All,
         ),
+        spec::<args::EmulateRunArgs>(
+            "emulate_run",
+            "Bounded Unicorn emulation of the staged target from a start address: maps the ELF segments plus a stack, executes up to count instructions or until the PC reaches the until address (whichever first), and returns registers plus requested memory dumps (data_base64). The target never runs natively — this is a pure simulation for VM-style or hand-crafted code (interpreter loops, x87/FPU blocks) without hand-building Unicorn harnesses. Use init_regs for register preconditions and memory to inject bytes. The watchdog timeout bounds runaway loops; unsupported instructions report the failing address in error.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_emulate_run,
+            Visibility::All,
+        ),
         spec::<args::CrashReplayArgs>(
             "crash_replay",
             "Start a persistent clean-directory crash reproduction job.",
