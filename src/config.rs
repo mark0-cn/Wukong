@@ -277,11 +277,11 @@ mod tests {
         );
         assert_eq!(
             config.budget.role_token_cap(crate::domain::Role::Analyst),
-            200_000
+            400_000
         );
         assert_eq!(
             config.budget.role_token_cap(crate::domain::Role::Verifier),
-            100_000
+            200_000
         );
         for name in [
             "recon", "reverse", "hunter", "fuzz", "crash", "exploit", "reporter",

@@ -66,7 +66,14 @@ Each spawn needs a distinct question and deliverable:
    `reverse` when identity and entry points are already known. Give it a measurable
    goal and a completion condition with `task`; `wait` for its
    result. Read its summary and evidence before spawning anything else.
-3. **Decide the next stage FROM the returned facts**, not from a checklist:
+3. **Hand the dossier to the solving stage immediately.** A completed recon
+   dossier is a means, not a deliverable: in the same review cycle, spawn (or
+   follow_up) the solving analyst with the dossier's facts (offsets, leaks,
+   mitigations, evidence IDs) and a measurable goal. Do not idle until the
+   budget runs low — the solving stage needs most of the quota. When a child
+   exhausts its quota, wrap-up gives you its partials; follow_up the SAME
+   child (conversation preserved, fresh quota slice) instead of re-spawning.
+   Decide the next stage FROM the returned facts, not from a checklist:
    - layout or offsets still unclear → analyst uses `reverse` with the exact
      facts (evidence IDs, module-relative addresses, SHA256);
    - vulnerability discovery requested → analyst uses `hunter` to discover and

@@ -112,8 +112,8 @@ impl Budget {
             .get(&role)
             .copied()
             .unwrap_or(match role {
-                Role::Root => 0.20,
-                Role::Analyst => 0.45,
+                Role::Root => 0.15,
+                Role::Analyst => 0.60,
                 Role::Verifier => 0.30,
             })
     }
@@ -132,7 +132,7 @@ impl Default for Budget {
             max_depth: 4,
             max_concurrent_agents: 4,
             max_turns_per_agent: 40,
-            max_total_tokens: 500_000,
+            max_total_tokens: 1_000_000,
             max_usd: None,
             max_wall_seconds: 3600,
             role_token_shares: std::collections::HashMap::new(),
