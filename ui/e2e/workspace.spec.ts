@@ -1,0 +1,95 @@
+import { test, expect, type Page } from '@playwright/test';
+import { agents, budget, finding, host, tool, workspace } from '../src/test/fixtures';
+
+async function mockDesktop(page: Page) {
+  await page.addInitScript(({ data, host, tool, finding }) => {
+    const state = { data, host, requests: [] as { command: string; args: Record<string, any> }[], revision: 1, sendDelay: 0 };
+    const callbacks = new Map<number, (value: unknown) => void>();
+    const listeners = new Map<string, number[]>();
+    let next = 0;
+    const emit = (event: string, payload: unknown) => (listeners.get(event) ?? []).forEach(id => callbacks.get(id)?.({ event, payload, id }));
+    Object.assign(window, { __desktopTest: state, __emitDesktop: emit, __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} }, __TAURI_INTERNALS__: {
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
+      transformCallback: (callback: (value: unknown) => void) => { callbacks.set(++next, callback); return next; },
+      unregisterCallback: (id: number) => callbacks.delete(id),
+      invoke: async (command: string, args: Record<string, any> = {}) => {
+        state.requests.push({ command, args });
+        if (command === 'plugin:event|listen') { listeners.set(args.event, [...(listeners.get(args.event) ?? []), args.handler]); return args.handler; }
+        if (command === 'plugin:event|unlisten') { listeners.set(args.event, (listeners.get(args.event) ?? []).filter(id => id !== args.eventId)); return; }
+        if (command === 'workspace_read') {
+          const request = args.request;
+          const snapshot = structuredClone(state.data);
+          snapshot.selected = request.run ?? snapshot.selected;
+          if (snapshot.selected === 'run-b') { snapshot.agents = [{ ...snapshot.agents[0], id: 'root-b', name: '归档分析 Agent' }]; snapshot.transcript = []; snapshot.active_tools = []; }
+          else if (request.agent) snapshot.transcript = snapshot.transcript.filter(message => message.agent_id === request.agent);
+          const revision = `${state.revision}:${snapshot.selected}:${request.agent ?? ''}:${request.event_limit}`;
+          return { host: state.host, workspace: { revision, data: revision === request.known_revision ? null : snapshot } };
+        }
+        if (command === 'tool_details') return { id: args.id, agent_id: 'root', name: 'binary_info', arguments: { path: 'parser.elf', raw_parameter: 'visible-on-demand' }, result: { architecture: 'x86_64', format: 'elf' }, evidence_id: tool.evidence_id, state: 'completed' };
+        if (command === 'send_message') {
+          await new Promise(resolve => setTimeout(resolve, state.sendDelay));
+          state.data.transcript.push({ id: `mail-${state.revision}`, role: 'user', author: `你 → ${args.agent}`, agent_id: args.agent, created_at: new Date().toISOString(), delivery: 'queued', content: [{ type: 'text', text: args.text }] });
+          state.revision++; emit('workspace-changed', null); return { delivery: 'queued', recipient_generation: args.generation };
+        }
+        if (command === 'finding_details') return { finding, verification: null, evidence: [{ id: 'evidence-a', agent_id: 'analyst', tool_call_id: 'call-copy', source: 'reproduction.txt', media_type: 'text/plain', size: 20000, sha256: 'fixture-sha256' }], calls: [], missing_evidence: [] };
+        if (command === 'evidence_preview') return { id: args.id, source: 'reproduction.txt', media_type: 'text/plain', size: 20000, sha256: 'fixture-sha256', offset: args.offset, end: args.offset === 0 ? 16384 : 20000, text: args.offset === 0 ? 'first evidence page: controlled reproduction' : 'second evidence page: end of output', binary: false };
+        if (command === 'config_read') return { path: '/tmp/re-agent.toml', source: '# retain this comment\n[model]\nmodel = "gpt-5.2"\n', original: '# retain this comment\n[model]\nmodel = "gpt-5.2"\n', form: { model: { provider: 'openai', model: 'gpt-5.2' }, budget: state.host.budget, state_dir: 'state' } };
+        if (command === 'config_save') { state.host = { ...state.host, epoch: state.host.epoch + 1, execution: null }; return { ...args.document, original: args.document.source }; }
+        if (command === 'pause_run') { state.host.execution = null; state.data.runs[0].status = 'budget_paused'; state.revision++; emit('workspace-changed', null); return; }
+        if (command === 'pick_target') return '/samples/new.elf';
+        if (command === 'start_run' || command === 'resume_run') return 'run-a';
+        if (command === 'export_report') return '/reports/fixture';
+        if (command === 'stop_agent' || command === 'shutdown_workspace') return;
+        throw new Error(`Unhandled test command: ${command}`);
+      },
+    } });
+  }, { data: workspace, host, tool, finding });
+}
+test.beforeEach(async ({ page }) => { await mockDesktop(page); });
+test('shows public progress and paired tool results without raw JSON', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'parser.elf', exact: true })).toBeVisible();
+  await expect(page.getByText('启动调试会话', { exact: true })).toBeVisible();
+  await expect(page.getByText('调试后端暂不可用：连接已关闭。已保留当前证据。')).toBeVisible();
+  await expect(page.getByText('raw_parameter')).toHaveCount(0);
+  await page.locator('.transcript').evaluate(element => { element.scrollTop = 0; });
+  await expect(page.getByText('查看文件信息', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /查看文件信息/ }).click();
+  await expect(page.getByText(/visible-on-demand/)).toBeVisible();
+  await expect(page.locator('.agent-card')).toHaveCount(3);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: '/private/tmp/re-agent-web-transcript.png', fullPage: true });
+});
+test('retains per-agent drafts and targets message delivery after navigation', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.agent-card').filter({ hasText: '输入边界分析' }).click();
+  await page.getByLabel('发送给 Agent 的消息').fill('draft for analyst');
+  await page.locator('.agent-card').filter({ hasText: '复现与独立验证' }).click();
+  await page.getByLabel('发送给 Agent 的消息').fill('draft for verifier');
+  await page.locator('.agent-card').filter({ hasText: '输入边界分析' }).click();
+  await expect(page.getByLabel('发送给 Agent 的消息')).toHaveValue('draft for analyst');
+  await page.evaluate(() => { (window as any).__desktopTest.sendDelay = 1000; });
+  await page.getByLabel('发送消息', { exact: true }).click();
+  await page.locator('.agent-card').filter({ hasText: '复现与独立验证' }).click();
+  await page.locator('.agent-card').filter({ hasText: '输入边界分析' }).click();
+  await page.getByLabel('发送给 Agent 的消息').fill('newer analyst draft');
+  await page.waitForFunction(() => (window as any).__desktopTest.data.transcript.some((message: any) => message.id.startsWith('mail-')));
+  await expect(page.getByLabel('发送给 Agent 的消息')).toHaveValue('newer analyst draft');
+  const sent = await page.evaluate(() => (window as any).__desktopTest.requests.find((request: any) => request.command === 'send_message'));
+  expect(sent.args.agent).toBe('analyst'); expect(sent.args.generation).toBe(agents[1].generation);
+});
+test('loads scoped evidence pages and preserves settings drafts', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /发现与证据/ }).click();
+  await page.getByRole('button', { name: 'reproduction.txt', exact: true }).click();
+  await expect(page.getByText('first evidence page: controlled reproduction')).toBeVisible();
+  await page.getByLabel('下一页证据').click();
+  await expect(page.getByText('second evidence page: end of output')).toBeVisible();
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByLabel('主模型', { exact: true }).fill('draft-model');
+  await page.getByRole('button', { name: '关闭', exact: true }).last().click();
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await expect(page.getByLabel('主模型', { exact: true })).toHaveValue('draft-model');
+  await expect(page.getByRole('button', { name: '保存并应用' })).toBeDisabled();
+});

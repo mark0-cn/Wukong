@@ -203,7 +203,7 @@ pub fn run(
     tauri::async_runtime::set(tokio::runtime::Handle::current());
     let service = Service::new(config, store, selected, path, state_override);
     let updates = service.clone();
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(service)
         .invoke_handler(tauri::generate_handler![
@@ -225,14 +225,16 @@ pub fn run(
             shutdown_workspace
         ])
         .setup(move |app| {
+            let development = app.config().build.dev_url.clone();
             tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
-                .on_navigation(|url| {
-                    url.scheme() == "tauri"
+                .on_navigation(move |url| {
+                    (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
                         || (matches!(url.scheme(), "http" | "https")
-                            && matches!(
-                                url.host_str(),
-                                Some("tauri.localhost" | "127.0.0.1" | "localhost")
-                            ))
+                            && url.host_str() == Some("tauri.localhost"))
+                        || (cfg!(debug_assertions)
+                            && development
+                                .as_ref()
+                                .is_some_and(|development| url.origin() == development.origin()))
                 })
                 .build()?;
             let handle = app.handle().clone();
@@ -253,6 +255,18 @@ pub fn run(
                 let _ = window.emit("close-requested", CloseRequest { busy });
             }
         })
-        .run(tauri::generate_context!())?;
+        .build(tauri::generate_context!())?;
+    app.run(|app, event| {
+        // OS Quit / Cmd+Q follows the same save boundary as closing the window.
+        // An explicit shutdown command exits with Some(0) after awaiting cleanup.
+        if let tauri::RunEvent::ExitRequested {
+            code: None, api, ..
+        } = event
+        {
+            api.prevent_exit();
+            let busy = app.state::<Arc<Service>>().busy();
+            let _ = app.emit("close-requested", CloseRequest { busy });
+        }
+    });
     Ok(())
 }

@@ -61,13 +61,26 @@ pub fn tool_title(name: &str) -> &str {
         "binary_inspect" => "检查文件格式与安全属性",
         "binary_strings" => "检索程序字符串",
         "functions_list" => "查找程序函数",
+        "functions_search" => "搜索程序函数",
         "function_decompile" | "ghidra_decompile" => "反编译函数",
-        "xrefs" | "xrefs_list" => "追踪函数引用",
+        "xrefs_query" => "追踪函数引用",
         "exec_command" => "执行分析命令",
         "write_stdin" => "与运行中的进程交互",
         "job_start" => "启动后台分析任务",
         "job_status" => "查看后台任务结果",
         "job_cancel" => "取消后台任务",
+        "job_artifacts" => "读取后台任务产物",
+        "fuzz_start" => "启动模糊测试",
+        "fuzz_status" => "查看模糊测试结果",
+        "crash_replay" => "重放崩溃样例",
+        "input_minimize" => "最小化复现输入",
+        "angr_solve" => "求解程序执行路径",
+        "file_list" => "列出工作区文件",
+        "file_get" => "读取工作区文件",
+        "file_put" => "保存工作区文件",
+        "interactive_start" => "启动交互会话",
+        "interactive_send" => "与分析进程交互",
+        "interactive_close" => "关闭交互会话",
         "evidence_read" => "读取分析证据",
         "think" => "记录分析笔记",
         "note_save" => "保存分析笔记",
@@ -79,12 +92,15 @@ pub fn tool_title(name: &str) -> &str {
         "threat_model_get" => "阅读威胁模型",
         "threat_model_save" | "threat_model_amend" => "更新威胁模型",
         "finding_file" | "finding_update" => "记录分析发现",
+        "finding_get" => "查看分析发现",
         "findings_list" => "查看分析发现",
         "coverage_record" | "coverage_update" => "记录检查范围",
         "coverage_list" => "检查分析覆盖情况",
         "poc_verify" => "独立验证分析结论",
+        "verification_record" => "记录验证结果",
         "debug_start" => "启动调试会话",
         "debug_command" => "检查程序运行状态",
+        "debug_close" => "关闭调试会话",
         _ => name,
     }
 }
@@ -324,6 +340,15 @@ pub fn transcript(
                     .map(str::to_owned),
                 "agent.error" => text(&event.data, &["message", "error"])
                     .map(|text| format!("**分析遇到问题**\n\n{text}")),
+                "agent.status"
+                    if matches!(event.data["status"].as_str(), Some("failed" | "crashed")) =>
+                {
+                    text(&event.data, &["error"]).map(|text| format!("**分析遇到问题**\n\n{text}"))
+                }
+                "agent.completed" => {
+                    text(&event.data, &["summary"]).map(|text| format!("**任务结论**\n\n{text}"))
+                }
+                "agents.stopped" => Some("此 Agent 分支已停止，已有证据和分析结果已保留。".into()),
                 "run.budget_paused" => Some(match event.data["reason"].as_str() {
                     Some("operator paused from desktop" | "operator paused assessment") => {
                         "分析已暂停，进度已保存。".into()
@@ -346,7 +371,9 @@ pub fn transcript(
             id: format!("operator-{}", mail.id),
             role: "user",
             agent_id: Some(mail.recipient.clone()),
-            author: "你".into(),
+            author: agents
+                .get(mail.recipient.as_str())
+                .map_or_else(|| "你".into(), |agent| format!("你 → {}", agent.name)),
             created_at: mail.created_at,
             content: vec![ChatPart::Text {
                 text: mail.content.clone(),

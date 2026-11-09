@@ -1,0 +1,52 @@
+import { useMemo, useState } from 'react';
+import { Bot, ChevronDown, ChevronRight, GitBranch, LayoutList } from 'lucide-react';
+import type { Agent } from '../types';
+import { compact, labels, Status, terminal } from './Status';
+
+export function Agents({ agents, selected, onSelect, onStop, canStop }: {
+  agents: Agent[]; selected?: string; onSelect: (id?: string) => void;
+  onStop: (agent: Agent) => void; canStop: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const ordered = useMemo(() => {
+    const children = new Map<string | null, Agent[]>();
+    const ids = new Set(agents.map(agent => agent.id));
+    for (const agent of agents) {
+      const parent = agent.parent_id && ids.has(agent.parent_id) ? agent.parent_id : null;
+      children.set(parent, [...(children.get(parent) ?? []), agent]);
+    }
+    const visited = new Set<string>();
+    const rows: { agent: Agent; depth: number; hasChildren: boolean }[] = [];
+    const walk = (agent: Agent, depth: number) => {
+      if (visited.has(agent.id)) return;
+      visited.add(agent.id);
+      rows.push({ agent, depth, hasChildren: Boolean(children.get(agent.id)?.length) });
+      if (!collapsed.has(agent.id)) children.get(agent.id)?.forEach(child => walk(child, depth + 1));
+    };
+    children.get(null)?.forEach(agent => walk(agent, 0));
+    // Malformed cyclic/orphan data remains inspectable without recursive loops.
+    if (!rows.length) agents.forEach(agent => walk(agent, 0));
+    return rows;
+  }, [agents, collapsed]);
+  const current = agents.find(agent => agent.id === selected);
+  return <aside className="agents-panel"><div className="panel-heading"><GitBranch size={14} /><strong>协作任务</strong><span>{agents.length}</span></div>
+    <button className={`agent-all ${!selected ? 'selected' : ''}`} onClick={() => onSelect()}><LayoutList size={15} />全部进展</button>
+    <div className="agent-list">{ordered.map(({ agent, depth, hasChildren }) => <div className="agent-row" key={agent.id} style={{ paddingLeft: Math.min(depth, 6) * 12 }}>
+      <button className="agent-chevron" aria-label={collapsed.has(agent.id) ? `展开 ${agent.name}` : `折叠 ${agent.name}`} disabled={!hasChildren}
+        onClick={() => setCollapsed(value => { const next = new Set(value); if (next.has(agent.id)) next.delete(agent.id); else next.add(agent.id); return next; })}>
+        {hasChildren ? collapsed.has(agent.id) ? <ChevronRight size={12} /> : <ChevronDown size={12} /> : <span />}
+      </button>
+      <button className={`agent-card ${selected === agent.id ? 'selected' : ''}`} onClick={() => onSelect(agent.id)}>
+        <div className="agent-card-name"><Bot size={14} /><strong>{agent.name}</strong></div>
+        <p title={agent.task}>{agent.task}</p><Status value={agent.status} />
+      </button>
+    </div>)}</div>
+    {current && <div className="agent-inspector"><div className="detail-caption">{labels[current.role] ?? current.role} · 第 {current.generation} 代</div>
+      <h4>{current.name}</h4><p>{current.task}</p>{current.scope && <p className="muted">范围：{current.scope}</p>}
+      <div className="metric-row"><span>{current.turns} 轮</span><span>{compact(current.total_tokens)} tokens</span></div>
+      {current.error && <p className="error">{current.error}</p>}
+      {current.summary && <p className="agent-summary">{current.summary}</p>}
+      {!terminal(current.status) && <button className="danger subtle" disabled={!canStop} onClick={() => onStop(current)}>停止此 Agent</button>}
+    </div>}
+  </aside>;
+}
