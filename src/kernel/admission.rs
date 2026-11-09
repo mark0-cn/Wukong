@@ -272,6 +272,7 @@ pub(super) fn gate_models(
     ids: Query<&AgentId>,
     active: Query<(), (ModelCalls, With<Started>, Without<Settled>)>,
     wraps: Query<&QuotaWrap>,
+    nudges: Query<&Nudged>,
     application: Res<Application>,
     mut commands: Commands,
     mut fatal: ResMut<Fatal>,
@@ -319,11 +320,14 @@ pub(super) fn gate_models(
                 } else if agent.token_cap.is_some_and(|cap| agent.total_tokens >= cap)
                     || agent.turns >= run.budget.max_turns_per_agent
                 {
-                    if wraps.get(from.0).is_ok() {
-                        // The wrap-up chance was already given; fail and keep
-                        // the conversation in the Rig journal so the root can
-                        // resume this SAME agent with follow_up_agent (which
-                        // grants a fresh quota slice).
+                    let wrapped = wraps.get(from.0).is_ok();
+                    let nudged = nudges.get(from.0).is_ok_and(|nudge| nudge.0);
+                    if wrapped && nudged {
+                        // The wrap-up instruction AND the final nudge were
+                        // both answered without a lifecycle tool: fail and
+                        // keep the conversation in the Rig journal so the
+                        // root can resume this SAME agent with
+                        // follow_up_agent (which grants a fresh quota slice).
                         application.runner.fail_agent(
                             &agent.id,
                             "agent model budget reached".into(),
@@ -331,12 +335,16 @@ pub(super) fn gate_models(
                         )?;
                         commands.trigger(StopTurn::new(from.0));
                     } else {
-                        commands.entity(from.0).insert(QuotaWrap);
-                        commands.trigger(Deliver::new(
-                            from.0,
-                            "Your role quota is exhausted. Do not start new work: call agent_finish NOW with your partial results, remaining questions and evidence IDs. The root can resume you later with follow_up_agent, which preserves this conversation and grants a fresh quota slice.",
-                            DeliveryMode::Inform,
-                        ));
+                        if !wrapped {
+                            commands.entity(from.0).insert(QuotaWrap);
+                            commands.trigger(Deliver::new(
+                                from.0,
+                                "Your role quota is exhausted. Do not start new work: call agent_finish NOW with your partial results, remaining questions and evidence IDs. The root can resume you later with follow_up_agent, which preserves this conversation and grants a fresh quota slice.",
+                                DeliveryMode::Inform,
+                            ));
+                        }
+                        // One turn to answer the wrap-up (or the completion
+                        // nudge) with the lifecycle tool.
                         slots += 1;
                         application
                             .runner

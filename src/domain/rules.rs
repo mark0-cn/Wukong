@@ -258,8 +258,14 @@ impl MessageRules {
             !correlation.trim().is_empty() && correlation.len() <= 256,
             "invalid correlation_id"
         );
+        let quota_failed = target.status == Status::Failed
+            && target
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("budget"));
+        let resumable = target.status == Status::Completed || quota_failed;
         let generation = if options.kind == MessageKind::FollowUp
-            && target.status == Status::Completed
+            && resumable
             && !stale
         {
             target
