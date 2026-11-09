@@ -1,6 +1,7 @@
 """Capabilities."""
 from pathlib import Path
 import importlib.util
+import json
 import platform
 import shutil
 import subprocess
@@ -18,7 +19,7 @@ def _python_module(name):
 def doctor(root, trusted, isolated):
     tools = {}
     for name in ["gdb", "afl-fuzz", "afl-qemu-trace", "afl-qemu-bridge", "afl-tmin", "gcc",
-                 "one_gadget", "patchelf", "ropper"]:
+                 "one_gadget", "patchelf", "ropper", "pwninit", "pwndbg", "tmux", "strace", "ltrace", "seccomp-tools", "socat", "gdbserver"]:
         executable = shutil.which(name)
         version = None
         if executable and name in {"gdb", "gcc"}:
@@ -43,7 +44,14 @@ def doctor(root, trusted, isolated):
         "unicorn": _python_module("unicorn"),
         "capstone": _python_module("capstone"),
     }
-    return {"protocol": PROTOCOL, "platform": platform.platform(), "python": platform.python_version(),
+    workbench=None
+    launch=Path(root)/"files/challenge/launch.json"
+    if launch.is_file():
+        try:
+            spec=json.loads(launch.read_text())
+            workbench={"launch_spec":"files/challenge/launch.json","challenge_id":spec["challenge_id"],"target":str(Path(spec["base"])/spec["target"]) if spec.get("target") else None,"input_mode":spec["input_mode"],"service":spec["service"],"runtime_confirmed":False}
+        except (OSError,ValueError,KeyError) as error:workbench={"error":str(error)}
+    return {"workbench":workbench,"protocol": PROTOCOL, "platform": platform.platform(), "python": platform.python_version(),
             "worker_root": str(root), "isolation": "trusted_local" if trusted else "external_worker",
             "core_pattern": core_pattern, "external_core_handler": bool(core_pattern and core_pattern.startswith("|")),
             "metadata_protected_from_targets": isolated, "unique_experiment_uids": isolated,

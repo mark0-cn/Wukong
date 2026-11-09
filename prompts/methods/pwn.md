@@ -9,6 +9,9 @@ known. Load alongside the relevant capability; select only the method needed now
 - Uncertain RELRO, CET, seccomp or other runtime protection: inspect static and
   live evidence with `mitigation_analysis` before choosing a path.
 
+Load `pwn_environment` when supplied runtimes, Docker services or a prepared
+workbench affect reproduction.
+
 ## Shared preconditions
 
 Pin target/runtime hashes with `runtime_profile`. When a loader and libc are
