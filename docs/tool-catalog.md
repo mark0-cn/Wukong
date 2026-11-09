@@ -20,6 +20,7 @@
 | `debug_close` | analyst / verifier | 是 | Close your debugger session, or clean up an in-run session whose owner is terminal. |
 | `debug_command` | analyst / verifier | 是 | Execute exactly one GDB/MI command in your owned session; stable request IDs prevent blind replay. |
 | `debug_start` | analyst / verifier | 是 | Start an owned GDB/MI session on the staged target. |
+| `differential_test` | analyst / verifier | 是 | Compare the staged target and reference on bounded stdin vectors in an isolated background job. Preserve raw outputs, hashes and mismatches as artifacts. Timeout or truncated output is inconclusive, never a match. |
 | `emulate_run` | analyst / verifier | 否 | Bounded Unicorn emulation of the staged target from a start address: maps the ELF segments plus a stack, executes up to count instructions or until the PC reaches the until address (whichever first), and returns registers plus requested memory dumps (data_base64). The target never runs natively — this is a pure simulation for VM-style or hand-crafted code (interpreter loops, x87/FPU blocks) without hand-building Unicorn harnesses. Use init_regs for register preconditions and memory to inject bytes. The watchdog timeout bounds runaway loops; unsupported instructions report the failing address in error. |
 | `evidence_read` | 全部 | 否 | Read a bounded byte range from an integrity-checked evidence artifact. Non-UTF8 is base64. |
 | `exec_command` | analyst / verifier | 是 | Run ONE bounded shell command synchronously in the worker and return its stdout/stderr/exit code in the result. The command runs in a fresh temporary directory: pass target=<staged path from stage_target> and the resolved file is available at $TARGET in the environment ("printf '<payload>' \| $TARGET"). Prefer this for quick inspection and stdin-driven PoCs; long-running work must go to job_start with output redirected to a log file instead of blocking here. Worker paths (files/...) resolve only as direct argv entries, never inside shell strings; use $RE_AGENT_STATE_DIR for the state root. |
@@ -32,6 +33,7 @@
 | `finish_scan` | root | 是 | Root only: finish the assessment after children and coverage are resolved. |
 | `follow_up_agent` | 全部 | 是 | Explicitly assign a follow-up; reopens completed work in a new generation while preserving history. Use recipient_generation to guard against stale assignments. |
 | `function_decompile` | analyst / verifier | 否 | Ghidra: decompile a function by MODULE-RELATIVE offset. |
+| `function_instructions` | analyst / verifier | 否 | Ghidra: paginated function instructions and control-flow edges, including calls. Addresses are module-relative and bound to target SHA256. Optional target_evidence_id selects an in-run baseline binary. |
 | `functions_search` | analyst / verifier | 否 | Ghidra: search analyzed functions, paginated. |
 | `fuzz_start` | analyst / verifier | 是 | Start AFL++ QEMU fuzzing after staging target and nonempty seed files. |
 | `fuzz_status` | analyst / verifier | 否 | Observe a bound AFL++ job and its real statistics/crash files. |
@@ -50,7 +52,7 @@
 | `notes_list` | 全部 | 否 | List shared notes for this assessment. |
 | `poc_verify` | analyst / verifier | 是 | Independently replay a finding's input in fresh directories; worker observations determine trial success. input_mode selects delivery: "argv" (default, AFL-style @@ file path) or "stdin" (payload bytes piped to the target's stdin — use this for programs that read(0, ...)). |
 | `py_run` | analyst / verifier | 是 | Run a Python script in the worker in ONE step: pass the source text directly (no base64, no file_put). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv and staged automatically in isolated jobs — read it from sys.argv[-1]. Prefer this over file_put+job_start for any script longer than one line. |
-| `runtime_doctor` | analyst / verifier | 否 | Inspect the configured worker's real platform, versions and available capabilities. |
+| `runtime_doctor` | 全部 | 否 | Inspect the configured worker's real platform, versions and available capabilities. |
 | `send_message_to_agent` | 全部 | 是 | Queue information, a question, reply, result or blocked notice. Information does not interrupt waits. Only follow_up_agent reopens completed work. Queued/included is not proof of processing. |
 | `stage_target` | analyst / verifier | 是 | Copy the run's SHA256-verified original target into the worker's immutable files area. |
 | `stop_agent` | 全部 | 是 | Stop yourself or your descendants, with a recorded reason. |

@@ -96,3 +96,4 @@ to try next.
 Stop when the assigned question is answered with bounded evidence or a
 specific missing capability/input blocks it. Do not require execution for a
 purely static question or turn every result into a vulnerability finding.
+Use function_instructions for original instruction and control-flow evidence; paginate with next_offset. Calls and branches are static edges, not proof of execution.

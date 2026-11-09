@@ -57,11 +57,11 @@ def query(root, params):
     analysis_timeout = bounded_int(params.get("analysis_timeout_secs"), min(90, timeout - 1), 1, 290)
     max_cpu = bounded_int(params.get("max_cpu"), 2, 1, 16)
     operation = dict(params["query"])
-    if operation.get("operation") not in {"functions", "decompile", "xrefs"}:
+    if operation.get("operation") not in {"functions", "decompile", "xrefs", "instructions"}:
         raise ValueError("unsupported Ghidra operation")
-    if operation["operation"] in {"functions", "xrefs"}:
+    if operation["operation"] in {"functions", "xrefs", "instructions"}:
         operation["limit"] = bounded_int(operation.get("limit"), 25, 1, 5000)
-    if operation["operation"] == "functions":
+    if operation["operation"] in {"functions", "instructions"}:
         operation["offset"] = bounded_int(operation.get("offset"), 0, 0, 100000000)
     binding = {"schema": 1, "target_sha256": actual_hash, "version": version, "properties_sha256": digest(properties),
                "launcher_sha256": digest(headless), "bridge_sha256": digest(script), "analysis_timeout_secs": analysis_timeout, "max_cpu": max_cpu}

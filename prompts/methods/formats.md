@@ -28,3 +28,4 @@ are explained and distinguishing cases support the layout, or identify the
 specific sample/capability needed to resolve the remaining ambiguity.
 
 When the contract requests `formats`, return a TaskArtifact named `formats` with original evidence_id and structured={kind:"formats",rows:[...]}. Every row must cite its own evidence_id; use the structured artifact fields documented in the completion tool schema and project contract.
+Each structured row requires offset, width, encoding, meaning, confidence, and evidence_id.

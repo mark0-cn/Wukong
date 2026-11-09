@@ -87,8 +87,8 @@ async fn model_server() -> Result<(
                 .collect::<Vec<_>>();
             if role == "root" {
                 ensure!(
-                    names.contains(&"binary_inspect"),
-                    "root did not receive the full catalog"
+                    !names.contains(&"binary_inspect") && names.contains(&"runtime_doctor"),
+                    "root must receive coordination and preflight tools only"
                 );
             }
             let turn = {

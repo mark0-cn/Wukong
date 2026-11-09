@@ -403,6 +403,9 @@ pub(super) struct BinaryStringsArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct FunctionsSearchArgs {
+    /// Optional same-run binary evidence for a baseline/secondary target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_evidence_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -415,12 +418,18 @@ pub(super) struct FunctionsSearchArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct FunctionDecompileArgs {
+    /// Optional same-run binary evidence for a baseline/secondary target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_evidence_id: Option<String>,
     pub address: u64,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct XrefsQueryArgs {
+    /// Optional same-run binary evidence for a baseline/secondary target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_evidence_id: Option<String>,
     pub address: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<Direction>,
@@ -774,4 +783,24 @@ pub(super) struct AnalysisVerifyArgs {
     pub verdict: AnalysisVerdict,
     pub evidence_ids: Vec<String>,
     pub counterexamples: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct FunctionInstructionsArgs {
+    pub address: u64,
+    pub offset: Option<u64>,
+    pub limit: Option<u64>,
+    pub target_evidence_id: Option<String>,
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DifferentialTestArgs {
+    /// In-run worker executable paths; reference may be a staged Python script.
+    pub target: String,
+    pub reference: String,
+    pub reference_python: bool,
+    /// At most 64 base64 stdin vectors, each at most 64 KiB decoded.
+    pub inputs_base64: Vec<String>,
+    pub case_timeout_seconds: u64,
 }
