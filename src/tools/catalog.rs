@@ -493,6 +493,14 @@ fn build_catalog() -> Vec<Spec> {
             handlers::handle_job_start,
             Visibility::All,
         ),
+        spec::<args::LibcIdentifyArgs>(
+            "libc_identify",
+            "Offline libc identification: map a leaked runtime address (banner %p / dlsym reference) to the libc base by matching it against the leaked symbol's offset in the WORKER's own libc. Returns base, system_offset and a /bin/sh offset when matched. Covers only the worker's libc — a no-match means the target runs a different libc than the worker.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_libc_identify,
+            Visibility::All,
+        ),
         spec::<args::EmulateRunArgs>(
             "emulate_run",
             "Bounded Unicorn emulation of the staged target from a start address: maps the ELF segments plus a stack, executes up to count instructions or until the PC reaches the until address (whichever first), and returns registers plus requested memory dumps (data_base64). The target never runs natively — this is a pure simulation for VM-style or hand-crafted code (interpreter loops, x87/FPU blocks) without hand-building Unicorn harnesses. Use init_regs for register preconditions and memory to inject bytes. The watchdog timeout bounds runaway loops; unsupported instructions report the failing address in error.",

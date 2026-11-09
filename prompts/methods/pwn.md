@@ -73,6 +73,68 @@ verification artifact)
 4. The flag comes from the service's own output; the connection
    transcript IS the evidence.
 
+## Heap exploitation basics (tcache era)
+
+When the target uses heap allocations, keep these facts and primitives in
+mind; verify each layout observation against the actual allocator version:
+
+- Chunk layout: size/prev_size header precedes user data; freed chunks
+  store forward/back pointers in the first 16 bytes of user space. glibc
+  2.26+ keeps small chunks in per-thread tcache (LIFO, no integrity checks
+  beyond a count), 2.35+ adds safe-linking (pointers stored XOR'd with the
+  heap address).
+- The most common primitives, in order of usefulness:
+  1. tcache poisoning: corrupt a freed chunk's next pointer so the next
+     malloc of that size returns an arbitrary address (overwrite a target
+     pointer, e.g. a function pointer or GOT entry when writable).
+  2. Use-after-free: a dangling pointer is reused after free — turn it
+     into a double-free or an overlapping chunk to build a poisoning
+     write.
+  3. Double-free (or overlapping free) of the same chunk, then reallocate
+     over it to forge the forward pointer.
+- Debug with the worker's gdb (gef: `heap chunks`, `heap bins`, `tcache
+  bins`) rather than reasoning from prints. Confirm the allocator version
+  from the worker libc, not the target's build hints.
+
+## Format-string exploitation
+
+When user-controlled data reaches a printf-family format argument:
+
+1. Locate the offset: send `%p` probes (e.g. `%N$p` for N=1..20) and find
+   which positions echo your input bytes — that N is your write index.
+2. Choose the WRITE TARGET first: partial RELRO -> a GOT entry you can
+   trigger afterwards; full RELRO -> a writable data pointer used by a
+   later call, or a saved return address on the stack (the probe leak
+   reveals stack addresses).
+3. Write with `%N$hn` (2-byte) or `%N$n` chunks, splitting the target
+   value into ascending short writes; pad with `%<len>c` before each
+   `%hn`. Recompute the length after every chunk.
+4. Trigger the overwritten target and observe the win marker; record the
+   exact final format string as evidence.
+
+## ROP when gadgets are scarce
+
+- ret2csu: x86-64 binaries linked with __libc_csu_init expose a universal
+  gadget (the pop-rbx..r15 + call [r12+rbx*8] sequence) that sets rdi/rsi/
+  rdx and calls through a chosen pointer — enough for write/syscall chains
+  when pop-gadgets are missing. Confirm the sequence exists before
+  depending on it.
+- ret2dlresolve: resolve a symbol at runtime through the dynamic linker
+  (pwntools `Ret2dlresolvePayload`) when the PLT lacks the function you
+  need — no libc base required.
+- SROP: one `syscall; ret` gadget plus a crafted signal frame sets every
+  register at once; prefer when a single gadget and a readable stack are
+  all you have.
+
+## Partial RELRO GOT overwrite
+
+When BIND_NOW is absent (partial RELRO), GOT entries are writable: an
+arbitrary-write primitive (overflow, format string, uninitialized index)
+can repoint a later-called import to a chosen address. Chain: find the
+write -> pick the GOT entry of a function called AFTER the write -> set it
+-> trigger. Full RELRO removes this option; use the format-string or
+heap paths instead.
+
 ## Verify with the real binary
 
 - `angr_solve` (see tooling) produces a hypothesis input; replay it against

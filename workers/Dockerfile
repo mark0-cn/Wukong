@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt/lists \
     apt-get update && apt-get install -y --no-install-recommends \
-    python3 gdb gcc ca-certificates curl unzip python3-pip ruby \
+    python3 gdb gcc ca-certificates curl unzip python3-pip ruby patchelf \
     && rm -rf /var/lib/apt/lists/* \
     && gem install one_gadget --no-document
 
@@ -74,6 +74,7 @@ COPY workers/runtime/requirements.txt /tmp/re-agent-runtime-requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages -i "$PIP_INDEX_URL" -r /tmp/re-agent-runtime-requirements.txt
 COPY workers/runtime /opt/re-agent/runtime
 COPY workers/ghidra /opt/re-agent/ghidra
+COPY workers/deps/gef.py /opt/gef.py
 RUN useradd --create-home --uid 10001 worker && mkdir -p /state && chown worker:worker /state
 # Java derives user.home from the passwd entry (root -> /root), ignoring the
 # HOME env var, and Ghidra writes its app config under <user.home>/.config.

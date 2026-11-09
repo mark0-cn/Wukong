@@ -622,6 +622,14 @@ pub(super) struct PyRunArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(super) struct LibcIdentifyArgs {
+    pub leaked: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(super) struct EmulateRunArgs {
     #[schemars(length(min = 1))]
     pub target: String,

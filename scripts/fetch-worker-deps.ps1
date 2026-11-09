@@ -9,6 +9,8 @@ $ghidraUrl = 'https://github.com/NationalSecurityAgency/ghidra/releases/download
 $ghidraSha = '2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67'
 $temurinUrl = 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz'
 $temurinSha = '68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb'
+$gefUrl = 'https://raw.githubusercontent.com/hugsy/gef/2024.06/gef.py'
+$gefSha = '12881b1d42fb490ca72896099daf5c128c7c7382be0779c8f8f7db3a9161ab6f'
 
 function Get-Verified([string]$url, [string]$sha, [string]$name) {
     $path = Join-Path $deps $name
@@ -45,4 +47,5 @@ function Get-Verified([string]$url, [string]$sha, [string]$name) {
 
 Get-Verified $ghidraUrl $ghidraSha 'ghidra.zip' | Out-Null
 Get-Verified $temurinUrl $temurinSha 'temurin25.tar.gz' | Out-Null
+Get-Verified $gefUrl $gefSha 'gef.py' | Out-Null
 Write-Host "worker dependencies ready in $deps"

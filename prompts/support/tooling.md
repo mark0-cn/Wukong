@@ -57,6 +57,21 @@ never runs natively. Use `init_regs` for register preconditions and
   lists single-shot execve gadgets with their constraints.
 - Symbol offsets from the worker's own libc: `python3 -c "from pwn import ELF; print(hex(ELF('/lib/x86_64-linux-gnu/libc.so.6').symbols['system']))"`.
   Compare against the leaked address to compute the libc base in one step.
+- `libc_identify` does the same offline in one call: pass the leaked
+  runtime address and the leaked symbol name; it returns the libc base,
+  system_offset and a /bin/sh offset when the worker's own libc matches.
+  A no-match means the target runs a different libc than the worker.
+
+## patchelf and gef
+
+- `patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --replace-needed
+  libc.so.6 <worker-libc> ./target` re-links an old binary against the
+  worker's libc for local runs (copy the target first; never patch the
+  staged original).
+- `gef` is available at /opt/gef.py for interactive gdb work: run
+  `gdb -q ./target -ex "source /opt/gef.py"` and use `heap chunks`,
+  `heap bins`, `tcache bins` for allocator debugging. The debug_start
+  session itself stays plain GDB/MI.
 
 ## job_start — persistent background jobs
 
