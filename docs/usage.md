@@ -257,3 +257,11 @@ alphabet、n 和内存顺序的恰好 n 字节，避免默认 n 或寄存器截�
 `rop_analysis` 处理 ABI、栈状态、gadget 语义及各路径前提，`format_string`
 区分格式控制、参数访问、泄漏、写入和最终触发。按当前子任务加载，避免一次
 灌入所有利用技巧。高级路径必须先证明前提，helper 生成 payload 不代表成功。
+
+### 缓解机制证据分层
+
+`mitigation_profile` 分开返回静态声明、worker 环境支持和所属进程的运行态观察；
+`mitigation_analysis` 解释这些证据如何约束当前实验。支持 debugger 或 interactive
+会话，不能传任意 PID。可选 `address` 仅查询该地址所在映射的权限。
+CET ELF note 不等于运行时启用；SHSTK 按线程记录，缺字段保留未知。seccomp
+mode 2 不推导 syscall 白名单。环境和映射变化需要重新观察。

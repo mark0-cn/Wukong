@@ -7,7 +7,7 @@ known. Load alongside the relevant capability; select only the method needed now
 - Saved return address, indirect control flow or gadget chain: `rop_analysis`.
 - Attacker bytes used as a printf-family format argument: `format_string`.
 - Uncertain RELRO, CET, seccomp or other runtime protection: inspect static and
-  live evidence before choosing a path; do not infer enablement from a name.
+  live evidence with `mitigation_analysis` before choosing a path.
 
 ## Shared preconditions
 

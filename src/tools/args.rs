@@ -839,3 +839,13 @@ pub(super) struct CyclicOffsetArgs {
     pub alphabet: String,
     pub n: u64,
 }
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct MitigationProfileArgs {
+    pub target: String,
+    pub session_id: Option<String>,
+    pub interactive_session_id: Option<String>,
+    /// Optional runtime address: report only the actual containing mapping's permissions.
+    pub address: Option<u64>,
+}
