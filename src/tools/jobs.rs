@@ -383,7 +383,7 @@ mod tests {
         fs::write(&target, b"fixture")?;
         let coordinator = Coordinator::new(store.clone());
         let run = coordinator.create_run(&target, "fixture", Budget::default(), json!({}))?;
-        let owner: AgentMetadata = store.require("agent", &run.root_id)?;
+        let owner = coordinator.create_child(&run.root_id, serde_json::from_value(json!({"name":"worker","role":"analyst","task":"fixture","scope":"fixture"}))?)?.agent.metadata;
         let mut config = AppConfig::default();
         config.runtime.backend = RuntimeBackend::TrustedLocal;
         config.runtime.state_dir = dir.path().join("worker");
