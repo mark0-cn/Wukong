@@ -359,7 +359,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::FilePutArgs>(
             "file_put",
-            "Create an immutable worker file from base64 bytes (data_base64) or from an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program.",
+            "Create an immutable worker file from base64 bytes (data_base64), UTF-8 text (text — preferred for scripts: no base64 encoding needed) or an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_file_put,
@@ -480,6 +480,14 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::AngrSolveArgs>(
             "angr_solve",
             "Input reconstruction through a validation/transform chain (the classic symbolic-execution case): a binary reads stdin, transforms each byte and compares it against embedded constants. Do NOT hand-invert the transform — pass the success address (code reached only when validation passes) as find, the failure print/abort addresses as avoid, and the expected input length. Runs as a background job; job_status returns {\"solved\": true, \"input_base64\": ...} plus exploration stats. Reproduce the solved input against the real binary before believing it. Falls short on network/threaded/huge inputs — hand-write z3 constraints then.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_job_start,
+            Visibility::All,
+        ),
+        spec::<args::PyRunArgs>(
+            "py_run",
+            "Run a Python script in the worker in ONE step: pass the source text directly (no base64, no file_put). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv and staged automatically in isolated jobs — read it from sys.argv[-1]. Prefer this over file_put+job_start for any script longer than one line.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,

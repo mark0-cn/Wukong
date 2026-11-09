@@ -29,6 +29,23 @@ surgery and stdin-driven PoCs:
   exec_command or file_get. Do not block exec_command on long work.
 - Multi-round interaction belongs to interactive_start/send, not exec_command.
 
+## py_run — scripts in one step
+
+For any script longer than one line, prefer `py_run` over
+file_put+job_start: pass the source text directly (no base64 encoding),
+and the worker syntax-checks it inline before starting the job — a syntax
+error comes back immediately instead of wasting a job round-trip.
+Optional `argv` entries arrive as `sys.argv[1..]`; an optional
+`target=<staged path>` is appended LAST and staged automatically — read it
+from `sys.argv[-1]`. Read stdout/stderr via job_status.
+
+## one_gadget and libc offsets
+
+- `one_gadget` (ruby) is in the worker: `one_gadget -l 1 /lib/x86_64-linux-gnu/libc.so.6`
+  lists single-shot execve gadgets with their constraints.
+- Symbol offsets from the worker's own libc: `python3 -c "from pwn import ELF; print(hex(ELF('/lib/x86_64-linux-gnu/libc.so.6').symbols['system']))"`.
+  Compare against the leaked address to compute the libc base in one step.
+
 ## job_start — persistent background jobs
 
 For long-running or multi-step work, write a script with file_put and run it

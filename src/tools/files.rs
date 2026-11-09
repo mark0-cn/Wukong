@@ -78,12 +78,22 @@ impl FilesService {
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
+        let supplied = ["data_base64", "evidence_id", "text"]
+            .iter()
+            .filter(|key| args.get(*key).is_some())
+            .count();
         ensure!(
-            args.get("data_base64").is_some() != args.get("evidence_id").is_some(),
-            "supply exactly one of data_base64 or evidence_id"
+            supplied == 1,
+            "supply exactly one of data_base64, evidence_id or text"
         );
         let bytes = if let Some(evidence) = args["evidence_id"].as_str() {
             self.store.read_evidence(&agent.run_id, evidence)?
+        } else if let Some(text) = args["text"].as_str() {
+            ensure!(
+                text.len() <= 1024 * 1024,
+                "text upload exceeds 1 MiB"
+            );
+            text.as_bytes().to_vec()
         } else {
             BASE64
                 .decode(

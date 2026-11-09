@@ -13,7 +13,7 @@ from worker_common import BRIDGE_PATH, MAX_FILE, TERMINAL, artifact, atomic_json
 from worker_processes import detached_options, process_identity
 
 class JobManager:
-    methods = frozenset(['angr.solve', 'job.start', 'fuzz.status', 'job.status', 'job.list', 'fuzz.stop', 'job.cancel', 'job.artifacts', 'fuzz.start', 'crash.replay', 'input.minimize', 'poc.verify'])
+    methods = frozenset(['angr.solve', 'py.run', 'job.start', 'fuzz.status', 'job.status', 'job.list', 'fuzz.stop', 'job.cancel', 'job.artifacts', 'fuzz.start', 'crash.replay', 'input.minimize', 'poc.verify'])
 
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated
@@ -173,6 +173,34 @@ class JobManager:
                     "request_id": params.get("request_id"),
                     "timeout_secs": bounded_int(params.get("timeout_secs"), 600, 10, 3600),
                     "output_limit": 1024 * 1024}
+            return self.start_job(spec)
+        if method == "py.run":
+            source = params.get("source")
+            if not isinstance(source, str) or not source.strip() or len(source) > 262144 or "\0" in source:
+                raise ValueError("source must be a nonempty string <=256KiB without NUL bytes")
+            import py_compile
+            import uuid
+            script_rel = "files/py_run_" + uuid.uuid4().hex + ".py"
+            script = confined(self.root, script_rel, True)
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text(source, encoding="utf-8")
+            script.chmod(0o444)
+            # Syntax errors fail HERE, inline, instead of costing a job round-trip.
+            try:
+                py_compile.compile(str(script), doraise=True)
+            except py_compile.PyCompileError as error:
+                raise ValueError("syntax error in source: %s" % str(error)[:800]) from error
+            argv = ["python3", script_rel]
+            argv.extend(str(argument) for argument in (params.get("argv") or [])[:64])
+            if params.get("target") is not None:
+                # The target travels as an argv entry so isolated jobs stage
+                # it into the sandbox like every other worker file reference.
+                argv.append(str(params["target"]))
+            spec = {"argv": argv,
+                    "call_id": params.get("call_id"),
+                    "request_id": params.get("request_id"),
+                    "timeout_secs": bounded_int(params.get("timeout_secs"), 120, 10, 3600),
+                    "output_limit": bounded_int(params.get("output_limit"), 1048576, 1024, 8 * 1048576)}
             return self.start_job(spec)
         if method == "job.start":
             return self.start_job(params)

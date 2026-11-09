@@ -73,7 +73,7 @@ impl ExecutionService {
                     .await
             }
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
-            | "angr_solve" => {
+            | "angr_solve" | "py_run" => {
                 let run: RunRecord = self.store.load(&agent.run_id)?;
                 if name == "angr_solve" {
                     ensure!(
@@ -116,7 +116,12 @@ impl ExecutionService {
                     args["producer_agent_id"] = json!(finding.agent_id);
                     args["verifier_agent_id"] = json!(agent.id);
                 }
-                if name != "job_start" {
+                if name == "py_run" {
+                    let _ = text(&args, "source")?;
+                    if let Some(target) = args.get("target").and_then(Value::as_str) {
+                        self.files.known_file(agent, target, true)?;
+                    }
+                } else if name != "job_start" {
                     self.files.known_file(agent, text(&args, "target")?, true)?;
                     if !matches!(name, "fuzz_start" | "angr_solve") {
                         self.files.known_file(agent, text(&args, "input")?, false)?;
@@ -146,6 +151,7 @@ impl ExecutionService {
                     "crash_replay" => "crash.replay",
                     "input_minimize" => "input.minimize",
                     "angr_solve" => "angr.solve",
+                    "py_run" => "py.run",
                     _ => "poc.verify",
                 };
                 // job_start argv may reference the staged target via the
