@@ -68,7 +68,8 @@ def main():
             manifest = root / "workbench/challenges/release-check/challenge.toml"
             manifest.write_text(manifest.read_text().replace('mode = "offline"', 'mode = "local_service"'))
             cli("challenge", "build", "release-check")
-            for path, role in [("/srv/echo", "binary"), ("/lib/x86_64-linux-gnu/libc.so.6", "libc"), ("/lib64/ld-linux-x86-64.so.2", "loader")]:
+            # Extraction intentionally accepts regular files, not the /lib64 loader symlink.
+            for path, role in [("/srv/echo", "binary"), ("/usr/lib/x86_64-linux-gnu/libc.so.6", "libc"), ("/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", "loader")]:
                 cli("challenge", "extract", "release-check", "--path", path, "--role", role)
             cli("challenge", "prepare", "release-check")
             cli("challenge", "up", "release-check")
