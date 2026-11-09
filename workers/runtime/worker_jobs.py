@@ -181,7 +181,7 @@ class JobManager:
             import py_compile
             import uuid
             script_rel = "files/py_run_" + uuid.uuid4().hex + ".py"
-            script = confined(self.root, script_rel, True)
+            script = confined(self.root, script_rel)
             script.parent.mkdir(parents=True, exist_ok=True)
             script.write_text(source, encoding="utf-8")
             script.chmod(0o444)
