@@ -42,14 +42,35 @@ Load the relevant method when its detailed workflow is needed:
 - Always say which space a number lives in; never hand a runtime address to a
   static query.
 
+## Input reconstruction: hand the transform chain to angr_solve
+
+When the assigned question is "what input passes this chain of checks or
+transformations" (a validation routine comparing the input against embedded
+constants is the textbook case):
+
+1. From the decompiled path, pick the SUCCESS address — code reached only when
+   the validation passes (right after the final check) — and the FAILURE
+   addresses (error prints, aborts). Module-relative values.
+2. Call `angr_solve` with find=<success>, avoid=<failure addresses> and
+   stdin_length close to the expected input size. It runs symbolic execution
+   as a background job: poll job_status for
+   {"solved": true, "input_base64": ...} (also persisted as job artifacts).
+   The longer the transform chain, the more this beats hand inversion —
+   hand-written inverse-transform scripts are the fallback, not the plan.
+3. Reproduce the solved input against the real binary (exec_command/job_start
+   feeding the bytes) before accepting it: angr's answer is a hypothesis
+   until the real run agrees.
+4. Fall back to loading `algorithms` and inverting the transform yourself only
+   when angr dead-ends (network input, threads, unsupported syscalls, or an
+   input size too large for symbolic stdin).
+
 ## Output
 
 Save the method-specific result in analysis notes with evidence IDs: the answer,
 exact locations, supporting observations, conflicting evidence and uncertainty.
 For behavior/path analysis include entry -> checks -> operation and an
-input that would exercise the path. For input reconstruction, load
-`tooling` and choose symbolic execution only when its stdin model matches the
-target; otherwise use a suitable harness or explicit constraints.
+input that would exercise the path. For input reconstruction follow the
+angr_solve checklist above before hand-writing anything.
 If the assigned goal is a control-flow hijack, load `exploit`/`pwn` as needed and
 reuse the layout facts (buffer size, saved-RIP offset, target address, mitigations).
 Delegate only a distinct subproblem, not the next technique in the same analysis.

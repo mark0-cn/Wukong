@@ -7,7 +7,7 @@
 | 工具 | 可见角色 | 有副作用 | 用途 |
 |---|---|---|---|
 | `agent_finish` | analyst / verifier | 是 | Finish a child task with a structured result accounting for its contract, evidence and gaps. summary is shorthand for tasks without required outputs and is ignored when result is provided (result.answer is the canonical summary). Active descendants must finish first. |
-| `angr_solve` | 全部 | 是 | Symbolic execution: solve for a concrete stdin input that reaches a module-relative find address while avoiding others. Runs as a background job with a hard timeout; results (input_base64 + exploration stats) arrive via job_status. |
+| `angr_solve` | 全部 | 是 | Input reconstruction through a validation/transform chain (the classic symbolic-execution case): a binary reads stdin, transforms each byte and compares it against embedded constants. Do NOT hand-invert the transform — pass the success address (code reached only when validation passes) as find, the failure print/abort addresses as avoid, and the expected input length. Runs as a background job; job_status returns {"solved": true, "input_base64": ...} plus exploration stats. Reproduce the solved input against the real binary before believing it. Falls short on network/threaded/huge inputs — hand-write z3 constraints then. |
 | `binary_inspect` | 全部 | 否 | Inspect the exact run target, architecture, sections, imports, symbols and mitigations. |
 | `binary_strings` | 全部 | 否 | Search printable strings with file-offset address references and pagination. |
 | `context_read` | 全部 | 否 | Read a bounded character range of an exact same-run shared document as JSON, including amendments. Use kind and id from context_search; follow content.next_offset until the required content is complete. |
