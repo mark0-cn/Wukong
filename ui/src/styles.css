@@ -13,3 +13,8 @@
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.link-target{background:#161b17;border:1px solid #3a443c;border-radius:7px;padding:10px;max-height:120px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:#cdd9d0}
+
+.workbench-controls { border: 0; padding: 0; display: grid; gap: 12px; }
+.workbench-controls label { display: grid; gap: 6px; }
+.workbench-controls .header-actions { flex-wrap: wrap; justify-content: flex-start; }
+.workbench-result { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }

@@ -23,6 +23,17 @@ async fn blocking<T: Send + 'static>(
         .map_err(failure)
 }
 #[tauri::command]
+async fn workbench_action(
+    service: State<'_, Arc<Service>>,
+    epoch: u64,
+    request: crate::workbench::DesktopRequest,
+) -> Reply<serde_json::Value> {
+    blocking(service.inner().clone(), move |s| {
+        s.workbench(epoch, request)
+    })
+    .await
+}
+#[tauri::command]
 async fn workspace_read(
     service: State<'_, Arc<Service>>,
     request: WorkspaceRequest,
@@ -208,6 +219,7 @@ pub fn run(
         .manage(service)
         .invoke_handler(tauri::generate_handler![
             workspace_read,
+            workbench_action,
             start_run,
             resume_run,
             pause_run,
