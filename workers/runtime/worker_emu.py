@@ -8,6 +8,7 @@ count, a stop address and a wall-clock watchdog bound the run.
 """
 import base64
 import json
+import struct
 import threading
 import time
 
@@ -16,6 +17,78 @@ from worker_common import bounded_int, confined, parse_address, WorkerError
 X86_64_REGISTERS = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip",
                     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"]
 X86_32_REGISTERS = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "eip", "eflags"]
+
+
+# ---------------------------------------------------------------------------
+# Exact x87 extended-precision semantics.
+# Unicorn approximates the x87 stack in host double precision, which shifts
+# the float32 roundings of chains like fldpi/fmulp (the CSAW "odd" decode
+# loop). These helpers perform the involved operations in true 80-bit
+# extended precision with Python integers, so float32 stores and fisttp
+# truncations match the silicon exactly.
+# A value is (sign, exponent, mantissa): value = (-1)^sign * mantissa * 2^(exponent - 63),
+# mantissa is a 64-bit integer whose top bit is the explicit integer bit.
+X87_PI = (0, 1, 0xC90FDAA22168C235)
+
+
+def _f80_normalize(sign, exponent, mantissa):
+    excess = mantissa.bit_length() - 64
+    if excess > 0:
+        keep = mantissa >> excess
+        dropped = mantissa & ((1 << excess) - 1)
+        halfway = 1 << (excess - 1)
+        if dropped > halfway or (dropped == halfway and keep & 1):
+            keep += 1
+            if keep.bit_length() > 64:
+                keep >>= 1
+                exponent += 1
+        mantissa = keep
+        exponent += excess
+    elif excess < 0:
+        mantissa <<= -excess
+        exponent -= -excess
+    return sign, exponent, mantissa
+
+
+def _f80_mul(a, b):
+    # value = mantissa * 2^(exponent - 63): the raw product carries the sum
+    # of the two (exponent-63) shifts, plus one 63 back to the representation.
+    return _f80_normalize(a[0] ^ b[0], a[1] + b[1] - 63, a[2] * b[2])
+
+
+def _f80_to_f32(value):
+    """Round an 80-bit value to the IEEE-754 float32 bit pattern (nearest-even)."""
+    sign, exponent, mantissa = value
+    # float32: 1.f * 2^e, 23 fraction bits; value = mantissa * 2^(exponent-63).
+    shift = 63 - 23
+    significand = mantissa >> shift
+    dropped = mantissa & ((1 << shift) - 1)
+    halfway = 1 << (shift - 1)
+    if dropped > halfway or (dropped == halfway and significand & 1):
+        significand += 1
+    # significand is 24 bits; overflow bumps the exponent and rounds to 1.0*2^(e+1)
+    if significand >= 1 << 24:
+        significand >>= 1
+        exponent += 1
+    e = exponent + 127
+    if e <= 0:
+        return sign << 31  # subnormal underflow: floor to zero (x87 honors masked underflow)
+    if e >= 255:
+        return (sign << 31) | 0x7F800000
+    return (sign << 31) | (e << 23) | (significand & 0x7FFFFF)
+
+
+def _f80_trunc_i32(value):
+    """Truncate an 80-bit value to int32, like fisttp (toward zero)."""
+    sign, exponent, mantissa = value
+    magnitude = mantissa << max(0, exponent - 63) if exponent >= 63 else mantissa >> (63 - exponent)
+    if sign:
+        magnitude = -magnitude
+    if magnitude > 0x7FFFFFFF:
+        return 0x80000000 if magnitude > 0 else -0x80000000
+    if magnitude < -0x80000000:
+        return -0x80000000
+    return magnitude
 
 
 def _segments(path):
@@ -108,8 +181,71 @@ class EmuService:
             mu.mem_write(parse_address(write["address"]),
                          base64.b64decode(write["data_base64"], validate=True))
         state = {"instructions": 0, "stopped": None, "error": None}
+        x87_exact = bool(params.get("x87_exact", True))
+        x87_stack = []  # Python-side 80-bit shadow of ST(0..7)
+        pc_register = UC_X86_REG_RIP if bits == 64 else UC_X86_REG_EIP
+        reg32 = {"eax": UC_X86_REG_EAX, "ecx": UC_X86_REG_ECX, "edx": UC_X86_REG_EDX,
+                 "ebx": UC_X86_REG_EBX, "esp": UC_X86_REG_ESP, "ebp": UC_X86_REG_EBP,
+                 "esi": UC_X86_REG_ESI, "edi": UC_X86_REG_EDI}
+        reg64 = {"rax": UC_X86_REG_RAX, "rcx": UC_X86_REG_RCX, "rdx": UC_X86_REG_RDX,
+                 "rbx": UC_X86_REG_RBX, "rsp": UC_X86_REG_RSP, "rbp": UC_X86_REG_RBP,
+                 "rsi": UC_X86_REG_RSI, "rdi": UC_X86_REG_RDI}
+        reg_by_index = {0: "rax", 1: "rcx", 2: "rdx", 3: "rbx", 4: "rsp", 5: "rbp", 6: "rsi", 7: "rdi"} \
+            if bits == 64 else {0: "eax", 1: "ecx", 2: "edx", 3: "ebx", 4: "esp", 5: "ebp", 6: "esi", 7: "edi"}
+        reg_table = reg64 if bits == 64 else reg32
+
+        def step_x87(uc, address):
+            """Intercept one x87 instruction; return its length, or None if uncovered."""
+            raw = bytes(uc.mem_read(address, 4))
+            opcode, modrm = raw[0], raw[1]
+            if opcode == 0xD9 and modrm == 0xEB:  # fldpi
+                x87_stack.append(X87_PI)
+                return 2
+            if opcode == 0xDE and modrm == 0xC9:  # fmulp st(1), st
+                if len(x87_stack) < 2:
+                    raise ValueError("fmulp with fewer than two x87 stack entries")
+                right = x87_stack.pop()
+                left = x87_stack.pop()
+                x87_stack.append(_f80_mul(left, right))
+                return 2
+            if opcode in (0xD9, 0xDB) and (modrm >> 6) == 0:
+                target_reg = reg_table[reg_by_index[modrm & 7]]
+                address_base = uc.reg_read(target_reg)
+                if opcode == 0xD9 and ((modrm >> 3) & 7) == 2:  # fst dword [reg]
+                    uc.mem_write(address_base, struct.pack("<I", _f80_to_f32(x87_stack[-1])))
+                    return 2
+                if opcode == 0xDB and ((modrm >> 3) & 7) == 1:  # fisttp dword [reg]
+                    uc.mem_write(address_base, struct.pack("<i", _f80_trunc_i32(x87_stack.pop()) & 0xFFFFFFFF))
+                    return 2
+            if 0xD8 <= opcode <= 0xDF:
+                raise ValueError("x87 instruction at %#x not covered by exact emulation" % address)
+            return None
 
         def hook_code(uc, address, size, user):
+            first = bytes(uc.mem_read(address, 1))[0]
+            if x87_exact and 0xD8 <= first <= 0xDF:
+                try:
+                    length = step_x87(uc, address)
+                except Exception as error:  # noqa: BLE001
+                    uc.emu_stop()
+                    state["stopped"] = "error"
+                    state["error"] = str(error)[:400]
+                    return
+                if length is None:
+                    uc.emu_stop()
+                    state["stopped"] = "error"
+                    state["error"] = "x87 instruction at %#x not covered by exact emulation" % address
+                    return
+                state["instructions"] += 1
+                next_pc = address + length
+                uc.reg_write(pc_register, next_pc)
+                if until is not None and next_pc == until:
+                    uc.emu_stop()
+                    state["stopped"] = "until"
+                elif state["instructions"] >= count:
+                    uc.emu_stop()
+                    state["stopped"] = "count"
+                return
             state["instructions"] += 1
             if until is not None and address == until:
                 uc.emu_stop()
