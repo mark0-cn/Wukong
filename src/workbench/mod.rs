@@ -3,6 +3,7 @@ pub mod challenge;
 pub mod cli;
 mod docker;
 mod environment;
+mod services;
 
 use crate::config::AppConfig;
 use anyhow::{Context, Result, ensure};

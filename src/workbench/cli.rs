@@ -35,6 +35,26 @@ pub fn environment(config: &AppConfig, command: EnvCommand) -> Result<Value> {
 
 #[derive(Subcommand)]
 pub enum ChallengeCommand {
+    Prepare {
+        id: String,
+    },
+    Build {
+        id: String,
+    },
+    Up {
+        id: String,
+        #[arg(long)]
+        allow_privileged: bool,
+    },
+    Down {
+        id: String,
+    },
+    Status {
+        id: String,
+    },
+    ExportRootfs {
+        id: String,
+    },
     Import {
         source: PathBuf,
         #[arg(long)]
@@ -54,6 +74,15 @@ pub fn challenge(config: &AppConfig, command: ChallengeCommand) -> Result<Value>
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     match command {
+        ChallengeCommand::Prepare { id } => workbench.prepare_challenge(&id),
+        ChallengeCommand::Build { id } => workbench.build_challenge(&id),
+        ChallengeCommand::Up {
+            id,
+            allow_privileged,
+        } => workbench.up_challenge(&id, allow_privileged),
+        ChallengeCommand::Down { id } => workbench.down_challenge(&id),
+        ChallengeCommand::Status { id } => workbench.challenge_status(&id),
+        ChallengeCommand::ExportRootfs { id } => workbench.export_rootfs(&id),
         ChallengeCommand::Import { source, id, binary } => {
             workbench.import_challenge(&source, &id, binary.as_deref())
         }
