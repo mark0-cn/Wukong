@@ -64,6 +64,18 @@ constants is the textbook case):
    when angr dead-ends (network input, threads, unsupported syscalls, or an
    input size too large for symbolic stdin).
 
+## VM / hand-crafted / self-decoding code: use emulate_run
+
+When the target embeds an interpreter, JIT or self-decoding payload (RWX
+mmap + signal handler, tiny hand-crafted ELFs, x87/FPU blocks), prefer
+`emulate_run` over hand-building a Unicorn harness: it maps the ELF segments
+plus a stack, runs from `start` for `count` instructions or until the PC
+reaches `until`, and returns registers and `dump` ranges. Set `init_regs`
+for preconditions and `memory` to inject bytes. It is a pure simulation —
+the target never runs natively. Hand-written harnesses have historically
+burned turns on hook-page and endianness bugs; this tool is those bugs
+pre-fixed.
+
 ## Output
 
 Save the method-specific result in analysis notes with evidence IDs: the answer,
