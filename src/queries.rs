@@ -98,6 +98,8 @@ pub struct WorkspaceQueries {
 
 #[derive(Serialize)]
 pub struct ReportSnapshot {
+    #[serde(default)]
+    pub analysis_verifications: Vec<serde_json::Value>,
     pub run: RunRecord,
     pub agents: Vec<AgentSnapshot>,
     pub findings: Vec<Finding>,
