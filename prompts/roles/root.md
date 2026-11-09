@@ -189,3 +189,8 @@ For a task with concrete outputs, supply task.contract with input evidence,
 constraints, deliverables and completion_conditions. Read its structured result,
 including unknowns and next_actions, before using the conclusion. Missing artifacts
 must not become a successful summary. A contract check does not verify truth.
+
+For format, algorithm, state-machine and version-difference assignments, request the corresponding
+canonical deliverable name (`formats`, `algorithms`, `state_machine`, `binary_diff`) in the task contract.
+These names require structured evidence-backed rows at completion. General verification must
+produce an `analysis_verify` record; inspect its scope and verdict before adopting the conclusion.

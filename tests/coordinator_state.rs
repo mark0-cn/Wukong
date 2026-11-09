@@ -34,10 +34,16 @@ fn request(scope: &str) -> ChildRequest {
 #[test]
 fn quota_exhausted_scope_requires_followup_instead_of_respawn() {
     let (_dir, _store, c, run) = fixture();
-    let child = c.create_child(&run.root_id, request("recon-scope")).unwrap();
-    assert!(child.created);
-    c.set_status(&child.agent.id, Status::Failed, Some("agent model budget reached".into()))
+    let child = c
+        .create_child(&run.root_id, request("recon-scope"))
         .unwrap();
+    assert!(child.created);
+    c.set_status(
+        &child.agent.id,
+        Status::Failed,
+        Some("agent model budget reached".into()),
+    )
+    .unwrap();
     let error = c
         .create_child(&run.root_id, request("recon-scope"))
         .unwrap_err();
@@ -46,12 +52,15 @@ fn quota_exhausted_scope_requires_followup_instead_of_respawn() {
         "{error:#}"
     );
     // A DIFFERENT scope stays spawnable.
-    let other = c.create_child(&run.root_id, request("other-scope")).unwrap();
+    let other = c
+        .create_child(&run.root_id, request("other-scope"))
+        .unwrap();
     assert!(other.created);
 }
 
 #[test]
-fn wait_for_predecessors_is_validated_and_persisted() {    let (_dir, store, c, run) = fixture();
+fn wait_for_predecessors_is_validated_and_persisted() {
+    let (_dir, store, c, run) = fixture();
     let mut blocked = request("gated child");
     blocked.wait_for_predecessors = vec!["agent-does-not-exist".into()];
     let error = c.create_child(&run.root_id, blocked).unwrap_err();
@@ -827,6 +836,7 @@ fn task_contract_requires_real_deliverables_and_preserves_each_generation_result
     let mut answer = TaskResult {
         answer: "fixture answer".into(),
         artifacts: vec![TaskArtifact {
+            structured: None,
             name: "field table".into(),
             evidence_id: evidence.id.clone(),
         }],
@@ -1133,4 +1143,19 @@ fn a_missing_dependency_is_not_assumed_successful() {
     let consumer: AgentSnapshot = store.require("agent", &consumer.id).unwrap();
     assert_eq!(consumer.status, Status::Failed);
     assert!(consumer.metadata.error.unwrap().contains("missing"));
+}
+
+#[test]
+fn structured_deliverables_reject_missing_semantics() {
+    let mut artifact = StructuredArtifact {
+        kind: "formats".into(),
+        rows: vec![
+            json!({"offset":0,"width":4,"encoding":"le","meaning":"length","confidence":"observed","evidence_id":"e1"}),
+        ],
+    };
+    assert!(artifact.validate().is_ok());
+    artifact.rows[0].as_object_mut().unwrap().remove("encoding");
+    assert!(artifact.validate().is_err());
+    artifact.kind = "invented".into();
+    assert!(artifact.validate().is_err());
 }

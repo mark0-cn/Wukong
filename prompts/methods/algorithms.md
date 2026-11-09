@@ -30,3 +30,5 @@ test-vector table with expected/observed outputs and evidence IDs. Include a
 reference implementation artifact when useful. Stop at the requested routine
 once the discriminating vectors agree, or state which operation, parameter or
 environment dependency remains unresolved.
+
+When the contract requests `algorithms`, return a TaskArtifact named `algorithms` with original evidence_id and structured={kind:"algorithms",rows:[...]}. Every row must cite its own evidence_id; use the structured artifact fields documented in the completion tool schema and project contract.
