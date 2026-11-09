@@ -10,10 +10,19 @@ other configured workers may not. Reach available tools through execution.
 stdout/stderr/exit code in the result. Prefer it for inspection, file
 surgery and stdin-driven PoCs:
 
-- stdin delivery is plain shell syntax: `printf '<payload>' | {staged-target-path}`,
+- The command runs in a FRESH temporary directory — nothing from the state
+  is present unless you make it present. Pass `target=<staged path from
+  stage_target>` and the worker places the resolved target at `$TARGET`
+  in the environment; the worker also stages it automatically in isolated
+  jobs. Use `"$TARGET"` in the command, e.g.
+  `printf '<payload>' | "$TARGET"` or `objdump -d "$TARGET"`.
+- Worker paths like `files/...` resolve only as DIRECT argv entries; a path
+  written inside the command string is not resolved. Never `find /` or
+  `ls /state` to locate the target — it is either at `$TARGET` (pass
+  `target=`) or staged via argv in job_start. If you catch yourself
+  searching for a file, you are missing one of those two mechanisms.
+- stdin delivery is plain shell syntax: `printf '<payload>' | "$TARGET"`,
   a heredoc, or `python3 -c '...'`. There is no separate input plumbing.
-- stage_target first and use the returned path (or pass `{target}` into the
-  command string) for the binary itself.
 - The call is capped (timeout_secs, default 30; output is bounded). Anything
   longer goes to the background with its output redirected:
   `cmd > /tmp/out.log 2>&1 &` — then read /tmp/out.log with a later

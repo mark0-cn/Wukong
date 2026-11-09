@@ -43,11 +43,24 @@ class CommandService:
             env.update({"RE_AGENT_STATE_DIR": state_value, "RE_AGENT_JOB_DIR": job_value})
             experiment = None
             cwd = workdir
+            resolved_target = None
+            if params.get("target") is not None:
+                from worker_common import confined
+                target = params["target"]
+                if not isinstance(target, str):
+                    raise ValueError("target must be a staged worker path")
+                resolved_target = confined(self.root, target, True)
+                if not resolved_target.is_file():
+                    raise ValueError("exec target must be a staged file")
             if self.isolated:
                 import isolation
                 experiment = isolation.sandbox(self.root, isolation.allocate_uid(self.root))
+                if resolved_target is not None:
+                    env["TARGET"] = str(isolation.stage_file(resolved_target, experiment, "target.bin", True))
                 isolation.seal(experiment)
                 cwd = Path(experiment["work"])
+            elif resolved_target is not None:
+                env["TARGET"] = str(resolved_target)
             if os.name != "nt":
                 shell = ["bash", "-lc"]
             elif git := shutil.which("git"):

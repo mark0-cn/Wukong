@@ -375,7 +375,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::ExecCommandArgs>(
             "exec_command",
-            "Run ONE bounded shell command synchronously in the worker and return its stdout/stderr/exit code in the result. Prefer this for quick inspection and for stdin-driven PoCs: pipe the payload directly, e.g. \"printf '<payload>' | {target-path-or-command}\" or \"python3 -c '...'\". Long-running work must go to job_start with output redirected to a log file instead of blocking here. Reads RE_AGENT_STATE_DIR/RE_AGENT_JOB_DIR from the environment.",
+            "Run ONE bounded shell command synchronously in the worker and return its stdout/stderr/exit code in the result. The command runs in a fresh temporary directory: pass target=<staged path from stage_target> and the resolved file is available at $TARGET in the environment (\"printf '<payload>' | $TARGET\"). Prefer this for quick inspection and stdin-driven PoCs; long-running work must go to job_start with output redirected to a log file instead of blocking here. Worker paths (files/...) resolve only as direct argv entries, never inside shell strings; use $RE_AGENT_STATE_DIR for the state root.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,
