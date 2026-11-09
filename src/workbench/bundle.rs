@@ -344,8 +344,10 @@ mod tests {
     #[test]
     fn history_snapshot_copies_wal_and_refuses_active_leases() -> Result<()> {
         let temp = tempfile::tempdir()?;
-        let mut config = AppConfig::default();
-        config.state_dir = temp.path().join("state");
+        let mut config = AppConfig {
+            state_dir: temp.path().join("state"),
+            ..AppConfig::default()
+        };
         config.workbench.root = temp.path().join("workbench");
         let _store = crate::store::Store::open(&config.state_dir)?;
         let source = rusqlite::Connection::open(config.state_dir.join("state.sqlite3"))?;
