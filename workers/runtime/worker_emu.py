@@ -84,21 +84,23 @@ class EmuService:
             if data:
                 mu.mem_write(address, data)
         init = params.get("init_regs") or {}
+        if bits == 64:
+            table = {"rax": UC_X86_REG_RAX, "rbx": UC_X86_REG_RBX, "rcx": UC_X86_REG_RCX,
+                     "rdx": UC_X86_REG_RDX, "rsi": UC_X86_REG_RSI, "rdi": UC_X86_REG_RDI,
+                     "rbp": UC_X86_REG_RBP, "rsp": UC_X86_REG_RSP, "rip": UC_X86_REG_RIP,
+                     "r8": UC_X86_REG_R8, "r9": UC_X86_REG_R9, "r10": UC_X86_REG_R10,
+                     "r11": UC_X86_REG_R11, "r12": UC_X86_REG_R12, "r13": UC_X86_REG_R13,
+                     "r14": UC_X86_REG_R14, "r15": UC_X86_REG_R15, "eflags": UC_X86_REG_EFLAGS}
+        else:
+            table = {"eax": UC_X86_REG_EAX, "ebx": UC_X86_REG_EBX, "ecx": UC_X86_REG_ECX,
+                     "edx": UC_X86_REG_EDX, "esi": UC_X86_REG_ESI, "edi": UC_X86_REG_EDI,
+                     "ebp": UC_X86_REG_EBP, "esp": UC_X86_REG_ESP, "eip": UC_X86_REG_EIP,
+                     "eflags": UC_X86_REG_EFLAGS}
+        if "rsp" not in init and "esp" not in init:
+            mu.reg_write(UC_X86_REG_RSP if bits == 64 else UC_X86_REG_ESP, stack_top - 0x1000)
         for name, value in init.items():
             if not isinstance(value, int):
                 raise ValueError("init_regs values must be integers")
-            if bits == 64:
-                table = {"rax": UC_X86_REG_RAX, "rbx": UC_X86_REG_RBX, "rcx": UC_X86_REG_RCX,
-                         "rdx": UC_X86_REG_RDX, "rsi": UC_X86_REG_RSI, "rdi": UC_X86_REG_RDI,
-                         "rbp": UC_X86_REG_RBP, "rsp": UC_X86_REG_RSP, "rip": UC_X86_REG_RIP,
-                         "r8": UC_X86_REG_R8, "r9": UC_X86_REG_R9, "r10": UC_X86_REG_R10,
-                         "r11": UC_X86_REG_R11, "r12": UC_X86_REG_R12, "r13": UC_X86_REG_R13,
-                         "r14": UC_X86_REG_R14, "r15": UC_X86_REG_R15, "eflags": UC_X86_REG_EFLAGS}
-            else:
-                table = {"eax": UC_X86_REG_EAX, "ebx": UC_X86_REG_EBX, "ecx": UC_X86_REG_ECX,
-                         "edx": UC_X86_REG_EDX, "esi": UC_X86_REG_ESI, "edi": UC_X86_REG_EDI,
-                         "ebp": UC_X86_REG_EBP, "esp": UC_X86_REG_ESP, "eip": UC_X86_REG_EIP,
-                         "eflags": UC_X86_REG_EFLAGS}
             if name not in table:
                 raise ValueError("unknown register for this mode: " + name)
             mu.reg_write(table[name], value)
