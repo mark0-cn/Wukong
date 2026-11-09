@@ -27,3 +27,5 @@ mod model_catalog;
 mod usage;
 
 pub mod queries;
+
+pub mod workbench;
