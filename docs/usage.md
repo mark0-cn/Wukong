@@ -230,3 +230,7 @@ re-agent verify-bundle ./reports/assessment-01
 `function_instructions` 返回分页指令、所属基本块起点、分支／调用流和 fallthrough；所有地址携带模块 SHA256。Ghidra 查询可设置 `target_evidence_id` 使用本任务已有的另一个二进制证据作为基线，原任务目标保持不变。缺少基线必须显式报告，不能拿当前目标代替。
 
 `differential_test` 接收本任务已登记的 worker `target` 和 `reference` 文件、`reference_python`、`inputs_base64` 和每例 1–10 秒时限；最多 64 个 stdin 输入，每个最多 64 KiB。它通过现有隔离任务生命周期运行，`job_artifacts` 导入 `differential-results.json`，保留输入、原始输出、退出码、两侧哈希和差异。超时、输出截断、非零退出归为 inconclusive。当前协议只比较 stdin；argv／状态会话需单独 harness。
+
+### Pwn 方法：堆分析
+
+`heap_ptmalloc` 已加入内置能力目录。它按实际 allocator 身份、ABI 和版本解释分配／释放时间线，要求 chunk 快照、原语证据、反例和未知项。版本表只是上游检查点，不能替代发行版补丁或运行时观察。来源见 `docs/pwn-knowledge.md`。

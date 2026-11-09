@@ -145,6 +145,12 @@ pub(crate) static REGISTRY: &[Entry] = &[
         "Explain version differences using comparable evidence from both sides."
     ),
     entry!(
+        heap_ptmalloc,
+        Kind::Method,
+        "methods",
+        "Analyze glibc heap lifetimes and primitives using actual allocator identity and version-specific checks."
+    ),
+    entry!(
         pwn,
         Kind::Method,
         "methods",
