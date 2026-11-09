@@ -250,3 +250,7 @@ worker 测试、环境依赖和性能检查见 [维护约定](docs/maintenance.m
 ## 许可证
 
 本项目采用 [Apache License 2.0](LICENSE)。来源与第三方声明见 [NOTICE](NOTICE)；外部分析引擎遵循各自的上游许可证。
+
+## Pwn 工作环境
+
+工具 Docker 与题目 Docker 由宿主机统一管理，每题独立网络。使用 `env up/doctor`、`challenge import/prepare/build/up` 和离线迁移命令；桌面右上角也有“Pwn 环境”入口。详见 [Pwn 工作环境](docs/pwn-workbench.md)。
