@@ -82,7 +82,7 @@ impl Docker {
             .status()?;
         ensure!(
             status.success(),
-            "Docker operation failed; inspect {}",
+            "Docker operation exited {status}; inspect {}",
             log.display()
         );
         Ok(())
