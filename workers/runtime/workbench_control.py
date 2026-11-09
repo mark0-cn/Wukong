@@ -45,7 +45,7 @@ def doctor(root):
         check("i386_compile",["gcc","-m32","-o",str(directory/"probe32"),str(source)])
         check("i386_run",[str(directory/"probe32")])
         check("pwntools",[sys.executable,"-c","from pwn import *; p=process(["+repr(str(binary))+"]); p.sendline(b'probe'); assert b'probe' in p.recvall(timeout=2); assert p.poll()==0"])
-        for name in ["pwninit","patchelf","seccomp-tools","pwndbg"]: check(name,[name,"--version"])
+        for name in ["pwninit","patchelf","seccomp-tools","pwndbg","eu-unstrip"]: check(name,[name,"--version"])
         check("python_analysis",[sys.executable,"-c","import angr,z3,capstone,unicorn,elftools,pygdbmi; print('imports OK')"])
         ghidra=os.environ.get("RE_AGENT_GHIDRA_HEADLESS")
         if ghidra and Path(ghidra).is_file():

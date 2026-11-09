@@ -15,6 +15,7 @@ RUN echo '17049a23ba8cbcf4780c4bc9b4aeb519f2801ceabe7304b55d3d622acca03b8c  /tmp
     && mkdir -p /opt/pwndbg && tar -xJf /tmp/pwndbg.tar.xz -C /opt \
     && chmod 755 /usr/local/bin/pwninit && ln -s /opt/pwndbg/bin/pwndbg /usr/local/bin/pwndbg \
     && rm /tmp/pwndbg.tar.xz
+RUN apt-get update && apt-get install -y --no-install-recommends elfutils && rm -rf /var/lib/apt/lists/*
 COPY workers/runtime /opt/re-agent/runtime
 COPY workers/ghidra /opt/re-agent/ghidra
 COPY prompts /opt/re-agent/prompts
