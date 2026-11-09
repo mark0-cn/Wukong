@@ -499,3 +499,78 @@ impl Workbench {
         })
     }
 }
+
+impl Workbench {
+    /// An operator debugger shares only the challenge PID namespace, never the host's.
+    pub fn debug_challenge(&self, id: &str) -> Result<Value> {
+        self.verify_original(id)?;
+        let challenge = self.challenge(id)?;
+        ensure!(
+            challenge.network.mode == "local_service",
+            "debug companion requires a local challenge service"
+        );
+        let service = self.name(&format!("{id}-service"));
+        let target = self
+            .docker
+            .inspect("container", &service)?
+            .context("start the original challenge service first")?;
+        self.owned(&target, &service)?;
+        ensure!(
+            target["State"]["Running"] == true,
+            "challenge service is not running"
+        );
+        let image = self.checked_image(id)?;
+        ensure!(
+            target["Image"] == image,
+            "running service does not match locked image"
+        );
+        let env = self.challenge_environment(id)?;
+        let name = self.name(&format!("{id}-debug"));
+        if let Some(existing) = self.docker.inspect("container", &name)? {
+            self.owned(&existing, &name)?;
+            ensure!(
+                existing["HostConfig"]["PidMode"]
+                    == format!("container:{}", target["Id"].as_str().unwrap()),
+                "debug companion belongs to a previous service instance; run challenge down first"
+            );
+            self.docker.run(&["start", &name])?;
+        } else {
+            self.docker.run(&[
+                "run",
+                "-d",
+                "--name",
+                &name,
+                "--label",
+                &format!("re-agent.workspace={}", self.id),
+                "--label",
+                "re-agent.kind=debug-companion",
+                "--pid",
+                &format!("container:{service}"),
+                "--network",
+                &env.network,
+                "--read-only",
+                "--cap-drop",
+                "ALL",
+                "--cap-add",
+                "SYS_PTRACE",
+                "--cap-add",
+                "DAC_OVERRIDE",
+                "--security-opt",
+                "no-new-privileges",
+                "--security-opt",
+                "seccomp=unconfined",
+                "--tmpfs",
+                "/tmp:rw,size=1g,exec",
+                "--memory",
+                "2g",
+                "--pids-limit",
+                "128",
+                &env.image_id,
+            ])?;
+        }
+        let processes=self.docker.run(&["exec",&name,"python3","-c","import pathlib,json; print(json.dumps([{'pid':int(p.name),'command':(p/'cmdline').read_bytes().replace(bytes([0]),b' ').decode(errors='replace')[:512]} for p in pathlib.Path('/proc').iterdir() if p.name.isdigit() and (p/'cmdline').is_file()]))"])?;
+        Ok(
+            json!({"container":name,"service_image_id":image,"processes":serde_json::from_str::<Value>(&processes)?,"instruction":"docker exec -it <debug-container> gdb -ex 'set sysroot /proc/<PID>/root' -p <PID>","final_verification":"restart the original service after debugger experiments and verify the protocol there"}),
+        )
+    }
+}
