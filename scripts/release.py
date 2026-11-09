@@ -27,7 +27,11 @@ def sha256(path):
 
 
 def version(tag=None, root=ROOT):
-    cargo = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
+    package = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))["package"]
+    cargo = package["version"]
+    toolchain = tomllib.loads((root / "rust-toolchain.toml").read_text(encoding="utf-8"))["toolchain"]["channel"]
+    if toolchain != package["rust-version"]:
+        raise ValueError("Rust toolchain and Cargo rust-version differ")
     match = VERSION.fullmatch(cargo)
     if not match or (match[4] and any(x.isdigit() and len(x) > 1 and x[0] == "0" for x in match[4].split("."))):
         raise ValueError("Unsupported SemVer: " + cargo)
