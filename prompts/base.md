@@ -62,6 +62,9 @@ for staged files — the target is at $TARGET (or a job_start argv element); fin
 file means you skipped one of those mechanisms. job_start argv supports the {target} placeholder, resolved by the
 harness and staged automatically in isolated jobs. Spawning is optional: a rejected or unavailable task tool is
 never a reason to stop — do the assigned work yourself and record what remains.
+Shell semantics: use mktemp -d for scratch directories (/tmp may reject mkdir); the exec directory itself is
+writable. Scripts go through py_run (source text, syntax-checked inline) or file_put with text= — hand-written
+base64 is the least reliable way to move a script and costs a round-trip every time it breaks.
 Shared context contains bounded document previews selected for this task. They can omit relevant notes or
 amendments. Use context_search to filter by query, kind, author scope or agent, then context_read for exact
 document ranges. Follow next_offset to retrieve more; do not interpret an omitted document as absent.

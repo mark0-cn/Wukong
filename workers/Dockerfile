@@ -13,8 +13,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt/lists \
     apt-get update && apt-get install -y --no-install-recommends \
-    python3 gdb gcc ca-certificates curl unzip python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+    python3 gdb gcc ca-certificates curl unzip python3-pip ruby \
+    && rm -rf /var/lib/apt/lists/* \
+    && gem install one_gadget --no-document
 
 # Official Ghidra release and Temurin JDK 25 are fetched ONCE on the host by
 # scripts/fetch-worker-deps.ps1 into workers/deps/ (checksum-verified there),

@@ -445,6 +445,8 @@ pub(super) struct FilePutArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_base64: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executable: Option<bool>,
@@ -599,6 +601,23 @@ pub(super) struct AngrSolveArgs {
     pub timeout_secs: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub printable_only: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PyRunArgs {
+    #[schemars(length(min = 1, max = 262144))]
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argv: Option<Vec<String>>,
+    #[schemars(range(min = 10, max = 3600))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+    #[schemars(range(min = 1024, max = 8388608))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_limit: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
