@@ -61,6 +61,22 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::RuntimeProfileArgs>(
+            "runtime_profile",
+            "Inspect SHA256, ELF Build ID and architecture of in-run target/libc/loader files. Optionally observe actual mappings of an owned live debugger session. File candidates never imply a confirmed mapped runtime.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_runtime_profile,
+            Visibility::Child,
+        ),
+        spec::<args::RuntimeProfileArgs>(
+            "runtime_prepare",
+            "Create an immutable execution copy of supplied target, libc and loader and return direct launch argv. Requires all three ELF files with matching architecture. Does not execute or modify originals; verify actual mappings separately.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_runtime_profile,
+            Visibility::Child,
+        ),
         spec::<args::FunctionInstructionsArgs>(
             "function_instructions",
             "Ghidra: paginated function instructions and control-flow edges, including calls. Addresses are module-relative and bound to target SHA256. Optional target_evidence_id selects an in-run baseline binary.",

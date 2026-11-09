@@ -23,7 +23,7 @@ class DebugSession:
         self.id = uuid.uuid4().hex
         self.directory = root / "debug" / self.id
         self.directory.mkdir(parents=True)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.records = queue.Queue(maxsize=2048)
         self.events = collections.deque(maxlen=256)
         self.token = 0
@@ -125,6 +125,15 @@ class DebugSession:
             terminate_tree(self.process)
             self.persist("lost")
             raise ValueError("GDB command timeout; session invalidated")
+
+    def profile(self):
+        from worker_profile import process_profile
+        with self.lock:
+            groups = self.command("-list-thread-groups", 10, True)
+            candidates = [g for g in (groups.get("payload") or {}).get("groups", []) if g.get("pid")]
+            if len(candidates) != 1: raise ValueError("runtime profile requires exactly one live inferior")
+            return {"session_id":self.id, "process":process_profile(candidates[0]["pid"]),
+                    "transcript":"debug/" + self.id + "/transcript.mi"}
 
     def close(self):
         with self.lock:

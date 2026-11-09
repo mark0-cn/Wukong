@@ -46,7 +46,7 @@ impl SessionsService {
         args: Value,
     ) -> Result<Value> {
         match name {
-            "debug_command" | "debug_close" => {
+            "debug_command" | "debug_close" | "debug_profile" => {
                 let session_id = text(&args, "session_id")?.to_owned();
                 let mut session: SessionRecord = require_session(
                     &self.store,
@@ -76,6 +76,8 @@ impl SessionsService {
                         call_id,
                         if name == "debug_close" {
                             "debug.close"
+                        } else if name == "debug_profile" {
+                            "debug.profile"
                         } else {
                             "debug.command"
                         },
@@ -166,7 +168,7 @@ impl SessionsService {
                 self.store.save_session(SessionKind::Interactive, &record)?;
                 Ok(raw)
             }
-            "interactive_send" | "interactive_close" => {
+            "interactive_send" | "interactive_close" | "interactive_profile" => {
                 let session_id = text(&args, "session_id")?.to_owned();
                 let mut session: SessionRecord = require_session(
                     &self.store,
@@ -198,6 +200,8 @@ impl SessionsService {
                         call_id,
                         if name == "interactive_close" {
                             "interact.close"
+                        } else if name == "interactive_profile" {
+                            "interact.profile"
                         } else {
                             "interact.write"
                         },
