@@ -43,6 +43,16 @@ pub fn environment(config: &AppConfig, command: EnvCommand) -> Result<Value> {
 
 #[derive(Subcommand)]
 pub enum ChallengeCommand {
+    Pwninit {
+        id: String,
+    },
+    Extract {
+        id: String,
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        role: String,
+    },
     Prepare {
         id: String,
     },
@@ -82,6 +92,8 @@ pub fn challenge(config: &AppConfig, command: ChallengeCommand) -> Result<Value>
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     match command {
+        ChallengeCommand::Pwninit { id } => workbench.pwninit(&id),
+        ChallengeCommand::Extract { id, path, role } => workbench.extract_file(&id, &path, &role),
         ChallengeCommand::Prepare { id } => workbench.prepare_challenge(&id),
         ChallengeCommand::Build { id } => workbench.build_challenge(&id),
         ChallengeCommand::Up {
