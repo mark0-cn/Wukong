@@ -220,3 +220,7 @@ re-agent verify-bundle ./reports/assessment-01
 独立复核必须由不同 Agent 执行，并关联实际 worker 结果。静态可疑特征或单纯崩溃不会自动升级为已验证影响。
 
 [`fixtures/`](../fixtures/README.md) 提供本地评测构建与行为回归定义，区分样本真值、执行观察和 Agent 检测结论；行为回归通过不代表 Agent 分析质量已经通过评测。
+
+### 自定义 Skill 元数据
+
+`skills_dir` 中的自定义 `.md` 会自动出现在 Agent 的能力目录。可添加同名 `.json`，字段为 `description`、`applies_to`、`excludes`、`requires`、`deliverables`、`validation`、`version`；除说明和版本外均为字符串数组。目录标记有效正文的 SHA256 和来源，覆盖内置正文时使用覆盖后的哈希。元数据只指导路由，不授予工具权限；运行前仍须检查实际后端能力。每个元数据文件最多 16 KiB，目录最多 256 项。

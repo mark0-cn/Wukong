@@ -6,6 +6,71 @@ use anyhow::{Context, Result, bail};
 use serde_json::json;
 use std::{fs, path::Path};
 
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SkillManifest {
+    pub description: String,
+    pub applies_to: Vec<String>,
+    pub excludes: Vec<String>,
+    pub requires: Vec<String>,
+    pub deliverables: Vec<String>,
+    pub validation: Vec<String>,
+    pub version: String,
+}
+
+/// Discover effective content, including custom-only capabilities. Metadata never grants permissions.
+pub fn skill_catalog(custom_dir: Option<&Path>) -> Result<serde_json::Value> {
+    use sha2::{Digest, Sha256};
+    let mut names = std::collections::BTreeSet::new();
+    for entry in crate::prompts::REGISTRY {
+        if !matches!(entry.kind, crate::prompts::Kind::Role(_)) {
+            names.insert(entry.name.to_owned());
+        }
+    }
+    if let Some(dir) = custom_dir.filter(|dir| dir.exists()) {
+        for file in fs::read_dir(dir)? {
+            let path = file?.path();
+            if path.extension().is_some_and(|ext| ext == "md") {
+                if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                    if validate_capability(name).is_ok() {
+                        names.insert(name.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    anyhow::ensure!(names.len() <= 256, "skill catalog exceeds 256 entries");
+    let mut entries = Vec::new();
+    for name in names {
+        let body = load_skill(&name, custom_dir)?;
+        let mut manifest = SkillManifest::default();
+        if let Some(entry) = crate::prompts::find(&name) {
+            manifest.description = entry.description.into();
+        }
+        let custom = custom_dir.is_some_and(|dir| dir.join(format!("{name}.md")).exists());
+        if let Some(dir) = custom_dir.filter(|_| custom) {
+            let path = dir.join(format!("{name}.json"));
+            if path.exists() {
+                let path = fs::canonicalize(path)?;
+                anyhow::ensure!(
+                    path.starts_with(fs::canonicalize(dir)?),
+                    "skill metadata escapes directory"
+                );
+                anyhow::ensure!(
+                    fs::metadata(&path)?.len() <= 16384,
+                    "skill metadata too large"
+                );
+                manifest = serde_json::from_slice(&fs::read(path)?)?;
+            }
+        }
+        entries.push(
+            json!({"name":name,"source":if custom {"custom"} else {"builtin"},
+            "sha256":hex::encode(Sha256::digest(body.as_bytes())),"metadata":manifest}),
+        );
+    }
+    Ok(json!(entries))
+}
+
 pub fn built_in_skill(name: &str) -> Option<&'static str> {
     crate::prompts::find(name).map(|entry| entry.content)
 }
@@ -115,6 +180,8 @@ pub fn preamble(
     )?;
     let mut text = crate::prompts::BASE.to_owned();
     text.push_str(&crate::prompts::discovery_prompt());
+    text.push_str("\nEffective skill metadata (custom names and overrides included):\n");
+    text.push_str(&serde_json::to_string(&skill_catalog(custom_dir)?)?);
     // The complete built-in tool directory is generated from the registry and
     // always injected: a tool added to the catalog is visible to every agent
     // without anyone remembering to mention it in prose (guarded by a test).
@@ -259,5 +326,34 @@ mod tests {
             base < skill && skill < identity && identity < context,
             "stable prefix must precede per-run context"
         );
+    }
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+    #[test]
+    fn discovers_custom_and_hashes_effective_override() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        fs::write(dir.path().join("wire.md"), "Recover wire records")?;
+        fs::write(
+            dir.path().join("wire.json"),
+            r#"{"description":"Wire records","requires":["ghidra"],"version":"1"}"#,
+        )?;
+        fs::write(dir.path().join("reverse.md"), "Custom reverse")?;
+        let value = skill_catalog(Some(dir.path()))?;
+        let rows = value.as_array().unwrap();
+        assert_eq!(
+            rows.iter().find(|r| r["name"] == "wire").unwrap()["metadata"]["version"],
+            "1"
+        );
+        assert_eq!(
+            rows.iter().find(|r| r["name"] == "reverse").unwrap()["source"],
+            "custom"
+        );
+        assert!(!rows.iter().any(|r| r["name"] == "root"));
+        fs::write(dir.path().join("wire.json"), r#"{"unknown":true}"#)?;
+        assert!(skill_catalog(Some(dir.path())).is_err());
+        Ok(())
     }
 }
