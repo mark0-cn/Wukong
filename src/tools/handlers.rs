@@ -794,3 +794,46 @@ pub(super) fn handle_runtime_profile<'a>(
         Ok(raw)
     })
 }
+
+pub(super) fn handle_crash_snapshot<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    call_id: &'a str,
+    name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        if name == "cyclic_offset" {
+            tools
+                .execution
+                .files
+                .known_file(agent, text(&args, "pattern")?, false)?;
+            return tools
+                .execution
+                .gateway
+                .worker_call(agent, call_id, "cyclic.offset", args)
+                .await;
+        }
+        ensure!(
+            args["session_id"].is_string() != args["core"].is_string(),
+            "choose exactly one snapshot source"
+        );
+        if args["session_id"].is_string() {
+            tools
+                .execution
+                .sessions
+                .session_tool(agent, call_id, "debug_snapshot", args)
+                .await
+        } else {
+            tools
+                .execution
+                .files
+                .known_file(agent, text(&args, "core")?, false)?;
+            tools
+                .execution
+                .gateway
+                .worker_call(agent, call_id, "core.snapshot", args)
+                .await
+        }
+    })
+}

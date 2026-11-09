@@ -46,7 +46,7 @@ impl SessionsService {
         args: Value,
     ) -> Result<Value> {
         match name {
-            "debug_command" | "debug_close" | "debug_profile" => {
+            "debug_command" | "debug_close" | "debug_profile" | "debug_snapshot" => {
                 let session_id = text(&args, "session_id")?.to_owned();
                 let mut session: SessionRecord = require_session(
                     &self.store,
@@ -78,6 +78,8 @@ impl SessionsService {
                             "debug.close"
                         } else if name == "debug_profile" {
                             "debug.profile"
+                        } else if name == "debug_snapshot" {
+                            "debug.snapshot"
                         } else {
                             "debug.command"
                         },

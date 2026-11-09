@@ -667,6 +667,8 @@ pub(super) struct CrashReplayArgs {
     #[schemars(length(min = 1))]
     pub input: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_mode: Option<InputMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected: Option<Expected>,
@@ -691,8 +693,13 @@ pub(super) struct CrashReplayArgs {
 pub(super) struct InputMinimizeArgs {
     #[schemars(length(min = 1))]
     pub target: String,
+    /// Explicit weak fallback; default requires module-hash/location crash equivalence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_signal_only: Option<bool>,
     #[schemars(length(min = 1))]
     pub input: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_mode: Option<InputMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -815,4 +822,20 @@ pub(super) struct RuntimeProfileArgs {
     pub session_id: Option<String>,
     /// Alternatively observe an owned interactive process (e.g. a prepared runtime bundle).
     pub interactive_session_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CrashSnapshotArgs {
+    /// Choose exactly one: owned stopped debugger session or in-run core file.
+    pub session_id: Option<String>,
+    pub core: Option<String>,
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CyclicOffsetArgs {
+    pub pattern: String,
+    pub observed_base64: String,
+    pub alphabet: String,
+    pub n: u64,
 }

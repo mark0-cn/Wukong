@@ -33,6 +33,7 @@ class DebugSession:
         self.isolated = isolated
         self.experiment = None
         args = list(params.get("args", []))
+        self.stdin_path = confined(root, params["_stdin"], True) if params.get("_stdin") else None
         if isolated:
             import isolation
             self.experiment = isolation.sandbox(root, isolation.allocate_uid(root))
@@ -42,13 +43,16 @@ class DebugSession:
                 source = path.resolve() if path.is_absolute() else (root / path).resolve()
                 if root in source.parents and source.is_file():
                     args[index] = str(isolation.stage_file(source, self.experiment))
+            if self.stdin_path:
+                self.stdin_path = isolation.stage_file(self.stdin_path, self.experiment, "stdin.bin")
             isolation.seal(self.experiment)
         self.process = subprocess.Popen(["gdb", "--quiet", "--nx", "--nh", "-iex", "set auto-load off", "--interpreter=mi2", "--args", str(target)] + args,
-                                        cwd=self.directory, env=safe_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        cwd=self.directory, env=safe_env(params.get("env")), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1, **detached_options())
         threading.Thread(target=self.read_records, daemon=True).start()
         self.command("-gdb-set pagination off", 10, True)
         self.command("-gdb-set mi-async on", 10, True)
+        self.command("-gdb-set disable-randomization off", 10, True)
         if self.experiment:
             uid = str(self.experiment["uid"])
             self.command("-gdb-set exec-wrapper setpriv --reuid=" + uid + " --regid=" + uid + " --clear-groups --no-new-privs", 10, True)

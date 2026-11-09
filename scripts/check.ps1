@@ -22,6 +22,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'General analysis scoring tests failed.' }
     & python fixtures/analysis/test_compare_runs.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Agent experiment scoring tests failed.' }
+    & python workers/runtime/test_profile.py 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Runtime identity tests failed.' }
+    & python workers/runtime/test_crash_observations.py 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Crash observation tests failed.' }
     & python workers/runtime/test_differential.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Differential harness tests failed.' }
     if ($DockerContainer) {

@@ -39,3 +39,15 @@ classification, root-cause hypothesis and confidence, evidence IDs. Do not
 infer exploitability from the signal alone.
 Continue the primary assignment if it also requires explanation or experiments;
 do not create a new agent solely to switch analysis techniques.
+
+Use `crash_snapshot` with an owned stopped debugger session (or an in-run core)
+for registers, PC/SP, fault address, frames and raw evidence. For a cyclic pattern,
+record the original file, alphabet and n; give `cyclic_offset` exactly n observed
+bytes in memory order. Do not silently truncate a register or guess endianness.
+
+`input_minimize` defaults to signal + mapped-module hash + PC file offset +
+resolved frames. Each candidate is replayed natively and observed in a fresh GDB
+session. Unresolved identity stops baseline minimization; `allow_signal_only=true`
+is an explicit weaker fallback, not proof of the same root cause. Collect trial
+snapshots from `job_artifacts`. A stdin debugger replay uses file redirection,
+whereas the native replay uses a pipe: check channel-sensitive differences.

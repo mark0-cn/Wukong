@@ -61,6 +61,22 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::CrashSnapshotArgs>(
+            "crash_snapshot",
+            "Capture registers, PC/SP, fault address, instructions, stack and module identities from an owned stopped debugger; alternatively inspect an in-run core file. Strong signatures require observed module hashes. Unknown identity remains unresolved.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_crash_snapshot,
+            Visibility::Child,
+        ),
+        spec::<args::CyclicOffsetArgs>(
+            "cyclic_offset",
+            "Find a unique offset in an in-run cyclic pattern. Requires the original alphabet/n and exactly n observed bytes in memory order. Rejects mismatched generation parameters; never guesses endianness or truncates a register implicitly.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_crash_snapshot,
+            Visibility::Child,
+        ),
         spec::<args::RuntimeProfileArgs>(
             "runtime_profile",
             "Inspect SHA256, ELF Build ID and architecture of in-run target/libc/loader files. Optionally observe actual mappings of an owned live debugger session. File candidates never imply a confirmed mapped runtime.",
@@ -559,7 +575,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::InputMinimizeArgs>(
             "input_minimize",
-            "Start crash-preserving delta reduction using observed crash signatures.",
+            "Minimize a crashing input with fresh module-hash, PC-offset and frame signatures; requires GDB. allow_signal_only explicitly permits weaker signal-only equivalence. Poll job_status and collect job_artifacts.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,

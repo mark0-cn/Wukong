@@ -9,7 +9,7 @@ from worker_debugger import DebugSession
 from worker_interactive import InteractSession
 
 class SessionManager:
-    methods = frozenset(['interact.start', 'interact.close', 'interact.write', 'interact.profile', 'debug.start', 'debug.close', 'debug.command', 'debug.events', 'debug.profile'])
+    methods = frozenset(['interact.start', 'interact.close', 'interact.write', 'interact.profile', 'debug.start', 'debug.close', 'debug.command', 'debug.events', 'debug.profile', 'debug.snapshot'])
 
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated
@@ -82,11 +82,14 @@ class SessionManager:
             with self.lock:
                 self.debug[session.id] = session
             return {"session_id": session.id, "state": "running", "ownership": "single_worker_serialized", "daemon_pid": os.getpid()}
-        if method in {"debug.command", "debug.close", "debug.events", "debug.profile"}:
+        if method in {"debug.command", "debug.close", "debug.events", "debug.profile", "debug.snapshot"}:
             with self.lock:
                 session = self.debug.get(params["session_id"])
             if not session:
                 raise WorkerError("session_lost", "debug session not owned by this daemon; it is absent or lost")
+            if method == "debug.snapshot":
+                from worker_crash import debugger_snapshot
+                return debugger_snapshot(session)
             if method == "debug.profile":
                 return session.profile()
             if method == "debug.close":

@@ -17,6 +17,8 @@
 | `coverage_record` | 全部 | 是 | Record inspected scope, outcome and supporting evidence. needs_follow_up blocks root completion. |
 | `coverage_update` | 全部 | 是 | Update a coverage record's outcome, notes and evidence. |
 | `crash_replay` | analyst / verifier | 是 | Start a persistent clean-directory crash reproduction job. |
+| `crash_snapshot` | analyst / verifier | 否 | Capture registers, PC/SP, fault address, instructions, stack and module identities from an owned stopped debugger; alternatively inspect an in-run core file. Strong signatures require observed module hashes. Unknown identity remains unresolved. |
+| `cyclic_offset` | analyst / verifier | 否 | Find a unique offset in an in-run cyclic pattern. Requires the original alphabet/n and exactly n observed bytes in memory order. Rejects mismatched generation parameters; never guesses endianness or truncates a register implicitly. |
 | `debug_close` | analyst / verifier | 是 | Close your debugger session, or clean up an in-run session whose owner is terminal. |
 | `debug_command` | analyst / verifier | 是 | Execute exactly one GDB/MI command in your owned session; stable request IDs prevent blind replay. |
 | `debug_start` | analyst / verifier | 是 | Start an owned GDB/MI session on the staged target. |
@@ -37,7 +39,7 @@
 | `functions_search` | analyst / verifier | 否 | Ghidra: search analyzed functions, paginated. |
 | `fuzz_start` | analyst / verifier | 是 | Start AFL++ QEMU fuzzing after staging target and nonempty seed files. |
 | `fuzz_status` | analyst / verifier | 否 | Observe a bound AFL++ job and its real statistics/crash files. |
-| `input_minimize` | analyst / verifier | 是 | Start crash-preserving delta reduction using observed crash signatures. |
+| `input_minimize` | analyst / verifier | 是 | Minimize a crashing input with fresh module-hash, PC-offset and frame signatures; requires GDB. allow_signal_only explicitly permits weaker signal-only equivalence. Poll job_status and collect job_artifacts. |
 | `interactive_close` | analyst / verifier | 是 | Close your interactive session and terminate its process tree; also permits cleanup when its in-run owner is terminal. |
 | `interactive_send` | analyst / verifier | 是 | Write bytes to an owned interactive session's stdin and return its newly produced output. The session stays alive between calls. |
 | `interactive_start` | analyst / verifier | 是 | Start a persistent interactive process (REPL-style program) owned by this agent; returns a session_id. Worker paths resolve as direct argv entries. |

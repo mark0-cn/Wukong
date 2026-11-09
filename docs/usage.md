@@ -240,3 +240,13 @@ re-agent verify-bundle ./reports/assessment-01
 先用 `file_put` 登记用户提供的 libc 和 loader，再用 `runtime_profile` 读取目标与运行库 SHA256、ELF Build ID、架构。它默认只确认文件身份。传入自己拥有的 `session_id`（调试器）或 `interactive_session_id`（交互进程）可读取实际映射，并按哈希逐个标记 mapped_hash_confirmed；不能传任意 PID。进程已退出或模块无法读取时不推断匹配。
 
 `runtime_prepare` 要求 target/libc/loader 三个已登记 ELF，创建内容寻址的独立副本，并返回 loader、library-path、target 的直接 argv。将其用于 `interactive_start` 或 `job_start`，不要拼接为 shell 字符串。原始文件不改写；不同 glibc 版本、附加依赖或 loader ABI 仍可能导致启动失败，需记录实际结果。`libc_identify` 的单符号地址减法仅返回 candidate_only，不再宣称确认匹配。
+
+### 结构化崩溃证据
+
+`crash_snapshot` 读取已停止的所属调试会话或已登记 core 文件；输出保留寄存器、
+PC/SP、故障地址、栈、映射和原始调试回执。`cyclic_offset` 必须提供原始 pattern、
+alphabet、n 和内存顺序的恰好 n 字节，避免默认 n 或寄存器截断造成假偏移。
+`input_minimize` 默认用信号、模块哈希、PC 文件偏移及已解析帧区分崩溃；
+缺少 GDB/模块身份时拒绝弱化基线。确需只按信号缩减时显式传
+`allow_signal_only=true`，结果标记为弱判据。stdin 的原生复现走管道，调试复现
+使用文件重定向；对输入通道敏感的目标需检查二者差异。每次快照可从 job_artifacts 获取。
