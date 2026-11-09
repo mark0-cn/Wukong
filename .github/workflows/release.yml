@@ -70,7 +70,9 @@ jobs:
         id: existing
         env:
           CANDIDATE: ${{ needs.metadata.outputs.candidate }}
-        run: echo "digest=$(python scripts/publish-release.py --inspect-image "$CANDIDATE")" >> "$GITHUB_OUTPUT"
+        run: |
+          digest=$(python scripts/publish-release.py --inspect-image "$CANDIDATE")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Prepare disk and locked inputs
         if: steps.existing.outputs.digest == ''
         run: |
