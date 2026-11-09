@@ -84,6 +84,7 @@ pub struct AppConfig {
     pub model: ModelConfig,
     pub budget: Budget,
     pub runtime: RuntimeConfig,
+    pub workbench: crate::workbench::WorkbenchConfig,
     pub analysis: StaticConfig,
     pub pricing: Pricing,
     pub tools: ToolLimits,
@@ -99,6 +100,7 @@ impl Default for AppConfig {
             model: ModelConfig::default(),
             budget: Budget::default(),
             runtime: RuntimeConfig::default(),
+            workbench: crate::workbench::WorkbenchConfig::default(),
             analysis: StaticConfig::default(),
             pricing: Pricing::default(),
             tools: ToolLimits::default(),
@@ -137,6 +139,7 @@ impl AppConfig {
                 *path = base.join(&*path);
             }
         }
+        resolve(base, &mut self.workbench.root);
         resolve(base, &mut self.state_dir);
         resolve(base, &mut self.runtime.state_dir);
         resolve(base, &mut self.runtime.bridge_path);
