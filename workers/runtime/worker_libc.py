@@ -52,4 +52,5 @@ class LibcService:
         if not candidates:
             return {"matched": False, "leaked": leaked, "symbol": symbol,
                     "note": "no local libc matches; offline identification covers the worker's OWN libc only"}
-        return {"matched": True, "leaked": leaked, "symbol": symbol, "candidates": candidates[:4]}
+        return {"matched": False, "candidate_match": True, "identity_status":"candidate_only", "leaked": leaked, "symbol": symbol, "candidates": candidates[:4],
+                "note":"Aligned symbol subtraction is only a hypothesis. Confirm SHA256/Build ID against actual target mappings using runtime_profile."}

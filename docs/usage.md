@@ -234,3 +234,9 @@ re-agent verify-bundle ./reports/assessment-01
 ### Pwn 方法：堆分析
 
 `heap_ptmalloc` 已加入内置能力目录。它按实际 allocator 身份、ABI 和版本解释分配／释放时间线，要求 chunk 快照、原语证据、反例和未知项。版本表只是上游检查点，不能替代发行版补丁或运行时观察。来源见 `docs/pwn-knowledge.md`。
+
+### 固定 pwn 运行环境
+
+先用 `file_put` 登记用户提供的 libc 和 loader，再用 `runtime_profile` 读取目标与运行库 SHA256、ELF Build ID、架构。它默认只确认文件身份。传入自己拥有的 `session_id`（调试器）或 `interactive_session_id`（交互进程）可读取实际映射，并按哈希逐个标记 mapped_hash_confirmed；不能传任意 PID。进程已退出或模块无法读取时不推断匹配。
+
+`runtime_prepare` 要求 target/libc/loader 三个已登记 ELF，创建内容寻址的独立副本，并返回 loader、library-path、target 的直接 argv。将其用于 `interactive_start` 或 `job_start`，不要拼接为 shell 字符串。原始文件不改写；不同 glibc 版本、附加依赖或 loader ABI 仍可能导致启动失败，需记录实际结果。`libc_identify` 的单符号地址减法仅返回 candidate_only，不再宣称确认匹配。

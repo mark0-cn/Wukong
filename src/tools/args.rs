@@ -804,3 +804,15 @@ pub(super) struct DifferentialTestArgs {
     pub inputs_base64: Vec<String>,
     pub case_timeout_seconds: u64,
 }
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RuntimeProfileArgs {
+    pub target: String,
+    pub libc: Option<String>,
+    pub loader: Option<String>,
+    /// Owned live debugger session; never an arbitrary PID.
+    pub session_id: Option<String>,
+    /// Alternatively observe an owned interactive process (e.g. a prepared runtime bundle).
+    pub interactive_session_id: Option<String>,
+}

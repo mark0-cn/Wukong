@@ -9,7 +9,7 @@ from worker_debugger import DebugSession
 from worker_interactive import InteractSession
 
 class SessionManager:
-    methods = frozenset(['interact.start', 'interact.close', 'interact.write', 'debug.start', 'debug.close', 'debug.command', 'debug.events'])
+    methods = frozenset(['interact.start', 'interact.close', 'interact.write', 'interact.profile', 'debug.start', 'debug.close', 'debug.command', 'debug.events', 'debug.profile'])
 
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated
@@ -55,10 +55,15 @@ class SessionManager:
             self.interact[session.id] = session
             return {"session_id": session.id, "state": "running",
                     "ownership": "single_agent_serialized", "pid": session.process.pid}
-        if method in {"interact.write", "interact.close"}:
+        if method in {"interact.write", "interact.close", "interact.profile"}:
             session = self.interact.get(params.get("session_id"))
             if session is None:
                 raise WorkerError("session_lost", "interactive session absent or lost")
+            if method == "interact.profile":
+                from worker_profile import process_profile
+                with session.lock:
+                    if session.process.poll() is not None: raise ValueError("interactive process exited")
+                    return {"session_id":session.id,"process":process_profile(session.process.pid)}
             if method == "interact.close":
                 self.interact.pop(session.id, None)
                 return session.close()
@@ -77,11 +82,13 @@ class SessionManager:
             with self.lock:
                 self.debug[session.id] = session
             return {"session_id": session.id, "state": "running", "ownership": "single_worker_serialized", "daemon_pid": os.getpid()}
-        if method in {"debug.command", "debug.close", "debug.events"}:
+        if method in {"debug.command", "debug.close", "debug.events", "debug.profile"}:
             with self.lock:
                 session = self.debug.get(params["session_id"])
             if not session:
                 raise WorkerError("session_lost", "debug session not owned by this daemon; it is absent or lost")
+            if method == "debug.profile":
+                return session.profile()
             if method == "debug.close":
                 return session.close()
             if method == "debug.events":

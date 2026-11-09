@@ -173,3 +173,14 @@ class per call.
 - Timeout every job; angr and z3 can run away. timeout_secs is your friend.
 - The solver's answer is evidence only after the real binary reproduces it:
   run the solved input and cite both the solver job and the replay job.
+
+## Reproduce the exact runtime
+
+Use runtime_profile on staged target/libc/loader files. File identity and page-aligned
+symbol subtraction are candidate evidence, not proof of a loaded library. An owned live
+debugger session enables observed mappings and per-file mapped_hash_confirmed status.
+For supplied runtime files, runtime_prepare returns immutable copies and direct launch_argv;
+pass those argv entries unchanged to job_start or interactive_start. Extra libraries may
+still be missing. Preserve the original target and all runtime hashes. Never patch the
+original binary or silently substitute the worker's libc. A mapping that could not be
+hashed or a missing process remains unknown, not a confirmed match.

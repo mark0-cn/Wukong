@@ -12,7 +12,7 @@ class OperationLedger:
         (root / "operations").mkdir(exist_ok=True)
 
     def invoke(self, method, params, execute, reconcile):
-        effects = {"job.start", "fuzz.start", "debug.start", "debug.command", "debug.close",
+        effects = {"runtime.prepare", "job.start", "fuzz.start", "debug.start", "debug.command", "debug.close",
                    "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop",
                    "interact.start", "interact.write", "interact.close", "exec.run"}
         request_id = params.get("request_id")
@@ -34,7 +34,7 @@ class OperationLedger:
                     return reconcile(method, operation["result"])
                 if operation["state"] == "failed":
                     raise WorkerError(operation.get("error_kind", "invalid_request"), operation["error"])
-                if method not in {"job.start", "fuzz.start", "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop", "debug.close"}:
+                if method not in {"runtime.prepare", "job.start", "fuzz.start", "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop", "debug.close"}:
                     raise WorkerError("outcome_unknown", "prior operation outcome is unknown; reconcile the affected worker state instead of replaying")
             atomic_json(ledger, {"fingerprint": fingerprint, "state": "pending", "method": method, "at": time.time()})
             try:

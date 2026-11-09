@@ -8,6 +8,7 @@ from worker_emu import EmuService
 from worker_files import FileService
 from worker_jobs import JobManager
 from worker_libc import LibcService
+from worker_profile import ProfileService
 from worker_operations import OperationLedger
 from worker_sessions import SessionManager
 
@@ -21,9 +22,10 @@ class Runtime:
         self.commands = CommandService(self.root, trusted, self.isolated)
         self.emu = EmuService(self.root, trusted, self.isolated)
         self.libc = LibcService(self.root, trusted, self.isolated)
+        self.profile = ProfileService(self.root, trusted, self.isolated)
         self.operations = OperationLedger(self.root)
         self.handlers = {}
-        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu, self.libc]:
+        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu, self.libc, self.profile]:
             for name in service.methods:
                 if name in self.handlers:
                     raise ValueError("duplicate worker method: " + name)

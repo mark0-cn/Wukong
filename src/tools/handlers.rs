@@ -708,3 +708,89 @@ pub(super) fn handle_differential_test<'a>(
             .await
     })
 }
+
+pub(super) fn handle_runtime_profile<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    call_id: &'a str,
+    name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        for key in ["target", "libc", "loader"] {
+            if let Some(path) = args[key].as_str() {
+                tools
+                    .execution
+                    .files
+                    .known_file(agent, path, key == "target")?;
+            }
+        }
+        let mut raw = tools
+            .execution
+            .gateway
+            .worker_call(
+                agent,
+                call_id,
+                if name == "runtime_prepare" {
+                    "runtime.prepare"
+                } else {
+                    "runtime.profile"
+                },
+                args.clone(),
+            )
+            .await?;
+        if let Some(files) = raw["artifacts"].as_array() {
+            for file in files {
+                tools.execution.files.register_file(agent, file, None)?;
+            }
+        }
+        ensure!(
+            args["session_id"].is_null() || args["interactive_session_id"].is_null(),
+            "choose one session kind"
+        );
+        if let Some(session_id) = args["session_id"]
+            .as_str()
+            .or(args["interactive_session_id"].as_str())
+        {
+            let debug = args["session_id"].is_string();
+            let mut observation = tools
+                .execution
+                .sessions
+                .session_tool(
+                    agent,
+                    &format!("{call_id}:profile"),
+                    if debug {
+                        "debug_profile"
+                    } else {
+                        "interactive_profile"
+                    },
+                    json!({"session_id":session_id}),
+                )
+                .await?;
+            if !debug {
+                observation = json!({"response":observation});
+            }
+            let process = &observation["response"]["process"];
+            let mut matches = serde_json::Map::new();
+            for key in ["target", "libc", "loader"] {
+                if let Some(hash) = raw["files"][key]["sha256"].as_str() {
+                    let matched = process["modules"].as_array().is_some_and(|items| {
+                        items.iter().any(|m| m["sha256"].as_str() == Some(hash))
+                    });
+                    matches.insert(
+                        key.into(),
+                        json!(if matched {
+                            "mapped_hash_confirmed"
+                        } else {
+                            "not_confirmed"
+                        }),
+                    );
+                }
+            }
+            raw["mapped_files"] = Value::Object(matches);
+            raw["observation"] = observation;
+            raw["status"] = json!("process_observed");
+        }
+        Ok(raw)
+    })
+}
