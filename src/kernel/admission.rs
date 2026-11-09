@@ -267,6 +267,10 @@ pub(super) fn gate_tools(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Bevy injects each query and resource as a system parameter"
+)]
 pub(super) fn gate_models(
     mut calls: Query<(Entity, &ForAgent, &mut Decision), (ReadyToStart, ModelCalls)>,
     ids: Query<&AgentId>,

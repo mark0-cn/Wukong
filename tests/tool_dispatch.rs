@@ -303,21 +303,19 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
         .into_iter()
         .map(|tool| tool.name.to_string())
         .collect::<Vec<_>>();
-    assert!(root_tools.iter().any(|name| name == "binary_inspect"));
+    assert!(!root_tools.iter().any(|name| name == "binary_inspect"));
     assert!(!root_tools.iter().any(|name| name == "agent_finish"));
     assert!(root_tools.iter().any(|name| name == "finish_scan"));
     let outcome = service
         .execute(&root.id, "report-target", "binary_inspect", json!({}))
         .await?;
-    if outcome.is_error {
-        assert!(
-            !result(&outcome)["error"]
-                .as_str()
-                .unwrap()
-                .contains("unavailable"),
-            "binary_inspect is no longer role-gated"
-        );
-    }
+    assert!(outcome.is_error);
+    assert!(
+        result(&outcome)["error"]
+            .as_str()
+            .unwrap()
+            .contains("unavailable")
+    );
 
     request.scope = "independent check".into();
     request.role = Role::Verifier;
@@ -806,7 +804,7 @@ async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Re
 }
 
 #[tokio::test]
-async fn lifecycle_split_is_the_only_role_difference_and_failures_are_evidence() -> Result<()> {
+async fn role_boundary_is_enforced_and_failures_are_evidence() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
@@ -821,13 +819,13 @@ async fn lifecycle_split_is_the_only_role_difference_and_failures_are_evidence()
         "stage_target",
         "job_start",
         "poc_verify",
-        "finish_scan",
     ] {
         assert!(
-            root_names.iter().any(|entry| entry == name),
-            "{name} missing for root"
+            !root_names.iter().any(|entry| entry == name),
+            "{name} must not be exposed to root"
         );
     }
+    assert!(root_names.iter().any(|entry| entry == "finish_scan"));
     assert!(!root_names.iter().any(|entry| entry == "agent_finish"));
     let analyst_names = service
         .definitions(Role::Analyst)
@@ -840,20 +838,18 @@ async fn lifecycle_split_is_the_only_role_difference_and_failures_are_evidence()
     let failed = service
         .execute(&run.root_id, "root-strings", "binary_strings", json!({}))
         .await?;
-    if failed.is_error {
-        assert!(
-            !result(&failed)["error"]
-                .as_str()
-                .unwrap()
-                .contains("unavailable"),
-            "binary_strings is no longer role-gated"
-        );
-        assert!(
-            !store
-                .read_evidence(&run.id, failed.value["evidence_id"].as_str().unwrap())?
-                .is_empty()
-        );
-    }
+    assert!(failed.is_error);
+    assert!(
+        result(&failed)["error"]
+            .as_str()
+            .unwrap()
+            .contains("unavailable")
+    );
+    assert!(
+        !store
+            .read_evidence(&run.id, failed.value["evidence_id"].as_str().unwrap())?
+            .is_empty()
+    );
     let allowed = service
         .execute(
             &agent.id,
@@ -1684,16 +1680,43 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
     let (store, coordinator, run, producer) = fixture(temp.path())?;
     let verifier = child(&coordinator, &run.root_id, Role::Verifier, "check-layout")?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    let observation = store.artifact(&run.id, &verifier.id, "observe", "test-vector", b"observed 8", "text/plain", json!({}))?;
+    let observation = store.artifact(
+        &run.id,
+        &verifier.id,
+        "observe",
+        "test-vector",
+        b"observed 8",
+        "text/plain",
+        json!({}),
+    )?;
     let args = json!({"producer_id":producer.id,"claim":"header has 8 bytes","scope":"header", "expected":"8","observed":"8","verdict":"supported","evidence_ids":[observation.id],"counterexamples":[]});
-    assert!(service.execute(&producer.id,"invalid-verifier","analysis_verify",args.clone()).await?.is_error);
-    let first = service.execute(&verifier.id,"verify-layout","analysis_verify",args.clone()).await?;
+    assert!(
+        service
+            .execute(
+                &producer.id,
+                "invalid-verifier",
+                "analysis_verify",
+                args.clone()
+            )
+            .await?
+            .is_error
+    );
+    let first = service
+        .execute(
+            &verifier.id,
+            "verify-layout",
+            "analysis_verify",
+            args.clone(),
+        )
+        .await?;
     assert!(!first.is_error, "{first:?}");
-    let replay = service.execute(&verifier.id,"verify-layout","analysis_verify",args).await?;
-    assert_eq!(result(&first),result(&replay));
+    let replay = service
+        .execute(&verifier.id, "verify-layout", "analysis_verify", args)
+        .await?;
+    assert_eq!(result(&first), result(&replay));
     let records: Vec<Value> = store.list("analysis_verification", &run.id)?;
-    assert_eq!(records.len(),1);
-    assert_eq!(records[0]["target_sha256"],run.target_sha256);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["target_sha256"], run.target_sha256);
     service.close().await;
     Ok(())
 }

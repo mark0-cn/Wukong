@@ -1,7 +1,7 @@
 //! Tool visibility is Strix-style: every agent sees the full catalog for its
 //! role upfront, and no model turn is spent discovering or loading tools. The
-//! only per-role difference is the lifecycle tool: `finish_scan` for the root
-//! and `agent_finish` for children.
+//! role boundary excludes target operations from root; runtime_doctor remains
+//! available for preflight. Lifecycle tools are also role-scoped.
 use super::*;
 use std::collections::BTreeSet;
 

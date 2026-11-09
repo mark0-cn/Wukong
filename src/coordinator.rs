@@ -170,7 +170,9 @@ impl Coordinator {
             a.scope.trim() == request.scope.trim()
                 && a.role == request.role
                 && a.status.terminal()
-                && a.error.as_deref().is_some_and(|error| error.contains("budget"))
+                && a.error
+                    .as_deref()
+                    .is_some_and(|error| error.contains("budget"))
         }) {
             bail!(
                 "scope '{}' belongs to a quota-exhausted child ({}): resume it with follow_up_agent instead of spawning a replacement — its conversation and dossier are preserved",
@@ -407,7 +409,9 @@ impl Coordinator {
                 .error
                 .as_deref()
                 .is_some_and(|error| error.contains("budget"));
-        if options.kind == MessageKind::FollowUp && (target.status == Status::Completed || quota_failed) {
+        if options.kind == MessageKind::FollowUp
+            && (target.status == Status::Completed || quota_failed)
+        {
             // Keep the old conversation as background, but start a new
             // Rig run so its lifecycle call cannot be replayed as new work.
             let mut current = Some(target.clone());
@@ -710,43 +714,43 @@ impl Coordinator {
             .write(|tx| Self::tx_finish_result(tx, agent_id, result))
     }
     /// A flag-looking token in a result that is NOT a literal placeholder
-/// (`flag{...}`, `Flag{.}`, `flag{AAAA}`) — the kind of claim an independent
-/// verifier must reproduce before the root closes the assessment.
-fn contains_flag_claim(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    let mut rest = lower.as_str();
-    while let Some(index) = rest.find("flag") {
-        let after = &rest[index + 4..];
-        let Some(body) = after.strip_prefix('{') else {
-            rest = after;
-            continue;
-        };
-        let Some(close) = body.find('}') else {
-            break;
-        };
-        let core: String = body[..close]
-            .chars()
-            .filter(|c| !matches!(c, '\\' | '_'))
-            .collect();
-        let placeholder = core.is_empty()
-            || core
+    /// (`flag{...}`, `Flag{.}`, `flag{AAAA}`) — the kind of claim an independent
+    /// verifier must reproduce before the root closes the assessment.
+    fn contains_flag_claim(text: &str) -> bool {
+        let lower = text.to_lowercase();
+        let mut rest = lower.as_str();
+        while let Some(index) = rest.find("flag") {
+            let after = &rest[index + 4..];
+            let Some(body) = after.strip_prefix('{') else {
+                rest = after;
+                continue;
+            };
+            let Some(close) = body.find('}') else {
+                break;
+            };
+            let core: String = body[..close]
                 .chars()
-                .all(|c| matches!(c, '.' | '…' | '+' | '-' | ' ' | '*' | 'x' | 'a'))
-            || core == "test"
-            || (core.len() >= 3
-                && core
+                .filter(|c| !matches!(c, '\\' | '_'))
+                .collect();
+            let placeholder = core.is_empty()
+                || core
                     .chars()
-                    .next()
-                    .is_some_and(|first| core.chars().all(|c| c == first)));
-        if !placeholder {
-            return true;
+                    .all(|c| matches!(c, '.' | '…' | '+' | '-' | ' ' | '*' | 'x' | 'a'))
+                || core == "test"
+                || (core.len() >= 3
+                    && core
+                        .chars()
+                        .next()
+                        .is_some_and(|first| core.chars().all(|c| c == first)));
+            if !placeholder {
+                return true;
+            }
+            rest = &body[close..];
         }
-        rest = &body[close..];
+        false
     }
-    false
-}
 
-pub(crate) fn tx_finish_result(
+    pub(crate) fn tx_finish_result(
         tx: &crate::store::StateSession<'_>,
         agent_id: &str,
         result: TaskResult,

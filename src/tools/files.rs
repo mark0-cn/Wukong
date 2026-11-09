@@ -89,10 +89,7 @@ impl FilesService {
         let bytes = if let Some(evidence) = args["evidence_id"].as_str() {
             self.store.read_evidence(&agent.run_id, evidence)?
         } else if let Some(text) = args["text"].as_str() {
-            ensure!(
-                text.len() <= 1024 * 1024,
-                "text upload exceeds 1 MiB"
-            );
+            ensure!(text.len() <= 1024 * 1024, "text upload exceeds 1 MiB");
             text.as_bytes().to_vec()
         } else {
             BASE64

@@ -467,7 +467,15 @@ mod tests {
             Budget::default(),
             json!({}),
         )?;
-        let agent = Coordinator::new(store.clone()).create_child(&run.root_id, serde_json::from_value(json!({"name":"worker","role":"analyst","task":"fixture","scope":"fixture"}))?)?.agent.metadata;
+        let agent = Coordinator::new(store.clone())
+            .create_child(
+                &run.root_id,
+                serde_json::from_value(
+                    json!({"name":"worker","role":"analyst","task":"fixture","scope":"fixture"}),
+                )?,
+            )?
+            .agent
+            .metadata;
         Ok((store, agent))
     }
 
