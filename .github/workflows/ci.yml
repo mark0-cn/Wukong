@@ -5,10 +5,6 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
-    inputs:
-      release:
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -60,20 +56,6 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cargo test --locked --all-targets
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Build embedded desktop release
-        if: inputs.release == true
-        run: |
-          cargo build --locked --release --features custom-protocol
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ./target/release/re-agent.exe --version
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: inputs.release == true
-        with:
-          name: windows-client
-          path: target/release/re-agent.exe
-          retention-days: 7
-          if-no-files-found: error
 
   linux:
     runs-on: ubuntu-24.04
@@ -94,13 +76,3 @@ jobs:
           python -m unittest discover -s workers/runtime -p 'test_*.py' -v
           python fixtures/analysis/test_analysis.py
           python fixtures/analysis/test_compare_runs.py
-      - name: Build Linux host for container acceptance
-        if: inputs.release == true
-        run: cargo build --locked --no-default-features
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: inputs.release == true
-        with:
-          name: linux-acceptance-client
-          path: target/debug/re-agent
-          retention-days: 7
-          if-no-files-found: error

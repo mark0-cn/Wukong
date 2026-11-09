@@ -47,8 +47,59 @@ jobs:
   checks:
     needs: metadata
     uses: ./.github/workflows/ci.yml
-    with:
-      release: true
+
+  windows-client:
+    needs: metadata
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          key: windows-release
+          cache-on-failure: true
+      - name: Build embedded Windows release
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --locked --release --features custom-protocol
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./target/release/re-agent.exe --version
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-client
+          path: target/release/re-agent.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  linux-client:
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          key: linux-acceptance
+      - name: Build host CLI for container acceptance
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev
+          cargo build --locked --no-default-features
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-acceptance-client
+          path: target/debug/re-agent
+          retention-days: 7
+          if-no-files-found: error
 
   image:
     needs: metadata
@@ -105,7 +156,7 @@ jobs:
           df -h /
 
   acceptance:
-    needs: [metadata, image, checks]
+    needs: [metadata, image, linux-client]
     runs-on: ${{ vars.WORKBENCH_LINUX_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 60
     steps:
@@ -144,7 +195,7 @@ jobs:
           if-no-files-found: warn
 
   package:
-    needs: [metadata, acceptance, checks]
+    needs: [metadata, acceptance, windows-client, checks]
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
