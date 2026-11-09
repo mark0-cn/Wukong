@@ -343,3 +343,159 @@ impl Workbench {
         Ok(json!({"archive":output,"sha256":digest,"runtime_confirmed":false}))
     }
 }
+
+impl Workbench {
+    pub fn extract_file(&self, id: &str, path: &str, role: &str) -> Result<Value> {
+        ensure!(
+            ["binary", "libc", "loader"].contains(&role),
+            "role must be binary, libc or loader"
+        );
+        ensure!(
+            path.starts_with('/') && !path.contains('\0') && !path.split('/').any(|p| p == ".."),
+            "container path must be absolute without traversal"
+        );
+        self.verify_original(id)?;
+        self.challenge_idle(id)?;
+        let image = self.checked_image(id)?;
+        let root = self.challenge_dir(id)?;
+        let relative = format!("prepared/extracted-{role}");
+        let output = root.join(&relative);
+        ensure!(!output.exists(), "extracted file already exists");
+        let name = self.name(&format!(
+            "{id}-extract-{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..8]
+        ));
+        self.docker.run(&[
+            "create",
+            "--name",
+            &name,
+            "--label",
+            &format!("re-agent.workspace={}", self.id),
+            "--network",
+            "none",
+            &image,
+        ])?;
+        let result = self.docker.copy_from(&name, path, &output);
+        let cleanup = self.docker.run(&["rm", &name]);
+        result?;
+        cleanup?;
+        ensure!(
+            fs::symlink_metadata(&output)?.is_file(),
+            "extracted path must be a regular file; specify the resolved in-image path"
+        );
+        let profile = crate::binary::inspect(&output)?;
+        ensure!(
+            profile.format == "Elf",
+            "extracted runtime file must be ELF"
+        );
+        let mut challenge = self.challenge(id)?;
+        match role {
+            "binary" => challenge.target.binary = Some(relative.clone()),
+            "libc" => challenge.runtime.libc = Some(relative.clone()),
+            _ => challenge.runtime.loader = Some(relative.clone()),
+        };
+        fs::write(
+            root.join("challenge.toml"),
+            toml::to_string_pretty(&challenge)?,
+        )?;
+        let mut lock: Value = read_json(&root.join("environment.lock.json"))?;
+        // Extraction changes only declared file paths; the built image remains the source.
+        lock["build_manifest_sha256"] =
+            json!(crate::binary::sha256_file(root.join("challenge.toml"))?);
+        lock["extracted"][role] = json!({"image_id":image,"container_path":path,"file":relative,"sha256":crate::binary::sha256_file(&output)?});
+        write_json(&root.join("environment.lock.json"), &lock)?;
+        Ok(json!({"file":output,"profile":profile,"runtime_confirmed":false}))
+    }
+    pub fn pwninit(&self, id: &str) -> Result<Value> {
+        self.verify_original(id)?;
+        self.challenge_idle(id)?;
+        let challenge = self.challenge(id)?;
+        let root = self.challenge_dir(id)?;
+        let env = self.environment()?;
+        let binary = relative_path(
+            &root,
+            challenge
+                .target
+                .binary
+                .as_deref()
+                .context("pwninit requires binary")?,
+        )?;
+        let libc = relative_path(
+            &root,
+            challenge
+                .runtime
+                .libc
+                .as_deref()
+                .context("pwninit requires supplied libc")?,
+        )?;
+        let suffix = &uuid::Uuid::new_v4().simple().to_string()[..8];
+        let name = self.name(&format!("{id}-pwninit-{suffix}"));
+        let output = root.join(format!("prepared/pwninit-{suffix}"));
+        self.docker.run(&[
+            "run",
+            "-d",
+            "--name",
+            &name,
+            "--label",
+            &format!("re-agent.workspace={}", self.id),
+            "--network",
+            "bridge",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--memory",
+            "1g",
+            "--pids-limit",
+            "64",
+            &env.image_id,
+        ])?;
+        let result = (|| -> Result<Value> {
+            self.docker.run(&["exec", &name, "mkdir", "-p", "/work"])?;
+            self.docker.copy_to(&binary, &name, "/work/target")?;
+            self.docker.copy_to(&libc, &name, "/work/libc.so.6")?;
+            let mut args = vec![
+                "exec",
+                "--user",
+                "65534:65534",
+                "--workdir",
+                "/work",
+                &name,
+                "timeout",
+                "180",
+                "pwninit",
+                "--bin",
+                "target",
+                "--libc",
+                "libc.so.6",
+                "--no-template",
+                "--no-patch-bin",
+            ];
+            if let Some(loader) = &challenge.runtime.loader {
+                self.docker
+                    .copy_to(&relative_path(&root, loader)?, &name, "/work/ld.so")?;
+                args.extend(["--ld", "ld.so"]);
+            }
+            // Root changes only disposable copies. Downloads/parsing run unprivileged.
+            self.docker
+                .run(&["exec", &name, "chmod", "-R", "a+rwX", "/work"])?;
+            let execution = self.docker.logged(&args, &root.join("results/pwninit.log"));
+            fs::create_dir_all(&output)?;
+            self.docker.copy_from(&name, "/work/.", &output)?;
+            let files = super::challenge::inventory(&output)?;
+            write_json(
+                &output.join("pwninit-result.json"),
+                &json!({"files":files,"source_libc_sha256":crate::binary::sha256_file(&libc)?,"runtime_confirmed":false,"success":execution.is_ok()}),
+            )?;
+            execution?;
+            Ok(
+                json!({"directory":output,"files":files,"note":"downloaded symbols may change libc bytes; originals and selected runtime remain unchanged"}),
+            )
+        })();
+        let cleanup = self.docker.run(&["rm", "-f", &name]);
+        result.and_then(|value| {
+            cleanup?;
+            Ok(value)
+        })
+    }
+}

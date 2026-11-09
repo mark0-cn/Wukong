@@ -29,7 +29,7 @@ def prepare(root):
     if target:
         binary=inside(root,target); spec["files"][target]=digest(binary)
         binary.chmod(0o555)
-    if runtime["kind"]=="loader":
+    if runtime["kind"]=="loader" or runtime.get("libc") or runtime.get("loader"):
         if not target or not runtime.get("libc") or not runtime.get("loader"):
             raise ValueError("loader runtime requires target, libc and loader")
         library=root/"prepared"/"libraries"; library.mkdir(parents=True,exist_ok=True)
