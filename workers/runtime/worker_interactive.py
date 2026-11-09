@@ -30,7 +30,13 @@ class InteractSession:
         if not argv or not all(isinstance(argument, str) for argument in argv):
             raise ValueError("interactive argv must be a nonempty list of strings")
         self.isolated = isolated
-        if isolated:
+        launch=None
+        if params.get("launch_spec"):
+            from worker_launch import resolve
+            from worker_common import confined
+            launch=resolve(root,params,isolated,confined(root,params["input"],True) if params.get("input") else None)
+            argv,self.experiment=launch["argv"],launch["experiment"]
+        elif isolated:
             import isolation
             self.experiment = isolation.sandbox(root, isolation.allocate_uid(root))
             for index, argument in enumerate(argv):
@@ -47,13 +53,24 @@ class InteractSession:
             isolation.seal(self.experiment)
         cwd = Path(self.experiment["work"]) if self.experiment else self.directory
         env = safe_env(params.get("env"))
+        if launch: cwd,env=launch["cwd"],launch["env"]
         credential_options = {}
         if self.experiment:
+            import isolation
             credential_options = isolation.credentials(self.experiment)
             env.update({"HOME": self.experiment["work"], "TMPDIR": self.experiment["work"]})
+        self.pty_master=None
+        terminal_slave=None
+        if launch and launch["input_mode"]=="pty":
+            import pty
+            self.pty_master,terminal_slave=pty.openpty()
         self.process = subprocess.Popen(argv, cwd=cwd, env=env,
-                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        stdin=terminal_slave if terminal_slave is not None else subprocess.PIPE, stdout=terminal_slave if terminal_slave is not None else subprocess.PIPE,
                                         stderr=subprocess.STDOUT, bufsize=0, **detached_options(), **credential_options)
+        if terminal_slave is not None:
+            os.close(terminal_slave)
+            self.process.stdin=os.fdopen(os.dup(self.pty_master),"wb",buffering=0)
+            self.process.stdout=os.fdopen(self.pty_master,"rb",buffering=0)
         attach_windows_job(self.process)
         threading.Thread(target=self.drain, daemon=True).start()
         self.persist("running")
@@ -65,7 +82,10 @@ class InteractSession:
 
     def drain(self):
         while True:
-            chunk = self.process.stdout.read(4096)
+            try: chunk = self.process.stdout.read(4096)
+            except OSError as error:
+                if self.pty_master is not None and error.errno==5: break
+                raise
             if not chunk:
                 break
             with self.lock:

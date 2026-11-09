@@ -540,6 +540,12 @@ pub(super) struct FuzzStatusArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DebugStartArgs {
+    /// Input artifact for argv_file LaunchSpecs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<String>,
     #[schemars(length(min = 1))]
     pub target: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -568,6 +574,12 @@ pub(super) struct DebugCloseArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct InteractiveStartArgs {
+    /// Input artifact for argv_file LaunchSpecs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<String>,
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<Map<String, Value>>,
@@ -662,6 +674,9 @@ pub(super) struct EmulateRunArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct CrashReplayArgs {
+    /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<String>,
     #[schemars(length(min = 1))]
     pub target: String,
     #[schemars(length(min = 1))]
@@ -691,6 +706,9 @@ pub(super) struct CrashReplayArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct InputMinimizeArgs {
+    /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<String>,
     #[schemars(length(min = 1))]
     pub target: String,
     /// Explicit weak fallback; default requires module-hash/location crash equivalence.
@@ -744,6 +762,9 @@ pub(super) enum InputMode {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PocVerifyArgs {
+    /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<String>,
     #[schemars(length(min = 1))]
     pub finding_id: String,
     #[schemars(length(min = 1))]

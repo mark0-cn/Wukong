@@ -114,6 +114,10 @@ def replay_snapshot(root, spec, input_path, cancel):
     args = ([str(a) for a in spec.get("args", []) if a != "@@"] if stdin else
             [str(input_path) if a == "@@" else str(a) for a in spec.get("args", ["@@"])])
     params = {"target":spec["target"], "args":args, "env":spec.get("env")}
+    if spec.get("launch_spec"):
+        params.pop("args",None); params.pop("env",None)
+        params["launch_spec"]=spec["launch_spec"]
+        if not stdin: params["input"]=input_path.relative_to(root).as_posix()
     if stdin: params["_stdin"] = input_path.relative_to(root).as_posix()
     session = DebugSession(root, params, isolated=spec.get("isolated", False))
     try:

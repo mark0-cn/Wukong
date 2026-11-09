@@ -40,7 +40,7 @@ def replay(root, directory, spec, input_bytes, index):
     input_path.chmod(0o444)
     experiment = None
     cwd = sandbox
-    if spec.get("isolated"):
+    if spec.get("isolated") and not spec.get("launch_spec"):
         import isolation
         experiment = isolation.sandbox(root, isolation.allocate_uid(root))
         target = isolation.stage_file(target, experiment, "target.bin", True)
@@ -53,7 +53,13 @@ def replay(root, directory, spec, input_bytes, index):
     input_mode = spec.get("input_mode", "argv")
     if input_mode not in {"argv", "stdin"}:
         raise ValueError("input_mode must be 'argv' or 'stdin'")
-    if input_mode == "stdin":
+    if spec.get("launch_spec"):
+        from worker_launch import resolve
+        launch=resolve(root,spec,spec.get("isolated",False),input_path)
+        experiment=launch["experiment"]
+        result=run_process(launch["argv"],launch["cwd"],launch["env"],spec["timeout_secs"],spec["output_limit"],sandbox/"output",directory/"cancel",experiment,stdin_bytes=input_bytes if input_mode=="stdin" else None)
+        result["launch_identity"]=launch["identity"]
+    elif input_mode == "stdin":
         # Pipe the payload bytes into the target's stdin; any extra args are
         # passed through verbatim (no @@ file-path substitution).
         argv = [str(target)] + [str(arg) for arg in spec.get("args", []) if arg != "@@"]
