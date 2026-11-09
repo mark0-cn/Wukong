@@ -359,7 +359,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::FilePutArgs>(
             "file_put",
-            "Create an immutable worker file from base64 bytes or an existing evidence artifact.",
+            "Create an immutable worker file from base64 bytes (data_base64) or from an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_file_put,

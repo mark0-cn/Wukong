@@ -33,6 +33,11 @@ surgery and stdin-driven PoCs:
 
 For long-running or multi-step work, write a script with file_put and run it
 with job_start (argv ["python3", "files/<script>"]), then read job_status.
+Before job_start, syntax-check the script once:
+`exec_command` `python3 -m py_compile files/<script>` (or run the script with
+`--help`-style harmless flags) — a one-character syntax error discovered
+inside a job wastes the whole job round-trip, and at quota's edge it can
+cost the rest of your budget.
 Prefer `python3 files/<script>` over executing the script directly:
 file_put stages files without the executable bit unless executable=true, and
 a direct exec of a non-executable file fails with Permission denied.
