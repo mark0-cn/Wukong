@@ -479,7 +479,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::AngrSolveArgs>(
             "angr_solve",
-            "Input reconstruction through a validation/transform chain (the classic symbolic-execution case): a binary reads stdin, transforms each byte and compares it against embedded constants. Do NOT hand-invert the transform — pass the success address (code reached only when validation passes) as find, the failure print/abort addresses as avoid, and the expected input length. Runs as a background job; job_status returns {\"solved\": true, \"input_base64\": ...} plus exploration stats. Reproduce the solved input against the real binary before believing it. Falls short on network/threaded/huge inputs — hand-write z3 constraints then.",
+            "Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,

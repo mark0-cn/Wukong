@@ -42,27 +42,20 @@ Load the relevant method when its detailed workflow is needed:
 - Always say which space a number lives in; never hand a runtime address to a
   static query.
 
-## Input reconstruction: hand the transform chain to angr_solve
+## Choose an input reconstruction method
 
-When the assigned question is "what input passes this chain of checks or
-transformations" (a validation routine comparing the input against embedded
-constants is the textbook case):
+Select the cheapest method that can distinguish the current hypotheses:
+- A short reversible transform: derive an inverse with explicit machine widths and test it.
+- Clear constraints over several paths: try bounded symbolic execution with angr_solve.
+- Large state space: slice the routine, fix known input bytes, or model local constraints.
+- Stateful, network or unsupported execution: use a concrete harness and explicit constraints.
 
-1. From the decompiled path, pick the SUCCESS address — code reached only when
-   the validation passes (right after the final check) — and the FAILURE
-   addresses (error prints, aborts). Module-relative values.
-2. Call `angr_solve` with find=<success>, avoid=<failure addresses> and
-   stdin_length close to the expected input size. It runs symbolic execution
-   as a background job: poll job_status for
-   {"solved": true, "input_base64": ...} (also persisted as job artifacts).
-   The longer the transform chain, the more this beats hand inversion —
-   hand-written inverse-transform scripts are the fallback, not the plan.
-3. Reproduce the solved input against the real binary (exec_command/job_start
-   feeding the bytes) before accepting it: angr's answer is a hypothesis
-   until the real run agrees.
-4. Fall back to loading `algorithms` and inverting the transform yourself only
-   when angr dead-ends (network input, threads, unsupported syscalls, or an
-   input size too large for symbolic stdin).
+Before each attempt record the hypothesis, expected observation, time/step budget and
+fallback in your checklist. Do not retry an unchanged method after a timeout. Preserve
+partial facts and switch methods when the budget expires or assumptions are contradicted.
+For angr, identify success/failure addresses and input length first. A solver result is
+only a candidate: replay it on the real target. A successful inverse or reference model
+also needs discriminating real-target checks; neither method is privileged by this skill.
 
 ## VM / hand-crafted / self-decoding code: use emulate_run
 
