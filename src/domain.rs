@@ -298,6 +298,62 @@ pub enum TaskOutcome {
 pub struct TaskArtifact {
     pub name: String,
     pub evidence_id: String,
+    /// Structured summary of the linked original artifact; never a replacement for original evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured: Option<StructuredArtifact>,
+}
+
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuredArtifact {
+    /// formats, algorithms, state_machine or binary_diff.
+    pub kind: String,
+    /// Each row includes evidence_id plus the fields required by its kind.
+    pub rows: Vec<serde_json::Value>,
+}
+impl StructuredArtifact {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        let required: &[&str] = match self.kind.as_str() {
+            "formats" => &["offset", "width", "encoding", "meaning", "confidence"],
+            "algorithms" => &["input", "expected", "observed", "arithmetic"],
+            "state_machine" => &["from", "action", "to", "expected", "observed"],
+            "binary_diff" => &["baseline_sha256", "target_sha256", "before", "after"],
+            _ => anyhow::bail!("unknown structured artifact kind"),
+        };
+        anyhow::ensure!(
+            !self.rows.is_empty() && self.rows.len() <= 256,
+            "invalid structured row count"
+        );
+        for row in &self.rows {
+            anyhow::ensure!(
+                serde_json::to_vec(row)?.len() <= 16384,
+                "structured row too large"
+            );
+            for key in required.iter().copied().chain(["evidence_id"]) {
+                anyhow::ensure!(
+                    row.get(key).is_some_and(
+                        |v| !v.is_null() && v.as_str().is_none_or(|s| !s.trim().is_empty())
+                    ),
+                    "missing structured field {key}"
+                );
+            }
+            anyhow::ensure!(
+                row["evidence_id"].as_str().is_some(),
+                "evidence_id must be a string"
+            );
+            if self.kind == "binary_diff" {
+                for key in ["baseline_sha256", "target_sha256"] {
+                    anyhow::ensure!(
+                        row[key].as_str().is_some_and(
+                            |s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+                        ),
+                        "invalid target digest"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
@@ -326,6 +382,13 @@ impl TaskResult {
                 self.artifacts
                     .iter()
                     .map(|artifact| artifact.evidence_id.clone()),
+            )
+            .chain(
+                self.artifacts
+                    .iter()
+                    .filter_map(|a| a.structured.as_ref())
+                    .flat_map(|s| &s.rows)
+                    .filter_map(|r| r["evidence_id"].as_str().map(str::to_owned)),
             )
             .collect()
     }

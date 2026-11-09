@@ -32,3 +32,5 @@ supporting evidence, build/environment differences and unmatched regions.
 Distinguish supplied baseline facts from independently observed facts. Stop
 when the assigned difference is explained or identify the missing version,
 mapping or experiment that prevents a reliable comparison.
+
+When the contract requests `binary_diff`, return a TaskArtifact named `binary_diff` with original evidence_id and structured={kind:"binary_diff",rows:[...]}. Every row must cite its own evidence_id; use the structured artifact fields documented in the completion tool schema and project contract.

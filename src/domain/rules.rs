@@ -145,6 +145,22 @@ impl CompletionRules {
             "invalid result answer"
         );
         ensure!(result.artifacts.len() <= 32, "too many task artifacts");
+        for artifact in &result.artifacts {
+            if let Some(structured) = &artifact.structured {
+                structured.validate()?;
+            }
+            if ["formats", "algorithms", "state_machine", "binary_diff"]
+                .contains(&artifact.name.as_str())
+            {
+                ensure!(
+                    artifact
+                        .structured
+                        .as_ref()
+                        .is_some_and(|s| s.kind == artifact.name),
+                    "method deliverable requires matching structured rows"
+                );
+            }
+        }
         let names: HashSet<_> = result
             .artifacts
             .iter()
@@ -264,10 +280,7 @@ impl MessageRules {
                 .as_deref()
                 .is_some_and(|error| error.contains("budget"));
         let resumable = target.status == Status::Completed || quota_failed;
-        let generation = if options.kind == MessageKind::FollowUp
-            && resumable
-            && !stale
-        {
+        let generation = if options.kind == MessageKind::FollowUp && resumable && !stale {
             target
                 .generation
                 .checked_add(1)

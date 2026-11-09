@@ -30,3 +30,7 @@ Use unit/integration tests for transactional lifecycle, concurrent messages, ded
 ## Delivery audit
 
 Track CLI/config, dynamic scheduling, persistence/resume, static analysis, Ghidra, GDB/MI, AFL++, crash reduction, independent verification, skills, MCP, GUI, JSON/Markdown/HTML reports, replayable artifacts, Docker runtime, evaluation fixtures and regression tests. Do not mark the project complete on compilation alone.
+
+## Structured method deliverables
+
+Canonical artifact names `formats`, `algorithms`, `state_machine`, `binary_diff` require a matching `structured.kind` and 1–256 rows. Every row references same-run `evidence_id`. Required row fields: formats: offset/width/encoding/meaning/confidence; algorithms: input/expected/observed/arithmetic; state_machine: from/action/to/expected/observed; binary_diff: baseline_sha256/target_sha256/before/after. Digests are 64 hexadecimal characters. The original artifact remains linked separately; structural completeness is not correctness. An independent verifier must challenge the semantic claims. Legacy noncanonical artifact names remain supported.
