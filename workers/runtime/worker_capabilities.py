@@ -19,7 +19,7 @@ def _python_module(name):
 def doctor(root, trusted, isolated):
     tools = {}
     for name in ["gdb", "afl-fuzz", "afl-qemu-trace", "afl-qemu-bridge", "afl-tmin", "gcc",
-                 "one_gadget", "patchelf", "ropper", "pwninit", "pwndbg", "tmux", "strace", "ltrace", "seccomp-tools", "socat", "gdbserver"]:
+                 "one_gadget", "patchelf", "ropper", "pwninit", "pwndbg", "tmux", "strace", "ltrace", "seccomp-tools", "socat", "gdbserver", "eu-unstrip"]:
         executable = shutil.which(name)
         version = None
         if executable and name in {"gdb", "gcc"}:
