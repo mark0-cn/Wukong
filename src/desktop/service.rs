@@ -307,6 +307,48 @@ impl Service {
         self.operations.fetch_add(1, Ordering::SeqCst);
         Ok((state.clone(), Operation(self.operations.clone())))
     }
+    pub fn workbench(
+        &self,
+        epoch: u64,
+        request: crate::workbench::DesktopRequest,
+    ) -> Result<serde_json::Value> {
+        let (context, _operation) = {
+            let state = self.state.lock().unwrap();
+            let active = self.active.lock().unwrap();
+            ensure!(
+                state.epoch == epoch && !self.closing.load(Ordering::SeqCst),
+                "workspace changed or is closing"
+            );
+            ensure!(
+                active.is_none() && self.operations.load(Ordering::SeqCst) == 0,
+                "pause analysis and wait for current operations before changing the environment"
+            );
+            self.operations.fetch_add(1, Ordering::SeqCst);
+            (state.clone(), Operation(self.operations.clone()))
+        };
+        let workbench = crate::workbench::Workbench::open(&context.config)?;
+        let _lock = workbench.lock()?;
+        if let crate::workbench::DesktopRequest::Select { id } = &request {
+            let config_path = if let Some(id) = id {
+                workbench.challenge_dir(id)?.join("re-agent.toml")
+            } else {
+                workbench.root.join("re-agent.toml")
+            };
+            let config = AppConfig::load(Some(&config_path))?;
+            let mut state = self.state.lock().unwrap();
+            state.config = config;
+            state.path = config_path;
+            state.epoch += 1;
+            drop(state);
+            self.changed();
+            return Ok(
+                serde_json::json!({"selected":id,"new_tasks_use_selected_environment":true,"existing_runs_keep_saved_configuration":true}),
+            );
+        }
+        let result = workbench.desktop(request)?;
+        self.changed();
+        Ok(result)
+    }
     pub fn export(&self, epoch: u64, run: &str) -> Result<Option<PathBuf>> {
         let (context, _operation) = self.operation(epoch)?;
         context.store.require::<RunRecord>("run", run)?;

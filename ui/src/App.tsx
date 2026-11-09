@@ -9,6 +9,7 @@ import { Composer, Conversation, type Draft } from './components/Conversation';
 import { Findings } from './components/Findings';
 import { Markdown } from './components/Markdown';
 import { Modal } from './components/Modal';
+import { Workbench } from './components/Workbench';
 import { Settings } from './components/Settings';
 import { Sidebar } from './components/Sidebar';
 import { compact, fileName, StateIcon, Status, terminal } from './components/Status';
@@ -22,6 +23,7 @@ export default function App() {
   const [showAgents, setShowAgents] = useState(true);
   const [newTask, setNewTask] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [workbench, setWorkbench] = useState(false);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [target, setTarget] = useState('');
   const [task, setTask] = useState(defaultTask);
@@ -82,11 +84,12 @@ export default function App() {
     workspace.selectRun(id); workspace.refresh(); setResume(undefined); setTab('conversation');
   };
   return <div className="app-shell">
+    {workbench && host && <Workbench epoch={host.epoch} onClose={() => setWorkbench(false)} onChanged={workspace.refresh} />}
     <Sidebar runs={data?.runs ?? []} selected={data?.selected} host={host} onSelect={id => { workspace.selectRun(id); setTab('conversation'); }}
       onNew={() => setNewTask(true)} onSettings={() => setSettings(true)} />
     <main className="workspace-main">
       <header className="workspace-header"><div className="workspace-title"><span className="breadcrumb">本地工作区 <span>/</span> 分析任务</span><div><h1>{selectedRun ? fileName(selectedRun.target_path) : '开始一项新的分析'}</h1>{selectedRun && <Status value={selectedRun.status} />}</div></div>
-        <div className="header-actions"><button className="icon-button" aria-label="刷新任务" onClick={workspace.refresh}><RefreshCw size={15} className={workspace.loading ? 'spin' : ''} /></button>
+        <div className="header-actions"><button disabled={busy || closing} onClick={() => setWorkbench(true)}>Pwn 环境</button><button className="icon-button" aria-label="刷新任务" onClick={workspace.refresh}><RefreshCw size={15} className={workspace.loading ? 'spin' : ''} /></button>
           {selectedRun && host && <><button disabled={pending || closing} onClick={() => { void command(() => api('export_report', { epoch: host.epoch, run: selectedRun.id })); }}><Download size={14} /><span>导出</span></button>
             {['running', 'waiting', 'queued'].includes(selectedRun.status) ? <button disabled={pending || closing} onClick={() => { void command(() => api('pause_run', { epoch: host.epoch, run: selectedRun.id })); }}><Pause size={14} />暂停</button> :
               <button className="primary" disabled={busy || closing} onClick={() => setResume(selectedRun)}><Play size={14} />恢复分析</button>}</>}

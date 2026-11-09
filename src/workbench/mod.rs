@@ -159,3 +159,58 @@ mod tests {
         Ok(())
     }
 }
+
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum DesktopRequest {
+    Status,
+    Up,
+    Down,
+    Doctor,
+    List,
+    Import {
+        source: PathBuf,
+        id: String,
+        binary: Option<String>,
+    },
+    Prepare {
+        id: String,
+    },
+    Build {
+        id: String,
+    },
+    Start {
+        id: String,
+    },
+    Stop {
+        id: String,
+    },
+    Select {
+        id: Option<String>,
+    },
+    Export {
+        destination: PathBuf,
+    },
+}
+impl Workbench {
+    pub fn desktop(&self, request: DesktopRequest) -> Result<Value> {
+        match request {
+            DesktopRequest::Status => self.status(),
+            DesktopRequest::Up => self.up(None),
+            DesktopRequest::Down => self.down(),
+            DesktopRequest::Doctor => self.doctor(),
+            DesktopRequest::List => self.challenges(),
+            DesktopRequest::Import { source, id, binary } => {
+                self.import_challenge(&source, &id, binary.as_deref())
+            }
+            DesktopRequest::Prepare { id } => self.prepare_challenge(&id),
+            DesktopRequest::Build { id } => self.build_challenge(&id),
+            DesktopRequest::Start { id } => self.up_challenge(&id, false),
+            DesktopRequest::Stop { id } => self.down_challenge(&id),
+            DesktopRequest::Export { destination } => self.export_bundle(&destination),
+            DesktopRequest::Select { .. } => {
+                anyhow::bail!("selection requires the desktop context")
+            }
+        }
+    }
+}
