@@ -7,6 +7,7 @@ from pathlib import Path
 
 def export(root,archive):
     def selected(info):
+        if info.name in {"./endpoint.json","./daemon.lock"}: return None
         return None if not (info.isfile() or info.isdir() or info.issym() or info.islnk()) else info
     with tarfile.open(archive,"w") as stream: stream.add(root,arcname=".",filter=selected)
 
@@ -25,7 +26,7 @@ def restore(root,archive):
             for key in ["pid","gdb_pid","daemon_pid","supervisor_pid","supervisor_identity"]: value.pop(key,None)
             path.write_text(json.dumps(value))
     for path in root.glob("*.sock"):path.unlink()
-    for name in ["daemon.json","bridge-daemon.json"]:
+    for name in ["daemon.json","bridge-daemon.json","endpoint.json","daemon.lock"]:
         path=root/name
         if path.exists():path.unlink()
 

@@ -41,7 +41,11 @@ impl Workbench {
         Ok(())
     }
     pub fn up(&self, image: Option<&str>) -> Result<Value> {
-        let image = image.unwrap_or(&self.config.workbench.image);
+        let selected = image
+            .map(str::to_owned)
+            .or_else(|| self.environment().ok().map(|e| e.image_id))
+            .unwrap_or_else(|| self.config.workbench.image.clone());
+        let image = selected.as_str();
         if self.docker.inspect("image", image)?.is_none() {
             self.docker
                 .logged(&["pull", image], &self.root.join("logs/pull.log"))?;
@@ -146,11 +150,13 @@ impl Workbench {
     }
     pub fn write_worker_config(&self, env: &Environment, path: &Path) -> Result<()> {
         let mut config = self.config.clone();
+        config.resolve_paths(&std::env::current_dir()?);
         config.runtime.backend = crate::runtime::RuntimeBackend::Docker;
         config.runtime.docker_container = Some(env.container.clone());
         config.runtime.remote_state_dir = "/state".into();
         config.runtime.remote_bridge_path = "/opt/re-agent/runtime/bridge.py".into();
         config.workbench.root = self.root.clone();
+        config.workbench.image = env.image_id.clone();
         fs::write(path, toml::to_string_pretty(&config)?)?;
         Ok(())
     }
