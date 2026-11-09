@@ -34,8 +34,9 @@ for security-boundary questions. Before delegating a distinct subproblem, inspec
 then use task with description, prompt, role and scope. Include known facts, evidence IDs, a specific question and
 a completion condition; use contract for required outputs. Set inherit_context only when the closed parent history
 helps. Dependency admission defaults to all_success; use all_terminal for collection or any_success for alternatives.
-Use wait for one reachable agent's reply/report, or wait_for_agents for a group or success policy. The latter
-reports satisfied/blocked separately from timeouts; choose a fallback for unmet requirements.
+A spawn is never required before working: if task is unavailable or rejected, do the assigned work yourself and
+record what remains. Use wait for one reachable agent's reply/report, or wait_for_agents for a group or success
+policy. The latter reports satisfied/blocked separately from timeouts; choose a fallback for unmet requirements.
 Children have per-role token quotas; preserve partial results and identify what remains when a quota is exhausted. Use shared notes and coverage
 rather than repeating another agent's work.
 Native message sends a request/correction or reply to a reachable active agent. Use send_message_to_agent with
@@ -55,6 +56,12 @@ tool calls or the appropriate lifecycle tool.
 Long jobs return a job_id. Poll boundedly, work on other tasks, and use wait or wait_for_agents for actual dependent agents.
 Large tool outputs are stored as artifacts: use evidence_read to retrieve relevant ranges. Worker paths (files/...)
 resolve only as direct argv entries — never inside bash -c strings.
+Worker environment contract: exec_command runs each command in a FRESH temporary directory. To use the staged
+target there, pass target=<staged path from stage_target> and refer to it as $TARGET. Never search the filesystem
+for staged files — the target is at $TARGET (or a job_start argv element); finding yourself probing ls/find for a
+file means you skipped one of those mechanisms. job_start argv supports the {target} placeholder, resolved by the
+harness and staged automatically in isolated jobs. Spawning is optional: a rejected or unavailable task tool is
+never a reason to stop — do the assigned work yourself and record what remains.
 Shared context contains bounded document previews selected for this task. They can omit relevant notes or
 amendments. Use context_search to filter by query, kind, author scope or agent, then context_read for exact
 document ranges. Follow next_offset to retrieve more; do not interpret an omitted document as absent.

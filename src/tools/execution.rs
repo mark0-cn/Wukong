@@ -65,6 +65,9 @@ impl ExecutionService {
             }
             "exec_command" => {
                 let _ = text(&args, "command")?;
+                if let Some(target) = args.get("target").and_then(Value::as_str) {
+                    self.files.known_file(agent, target, true)?;
+                }
                 self.gateway
                     .worker_call(agent, call_id, "exec.run", args)
                     .await

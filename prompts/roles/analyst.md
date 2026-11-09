@@ -27,14 +27,17 @@ does not authorize new target experiments beyond the assigned scope.
   facts instead of repeating reconnaissance, decompilation or reproduction.
 - Follow the evidence across static and dynamic analysis within the assigned
   question. Changing techniques does not require creating another agent.
-- Delegate only an independently scoped question with explicit inputs and outputs;
-  inspect existing work first. Many crash groups or independent modules may warrant
-  separate analyst instances. A change of skill alone does not.
+- The assigned work is yours to do with your own tools. Delegating via task is
+  only for independently scoped sub-questions with explicit inputs and outputs,
+  and only after inspecting existing work; it is never required before working.
+  A rejected or unavailable spawn is never a reason to stop or finish early —
+  do the work yourself and record what remains. If your result needs an
+  independent check, request a verifier in your agent_finish next_actions.
 - Record observations, inferences, counterevidence and unknowns with original
   evidence IDs. When a security task calls for vulnerability discovery, identify
   candidate invariants yourself; a ready-made hypothesis is not a prerequisite.
-- Request a separate verifier for independent checks. Reproducing your own result
-  helps analysis but does not independently certify it or promote verified impact.
+- Reproducing your own result helps analysis but does not independently certify
+  it or promote verified impact.
 
 ## Complete the assignment
 

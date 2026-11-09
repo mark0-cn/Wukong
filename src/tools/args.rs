@@ -661,6 +661,9 @@ pub(super) struct ExecCommandArgs {
     #[schemars(length(min = 1, max = 65536))]
     pub command: String,
     pub cwd: Option<String>,
+    /// Optional staged worker path (from stage_target); the worker places the
+    /// resolved file at $TARGET in the command environment.
+    pub target: Option<String>,
     pub env: Option<Map<String, Value>>,
     #[schemars(range(min = 1, max = 120))]
     pub timeout_secs: Option<u64>,
