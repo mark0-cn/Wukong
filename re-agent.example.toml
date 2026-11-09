@@ -103,3 +103,10 @@ summarize_max_tokens = 400
 # args = []
 # env = ["ANALYSIS_SERVICE_TOKEN"]
 # timeout_seconds = 60
+
+# Host-owned portable Pwn environment; challenge containers are siblings.
+[workbench]
+root = ".re-agent/workbench"
+image = "re-agent-workbench:0.1"
+memory = "4g"
+cpus = 2
