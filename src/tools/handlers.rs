@@ -150,10 +150,12 @@ pub(super) fn handle_emulate_run<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        tools.execution
+        tools
+            .execution
             .files
             .known_file(agent, text(&args, "target")?, true)?;
-        tools.execution
+        tools
+            .execution
             .gateway
             .worker_call(agent, call_id, "emu.run", args)
             .await
@@ -168,14 +170,16 @@ pub(super) fn handle_libc_identify<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        tools.execution
+        tools
+            .execution
             .gateway
             .worker_call(agent, call_id, "libc.identify", args)
             .await
     })
 }
 
-pub(super) fn handle_agent_finish<'a>(    tools: &'a ToolService,
+pub(super) fn handle_agent_finish<'a>(
+    tools: &'a ToolService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -575,5 +579,85 @@ pub(super) fn handle_job_start<'a>(
             .execution
             .runtime_tool(agent, call_id, name, args)
             .await
+    })
+}
+
+pub(super) fn handle_analysis_verify<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    call_id: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        ensure!(
+            agent.role == Role::Verifier,
+            "independent verifier required"
+        );
+        let input: args::AnalysisVerifyArgs = serde_json::from_value(args.clone())?;
+        for field in [&input.claim, &input.scope, &input.expected, &input.observed] {
+            ensure!(
+                !field.trim().is_empty() && field.len() <= 16384,
+                "invalid verification text"
+            );
+        }
+        ensure!(
+            input.counterexamples.len() <= 32
+                && input.counterexamples.iter().all(|s| s.len() <= 4096),
+            "too many counterexamples"
+        );
+        ensure!(
+            !input.evidence_ids.is_empty() && input.evidence_ids.len() <= 128,
+            "verification requires bounded evidence"
+        );
+        tools
+            .store
+            .verify_evidence_links(&agent.run_id, &input.evidence_ids)?;
+        tools.effect(agent, call_id, |tx| {
+            let producer: AgentMetadata = tx
+                .get("agent", &input.producer_id)?
+                .context("claim producer missing")?;
+            ensure!(
+                producer.run_id == agent.run_id
+                    && producer.id != agent.id
+                    && producer.role != Role::Verifier,
+                "invalid independent producer"
+            );
+            let mut own = false;
+            for id in &input.evidence_ids {
+                let evidence: Evidence = tx.get_record(id)?.context("evidence missing")?;
+                ensure!(evidence.run_id == agent.run_id, "cross-run evidence");
+                own |= evidence.agent_id == agent.id;
+            }
+            ensure!(own, "verification requires verifier-owned observations");
+            let run: RunRecord = tx.get("run", &agent.run_id)?.context("run missing")?;
+            let id = stable("analysis-verification", call_id);
+            let record = json!({"id":id,"run_id":agent.run_id,"verifier_id":agent.id,
+                "target_sha256":run.target_sha256,"created_at":now(),"result":args});
+            ensure!(
+                tx.get::<Value>("analysis_verification", &id)?.is_none(),
+                "verification is immutable"
+            );
+            tx.put("analysis_verification", &id, &agent.run_id, &record)?;
+            let note = SharedDocument {
+                id: id.clone(),
+                run_id: agent.run_id.clone(),
+                agent_id: agent.id.clone(),
+                kind: "note".into(),
+                title: format!("Independent verification: {}", input.scope),
+                body: serde_json::to_string_pretty(&record)?,
+                amendments: vec![],
+                created_at: now(),
+                updated_at: now(),
+            };
+            tx.save_document(&note)?;
+            tx.event(
+                &agent.run_id,
+                Some(&agent.id),
+                "analysis.verified",
+                record.clone(),
+            )?;
+            Ok(record)
+        })
     })
 }

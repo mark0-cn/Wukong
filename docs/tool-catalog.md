@@ -7,6 +7,7 @@
 | 工具 | 可见角色 | 有副作用 | 用途 |
 |---|---|---|---|
 | `agent_finish` | analyst / verifier | 是 | Finish a child task with a structured result accounting for its contract, evidence and gaps. summary is shorthand for tasks without required outputs and is ignored when result is provided (result.answer is the canonical summary). Active descendants must finish first. |
+| `analysis_verify` | analyst / verifier | 是 | Verifier only: record an independent general-analysis verdict with expected and observed results, scope, counterexamples and verifier-owned evidence. Does not promote security impact. Records are immutable and appear in shared notes. |
 | `angr_solve` | analyst / verifier | 是 | Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target. |
 | `binary_inspect` | analyst / verifier | 否 | Inspect the exact run target, architecture, sections, imports, symbols and mitigations. |
 | `binary_strings` | analyst / verifier | 否 | Search printable strings with file-offset address references and pagination. |

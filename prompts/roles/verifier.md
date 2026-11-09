@@ -79,6 +79,8 @@ Verification is bounded; more trials beyond these limits are waste, not rigor.
 - reject: it does not reproduce, or it reproduces something weaker than the
   claim (a crash is not code execution).
 
-Security verification uses `verification_record`; general analysis uses the
-shared analysis note above. Finish with `agent_finish` describing the verified
+Security verification uses `verification_record`; general analysis must call `analysis_verify`
+with the producer identity, claim, scope, expected/observed results, verdict, counterexamples
+and original evidence IDs (including your own observations). This creates an immutable
+record and shared note; it does not promote security impact. Finish with `agent_finish` describing the verified
 scope, verdict, counterexamples and remaining uncertainty.

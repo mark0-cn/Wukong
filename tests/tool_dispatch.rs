@@ -171,7 +171,7 @@ async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()
 }
 
 #[tokio::test]
-async fn every_role_sees_the_full_catalog_with_only_lifecycle_split() -> Result<()> {
+async fn role_catalog_enforces_coordinator_boundary() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, _agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
@@ -202,7 +202,7 @@ async fn every_role_sees_the_full_catalog_with_only_lifecycle_split() -> Result<
     ] {
         assert!(analyst.contains(expected), "{expected} missing");
     }
-    // The lifecycle tool is the only per-role difference.
+    // Lifecycle and target operations follow the role boundary.
     assert!(analyst.contains("agent_finish"));
     assert!(!analyst.contains("finish_scan"));
     let root: BTreeSet<String> = service
@@ -212,9 +212,9 @@ async fn every_role_sees_the_full_catalog_with_only_lifecycle_split() -> Result<
         .collect();
     assert!(root.contains("finish_scan"));
     assert!(!root.contains("agent_finish"));
-    // No role wall: target tools are visible to the root as well.
-    assert!(root.contains("binary_inspect"));
-    assert!(root.contains("poc_verify"));
+    // Root delegates target operations.
+    assert!(!root.contains("binary_inspect"));
+    assert!(!root.contains("poc_verify"));
     // (create_agent exclusion from the model toolset is covered by the
     // native kernel test, which inspects the actual request tools.)
     let _ = run;
@@ -1674,6 +1674,26 @@ async fn conditional_wait_receipts_survive_a_wakeup_without_reparking() -> Resul
             .count(),
         1
     );
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn general_verification_requires_independent_owned_evidence() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, producer) = fixture(temp.path())?;
+    let verifier = child(&coordinator, &run.root_id, Role::Verifier, "check-layout")?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let observation = store.artifact(&run.id, &verifier.id, "observe", "test-vector", b"observed 8", "text/plain", json!({}))?;
+    let args = json!({"producer_id":producer.id,"claim":"header has 8 bytes","scope":"header", "expected":"8","observed":"8","verdict":"supported","evidence_ids":[observation.id],"counterexamples":[]});
+    assert!(service.execute(&producer.id,"invalid-verifier","analysis_verify",args.clone()).await?.is_error);
+    let first = service.execute(&verifier.id,"verify-layout","analysis_verify",args.clone()).await?;
+    assert!(!first.is_error, "{first:?}");
+    let replay = service.execute(&verifier.id,"verify-layout","analysis_verify",args).await?;
+    assert_eq!(result(&first),result(&replay));
+    let records: Vec<Value> = store.list("analysis_verification", &run.id)?;
+    assert_eq!(records.len(),1);
+    assert_eq!(records[0]["target_sha256"],run.target_sha256);
     service.close().await;
     Ok(())
 }
