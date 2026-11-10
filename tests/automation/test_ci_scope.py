@@ -33,7 +33,7 @@ class ScopeTests(unittest.TestCase):
         self.assertTrue(select_scope(["ui/package.json"], "pull_request", "codex/release-v0.2.0")["rust"])
 
     def test_known_paths_select_only_relevant_expensive_checks(self):
-        for paths, expected in [(["README.md", "docs/development/releases.md"], (False, False, False)),
+        for paths, expected in [(["README.md", "README.en.md", "docs/development/releases.md"], (False, False, False)),
                                 (["ui/src/App.tsx"], (False, True, False)),
                                 (["workers/runtime/requirements.txt"], (False, False, True)),
                                 (["workers/tests/unit/test_profile.py"], (False, False, True)),
@@ -46,7 +46,7 @@ class ScopeTests(unittest.TestCase):
     def test_shared_unknown_and_renamed_paths_fail_closed(self):
         for paths in ([], ["Cargo.lock"], ["scripts/release/cli.py"], ["src/protocol.rs"],
                       [".github/workflows/ci.yml"], ["unknown.txt"], ["docs/example.py"],
-                      ["src/old.rs", "docs/new.md"]):
+                      ["src/old.rs", "docs/new.md"], ["locales/en-US/common.ftl"]):
             with self.subTest(paths=paths):
                 scope = select_scope(paths, "pull_request")
                 self.assertTrue(all(scope[name] for name in ("rust", "frontend", "linux")))

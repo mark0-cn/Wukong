@@ -216,6 +216,14 @@ mod tests {
         let native = anyhow::anyhow!("raw cause: 0x42").context(Message::new("error-operation"));
         let native = Message::from_error(native);
         assert_eq!(native.code, "error-operation");
-        assert_eq!(native.detail.as_deref(), Some("raw cause: 0x42"));
+        // anyhow's typed context wrapper can contribute its own diagnostic text;
+        // keep the entire cause chain rather than dropping outer context.
+        assert!(
+            native
+                .detail
+                .as_deref()
+                .unwrap()
+                .ends_with("raw cause: 0x42")
+        );
     }
 }

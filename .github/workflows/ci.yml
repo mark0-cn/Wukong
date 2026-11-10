@@ -93,6 +93,18 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm run build
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npx --no-install playwright install chromium
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run test:e2e
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Preserve browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-browser-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Rust formatting
         if: needs.changes.outputs.rust == 'true'
         run: |
@@ -114,11 +126,24 @@ jobs:
     if: needs.changes.outputs.linux == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '1'
+      CARGO_PROFILE_TEST_DEBUG: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.changes.outputs.frontend == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        if: needs.changes.outputs.rust == 'true'
+        with:
+          shared-key: linux-desktop-checks-v1
+          save-if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
       - name: Python runtime and release tests
         run: |
           sudo apt-get update
@@ -134,6 +159,27 @@ jobs:
           python -m evals.analysis.evaluate --build-dir "$RUNNER_TEMP/analysis-fixtures"
           sh fixtures/build.sh "$RUNNER_TEMP/vulnerability-fixtures"
           python -m evals.vulnerability.evaluate --build-dir "$RUNNER_TEMP/vulnerability-fixtures" --repetitions 1
+      - name: Linux desktop feature tests
+        if: needs.changes.outputs.rust == 'true'
+        run: |
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb
+          cargo test --locked --all-targets
+      - name: Linux bilingual interface tests
+        if: needs.changes.outputs.frontend == 'true'
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npx --no-install playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Preserve browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-browser-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Verify replay between sibling containers
         run: |
           python tests/acceptance/check_network_verify.py \
