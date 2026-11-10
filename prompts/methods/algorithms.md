@@ -23,6 +23,27 @@ not proof of an algorithm family.
   models stdin; use explicit constraints or a suitable harness for other
   channels. Solver outputs still need real-target confirmation.
 
+## Hash-gate preimage
+
+A validation of the form `hash(input) == constant` where the hash is a simple
+polynomial or linear recurrence over a machine word (`h = a*h + c` per byte;
+djb2, the class representative, is a=33 with seed 5381) is solvable directly
+— the gate checks a boolean, so ANY preimage passes:
+
+1. Reconstruct the exact recurrence (width, seed, per-byte step, any
+   finalization) from decompilation; confirm against a runtime trace when
+   feasible — a one-constant mismatch in the model wastes every later step.
+2. Solve the preimage, cheapest first:
+   - SMT: model the recurrence in z3 `BitVec` of the machine width, constrain
+     the unknown bytes to a plausible character set, assert the target
+     constant; a sat model is a valid input (the worker has z3).
+   - Linear structure: the recurrence is invertible per byte when the
+     multiplier is odd — recover `c = h_next - a*h` per position, or split
+     the input and meet in the middle on half-hash states.
+   - Bounded brute force over the constrained character set as a fallback.
+3. Collisions mean many inputs pass; return one that does. Confirm it against
+   the real target before reporting.
+
 ## Handoff and stopping condition
 
 Provide pseudocode, parameters, exact arithmetic/encoding semantics and a
