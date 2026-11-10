@@ -64,8 +64,8 @@ jobs:
         env:
           TARGET: ${{ inputs.target }}
         run: |
-          python scripts/client_artifact.py stage --target "$TARGET" --directory client-artifact
-          python scripts/client_artifact.py verify --target "$TARGET" --directory client-artifact
+          python -m scripts.release.client_artifact stage --target "$TARGET" --directory client-artifact
+          python -m scripts.release.client_artifact verify --target "$TARGET" --directory client-artifact
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.target == 'windows' && 'windows-client-v1' || 'linux-acceptance-client-v1' }}

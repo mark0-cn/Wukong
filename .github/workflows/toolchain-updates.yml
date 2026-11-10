@@ -23,7 +23,7 @@ jobs:
       - name: Compare locked tools with upstream releases
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python scripts/check-toolchain-updates.py
+        run: python -m scripts.toolchain.check_toolchain_updates
       - name: Summarize findings
         if: always()
         shell: bash

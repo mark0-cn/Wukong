@@ -55,7 +55,7 @@ Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。�
 重试只复用文件树与本次准备完全一致的版本分支，不强推覆盖。若 `master` 或版本分支已有变化导致重试失败，先处理已有 PR/分支，再重新准备。
 
 勾选 `dry_run` 可以查看同步后的 diff 和测试结果，不创建远端分支或 PR。
-本地也可以执行 `python scripts/release.py bump --tag v0.2.0` 一次同步全部版本文件用于检查；自动发布请通过上述 App 版本 PR 流程。
+本地也可以执行 `python -m scripts.release.cli bump --tag v0.2.0` 一次同步全部版本文件用于检查；自动发布请通过上述 App 版本 PR 流程。
 该命令不更新依赖，也不运行 Cargo/npm 依赖解析；原有版本不一致、版本倒退或格式错误时拒绝修改。
 
 tag 只允许 `v主版本.次版本.补丁版本`，例如 `v0.1.0`、`v12.3.45`。

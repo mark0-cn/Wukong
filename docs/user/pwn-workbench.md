@@ -21,7 +21,7 @@ flowchart LR
 从源码构建时，先下载锁定依赖，再通过 Bake 一起构建基础镜像和工具镜像：
 
 ```powershell
-python scripts/fetch-worker-deps.py
+python -m scripts.toolchain.fetch_worker_deps
 docker buildx bake --load --set workbench.tags=re-agent-workbench:0.1
 re-agent init re-agent.toml
 re-agent --config re-agent.toml env up
@@ -32,7 +32,7 @@ Docker 不在 PATH 时，在配置的 `[runtime]` 设置 `docker_executable` 为
 
 `env doctor` 实际编译并运行 32/64 位程序，检查 GDB 断点、pwntools 收发、Python 分析库、Pwndbg/pwninit 和 Ghidra 导入，结果保存在 `doctor.json`。不是只检查可执行文件存在。
 
-Windows 源码目录可能带 Low 完整性标记，直接运行其中生成的 EXE 会继承该标记并导致 Docker 管道拒绝访问。项目已有 `scripts/publish-gui.ps1`，安装包也将程序复制到正常用户应用目录；按正式发布流程使用客户端，不需要修改 Docker 管道 ACL。
+Windows 源码目录可能带 Low 完整性标记，直接运行其中生成的 EXE 会继承该标记并导致 Docker 管道拒绝访问。项目已有 `scripts/dev/publish-gui.ps1`，安装包也将程序复制到正常用户应用目录；按正式发布流程使用客户端，不需要修改 Docker 管道 ACL。
 
 ## 导入和准备题目
 
@@ -170,4 +170,4 @@ re-agent --config 新机器配置.toml challenge up demo
 
 尚不提供：内核/ARM 环境自动重建、任意 Compose 多服务拓扑导入、任意 jail 内层 namespace 自动附加、PTY 自动崩溃重放、历史运行的跨机器无缝续跑。APT/Python 全依赖没有完全锁死；迁移的可重复性依赖已验证的镜像 ID 和离线镜像，不能宣称任意日期从源码重建会得到同一镜像。
 
-验收脚本：`python scripts/check-workbench.py --docker <docker路径>`。这是开发验收工具，不是日常运行依赖，也不是 Pwn 题库评测套件。
+验收脚本：`python tests/acceptance/check_workbench.py --docker <docker路径>`。这是开发验收工具，不是日常运行依赖，也不是 Pwn 题库评测套件。

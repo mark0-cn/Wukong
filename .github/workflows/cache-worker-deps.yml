@@ -5,7 +5,7 @@ on:
     branches: [master]
     paths:
       - workers/toolchain.lock.json
-      - scripts/fetch-worker-deps.py
+      - scripts/toolchain/fetch_worker_deps.py
       - .github/workflows/cache-worker-deps.yml
   workflow_dispatch:
 
@@ -31,6 +31,6 @@ jobs:
           path: workers/deps
           key: worker-deps-v1-${{ hashFiles('workers/toolchain.lock.json') }}
       - name: Verify all cached files and download missing inputs
-        run: python scripts/fetch-worker-deps.py
+        run: python -m scripts.toolchain.fetch_worker_deps
       - name: Summarize shared cache
         run: echo 'Locked tool downloads verified. Master cache is available to subsequent branch and tag builds.' >> "$GITHUB_STEP_SUMMARY"

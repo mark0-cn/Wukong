@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     && gem install one_gadget --no-document
 
 # Official Ghidra release and Temurin JDK 25 are fetched ONCE on the host by
-# scripts/fetch-worker-deps.ps1 into workers/deps/ (checksum-verified there),
+# scripts/toolchain/fetch-worker-deps.ps1 into workers/deps/ (checksum-verified there),
 # so unchanged attachments can be restored from the master download cache.
 # The build verifies their checksums again.
 # Set INSTALL_GHIDRA=0 for a smaller runtime-only worker.

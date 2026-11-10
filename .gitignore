@@ -19,7 +19,7 @@ __pycache__/
 /benchmarks/
 
 
-# Host-cached worker image dependencies (fetched by scripts/fetch-worker-deps.ps1)
+# Host-cached worker image dependencies (fetched by scripts/toolchain/fetch-worker-deps.ps1)
 /workers/deps/
 
 
