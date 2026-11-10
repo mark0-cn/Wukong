@@ -7,11 +7,13 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 pub(crate) async fn build_runner(mut config: AppConfig, store: Store) -> Result<AssessmentRunner> {
+    let maintenance = Arc::new(crate::updates::maintenance::assessment_guard()?);
     config.validate()?;
     let models = Arc::new(ModelCatalog::new(config.model.clone())?);
     config.model = models.config().clone();
     let tools = Arc::new(ToolService::new(config.clone(), store.clone()).await?);
     Ok(AssessmentRunner {
+        _maintenance: maintenance,
         coordinator: Coordinator::new(store.clone()),
         tools,
         usage: UsageService::new(store.clone(), config.pricing.clone()),

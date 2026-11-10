@@ -14,6 +14,7 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub struct AssessmentRunner {
+    pub(crate) _maintenance: Arc<std::fs::File>,
     pub store: Store,
     pub coordinator: Coordinator,
     pub tools: Arc<ToolService>,

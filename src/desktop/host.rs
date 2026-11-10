@@ -34,6 +34,20 @@ async fn workbench_action(
     .await
 }
 #[tauri::command]
+async fn update_action(
+    service: State<'_, Arc<Service>>,
+    controller: State<'_, Arc<super::updates::Controller>>,
+    app: tauri::AppHandle,
+    epoch: u64,
+    action: super::updates::Action,
+) -> Reply<super::updates::Status> {
+    controller
+        .inner()
+        .action(action, epoch, service.inner().clone(), app)
+        .await
+        .map_err(failure)
+}
+#[tauri::command]
 async fn workspace_read(
     service: State<'_, Arc<Service>>,
     request: WorkspaceRequest,
@@ -212,13 +226,22 @@ pub fn run(
         store.require::<RunRecord>("run", id)?;
     }
     tauri::async_runtime::set(tokio::runtime::Handle::current());
+    let controller = Arc::new(super::updates::Controller::default());
+    controller.initialization(&config);
     let service = Service::new(config, store, selected, path, state_override);
     let updates = service.clone();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .pubkey(crate::updates::manifest::PUBLIC_KEY.trim())
+                .build(),
+        )
+        .manage(controller.clone())
         .manage(service)
         .invoke_handler(tauri::generate_handler![
             workspace_read,
+            update_action,
             workbench_action,
             start_run,
             resume_run,
@@ -237,6 +260,10 @@ pub fn run(
             shutdown_workspace
         ])
         .setup(move |app| {
+            let confirmation_service = updates.clone();
+            tauri::async_runtime::spawn(async move {
+                controller.confirm(confirmation_service).await;
+            });
             let development = app.config().build.dev_url.clone();
             tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
                 .on_navigation(move |url| {

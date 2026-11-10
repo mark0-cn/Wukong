@@ -16,7 +16,7 @@ flowchart LR
 
 ## 首次使用
 
-普通使用只需要 Docker 和预编译客户端，不需要在宿主机安装 Python、GDB 或 pwntools。Windows 在线发布包可用 `install-workbench.ps1` 安装到用户应用目录；它校验包内文件，并从公开仓库 `hlmark0/wukong` 拉取固定 digest 的镜像。见 [在线安装](online-install.md)。
+普通使用只需要 Docker 和预编译客户端，不需要在宿主机安装 Python、GDB 或 pwntools。Windows 使用安装 EXE，Linux 使用 AppImage；首次启动通过环境向导从公开仓库 `hlmark0/wukong` 拉取当前版本固定 digest 的镜像，并完成自检。见 [在线安装](online-install.md)。
 
 从源码构建时，先下载锁定依赖，再通过 Bake 一起构建基础镜像和工具镜像：
 

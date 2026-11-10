@@ -5,7 +5,7 @@ fn main() {
         .parent()
         .expect("xtask lives in the repository root");
     let result = Command::new("python")
-        .args(["-m", "scripts.release.local_package"])
+        .args(["-m", "scripts.release.native_package"])
         .args(env::args_os().skip(1))
         .current_dir(root)
         .status();
