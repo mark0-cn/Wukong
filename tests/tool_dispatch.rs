@@ -1811,3 +1811,37 @@ async fn mitigation_profiles_separate_static_unknown_runtime_and_session_ownersh
     service.close().await;
     Ok(())
 }
+
+#[tokio::test]
+async fn placeholder_completion_is_rejected_without_terminating_the_agent() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, _, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    for (index, answer) in ["flag{...}", "flag{test}", "Flag{AAAA}"].iter().enumerate() {
+        let outcome = service
+            .execute(
+                &agent.id,
+                &format!("placeholder-{index}"),
+                "agent_finish",
+                json!({"summary":answer}),
+            )
+            .await?;
+        assert!(outcome.is_error, "placeholder was accepted: {answer}");
+        assert!(!store.load::<AgentMetadata>(&agent.id)?.status.terminal());
+    }
+    let outcome = service
+        .execute(
+            &agent.id,
+            "negative-finish",
+            "agent_finish",
+            json!({"summary":"No flag found in the inspected input path."}),
+        )
+        .await?;
+    assert!(!outcome.is_error, "{:?}", outcome.value);
+    assert_eq!(
+        store.load::<AgentMetadata>(&agent.id)?.status,
+        Status::Completed
+    );
+    service.close().await;
+    Ok(())
+}
