@@ -6,9 +6,11 @@
 2. 工具镜像 `hlmark0/wukong` 为公开仓库，可以匿名拉取。若遇到 Docker Hub 匿名拉取限额，可用自己的 Docker 账号登录；不要使用 CI 发布 Token。
 3. 从 GitHub Release 下载在线 zip，核对 `SHA256SUMS`，解压到临时目录。
 4. 在 PowerShell 中进入解压目录，执行 `powershell -ExecutionPolicy Bypass -File .\install-workbench.ps1`。
-5. 安装器按版本清单的 digest 拉取镜像、检查环境并创建快捷方式。打开客户端后配置模型。
+5. 安装器优先复用本地匹配镜像，缺失时按版本清单的 digest 拉取；检查环境并创建快捷方式。打开客户端后配置模型。
 
 默认安装目录为 `%LOCALAPPDATA%\Programs\Wukong Workbench`。可用 `-Destination` 指定目录，或用 `-DockerExecutable` 指定 Docker CLI。至少为镜像与 Docker 临时层预留 25 GiB；安装器另检查客户端所在盘的空间。Docker Desktop 的虚拟磁盘容量需在其设置中检查。
+
+本地镜像先按仓库 digest 查找，再按清单的 image ID 查找，均须匹配 `linux/amd64`。例如通过 `docker load` 导入的镜像即使缺少仓库 digest 引用，只要 ID 和平台匹配，也会直接使用本地 ID 启动，不执行 `docker pull`。仅有同名标签不算匹配。镜像缺失才下载，已有但身份或平台不符则报错。
 
 失败后修复 Docker 登录、网络或磁盘问题，再运行相同安装命令即可。Docker 会复用已下载的层。`-ValidateOnly` 只验证包内校验值，不拉取或安装。
 
