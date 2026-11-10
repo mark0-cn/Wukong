@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from score import score
+from evals.analysis.score import score
 
 
 class ScoreTests(unittest.TestCase):

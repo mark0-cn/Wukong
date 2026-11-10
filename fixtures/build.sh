@@ -14,6 +14,7 @@ for NAME in overflow-vuln overflow-fixed benign; do
     cp "$OUT/$NAME" "$OUT/$NAME-stripped"
     "$STRIP" --strip-all "$OUT/$NAME-stripped"
 done
-python3 "$ROOT/evaluate.py" --build-dir "$OUT" --prepare-only
+OUT=$(CDPATH= cd -- "$OUT" && pwd)
+(cd "$ROOT/.." && python3 -m evals.vulnerability.evaluate --build-dir "$OUT" --prepare-only)
 "$CC" --version | head -1
 printf '%s\n' "Built benchmark at $OUT"

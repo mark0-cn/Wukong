@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from evals.paths import ANALYSIS
 
 
 def sha256(path):
@@ -73,7 +74,7 @@ def main():
     parser.add_argument("--adjudications", type=Path, required=True, help="JSON object with independently reviewed labels")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    root = Path(__file__).resolve().parent
+    root = ANALYSIS
     build = json.loads((args.build_dir / "build.json").read_text())
     if build["tasks_sha256"] != sha256(root / "tasks.json"):
         parser.error("task manifest changed since the fixture build")

@@ -9,7 +9,7 @@ Run the existing analysis fixture tasks under two conditions, changing exactly o
 
 Use at least three repeats per case. Export real report.json files; independently adjudicate every question, including unresolved ones. The comparison does not call a model or fabricate verdicts. Record model, budget and target hash from the run configuration, not from memory. Treat a declared experimental condition as a hypothesis: inspect the actual agent/skill trace to ensure it was applied.
 
-`python fixtures/analysis/compare_runs.py manifest.json --output comparison.json`
+`python -m evals.analysis.compare_runs manifest.json --output comparison.json`
 
 The manifest is a JSON array. Each row has `case`, `repeat`, `condition` (baseline/candidate), `model`, `budget`, `target_sha256`, `questions` (IDs), `report` (relative path), and `reviews` (relative path). Review files are arrays containing question_id, verdict (correct/incorrect/unresolved), rationale and evidence_ids. False-claim reviews additionally contain injected_false_claim=true and accepted_by_agent=true/false. Missing reviews, unpaired runs and mismatched model/budget/hash/question sets are rejected.
 
