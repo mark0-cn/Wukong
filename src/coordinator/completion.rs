@@ -55,43 +55,6 @@ impl Coordinator {
         self.store
             .write(|tx| Self::tx_finish_result(tx, agent_id, result))
     }
-    /// A flag-looking token in a result that is NOT a literal placeholder
-    /// (`flag{...}`, `Flag{.}`, `flag{AAAA}`) — the kind of claim an independent
-    /// verifier must reproduce before the root closes the assessment.
-    fn contains_flag_claim(text: &str) -> bool {
-        let lower = text.to_lowercase();
-        let mut rest = lower.as_str();
-        while let Some(index) = rest.find("flag") {
-            let after = &rest[index + 4..];
-            let Some(body) = after.strip_prefix('{') else {
-                rest = after;
-                continue;
-            };
-            let Some(close) = body.find('}') else {
-                break;
-            };
-            let core: String = body[..close]
-                .chars()
-                .filter(|c| !matches!(c, '\\' | '_'))
-                .collect();
-            let placeholder = core.is_empty()
-                || core
-                    .chars()
-                    .all(|c| matches!(c, '.' | '…' | '+' | '-' | ' ' | '*' | 'x' | 'a'))
-                || core == "test"
-                || (core.len() >= 3
-                    && core
-                        .chars()
-                        .next()
-                        .is_some_and(|first| core.chars().all(|c| c == first)));
-            if !placeholder {
-                return true;
-            }
-            rest = &body[close..];
-        }
-        false
-    }
-
     pub(crate) fn tx_finish_result(
         tx: &crate::store::StateSession<'_>,
         agent_id: &str,
@@ -134,7 +97,7 @@ impl Coordinator {
                     && other
                         .task_result
                         .as_ref()
-                        .is_some_and(|result| Self::contains_flag_claim(&result.answer))
+                        .is_some_and(|result| flag_claims(&result.answer).concrete)
             });
             if claim {
                 let verifications: Vec<Verification> = tx.records::<Verification>(&agent.run_id)?;
