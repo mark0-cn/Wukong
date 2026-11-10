@@ -70,13 +70,14 @@ def score(tasks, build, reports, labels):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", type=Path, required=True)
+    parser.add_argument("--tasks", type=Path, default=ANALYSIS / "tasks.json", help="source-controlled task manifest used by this fixture build")
     parser.add_argument("--reports", type=Path, required=True, help="JSON object: task case ID -> exported report.json")
     parser.add_argument("--adjudications", type=Path, required=True, help="JSON object with independently reviewed labels")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    root = ANALYSIS
+    tasks_path = args.tasks.resolve()
     build = json.loads((args.build_dir / "build.json").read_text())
-    if build["tasks_sha256"] != sha256(root / "tasks.json"):
+    if build["tasks_sha256"] != sha256(tasks_path):
         parser.error("task manifest changed since the fixture build")
     paths = json.loads(args.reports.read_text())
     reports, hashes = {}, {}
@@ -87,7 +88,7 @@ def main():
         reports[case_id] = json.loads(path.read_text())
         hashes[case_id] = sha256(path)
     try:
-        result = score(json.loads((root / "tasks.json").read_text()), build, reports,
+        result = score(json.loads(tasks_path.read_text()), build, reports,
                        json.loads(args.adjudications.read_text())["labels"])
     except (ValueError, KeyError) as error:
         parser.error(str(error))
