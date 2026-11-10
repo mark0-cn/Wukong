@@ -47,6 +47,31 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 
 ## Actions 运行摘要
 
+### CI 调度与缓存
+
+普通 CI 只在 `master` push 和面向 `master` 的 PR 触发，避免同一开发分支的 push/PR 重复执行。
+未开 PR 的分支可手动启动 CI；版本准备工作流仍显式启动完整 CI。
+PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
+
+PR 使用 `scripts/ci_scope.py` 选择检查：仅 README/docs Markdown 改动执行轻量检查；
+`ui/` 增加前端检查；`workers/runtime/`、`fixtures/analysis/` 增加 Linux 测试。
+Rust、公共脚本、锁文件、工作流、未知路径或版本准备 PR 都执行全量检查。
+重命名同时检查旧路径和新路径；计算范围失败直接阻止 CI 通过。
+Windows 版本一致性、发布脚本和安装器测试始终运行。`master`、手动运行和发布调用始终全量。
+
+`summary` 是最终检查门禁：要求范围计算及 Windows 检查成功，Linux 的结果必须与选择范围一致。
+以后配置 required checks 时应包含 `summary`，不要仅依赖可能按规则跳过的 `linux`。
+正常范围跳过会明确记录，失败/取消/异常跳过不能通过最终门禁。
+
+Rust 使用固定工具链和参数派生缓存键，主分支负责写入，PR 只恢复。
+CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。首次或工具链/参数变化仍需重新编译。
+摘要显示精确缓存命中状态及恢复、保存、fmt、Clippy、test 的独立耗时。
+非精确命中可能是回退缓存或无缓存，实际恢复键见 Rust cache 日志。
+Clippy 与测试保持在同一 Windows job 复用编译目录，不为并行而重复下载和编译依赖。
+
+优化验收分别记录首次运行、同配置缓存命中运行及仅 Python 改动 PR 的耗时，
+同时比较总等待时间和 runner 用量；不把无缓存构建和缓存命中构建直接当作同条件性能对比。
+
 CI 与 Release 在各任务结束后运行 `summary` job，包括前面任务失败的情况。
 运行首页可查看 commit、ref、任务结果、耗时和产物链接；Release 额外显示版本、
 镜像 digest、镜像解包大小、在线包大小与实际容器验收结果。

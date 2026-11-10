@@ -66,6 +66,17 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         lines += ["### 检查范围", "", cell(scope.get("reason", "范围计算失败")), "",
                   "Windows 版本及安装器检查始终执行；未选择的重型检查按规则跳过。",
                   *[f"- {name}: {cell(scope.get(name, 'unknown'))}" for name in ("rust", "frontend", "linux")], ""]
+        cache_hit = needs.get("windows", {}).get("outputs", {}).get("rust_cache_hit", "")
+        cache_state = {"true": "精确命中", "false": "未精确命中（回退恢复或无缓存，详见 Rust cache 日志）"}.get(cache_hit, "未执行或无结果")
+        lines += ["### Rust 缓存与步骤耗时", "", f"- Rust cache: {cache_state}", "",
+                  "| Job | 步骤 | 结果 | 耗时 |", "| --- | --- | --- | --- |"]
+        measured = {"Rust cache", "Post Rust cache", "Rust formatting", "Rust Clippy", "Rust tests",
+                    "Frontend", "Version and release tooling tests", "Python runtime and release tests"}
+        for job in jobs:
+            for step in job.get("steps", []):
+                if step["name"] in measured:
+                    lines.append(f"| {cell(job['name'])} | {cell(step['name'])} | {cell(step.get('conclusion') or step.get('status', 'unknown'))} | {duration(step['name'], [step])} |")
+        lines += ["", "缓存保存耗时显示在 Post Rust cache；未写入缓存时，该步骤可能仅执行清理或直接跳过。", ""]
     if kind == "release":
         manifest = read(directory / "release/release.json")
         validation = read(directory / "validation/validation-summary.json") or read(directory / "release/validation-summary.json")

@@ -20,7 +20,7 @@ PAT 到期后在 Docker 重新创建并替换 Secret。不要将 PAT 写入源�
 
 ## 日常 CI
 
-`ci.yml` 在分支 push、PR 和手动触发时运行。Windows 执行 Rust fmt/clippy/test、前端测试与构建、在线包校验测试；Linux 执行 Python runtime 和分析评测工具测试。外部 PR 不获取 Docker Hub Secret。
+`ci.yml` 在 `master` push、面向 `master` 的 PR 和手动触发时运行。PR 按改动范围选择检查；`master`、手动运行、版本 PR 和发布调用执行全量检查。Windows 执行 Rust fmt/clippy/test、前端测试与构建、在线包校验测试；Linux 执行 Python runtime 和分析评测工具测试。外部 PR 不获取 Docker Hub Secret。范围规则与缓存策略见 [GitHub 维护功能](github-maintenance.md)。
 
 Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。上游 Debian/Python 的全部传递依赖并未完全锁死；已发布镜像以 digest 为准，不能把重新构建视为逐位可复现。
 
