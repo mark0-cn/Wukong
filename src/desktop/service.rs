@@ -93,6 +93,28 @@ impl Drop for Operation {
     }
 }
 impl Service {
+    pub(crate) fn set_data_directory(&self, epoch: u64, directory: PathBuf) -> Result<()> {
+        ensure!(directory.is_absolute(), "请选择绝对路径");
+        ensure!(
+            self.context(epoch)?.state_override.is_none(),
+            "当前使用 --state 指定目录，请重新启动后在界面修改"
+        );
+        let _lock = crate::updates::maintenance::lock(&crate::updates::recovery::root()?, true)?;
+        ensure!(
+            crate::updates::recovery::pending()?.is_none(),
+            "先完成或恢复待处理更新"
+        );
+        let document = self.current_configuration(epoch)?;
+        self.save_configuration(
+            epoch,
+            document,
+            vec![ConfigEdit {
+                path: vec!["state_dir".into()],
+                value: serde_json::json!(directory),
+            }],
+        )?;
+        Ok(())
+    }
     pub(crate) fn maintenance_context(
         &self,
         epoch: u64,

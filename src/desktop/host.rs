@@ -48,6 +48,46 @@ async fn update_action(
         .map_err(failure)
 }
 #[tauri::command]
+async fn update_storage(service: State<'_, Arc<Service>>, epoch: u64) -> Reply<serde_json::Value> {
+    service.current_configuration(epoch).map_err(failure)?;
+    Ok(
+        serde_json::json!({"data_dir":service.status().state_dir, "cache_dir":crate::updates::storage::cache_root().map_err(failure)?}),
+    )
+}
+#[tauri::command]
+async fn update_cache_directory(
+    service: State<'_, Arc<Service>>,
+    controller: State<'_, Arc<super::updates::Controller>>,
+    epoch: u64,
+    destination: PathBuf,
+) -> Reply<PathBuf> {
+    controller
+        .relocate_cache(destination, epoch, service.inner().clone())
+        .await
+        .map_err(failure)
+}
+#[tauri::command]
+async fn pick_directory() -> Reply<Option<PathBuf>> {
+    tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("选择保存目录")
+            .pick_folder()
+    })
+    .await
+    .map_err(failure)
+}
+#[tauri::command]
+async fn update_data_directory(
+    service: State<'_, Arc<Service>>,
+    epoch: u64,
+    destination: PathBuf,
+) -> Reply<()> {
+    blocking(service.inner().clone(), move |s| {
+        s.set_data_directory(epoch, destination)
+    })
+    .await
+}
+#[tauri::command]
 async fn workspace_read(
     service: State<'_, Arc<Service>>,
     request: WorkspaceRequest,
@@ -242,6 +282,10 @@ pub fn run(
         .invoke_handler(tauri::generate_handler![
             workspace_read,
             update_action,
+            update_storage,
+            update_cache_directory,
+            update_data_directory,
+            pick_directory,
             workbench_action,
             start_run,
             resume_run,
