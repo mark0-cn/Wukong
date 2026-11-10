@@ -8,7 +8,7 @@
     "dev": "npm run dev --workspace ui",
     "build": "npm run build --workspace ui",
     "test": "npm run test --workspace ui",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --config ui/playwright.config.ts",
     "check": "npm run check --workspace ui",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"
