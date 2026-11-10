@@ -20,6 +20,13 @@ or execution capabilities before promising a complete decoder.
 
 ## Handoff and stopping condition
 
+When a format drives allocation, decompression or copying, trace decoded sizes,
+literal/repeat/back-reference counts, source distances and accumulated output
+length with exact integer widths. Build valid seeds that reach the consumer and
+boundary mutations that violate one invariant at a time. A malformed input that
+fails the header check does not cover the decompressor. Preserve a repaired or
+bounded implementation as a control; see the original toy-LZ regression fixture.
+
 Save a field table with offset/width/encoding/meaning/evidence/confidence,
 length relationships, sample hex plus decoded values, and rejection behavior.
 A runnable decoder is a useful artifact when supported by the observations;

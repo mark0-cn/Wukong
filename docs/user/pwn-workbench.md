@@ -166,6 +166,15 @@ wukong --config 新机器配置.toml challenge up demo
 
 ## 验证范围和边界
 
+新增的 FILE、退出回调、seccomp I/O、输入约束和 musl 方法按需加载；隐式堆分配
+与 GC 对象不变量补充到现有方法。来源与适用限制见
+[Pwn 知识来源](../reference/pwn-knowledge.md)。
+
+`seccomp_analyze` 可解析已保存的过滤器并探测具体调用；`libc_identify` 可比对多份
+附件 libc。`poc_verify` 的 network 模式通过准备好的题目端点执行有界、多轮 TCP
+回放，保留每次连接的泄漏捕获、payload 修补和原始收发证据。接口与限制见
+[Pwn 证据工具](../reference/pwn-tools.md)。它不重置服务，也不确认远端运行时身份。
+
 已经覆盖原件变更检测、路径越界、工作区锁、SQLite WAL 快照、归档穿越拒绝、会话状态清理，以及真实 Docker 的两题隔离、固定目标转发、卷恢复、指定 libc 的交互/GDB/重放和 PTY 交互。
 
 尚不提供：内核/ARM 环境自动重建、任意 Compose 多服务拓扑导入、任意 jail 内层 namespace 自动附加、PTY 自动崩溃重放、历史运行的跨机器无缝续跑。APT/Python 全依赖没有完全锁死；迁移的可重复性依赖已验证的镜像 ID 和离线镜像，不能宣称任意日期从源码重建会得到同一镜像。

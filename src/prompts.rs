@@ -175,10 +175,42 @@ pub(crate) static REGISTRY: &[Entry] = &[
         "Use prepared challenge LaunchSpecs, sibling Docker services and runtime identity when reproducing Pwn environments."
     ),
     entry!(
+        fsop,
+        Kind::Method,
+        "methods",
+        "Trace live FILE objects, version-specific checks and a measured stream primitive to its actual trigger.",
+        example
+    ),
+    entry!(
+        exit_handlers,
+        Kind::Method,
+        "methods",
+        "Establish exit-time callback consumers, pointer representation, object lifetime and the real termination trigger."
+    ),
+    entry!(
+        seccomp_io,
+        Kind::Method,
+        "methods",
+        "Select feasible I/O using filter artifacts, syscall arguments, existing descriptors and native observations.",
+        example
+    ),
+    entry!(
+        payload_constraints,
+        Kind::Method,
+        "methods",
+        "Track payload bytes, lengths and buffer identity through filtering, UTF-8 and floating-point transformations."
+    ),
+    entry!(
+        musl,
+        Kind::Method,
+        "methods",
+        "Re-derive printf, allocator, FILE, TLS and exit assumptions for the identified musl build."
+    ),
+    entry!(
         pwn,
         Kind::Method,
         "methods",
-        "Route requested pwn work to heap, ROP or format-string methods and preserve shared evidence requirements."
+        "Route requested Pwn work to the applicable memory, runtime, I/O or payload method and preserve shared evidence requirements."
     ),
     entry!(
         exec_sinks,

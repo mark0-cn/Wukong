@@ -6,11 +6,20 @@ known. Load alongside the relevant capability; select only the method needed now
 - Allocation/free lifetime or allocator metadata: `heap_ptmalloc`.
 - Saved return address, indirect control flow or gadget chain: `rop_analysis`.
 - Attacker bytes used as a printf-family format argument: `format_string`.
+- A reachable live FILE object or stream consumer: `fsop`.
+- A write consumed during exit/cleanup: `exit_handlers`.
+- Syscall policy, pre-opened descriptors or a jailed I/O objective: `seccomp_io`.
+- Encoding, numeric parsing, bad bytes or transformed buffer identity: `payload_constraints`.
+- Confirmed musl runtime: `musl`, before applying libc-specific layouts.
 - Uncertain RELRO, CET, seccomp or other runtime protection: inspect static and
   live evidence with `mitigation_analysis` before choosing a path.
 
 Load `pwn_environment` when supplied runtimes, Docker services or a prepared
 workbench affect reproduction.
+
+Select the method for the current question; initial and dynamically loaded skills
+share the five-name limit. These methods do not change role permissions or the
+independent verification protocol.
 
 ## Shared preconditions
 
