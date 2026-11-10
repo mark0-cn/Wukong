@@ -50,7 +50,7 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 ### CI 调度与缓存
 
 普通 CI 只在 `master` push 和面向 `master` 的 PR 触发，避免同一开发分支的 push/PR 重复执行。
-未开 PR 的分支可手动启动 CI；版本准备工作流仍显式启动完整 CI。
+未开 PR 的分支可手动启动 CI；版本准备工作流使用发布 App 创建 PR，由原生 PR 事件启动完整 CI。
 PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
 
 PR 使用 `scripts/ci_scope.py` 选择检查：仅 README/docs Markdown 改动执行轻量检查；
