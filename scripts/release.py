@@ -129,7 +129,7 @@ def package(binary, metadata, output, tag):
         "re-agent.exe": binary,
         "install-workbench.ps1": ROOT / "scripts/install-workbench.ps1",
         "rollback-workbench.ps1": ROOT / "scripts/rollback-workbench.ps1",
-        "README.md": ROOT / "docs/online-install.md",
+        "README.md": ROOT / "docs/user/online-install.md",
     }
     manifest = {
         "schema_version": 2, "version": number, "source_revision": revision,

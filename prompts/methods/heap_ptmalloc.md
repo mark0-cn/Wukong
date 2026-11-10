@@ -16,7 +16,7 @@ Worker installation versions and a target's imported symbol versions are not pro
 | Later versions / vendor builds | exact source, patches, tunables and observations | that an old how2heap example transfers unchanged |
 
 Treat these as upstream checkpoints, not a complete compatibility database. Unrecognized
-builds remain unknown. Refer to docs/pwn-knowledge.md for primary sources; fetch no code
+builds remain unknown. Refer to docs/reference/pwn-knowledge.md for primary sources; fetch no code
 or packages from an analysis target. Inspect existing tool availability before using GEF
 or pwndbg commands; raw GDB/MI is sufficient for memory and register observations.
 

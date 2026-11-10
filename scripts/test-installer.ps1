@@ -8,7 +8,7 @@ $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 & $compiler /nologo /target:exe "/out:$package\re-agent.exe" (Join-Path $PSScriptRoot 'fixtures\installer-client.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Could not compile installer process fixture.' }
 foreach ($name in @('install-workbench.ps1','rollback-workbench.ps1')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $package }
-Copy-Item -LiteralPath (Join-Path $root 'docs\online-install.md') -Destination (Join-Path $package 'README.md')
+Copy-Item -LiteralPath (Join-Path $root 'docs\user\online-install.md') -Destination (Join-Path $package 'README.md')
 $dockerFixture = Join-Path $temporary 'docker-fixture.ps1'
 @'
 if ($args[0] -eq 'info') { Write-Output 'linux' }
