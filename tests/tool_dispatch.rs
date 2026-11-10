@@ -215,8 +215,10 @@ async fn role_catalog_enforces_coordinator_boundary() -> Result<()> {
     // Root delegates target operations.
     assert!(!root.contains("binary_inspect"));
     assert!(!root.contains("poc_verify"));
-    // (create_agent exclusion from the model toolset is covered by the
-    // native kernel test, which inspects the actual request tools.)
+    assert!(!analyst.contains("create_agent"));
+    assert!(!root.contains("create_agent"));
+    // Internal execution remains tested by durable child-creation tests;
+    // the kernel regression separately inspects model request tools.
     let _ = run;
     service.close().await;
     Ok(())
