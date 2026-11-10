@@ -1,0 +1,34 @@
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+from scripts.release.desktop_manifest import generate
+
+
+class DesktopManifestTests(unittest.TestCase):
+    def test_requires_both_platforms_and_matching_acceptance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image = dict(repository='hlmark0/wukong', digest='sha256:' + 'a'*64,
+                         source_revision='b'*40, size_bytes=123)
+            (root / 'image.json').write_text(json.dumps(image))
+            report = dict(passed=True, source_revision='b'*40,
+                          image=image['repository'] + '@' + image['digest'])
+            (root / 'validation-summary.json').write_text(json.dumps(report))
+            with patch('scripts.release.desktop_manifest.subprocess.check_output', return_value='b'*40), \
+                 patch('scripts.release.desktop_manifest.version', return_value='0.2.0'), \
+                 patch('scripts.release.desktop_manifest.subprocess.run') as sign:
+                with self.assertRaises(ValueError):
+                    generate(root, root)
+                for name in ['Wukong_setup.exe', 'Wukong.AppImage']:
+                    (root / name).write_bytes(b'installer')
+                    (root / (name + '.sig')).write_text('signature')
+                manifest = generate(root, root)
+                self.assertEqual(set(manifest['platforms']), {'windows-x86_64', 'linux-x86_64'})
+                self.assertEqual(manifest['image'], report['image'])
+                sign.assert_called_once()
+                report['source_revision'] = 'c'*40
+                (root / 'validation-summary.json').write_text(json.dumps(report))
+                with self.assertRaises(ValueError):
+                    generate(root, root)

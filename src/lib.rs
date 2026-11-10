@@ -28,4 +28,5 @@ mod usage;
 
 pub mod queries;
 
+pub mod updates;
 pub mod workbench;
