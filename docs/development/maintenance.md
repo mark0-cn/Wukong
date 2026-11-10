@@ -23,7 +23,7 @@ worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录
 
 ## 工具文档
 
-工具定义、参数 schema 和 Markdown 工具清单来自同一注册表：
+工具定义、参数 schema、角色权限、模型可见性和中文显示标题来自同一注册表。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供标题。Markdown 工具清单也从注册表生成：
 
 ```sh
 cargo run -- tool-catalog > docs/reference/tool-catalog.md
@@ -44,6 +44,12 @@ cargo test --test tool_catalog
 ```
 
 这些字段只用于维护和查询，不授予工具权限，也不证明当前后端可用、原题复现或 Agent 解题成功率。未登记表示没有关联记录。自定义 Skill 可在原有 manifest 中填写这些字段；覆盖内置正文时不会自动继承内置夹具声明。单元测试校验内置关联的工具、来源文件及夹具 ID 存在，导出不读取模型凭据或状态目录。
+
+## 共享校验与内容身份
+
+`domain/claims` 统一解析 flag 形状的声明；完成工具拒绝占位符，协调器按具体声明执行独立验证门槛。解析结果只表示文本分类，不证明利用成功。
+
+Rust 文件哈希和实际读取字节计数放在 `content`，`binary` 保留公开哈希接口；worker 使用 `worker_common.sha256_file`，构建与发布脚本使用 `scripts._lib.checksums.sha256`。独立注入沙箱的脚本保持自包含，不引入控制端模块。路径限制、大小预算和控制端/worker 的独立身份核对仍留在调用边界，不因共用哈希函数而合并或删除。
 
 ## 验证
 
