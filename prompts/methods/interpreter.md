@@ -23,6 +23,22 @@ bypassing the interpreter.
    verifying each intermediate state with a live run; the interpreter's
    feedback (printed state, errors) is the oracle.
 
+## Moving objects and stale references
+
+For a VM with GC, separate logical handles/offsets from native pointers. Record
+root encoding, null/sentinel values, tags, object headers, lengths, off-heap
+storage and reference widths. Check size_t-to-narrow-offset conversions and
+signed/unsigned arithmetic at each boundary. Large allocation arithmetic must
+be reachable within the real resource budget.
+
+Observe the heap before and after marking, compaction and reference updates.
+Check whether a null root is skipped, overlapping moves preserve source headers,
+interior/off-heap references are updated, and reused handles carry a generation
+check. Construct the smallest operation sequence plus a no-GC/fixed control.
+Do not reuse a pre-GC physical address without revalidation. An out-of-range VM
+index or stale logical handle is not a native arbitrary read/write until the
+mapped native access has actually been demonstrated.
+
 ## Handoff
 
 Deliver the operation sequence, the memory invariant each step establishes

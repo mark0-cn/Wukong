@@ -36,6 +36,15 @@ or pwndbg commands; raw GDB/MI is sufficient for memory and register observation
 
 ## Choose a bounded experiment
 
+Include implicit allocation/free paths from stdio, parsing, buffering and runtime
+support, not only the menu's malloc calls. Large scanf input can alter allocation
+and consolidation on a particular build; establish it with an observed trace.
+Record GLIBC_TUNABLES, size/count limits, arenas and buffering before inferring a
+bin. A new glibc version does not prove tcache is enabled. For realloc(ptr, 0),
+check this implementation's release/return behavior and whether all aliases,
+lengths and ownership flags were updated. Preserve a fixed or no-stale-alias
+control. Do not dereference freed memory merely to manufacture a trace.
+
 Start from the demonstrated primitive and required preconditions, not a named 'house'.
 State the expected allocation/reuse relationship and a control sequence. Preserve cases
 where reuse does not occur, another thread/arena is involved, or a check rejects the state.
