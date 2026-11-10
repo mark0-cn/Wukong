@@ -115,6 +115,29 @@ impl ExecutionService {
                         .remove("finding_id");
                     args["producer_agent_id"] = json!(finding.agent_id);
                     args["verifier_agent_id"] = json!(agent.id);
+                    if args["network"].is_object() {
+                        self.files.known_file(agent, text(&args, "target")?, true)?;
+                        ensure!(
+                            ["args", "env", "expected", "input_mode"]
+                                .iter()
+                                .all(|key| args[key].is_null()),
+                            "network replay cannot override local replay parameters"
+                        );
+                        let binding = self
+                            .gateway
+                            .worker_call(
+                                agent,
+                                &format!("{call_id}:network-profile"),
+                                "network.profile",
+                                json!({"target":args["target"],"launch_spec":args["launch_spec"]}),
+                            )
+                            .await?;
+                        ensure!(
+                            binding["target_sha256"] == run.target_sha256,
+                            "network profile target differs from this run"
+                        );
+                        args["network_binding"] = binding;
+                    }
                 }
                 if name == "py_run" {
                     let _ = text(&args, "source")?;

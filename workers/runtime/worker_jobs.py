@@ -24,7 +24,17 @@ class JobManager:
         if not self.trusted and not self.isolated:
             raise ValueError("production execution requires a root Linux worker with UID/GID/CHOWN capabilities; use explicit trusted_local only for trusted fixtures")
         spec = dict(params)
-        if spec.get("launch_spec"):
+        if spec.get("network") is not None:
+            from worker_network import network_profile, validate_plan
+            if kind != "verify" or any(spec.get(key) is not None for key in ["args","env","expected","input_mode"]):
+                raise ValueError("network plans are exclusive to poc.verify and cannot override local replay parameters")
+            spec["trusted_local"] = self.trusted
+            binding = network_profile(self.root,spec,self.trusted)
+            if binding != spec.get("network_binding"): raise ValueError("network binding must match the admitted service profile")
+            input_path=confined(self.root,spec["input"],True)
+            if input_path.stat().st_size > 1048576: raise ValueError("network input exceeds 1 MiB")
+            validate_plan(spec["network"],input_path.read_bytes())
+        elif spec.get("launch_spec"):
             from worker_launch import load
             launch,_,_,_,_=load(self.root,spec)
             spec["input_mode"]="stdin" if launch["input_mode"]=="stdin_pipe" else "argv"

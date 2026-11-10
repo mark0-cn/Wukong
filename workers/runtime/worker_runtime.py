@@ -9,6 +9,7 @@ from worker_files import FileService
 from worker_jobs import JobManager
 from worker_libc import LibcService
 from worker_seccomp import SeccompService
+from worker_network import NetworkService
 from worker_profile import ProfileService
 from worker_crash import CrashService
 from worker_operations import OperationLedger
@@ -27,9 +28,10 @@ class Runtime:
         self.profile = ProfileService(self.root, trusted, self.isolated)
         self.crash = CrashService(self.root, trusted, self.isolated)
         self.seccomp = SeccompService(self.root, trusted, self.isolated)
+        self.network = NetworkService(self.root, trusted, self.isolated)
         self.operations = OperationLedger(self.root)
         self.handlers = {}
-        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu, self.libc, self.profile, self.crash, self.seccomp]:
+        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu, self.libc, self.profile, self.crash, self.seccomp, self.network]:
             for name in service.methods:
                 if name in self.handlers:
                     raise ValueError("duplicate worker method: " + name)

@@ -237,3 +237,10 @@ detached execution. Debugger, interactive processes, files and synchronous
 commands have separate components. `worker_processes` contains bounded process
 IO and process-tree ownership; `worker_common` contains protocol values, confined
 paths and atomic metadata IO. Backend adapters import these components directly.
+
+`worker_seccomp` owns offline classic-BPF decoding and concrete probes;
+`worker_libc` compares bounded supplied ELF candidates without executing them.
+`worker_network` validates the prepared service binding and performs declarative
+TCP verification. The job supervisor retains lifecycle/cancellation ownership;
+network replay never executes a model-provided program inside the privileged
+supervisor. See [Pwn tool contracts](../../docs/reference/pwn-tools.md).
