@@ -185,6 +185,11 @@ workspace-total-cost-limit = Total cost limit
 workspace-resuming = Resuming…
 workspace-could-not-load-the-interface = Could not load the interface
 workspace-reload = Reload
+severity-critical = Critical
+severity-high = High
+severity-medium = Medium
+severity-low = Low
+severity-info = Informational
 workspace-agent-count = { $count ->
     [one] { $count } Agent
    *[other] { $count } Agents

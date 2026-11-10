@@ -1,10 +1,10 @@
-import { t, useLocale, currentLocale } from '../i18n';
+import { t, text, useLocale, currentLocale } from '../i18n';
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileSearch, ShieldCheck } from 'lucide-react';
 import { api, errorText, errorValue } from '../bridge';
 import type { Evidence, EvidenceView, Finding, FindingDetails } from '../types';
 import { Markdown } from './Markdown';
-import { Status } from './Status';
+import { labels, Status } from './Status';
 
 export function EvidenceReader({ evidence, epoch, run }: { evidence: Evidence; epoch: number; run: string }) {
   useLocale();
@@ -41,7 +41,7 @@ function FindingInspector({ epoch, run, finding, onAgent }: { epoch: number; run
   if (error) return <p className="error" role="alert">{errorText(error)}</p>;
   if (!details) return <p className="muted">{t('workspace-loading-finding-and-verification')}</p>;
   const selected = details.evidence.find(value => value.id === evidence);
-  return <article className="finding-inspector"><div className="finding-tags"><Status value={finding.stage} />{finding.severity && <span className={`severity severity-${finding.severity}`}>{finding.severity}</span>}</div>
+  return <article className="finding-inspector"><div className="finding-tags"><Status value={finding.stage} />{finding.severity && <span className={`severity severity-${finding.severity}`}>{text(`severity-${finding.severity}`, {}, finding.severity)}</span>}</div>
     <h2>{finding.title}</h2><Markdown text={finding.description} />
     {finding.root_cause && <><h3>{t('workspace-root-cause')}</h3><Markdown text={finding.root_cause} /></>}
     {finding.impact && <><h3>{t('workspace-impact')}</h3><Markdown text={finding.impact} /></>}
@@ -68,9 +68,9 @@ export function Findings({ findings, epoch, run, onAgent }: { findings: Finding[
   const visible = findings.filter(finding => (!stage || finding.stage === stage) && `${finding.title} ${finding.description} ${finding.severity ?? ''}`.toLowerCase().includes(filter.toLowerCase()));
   const finding = visible.find(finding => finding.id === selected) ?? visible[0];
   return <div className="findings-page"><div className="finding-list"><input aria-label={t('workspace-search-findings')} placeholder={t('workspace-search-findings-2')} value={filter} onChange={event => setFilter(event.target.value)} />
-    <select aria-label={t('workspace-filter-by-verification-stage')} value={stage} onChange={event => setStage(event.target.value)}><option value="">{t('workspace-all-stages')}</option>{[...new Set(findings.map(finding => finding.stage))].map(stage => <option key={stage} value={stage}>{stage}</option>)}</select>
+    <select aria-label={t('workspace-filter-by-verification-stage')} value={stage} onChange={event => setStage(event.target.value)}><option value="">{t('workspace-all-stages')}</option>{[...new Set(findings.map(finding => finding.stage))].map(stage => <option key={stage} value={stage}>{labels[stage] ?? stage}</option>)}</select>
     {visible.map(item => <button key={item.id} className={`finding-card ${finding?.id === item.id ? 'selected' : ''}`} onClick={() => setSelected(item.id)}>
-      <strong>{item.title}</strong><div><Status value={item.stage} />{item.severity && <span className={`severity severity-${item.severity}`}>{item.severity}</span>}</div></button>)}
+      <strong>{item.title}</strong><div><Status value={item.stage} />{item.severity && <span className={`severity severity-${item.severity}`}>{text(`severity-${item.severity}`, {}, item.severity)}</span>}</div></button>)}
     {!visible.length && <p className="muted">{findings.length ? t('workspace-no-matching-findings') : t('workspace-findings-and-verification-results-will-appear-here')}</p>}</div>
     <div className="finding-detail-scroll">{finding ? <FindingInspector key={`${epoch}:${run}:${finding.id}`} epoch={epoch} run={run} finding={finding} onAgent={onAgent} /> : <div className="empty-state"><ShieldCheck size={28} /><h3>{t('workspace-support-conclusions-with-evidence')}</h3><p>{t('workspace-every-finding-links-back-to-tool-operations')}</p></div>}</div>
   </div>;
