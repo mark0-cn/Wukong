@@ -14,7 +14,7 @@ def build(platform, signed=False):
     npx = "npx.cmd" if os.name == "nt" else "npx"
     subprocess.run([npm, "ci"], cwd=ROOT, check=True)
     subprocess.run([npx, "--no-install", "tauri", "build", "--ci", "--config",
-                    '{"bundle":{"createUpdaterArtifacts":' + str(signed).lower() + '}}'],
+                    '{"bundle":{"createUpdaterArtifacts":' + str(signed).lower() + '}}', '--', '--locked'],
                    cwd=ROOT, check=True)
 
 

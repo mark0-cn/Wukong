@@ -30,6 +30,11 @@ def generate(directory, validation):
         source_revision=revision, platforms=platforms)
     output = directory / 'latest.json'
     output.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    release = dict(schema_version=3, version=number, source_revision=revision,
+                   tool_platform='linux/amd64', platforms=list(platforms), image=reference,
+                   image_id=image.get('image_id'), image_size_bytes=image['size_bytes'],
+                   runtime_protocol=1, data_schema=3)
+    (directory / 'release.json').write_text(json.dumps(release, indent=2) + '\n', encoding='utf-8')
     subprocess.run(['npx.cmd' if os.name == 'nt' else 'npx', '--no-install', 'tauri', 'signer', 'sign', str(output)], check=True)
     return manifest
 
