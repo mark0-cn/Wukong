@@ -1,5 +1,6 @@
 //! Auditable reports and an integrity-checked, self-contained evidence bundle.
 use crate::content::{file_identity as hash_file, sha256_bytes as digest};
+use crate::i18n::{Locale, Message as UiMessage};
 use crate::{domain::*, store::Store};
 use anyhow::{Context, Result, ensure};
 use askama::Template;
@@ -146,8 +147,8 @@ fn validated_verification<'a>(
 
 struct HtmlFinding<'a> {
     finding: &'a Finding,
-    label: &'static str,
-    fields: Vec<(&'static str, &'a str)>,
+    label: String,
+    fields: Vec<(String, &'a str)>,
     verification: Option<&'a Verification>,
     evidence: String,
 }
@@ -157,51 +158,67 @@ struct HtmlFinding<'a> {
 struct HtmlReport<'a> {
     snapshot: &'a crate::queries::ReportSnapshot,
     findings: Vec<HtmlFinding<'a>>,
-    summary: &'a str,
-    cost: String,
+    summary: String,
+    locale: Locale,
+    status: String,
+    accounting: String,
 }
 
-fn readable_report(snapshot: &crate::queries::ReportSnapshot) -> Result<(String, String)> {
+impl HtmlReport<'_> {
+    fn label(&self, key: &str) -> String {
+        self.locale.text(key)
+    }
+}
+fn readable_report(
+    snapshot: &crate::queries::ReportSnapshot,
+    locale: Locale,
+) -> Result<(String, String)> {
     let run = &snapshot.run;
+    let tr = |key: &str| locale.text(key);
+    let summary = run
+        .summary
+        .clone()
+        .unwrap_or_else(|| tr("report-no-summary"));
+    let status = tr(&format!("report-status-{}", run.status));
     let mut md = format!(
-        "# Binary analysis report\n\nRun: `{}`\n\nTarget SHA256: `{}`\n\nStatus: {}\n\nTask: {}\n\n{}\n\n",
+        "# {}\n\n{}: `{}`\n\n{}: `{}`\n\n{}: {}\n\n{}: {}\n\n{}\n\n",
+        tr("report-title"),
+        tr("report-run"),
         markdown_text(&run.id),
+        tr("report-target"),
         run.target_sha256,
-        run.status,
+        tr("report-status"),
+        status,
+        tr("report-task"),
         markdown_text(&run.task),
-        markdown_text(
-            run.summary
-                .as_deref()
-                .unwrap_or("No final summary recorded.")
-        )
+        markdown_text(&summary)
     );
     let mut findings = Vec::new();
-    md.push_str("## Findings\n\n");
+    md.push_str(&format!("## {}\n\n", tr("report-findings")));
     if snapshot.findings.is_empty() {
-        md.push_str(
-            "No findings recorded. This does not prove the target is free of vulnerabilities.\n\n",
-        );
+        md.push_str(&format!("{}\n\n", tr("report-no-findings")));
     }
     for finding in &snapshot.findings {
         let verification = validated_verification(snapshot, finding);
         let label = if finding.stage == FindingStage::ImpactVerified && verification.is_none() {
-            "impact_verified (recorded claim; independent verification is missing or incomplete)"
+            tr("report-unconfirmed")
         } else {
-            stage(finding.stage)
+            tr(&format!("report-stage-{}", stage(finding.stage)))
         };
         md.push_str(&format!(
-            "### {}\n\nID: `{}`\n\nRecorded stage: {}\n\n{}\n\n",
+            "### {}\n\nID: `{}`\n\n{}: {}\n\n{}\n\n",
             markdown_text(&finding.title),
             markdown_text(&finding.id),
+            tr("report-stage"),
             label,
             markdown_text(&finding.description)
         ));
         let mut fields = Vec::new();
-        for (name, value) in [
-            ("Root cause", finding.root_cause.as_deref()),
-            ("Reported impact", finding.impact.as_deref()),
+        for (key, value) in [
+            ("report-root-cause", finding.root_cause.as_deref()),
+            ("report-impact", finding.impact.as_deref()),
             (
-                "Severity",
+                "report-severity",
                 finding.severity.map(|severity| match severity {
                     Severity::Critical => "critical",
                     Severity::High => "high",
@@ -210,31 +227,38 @@ fn readable_report(snapshot: &crate::queries::ReportSnapshot) -> Result<(String,
                     Severity::Info => "info",
                 }),
             ),
-            ("Severity rationale", finding.severity_rationale.as_deref()),
+            (
+                "report-severity-rationale",
+                finding.severity_rationale.as_deref(),
+            ),
         ] {
             if let Some(value) = value {
+                let name = tr(key);
                 md.push_str(&format!("**{name}:** {}\n\n", markdown_text(value)));
                 fields.push((name, value));
             }
         }
         if let Some(verification) = verification {
             md.push_str(&format!(
-                "Independent replay: {} / {} successful attempts. Verified impact: {}.\n\n",
+                "{}: {} / {} {}. {}: {}.\n\n",
+                tr("report-replay"),
                 verification.successes,
                 verification.attempts,
+                tr("report-attempts"),
+                tr("report-verified-impact"),
                 markdown_text(&verification.impact)
             ));
         }
-        md.push_str("Evidence IDs: ");
-        md.push_str(
-            &finding
+        md.push_str(&format!(
+            "{}: {}\n\n",
+            tr("report-evidence"),
+            finding
                 .evidence_ids
                 .iter()
                 .map(|id| format!("`{}`", markdown_text(id)))
                 .collect::<Vec<_>>()
-                .join(", "),
-        );
-        md.push_str("\n\n");
+                .join(", ")
+        ));
         findings.push(HtmlFinding {
             finding,
             label,
@@ -243,7 +267,14 @@ fn readable_report(snapshot: &crate::queries::ReportSnapshot) -> Result<(String,
             evidence: finding.evidence_ids.join(", "),
         });
     }
-    md.push_str("## Coverage\n\n| Scope | Kind | Outcome | Notes |\n|---|---|---|---|\n");
+    md.push_str(&format!(
+        "## {}\n\n| {} | {} | {} | {} |\n|---|---|---|---|\n",
+        tr("report-coverage"),
+        tr("report-scope"),
+        tr("report-kind"),
+        tr("report-outcome"),
+        tr("report-notes")
+    ));
     for coverage in &snapshot.coverage {
         md.push_str(&format!(
             "| {} | {} | {} | {} |\n",
@@ -253,15 +284,26 @@ fn readable_report(snapshot: &crate::queries::ReportSnapshot) -> Result<(String,
             markdown_text(&coverage.notes).replace('\n', " ")
         ));
     }
-    md.push_str(&format!("\n## Accounting\n\n{} agents; {} tool calls; {} evidence records; {} tokens; USD {:.6}.\n\nSee `report.json` and `replay.json` for environment, conditions, exact tool arguments, and evidence references.\n",snapshot.agents.len(),snapshot.calls.len(),snapshot.evidence.len(),run.total_tokens,run.cost_usd));
+    let accounting = UiMessage::new("report-accounting-body")
+        .arg("agents", snapshot.agents.len())
+        .arg("calls", snapshot.calls.len())
+        .arg("evidence", snapshot.evidence.len())
+        .arg("tokens", run.total_tokens)
+        .arg("cost", format!("{:.6}", run.cost_usd))
+        .render(locale);
+    md.push_str(&format!(
+        "\n## {}\n\n{}\n\n{}\n",
+        tr("report-accounting"),
+        accounting,
+        tr("report-raw-guide")
+    ));
     let html = HtmlReport {
         snapshot,
         findings,
-        summary: run
-            .summary
-            .as_deref()
-            .unwrap_or("No final summary recorded."),
-        cost: format!("{:.6}", run.cost_usd),
+        summary,
+        locale,
+        status,
+        accounting,
     }
     .render()
     .context("render HTML report")?;
@@ -355,6 +397,14 @@ fn validate_evidence_refs(snapshot: &crate::queries::ReportSnapshot) -> Result<(
 /// Export without executing the sample. Existing output paths are refused;
 /// complete bundles are published by renaming a verified staging directory.
 pub fn export(store: &Store, run_id: &str, output: &Path) -> Result<ExportSummary> {
+    export_with_locale(store, run_id, output, Locale::EnUs)
+}
+pub fn export_with_locale(
+    store: &Store,
+    run_id: &str,
+    output: &Path,
+    locale: Locale,
+) -> Result<ExportSummary> {
     ensure!(
         !output.exists(),
         "export destination already exists: {}",
@@ -427,10 +477,15 @@ pub fn export(store: &Store, run_id: &str, output: &Path) -> Result<ExportSummar
         let mut replay = json!({"schema_version":1,"target":{"original_path":snapshot.run.target_path,"bundle_path":target_relative,"sha256":target_hash},"config":"config.redacted.json","tool_calls":snapshot.calls,"verifications":snapshot.verifications,"jobs":snapshot.jobs,"evidence":evidence_index,"instructions":"Verify manifest before replay. Recreate the recorded runtime and dependencies, map the original target path to target/sample.bin, import required evidence by bundle_path, then replay the recorded tool arguments. Environment credentials must be supplied separately. Export itself executes no target code."});
         redact(&mut replay);
         write_json(staging, "replay.json", &replay, &mut files)?;
-        let (md, html) = readable_report(&snapshot)?;
+        let (md, html) = readable_report(&snapshot, locale)?;
         write_file(staging, "report.md", md.as_bytes(), &mut files)?;
         write_file(staging, "report.html", html.as_bytes(), &mut files)?;
-        write_file(staging,"README.txt",b"wukong evidence bundle\n\nreport.md / report.html: human-readable recorded findings and verification status.\nreport.json: transactional run snapshot and original evidence index.\nreplay.json: exact recorded tool calls, verification environment and conditions.\nconfig.redacted.json: settings with credential fields redacted.\ntarget/sample.bin: original target bytes (not executed during export).\nevidence/: deduplicated original evidence bytes, addressed by SHA256.\nmanifest.json / SHA256SUMS: all payload digests. Use wukong bundle-verify.\n\nA checksum verifies integrity, not publisher identity. Original evidence is not redacted.\nRedacted configuration and event metadata are not a credential backup.\n",&mut files)?;
+        write_file(
+            staging,
+            "README.txt",
+            locale.text("report-bundle-readme").as_bytes(),
+            &mut files,
+        )?;
         let manifest = BundleManifest {
             schema_version: 1,
             run_id: run_id.into(),
