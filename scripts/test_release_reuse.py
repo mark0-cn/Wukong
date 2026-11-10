@@ -40,4 +40,20 @@ class ReuseTests(unittest.TestCase):
         self.assertTrue(any("/attempts/2/jobs" in path for path in paths))
         self.run["conclusion"] = "failure"
         self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="", windows_run="1", linux_run=""))
+        self.run["run_attempt"] = 1
         self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="", linux_run=""))
+
+    def test_whole_run_retry_reads_only_previous_completed_attempt(self):
+        previous = dict(self.run, run_attempt=1, path=".github/workflows/release.yml", event="workflow_dispatch")
+        current = dict(previous, run_attempt=2, status="in_progress", conclusion=None)
+        def request(path):
+            if path.endswith("/attempts/1"):
+                return previous
+            if "/attempts/1/jobs" in path:
+                return dict(jobs=self.jobs, total_count=len(self.jobs))
+            if "/artifacts?" in path:
+                return dict(artifacts=[self.artifact])
+            if "/attempts/2" in path:
+                self.fail("Must not consume jobs from running attempt")
+            return dict(workflow_runs=[current])
+        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="1", linux_run=""))
