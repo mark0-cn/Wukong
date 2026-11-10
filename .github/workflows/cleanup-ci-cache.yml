@@ -35,7 +35,7 @@ jobs:
           APPLY: ${{ github.event_name == 'schedule' || inputs.apply == true }}
         run: |
           if [[ "$APPLY" == true ]]; then
-            python scripts/cleanup_ci_cache.py --apply
+            python -m scripts.ci.cleanup_ci_cache --apply
           else
-            python scripts/cleanup_ci_cache.py
+            python -m scripts.ci.cleanup_ci_cache
           fi

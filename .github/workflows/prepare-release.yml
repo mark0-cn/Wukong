@@ -58,13 +58,13 @@ jobs:
           python-version: '3.12'
       - name: Synchronize versions and validate
         run: |
-          python scripts/release.py bump --tag "$RELEASE_TAG"
+          python -m scripts.release.cli bump --tag "$RELEASE_TAG"
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             echo "Tag already exists: $RELEASE_TAG" >&2
             exit 1
           fi
-          python scripts/release.py check --tag "$RELEASE_TAG"
-          python -m unittest discover -s scripts -p 'test_*.py' -v
+          python -m scripts.release.cli check --tag "$RELEASE_TAG"
+          python -m unittest discover -s tests/automation -p 'test_*.py' -v
           git diff --check
           {
             echo "## Prepare $RELEASE_TAG"

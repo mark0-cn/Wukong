@@ -2,7 +2,7 @@
 //!
 //! Every test here is `#[ignore]`d and demands a live configured worker: set
 //! `RE_AGENT_TEST_DOCKER_CONTAINER` to a running worker container (see
-//! `workers/runtime/README.md` and `scripts/start-worker.ps1`), then run with
+//! `workers/runtime/README.md` and `scripts/dev/start-worker.ps1`), then run with
 //! `cargo test --test runtime_adapters -- --ignored`. They exercise the real
 //! GDB/MI bridge, crash replay/minimization, AFL++ QEMU campaigns and the angr
 //! solver against a freshly compiled fixture. No test substitutes a mock for

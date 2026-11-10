@@ -52,12 +52,12 @@ API key 内容不写入 TOML。Windows 下优先读取进程环境变量；缺�
 
 ### Windows 发布与启动
 
-若构建目录带有 Low 完整性标签，EXE 会继承该标签，启动后可能无法访问 Docker Desktop 的命名管道。可使用 [发布脚本](../../scripts/publish-gui.ps1) 将程序复制到工作区之外的普通应用目录，并生成指向所选配置文件的快捷方式。
+若构建目录带有 Low 完整性标签，EXE 会继承该标签，启动后可能无法访问 Docker Desktop 的命名管道。可使用 [发布脚本](../../scripts/dev/publish-gui.ps1) 将程序复制到工作区之外的普通应用目录，并生成指向所选配置文件的快捷方式。
 
 在仓库根目录运行，以下示例使用快速开始生成的 release 程序与根目录配置：
 
 ```powershell
-.\scripts\publish-gui.ps1 -Destination D:\re-agent-bin\desktop-gui -BinaryPath .\target\release\re-agent.exe -ConfigPath .\re-agent.toml
+.\scripts\dev\publish-gui.ps1 -Destination D:\re-agent-bin\desktop-gui -BinaryPath .\target\release\re-agent.exe -ConfigPath .\re-agent.toml
 ```
 
 此后使用发布目录中的 `RE Agent.lnk` 启动。配置仍保存到指定的原始文件；脚本不修改工作区或 Docker 权限。重新构建后，关闭旧窗口并再次运行脚本即可更新。

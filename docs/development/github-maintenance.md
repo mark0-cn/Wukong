@@ -53,7 +53,7 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 未开 PR 的分支可手动启动 CI；版本准备工作流使用发布 App 创建 PR，由原生 PR 事件启动完整 CI。
 PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
 
-PR 使用 `scripts/ci_scope.py` 选择检查：仅 README/docs Markdown 改动执行轻量检查；
+PR 使用 `scripts/ci/ci_scope.py` 选择检查：仅 README/docs Markdown 改动执行轻量检查；
 `ui/` 增加前端检查；`workers/runtime/`、`fixtures/analysis/` 增加 Linux 测试。
 Rust、公共脚本、锁文件、工作流、未知路径或版本准备 PR 都执行全量检查。
 重命名同时检查旧路径和新路径；计算范围失败直接阻止 CI 通过。

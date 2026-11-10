@@ -171,7 +171,7 @@ re-agent verify-bundle ./reports/analysis-02
 执行工具默认关闭。启用 Docker 或 SSH worker 后，可使用调试、模糊测试、崩溃重放和独立验证。Windows Docker Desktop 可在仓库根目录运行：
 
 ```powershell
-.\scripts\start-worker.ps1
+.\scripts\dev\start-worker.ps1
 ```
 
 脚本构建 worker 镜像，创建独立容器与持久化卷。随后修改 `re-agent.toml` 中的 `[runtime]`：

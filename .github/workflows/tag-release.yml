@@ -49,7 +49,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CI_RUN_ID: ${{ github.event.workflow_run.id || inputs.ci_run_id }}
-        run: python scripts/tag_release.py discover --run-id "$CI_RUN_ID"
+        run: python -m scripts.release.tag_release discover --run-id "$CI_RUN_ID"
       - name: Require release App configuration
         if: steps.candidate.outputs.eligible == 'true' && github.event_name == 'workflow_run'
         env:
@@ -81,7 +81,7 @@ jobs:
           gh auth setup-git
           git config user.name "$APP_SLUG[bot]"
           git config user.email "$APP_SLUG[bot]@users.noreply.github.com"
-          result=$(python scripts/tag_release.py push --tag "$RELEASE_TAG" --sha "$MERGE_SHA")
+          result=$(python -m scripts.release.tag_release push --tag "$RELEASE_TAG" --sha "$MERGE_SHA")
           echo "Tag $RELEASE_TAG: $result at $MERGE_SHA. New App-pushed tags trigger Build and Publish." >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize manual inspection
         if: github.event_name == 'workflow_dispatch'

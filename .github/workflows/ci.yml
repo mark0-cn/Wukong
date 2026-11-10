@@ -43,7 +43,7 @@ jobs:
         id: scope
         env:
           BUILD_RELEASE_CLIENTS: ${{ inputs.build_release_clients || false }}
-        run: python scripts/ci_scope.py
+        run: python -m scripts.ci.ci_scope
 
   windows:
     needs: changes
@@ -78,12 +78,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
       - name: Version and release tooling tests
         run: |
-          python scripts/release.py check
+          python -m scripts.release.cli check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python -m unittest discover -s scripts -p 'test_*.py' -v
+          python -m unittest discover -s tests/automation -p 'test_*.py' -v
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ./scripts/test-online-package.ps1
-          ./scripts/test-installer.ps1
+          ./tests/automation/test-online-package.ps1
+          ./tests/automation/test-installer.ps1
       - name: Frontend
         if: needs.changes.outputs.frontend == 'true'
         run: |
@@ -125,7 +125,7 @@ jobs:
           sudo apt-get install -y gdb patchelf gcc-multilib libwayland-dev libxkbcommon-dev
           python -m pip install -r workers/runtime/requirements.txt pyelftools
           python -m compileall -q workers/runtime scripts
-          python -m unittest discover -s scripts -p 'test_*.py' -v
+          python -m unittest discover -s tests/automation -p 'test_*.py' -v
           python -m unittest discover -s workers/runtime -p 'test_*.py' -v
           python fixtures/analysis/test_analysis.py
           python fixtures/analysis/test_compare_runs.py
@@ -158,10 +158,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python scripts/actions-summary.py --kind ci
+        run: python -m scripts.ci.actions_summary --kind ci
       - name: Require every selected check to pass
         if: always()
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          python -c 'import json, os, sys; sys.path.insert(0, "scripts"); from ci_scope import checks_passed; sys.exit(0 if checks_passed(json.loads(os.environ["NEEDS_JSON"])) else 1)'
+          python -c 'import json, os, sys; from scripts.ci.ci_scope import checks_passed; sys.exit(0 if checks_passed(json.loads(os.environ["NEEDS_JSON"])) else 1)'
