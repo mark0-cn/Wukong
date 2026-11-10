@@ -48,7 +48,11 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
     failed = any(v["result"] in {"failure", "cancelled"} for v in needs.values())
     if kind == "release":
         passed = all(needs.get(n, {}).get("result") == "success" for n in
-                     ("metadata", "checks", "windows-client", "linux-client", "image", "acceptance", "package"))
+                     ("metadata", "checks", "image", "acceptance", "package"))
+        metadata = needs.get("metadata", {}).get("outputs", {})
+        for target in ("windows", "linux"):
+            result = needs.get(target + "-client", {}).get("result")
+            passed = passed and (result == "success" or (result == "skipped" and bool(metadata.get(target + "_run"))))
         if context.get("event") == "push":
             passed = passed and needs.get("publish", {}).get("result") == "success"
     else:
@@ -82,6 +86,11 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         validation = read(directory / "validation/validation-summary.json") or read(directory / "release/validation-summary.json")
         image = read(directory / "validation/image.json")
         metadata = needs.get("metadata", {}).get("outputs", {})
+        lines += ["### 检查与构建复用", ""]
+        for key, label in (("ci_run", "完整 master CI"), ("windows_run", "Windows 客户端"), ("linux_run", "Linux 验收客户端")):
+            source = metadata.get(key)
+            lines.append(f"- {label}: " + (f"[复用同一提交的运行 #{cell(source)}](https://github.com/{context['repository']}/actions/runs/{source})" if source else "本次执行"))
+        lines.append("")
         digest = needs.get("image", {}).get("outputs", {}).get("digest")
         image_ref = manifest.get("image") if manifest else None
         if not image_ref and image:
@@ -111,7 +120,7 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         else:
             lines.append("- 正式发布未成功完成；失败时可能留有草稿或部分发布结果，请查看 publish 日志。")
     lines += ["", "### 下载", ""]
-    useful = [a for a in artifacts if a["name"] in {"online-release", "image-validation", "windows-client"} and not a.get("expired")]
+    useful = [a for a in artifacts if a["name"] in {"online-release", "image-validation", "windows-client-v1", "linux-acceptance-client-v1"} and not a.get("expired")]
     for artifact in useful:
         url = f"https://github.com/{context['repository']}/actions/runs/{context['run_id']}/artifacts/{artifact['id']}"
         lines.append(f"- [{cell(artifact['name'])}]({url}) — {artifact['size_in_bytes'] / (1024 ** 2):.2f} MiB; expires {cell(artifact.get('expires_at', 'unknown'))}")
