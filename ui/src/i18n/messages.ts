@@ -208,6 +208,11 @@ export interface Messages {
   'settings-validating-and-saving-please-wait': undefined;
   'settings-workspace-configuration-changed-reload-settings-your-draft': undefined;
   'settings-workspace-settings': undefined;
+  'severity-critical': undefined;
+  'severity-high': undefined;
+  'severity-info': undefined;
+  'severity-low': undefined;
+  'severity-medium': undefined;
   'system-already-up-to-date': undefined;
   'system-an-operation-is-still-running-wait-for-it': undefined;
   'system-an-update-already-needs-recovery': undefined;
