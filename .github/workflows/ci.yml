@@ -17,7 +17,27 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.scope.outputs.rust }}
+      frontend: ${{ steps.scope.outputs.frontend }}
+      linux: ${{ steps.scope.outputs.linux }}
+      reason: ${{ steps.scope.outputs.reason }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Select checks (full for master, releases and manual runs)
+        id: scope
+        run: python scripts/ci_scope.py
+
   windows:
+    needs: changes
     runs-on: windows-2025
     timeout-minutes: 90
     defaults:
@@ -26,6 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: needs.changes.outputs.frontend == 'true'
         with:
           node-version: '22'
           cache: npm
@@ -33,6 +54,7 @@ jobs:
         with:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        if: needs.changes.outputs.rust == 'true'
         id: rust-cache
         with:
           shared-key: windows-checks-v2
@@ -46,6 +68,7 @@ jobs:
           ./scripts/test-online-package.ps1
           ./scripts/test-installer.ps1
       - name: Frontend
+        if: needs.changes.outputs.frontend == 'true'
         run: |
           npm ci
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -54,6 +77,7 @@ jobs:
           npm run build
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Rust checks
+        if: needs.changes.outputs.rust == 'true'
         run: |
           cargo fmt --all -- --check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -63,6 +87,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
   linux:
+    needs: changes
+    if: needs.changes.outputs.linux == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -83,7 +109,7 @@ jobs:
 
   summary:
     if: always()
-    needs: [windows, linux]
+    needs: [changes, windows, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -96,3 +122,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python scripts/actions-summary.py --kind ci
+      - name: Require every selected check to pass
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python -c 'import json, os, sys; sys.path.insert(0, "scripts"); from ci_scope import checks_passed; sys.exit(0 if checks_passed(json.loads(os.environ["NEEDS_JSON"])) else 1)'
