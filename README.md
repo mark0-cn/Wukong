@@ -52,6 +52,8 @@ Wukong（悟空）使用 Rust 与 Rig 构建分析核心，通过 Tauri + React 
 
 ## 快速开始
 
+普通用户从 [GitHub Releases](https://github.com/mark0-cn/Wukong/releases) 下载 Windows `-setup.exe` 或 Linux `.AppImage`，打开后通过环境向导准备 Docker 工具。后续客户端与镜像更新在“更新与环境”中完成，详见[在线安装](docs/user/online-install.md)。以下为源码构建步骤。
+
 ### 1. 准备环境
 
 - **Rust 1.97.1+**。
