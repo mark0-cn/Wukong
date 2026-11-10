@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type EventCallback } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -9,6 +10,6 @@ export const api = <K extends keyof Commands>(command: K, ...args: Commands[K]['
 export const subscribe = <K extends keyof Events>(event: K, callback: EventCallback<Events[K]>) => listen<Events[K]>(event, callback);
 export const openLink = (url: string) => {
   if (/^https?:\/\//i.test(url)) return openUrl(url);
-  return Promise.reject(new Error('仅支持打开 HTTP 或 HTTPS 链接。'));
+  return Promise.reject(new Error(t('workspace-only-http-and-https-links-can-be')));
 };
 export const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);

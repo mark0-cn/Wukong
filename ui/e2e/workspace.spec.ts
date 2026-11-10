@@ -5,7 +5,7 @@ import { agents, budget, finding, host, tool, workspace } from '../src/test/fixt
 
 async function mockDesktop(page: Page) {
   await page.addInitScript(({ data, host, tool, finding }) => {
-    const state = { data, host, requests: [] as { command: string; args: Record<string, any> }[], revision: 1, sendDelay: 0 };
+    const state = { data, host, preferences: { ui_language: 'zh-CN', output_language: 'auto', system_locale: 'en-US' }, requests: [] as { command: string; args: Record<string, any> }[], revision: 1, sendDelay: 0 };
     const callbacks = new Map<number, (value: unknown) => void>();
     const listeners = new Map<string, number[]>();
     let next = 0;
@@ -16,6 +16,8 @@ async function mockDesktop(page: Page) {
       unregisterCallback: (id: number) => callbacks.delete(id),
       invoke: async (command: string, args: Record<string, any> = {}) => {
         state.requests.push({ command, args });
+        if (command === 'preferences_read') return JSON.parse(sessionStorage.getItem('test-preferences') ?? 'null') ?? state.preferences;
+        if (command === 'preferences_save') { state.preferences = { ...state.preferences, ...args.preferences }; sessionStorage.setItem('test-preferences', JSON.stringify(state.preferences)); return state.preferences; }
         if (command === 'update_action') return { version: '0.2.0', phase: 'idle', message: '当前工具环境已就绪', available: '0.2.1', notes: '修复工具兼容性', downloaded: 0, total: null, prepared: null, recovery: null, needs_setup: false, pending: false };
         if (command === 'plugin:event|listen') { listeners.set(args.event, [...(listeners.get(args.event) ?? []), args.handler]); return args.handler; }
         if (command === 'plugin:event|unlisten') { listeners.set(args.event, (listeners.get(args.event) ?? []).filter(id => id !== args.eventId)); return; }
@@ -49,6 +51,43 @@ async function mockDesktop(page: Page) {
   }, { data: workspace, host, tool, finding });
 }
 test.beforeEach(async ({ page }) => { await mockDesktop(page); });
+
+test('language changes preserve active work, drafts and configuration identity', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('发送给 Agent 的消息').fill('keep this exact payload: 原始字节');
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByLabel('主模型', { exact: true }).fill('draft-model');
+  await page.getByLabel('界面语言', { exact: true }).selectOption('en-US');
+  await expect(page.getByRole('heading', { name: 'Workspace settings' })).toBeVisible();
+  await expect(page.getByLabel('Main model', { exact: true })).toHaveValue('draft-model');
+  await expect(page.getByLabel('Interface language')).toHaveValue('en-US');
+  await page.getByLabel('New task output language').selectOption('zh-CN');
+  await page.getByLabel('Close', { exact: true }).click();
+  await expect(page.getByLabel('Message to Agent')).toHaveValue('keep this exact payload: 原始字节');
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.lang)).toBe('en-US');
+  const state = await page.evaluate(() => (window as any).__desktopTest);
+  expect(state.host.epoch).toBe(host.epoch);
+  expect(state.requests.some((r: any) => ['pause_run', 'config_save', 'start_run', 'resume_run'].includes(r.command))).toBe(false);
+  expect(state.data.transcript).toEqual(workspace.transcript);
+  await page.getByRole('button', { name: 'Workspace settings', exact: true }).click();
+  await expect(page.getByLabel('Main model', { exact: true })).toHaveValue('draft-model');
+  await page.getByLabel('Interface language').selectOption('zh-CN');
+  await expect(page.getByLabel('主模型', { exact: true })).toHaveValue('draft-model');
+});
+
+test('English interface fits the minimum desktop and reload keeps language preference', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByLabel('界面语言').selectOption('en-US');
+  await page.getByLabel('Close', { exact: true }).click();
+  await page.reload();
+  await page.setViewportSize({ width: 1024, height: 680 });
+  await expect(page.getByRole('button', { name: /^New analysis/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: 'target/i18n-english-minimum.png' });
+});
 
 test('close requests use current draft state and preserve text when dismissed', async ({ page }) => {
   await page.goto('/');
