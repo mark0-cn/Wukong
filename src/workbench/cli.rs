@@ -23,6 +23,7 @@ pub enum EnvCommand {
     Rollback,
 }
 pub fn environment(config: &AppConfig, command: EnvCommand) -> Result<Value> {
+    let _maintenance = crate::updates::maintenance::assessment_guard()?;
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     match command {
@@ -92,6 +93,7 @@ pub enum ChallengeCommand {
     },
 }
 pub fn challenge(config: &AppConfig, command: ChallengeCommand) -> Result<Value> {
+    let _maintenance = crate::updates::maintenance::assessment_guard()?;
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     match command {

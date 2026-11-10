@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": { "installMode": "currentUser", "displayLanguageSelector": true, "languages": ["SimpChinese", "English"] },
+      "webviewInstallMode": { "type": "downloadBootstrapper" }
+    }
+  }
+}

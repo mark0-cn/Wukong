@@ -31,6 +31,13 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 pub enum Command {
+    /// Restore the last desktop installation without opening the webview.
+    RecoverUpdate,
+    /// Validate the signed desktop release and all installer files before publication.
+    VerifyUpdate {
+        #[arg(long)]
+        directory: PathBuf,
+    },
     /// Manage the portable tool environment on the Docker host.
     Env {
         #[command(subcommand)]
@@ -126,6 +133,21 @@ pub enum Command {
 
 pub async fn run(cli: Cli) -> Result<()> {
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
+    if matches!(command, Command::RecoverUpdate) {
+        return crate::updates::recovery::recover();
+    }
+    if let Command::VerifyUpdate { directory } = &command {
+        let manifest = crate::updates::manifest::Manifest::parse(
+            &std::fs::read(directory.join("latest.json"))?,
+            &std::fs::read_to_string(directory.join("latest.json.sig"))?,
+        )?;
+        for artifact in manifest.platforms.values() {
+            let filename = artifact.url.rsplit('/').next().unwrap();
+            crate::updates::manifest::verify_file(&directory.join(filename), artifact)?;
+        }
+        println!("Verified signed desktop release {}", manifest.version);
+        return Ok(());
+    }
     if let Command::Init { path } = &command {
         AppConfig::write_example(path)?;
         println!("{}", json!({"config":path}));
@@ -141,14 +163,17 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         return Ok(());
     }
-    // Desktop settings travel with the executable. CLI keeps its working-directory
-    // convention, and an explicit --config always takes precedence.
-    let path = config_path(
+    // Explicit/portable configurations remain supported. New desktop installs
+    // use writable per-user storage, independent of installer replacement.
+    let mut path = config_path(
         cli.config.clone(),
         matches!(command, Command::Gui { .. }),
         &std::env::current_dir()?,
         std::env::current_exe().ok().as_deref(),
     );
+    if path.is_none() && matches!(command, Command::Gui { .. }) {
+        path = Some(crate::desktop::paths::default_config()?);
+    }
     let mut config = AppConfig::load(path.as_deref())?;
     if let Some(state) = &cli.state {
         config.state_dir = state.clone();
@@ -174,7 +199,9 @@ pub async fn run(cli: Cli) -> Result<()> {
     let store = Store::open(&config.state_dir)?;
     let service = AssessmentService::new(config.clone(), store.clone());
     match command {
-        Command::Init { .. }
+        Command::VerifyUpdate { .. }
+        | Command::RecoverUpdate
+        | Command::Init { .. }
         | Command::Inspect { .. }
         | Command::ToolCatalog
         | Command::Env { .. }

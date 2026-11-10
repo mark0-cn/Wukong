@@ -18,3 +18,8 @@
 .workbench-controls label { display: grid; gap: 6px; }
 .workbench-controls .header-actions { flex-wrap: wrap; justify-content: flex-start; }
 .workbench-result { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+/* Desktop lifecycle controls share the workbench's spacing and color tokens. */
+.update-summary { display: flex; gap: 3rem; margin: 1rem 0; }
+.update-summary h3 { margin: .35rem 0; }
+.setup-steps { padding-left: 1.5rem; line-height: 1.9; }
+progress { width: 100%; accent-color: #efc267; }

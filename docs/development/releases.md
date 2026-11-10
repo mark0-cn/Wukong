@@ -1,6 +1,6 @@
 # 在线发布与 GitHub Actions
 
-仓库：`mark0-cn/Wukong`。公开镜像：`hlmark0/wukong`。只发布 Windows x64 在线安装包，镜像平台为 linux/amd64。
+仓库：`mark0-cn/Wukong`。公开镜像：`hlmark0/wukong`。发布 Windows x64 NSIS 安装 EXE 和 Linux x64 AppImage；镜像平台为 linux/amd64。
 
 ## 仓库配置
 
@@ -11,6 +11,7 @@ Settings → Secrets and variables → Actions：
 | Variable | DOCKERHUB_USERNAME | hlmark0 |
 | Variable | DOCKERHUB_NAMESPACE | hlmark0 |
 | Secret | DOCKERHUB_TOKEN | Docker Hub 仓库 Read/Write PAT，不需要 Delete |
+| Secret | TAURI_SIGNING_PRIVATE_KEY | Tauri 更新签名私钥内容，仅可信发布工作流使用 |
 | Variable | RELEASE_APP_ID | 专用发布 GitHub App 的 App ID |
 | Secret | RELEASE_APP_PRIVATE_KEY | 该 App 生成的 PEM 私钥全文 |
 
@@ -32,34 +33,25 @@ App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发
 
 本项目 GitHub 仓库公开，标准托管 runner 的运行时间免费；镜像首次无缓存构建较慢。缓存写入同一公开 Docker Hub 仓库的 `buildcache` 标签。只保留客户端和报告类 Actions artifacts，默认 7–14 天过期。
 
-## 本地一条 Cargo 命令打包
+## 本地生成原生安装文件
 
-在仓库根目录执行：
+在 Windows x64 或 Linux x64 的源码目录执行 `cargo package-local`。
+入口检查源码已提交、工作区干净和构建工具，再调用 Tauri 生成当前平台的 NSIS EXE 或 AppImage，输出到 `target/local-installers/`。
+不下载工具镜像、不发布版本。首次运行客户端时从对应正式 Release 获取签名环境清单，所以未发布版本的本地构建不能通过在线向导获取该版本环境。
 
-```powershell
-cargo package-local
-```
-
-入口使用独立的轻量 Rust launcher 调用现有 Python 发布工具：读取项目版本，下载对应 GitHub Release 的镜像元数据，再依次执行 `npm ci`、前端构建、Windows x64 MSVC Release 编译及在线 ZIP 打包。不会创建 tag、推送镜像或发布 GitHub Release。
-
-前提是 Windows x64，已安装项目固定版本的 Rust、MSVC C++ 编译工具、Node.js/npm 和 Python 3.11+。源码必须已提交且工作区干净。默认从 `mark0-cn/Wukong` 的 `v<项目版本>` Release 下载 `release.json` 和 `SHA256SUMS`，校验后在内存中转换为镜像元数据，无需手动准备 `image.json`。只使用精确版本，不回退到 `latest`，也不依赖 Actions artifact 或 GitHub API；公开附件无需登录。可用 `--repository OWNER/REPO` 指定自己的公开发布仓库。
-
-Release 必须已经发布，清单中的版本、平台、运行协议及数据格式必须匹配。**本地 HEAD 可以晚于镜像的源码提交**，只要项目版本号对应同一个 Release，就复用该 Release 固定的镜像 digest。输出清单用 `source_revision` 记录本地客户端提交，用 `image_source_revision` 记录镜像原始提交，并用 `image_release_version` 记录所用 Release 版本；不会把旧镜像标成由当前源码构建。正式 CI 发布及显式 `--image-metadata` 输入仍要求客户端和镜像同提交。首次发布仍通过现有 Release 流程构建和验收镜像。
-
-镜像由安装器按 digest 拉取，本地打包不会下载镜像本体。兼容 Release 中的 `wukong` 和历史 `re-agent-workbench` 仓库名；接受旧镜像身份不等于验证新版客户端与旧 worker 的运行兼容，安装时仍必须通过 doctor。尤其跨项目改名的旧镜像可能使用不同的 `/opt/...` 路径，本地打包本身不会改写镜像或做运行时适配。
-
-默认输出到新目录 `target/local-package/`，包含 `wukong-v<版本>-windows-amd64.zip`、`release.json` 和 `SHA256SUMS`。已有输出目录会拒绝覆盖，可以指定其他目录。参数路径均相对仓库根目录：
-
-```powershell
-cargo package-local --image-metadata target/validation/image.json --output target/packages/local-1
-cargo package-local --repository your-account/Wukong
+```sh
 cargo package-local --check
-cargo package-local --help
+cargo package-local --output target/installers/build-1
+cargo package-local --signed
 ```
 
-`--check` 会下载并验证对应 Release 的小型元数据，同时检查平台、版本、工作区和工具入口，不编译、不写安装包、不运行镜像验收。显式传入 `--image-metadata` 则使用本地文件并跳过下载；该文件仍须匹配源码提交。Release 未发布、附件缺失、校验失败或构建失败时立即停止，不自动切换版本。打包过程复用已验证的元数据快照，并在编译后再次检查源码状态。实际的镜像可拉取性由原验收及安装时的 digest 拉取验证。
+已有输出目录拒绝覆盖。`--check` 检查源码和工具入口，系统库及安装器工具由实际构建验证。
+`--signed` 需要 `TAURI_SIGNING_PRIVATE_KEY`；普通本地构建无需发布密钥。
+Windows 需要 MSVC、Rust、Node.js/npm、Python；Linux 还需要 Tauri WebKitGTK、GTK、AppIndicator、patchelf 等构建依赖。
+Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检查，不承诺覆盖所有发行版。
+旧 ZIP 包脚本保留用于开发夹具，正式流水线及 `cargo package-local` 不再以 ZIP 为用户安装入口。
 
-独立 launcher 的检查命令为 `cargo fmt --manifest-path xtask/Cargo.toml -- --check` 和 `cargo clippy --locked --manifest-path xtask/Cargo.toml --target-dir target/xtask -- -D warnings`。
+独立 launcher 检查：`cargo fmt --manifest-path xtask/Cargo.toml -- --check`。
 
 ## 日常 CI
 
@@ -102,7 +94,7 @@ tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `mas
 1. 校验版本与来源；查询同仓库、同 SHA 的成功 master push CI，核对当前尝试的 changes/windows/linux/summary 后复用结果。无合格记录或 API 查询失败时执行完整 CI。
 2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
 3. 新 runner 按 digest 拉取候选，运行网络隔离、固定目标转发、LaunchSpec、归档测试，以及 host CLI 的 doctor、题目导入/构建/提取/启动/连接、GDB 附加、更新回滚。
-4. 生成 Windows 在线 zip、release.json、SHA256SUMS、doctor.json、validation-summary.json。
+4. Windows 使用已校验客户端生成 NSIS EXE，Linux 构建 AppImage；签名并执行原生安装/启动检查。汇总两个平台文件，生成签名 `latest.json`、`release.json`、SHA256SUMS 与验收报告，再用 Rust 验证全部安装文件签名与哈希。
 5. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
 6. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
 
@@ -110,7 +102,7 @@ tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `mas
 
 完整重跑也可复用上一尝试中成功上传、尚未过期的客户端；其他同 SHA 的可信运行也可提供产物。仅接受当前所查询尝试中成功的构建 job，PR 产物不进入发布链。元数据不符、文件损坏会直接失败，不执行可疑客户端。产物过期、被删除或构建配方变化时需要重建；缓存只加速编译，不能替代这些校验。
 
-客户端和报告保留 14 天。客户端以低压缩级别上传；在线 ZIP 上传不再重复压缩。摘要只下载 `release-report` 小型元数据与验收报告，不下载完整安装包。运行名区分 CI、版本打 tag、正式发布与手动演练，摘要链接到实际复用的运行。
+客户端和报告保留 14 天。客户端以低压缩级别上传；原生安装文件不再重复压缩。摘要只下载 `release-report` 小型元数据与验收报告，不下载完整安装包。运行名区分 CI、版本打 tag、正式发布与手动演练，摘要链接到实际复用的运行。
 
 发布使用全局 concurrency 锁，避免并行更改 latest。GitHub concurrency 对待运行任务不保证 FIFO；不要连续推送多个待发布 tag，若某次等待任务被替换，手动重跑该 tag 对应的工作流。
 
@@ -139,10 +131,19 @@ Actions → Tag Merged Release → Run workflow，选择 `master`，填写一个
 - 镜像已存在但不匹配：不删除或覆盖已有版本，改发新版本。
 - 验收失败：查看 `image-validation` artifact 的 doctor 与失败报告，不升级 latest。
 
-候选标签与 buildcache 共用私有镜像仓库，需按空间情况定期清理无引用的旧候选。CI Token 没有 Delete 权限，因此工作流不删除仓库标签。正式版本及用户正在使用的 digest 应保留。
+候选标签与 buildcache 共用公开镜像仓库，需按空间情况定期清理无引用的旧候选。CI Token 没有 Delete 权限，因此工作流不删除仓库标签。正式版本及用户正在使用的 digest 应保留。
 
 ## 验收边界
 
 Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改拒绝，并用独立进程夹具验证首次安装、doctor 失败后的恢复、升级成功和手动回滚；这些安装器事务测试不调用真实 Docker。Linux runner 执行真实 Docker 集成测试。标准 Windows runner 不等同于用户 Docker Desktop + WSL2 桌面，不能声称完成了该环境的全自动端到端验收。首次及关键安装器改动应在真实 Windows 桌面补充安装/升级确认。当前 Windows 文件未做 Authenticode 签名。
 
 用户安装方法见 [在线安装](../user/online-install.md)。发布包不包含镜像 tar、模型密钥、用户配置或题目数据；原有工作区导入/导出功能与 CI 在线发行独立。
+
+## 应用内更新信任与恢复
+
+客户端读取正式 Release 的 `latest.json` 和 `latest.json.sig`，先验证清单签名，再读取版本、平台、镜像 digest 与兼容性。
+下载 EXE/AppImage 后再次验证文件签名、SHA256 与大小；不使用 Docker `latest` 决定运行环境。
+公钥位于 `src/desktop/update-public.key` 和 Tauri 配置，必须保持一致。私钥存于 Actions Secret，并由管理员在仓库外备份；丢失密钥不能通过重新生成密钥为已有客户端无缝更新。
+更新签名不替代 Windows Authenticode；当前安装文件没有系统代码签名。
+
+更新的检查、准备、切换和确认规则见[桌面更新设计](desktop-updates.md)。手动演练签署候选产物，但不修改正式 Release 或应用稳定更新入口。

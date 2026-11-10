@@ -97,7 +97,7 @@ def publish(directory, tag):
     else:
         notes = directory.parent / "release-notes.md"
         generated = json.loads(run(["gh", "api", f"repos/{repository}/releases/generate-notes", "-f", "tag_name=" + tag, "-f", "target_commitish=" + revision]))
-        notes.write_text(generated["body"] + f'\n\n## Online installation\n\nPrivate tool image: `{manifest["image"]}`. Authenticate to Docker Hub before installation. Download the Windows zip, extract it, then run `install-workbench.ps1`.\n\nChecks: Linux tool/container/debugger acceptance passed; Windows Docker Desktop end-to-end is not covered by hosted runners.\n', encoding="utf-8")
+        notes.write_text(generated["body"] + f'\n\n## Install Wukong\n\nDownload the Windows `-setup.exe` or Linux `.AppImage`. Open Wukong and use the environment wizard to prepare Docker tools. Future client and image updates are available in the update center.\n\nPublic tool image: `{manifest["image"]}`. No Docker Hub account is required for normal pulls.\n\nChecks: native installer smoke tests and Linux tool/container/debugger acceptance passed; full Windows Docker Desktop end-to-end is not covered by hosted runners.\n', encoding="utf-8")
         if not existing:
             run(["gh", "release", "create", tag, "--repo", repository, "--verify-tag", "--draft", "--title", tag, "--notes-file", str(notes), "--target", revision])
         run(["gh", "release", "upload", tag, "--repo", repository, "--clobber", *map(str, sorted(directory.iterdir()))])
