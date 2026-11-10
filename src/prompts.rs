@@ -181,6 +181,30 @@ pub(crate) static REGISTRY: &[Entry] = &[
         "Route requested pwn work to heap, ROP or format-string methods and preserve shared evidence requirements."
     ),
     entry!(
+        exec_sinks,
+        Kind::Method,
+        "methods",
+        "Reach an existing command-execution sink (system/popen/execve with a tainted argument) without memory corruption."
+    ),
+    entry!(
+        jit_dump,
+        Kind::Method,
+        "methods",
+        "Dump runtime-generated code at its transfer point and analyze the generated buffer."
+    ),
+    entry!(
+        interpreter,
+        Kind::Method,
+        "methods",
+        "Reuse an embedded interpreter's own primitives (indexing, traps, stack operations, leaks) as exploit primitives."
+    ),
+    entry!(
+        elf_recovery,
+        Kind::Method,
+        "methods",
+        "Recover malformed or hand-crafted ELF files: raw header audit, patched working copies and per-entry analysis."
+    ),
+    entry!(
         tooling,
         Kind::Support,
         "support",
