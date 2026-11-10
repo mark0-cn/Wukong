@@ -61,6 +61,14 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::SeccompAnalyzeArgs>(
+            "seccomp_analyze",
+            "Decode an in-run raw classic-BPF seccomp filter into instructions, branch targets and actions; optionally evaluate concrete architecture/syscall/argument/IP probes. An artifact is not a confirmed installed policy, and probes are not an exhaustive allowlist.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_seccomp_analyze,
+            Visibility::Child,
+        ),
         spec::<args::MitigationProfileArgs>(
             "mitigation_profile",
             "Separate binary declarations, worker environment support and owned process/thread protection observations; optional address checks the actual containing mapping.",

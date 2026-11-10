@@ -58,6 +58,7 @@
 | `runtime_doctor` | 全部 | 否 | Inspect the configured worker's real platform, versions and available capabilities. |
 | `runtime_prepare` | analyst / verifier | 是 | Create an immutable execution copy of supplied target, libc and loader and return direct launch argv. Requires all three ELF files with matching architecture. Does not execute or modify originals; verify actual mappings separately. |
 | `runtime_profile` | analyst / verifier | 否 | Inspect SHA256, ELF Build ID and architecture of in-run target/libc/loader files. Optionally observe actual mappings of an owned live debugger session. File candidates never imply a confirmed mapped runtime. |
+| `seccomp_analyze` | analyst / verifier | 否 | Decode an in-run raw classic-BPF seccomp filter into instructions, branch targets and actions; optionally evaluate concrete architecture/syscall/argument/IP probes. An artifact is not a confirmed installed policy, and probes are not an exhaustive allowlist. |
 | `send_message_to_agent` | 全部 | 是 | Queue information, a question, reply, result or blocked notice. Information does not interrupt waits. Only follow_up_agent reopens completed work. Queued/included is not proof of processing. |
 | `stage_target` | analyst / verifier | 是 | Copy the run's SHA256-verified original target into the worker's immutable files area. |
 | `stop_agent` | 全部 | 是 | Stop yourself or your descendants, with a recorded reason. |
