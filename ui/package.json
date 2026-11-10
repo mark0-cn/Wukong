@@ -7,7 +7,10 @@
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc -b && vite build",
     "check": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prebuild": "node ../scripts/check-locales.mjs",
+    "pretest": "node ../scripts/check-locales.mjs",
+    "precheck": "node ../scripts/check-locales.mjs"
   },
   "dependencies": {
     "@assistant-ui/react": "0.15.33",

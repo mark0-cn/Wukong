@@ -11,7 +11,9 @@
     "test:e2e": "playwright test --config ui/playwright.config.ts",
     "check": "npm run check --workspace ui",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "check:locales": "node scripts/check-locales.mjs",
+    "pretest:e2e": "node scripts/check-locales.mjs"
   },
   "devDependencies": {
     "@fluent/syntax": "^0.19.0",

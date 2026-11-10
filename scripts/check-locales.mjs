@@ -4,23 +4,26 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const read = locale => {
   const messages = new Map();
+  const references = [];
   for (const file of readdirSync(`${root}locales/${locale}`).filter(f => f.endsWith('.ftl'))) {
     const ast = parse(readFileSync(`${root}locales/${locale}/${file}`, 'utf8'));
     for (const entry of ast.body) {
       if (entry.type === 'Junk') throw Error(`${locale}/${file}: ${entry.annotations.map(a => a.message)}`);
       if (entry.type !== 'Message' && entry.type !== 'Term') continue;
-      const id = entry.id.name;
+      const id = (entry.type === 'Term' ? '-' : '') + entry.id.name;
       if (messages.has(id)) throw Error(`${locale}: duplicate ${id}`);
       const variables = new Set();
       const walk = node => {
         if (!node || typeof node !== 'object') return;
         if (node.type === 'VariableReference') variables.add(node.id.name);
+        if (node.type === 'MessageReference' || node.type === 'TermReference') references.push({ from: id, to: (node.type === 'TermReference' ? '-' : '') + node.id.name });
         for (const value of Object.values(node)) if (Array.isArray(value)) value.forEach(walk); else walk(value);
       };
       walk(entry);
       messages.set(id, [...variables].sort());
     }
   }
+  for (const { from, to } of references) if (!messages.has(to)) throw Error(`${locale}: ${from} references missing ${to}`);
   return Object.fromEntries([...messages].sort(([a], [b]) => a.localeCompare(b, 'en')));
 };
 const en = read('en-US'), zh = read('zh-CN');

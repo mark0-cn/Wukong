@@ -55,6 +55,16 @@ test.beforeEach(async ({ page }) => { await mockDesktop(page); });
 test('language changes preserve active work, drafts and configuration identity', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('发送给 Agent 的消息').fill('keep this exact payload: 原始字节');
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__;
+    const invoke = native.invoke;
+    native.invoke = (command: string, args: unknown) => command === 'export_report'
+      ? Promise.reject({ code: 'error-operation', args: {}, detail: 'original diagnostic: 0x4141 原始字节' }) : invoke(command, args);
+    (window as any).__desktopTest.host.notice = { id: 123, error: false, message: { code: 'system-an-update-is-available', args: {} } };
+    (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await page.getByRole('button', { name: '导出', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('操作未能完成');
   await page.getByRole('button', { name: '工作区设置', exact: true }).click();
   await page.getByLabel('主模型', { exact: true }).fill('draft-model');
   await page.getByLabel('界面语言', { exact: true }).selectOption('en-US');
@@ -66,6 +76,9 @@ test('language changes preserve active work, drafts and configuration identity',
   await expect(page.getByLabel('Message to Agent')).toHaveValue('keep this exact payload: 原始字节');
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
   await expect(page.getByText('Trace cross-references', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('The operation could not be completed.');
+  await expect(page.getByRole('alert')).toContainText('original diagnostic: 0x4141 原始字节');
+  await expect(page.getByText('An update is available.', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.lang)).toBe('en-US');
   const state = await page.evaluate(() => (window as any).__desktopTest);
   expect(state.host.epoch).toBe(host.epoch);
@@ -83,7 +96,7 @@ test('English interface fits the minimum desktop and reload keeps language prefe
   await page.getByLabel('界面语言').selectOption('en-US');
   await page.getByLabel('Close', { exact: true }).click();
   await page.reload();
-  await page.setViewportSize({ width: 1024, height: 680 });
+  await page.setViewportSize({ width: 860, height: 600 });
   await expect(page.getByRole('button', { name: /^New analysis/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
