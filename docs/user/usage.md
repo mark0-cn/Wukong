@@ -58,6 +58,8 @@ API key 内容不写入 TOML。Windows 下优先读取进程环境变量；缺�
 
 ### Windows 发布与启动
 
+普通安装使用正式 Release 的 `-setup.exe`，安装与更新说明见[在线安装](online-install.md)。以下内容仅针对从源码构建后手工部署桌面程序。
+
 若构建目录带有 Low 完整性标签，EXE 会继承该标签，启动后可能无法访问 Docker Desktop 的命名管道。可使用 [发布脚本](../../scripts/dev/publish-gui.ps1) 将程序复制到工作区之外的普通应用目录，并生成指向所选配置文件的快捷方式。
 
 在仓库根目录运行，以下示例使用快速开始生成的 release 程序与根目录配置：
@@ -77,8 +79,11 @@ API key 内容不写入 TOML。Windows 下优先读取进程环境变量；缺�
 | 入口 | 查找顺序 |
 | --- | --- |
 | 显式指定 `--config PATH` | 始终优先使用指定文件 |
-| 桌面入口 | 可执行文件同目录的 `wukong.toml` → 当前目录 |
+| 桌面入口 | 可执行文件同目录的 `wukong.toml` → 当前目录 → 用户数据目录中的默认配置 |
 | CLI 命令 | 当前目录的 `wukong.toml` → 可执行文件同目录 |
+
+桌面默认配置保存在 Windows `%LOCALAPPDATA%/WukongData/wukong.toml`，Linux 为 `$XDG_DATA_HOME/Wukong/wukong.toml`（默认 `~/.local/share/Wukong/wukong.toml`）；首次启动时按需创建。
+任务数据与更新缓存可在“更新与环境 → 配置存储目录”切换，详情见[在线安装](online-install.md#更新)。
 
 ```sh
 wukong --config ./wukong.toml --state ./saved-state gui
