@@ -1,86 +1,27 @@
-/* Workbench layout: navigation, analysis, and a resizable inspector. */
-.workspace-split { width: 100%; height: 100%; min-height: 0; flex: 1; }
-.split-content { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
-.workspace-separator { flex: 0 0 4px; background: var(--border); transition: background .12s; }
-.workspace-separator:hover, .workspace-separator:focus-visible { background: var(--accent); outline: none; }
-.sidebar, .agents-panel { flex: 1; width: 100%; height: 100%; border: 0; }
-.sidebar { padding: 20px 12px 10px; }
-.brand { padding-bottom: 24px; }
-.new-task { margin-bottom: 22px; }
-.run-title strong { max-width: none; flex: 1; min-width: 0; }
-.run-card { padding: 10px; }
-.sidebar-footer button { padding: 10px 8px; }
-.workspace-path { padding: 10px 8px 4px; }
-.workspace-header { min-height: 72px; padding: 12px 22px; gap: 12px; }
-.workspace-title { flex: 1; }
-.workspace-title h1 { font-size: 19px; max-width: none; min-width: 0; }
-.workspace-title>div { gap: 10px; }
-.breadcrumb { margin-bottom: 5px; }
-.header-actions { flex-wrap: wrap; }
-.workspace-header>.header-actions { flex-wrap: nowrap; }
-.focus-toggle[aria-pressed=true] { color: var(--accent); background: var(--accent-surface); }
-.workspace-tabs { min-height: 42px; padding: 0 24px; gap: 22px; }
-.workspace-tabs>button { padding: 11px 0 9px; font-size: 13px; }
-.workspace-tabs>.agents-toggle { font-size: 12px; }
-.agents-toggle.enabled { color: var(--accent); }
-.work-status { min-height: 52px; padding: 8px 24px; gap: 10px; }
-.work-status-icon { width: 26px; height: 26px; border: 0; }
-.work-status[data-status=completed] .work-status-icon { color: var(--success); background: var(--success-bg); }
-.work-error .work-status-icon { color: var(--error); background: var(--error-bg); }
-.work-status strong { font-size: 13px; }
-.work-status p { margin-top: 2px; max-width: 100%; }
-.budget-compact { gap: 3px; }
-.primary-panel { width: 100%; height: 100%; container-type: inline-size; }
-.transcript { padding: 0 28px; }
-.transcript-inner { max-width: 880px; padding-top: 24px; }
-.message-content { padding-left: 0; }
-.message-heading { margin-bottom: 10px; }
-.message-user .message-content>.markdown { background: var(--surface); }
-.tool-group { padding-left: 0; border: 0; margin-top: 18px; }
-.tool-step { border: 1px solid var(--border); background: var(--surface); margin-bottom: 8px; border-radius: 7px; }
-.tool-trigger { padding: 9px 11px; }
-.tool-label strong { font-size: 13px; }
-.tool-purpose, .tool-summary { margin-left: 33px; margin-right: 12px; }
-.tool-summary { margin-bottom: 10px; }
-.tool-details { margin: 0 10px 10px; border-color: var(--border); background: var(--field); }
-.composer-wrap { padding: 12px 28px 10px; }
-.composer, .composer-hint { max-width: 880px; }
-.composer { background: var(--surface); border-color: var(--border-strong); box-shadow: none; }
-.composer textarea { min-height: 68px; padding-top: 12px; }
-.composer-controls { flex-wrap: wrap; }
-.composer-hint { line-height: 1.5; }
-.agents-panel { padding: 18px 12px 12px; }
-.panel-heading { padding-bottom: 12px; }
-.panel-heading>span { margin-left: auto; }
-.agent-card { padding: 10px 8px; }
-.agent-card-name strong { font-size: 13px; }
-.agent-card p { margin: 7px 0; }
-.agent-inspector { max-height: 45%; }
-.workspace-footer { height: 30px; background: var(--sidebar); }
-.modal-wide { overflow: auto; }
-
-@container (max-width: 650px) {
-  .findings-page { flex-direction: column; }
-  .finding-list { flex: 0 0 auto; max-height: 190px; border-right: 0; border-bottom: 1px solid var(--border); }
-  .finding-list>input, .finding-list>select { width: calc(50% - 5px); }
-  .finding-list>select { margin-left: 10px; }
-  .finding-card { padding: 8px 10px; }
-  .finding-card>div { margin-top: 5px; }
-  .finding-detail-scroll { padding: 18px; }
-  .tool-label { flex-direction: column; gap: 2px; }
-  .tool-target { max-width: 100%; }
-  .tool-duration { display: none; }
-  .metrics { grid-template-columns: repeat(2, 1fr); }
+/* Resizable panel primitives. Component styles live in styles/. */
+.workspace-split {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
 }
-@media (max-width: 1180px) {
-  .workspace-header { padding: 10px 16px; gap: 8px; }
-  .workspace-title h1 { font-size: 18px; }
-  .workspace-title .status { display: none; }
-  .workspace-tabs { padding: 0 18px; gap: 18px; }
-  .workspace-tabs>.agents-toggle { font-size: 0; }
-  .work-status { padding: 8px 18px; }
-  .transcript { padding: 0 18px; }
-  .composer-wrap { padding-left: 18px; padding-right: 18px; }
-  .sidebar { padding-left: 8px; padding-right: 8px; }
-  .new-task { gap: 4px; }
+.split-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+.workspace-separator {
+  flex: 0 0 4px;
+  background: var(--border);
+  transition: background .12s;
+}
+.workspace-separator:hover {
+  background: var(--accent);
+  outline: none;
+}
+.workspace-separator:focus-visible {
+  background: var(--accent);
+  outline: none;
 }
