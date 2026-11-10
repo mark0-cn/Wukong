@@ -170,6 +170,16 @@ pub(super) fn handle_libc_identify<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
+        if let Some(target) = args["target"].as_str() {
+            tools.execution.files.known_file(agent, target, true)?;
+        }
+        for path in args["candidates"].as_array().into_iter().flatten() {
+            tools.execution.files.known_file(
+                agent,
+                path.as_str().context("candidate path missing")?,
+                false,
+            )?;
+        }
         tools
             .execution
             .gateway

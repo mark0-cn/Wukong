@@ -61,7 +61,7 @@ def doctor(root, trusted, isolated):
             "crash_replay": True, "input_minimize": tools["gdb"]["available"] and python_toolchain["pygdbmi"] and linux,
             "input_minimize_signal_only": True, "runtime_profile": True,
             "runtime_prepare": python_toolchain["pyelftools"], "mitigation_profile": True,
-            "seccomp_analyze": True,
+            "seccomp_analyze": True, "libc_identify": python_toolchain["pyelftools"],
             "process_mapping_observations": linux, "core_snapshot": python_toolchain["pwntools"],
             "cyclic_offset": python_toolchain["pwntools"], "poc_verify": True, "shell_exec": True,
             "py_run": True, "emulation": python_toolchain["unicorn"],

@@ -644,9 +644,32 @@ pub(super) struct PyRunArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct LibcIdentifyArgs {
-    pub leaked: u64,
+    /// Legacy single leak, optionally combined with leaks from the same process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaked: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
+    #[schemars(length(min = 1, max = 16))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaks: Option<Vec<LibcLeak>>,
+    /// In-run ELF candidate paths. Omission checks only the worker's own libc.
+    #[schemars(length(min = 1, max = 16))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidates: Option<Vec<String>>,
+    /// Optional staged target for architecture/word-width/byte-order comparison.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LibcLeak {
+    pub address: u64,
+    #[schemars(length(min = 1, max = 256))]
+    pub symbol: String,
+    /// Bytes after the named symbol, e.g. an identified return site.
+    #[serde(default)]
+    pub addend: i64,
 }
 
 choices!(ByteOrder { Little, Big });

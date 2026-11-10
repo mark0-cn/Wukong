@@ -567,7 +567,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::LibcIdentifyArgs>(
             "libc_identify",
-            "Offline libc identification: map a leaked runtime address (banner %p / dlsym reference) to the libc base by matching it against the leaked symbol's offset in the WORKER's own libc. Returns base, system_offset and a /bin/sh offset when matched. Covers only the worker's libc — a no-match means the target runs a different libc than the worker.",
+            "Compare same-process symbol leaks against up to 16 supplied in-run ELF libc candidates, or only the worker's libc when omitted. Preserve candidate hashes, Build IDs, architecture, inconsistent leaks and ambiguous matches. Candidates never confirm the mapped runtime; no match describes only the searched corpus.",
             ReplayPolicy::ReadOnly,
             true,
             handlers::handle_libc_identify,
