@@ -65,6 +65,7 @@ test('language changes preserve active work, drafts and configuration identity',
   await page.getByLabel('Close', { exact: true }).click();
   await expect(page.getByLabel('Message to Agent')).toHaveValue('keep this exact payload: 原始字节');
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await expect(page.getByText('Trace cross-references', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.lang)).toBe('en-US');
   const state = await page.evaluate(() => (window as any).__desktopTest);
   expect(state.host.epoch).toBe(host.epoch);
@@ -117,8 +118,8 @@ test('shows public progress and paired tool results without raw JSON', async ({ 
   await expect(page.getByText('调试后端暂不可用：连接已关闭。已保留当前证据。')).toBeVisible();
   await expect(page.getByText('raw_parameter')).toHaveCount(0);
   await page.locator('.transcript').evaluate(element => { element.scrollTop = 0; });
-  await expect(page.getByText('查看文件信息', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: /查看文件信息/ }).click();
+  await expect(page.getByText('检查文件格式与安全属性', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /检查文件格式与安全属性/ }).click();
   await expect(page.getByText(/visible-on-demand/)).toBeVisible();
   await expect(page.locator('.agent-card')).toHaveCount(3);
   expect(errors).toEqual([]);

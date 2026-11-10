@@ -12,5 +12,6 @@ describe('localization boundary', () => {
     expect(message({ code: 'unknown-error', args: {}, detail })).toContain(detail);
     expect(message(detail)).toBe(detail);
     expect(text('unknown-tool', {}, 'custom_tool')).toBe('custom_tool');
+    expect(message({ code: '', args: {} })).toBe('');
   });
 });

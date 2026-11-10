@@ -1,7 +1,7 @@
 import { t, useLocale } from '../i18n';
 import { useEffect, useState } from 'react';
 import { FileCode2, FolderOpen, RotateCcw, Save } from 'lucide-react';
-import { api, errorText } from '../bridge';
+import { api, errorText, errorValue } from '../bridge';
 import type { ConfigDocument, ConfigEdit, Host, Json } from '../types';
 import { Modal } from './Modal';
 import { LanguageSettings } from './LanguageSettings';
@@ -50,7 +50,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
   const [edits, setEdits] = useState<Record<string, Json>>({});
   const [raw, setRaw] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const dirty = Boolean(document && (document.source !== (document.original ?? '') || Object.keys(edits).length));
   useEffect(() => { onDirty(dirty); }, [dirty, onDirty]);
   useEffect(() => {
@@ -58,7 +58,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     let alive = true;
     setBusy(true); setError('');
     void api('config_read', { epoch: host.epoch }).then(value => { if (alive) { setBusy(false); setDocument(value); setLoadedEpoch(host.epoch); } })
-      .catch(error => { if (alive) setError(errorText(error)); }).finally(() => { if (alive) setBusy(false); });
+      .catch(error => { if (alive) setError(errorValue(error)); }).finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; };
   }, [open, document, host.epoch]);
   const patch = (): ConfigEdit[] => Object.entries(edits).map(([path, value]) => ({ path: path.split('.'), value }));
@@ -68,7 +68,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     try {
       const value = await api(choose ? 'config_open' : 'config_read', { epoch: host.epoch });
       if (value) { setDocument(value); setEdits({}); setLoadedEpoch(host.epoch); }
-    } catch (error) { setError(errorText(error)); }
+    } catch (error) { setError(errorValue(error)); }
     finally { setBusy(false); }
   };
   const switchMode = async () => {
@@ -77,7 +77,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     try {
       const value = await api('config_preview', { document, edits: patch() });
       setDocument(value); setEdits({}); setRaw(value => !value);
-    } catch (error) { setError(errorText(error)); }
+    } catch (error) { setError(errorValue(error)); }
     finally { setBusy(false); }
   };
   const save = async () => {
@@ -88,7 +88,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
       setDocument(value); setEdits({}); onDirty(false); onSaved(); onClose();
       // A later opening reads the current document and workspace epoch.
       setDocument(undefined);
-    } catch (error) { setError(errorText(error)); }
+    } catch (error) { setError(errorValue(error)); }
     finally { setBusy(false); }
   };
   if (!open) return null;
@@ -99,7 +99,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
       <button disabled={busy} onClick={() => { void load(false); }}><RotateCcw size={14} />{t('settings-reload')}</button>
       <button disabled={busy || !document} onClick={() => { void switchMode(); }}>{raw ? t('settings-form') : t('settings-toml-source')}</button></div>
     {loadedEpoch !== host.epoch && <p className="error" role="alert">{t('settings-workspace-configuration-changed-reload-settings-your-draft')}</p>}
-    {error && <p className="error" role="alert">{error}</p>}
+    {error && <p className="error" role="alert">{errorText(error)}</p>}
     <div className="settings-scroll">{!document ? <p className="muted">{busy ? t('settings-loading-configuration') : t('settings-could-not-load-configuration-please-reload')}</p> : raw ?
       <textarea className="toml-editor" aria-label={t('settings-toml-configuration-source')} spellCheck={false} value={document.source} disabled={busy}
         onChange={event => setDocument({ ...document, source: event.target.value })} /> : groups().map(group => <section key={group.fields[0].path} className="settings-group"><h3>{group.title}</h3>

@@ -189,3 +189,25 @@ workspace-expand-all-operations = 展开全部 { $count } 项操作
 workspace-source-operation-count = { $count } 项来源操作
 workspace-verification-count = 成功 { $successes } / { $attempts } 次
 workspace-welcome-description = 从本地文件开始，让 Agent 拆解任务、执行分析，并带回可以追溯的结论与证据。
+transcript-workspace = 工作区
+transcript-error = **分析遇到问题**
+
+    { $body }
+transcript-conclusion = **任务结论**
+
+    { $body }
+transcript-stopped = 此 Agent 分支已停止，已有证据和分析结果已保留。
+transcript-paused-reason = 分析已暂停：{ $reason }
+transcript-resumed = 已恢复分析，继续处理未完成的工作。
+transcript-you = 你
+transcript-recipient = 你 → { $name }
+result-matches = 返回 { $count } 项匹配
+result-functions = 返回 { $count } 项函数
+result-strings = 返回 { $count } 项字符串
+result-findings = 返回 { $count } 项发现
+result-results = 返回 { $count } 项结果
+result-completed = 操作已完成，可展开查看原始结果。
+result-failed = 操作执行失败，可展开查看错误详情。
+result-uncertain = 执行结果尚未确认，需要核对后再继续。
+result-paused = 分析已暂停，保留当前操作状态。
+result-interrupted = 所属任务已结束，本次操作未确认完成。

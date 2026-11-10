@@ -1,4 +1,5 @@
 //! Configuration documents preserve comments, relative paths and external edits.
+use crate::i18n::Message as UiMessage;
 use crate::{config::AppConfig, store::Store};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -31,7 +32,8 @@ impl ConfigDocument {
         let source = original
             .clone()
             .unwrap_or(toml::to_string_pretty(&AppConfig::default())?);
-        let form = toml::from_str(&source).context("配置 TOML 格式错误")?;
+        let form =
+            toml::from_str(&source).context(UiMessage::new("system-invalid-toml-configuration"))?;
         Ok(Self {
             path,
             source,
@@ -51,13 +53,19 @@ impl ConfigDocument {
                 if item.is_none() {
                     *item = Item::Table(toml_edit::Table::new());
                 }
-                ensure!(item.is_table_like(), "配置路径不是表格");
+                ensure!(
+                    item.is_table_like(),
+                    UiMessage::new("system-the-configuration-path-is-not-a-table")
+                );
                 item = &mut item[key];
             }
             if item.is_none() {
                 *item = Item::Table(toml_edit::Table::new());
             }
-            ensure!(item.is_table_like(), "配置路径不是表格");
+            ensure!(
+                item.is_table_like(),
+                UiMessage::new("system-the-configuration-path-is-not-a-table")
+            );
             let key = edit.path.last().unwrap();
             if edit.value.is_null() {
                 if let Some(table) = item.as_table_like_mut() {
@@ -76,15 +84,19 @@ impl ConfigDocument {
             }
         }
         let source = document.to_string();
-        let form = toml::from_str(&source).context("配置字段类型错误")?;
+        let form = toml::from_str(&source)
+            .context(UiMessage::new("system-invalid-configuration-field-type"))?;
         self.source = source;
         self.form = form;
         Ok(())
     }
     pub fn save(&mut self, state_override: Option<&Path>) -> Result<(AppConfig, Store)> {
-        let form: AppConfig = toml::from_str(&self.source).context("配置 TOML 格式错误")?;
+        let form: AppConfig = toml::from_str(&self.source)
+            .context(UiMessage::new("system-invalid-toml-configuration"))?;
         form.validate()?;
-        let parent = self.path.parent().context("配置目录不存在")?;
+        let parent = self.path.parent().context(UiMessage::new(
+            "system-the-configuration-directory-does-not-exist",
+        ))?;
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
         temporary.write_all(self.source.as_bytes())?;
         temporary.as_file().sync_all()?;
@@ -99,13 +111,17 @@ impl ConfigDocument {
         };
         ensure!(
             current == self.original,
-            "配置文件已被其他程序修改，请重新加载后编辑。"
+            UiMessage::new(
+                "system-another-program-changed-this-configuration-reload-before-editing"
+            )
         );
         let store = Store::open(&resolved.state_dir)?;
         temporary
             .persist(&self.path)
             .map_err(|error| error.error)
-            .context("保存失败，原配置未替换")?;
+            .context(UiMessage::new(
+                "system-save-failed-the-original-configuration-was-not-replaced",
+            ))?;
         self.original = Some(self.source.clone());
         self.form = form;
         Ok((resolved, store))

@@ -1,9 +1,10 @@
 //! Prepare isolated candidates, then bind a verified environment to user settings.
+use crate::i18n::Message as UiMessage;
 use crate::{config::AppConfig, workbench::Workbench};
 use anyhow::{Context, Result, ensure};
 use std::path::Path;
 
-pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(&str)) -> Result<()> {
+pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(UiMessage)) -> Result<()> {
     let root = super::storage::cache_root()?
         .join("probes")
         .join(uuid::Uuid::new_v4().to_string());
@@ -11,9 +12,13 @@ pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(&str)) -> Resu
     probe.workbench.root = root.clone();
     let workbench = Workbench::open(&probe)?;
     let result = (|| {
-        progress("正在拉取工具镜像；Docker 会复用已经下载的层");
+        progress(UiMessage::new(
+            "system-pulling-the-tool-image-docker-will-reuse-downloaded",
+        ));
         workbench.up(Some(image))?;
-        progress("正在检查候选工具环境");
+        progress(UiMessage::new(
+            "system-checking-the-candidate-tool-environment",
+        ));
         ensure!(
             workbench.doctor()?["passed"] == true,
             "candidate environment self-check failed"

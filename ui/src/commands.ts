@@ -1,9 +1,9 @@
 import type { Budget, ConfigDocument, ConfigEdit, Envelope, EvidenceView, FindingDetails, Json, ToolRecord } from './types';
-import type { Preferences, PreferenceSnapshot } from './i18n';
+import type { Preferences, PreferenceSnapshot, LocalizedMessage } from './i18n';
 
 export type UpdateAction = 'status' | 'check' | 'prepare' | 'setup' | 'install' | 'recover' | 'integrate' | 'clean_cache' | 'clean_images';
 export interface UpdateStatus {
-  version: string; phase: string; message: string; available: string | null; notes: string;
+  version: string; phase: string; message: string | LocalizedMessage; available: string | null; notes: string;
   downloaded: number; total: number | null; prepared: string | null; recovery: string | null;
   needs_setup: boolean; pending: boolean;
 }

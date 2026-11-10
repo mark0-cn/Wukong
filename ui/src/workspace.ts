@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, errorText, subscribe } from './bridge';
+import { api, errorValue, subscribe } from './bridge';
 import type { Envelope, Host, Workspace } from './types';
 
 export function useWorkspace() {
@@ -9,7 +9,7 @@ export function useWorkspace() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [host, setHost] = useState<Host>();
   const [data, setData] = useState<Workspace>();
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [loading, setLoading] = useState(true);
   const reload = useRef<() => void>(() => {});
   const previousSelection = useRef('');
@@ -45,7 +45,7 @@ export function useWorkspace() {
         }
         revision = response.workspace.revision;
         setError('');
-      } catch (error) { if (alive) setError(errorText(error)); }
+      } catch (error) { if (alive) setError(errorValue(error)); }
       finally {
         inFlight = false;
         if (alive) {

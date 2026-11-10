@@ -1,3 +1,4 @@
+import type { LocalizedMessage } from './i18n';
 export type Status = 'queued' | 'running' | 'waiting' | 'budget_paused' | 'completed' | 'stopped' | 'crashed' | 'failed';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export interface Budget {
@@ -16,12 +17,12 @@ export interface Agent {
 }
 export interface ToolDisplay {
   call_id: string; title: string; target: string; purpose: string; state: string;
-  summary: string; duration_ms: number | null; evidence_id: string | null;
+  summary: string | LocalizedMessage; duration_ms: number | null; evidence_id: string | null;
 }
 export interface ChatMessage {
-  id: string; role: 'assistant' | 'user'; agent_id: string | null; author: string;
+  id: string; role: 'assistant' | 'user'; agent_id: string | null; author: string | LocalizedMessage;
   created_at: string; delivery?: string;
-  content: ({ type: 'text'; text: string } | { type: 'tool-call'; toolCallId: string;
+  content: ({ type: 'text'; text: string | LocalizedMessage } | { type: 'tool-call'; toolCallId: string;
     toolName: string; args: { display: ToolDisplay }; result?: { display: ToolDisplay }; isError: boolean })[];
 }
 export interface Finding {
@@ -37,7 +38,7 @@ export interface Workspace {
 export interface Host {
   epoch: number; initial_run: string | null; config_path: string; state_dir: string;
   model: string; budget: Budget; execution: { operation: string; run_id: string | null; phase: string } | null;
-  pending_operations: number; notice: { id: number; error: boolean; message: string } | null;
+  pending_operations: number; notice: { id: number; error: boolean; message: string | LocalizedMessage } | null;
 }
 export interface Envelope { host: Host; workspace: { revision: string; data: Workspace | null } }
 export interface ConfigDocument { path: string; source: string; original: string | null; form: Record<string, Json> }

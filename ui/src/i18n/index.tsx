@@ -56,6 +56,7 @@ export function t<K extends keyof Messages>(code: K, ...args: Messages[K] extend
 }
 export function message(value: LocalizedMessage | string): string {
   if (typeof value === 'string') return value; // Verbatim legacy diagnostics.
+  if (!value.code) return value.detail ?? '';
   const rendered = text(value.code, value.args, t('error-operation'));
   return value.detail ? `${rendered}\n${value.detail}` : rendered;
 }

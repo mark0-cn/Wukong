@@ -81,6 +81,9 @@ fn every_current_tool_has_a_display_label_and_unknown_tools_keep_their_name() {
         let title = wukong::tools::tool_display_title(tool.name.as_str()).expect("missing label");
         assert!(!title.is_empty());
         assert_ne!(title, tool.name.as_str());
+        for locale in [wukong::i18n::Locale::EnUs, wukong::i18n::Locale::ZhCn] {
+            assert_ne!(locale.text(title), title, "missing localized tool label");
+        }
     }
     assert!(wukong::tools::tool_display_title("mcp_custom_tool").is_none());
 }

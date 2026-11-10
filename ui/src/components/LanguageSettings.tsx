@@ -1,16 +1,16 @@
 import { useState } from 'react';
-import { errorText } from '../bridge';
+import { errorText, errorValue } from '../bridge';
 import { saveLanguage, t, usePreferences, type LanguageChoice } from '../i18n';
 
 /** Never enters the workspace config save/reload path, even during analysis. */
 export function LanguageSettings() {
   const preferences = usePreferences();
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const change = async (field: 'ui_language' | 'output_language', value: LanguageChoice) => {
     setPending(true); setError('');
     try { await saveLanguage({ ui_language: preferences.ui_language, output_language: preferences.output_language, [field]: value }); }
-    catch (error) { setError(errorText(error)); }
+    catch (error) { setError(errorValue(error)); }
     finally { setPending(false); }
   };
   return <section className="language-settings">
@@ -23,6 +23,6 @@ export function LanguageSettings() {
         </select>
       </label>)}</div>
     <p className="muted">{t('language-help')}</p>
-    {error && <p role="alert" className="error">{error}</p>}
+    {error && <p role="alert" className="error">{errorText(error)}</p>}
   </section>;
 }
