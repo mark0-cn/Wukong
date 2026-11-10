@@ -1,1 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111919"/><path d="M128 152h112c68 0 108 33 108 88 0 40-21 68-60 81l72 95h-90l-85-116v116h-57zm57 57v65h52c34 0 51-11 51-33 0-21-17-32-51-32z" fill="#7ee0c3"/><circle cx="373" cy="139" r="27" fill="#b5f3dc"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Wukong — 金箍与火眼</title>
+  <defs>
+    <linearGradient id="gold" x1="128" y1="130" x2="372" y2="396" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFE3A0"/>
+      <stop offset=".52" stop-color="#EFC267"/>
+      <stop offset="1" stop-color="#C68C3F"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#111919"/>
+  <!-- Inward curls evoke the golden circlet. -->
+  <path d="M119 195C132 152 165 131 197 136C227 141 245 160 237 180C230 197 207 195 204 180M393 195C380 152 347 131 315 136C285 141 267 160 275 180C282 197 305 195 308 180"
+        fill="none" stroke="url(#gold)" stroke-width="25" stroke-linecap="round"/>
+  <!-- Angular brows and pointed cheek planes remain legible at small sizes. -->
+  <path d="M118 226L172 244L195 228L256 287L317 228L340 244L394 226L373 306C354 350 309 386 256 414C203 386 158 350 139 306Z"
+        fill="url(#gold)"/>
+  <path d="M156 269L225 294L206 312L173 298ZM356 269L287 294L306 312L339 298Z" fill="#111919"/>
+  <path d="M170 279L212 294L202 299L179 291ZM342 279L300 294L310 299L333 291Z" fill="#F58B43"/>
+  <path d="M210 341L256 359L302 341L281 374L256 390L231 374Z" fill="#111919"/>
+</svg>

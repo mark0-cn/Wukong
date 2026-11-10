@@ -1,5 +1,6 @@
+import brandIcon from '../../icons/icon.svg';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Activity, ArrowRight, Bot, CircleAlert, Download, FileSearch, GitBranch, MessageSquare, Pause, Play, RefreshCw, Sparkles, X } from 'lucide-react';
+import { Activity, ArrowRight, Bot, CircleAlert, Download, FileSearch, GitBranch, MessageSquare, Pause, Play, RefreshCw, X } from 'lucide-react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { api, errorText, subscribe } from './bridge';
 import { useWorkspace } from './workspace';
@@ -124,7 +125,7 @@ export default function App() {
               {data.notes.length > 0 && <section className="shared-notes"><h3>共享分析笔记</h3>{data.notes.map(note => <details key={note.id}><summary>{note.title}</summary><Markdown text={note.body} /></details>)}</section>}</div>}
         </div>
         {showAgents && <Agents agents={data.agents} selected={workspace.agent} onSelect={selectAgent} canStop={!pending && !closing} onStop={agent => setConfirmation({ kind: 'stop', agent, run: selectedRun.id, epoch: host.epoch })} />}
-      </> : <div className="welcome"><div className="welcome-icon"><Sparkles size={28} /></div><span className="eyebrow">RE AGENT</span><h2>{workspace.loading ? '正在载入工作区…' : '让分析过程清晰可见'}</h2><p>从本地文件开始，让 Agent 拆解任务、执行分析，<br />并带回可以追溯的结论与证据。</p><button className="primary" disabled={!host} onClick={() => setNewTask(true)}>新建分析<ArrowRight size={15} /></button><div className="welcome-features"><span><MessageSquare size={15} />实时工作进展</span><span><GitBranch size={15} />多 Agent 协作</span><span><FileSearch size={15} />证据追溯</span></div></div>}</div>
+      </> : <div className="welcome"><div className="welcome-icon"><img src={brandIcon} alt="Wukong" width={64} height={64} /></div><span className="eyebrow">WUKONG</span><h2>{workspace.loading ? '正在载入工作区…' : '让分析过程清晰可见'}</h2><p>从本地文件开始，让 Agent 拆解任务、执行分析，<br />并带回可以追溯的结论与证据。</p><button className="primary" disabled={!host} onClick={() => setNewTask(true)}>新建分析<ArrowRight size={15} /></button><div className="welcome-features"><span><MessageSquare size={15} />实时工作进展</span><span><GitBranch size={15} />多 Agent 协作</span><span><FileSearch size={15} />证据追溯</span></div></div>}</div>
       <footer className="workspace-footer"><span><span className="connection-dot" />{workspace.error ? '连接异常' : '本地引擎'}{host && <> · {host.model}</>}</span><span>{host?.execution ? host.execution.phase === 'starting' ? '正在准备分析…' : '后台分析运行中' : '所有进展保存在本地'}</span></footer>
     </main>
     {host && <Settings open={settings} host={host} onClose={() => setSettings(false)} onSaved={workspace.reset} onDirty={onDirty} />}
