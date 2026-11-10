@@ -231,6 +231,19 @@ impl Service {
         task: String,
         resume: Option<(String, Budget)>,
     ) -> Result<String> {
+        // Read before claiming the active slot so a preference I/O failure cannot strand it.
+        let output_language = if resume.is_none() {
+            let saved = super::preferences::read()?;
+            Some(match saved.preferences.output_language {
+                super::preferences::LanguageChoice::Auto => crate::i18n::Locale::for_task(
+                    &task,
+                    saved.preferences.ui_language.resolve(saved.system_locale),
+                ),
+                choice => choice.resolve(saved.system_locale),
+            })
+        } else {
+            None
+        };
         let operation = uuid::Uuid::new_v4().to_string();
         let cancel = CancellationToken::new();
         let context = {
@@ -259,7 +272,11 @@ impl Service {
             state.clone()
         };
         self.changed();
-        let service = AssessmentService::new(context.config, context.store);
+        let mut config = context.config;
+        if let Some(language) = output_language {
+            config.output_language = Some(language);
+        }
+        let service = AssessmentService::new(config, context.store);
         let prepared = if let Some((run, budget)) = resume {
             service.resume(&run, Some(budget)).await
         } else {

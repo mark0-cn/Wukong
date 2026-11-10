@@ -14,6 +14,17 @@ pub enum Locale {
     ZhCn,
 }
 impl Locale {
+    /// A bounded default, not language detection by an additional model call.
+    /// Explicit output requests in the task remain authoritative in the prompt.
+    pub fn for_task(task: &str, fallback: Self) -> Self {
+        if task.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) {
+            Self::ZhCn
+        } else if task.chars().any(|c| c.is_ascii_alphabetic()) {
+            Self::EnUs
+        } else {
+            fallback
+        }
+    }
     pub fn tag(self) -> &'static str {
         match self {
             Self::EnUs => "en-US",

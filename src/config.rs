@@ -81,6 +81,8 @@ impl Default for ExecutionConfig {
 #[serde(default)]
 pub struct AppConfig {
     pub state_dir: PathBuf,
+    /// None follows the initial task language; new runs persist a concrete choice.
+    pub output_language: Option<crate::i18n::Locale>,
     pub model: ModelConfig,
     pub budget: Budget,
     pub runtime: RuntimeConfig,
@@ -97,6 +99,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             state_dir: PathBuf::from(".wukong"),
+            output_language: None,
             model: ModelConfig::default(),
             budget: Budget::default(),
             runtime: RuntimeConfig::default(),
