@@ -6,13 +6,15 @@ use std::{
 };
 
 pub fn lock(root: &Path, exclusive: bool) -> Result<File> {
-    std::fs::create_dir_all(root)?;
+    std::fs::create_dir_all(root)
+        .with_context(|| format!("create maintenance directory {}", root.display()))?;
     let file = OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
-        .open(root.join("maintenance.lock"))?;
+        .open(root.join("maintenance.lock"))
+        .with_context(|| format!("open maintenance lock in {}", root.display()))?;
     if exclusive {
         file.try_lock()
             .context("another application task or update is active")?;

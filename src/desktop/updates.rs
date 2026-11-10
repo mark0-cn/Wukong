@@ -43,6 +43,7 @@ pub enum Action {
     Recover,
     Integrate,
     CleanCache,
+    CleanImages,
 }
 
 impl Default for Controller {
@@ -68,7 +69,8 @@ impl Controller {
     }
     pub fn initialization(&self, config: &AppConfig) {
         let mut state = self.status.lock().unwrap();
-        state.needs_setup = !config.workbench.root.join("environment.json").is_file();
+        state.needs_setup = !config.workbench.root.join("environment.json").is_file()
+            || config.runtime.backend == crate::runtime::RuntimeBackend::Disabled;
         state.pending = recovery::pending().map_or(true, |p| p.is_some());
         state.recovery = recovery::root()
             .ok()
@@ -79,7 +81,12 @@ impl Controller {
                     "Wukong-Recovery.AppImage"
                 })
             })
-            .filter(|path| path.is_file());
+            .filter(|path| {
+                path.is_file()
+                    && path.parent().is_some_and(|root| {
+                        root.join("pending.json").is_file() || root.join("previous.json").is_file()
+                    })
+            });
     }
     pub async fn confirm(&self, service: Arc<Service>) {
         let _serial = self.operation.lock().await;
@@ -191,12 +198,27 @@ impl Controller {
             app.exit(0);
             return Ok(());
         }
-        if matches!(action, Action::CleanCache) {
+        if matches!(action, Action::CleanCache | Action::CleanImages) {
             let _lock = maintenance::lock(&recovery::root()?, true)?;
             ensure!(recovery::pending()?.is_none(), "先完成或恢复待处理更新");
-            let previous: Option<recovery::Journal> =
-                crate::workbench::read_json(&recovery::root()?.join("previous.json")).ok();
+            let previous_path = recovery::root()?.join("previous.json");
+            let previous: Option<recovery::Journal> = if previous_path.exists() {
+                Some(crate::workbench::read_json(&previous_path)?)
+            } else {
+                None
+            };
             let prepared = self.status().prepared;
+            let protected = [
+                Some(env!("CARGO_PKG_VERSION").to_string()),
+                prepared.clone(),
+                previous.as_ref().map(|p| p.from.clone()),
+            ];
+            let protected_images: Vec<String> = protected
+                .iter()
+                .flatten()
+                .map(|v| recovery::cached(v).map(|m| m.image))
+                .collect::<Result<_>>()?;
+            let docker = crate::workbench::Docker::new(&config.runtime.docker_executable);
             let directory = recovery::root()?.join("releases");
             if directory.exists() {
                 for entry in std::fs::read_dir(&directory)? {
@@ -215,12 +237,38 @@ impl Controller {
                         path.starts_with(std::fs::canonicalize(&directory)?),
                         "cache path escaped its directory"
                     );
-                    std::fs::remove_dir_all(path)?;
+                    let manifest = recovery::cached(&name)?;
+                    if matches!(action, Action::CleanImages) {
+                        if protected_images.contains(&manifest.image) {
+                            continue;
+                        }
+                        if docker.inspect("image", &manifest.image)?.is_some()
+                            && docker
+                                .run(&[
+                                    "ps",
+                                    "-aq",
+                                    "--filter",
+                                    &format!("ancestor={}", manifest.image),
+                                ])?
+                                .is_empty()
+                        {
+                            docker.run(&["image", "rm", &manifest.image])?;
+                        }
+                    } else {
+                        let payload = recovery::payload(&manifest)?;
+                        if payload.exists() {
+                            ensure!(
+                                std::fs::canonicalize(&payload)?.parent() == Some(path.as_path()),
+                                "payload escaped cache directory"
+                            );
+                            std::fs::remove_file(payload)?;
+                        }
+                    }
                 }
             }
             self.phase(
                 "idle",
-                "旧客户端下载缓存已清理；恢复版本及 Docker 镜像已保留",
+                "清理已完成，当前版本、恢复版本和容器引用的镜像均保留",
             );
             return Ok(());
         }

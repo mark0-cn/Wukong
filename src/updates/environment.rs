@@ -98,6 +98,10 @@ pub fn activate(config_path: &Path, image: &str) -> Result<()> {
         workbench
             .update(&old.image_id)
             .context("failed to restore previous environment")?;
+        ensure!(
+            workbench.doctor()?["passed"] == true,
+            "restored environment failed self-check"
+        );
         bind(config_path, &workbench)?;
     }
     result
