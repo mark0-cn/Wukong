@@ -10,28 +10,15 @@ import tempfile
 from worker_common import confined, safe_env
 
 
-def digest(path):
-    with Path(path).open("rb") as stream: return hashlib.file_digest(stream,"sha256").hexdigest()
+from worker_launch_spec import digest, read_launch
 
 
 def load(root,params):
-    path=confined(root,params["launch_spec"],True)
-    if path.stat().st_size>65536: raise ValueError("launch spec exceeds 64 KiB")
-    spec=json.loads(path.read_text())
-    if spec.get("schema_version")!=1: raise ValueError("unsupported launch schema")
-    base=confined(root,spec["base"],True)
-    def member(name):
-        if not isinstance(name,str) or not name or Path(name).is_absolute() or ".." in Path(name).parts:
-            raise ValueError("invalid launch member")
-        value=(base/name).resolve()
-        if not value.is_relative_to(base) or not value.exists(): raise ValueError("launch member escapes or is missing")
-        return value
+    document = read_launch(root, params["launch_spec"])
+    spec, base, member = document.spec, document.base, document.member
     if not spec.get("target"): raise ValueError("service-only challenge has no local target; use a network script")
-    files=spec.get("files",{})
-    if len(files)>1024 or spec["target"] not in files: raise ValueError("launch file identity missing")
-    for name,expected in files.items():
-        if digest(member(name))!=expected: raise ValueError("launch input changed: "+name)
-    target=member(spec["target"])
+    files = document.check_files()
+    target = member(spec["target"])
     if params.get("target") and digest(confined(root,params["target"],True))!=digest(target):
         raise ValueError("requested target differs from LaunchSpec")
     if spec.get("loader") and spec["loader"] not in files: raise ValueError("loader identity missing")

@@ -244,3 +244,4 @@ paths and atomic metadata IO. Backend adapters import these components directly.
 TCP verification. The job supervisor retains lifecycle/cancellation ownership;
 network replay never executes a model-provided program inside the privileged
 supervisor. See [Pwn tool contracts](../../docs/reference/pwn-tools.md).
+`worker_launch_spec` owns shared LaunchSpec parsing and artifact checks; local launch and network replay retain their own execution policy and explicit resource budgets.
