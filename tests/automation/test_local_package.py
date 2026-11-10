@@ -82,10 +82,22 @@ class LocalPackageTests(unittest.TestCase):
 
     def test_default_downloads_matching_release_without_local_metadata(self):
         self.metadata.unlink()
-        with patch.object(local_package, "release_image", return_value=self.image) as fetch:
+        image = {**self.image, "release_version": "1.2.3", "source_revision": "d" * 40}
+        with patch.object(local_package, "release_image", return_value=image) as fetch:
             local_package.build(None, self.output)
         fetch.assert_called_once_with("1.2.3", self.revision, "mark0-cn/Wukong")
         self.assertTrue((self.output / "wukong-v1.2.3-windows-amd64.zip").is_file())
+        manifest = json.loads((self.output / "release.json").read_text())
+        self.assertEqual(manifest["source_revision"], self.revision)
+        self.assertEqual(manifest["image_source_revision"], "d" * 40)
+        self.assertEqual(manifest["image_release_version"], "1.2.3")
+
+    def test_released_image_from_different_version_still_stops_before_build(self):
+        image = {**self.image, "release_version": "1.2.2", "source_revision": "d" * 40}
+        with patch.object(local_package, "release_image", return_value=image):
+            with self.assertRaisesRegex(ValueError, "Release version"):
+                local_package.build(None, self.output)
+        self.runner.assert_not_called()
 
     def test_release_download_failure_stops_before_compiling(self):
         with patch.object(local_package, "release_image", side_effect=ValueError("Release asset not found")):

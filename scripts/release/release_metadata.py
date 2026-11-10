@@ -59,17 +59,17 @@ def release_image(number, revision, repository=DEFAULT_REPOSITORY):
         raise ValueError("Release must provide a Windows x64 client and linux/amd64 image")
     if manifest.get("runtime_protocol") != 1 or manifest.get("data_schema") != 1:
         raise ValueError("Release runtime protocol or data schema is not supported")
-    if manifest.get("source_revision") != revision:
-        raise ValueError(f"Release {tag} source commit {manifest.get('source_revision')} differs from "
-                         f"local HEAD {revision}. Use the matching released source; no other version was selected.")
+    source = manifest.get("image_source_revision", manifest.get("source_revision"))
+    if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{40}", source):
+        raise ValueError("Release must record the image's original source commit")
     reference = manifest.get("image")
     if not isinstance(reference, str) or reference.count("@") != 1:
         raise ValueError("Release image must be pinned by registry digest")
     image_repository, digest = reference.split("@")
     image = dict(repository=image_repository, digest=digest, image_id=manifest.get("image_id"),
-                 source_revision=revision, platform=manifest["tool_platform"],
+                 source_revision=source, release_version=number, platform=manifest["tool_platform"],
                  size_bytes=manifest.get("image_size_bytes"))
     if not isinstance(image["image_id"], str) or type(image["size_bytes"]) is not int:
         raise ValueError("Release is missing image ID or size")
-    validate_image(image, revision)
+    validate_image(image, revision, released_version=number)
     return image
