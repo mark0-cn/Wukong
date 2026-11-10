@@ -404,8 +404,8 @@ pub(super) fn handle_verification_record<'a>(
     Box::pin(async move {
         tools
             .execution
-            .jobs
-            .verification(agent, call_id, &args)
+            .verification
+            .record(agent, call_id, &args)
             .await
     })
 }

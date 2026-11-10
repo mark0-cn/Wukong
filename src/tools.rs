@@ -51,6 +51,8 @@ mod files;
 mod handlers;
 mod jobs;
 mod sessions;
+mod verification;
+mod verification_protocol;
 use catalog::builtins;
 pub(crate) use catalog::child_schema;
 

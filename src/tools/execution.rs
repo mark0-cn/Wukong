@@ -7,6 +7,7 @@ pub(super) struct ExecutionService {
     pub(super) gateway: WorkerGateway,
     pub(super) files: FilesService,
     pub(super) jobs: jobs::JobService,
+    pub(super) verification: verification::VerificationService,
     pub(super) sessions: SessionsService,
 }
 impl ExecutionService {
@@ -30,6 +31,7 @@ impl ExecutionService {
             store,
             gateway,
             files,
+            verification: verification::VerificationService { jobs: jobs.clone() },
             jobs,
             sessions,
         }
@@ -83,61 +85,9 @@ impl ExecutionService {
                 }
                 let finding_id = args["finding_id"].as_str().map(str::to_owned);
                 if name == "poc_verify" {
-                    let finding: Finding = require_in_run(
-                        &self.store,
-                        finding_id.as_deref().context("finding_id missing")?,
-                        &agent.run_id,
-                    )?;
-                    ensure!(
-                        finding.agent_id != agent.id,
-                        "the verifier must differ from the finding producer"
-                    );
-                    // Structural closure budget: at most two replay jobs per
-                    // (verifier, finding). The verdict then belongs in
-                    // verification_record, passed=true or a diagnosed false.
-                    let used = self
-                        .store
-                        .records::<JobRecord>(&agent.run_id)?
-                        .into_iter()
-                        .filter(|job| {
-                            job.tool_name == "poc_verify"
-                                && job.agent_id == agent.id
-                                && job.call_id != call_id
-                                && job.finding_id.as_deref() == Some(finding.id.as_str())
-                        })
-                        .count();
-                    ensure!(
-                        used < 2,
-                        "poc_verify budget for this finding is exhausted ({used}/2 jobs used); record your verdict with verification_record now — passed=false with a diagnosis is a complete outcome"
-                    );
-                    args.as_object_mut()
-                        .context("arguments not an object")?
-                        .remove("finding_id");
-                    args["producer_agent_id"] = json!(finding.agent_id);
-                    args["verifier_agent_id"] = json!(agent.id);
-                    if args["network"].is_object() {
-                        self.files.known_file(agent, text(&args, "target")?, true)?;
-                        ensure!(
-                            ["args", "env", "expected", "input_mode"]
-                                .iter()
-                                .all(|key| args[key].is_null()),
-                            "network replay cannot override local replay parameters"
-                        );
-                        let binding = self
-                            .gateway
-                            .worker_call(
-                                agent,
-                                &format!("{call_id}:network-profile"),
-                                "network.profile",
-                                json!({"target":args["target"],"launch_spec":args["launch_spec"]}),
-                            )
-                            .await?;
-                        ensure!(
-                            binding["target_sha256"] == run.target_sha256,
-                            "network profile target differs from this run"
-                        );
-                        args["network_binding"] = binding;
-                    }
+                    self.verification
+                        .admit(agent, call_id, &run, finding_id.as_deref(), &mut args)
+                        .await?;
                 }
                 if name == "py_run" {
                     let _ = text(&args, "source")?;
