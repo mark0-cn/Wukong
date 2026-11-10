@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: workbench-release
@@ -254,3 +255,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/publish-release.py --directory dist --tag "$GITHUB_REF_NAME"
+
+  summary:
+    if: always()
+    needs: [metadata, checks, windows-client, linux-client, image, acceptance, package, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.acceptance.result == 'success' || needs.acceptance.result == 'failure'
+        continue-on-error: true # Acceptance can fail before producing a report.
+        with:
+          name: image-validation
+          path: summary-artifacts/validation
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.package.result == 'success'
+        with:
+          name: online-release
+          path: summary-artifacts/release
+      - name: Summarize release results and downloads
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python scripts/actions-summary.py --kind release
