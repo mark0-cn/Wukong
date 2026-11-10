@@ -2,6 +2,7 @@
 pub mod configuration;
 #[cfg(feature = "desktop")]
 pub mod host;
+pub mod paths;
 pub mod presentation;
 pub mod service;
 pub mod workspace;

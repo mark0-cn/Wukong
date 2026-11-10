@@ -141,14 +141,17 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         return Ok(());
     }
-    // Desktop settings travel with the executable. CLI keeps its working-directory
-    // convention, and an explicit --config always takes precedence.
-    let path = config_path(
+    // Explicit/portable configurations remain supported. New desktop installs
+    // use writable per-user storage, independent of installer replacement.
+    let mut path = config_path(
         cli.config.clone(),
         matches!(command, Command::Gui { .. }),
         &std::env::current_dir()?,
         std::env::current_exe().ok().as_deref(),
     );
+    if path.is_none() && matches!(command, Command::Gui { .. }) {
+        path = Some(crate::desktop::paths::default_config()?);
+    }
     let mut config = AppConfig::load(path.as_deref())?;
     if let Some(state) = &cli.state {
         config.state_dir = state.clone();
