@@ -55,6 +55,11 @@ class ImmutableReleaseTests(unittest.TestCase):
         publish.verify_assets(self.directory, self.release)
         publish.verify_assets(self.directory, self.release, require_immutable=True)
 
+    def test_draft_lookup_uses_release_id_not_published_tag_endpoint(self):
+        with patch.object(publish, "releases", return_value=[[{"id": 42, "tag_name": "v0.1.0", "draft": True}]]), patch.object(publish, "run", return_value='{"draft":true}') as run:
+            self.assertTrue(publish.release_by_tag("owner/repo", "v0.1.0")["draft"])
+            run.assert_called_once_with(["gh", "api", "repos/owner/repo/releases/42"])
+
     def test_stale_draft_asset_is_rejected_before_locking(self):
         self.release["assets"].append({"name": "stale.zip"})
         with self.assertRaisesRegex(ValueError, "accepted set"):
