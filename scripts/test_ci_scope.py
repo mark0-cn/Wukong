@@ -1,9 +1,31 @@
 import copy
 import unittest
-from ci_scope import checks_passed, select_scope
+from ci_scope import checks_passed, select_scope, prebuild_clients
 
 
 class ScopeTests(unittest.TestCase):
+    def test_clients_only_for_master_version_increase_or_explicit_prewarm(self):
+        self.assertTrue(prebuild_clients("push", "refs/heads/master", False, "0.1.2", "0.1.3"))
+        self.assertTrue(prebuild_clients("workflow_dispatch", "refs/heads/master", True, "0.1.2", "0.1.2"))
+        for event, ref, requested, old, new in [
+                ("push", "refs/heads/master", False, "0.1.2", "0.1.2"),
+                ("push", "refs/heads/master", False, "0.2.0", "0.1.2"),
+                ("push", "refs/tags/v0.1.3", True, "0.1.2", "0.1.3"),
+                ("pull_request", "refs/heads/master", True, "0.1.2", "0.1.3"),
+                ("workflow_dispatch", "refs/heads/topic", True, "0.1.2", "0.1.3"),
+                ("workflow_dispatch", "refs/heads/master", False, "0.1.2", "0.1.3")]:
+            self.assertFalse(prebuild_clients(event, ref, requested, old, new))
+
+    def test_required_prebuild_failure_blocks_ci(self):
+        needs = {"changes": {"result": "success", "outputs": dict(rust="true", frontend="true", linux="true", release_clients="true")},
+                 **{name: {"result": "success"} for name in ("windows", "linux", "windows-client", "linux-client")}}
+        self.assertTrue(checks_passed(needs))
+        needs["linux-client"]["result"] = "skipped"
+        self.assertFalse(checks_passed(needs))
+        needs["changes"]["outputs"]["release_clients"] = "false"
+        needs["windows-client"]["result"] = "skipped"
+        self.assertTrue(checks_passed(needs))
+
     def test_master_manual_and_release_always_run_full_checks(self):
         for event in ("push", "workflow_dispatch", "workflow_call"):
             scope = select_scope(["docs/releases.md"], event)

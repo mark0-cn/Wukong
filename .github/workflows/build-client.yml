@@ -1,0 +1,76 @@
+name: Build Client
+on:
+  workflow_call:
+    inputs:
+      target:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ inputs.target == 'windows' && 'windows-2025' || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Validate target and trusted source
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          [[ "$TARGET" == windows || "$TARGET" == linux ]]
+          git merge-base --is-ancestor HEAD origin/master
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: inputs.target == 'windows'
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: ${{ inputs.target }}-client-v1
+          # Master prebuilds seed caches that later tags can restore.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Build embedded Windows release
+        if: inputs.target == 'windows'
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --locked --release --features custom-protocol
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./target/release/re-agent.exe --version
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build Linux acceptance CLI
+        if: inputs.target == 'linux'
+        env:
+          CARGO_PROFILE_DEV_DEBUG: '1'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev
+          cargo build --locked --no-default-features
+          ./target/debug/re-agent --version
+      - name: Stage verified client
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          python scripts/client_artifact.py stage --target "$TARGET" --directory client-artifact
+          python scripts/client_artifact.py verify --target "$TARGET" --directory client-artifact
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.target == 'windows' && 'windows-client-v1' || 'linux-acceptance-client-v1' }}
+          path: client-artifact/
+          compression-level: 1
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
