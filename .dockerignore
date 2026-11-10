@@ -17,6 +17,6 @@ playwright-report
 **/__pycache__
 **/*.pyc
 
-# Legacy local credentials and state
+# Additional local credentials and state
 re-agent.toml
 .re-agent

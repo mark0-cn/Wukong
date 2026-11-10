@@ -6,7 +6,7 @@
 `analysis/tasks.json` 定义用户问题与逐题评分项，不以漏洞发现或 flag 为完成条件。
 
 ```sh
-python3 -m evals.analysis.evaluate --build-dir /tmp/re-agent-analysis-fixtures
+python3 -m evals.analysis.evaluate --build-dir /tmp/wukong-analysis-fixtures
 python3 -m evals.tests.test_analysis
 ```
 
@@ -27,7 +27,7 @@ python3 -m evals.tests.test_analysis
 ```
 
 ```sh
-python3 -m evals.analysis.score --build-dir /tmp/re-agent-analysis-fixtures \
+python3 -m evals.analysis.score --build-dir /tmp/wukong-analysis-fixtures \
   --reports reports/analysis-index.json --adjudications reports/analysis-reviewed.json \
   --output reports/analysis-metrics.json
 ```

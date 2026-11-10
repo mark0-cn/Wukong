@@ -4,10 +4,10 @@
 从仓库根目录用 Python 模块方式运行。默认构建输出仍位于对应的 `fixtures/*/build`，也可指定独立目录。
 
 ```sh
-python -m evals.analysis.evaluate --build-dir /tmp/re-agent-analysis
+python -m evals.analysis.evaluate --build-dir /tmp/wukong-analysis
 python -m unittest discover -s evals/tests -p 'test_*.py'
-sh fixtures/build.sh /tmp/re-agent-vulnerability
-python -m evals.vulnerability.evaluate --build-dir /tmp/re-agent-vulnerability --repetitions 3
+sh fixtures/build.sh /tmp/wukong-vulnerability
+python -m evals.vulnerability.evaluate --build-dir /tmp/wukong-vulnerability --repetitions 3
 ```
 
 漏洞样本行为评测需要 Linux x86_64；分析样本需要 C11 编译器。测试只执行项目的可信样本。

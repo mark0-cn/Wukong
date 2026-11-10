@@ -1,14 +1,14 @@
-# RE Agent 在线安装
+# Wukong 在线安装
 
 支持 Windows x64 客户端和 linux/amd64 工具镜像。安装包不包含镜像或模型密钥。
 
 1. 安装并启动 Docker Desktop，启用 Linux containers。
-2. 私有镜像 `hlmark0/re-agent-workbench` 需要授权。执行 `docker login --username hlmark0`，或使用其他有仓库读取权限的账号。密码提示处输入个人读取 Token；不要使用 CI 发布 Token。
+2. 工具镜像 `hlmark0/wukong` 为公开仓库，可以匿名拉取。若遇到 Docker Hub 匿名拉取限额，可用自己的 Docker 账号登录；不要使用 CI 发布 Token。
 3. 从 GitHub Release 下载在线 zip，核对 `SHA256SUMS`，解压到临时目录。
 4. 在 PowerShell 中进入解压目录，执行 `powershell -ExecutionPolicy Bypass -File .\install-workbench.ps1`。
 5. 安装器按版本清单的 digest 拉取镜像、检查环境并创建快捷方式。打开客户端后配置模型。
 
-默认安装目录为 `%LOCALAPPDATA%\Programs\RE Agent Workbench`。可用 `-Destination` 指定目录，或用 `-DockerExecutable` 指定 Docker CLI。至少为镜像与 Docker 临时层预留 25 GiB；安装器另检查客户端所在盘的空间。Docker Desktop 的虚拟磁盘容量需在其设置中检查。
+默认安装目录为 `%LOCALAPPDATA%\Programs\Wukong Workbench`。可用 `-Destination` 指定目录，或用 `-DockerExecutable` 指定 Docker CLI。至少为镜像与 Docker 临时层预留 25 GiB；安装器另检查客户端所在盘的空间。Docker Desktop 的虚拟磁盘容量需在其设置中检查。
 
 失败后修复 Docker 登录、网络或磁盘问题，再运行相同安装命令即可。Docker 会复用已下载的层。`-ValidateOnly` 只验证包内校验值，不拉取或安装。
 

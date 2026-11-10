@@ -15,12 +15,12 @@
 
 ## 桌面工作区
 
-桌面版基于 Tauri + React。直接双击 `re-agent.exe`，或使用以下命令打开窗口，无需另开浏览器：
+桌面版基于 Tauri + React。直接双击 `wukong.exe`，或使用以下命令打开窗口，无需另开浏览器：
 
 ```sh
-re-agent
-re-agent gui
-re-agent gui RUN_ID
+wukong
+wukong gui
+wukong gui RUN_ID
 ```
 
 `gui RUN_ID` 直接选中已保存任务。未配置模型凭据时，仍可查看已有记录；开始分析需要可用的模型配置。
@@ -57,26 +57,26 @@ API key 内容不写入 TOML。Windows 下优先读取进程环境变量；缺�
 在仓库根目录运行，以下示例使用快速开始生成的 release 程序与根目录配置：
 
 ```powershell
-.\scripts\dev\publish-gui.ps1 -Destination D:\re-agent-bin\desktop-gui -BinaryPath .\target\release\re-agent.exe -ConfigPath .\re-agent.toml
+.\scripts\dev\publish-gui.ps1 -Destination D:\wukong-bin\desktop-gui -BinaryPath .\target\release\wukong.exe -ConfigPath .\wukong.toml
 ```
 
-此后使用发布目录中的 `RE Agent.lnk` 启动。配置仍保存到指定的原始文件；脚本不修改工作区或 Docker 权限。重新构建后，关闭旧窗口并再次运行脚本即可更新。
+此后使用发布目录中的 `Wukong.lnk` 启动。配置仍保存到指定的原始文件；脚本不修改工作区或 Docker 权限。重新构建后，关闭旧窗口并再次运行脚本即可更新。
 
 ## 配置与模型
 
-完整字段见 [re-agent.example.toml](../../re-agent.example.toml)。相对文件路径按配置文件所在目录解析。
+完整字段见 [wukong.example.toml](../../wukong.example.toml)。相对文件路径按配置文件所在目录解析。
 
 ### 配置查找顺序
 
 | 入口 | 查找顺序 |
 | --- | --- |
 | 显式指定 `--config PATH` | 始终优先使用指定文件 |
-| 桌面入口 | 可执行文件同目录的 `re-agent.toml` → 当前目录 |
-| CLI 命令 | 当前目录的 `re-agent.toml` → 可执行文件同目录 |
+| 桌面入口 | 可执行文件同目录的 `wukong.toml` → 当前目录 |
+| CLI 命令 | 当前目录的 `wukong.toml` → 可执行文件同目录 |
 
 ```sh
-re-agent --config ./re-agent.toml --state ./saved-state gui
-re-agent --config ./re-agent.toml analyze ./sample.elf --task "还原记录格式并验证字段边界"
+wukong --config ./wukong.toml --state ./saved-state gui
+wukong --config ./wukong.toml analyze ./sample.elf --task "还原记录格式并验证字段边界"
 ```
 
 ### 模型服务
@@ -124,12 +124,12 @@ verifier = { model = "your-verifier-model", max_tokens = 16384 }
 ### 查看与干预
 
 ```sh
-re-agent runs
-re-agent status RUN_ID --events 30
-re-agent gui RUN_ID
-re-agent message AGENT_ID "请记录这条新的分析约束"
-re-agent message AGENT_ID "请继续调查该函数的边界条件" --kind follow_up
-re-agent stop AGENT_ID --reason "停止该分支"
+wukong runs
+wukong status RUN_ID --events 30
+wukong gui RUN_ID
+wukong message AGENT_ID "请记录这条新的分析约束"
+wukong message AGENT_ID "请继续调查该函数的边界条件" --kind follow_up
+wukong stop AGENT_ID --reason "停止该分支"
 ```
 
 普通消息补充信息，不会重新开启已完成任务。`--kind follow_up` 用于向已完成的 Agent 追加工作，保留其历史和累计预算；暂停状态仍需显式恢复。
@@ -137,8 +137,8 @@ re-agent stop AGENT_ID --reason "停止该分支"
 ### 暂停与恢复
 
 ```sh
-re-agent pause RUN_ID
-re-agent resume RUN_ID --max-tokens 1000000
+wukong pause RUN_ID
+wukong resume RUN_ID --max-tokens 1000000
 ```
 
 CLI 的 Ctrl+C 请求在持久化边界停止调度，保留状态以便恢复。`resume` 使用保存的配置与检查点，并可通过 `--max-tokens`、`--max-usd` 调整累计预算上限。活动控制端通过租约互斥。
@@ -152,7 +152,7 @@ CLI 的 Ctrl+C 请求在持久化边界停止调度，保留状态以便恢复�
 有副作用且结果未知的第三方 MCP 调用保留未决状态，不会盲目重放。操作员复核实际结果并关联证据后，可执行对账：
 
 ```sh
-re-agent reconcile CALL_ID --result-file ./reviewed-result.json --evidence-id EVIDENCE_ID
+wukong reconcile CALL_ID --result-file ./reviewed-result.json --evidence-id EVIDENCE_ID
 ```
 
 ## 预算与用量
@@ -161,7 +161,7 @@ Token 预算按 provider 返回的用量累计。缺少必要用量时，系统�
 
 已经发出的并行请求仍可能使观测用量超过阈值；取消或重发的请求也可能产生 provider 未回报的费用。配置的 USD 单价用于估算，并非账单保证。
 
-使用费用预算前，在 `[pricing]` 中配置实际的每百万 Token 输入与输出价格。默认零价格关闭 USD 计价；`max_usd` 需要相应价格配置。完整预算字段见 [配置示例](../../re-agent.example.toml)。
+使用费用预算前，在 `[pricing]` 中配置实际的每百万 Token 输入与输出价格。默认零价格关闭 USD 计价；`max_usd` 需要相应价格配置。完整预算字段见 [配置示例](../../wukong.example.toml)。
 
 ## Agent 角色与能力
 
@@ -211,8 +211,8 @@ Token 预算按 provider 返回的用量累计。缺少必要用量时，系统�
 ## 报告与复核
 
 ```sh
-re-agent report RUN_ID --output ./reports/assessment-01
-re-agent verify-bundle ./reports/assessment-01
+wukong report RUN_ID --output ./reports/assessment-01
+wukong verify-bundle ./reports/assessment-01
 ```
 
 导出目录必须是新目录。报告包包含目标快照、原始证据、配置与复现元数据、JSON、Markdown、HTML 及 SHA256 清单。导出不执行目标；`verify-bundle` 校验文件与映射的完整性。文件清单和复现方法见 [报告格式](../reference/report-format.md)。

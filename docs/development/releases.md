@@ -1,6 +1,6 @@
 # 在线发布与 GitHub Actions
 
-仓库：`mark0-cn/re_agent`。私有镜像：`hlmark0/re-agent-workbench`。只发布 Windows x64 在线安装包，镜像平台为 linux/amd64。
+仓库：`mark0-cn/Wukong`。公开镜像：`hlmark0/wukong`。只发布 Windows x64 在线安装包，镜像平台为 linux/amd64。
 
 ## 仓库配置
 
@@ -10,17 +10,17 @@ Settings → Secrets and variables → Actions：
 | --- | --- | --- |
 | Variable | DOCKERHUB_USERNAME | hlmark0 |
 | Variable | DOCKERHUB_NAMESPACE | hlmark0 |
-| Secret | DOCKERHUB_TOKEN | Docker Hub 私有仓库 Read/Write PAT，不需要 Delete |
+| Secret | DOCKERHUB_TOKEN | Docker Hub 仓库 Read/Write PAT，不需要 Delete |
 | Variable | RELEASE_APP_ID | 专用发布 GitHub App 的 App ID |
 | Secret | RELEASE_APP_PRIVATE_KEY | 该 App 生成的 PEM 私钥全文 |
 
-PAT 到期后在 Docker 重新创建并替换 Secret。不要将 PAT 写入源码、包、命令参数或发布说明。客户端使用自己的读取权限登录。
+PAT 到期后在 Docker 重新创建并替换 Secret。不要将 PAT 写入源码、包、命令参数或发布说明。公开镜像允许客户端匿名拉取；发布凭据只用于 CI。
 
 发布 App 只需一次性配置：
 
 1. 在 [GitHub Apps 设置](https://github.com/settings/apps/new) 创建 App，Homepage 填仓库 URL，关闭 Webhook；仅允许安装到自己的账号即可。
 2. Repository permissions 设置 **Contents: Read and write**、**Pull requests: Read and write**；不需要 Administration、Actions write 或 Workflows write。
-3. Install App → Only select repositories → `mark0-cn/re_agent`。
+3. Install App → Only select repositories → `mark0-cn/Wukong`。
 4. 将 App ID 保存到上述仓库 Variable，Generate a private key 后将 PEM 全文保存到上述 Secret；不要把私钥提交到仓库或聊天。
 
 工作流按当前仓库签发短期 installation token，结束后撤销。创建 PR 时请求 Contents/PR 写权限；打 tag 时只请求 Contents 写权限。
@@ -30,7 +30,7 @@ App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发
 
 默认使用 GitHub 标准托管 `ubuntu-24.04` / `windows-2025`。镜像构建和验收是不同 job，彼此只传 digest 与小文件，不传镜像 tar。磁盘准备脚本仅允许在 GitHub 托管 Linux VM 上运行，删除该 job 不需要的预装 SDK，打印空间并做预检。若空间不足，可以把可选 Variable `WORKBENCH_LINUX_RUNNER` 设置为已配置的大规格 **GitHub 托管** runner 标签；不会自动开通付费资源。
 
-私有 GitHub 仓库的标准 runner 使用计入账号 Actions 配额；镜像首次无缓存构建较慢。缓存写入同一私有 Docker Hub 仓库的 `buildcache` 标签。只保留客户端和报告类 Actions artifacts，默认 7–14 天过期。
+本项目 GitHub 仓库公开，标准托管 runner 的运行时间免费；镜像首次无缓存构建较慢。缓存写入同一公开 Docker Hub 仓库的 `buildcache` 标签。只保留客户端和报告类 Actions artifacts，默认 7–14 天过期。
 
 ## 日常 CI
 
@@ -41,7 +41,7 @@ Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。�
 ## 发布版本
 
 1. 打开 **Actions → Prepare Version PR → Run workflow**，分支选择 `master`，填写完整的新 tag，例如 `v0.2.0`。正常准备版本时不要勾选 `dry_run`。
-2. 工作流同步 `Cargo.toml`、`Cargo.lock` 中 re-agent 的版本、`tauri.conf.json`、`ui/package.json`、`package-lock.json` 中 ui 的版本；检查格式、版本递增和一致性，运行发布脚本测试，然后创建 `codex/release-v0.2.0` 分支及目标为 `master` 的 PR。
+2. 工作流同步 `Cargo.toml`、`Cargo.lock` 中 wukong 的版本、`tauri.conf.json`、`ui/package.json`、`package-lock.json` 中 ui 的版本；检查格式、版本递增和一致性，运行发布脚本测试，然后创建 `codex/release-v0.2.0` 分支及目标为 `master` 的 PR。
 3. App 创建 PR 后，原生 CI 自动启动并显示在 PR 页面。Windows、Linux、summary 通过后，由维护者确认合并；**合并版本 PR 即批准发布**。
 4. 合并提交在 `master` 上执行全量 CI，并行预构建 Windows Release 客户端和 Linux 验收客户端。全部成功后 **Tag Merged Release** 自动校验并推送 tag，指向经过检查的合并提交；即使随后 `master` 前进，也不会误标到新提交。
 5. tag 自动触发 **Build and Publish**，完成构建、验收并发布 Docker Hub 镜像和 GitHub Release。无需本地操作或手动推送 tag。
@@ -94,7 +94,7 @@ Docker Hub 如支持也可将精确版本标签设为不可变，但 `latest`、
 
 ## 演练与排错
 
-Actions → Build and Publish → Run workflow，选择默认分支。手动演练会推送私有候选镜像并生成 `online-release` artifact，**不创建 GitHub Release、不更新版本标签或 latest**。正式发布由 tag push 触发。
+Actions → Build and Publish → Run workflow，选择默认分支。手动演练会推送公开候选镜像并生成 `online-release` artifact，**不创建 GitHub Release、不更新版本标签或 latest**。正式发布由 tag push 触发。
 
 首次预热或验证客户端复用时，先运行 **CI**，选择 `master` 并勾选 `build_release_clients`；成功后在同一提交上运行发布演练。正常版本合并自动预构建，不需每次手工预热。普通 master push 不额外编译 Release 客户端。
 
@@ -102,7 +102,7 @@ Actions → Tag Merged Release → Run workflow，选择 `master`，填写一个
 
 查看失败 job：
 
-- 登录失败：检查 Docker Hub PAT 私有仓库读写权限、有效期和 GitHub 配置。
+- 登录失败：检查 Docker Hub PAT 对 `hlmark0/wukong` 的读写权限、有效期和 GitHub 配置。
 - App token 失败：检查 App ID/PEM、App 是否安装到该仓库、Contents/PR 权限及新增权限是否获安装批准。
 - PR 未显示 CI：核对 PR 作者是否为发布 App，查看 PR Checks 页面；不要将 Prepare Version PR 成功视为全部 CI 通过。
 - 空间预检失败：查看 `df` 输出，改用更大托管 runner 或进一步缩减镜像；不自动降级/跳过验收。
