@@ -1,0 +1,61 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:10'
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 2
+    groups:
+      rig-family:
+        patterns: ['rig', 'rig-*']
+      compatible-rust:
+        patterns: ['*']
+        exclude-patterns: ['rig', 'rig-*']
+        update-types: [minor, patch]
+      rust-security:
+        applies-to: security-updates
+        patterns: ['*']
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:20'
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 2
+    groups:
+      compatible-frontend:
+        patterns: ['*']
+        update-types: [minor, patch]
+      frontend-security:
+        applies-to: security-updates
+        patterns: ['*']
+  - package-ecosystem: pip
+    directory: /workers/runtime
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:30'
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 2
+    groups:
+      compatible-runtime:
+        patterns: ['*']
+        update-types: [minor, patch]
+      runtime-security:
+        applies-to: security-updates
+        patterns: ['*']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '09:40'
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ['*']
