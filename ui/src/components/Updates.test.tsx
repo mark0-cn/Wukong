@@ -17,7 +17,7 @@ test('cannot install until preparation succeeds and the user confirms restart', 
   await waitFor(() => expect(install.disabled).toBe(false));
   await userEvent.click(install);
   expect(vi.mocked(api).mock.calls.some(([, args]) => args?.action === 'install')).toBe(false);
-  await userEvent.click(screen.getByRole('button', { name: '确认', exact: true }));
+  await userEvent.click(screen.getByRole('button', { name: /^确认$/ }));
   expect(vi.mocked(api).mock.calls.some(([, args]) => args?.action === 'install')).toBe(true);
 });
 test('first launch explains Docker setup and pending recovery blocks installation', async () => {

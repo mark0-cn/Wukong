@@ -7,6 +7,11 @@ from scripts.release.desktop_manifest import generate
 
 
 class DesktopManifestTests(unittest.TestCase):
+    def test_installer_and_runtime_share_the_trust_anchor(self):
+        root = Path(__file__).resolve().parents[2]
+        config = json.loads((root / 'tauri.conf.json').read_text(encoding='utf-8'))
+        self.assertEqual(config['plugins']['updater']['pubkey'],
+                         (root / 'src/desktop/update-public.key').read_text().strip())
     def test_requires_both_platforms_and_matching_acceptance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

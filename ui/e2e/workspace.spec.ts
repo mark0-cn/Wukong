@@ -16,6 +16,7 @@ async function mockDesktop(page: Page) {
       unregisterCallback: (id: number) => callbacks.delete(id),
       invoke: async (command: string, args: Record<string, any> = {}) => {
         state.requests.push({ command, args });
+        if (command === 'update_action') return { version: '0.2.0', phase: 'idle', message: '当前工具环境已就绪', available: '0.2.1', notes: '修复工具兼容性', downloaded: 0, total: null, prepared: null, recovery: null, needs_setup: false, pending: false };
         if (command === 'plugin:event|listen') { listeners.set(args.event, [...(listeners.get(args.event) ?? []), args.handler]); return args.handler; }
         if (command === 'plugin:event|unlisten') { listeners.set(args.event, (listeners.get(args.event) ?? []).filter(id => id !== args.eventId)); return; }
         if (command === 'workspace_read') {
@@ -94,4 +95,13 @@ test('loads scoped evidence pages and preserves settings drafts', async ({ page 
   await page.getByRole('button', { name: '工作区设置', exact: true }).click();
   await expect(page.getByLabel('主模型', { exact: true })).toHaveValue('draft-model');
   await expect(page.getByRole('button', { name: '保存并应用' })).toBeDisabled();
+});
+
+ test('update center presents versions and requires preparation before restart', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '更新与环境', exact: true }).click();
+  await expect(page.getByText('0.2.0', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '安装并重启', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '下载并验证更新', exact: true })).toBeEnabled();
+  await page.screenshot({ path: join(tmpdir(), 'wukong-update-center.png'), fullPage: true });
 });

@@ -63,7 +63,10 @@ pub fn stage(journal: &Journal) -> Result<PathBuf> {
     } else {
         "Wukong-Recovery.AppImage"
     });
-    std::fs::copy(source, &helper)?;
+    let temporary = tempfile::NamedTempFile::new_in(root()?)?;
+    std::fs::copy(source, temporary.path())?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(&helper).map_err(|e| e.error)?;
     write_json(&root()?.join("pending.json"), journal)?;
     Ok(helper)
 }
@@ -138,6 +141,16 @@ pub fn recover() -> Result<()> {
             .persist(&journal.destination)
             .map_err(|e| e.error)?;
     }
+    let restored = std::process::Command::new(&journal.destination)
+        .arg("--version")
+        .env("APPIMAGE_EXTRACT_AND_RUN", "1")
+        .output()?;
+    ensure!(
+        restored.status.success()
+            && String::from_utf8_lossy(&restored.stdout).trim()
+                == format!("wukong {}", journal.from),
+        "restored client identity mismatch; recovery record retained"
+    );
     for name in ["pending.json", "previous.json"] {
         let path = root()?.join(name);
         if path.exists() {

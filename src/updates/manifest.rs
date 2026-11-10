@@ -44,12 +44,15 @@ pub fn target() -> Result<&'static str> {
 }
 
 pub fn verify(data: &[u8], signature: &str) -> Result<()> {
+    verify_with_key(data, signature, PUBLIC_KEY)
+}
+fn verify_with_key(data: &[u8], signature: &str, key: &str) -> Result<()> {
     let decode = |value: &str| -> Result<String> {
         Ok(String::from_utf8(
             base64::engine::general_purpose::STANDARD.decode(value.trim())?,
         )?)
     };
-    let public = minisign_verify::PublicKey::decode(&decode(PUBLIC_KEY)?)?;
+    let public = minisign_verify::PublicKey::decode(&decode(key)?)?;
     public.verify(
         data,
         &minisign_verify::Signature::decode(&decode(signature)?)?,
@@ -190,5 +193,15 @@ mod tests {
     fn unsigned_metadata_is_rejected() {
         assert!(Manifest::parse(b"{}", "").is_err());
         assert!(verify(b"changed", "not-a-signature").is_err());
+    }
+    #[test]
+    fn real_signature_rejects_modified_content_and_wrong_key() -> Result<()> {
+        let data = include_bytes!("../../tests/fixtures/update-signature/message.txt");
+        let signature = include_str!("../../tests/fixtures/update-signature/message.txt.sig");
+        let key = include_str!("../../tests/fixtures/update-signature/test.pub");
+        verify_with_key(data, signature, key)?;
+        assert!(verify_with_key(b"modified", signature, key).is_err());
+        assert!(verify(data, signature).is_err());
+        Ok(())
     }
 }
