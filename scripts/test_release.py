@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
-from release import ROOT, package, sha256, validate_image, version
+from release import ROOT, package, sha256, validate_image, validate_tag, version
 
 
 class ReleaseTests(unittest.TestCase):
@@ -32,6 +32,18 @@ class ReleaseTests(unittest.TestCase):
     def test_mismatched_tag_is_rejected(self):
         with self.assertRaises(ValueError):
             version("v999.0.0")
+
+    def test_release_tag_accepts_three_numeric_components(self):
+        for tag in ["v0.0.0", "v0.1.0", "v1.2.3", "v12.34.567"]:
+            with self.subTest(tag=tag):
+                self.assertEqual(validate_tag(tag), tag[1:])
+
+    def test_invalid_tag_is_rejected_before_repository_files_are_read(self):
+        for tag in ["", "1.2.3", "V1.2.3", "v1", "v1.2", "v1.2.3.4", "v01.2.3", "v1.02.3",
+                    "v1.2.03", "v1.2.3-rc.1", "v1.2.3+build", "vlatest", "release/v1.2.3",
+                    "v1.2.3\n", " v1.2.3", "v1.2.٣", "v-1.2.3"]:
+            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "Invalid release tag"):
+                version(tag, root=Path("nonexistent-repository"))
 
     def test_image_identity_and_platform(self):
         data = dict(repository="hlmark0/re-agent-workbench", digest="sha256:" + "a" * 64,

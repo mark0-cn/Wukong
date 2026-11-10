@@ -9,7 +9,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
+VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+RELEASE_TAG = re.compile("v" + VERSION.pattern)
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
@@ -26,15 +27,22 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def validate_tag(tag):
+    if not RELEASE_TAG.fullmatch(tag):
+        raise ValueError(f"Invalid release tag {tag!r}: expected vMAJOR.MINOR.PATCH (e.g. v0.1.0), ASCII digits only, no leading zeros or suffixes")
+    return tag[1:]
+
+
 def version(tag=None, root=ROOT):
+    if tag is not None:
+        validate_tag(tag)
     package = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))["package"]
     cargo = package["version"]
     toolchain = tomllib.loads((root / "rust-toolchain.toml").read_text(encoding="utf-8"))["toolchain"]["channel"]
     if toolchain != package["rust-version"]:
         raise ValueError("Rust toolchain and Cargo rust-version differ")
-    match = VERSION.fullmatch(cargo)
-    if not match or (match[4] and any(x.isdigit() and len(x) > 1 and x[0] == "0" for x in match[4].split("."))):
-        raise ValueError("Unsupported SemVer: " + cargo)
+    if not VERSION.fullmatch(cargo):
+        raise ValueError("Release version must be MAJOR.MINOR.PATCH without leading zeros or suffixes: " + cargo)
     versions = {
         "Cargo.toml": cargo,
         "tauri.conf.json": read_json(root / "tauri.conf.json")["version"],
