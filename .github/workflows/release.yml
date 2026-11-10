@@ -115,10 +115,18 @@ jobs:
         run: |
           digest=$(python scripts/publish-release.py --inspect-image "$CANDIDATE")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Prepare disk and locked inputs
+      - name: Prepare disk
         if: steps.existing.outputs.digest == ''
         run: |
           bash scripts/prepare-ci-disk.sh 25
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.existing.outputs.digest == ''
+        with:
+          path: workers/deps
+          key: worker-deps-v1-${{ hashFiles('workers/toolchain.lock.json') }}
+      - name: Verify locked inputs, including cache hits
+        if: steps.existing.outputs.digest == ''
+        run: |
           python scripts/fetch-worker-deps.py
       - uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
         if: steps.existing.outputs.digest == ''

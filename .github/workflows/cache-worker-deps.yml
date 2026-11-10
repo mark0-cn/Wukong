@@ -1,0 +1,36 @@
+name: Cache Worker Dependencies
+run-name: Cache locked tool downloads · ${{ github.ref_name }}
+on:
+  push:
+    branches: [master]
+    paths:
+      - workers/toolchain.lock.json
+      - scripts/fetch-worker-deps.py
+      - .github/workflows/cache-worker-deps.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-deps-master
+  cancel-in-progress: false
+
+jobs:
+  cache:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: workers/deps
+          key: worker-deps-v1-${{ hashFiles('workers/toolchain.lock.json') }}
+      - name: Verify all cached files and download missing inputs
+        run: python scripts/fetch-worker-deps.py
+      - name: Summarize shared cache
+        run: echo 'Locked tool downloads verified. Master cache is available to subsequent branch and tag builds.' >> "$GITHUB_STEP_SUMMARY"
