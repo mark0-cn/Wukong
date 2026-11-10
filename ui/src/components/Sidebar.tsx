@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Box, ChevronRight, Plus, Search, Settings2 } from 'lucide-react';
+import brandIcon from '../../../icons/icon.svg';
+import { ChevronRight, Plus, Search, Settings2 } from 'lucide-react';
 import type { Host, Run } from '../types';
 import { fileName, Status } from './Status';
 
@@ -9,7 +10,7 @@ export function Sidebar({ runs, selected, host, onSelect, onNew, onSettings }: {
 }) {
   const [search, setSearch] = useState('');
   const visible = runs.filter(run => `${run.target_path} ${run.task}`.toLowerCase().includes(search.toLowerCase()));
-  return <aside className="sidebar"><div className="brand"><span className="brand-mark"><Box size={19} /></span><div><strong>RE Agent</strong><span>分析工作区</span></div><span className="local-indicator" title="本地工作区" /></div>
+  return <aside className="sidebar"><div className="brand"><span className="brand-mark"><img src={brandIcon} alt="" width={32} height={32} /></span><div><strong>Wukong</strong><span>分析工作区</span></div><span className="local-indicator" title="本地工作区" /></div>
     <button className="new-task" onClick={onNew} disabled={!host}><Plus size={16} />新建分析<span>⌘ N</span></button>
     <div className="sidebar-label">任务记录 <span>{runs.length}</span></div>
     <div className="search"><Search size={13} /><input aria-label="搜索任务" placeholder="搜索任务…" value={search} onChange={event => setSearch(event.target.value)} /></div>
