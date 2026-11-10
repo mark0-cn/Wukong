@@ -38,6 +38,8 @@ jobs:
 
   windows:
     needs: changes
+    outputs:
+      rust_cache_hit: ${{ steps.rust-cache.outputs.cache-hit }}
     runs-on: windows-2025
     timeout-minutes: 90
     defaults:
@@ -54,6 +56,7 @@ jobs:
         with:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        name: Rust cache
         if: needs.changes.outputs.rust == 'true'
         id: rust-cache
         with:
@@ -76,13 +79,19 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm run build
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Rust checks
+      - name: Rust formatting
         if: needs.changes.outputs.rust == 'true'
         run: |
           cargo fmt --all -- --check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Rust Clippy
+        if: needs.changes.outputs.rust == 'true'
+        run: |
           cargo clippy --locked --all-targets -- -D warnings
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Rust tests
+        if: needs.changes.outputs.rust == 'true'
+        run: |
           cargo test --locked --all-targets
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 

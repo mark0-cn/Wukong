@@ -59,6 +59,20 @@ class SummaryTests(unittest.TestCase):
         jobs[0]["completed_at"] = None
         self.assertEqual(summary.duration("windows", jobs), "—")
 
+    def test_ci_scope_cache_and_step_durations(self):
+        needs = {"changes": {"result": "success", "outputs": dict(rust="false", frontend="false", linux="false")},
+                 "windows": {"result": "success", "outputs": {"rust_cache_hit": "true"}},
+                 "linux": {"result": "skipped"}}
+        jobs = [{"name": "windows", "steps": [{"name": "Rust tests", "conclusion": "success",
+                 "started_at": "2026-01-01T00:00:00Z", "completed_at": "2026-01-01T00:01:05Z"}]}]
+        result = summary.render("ci", needs, self.context, self.directory, jobs=jobs)
+        self.assertIn("通过 / Passed", result)
+        self.assertIn("Rust cache: 精确命中", result)
+        self.assertIn("Rust tests | success | 1m 5s", result)
+        needs["changes"]["outputs"]["linux"] = "true"
+        result = summary.render("ci", needs, self.context, self.directory)
+        self.assertIn("Incomplete or failed", result)
+
 
 if __name__ == "__main__":
     unittest.main()
