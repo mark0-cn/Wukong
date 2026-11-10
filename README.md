@@ -255,4 +255,6 @@ worker 测试、环境依赖和性能检查见 [维护约定](docs/maintenance.m
 
 发行版通过 GitHub Release 提供 Windows 在线安装包，安装器从私有 Docker Hub 仓库拉取固定 digest 的工具镜像。见 [在线安装与升级](docs/online-install.md) 和 [CI/tag 发布流程](docs/releases.md)。
 
+依赖更新、上游工具版本检查、不可变 Release 与运行摘要见 [GitHub 维护功能](docs/github-maintenance.md)。
+
 工具 Docker 与题目 Docker 由宿主机统一管理，每题独立网络。使用 `env up/doctor`、`challenge import/prepare/build/up` 和离线迁移命令；桌面右上角也有“Pwn 环境”入口。详见 [Pwn 工作环境](docs/pwn-workbench.md)。

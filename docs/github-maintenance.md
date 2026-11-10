@@ -44,3 +44,15 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 发布器先核对草稿的全部远端附件名称、大小和 SHA256，再发布；发布后校验
 `immutable=true` 才推进 latest。若管理员关闭此设置，正式发布检查会失败，
 不会悄悄把可变 Release 当作不可变版本。普通工作流无需管理员权限。
+
+## Actions 运行摘要
+
+CI 与 Release 在各任务结束后运行 `summary` job，包括前面任务失败的情况。
+运行首页可查看 commit、ref、任务结果、耗时和产物链接；Release 额外显示版本、
+镜像 digest、镜像解包大小、在线包大小与实际容器验收结果。
+手动演练明确注明未正式发布，tag 发布只有 publish 成功才显示正式版本链接。
+
+结论来自 GitHub `needs` 的任务状态；耗时及 artifact 链接通过只读 Actions API 获取。
+API 暂不可用时展示缺失提示，不把未知耗时写成 0，也不把缺失验收报告当成通过。
+摘要 job 在运行被强制取消或 GitHub 调度异常时仍可能无法执行，原始 job 日志为准。
+工具链检查有独立摘要及 30 天报告，Release 的在线包与验收报告保留 14 天。
