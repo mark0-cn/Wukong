@@ -31,6 +31,8 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 pub enum Command {
+    /// Restore the last desktop installation without opening the webview.
+    RecoverUpdate,
     /// Manage the portable tool environment on the Docker host.
     Env {
         #[command(subcommand)]
@@ -126,6 +128,9 @@ pub enum Command {
 
 pub async fn run(cli: Cli) -> Result<()> {
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
+    if matches!(command, Command::RecoverUpdate) {
+        return crate::updates::recovery::recover();
+    }
     if let Command::Init { path } = &command {
         AppConfig::write_example(path)?;
         println!("{}", json!({"config":path}));
@@ -177,7 +182,8 @@ pub async fn run(cli: Cli) -> Result<()> {
     let store = Store::open(&config.state_dir)?;
     let service = AssessmentService::new(config.clone(), store.clone());
     match command {
-        Command::Init { .. }
+        Command::RecoverUpdate
+        | Command::Init { .. }
         | Command::Inspect { .. }
         | Command::ToolCatalog
         | Command::Env { .. }
