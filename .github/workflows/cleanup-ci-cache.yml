@@ -1,0 +1,41 @@
+name: Clean Closed PR Caches
+run-name: ${{ github.event_name == 'schedule' || inputs.apply == true }} · closed PR cache cleanup
+on:
+  schedule:
+    - cron: '41 22 * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Delete only caches associated with closed PRs (false previews the inventory)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+concurrency:
+  group: closed-pr-cache-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Clean closed PR caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLY: ${{ github.event_name == 'schedule' || inputs.apply == true }}
+        run: |
+          if [[ "$APPLY" == true ]]; then
+            python scripts/cleanup_ci_cache.py --apply
+          else
+            python scripts/cleanup_ci_cache.py
+          fi
