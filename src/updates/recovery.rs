@@ -197,7 +197,7 @@ pub fn integrate_linux() -> Result<PathBuf> {
     std::fs::write(
         apps.join("io.wukong.desktop.desktop"),
         format!(
-            "[Desktop Entry]\nType=Application\nName=Wukong\nExec={}\nIcon={}\nTerminal=false\nCategories=Development;\n",
+            "[Desktop Entry]\nType=Application\nName=Wukong\nComment=Binary analysis and verification workspace\nComment[zh_CN]=二进制分析与验证工作区\nExec={}\nIcon={}\nTerminal=false\nCategories=Development;\n",
             quote(&destination)?,
             icon.display()
         ),
