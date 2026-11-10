@@ -1,3 +1,4 @@
+import { t, useLocale, currentLocale } from '../i18n';
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { AssistantRuntimeProvider, ThreadPrimitive, MessagePrimitive, useExternalStoreRuntime,
   useAuiState, groupPartByType, type ThreadMessageLike } from '@assistant-ui/react';
@@ -13,6 +14,7 @@ const TranscriptContext = createContext<{ epoch: number; run: string; onAgent: (
 const groupTools = groupPartByType({ 'tool-call': ['group-tools'] });
 
 export function ToolStep({ display }: { display: ToolDisplay }) {
+  useLocale();
   const context = useContext(TranscriptContext);
   const [open, setOpen] = useState(false);
   const [record, setRecord] = useState<ToolRecord>();
@@ -38,16 +40,17 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
     {display.purpose && <p className="tool-purpose">{display.purpose}</p>}
     {display.summary && <p className="tool-summary">{display.summary}</p>}
     <Collapsible.Content className="tool-details">
-      {loading && <p className="muted">正在读取操作详情…</p>}
+      {loading && <p className="muted">{t('workspace-loading-operation-details')}</p>}
       {error && <p className="error" role="alert">{error}</p>}
-      {record && <><div className="detail-caption"><Code2 size={13} />原始操作详情</div>
+      {record && <><div className="detail-caption"><Code2 size={13} />{t('workspace-raw-operation-details')}</div>
         <pre>{JSON.stringify(record.arguments, null, 2)}</pre>
-        {record.result != null && <><div className="detail-caption">原始返回</div><pre>{typeof record.result === 'string' ? record.result : JSON.stringify(record.result, null, 2)}</pre></>}
-        {record.evidence_id && <p className="muted">证据：<code>{record.evidence_id}</code></p>}</>}
+        {record.result != null && <><div className="detail-caption">{t('workspace-raw-result')}</div><pre>{typeof record.result === 'string' ? record.result : JSON.stringify(record.result, null, 2)}</pre></>}
+        {record.evidence_id && <p className="muted">{t('workspace-evidence')}<code>{record.evidence_id}</code></p>}</>}
     </Collapsible.Content>
   </Collapsible.Root>;
 }
 function ToolGroup({ indices }: { indices: readonly number[] }) {
+  useLocale();
   const content = useAuiState(s => s.message.content);
   const steps = indices.map(index => content[index]).filter(part => part?.type === 'tool-call')
     .map(part => (part.args as unknown as { display: ToolDisplay }).display);
@@ -58,24 +61,25 @@ function ToolGroup({ indices }: { indices: readonly number[] }) {
   return <Collapsible.Root open={open} onOpenChange={setExpanded} className="tool-group">
     <Collapsible.Trigger className="tool-group-heading" disabled={working || indices.length <= 4}>
       <span><StateIcon state={working ? 'running' : failures ? 'failed' : 'completed'} />
-        {working ? '正在执行操作' : `${indices.length} 项操作`}{failures > 0 ? ` · ${failures} 项需关注` : ''}</span>
+        {working ? t('workspace-running-operations') : t('workspace-operations', { v0: indices.length })}{failures > 0 ? ` · ${t('workspace-need-attention', { v0: failures })}` : ''}</span>
       {indices.length > 4 && !working && <ChevronRight size={14} className={open ? 'rotate' : ''} />}
     </Collapsible.Trigger>
     <Collapsible.Content>{(expanded ? steps : steps.slice(-4)).map(step => <ToolStep key={step.call_id} display={step} />)}
-      {!expanded && steps.length > 4 && <button className="earlier" onClick={() => setExpanded(true)}>展开全部 {steps.length} 项操作</button>}
+      {!expanded && steps.length > 4 && <button className="earlier" onClick={() => setExpanded(true)}>{t('workspace-expand-all-operations', { count: steps.length })}</button>}
     </Collapsible.Content>
   </Collapsible.Root>;
 }
 function Message() {
+  useLocale();
   const message = useAuiState(s => s.message);
   const context = useContext(TranscriptContext);
   const custom = message.metadata.custom as { author?: string; agent?: string; delivery?: string };
   const user = message.role === 'user';
   return <MessagePrimitive.Root className={`message ${user ? 'message-user' : 'message-assistant'}`}>
     <div className="message-heading"><span className={`avatar ${user ? 'avatar-user' : ''}`}>{user ? <User size={15} /> : <Bot size={16} />}</span>
-      <button className="author" onClick={() => { if (custom.agent) context.onAgent(custom.agent); }} disabled={!custom.agent}>{custom.author ?? (user ? '你' : 'Agent')}</button>
-      <time dateTime={message.createdAt.toISOString()}>{message.createdAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time>
-      {custom.delivery && <span className={`delivery delivery-${custom.delivery}`}>{custom.delivery === 'queued' ? '待接收' : labels[custom.delivery] ?? custom.delivery}</span>}
+      <button className="author" onClick={() => { if (custom.agent) context.onAgent(custom.agent); }} disabled={!custom.agent}>{custom.author ?? (user ? t('workspace-you') : 'Agent')}</button>
+      <time dateTime={message.createdAt.toISOString()}>{message.createdAt.toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' })}</time>
+      {custom.delivery && <span className={`delivery delivery-${custom.delivery}`}>{custom.delivery === 'queued' ? t('workspace-awaiting-delivery') : labels[custom.delivery] ?? custom.delivery}</span>}
     </div>
     <div className="message-content"><MessagePrimitive.GroupedParts groupBy={groupTools} indicator="never">
       {({ part }) => {
@@ -97,6 +101,7 @@ export function convertMessage(message: ChatMessage): ThreadMessageLike {
     metadata: { custom: { author: message.author, agent: message.agent_id, delivery: message.delivery } } };
 }
 function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier: () => void; limit: number }) {
+  useLocale();
   const messages = useAuiState(s => s.thread.messages);
   const viewport = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
@@ -122,8 +127,8 @@ function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier
         const first = virtual.getVirtualItems()[0];
         if (first) anchor.current = { id: messages[first.index].id };
         loadEarlier();
-      }}>{limit >= 10_000 ? '已展示最近 10,000 条事件，完整记录可导出报告' : '加载更早的进展'}</button>}
-      {!messages.length && <div className="empty-conversation"><Bot size={28} /><h3>工作进展将在这里展开</h3><p>Agent 的公开说明、工具操作和结果会按时间展示。</p></div>}
+      }}>{limit >= 10_000 ? t('workspace-showing-the-latest-10-000-events-export') : t('workspace-load-earlier-progress')}</button>}
+      {!messages.length && <div className="empty-conversation"><Bot size={28} /><h3>{t('workspace-work-unfolds-here')}</h3><p>{t('workspace-public-agent-updates-tool-operations-and-results')}</p></div>}
       <div style={{ height: virtual.getTotalSize(), position: 'relative', width: '100%' }}>
         {virtual.getVirtualItems().map(item => <div key={item.key} ref={virtual.measureElement} data-index={item.index}
           className="virtual-message" style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${item.start}px)` }}>
@@ -131,16 +136,17 @@ function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier
         </div>)}
       </div>
     </div>
-    <button className="jump-latest" aria-label="回到最新进展" onClick={() => { pinned.current = true; if (messages.length) virtual.scrollToIndex(messages.length - 1, { align: 'end' }); }}><ArrowDown size={15} />最新进展</button>
+    <button className="jump-latest" aria-label={t('workspace-jump-to-latest-progress')} onClick={() => { pinned.current = true; if (messages.length) virtual.scrollToIndex(messages.length - 1, { align: 'end' }); }}><ArrowDown size={15} />{t('workspace-latest-progress')}</button>
   </ThreadPrimitive.Viewport>;
 }
 export function Conversation({ data, host, agent, onAgent, loadEarlier, limit, composer }: {
   data: Workspace; host: Host; agent?: Agent; onAgent: (id: string) => void;
   loadEarlier: () => void; limit: number; composer: ReactNode;
 }) {
+  useLocale();
   const runtime = useExternalStoreRuntime({ messages: data.transcript, convertMessage,
     isRunning: host.execution?.run_id === data.selected,
-    onNew: async () => { throw new Error('请使用下方操作消息输入框。'); }, isSendDisabled: true });
+    onNew: async () => { throw new Error(t('workspace-use-the-message-composer-below')); }, isSendDisabled: true });
   return <TranscriptContext.Provider value={{ epoch: host.epoch, run: data.selected ?? '', onAgent }}>
     <AssistantRuntimeProvider runtime={runtime}><ThreadPrimitive.Root className="conversation">
       {agent && <div className="agent-context"><Bot size={17} /><div><strong>{agent.name}</strong><span>{agent.task}</span></div><Status value={agent.status} /></div>}
@@ -154,11 +160,12 @@ export function Composer({ target, draft, onDraft, send, busy }: {
   target?: Agent; draft: Draft; onDraft: (draft: Draft) => void;
   send: (draft: Draft, target: Agent) => Promise<void>; busy: boolean;
 }) {
+  useLocale();
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const submit = async () => {
     if (!target || !draft.text.trim() || sending || busy) return;
-    if (terminal(target.status) && !draft.followUp) { setError('该 Agent 已结束。勾选“安排后续任务”后发送。'); return; }
+    if (terminal(target.status) && !draft.followUp) { setError(t('workspace-this-agent-has-finished-select-schedule-follow')); return; }
     const submitted = { ...draft };
     setSending(true); setError('');
     try {
@@ -167,12 +174,12 @@ export function Composer({ target, draft, onDraft, send, busy }: {
     finally { setSending(false); }
   };
   return <div className="composer-wrap"><div className="composer">
-    <textarea aria-label="发送给 Agent 的消息" placeholder={target ? `补充信息或调整 ${target.name} 的工作…` : '选择任务后可向 Agent 发送消息'}
+    <textarea aria-label={t('workspace-message-to-agent')} placeholder={target ? t('workspace-add-information-or-adjust-s-work', { v0: target.name }) : t('workspace-select-a-task-to-message-an-agent')}
       value={draft.text} disabled={!target} rows={3} onChange={event => onDraft({ ...draft, text: event.target.value })}
       onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} />
-    <div className="composer-controls"><div className="composer-target"><Bot size={13} /><span>{target?.name ?? '等待选择任务'}</span></div>
-      <label className="checkbox"><input type="checkbox" checked={draft.followUp} onChange={event => onDraft({ ...draft, followUp: event.target.checked })} />安排后续任务</label>
-      <button className="send-button" aria-label="发送消息" disabled={!target || !draft.text.trim() || sending || busy} onClick={() => { void submit(); }}>{sending ? <StateIcon state="running" /> : <ArrowUp size={17} />}</button>
+    <div className="composer-controls"><div className="composer-target"><Bot size={13} /><span>{target?.name ?? t('workspace-select-a-task-first')}</span></div>
+      <label className="checkbox"><input type="checkbox" checked={draft.followUp} onChange={event => onDraft({ ...draft, followUp: event.target.checked })} />{t('workspace-schedule-follow-up')}</label>
+      <button className="send-button" aria-label={t('workspace-send-message')} disabled={!target || !draft.text.trim() || sending || busy} onClick={() => { void submit(); }}>{sending ? <StateIcon state="running" /> : <ArrowUp size={17} />}</button>
     </div>
-  </div>{error ? <p className="error composer-hint" role="alert">{error}</p> : <p className="composer-hint">{target && terminal(target.status) ? '后续任务会入队，恢复分析后执行。' : '消息按 Agent 代次投递；接收状态会显示在会话中。'}<span>⌘ / Ctrl + Enter 发送</span></p>}</div>;
+  </div>{error ? <p className="error composer-hint" role="alert">{error}</p> : <p className="composer-hint">{target && terminal(target.status) ? t('workspace-follow-up-work-will-queue-and-execute') : t('workspace-messages-target-an-agent-generation-delivery-status')}<span>{t('workspace-ctrl-enter-to-send')}</span></p>}</div>;
 }

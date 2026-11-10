@@ -1,15 +1,17 @@
+import { t, useLocale, currentLocale } from '../i18n';
 import { Check, Circle, CircleAlert, LoaderCircle, Pause, Square } from 'lucide-react';
 
-export const labels: Record<string, string> = {
-  queued: '等待执行', prepared: '等待执行', running: '进行中', waiting: '等待协作',
-  budget_paused: '已暂停', paused: '已暂停', completed: '已完成', stopped: '已停止',
-  crashed: '异常退出', failed: '失败', uncertain: '结果待确认', interrupted: '已中断',
-  hypothesis: '待验证', reported: '已报告', verified: '已验证', rejected: '已排除',
-  candidate: '候选问题', queued_delivery: '待接收', included: '已接收', replied: '已回复', stale: '已过期',
-  suspected: '待验证', reproduced: '已复现', root_cause_confirmed: '根因已确认', impact_verified: '影响已验证', inconclusive: '尚无定论',
-  root: '主 Agent', analyst: '分析 Agent', verifier: '验证 Agent',
-};
+export const labels: Record<string, string> = new Proxy({} as Record<string, string>, { get: (_, key: string) => ({
+  queued: t('workspace-queued'), prepared: t('workspace-queued'), running: t('workspace-running'), waiting: t('workspace-waiting-for-collaborators-2'),
+  budget_paused: t('workspace-paused'), paused: t('workspace-paused'), completed: t('workspace-completed'), stopped: t('workspace-stopped'),
+  crashed: t('workspace-crashed'), failed: t('workspace-failed'), uncertain: t('workspace-result-uncertain'), interrupted: t('workspace-interrupted'),
+  hypothesis: t('workspace-needs-verification'), reported: t('workspace-reported'), verified: t('workspace-verified'), rejected: t('workspace-rejected'),
+  candidate: t('workspace-candidate-finding'), queued_delivery: t('workspace-awaiting-delivery'), included: t('workspace-delivered'), replied: t('workspace-replied'), stale: t('workspace-expired'),
+  suspected: t('workspace-needs-verification'), reproduced: t('workspace-reproduced'), root_cause_confirmed: t('workspace-root-cause-confirmed'), impact_verified: t('workspace-impact-verified'), inconclusive: t('workspace-inconclusive'),
+  root: t('workspace-lead-agent'), analyst: t('workspace-analysis-agent'), verifier: t('workspace-verification-agent'),
+} as Record<string, string>)[key] });
 export function StateIcon({ state }: { state: string }) {
+  useLocale();
   if (state === 'running') return <LoaderCircle size={14} className="spin" />;
   if (state === 'completed' || state === 'verified') return <Check size={14} />;
   if (['failed', 'crashed', 'uncertain', 'interrupted'].includes(state)) return <CircleAlert size={14} />;
@@ -18,8 +20,9 @@ export function StateIcon({ state }: { state: string }) {
   return <Circle size={12} />;
 }
 export function Status({ value }: { value: string }) {
+  useLocale();
   return <span className={`status status-${value}`}><StateIcon state={value} />{labels[value] ?? value}</span>;
 }
 export const terminal = (status: string) => ['completed', 'stopped', 'crashed', 'failed'].includes(status);
-export const compact = (value: number) => new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+export const compact = (value: number) => new Intl.NumberFormat(currentLocale(), { notation: 'compact', maximumFractionDigits: 1 }).format(value);
 export const fileName = (value: string) => value.split(/[\\/]/).filter(Boolean).at(-1) ?? value;
