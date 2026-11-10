@@ -68,6 +68,9 @@ CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。首次或工�
 摘要显示精确缓存命中状态及恢复、保存、fmt、Clippy、test 的独立耗时。
 非精确命中可能是回退缓存或无缓存，实际恢复键见 Rust cache 日志。
 Clippy 与测试保持在同一 Windows job 复用编译目录，不为并行而重复下载和编译依赖。
+Windows CI 通过 `CARGO_PROFILE_DEV_DEBUG=1`、`CARGO_PROFILE_TEST_DEBUG=1` 使用有限调试信息，
+保留调试断言与溢出检查；本地开发及正式 Release 配置不变。CI 故障可用的类型/变量调试信息会减少。
+这两个环境变量属于 Rust 缓存键的输入，切换配置后的首次运行不能复用原配置的完整缓存。
 
 优化验收分别记录首次运行、同配置缓存命中运行及仅 Python 改动 PR 的耗时，
 同时比较总等待时间和 runner 用量；不把无缓存构建和缓存命中构建直接当作同条件性能对比。
