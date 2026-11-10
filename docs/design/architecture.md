@@ -8,17 +8,18 @@
 |---|---|
 | `domain` | run/agent/message/event/tool/evidence/finding/verification/coverage 的持久化记录 |
 | `store` | SQLite 事务、事件与邮箱、按内容哈希保存的原始产物 |
-| `coordinator` | 业务父子树、任务去重、契约、状态转移、消息账本、依赖和完成门槛 |
+| `coordinator` | 共享事务入口；`runs`、`tasks`、`messages`、`waits`、`completion` 分别管理运行、子任务、消息、依赖等待与完成 |
 | `agents`、`prompts/` | 角色与能力提示词装配；`src/prompts.rs` 统一维护内置目录 |
 | `llm` | provider 配置与原生连接、结构化工具摘要及摘要用量 hook |
 | `runner`、`bootstrap` | 运行生命周期与具体依赖装配 |
 | `kernel_host`、`model_catalog`、`usage` | 内核可调用的业务接口、角色模型选择、用量及预算记账 |
 | `kernel` | Rig 执行与日志、子任务及消息协议的业务接入，模型与工具准入、原生会话投影 |
-| `tools` | 类型化参数、权限/路径检查、工具调用记录、输出截断与证据引用 |
-| `binary` | ELF/PE/Mach-O 画像、SHA256、字符串、Ghidra headless 后端 |
+| `tools` | 单一 `catalog` 注册；`args/`、`handlers/` 按职责分组，服务负责权限、资源和证据；`verification` 统一独立验证准入与认证 |
+| `binary` | 地址身份及 SHA256；`profile` 解析 ELF/PE/Mach-O，`strings` 提取有界字符串，`ghidra` 管理 headless 后端及缓存/进程所有权 |
 | `runtime`、`workers/runtime` | 隔离运行、持久化 worker、GDB/MI 会话、AFL++ 任务、崩溃重放与最小化 |
 | `mcp` | rmcp 协议与 Rig 工具定义、命名空间、超时、环境变量及消息大小限制 |
-| `report`、`interface` | 报告导出、CLI、GUI、人工查询与干预 |
+| `report`、`interface` | 报告导出、CLI、人工查询与干预 |
+| `desktop`、`ui/src` | Tauri 命令与工作区服务、展示数据适配、React 桌面界面及生命周期 |
 
 ## 一次任务如何运行
 
@@ -68,6 +69,8 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 内置工具由 `src/tools/catalog.rs` 统一注册，模型从第一轮获得角色可见的完整目录；原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；目标身份、证据、会话 owner 和独立复核仍由实际操作校验。工具定义直接用于执行、参数校验和[生成的工具目录](../reference/tool-catalog.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，实际能力仍需探测。运行 `wukong tool-catalog` 重新生成 Markdown，`wukong --json tool-catalog` 导出机器可读 schema。
 
+内置方法的来源、相关工具和机制夹具由 `prompts/coverage.json` 关联到现有 `SkillManifest`，通过 `wukong skill-catalog` 生成[覆盖清单](../reference/skill-coverage.md)。这些维护信息不改变角色权限、工具可用性或完成门槛。
+
 Python worker 的入口、传输、操作账本、任务管理、独立监督、调试、交互、文件和命令执行由独立组件负责。`Runtime` 仅装配和路由，操作账本通过回调执行及核对会话存活，不依赖具体运行时。
 
 外部进程与模型状态分别恢复。worker 的 debugger/fuzz/job handle 需要重新核对存活状态；保存了 pid 或 SQLite 状态不等于进程仍在运行。已完成的有副作用工具调用复用记录，无法确定结果的调用不能盲目重放。MCP 的 readOnlyHint 通过 Rig 的提示语义处理，不足以授权重放结果未知的远端调用。GDB 同一会话只允许 owner 顺序修改；并行实验创建独立进程。原生内核只注册配置允许的业务工具，不加载宿主 shell 或通用编码工具。
@@ -76,7 +79,7 @@ Python worker 的入口、传输、操作账本、任务管理、独立监督、
 
 `queries` 提供 `WorkspaceQueries`、`AssessmentQueries` 和 `ReportQueries`，返回不依赖 GUI 的摘要、增量游标、会话快照和报告快照。SQL 实现位于 `store/workspace` 与 `store/report_queries`；CLI 与 GUI 共用查询模型，聊天解析和布局缓存只保留在 GUI 适配层。
 
-`gui_data` 在后台读取轻量任务/Agent 摘要，按 `entity_revisions` 的递增修订号接收变化；该索引每个实体保留一行，能够观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。切换任务或存储目录后丢弃旧请求结果并重新建立读取游标。
+`desktop/workspace` 通过 `store/desktop_queries` 在同一快照读取轻量任务/Agent 摘要。响应修订签名结合 epoch、`entity_revisions`、事件序号、查询范围和操作员消息；未变化时不重复发送工作区数据，也能观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。前端 `useWorkspace` 丢弃旧请求结果，切换任务或存储目录后重新读取。
 
 业务写入通过 `StateSession` 事务会话提交，业务层不接收 SQLite 连接。`StoredRecord` 在存储实现中绑定实体类型、存储位置、身份和会话读取策略；业务使用 `load`、`records`、`save_record`，文档及会话使用有类型的类别接口，任务结果归档也通过具体业务方法完成。消息替换、旧 generation 消息归档和未读计数封装在存储实现内；所有回执与业务更新共享同一次租约校验和 IMMEDIATE 事务。
 
@@ -84,7 +87,7 @@ SQLite 使用 WAL、独立只读连接和单写入连接。普通查询以读事
 
 类型边界与此对应：`AgentMetadata` 不含 checkpoint 或继承历史，元数据读取和写入接口使用该具体类型；`AgentConversation` 表示可选会话载荷，`AgentSnapshot` 在继承、恢复、报告和聊天展示时显式组合两者。完整快照使用平铺 JSON 结构，业务热路径使用元数据类型。
 
-聊天展示在后台按 Agent、generation 和内容版本缓存。追加消息复用已解析的聊天块，工具结果仅更新对应调用所在的块；压缩后重新建立展示。界面缓存块高度，用前缀高度定位可见范围，只排版可见块及少量预留区域。窗口宽度、缩放和技术详情开关变化时重新测量。性能回归和模块边界见[维护约定](../development/maintenance.md)。
+`desktop/presentation` 把公开进度、操作员消息和工具结果组合为展示 DTO，前端 `Conversation` 使用 assistant-ui 和虚拟列表呈现聊天。命令名、参数与返回值由 `ui/src/commands.ts` 的映射约束，`bridge` 统一调用；该类型检查不代替 Rust 权限和 epoch 校验。`useDesktopLifecycle` 管理关闭确认、原生文件拖入和键盘监听，`useStartupUpdates` 管理启动更新检查。样式入口保留固定导入顺序，颜色、分栏和组件样式分别维护。性能回归和模块边界见[维护约定](../development/maintenance.md)。
 
 ## 地址与静态分析
 
@@ -99,6 +102,8 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 项目缓存绑定目标 SHA256、Ghidra 版本/配置、launcher 与 bridge 内容哈希。首次导入完成后持久化项目，后续不同查询使用 `-process -noanalysis`。文件锁保护项目的单写者约束；每次请求保留参数、响应、stdout 与 stderr。外部/寄存器/栈地址保留 Ghidra 符号空间，不能伪装成 module-relative。
 
 ## 动态验证与评测边界
+
+`tools/verification` 集中处理验证准入和证据认证，`jobs` 负责通用任务查询与产物导入。`verification_protocol` 对 worker 身份、计数、网络绑定和逐次观测建立类型化视图；原始 JSON 继续完整保存为证据，类型合格不等于影响成立。网络绑定的扩展字段参与身份比较，不丢弃未解析的身份限制。
 
 静态假设、崩溃复现、根因确认、利用原语验证和最终影响分别记录。crash replay 使用目标哈希、运行参数、输入和环境；最小化重新运行谓词，不能用输入长度或某个字符串替代实际复现。
 

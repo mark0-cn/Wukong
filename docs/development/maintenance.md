@@ -3,8 +3,9 @@
 ## 模块边界
 
 - `kernel` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`kernel_host` 暴露业务操作，`supervisor` 独立管理心跳和后台任务观察；`model_catalog`、`usage`、`bootstrap` 分别负责模型选择、用量和装配。
-- `tools` 保留执行管线和共同校验入口，`effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`files`、`jobs`、`sessions` 各自管理资源。
-- `queries` 定义共享查询与 DTO，`store/workspace`、`store/report_queries` 实现 SQL；`gui_data` 负责后台查询结果与展示数据适配；GUI 绘制只消费缓存。`gui_chat` 负责增量解析和可见聊天块布局。
+- `tools` 保留执行管线和共同校验入口，`effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
+- `queries` 定义共享查询与 DTO，`store/workspace`、`store/report_queries` 实现 SQL；`desktop/workspace` 通过 `store/desktop_queries` 读取桌面快照，`desktop/presentation` 适配公开进度和工具结果，React 界面消费 DTO。`ui/src/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
+- `coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
 - `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 3，不提供旧数据库迁移。
 
 worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录，入口文件不承担模块重导出。
@@ -13,6 +14,7 @@ worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录
 
 ## 桌面界面样式
 
+`ui/src/styles.css` 只按固定顺序导入 `styles/` 中的基础、工作区、聊天、Agent、证据、设置、响应式及维护界面样式；移动规则时保持层叠顺序。
 前端使用现有的 Radix、assistant-ui 和 Lucide 组件。颜色统一定义在 `ui/src/theme.css`，组件样式引用语义变量；不要在组件中重新散布颜色值。
 工作区布局样式放在 `ui/src/workspace-layout.css`；分栏使用 `react-resizable-panels`，与 shadcn/ui 的分栏采用同一基础组件，保留键盘调整和宽度记忆。
 默认采用中性深灰底色，金色表示主要操作或选中，蓝色表示执行中，绿色表示成功，黄色表示等待/警告，红色表示失败。状态同时保留图标和文字。
@@ -72,6 +74,6 @@ cargo test --offline --lib workspace_history_performance_baseline -- --ignored -
 
 这些数值用于后续同环境比较，不代表界面端到端帧耗时，也未与改动前版本作速度对比。
 
-`long_conversations_only_layout_visible_blocks` 检查 2000 条聊天消息仅排版可见块。增量解析测试验证工具结果只更新其对应聊天块，压缩后重建索引；存储测试验证有写事务时仍可读取已提交快照，元数据更新与重复 checkpoint 不改写会话。
+前端使用虚拟列表限制聊天 DOM 数量；运行 `npm test`、`npm run build` 和 `npm run test:e2e` 验证类型、组件、任务切换、草稿、关闭确认、文件拖入与最小窗口交互。浏览器测试通过 Tauri 模拟边界运行，不代表真实桌面安装验收。存储测试验证有写事务时仍可读取已提交快照，元数据更新与重复 checkpoint 不改写会话。
 
 评估后续改动时记录数据规模、构建模式和硬件环境，并分别观察界面帧耗时、查询等待、内存和数据库写入量。审计记录、证据与恢复边界的持久化不可因 UI 降频而丢失。

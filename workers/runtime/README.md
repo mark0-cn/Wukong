@@ -59,7 +59,7 @@ request_timeout_secs = 120
 
 ## SSH or a VM
 
-Install Python 3.10+, GDB and AFL++ with `afl-qemu-trace` or `afl-qemu-bridge` on an
+Install Python 3.12+, GDB and AFL++ with `afl-qemu-trace` or `afl-qemu-bridge` on an
 isolated Linux guest. Copy this directory to `/opt/wukong/runtime`; configure a
 dedicated management account inside that isolated guest. Production mode requires
 a root-owned daemon so it can allocate a distinct unprivileged UID per job/session
@@ -244,5 +244,11 @@ paths and atomic metadata IO. Backend adapters import these components directly.
 TCP verification. The job supervisor retains lifecycle/cancellation ownership;
 network replay never executes a model-provided program inside the privileged
 supervisor. See [Pwn tool contracts](../../docs/reference/pwn-tools.md).
-`worker_launch_spec` owns shared LaunchSpec parsing and artifact checks; local launch and network replay retain their own execution policy and explicit resource budgets.
-`worker_network` coordinates each trial; plan validation and capture state, bounded TCP transport, and transcript persistence live in worker_network_plan, worker_network_transport, and worker_network_evidence respectively.
+
+`worker_launch_spec` owns shared LaunchSpec parsing, confined member lookup and
+streamed artifact hashes. Local launch and network replay retain their own
+execution policy and explicit resource budgets. `worker_network` coordinates each
+trial; `worker_network_plan` validates steps and tracks captures,
+`worker_network_transport` owns bounded TCP IO and fresh-response boundaries,
+and `worker_network_evidence` persists exact transmitted/received chunks and their
+hash-bound transcript. Cancellation remains owned by the job supervisor.
