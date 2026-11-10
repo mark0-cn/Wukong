@@ -10,7 +10,8 @@ import tempfile
 from worker_common import confined, safe_env
 
 
-from worker_launch_spec import digest, read_launch
+from worker_common import sha256_file as digest
+from worker_launch_spec import read_launch
 
 
 def load(root,params):

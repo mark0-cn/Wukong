@@ -1,14 +1,10 @@
 """Build a declarative launch description without executing challenge code."""
-import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import sys
-
-
-def digest(path):
-    with path.open("rb") as stream: return hashlib.file_digest(stream,"sha256").hexdigest()
+from worker_common import sha256_file as digest
 
 
 def inside(root, name):

@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from worker_common import MAX_FILE, confined
+from worker_common import MAX_FILE, confined, sha256_file
 
 
 def integer(value):
@@ -92,7 +92,7 @@ class CrashService:
         from pwn import Corefile
         core=Corefile(str(path))
         mappings=[{"start":m.start,"end":m.stop,"path":m.name,"flags":m.flags} for m in core.mappings][:512]
-        result={"source":"core","core_sha256":hashlib.sha256(path.read_bytes()).hexdigest(),
+        result={"source":"core","core_sha256":sha256_file(path),
             "pc":core.pc,"sp":core.sp,"fault_address":core.fault_addr,"signal":core.signal,
             "registers":core.registers,"mappings":mappings,"signature_strength":"unresolved",
             "note":"Core mapping names do not establish original module hashes. No location signature is fabricated."}

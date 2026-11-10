@@ -1,5 +1,5 @@
 """Shared application version and checksum rules."""
-import hashlib
+from scripts._lib.checksums import sha256
 import json
 import re
 import tomllib
@@ -18,11 +18,6 @@ def read_json(path):
 
 def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-
-
-def sha256(path):
-    with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def validate_tag(tag):

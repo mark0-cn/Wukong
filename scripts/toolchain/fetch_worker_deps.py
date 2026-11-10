@@ -1,6 +1,6 @@
 """Fetch all pinned Docker build inputs on Linux or Windows (Python 3.11+)."""
 import argparse
-import hashlib
+from scripts._lib.checksums import sha256
 import json
 from pathlib import Path
 from scripts._lib.repository import ROOT
@@ -28,17 +28,15 @@ def fetch(item, destination, force=False):
     name, entry = item
     path = destination / entry["file"]
     if path.is_file() and not force:
-        with path.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() == entry["sha256"]:
-                print(name + " cached and verified", flush=True)
-                return
+        if sha256(path) == entry["sha256"]:
+            print(name + " cached and verified", flush=True)
+            return
     temporary = path.with_suffix(path.suffix + ".download")
     try:
         subprocess.run(["curl", "--fail", "--location", "--silent", "--show-error", "--retry", "5", "--retry-all-errors",
                         "--connect-timeout", "20", "--max-time", "1800", "--output", str(temporary), entry["url"]], check=True)
-        with temporary.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != entry["sha256"]:
-                raise ValueError(name + " checksum mismatch")
+        if sha256(temporary) != entry["sha256"]:
+            raise ValueError(name + " checksum mismatch")
         temporary.replace(path)
         print(name + " downloaded and verified", flush=True)
     finally:

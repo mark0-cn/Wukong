@@ -6,16 +6,12 @@ from pathlib import Path
 import shutil
 import subprocess
 from scripts._lib.versioning import ROOT, version
+from scripts._lib.checksums import sha256 as digest
 
 TARGETS = {
     "windows": ("windows-client-v1", "target/release/wukong.exe", "release/custom-protocol/windows-amd64"),
     "linux": ("linux-acceptance-client-v1", "target/debug/wukong", "dev/debug=1/no-default-features/linux-amd64"),
 }
-
-
-def digest(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def identity(target, root=ROOT):

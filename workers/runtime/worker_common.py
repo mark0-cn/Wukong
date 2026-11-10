@@ -113,17 +113,18 @@ def tail(path, limit=8192):
         stream.seek(max(0, Path(path).stat().st_size - limit))
         return stream.read(limit).decode("utf-8", errors="replace")
 
+def sha256_file(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
 def artifact(root, path):
     path = Path(path).resolve()
     if root != path and root not in path.parents:
         raise ValueError("artifact outside worker root")
     if not path.is_file():
         return None
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return {"path": path.relative_to(root).as_posix(), "sha256": digest.hexdigest(), "size": path.stat().st_size}
+    return {"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path), "size": path.stat().st_size}
 
 def public_file(root, relative):
     path = confined(root, relative, True)
