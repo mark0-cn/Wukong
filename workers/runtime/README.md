@@ -23,13 +23,13 @@ From the repository root (PowerShell):
 ```powershell
 $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 $env:PATH = (Split-Path $docker) + ';' + $env:PATH
-& $docker build -f workers/Dockerfile -t re-agent-worker:0.1 .
-& $docker volume create re-agent-worker-state
-& $docker run -d --name re-agent-worker --network none --cap-drop ALL `
+& $docker build -f workers/Dockerfile -t wukong-worker:0.1 .
+& $docker volume create wukong-worker-state
+& $docker run -d --name wukong-worker --network none --cap-drop ALL `
   --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
   --security-opt no-new-privileges --security-opt seccomp=unconfined `
   --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g `
-  --mount type=volume,source=re-agent-worker-state,target=/state re-agent-worker:0.1
+  --mount type=volume,source=wukong-worker-state,target=/state wukong-worker:0.1
 ```
 
 Keep the container running to preserve sessions. The controller uses `docker exec`
@@ -49,10 +49,10 @@ The `runtime` section of the application configuration is:
 ```toml
 [runtime]
 backend = "docker"
-docker_container = "re-agent-worker"
+docker_container = "wukong-worker"
 # Optional: auto-detected on Windows Docker Desktop, otherwise "docker".
 # docker_executable = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
-remote_bridge_path = "/opt/re-agent/runtime/bridge.py"
+remote_bridge_path = "/opt/wukong/runtime/bridge.py"
 remote_state_dir = "/state"
 request_timeout_secs = 120
 ```
@@ -60,7 +60,7 @@ request_timeout_secs = 120
 ## SSH or a VM
 
 Install Python 3.10+, GDB and AFL++ with `afl-qemu-trace` or `afl-qemu-bridge` on an
-isolated Linux guest. Copy this directory to `/opt/re-agent/runtime`; configure a
+isolated Linux guest. Copy this directory to `/opt/wukong/runtime`; configure a
 dedicated management account inside that isolated guest. Production mode requires
 a root-owned daemon so it can allocate a distinct unprivileged UID per job/session
 and keep supervisor metadata private. The current SSH transport does not insert
@@ -71,8 +71,8 @@ SSH must already work; the transport uses `BatchMode=yes`.
 [runtime]
 backend = "ssh"
 ssh_host = "root@analysis-vm"
-remote_bridge_path = "/opt/re-agent/runtime/bridge.py"
-remote_state_dir = "/state/re-agent"
+remote_bridge_path = "/opt/wukong/runtime/bridge.py"
+remote_state_dir = "/state/wukong"
 ```
 
 Model credentials are removed from child environments. Job environment overrides
@@ -173,14 +173,14 @@ cargo test --test runtime_jobs
 Actual Linux GDB, replay, independent verification and minimization:
 
 ```powershell
-& $docker exec re-agent-worker python3 /opt/re-agent/tests/run.py integration --state /state/acceptance --fuzz
+& $docker exec wukong-worker python3 /opt/wukong/tests/run.py integration --state /state/acceptance --fuzz
 ```
 
 Actual Ghidra headless import, analysis, functions/decompile/xrefs queries, cache
 identity and hash-mismatch rejection:
 
 ```powershell
-& $docker exec re-agent-worker python3 /opt/re-agent/tests/run.py ghidra --state /state/ghidra-acceptance
+& $docker exec wukong-worker python3 /opt/wukong/tests/run.py ghidra --state /state/ghidra-acceptance
 ```
 
 The `ghidra` test suite compiles its own small C fixture, imports it through the

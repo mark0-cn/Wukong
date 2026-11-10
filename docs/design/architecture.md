@@ -66,7 +66,7 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 共享资料按需装配：每次新模型请求按作者、父任务、前驱、scope 和任务关键词选择最多 6 条笔记、待办或可选 threat model 的有界预览。选择属于启发式提示，不保证覆盖全部相关资料；提示词明确提供遗漏数量和检索入口。`context_search` 支持文本、kind、作者 scope、agent_id 和分页，`context_read` 按 Unicode 字符位置读取原始文档 JSON（含 amendments）。两者按工具输出字节限额自动缩小页面，并保留下一页位置，不经过模型摘要。所有读取限于当前 run；原始证据继续通过 `evidence_read` 读取。会话压缩只保存同样的有界预览、账本计数和完整会话证据引用，不重新注入全部文档或任务树。计划和约束仍来自任务契约，筛选不会替代验收。
 
-内置工具由 `src/tools/catalog.rs` 统一注册，模型从第一轮获得角色可见的完整目录；原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；目标身份、证据、会话 owner 和独立复核仍由实际操作校验。工具定义直接用于执行、参数校验和[生成的工具目录](../reference/tool-catalog.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，实际能力仍需探测。运行 `re-agent tool-catalog` 重新生成 Markdown，`re-agent --json tool-catalog` 导出机器可读 schema。
+内置工具由 `src/tools/catalog.rs` 统一注册，模型从第一轮获得角色可见的完整目录；原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；目标身份、证据、会话 owner 和独立复核仍由实际操作校验。工具定义直接用于执行、参数校验和[生成的工具目录](../reference/tool-catalog.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，实际能力仍需探测。运行 `wukong tool-catalog` 重新生成 Markdown，`wukong --json tool-catalog` 导出机器可读 schema。
 
 Python worker 的入口、传输、操作账本、任务管理、独立监督、调试、交互、文件和命令执行由独立组件负责。`Runtime` 仅装配和路由，操作账本通过回调执行及核对会话存活，不依赖具体运行时。
 

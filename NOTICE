@@ -1,4 +1,4 @@
-re-agent
+wukong
 
 This Rust implementation references the module responsibilities and agent
 coordination semantics of Strix (https://github.com/usestrix/strix), baseline

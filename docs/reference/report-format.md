@@ -1,6 +1,6 @@
 # Evidence report and replay bundle
 
-`re_agent::report::export(store, run_id, output)` exports one transactional run snapshot to a **new directory**. Export reads and hashes the original target and each evidence artifact; it never executes the sample. A verified staging directory is renamed to the destination only after all payloads pass verification. Existing destinations are refused.
+`wukong::report::export(store, run_id, output)` exports one transactional run snapshot to a **new directory**. Export reads and hashes the original target and each evidence artifact; it never executes the sample. A verified staging directory is renamed to the destination only after all payloads pass verification. Existing destinations are refused.
 
 HTML is rendered with an Askama template and automatic HTML escaping. Markdown
 uses its own punctuation escaping; neither renderer changes the raw evidence.

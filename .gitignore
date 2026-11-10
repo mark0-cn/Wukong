@@ -33,6 +33,6 @@ __pycache__/
 
 /gen/schemas/
 
-# Legacy local config and state remain private after the Wukong rename.
+# Additional local configuration and state
 /re-agent.toml
 /.re-agent/

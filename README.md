@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="icons/icon.png" width="88" alt="re-agent 标志">
+  <img src="icons/icon.png" width="88" alt="Wukong 标志">
 </p>
 
-<h1 align="center">re-agent</h1>
+<h1 align="center">Wukong</h1>
 
 <p align="center">
   <strong>面向二进制逆向与分析的多 Agent 工作区</strong><br>
@@ -20,10 +20,10 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="docs/user/usage.md">使用指南</a> ·
   <a href="#文档">文档导航</a> ·
-  <a href="https://github.com/mark0-cn/re_agent/issues">反馈问题</a>
+  <a href="https://github.com/mark0-cn/Wukong/issues">反馈问题</a>
 </p>
 
-re-agent 使用 Rust 与 Rig 构建分析核心，通过 Tauri + React 提供桌面工作区，同时保留完整 CLI。描述分析目标后，根 Agent 拆解任务，由分析与验证 Agent 协作完成调查，并交付可追溯的结论、原始证据和报告。
+Wukong（悟空）使用 Rust 与 Rig 构建分析核心，通过 Tauri + React 提供桌面工作区，同时保留完整 CLI。描述分析目标后，根 Agent 拆解任务，由分析与验证 Agent 协作完成调查，并交付可追溯的结论、原始证据和报告。
 
 ## 目录
 
@@ -62,8 +62,8 @@ re-agent 使用 Rust 与 Rig 构建分析核心，通过 Tauri + React 提供桌
 ### 2. 获取源码并构建
 
 ```sh
-git clone https://github.com/mark0-cn/re_agent.git
-cd re_agent
+git clone https://github.com/mark0-cn/Wukong.git
+cd Wukong
 npm ci
 npm run desktop:build
 ```
@@ -72,10 +72,10 @@ npm run desktop:build
 
 | 平台 | 路径 |
 | --- | --- |
-| Windows | `target/release/re-agent.exe` |
-| Linux / macOS | `target/release/re-agent` |
+| Windows | `target/release/wukong.exe` |
+| Linux / macOS | `target/release/wukong` |
 
-安装包输出到 `target/release/bundle/`。下文使用 `re-agent` 表示该可执行文件：可将其所在目录加入 `PATH`，或替换为完整路径，例如 PowerShell 中的 `.\target\release\re-agent.exe`。
+安装包输出到 `target/release/bundle/`。下文使用 `wukong` 表示该可执行文件：可将其所在目录加入 `PATH`，或替换为完整路径，例如 PowerShell 中的 `.\target\release\wukong.exe`。
 
 <details>
 <summary>仅构建 CLI</summary>
@@ -93,10 +93,10 @@ cargo build --release --no-default-features
 ### 3. 配置模型
 
 ```sh
-re-agent init
+wukong init
 ```
 
-编辑生成的 `re-agent.toml`，设置 `[model]` 中的模型与服务信息，保留其他配置。`init` 不会覆盖已有文件；完整字段见 [配置示例](re-agent.example.toml)。
+编辑生成的 `wukong.toml`，设置 `[model]` 中的模型与服务信息，保留其他配置。`init` 不会覆盖已有文件；完整字段见 [配置示例](wukong.example.toml)。
 
 ```toml
 [model]
@@ -124,9 +124,9 @@ export OPENAI_API_KEY="your-provider-key"
 ### 4. 检查环境并开始分析
 
 ```sh
-re-agent doctor
-re-agent inspect ./sample.exe --strings
-re-agent gui
+wukong doctor
+wukong inspect ./sample.exe --strings
+wukong gui
 ```
 
 `doctor` 检查配置与已安装能力；`inspect` 直接读取二进制，不执行样本，也不调用模型。在桌面工作区选择“新建分析”，选择样本并描述任务即可开始。
@@ -135,7 +135,7 @@ re-agent gui
 
 ### 桌面工作区
 
-双击 `re-agent.exe` 或运行 `re-agent gui` 打开工作区，无需另开浏览器。
+双击 `wukong.exe` 或运行 `wukong gui` 打开工作区，无需另开浏览器。
 
 - 搜索任务记录，选择或拖入目标，编辑分析任务。
 - 查看 Agent 会话、工具操作、协作任务、发现与证据。
@@ -149,22 +149,22 @@ re-agent gui
 
 ```sh
 # 启动分析并导出到一个新目录
-re-agent analyze ./sample.elf --task "还原输入格式与关键算法，给出可复核的证据" --output ./reports/analysis-01
+wukong analyze ./sample.elf --task "还原输入格式与关键算法，给出可复核的证据" --output ./reports/analysis-01
 
 # 查看任务与最近事件
-re-agent runs
-re-agent status RUN_ID --events 30
+wukong runs
+wukong status RUN_ID --events 30
 
 # 暂停与恢复
-re-agent pause RUN_ID
-re-agent resume RUN_ID --max-tokens 1000000
+wukong pause RUN_ID
+wukong resume RUN_ID --max-tokens 1000000
 
 # 导出与校验报告包
-re-agent report RUN_ID --output ./reports/analysis-02
-re-agent verify-bundle ./reports/analysis-02
+wukong report RUN_ID --output ./reports/analysis-02
+wukong verify-bundle ./reports/analysis-02
 ```
 
-`RUN_ID` 为任务 ID。完整选项可通过 `re-agent --help` 或 `re-agent <command> --help` 查看；消息、分支停止与恢复约定见 [任务管理指南](docs/user/usage.md#任务管理与恢复)。
+`RUN_ID` 为任务 ID。完整选项可通过 `wukong --help` 或 `wukong <command> --help` 查看；消息、分支停止与恢复约定见 [任务管理指南](docs/user/usage.md#任务管理与恢复)。
 
 ## 配置执行环境
 
@@ -174,17 +174,17 @@ re-agent verify-bundle ./reports/analysis-02
 .\scripts\dev\start-worker.ps1
 ```
 
-脚本构建 worker 镜像，创建独立容器与持久化卷。随后修改 `re-agent.toml` 中的 `[runtime]`：
+脚本构建 worker 镜像，创建独立容器与持久化卷。随后修改 `wukong.toml` 中的 `[runtime]`：
 
 ```toml
 [runtime]
 backend = "docker"
-docker_container = "re-agent-worker"
-remote_bridge_path = "/opt/re-agent/runtime/bridge.py"
+docker_container = "wukong-worker"
+remote_bridge_path = "/opt/wukong/runtime/bridge.py"
 remote_state_dir = "/state"
 ```
 
-运行 `re-agent doctor` 确认实际可用能力。模型凭据留在控制端；`trusted_local` 会直接在本机运行进程，仅适用于可信测试样本。
+运行 `wukong doctor` 确认实际可用能力。模型凭据留在控制端；`trusted_local` 会直接在本机运行进程，仅适用于可信测试样本。
 
 - [执行 worker](workers/runtime/README.md)：Docker、SSH / VM 部署、协议与验收。
 - [Ghidra 后端](workers/ghidra/README.md)：本地 Ghidra / JDK 配置、查询与缓存。
@@ -196,7 +196,7 @@ remote_state_dir = "/state"
 | 文档 | 内容 |
 | --- | --- |
 | [使用指南](docs/user/usage.md) | 桌面操作、模型配置、任务恢复、预算与 Agent 协作 |
-| [配置示例](re-agent.example.toml) | 模型、角色、预算、worker 与工具配置 |
+| [配置示例](wukong.example.toml) | 模型、角色、预算、worker 与工具配置 |
 | [工具目录](docs/reference/tool-catalog.md) | 从工具注册表生成的完整工具与参数说明 |
 | [实现架构](docs/design/architecture.md) | 模块边界、执行循环、状态与协作语义 |
 | [架构方案](docs/history/strix-rig-binary-agent-plan.md) / [实现契约](docs/design/implementation-contract.md) | 需求基线与验收约定 |
@@ -207,7 +207,7 @@ remote_state_dir = "/state"
 ## 项目结构
 
 ```text
-re_agent/
+Wukong/
 ├── src/                    # Rust 分析核心、CLI 与桌面宿主
 ├── ui/                     # React + TypeScript 桌面界面
 ├── prompts/                # 角色、能力、方法与示例提示词
@@ -219,12 +219,12 @@ re_agent/
 ├── scripts/                # CI、发布、工具链和开发脚本
 ├── packaging/              # 随在线包分发的安装与回滚脚本
 ├── docs/                   # 使用、架构与验收文档
-└── re-agent.example.toml    # 配置示例
+└── wukong.example.toml    # 配置示例
 ```
 
 ## 参与贡献
 
-欢迎通过 [Issue](https://github.com/mark0-cn/re_agent/issues) 报告问题、讨论功能，或提交 [Pull Request](https://github.com/mark0-cn/re_agent/pulls)。问题报告请包含复现步骤、操作系统、构建方式与相关日志。
+欢迎通过 [Issue](https://github.com/mark0-cn/Wukong/issues) 报告问题、讨论功能，或提交 [Pull Request](https://github.com/mark0-cn/Wukong/pulls)。问题报告请包含复现步骤、操作系统、构建方式与相关日志。
 
 桌面开发模式：
 
@@ -257,7 +257,7 @@ worker 测试、环境依赖和性能检查见 [维护约定](docs/development/m
 
 ## Pwn 工作环境
 
-发行版通过 GitHub Release 提供 Windows 在线安装包，安装器从私有 Docker Hub 仓库拉取固定 digest 的工具镜像。见 [在线安装与升级](docs/user/online-install.md) 和 [CI/tag 发布流程](docs/development/releases.md)。
+发行版通过 GitHub Release 提供 Windows 在线安装包，安装器从公开 Docker Hub 仓库 `hlmark0/wukong` 拉取固定 digest 的工具镜像。见 [在线安装与升级](docs/user/online-install.md)和 [CI/tag 发布流程](docs/development/releases.md)。
 
 依赖更新、上游工具版本检查、不可变 Release 与运行摘要见 [GitHub 维护功能](docs/development/github-maintenance.md)。
 

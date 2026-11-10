@@ -16,19 +16,19 @@ flowchart LR
 
 ## 首次使用
 
-普通使用只需要 Docker 和预编译客户端，不需要在宿主机安装 Python、GDB 或 pwntools。Windows 在线发布包可用 `install-workbench.ps1` 安装到用户应用目录；它校验包内文件，并从 Docker Hub 拉取固定 digest 的镜像。私有仓库需要先登录有读取权限的账号。见 [在线安装](online-install.md)。
+普通使用只需要 Docker 和预编译客户端，不需要在宿主机安装 Python、GDB 或 pwntools。Windows 在线发布包可用 `install-workbench.ps1` 安装到用户应用目录；它校验包内文件，并从公开仓库 `hlmark0/wukong` 拉取固定 digest 的镜像。见 [在线安装](online-install.md)。
 
 从源码构建时，先下载锁定依赖，再通过 Bake 一起构建基础镜像和工具镜像：
 
 ```powershell
 python -m scripts.toolchain.fetch_worker_deps
-docker buildx bake --load --set workbench.tags=re-agent-workbench:0.1
-re-agent init re-agent.toml
-re-agent --config re-agent.toml env up
-re-agent --config re-agent.toml env doctor
+docker buildx bake --load --set workbench.tags=wukong:0.1
+wukong init wukong.toml
+wukong --config wukong.toml env up
+wukong --config wukong.toml env doctor
 ```
 
-Docker 不在 PATH 时，在配置的 `[runtime]` 设置 `docker_executable` 为完整路径。生成的配置位于工作环境目录的 `re-agent.toml`；使用它打开客户端，或在桌面“Pwn 环境”中选择“使用工具环境”。模型密钥仍通过宿主机凭据存储或环境变量提供。
+Docker 不在 PATH 时，在配置的 `[runtime]` 设置 `docker_executable` 为完整路径。生成的配置位于工作环境目录的 `wukong.toml`；使用它打开客户端，或在桌面“Pwn 环境”中选择“使用工具环境”。模型密钥仍通过宿主机凭据存储或环境变量提供。
 
 `env doctor` 实际编译并运行 32/64 位程序，检查 GDB 断点、pwntools 收发、Python 分析库、Pwndbg/pwninit 和 Ghidra 导入，结果保存在 `doctor.json`。不是只检查可执行文件存在。
 
@@ -37,10 +37,10 @@ Windows 源码目录可能带 Low 完整性标记，直接运行其中生成的 
 ## 导入和准备题目
 
 ```powershell
-re-agent challenge import C:/ctf/attachments --id demo --binary pwn
-re-agent challenge show demo
-re-agent challenge verify demo
-re-agent challenge prepare demo
+wukong challenge import C:/ctf/attachments --id demo --binary pwn
+wukong challenge show demo
+wukong challenge verify demo
+wukong challenge prepare demo
 ```
 
 `--binary` 相对附件目录；只有一个 ELF 候选时可省略。导入建立：
@@ -54,7 +54,7 @@ challenges/demo/
   scripts/                  解题脚本
   results/                  构建与准备日志
   launch.json               统一启动配置
-  re-agent.toml             本机专用客户端配置，不进入迁移包
+  wukong.toml             本机专用客户端配置，不进入迁移包
 ```
 
 后续构建、准备、启动前校验 `original/`。原件改变需要重新导入为新题。修改 `challenge.toml` 后重新准备；改变构建配置后重新构建。路径使用题目目录下的相对路径，不能越界。
@@ -96,12 +96,12 @@ port = 1337
 ## 题目自带 Docker
 
 ```powershell
-re-agent challenge import C:/ctf/docker题目 --id docker-demo --binary pwn
+wukong challenge import C:/ctf/docker题目 --id docker-demo --binary pwn
 # 编辑 challenge.toml，确认 network.port、Dockerfile 和运行需求
-re-agent challenge build docker-demo
-re-agent challenge prepare docker-demo
-re-agent challenge up docker-demo
-re-agent challenge status docker-demo
+wukong challenge build docker-demo
+wukong challenge prepare docker-demo
+wukong challenge up docker-demo
+wukong challenge status docker-demo
 ```
 
 Dockerfile 的构建上下文仅为本题原始附件；保留题目镜像的 ENTRYPOINT、CMD 和 USER。服务不发布宿主机端口。工具脚本连接 `remote("challenge", 1337)`，题目需要监听 `0.0.0.0` 等容器网络可达地址。
@@ -111,16 +111,16 @@ Dockerfile 的构建上下文仅为本题原始附件；保留题目镜像的 EN
 镜像内的主程序、libc、loader 可以不运行 ENTRYPOINT 就提取：
 
 ```powershell
-re-agent challenge extract docker-demo --path /app/pwn --role binary
-re-agent challenge extract docker-demo --path /usr/lib/x86_64-linux-gnu/libc.so.6 --role libc
-re-agent challenge extract docker-demo --path /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 --role loader
-re-agent challenge prepare docker-demo
-re-agent challenge export-rootfs docker-demo
+wukong challenge extract docker-demo --path /app/pwn --role binary
+wukong challenge extract docker-demo --path /usr/lib/x86_64-linux-gnu/libc.so.6 --role libc
+wukong challenge extract docker-demo --path /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 --role loader
+wukong challenge prepare docker-demo
+wukong challenge export-rootfs docker-demo
 ```
 
 提取路径必须是镜像内实际普通文件；遇到符号链接请指定解析后的路径。redpwn 风格镜像可能把真实根文件系统放在 `/srv`，需检查 Dockerfile，并提取 `/srv/...` 下的文件；`runtime.rootfs = "/srv"` 记录这一事实。完整 rootfs 导出为 tar，不会自动把它转换为等价调试环境。
 
-需要完整题目文件系统的人工调试可以运行 `re-agent challenge debug docker-demo`。它创建独立工具调试容器，仅共享该题服务的 PID namespace；返回可附加的容器内 PID。按返回提示运行 GDB，并设置 `sysroot=/proc/<PID>/root` 读取该进程的真实文件系统。它不共享宿主机 PID namespace。调试会影响原服务进程，结束后重新启动原始题目服务再做最终验证。特殊 jail 的 namespace/权限限制仍可能阻止附加。
+需要完整题目文件系统的人工调试可以运行 `wukong challenge debug docker-demo`。它创建独立工具调试容器，仅共享该题服务的 PID namespace；返回可附加的容器内 PID。按返回提示运行 GDB，并设置 `sysroot=/proc/<PID>/root` 读取该进程的真实文件系统。它不共享宿主机 PID namespace。调试会影响原服务进程，结束后重新启动原始题目服务再做最终验证。特殊 jail 的 namespace/权限限制仍可能阻止附加。
 
 网络连接只提供服务输入输出。最终利用脚本应回到原始题目服务验证；本地 GDB 的成功不代表 jail、seccomp、文件布局和网络协议都相同。
 
@@ -137,19 +137,19 @@ port = 31337
 
 `challenge up` 创建固定目标 TCP relay。工具容器仍只连接内部网络，通过 `challenge:31337` 到达指定服务；relay 单独连接出口网络。这是 TCP 转发，不支持 UDP 或任意代理目标。
 
-`re-agent challenge pwninit demo` 在可联网的临时容器内，以非 root 用户对附件副本运行 pwninit，限时 180 秒。优先按 Build-ID 使用工具镜像已有的调试符号，未命中才由 pwninit 下载。输出保存为 `prepared/pwninit-*/`，不会自动替换选定运行库。下载调试符号、unstrip 可能改变副本哈希，应比对 Build-ID；失败日志位于 `results/pwninit.log`。离线环境应携带已经准备好的文件。
+`wukong challenge pwninit demo` 在可联网的临时容器内，以非 root 用户对附件副本运行 pwninit，限时 180 秒。优先按 Build-ID 使用工具镜像已有的调试符号，未命中才由 pwninit 下载。输出保存为 `prepared/pwninit-*/`，不会自动替换选定运行库。下载调试符号、unstrip 可能改变副本哈希，应比对 Build-ID；失败日志位于 `results/pwninit.log`。离线环境应携带已经准备好的文件。
 
 人工操作可用 `docker exec -it <本题工具容器> bash` 进入工具箱；容器名由 `challenge status` 返回。自动 agent 使用 UID 隔离执行，操作者的手工 root shell 拥有该工具容器的管理权限。
 
 ## 更新、停止和迁移
 
 ```powershell
-re-agent env status
-re-agent env update --image <新的工具镜像或镜像ID>
-re-agent env rollback
-re-agent challenge down demo
-re-agent env down
-re-agent env export C:/transfer/pwn-workbench
+wukong env status
+wukong env update --image <新的工具镜像或镜像ID>
+wukong env rollback
+wukong challenge down demo
+wukong env down
+wukong env export C:/transfer/pwn-workbench
 ```
 
 环境启动后固定镜像 ID，重新启动不会自动跟随浮动标签升级。工具环境更新记录上一镜像，失败尝试恢复；题目工具容器使用自己的既有镜像，重新创建时采用当前工具镜像。`env down` 停止主工具容器；每题使用 `challenge down` 单独停止并删除容器/网络及其匿名卷，保留题目文件和工具的命名数据卷。
@@ -157,9 +157,9 @@ re-agent env export C:/transfer/pwn-workbench
 迁移包是目录，包含 `bundle.json`、`images.tar`、题目文件、命名卷 tar 和历史分析快照。导出先拒绝已登记的活动任务/会话，停止相关容器取得卷快照，结束后恢复原先运行的容器。手工 shell/GDB 不在自动会话登记中，导出前先结束。哈希覆盖包内文件。初次完整镜像约 11 GB，应预留空间；跨机器复制完成后，在新机器的**空工作环境目录**导入：
 
 ```powershell
-re-agent --config 新机器配置.toml env import D:/transfer/pwn-workbench
-re-agent --config 新机器配置.toml env doctor
-re-agent --config 新机器配置.toml challenge up demo
+wukong --config 新机器配置.toml env import D:/transfer/pwn-workbench
+wukong --config 新机器配置.toml env doctor
+wukong --config 新机器配置.toml challenge up demo
 ```
 
 导入重建本机容器名、网络和客户端配置；不复活旧 PID、调试会话和 worker 认证 token。历史 SQLite 和证据保存在 `history/` 供只读查询，不把旧绝对路径的任务直接恢复执行。新任务使用新机器配置。服务容器的可写层和匿名卷不迁移，服务按原镜像重建。凭据存储、宿主机配置文件不打包；题目附件、脚本和历史内容本身仍应按私有数据保管。
