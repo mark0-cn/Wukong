@@ -237,8 +237,7 @@ impl Controller {
                 UiMessage::new("system-an-update-is-available")
             } else {
                 UiMessage::new("system-already-up-to-date")
-            }
-            .into();
+            };
             return Ok(());
         }
         let (config, config_path, _operation) = service.maintenance_context(epoch)?;
