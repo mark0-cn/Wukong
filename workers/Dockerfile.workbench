@@ -5,27 +5,31 @@ USER root
 ARG DEBIAN_FRONTEND=noninteractive
 RUN dpkg --add-architecture i386 && apt-get update && apt-get install -y --no-install-recommends \
     gdbserver tmux strace ltrace patchelf socat netcat-openbsd gcc-multilib libc6-dbg libc6-dbg:i386 \
-    python3-venv xz-utils ruby ruby-dev build-essential && rm -rf /var/lib/apt/lists/*
+    python3-venv xz-utils ruby ruby-dev build-essential elfutils && rm -rf /var/lib/apt/lists/*
 RUN gem install seccomp-tools --version 1.6.2 --no-document
-COPY workers/toolchain.lock.json /opt/re-agent/toolchain.lock.json
-RUN --mount=type=bind,source=workers/deps,target=/deps,ro \
+RUN --mount=type=bind,source=workers/deps/pwninit,target=/deps/pwninit,ro \
     cp /deps/pwninit /usr/local/bin/pwninit \
-    && echo '17049a23ba8cbcf4780c4bc9b4aeb519f2801ceabe7304b55d3d622acca03b8c  /deps/pwndbg.tar.xz' | sha256sum -c - \
     && echo 'f124b6645b01b0fc4adacabe61438fe73eef517dc3e4696a08e1250a8f47eec3  /usr/local/bin/pwninit' | sha256sum -c - \
+    && chmod 755 /usr/local/bin/pwninit && pwninit --version
+RUN --mount=type=bind,source=workers/deps/pwndbg.tar.xz,target=/deps/pwndbg.tar.xz,ro \
+    echo '17049a23ba8cbcf4780c4bc9b4aeb519f2801ceabe7304b55d3d622acca03b8c  /deps/pwndbg.tar.xz' | sha256sum -c - \
     && mkdir -p /opt/pwndbg && tar -xJf /deps/pwndbg.tar.xz -C /opt \
-    && chmod 755 /usr/local/bin/pwninit && ln -s /opt/pwndbg/bin/pwndbg /usr/local/bin/pwndbg \
-    && pwninit --version
-RUN apt-get update && apt-get install -y --no-install-recommends elfutils && rm -rf /var/lib/apt/lists/*
+    && ln -s /opt/pwndbg/bin/pwndbg /usr/local/bin/pwndbg
+COPY workers/runtime/requirements.txt /tmp/re-agent-runtime-requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install --break-system-packages -r /tmp/re-agent-runtime-requirements.txt
+RUN python3 -m pip freeze > /opt/re-agent/python.freeze.txt \
+    && dpkg-query -W > /opt/re-agent/debian-packages.txt \
+    && python3 -c "import pwn,angr,elftools,pygdbmi; print('toolchain imports OK')" \
+    && pwninit --version && /opt/pwndbg/bin/pwndbg --version
 COPY workers/runtime /opt/re-agent/runtime
 COPY workers/ghidra /opt/re-agent/ghidra
+COPY workers/deps/gef.py /opt/gef.py
+COPY workers/toolchain.lock.json /opt/re-agent/toolchain.lock.json
 COPY prompts /opt/re-agent/prompts
 ARG REVISION=development
 ARG VERSION=development
 LABEL org.opencontainers.image.title="re-agent pwn workbench" org.opencontainers.image.revision=$REVISION \
     org.opencontainers.image.version=$VERSION org.opencontainers.image.source="https://github.com/mark0-cn/re_agent"
-RUN python3 -m pip freeze > /opt/re-agent/python.freeze.txt \
-    && dpkg-query -W > /opt/re-agent/debian-packages.txt \
-    && python3 -c "import pwn,angr,elftools,pygdbmi; print('toolchain imports OK')" \
-    && pwninit --version && /opt/pwndbg/bin/pwndbg --version
 WORKDIR /state
 ENTRYPOINT ["sleep", "infinity"]
