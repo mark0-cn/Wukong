@@ -1,0 +1,11 @@
+app-title = Wukong · 分析工作区
+language-ui = 界面语言
+language-output = 新任务输出语言
+language-auto = 跟随系统
+language-match-task = 跟随任务语言
+language-help = 界面语言立即生效；已有任务沿用保存的输出语言。
+error-operation = 操作未能完成。
+dialog-target = 选择分析目标
+dialog-directory = 选择保存目录
+dialog-config = 打开工作区配置
+dialog-report = 导出分析报告

@@ -3,6 +3,7 @@ pub mod configuration;
 #[cfg(feature = "desktop")]
 pub mod host;
 pub mod paths;
+pub mod preferences;
 pub mod presentation;
 pub mod service;
 mod tool_aliases;

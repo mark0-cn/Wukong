@@ -1,0 +1,11 @@
+app-title = Wukong · Analysis workspace
+language-ui = Interface language
+language-output = New task output language
+language-auto = Follow system
+language-match-task = Match task language
+language-help = Interface changes apply immediately. Existing tasks keep their saved output language.
+error-operation = The operation could not be completed.
+dialog-target = Select analysis target
+dialog-directory = Select directory
+dialog-config = Open workspace configuration
+dialog-report = Export analysis report
