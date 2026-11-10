@@ -6,7 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $release = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'release.json') -Raw | ConvertFrom-Json
 if ($release.schema_version -ne 2 -or $release.platform -ne 'windows-amd64' -or $release.tool_platform -ne 'linux/amd64') { throw 'Unsupported online package.' }
-if ($release.image -notmatch '^[a-z0-9][a-z0-9_-]*/wukong@sha256:[0-9a-f]{64}$' -or $release.image_id -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Package must pin a Docker Hub image digest and image ID.' }
+if ($release.image -notmatch '^[a-z0-9][a-z0-9_-]*/(wukong|re-agent-workbench)@sha256:[0-9a-f]{64}$' -or $release.image_id -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Package must pin a Docker Hub image digest and image ID.' }
 $members = @('wukong.exe','install-workbench.ps1','rollback-workbench.ps1','README.md')
 foreach ($required in $members) {
     if (-not $release.files.PSObject.Properties[$required]) { throw "Missing package checksum: $required" }

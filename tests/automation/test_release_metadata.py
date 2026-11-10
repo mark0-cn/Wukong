@@ -30,7 +30,23 @@ class ReleaseMetadataTests(unittest.TestCase):
                          [base + "release.json", base + "SHA256SUMS"])
         self.assertEqual(image, dict(repository="example/wukong", digest="sha256:" + "b" * 64,
                                     image_id=self.manifest["image_id"], source_revision=self.revision,
-                                    size_bytes=12345, platform="linux/amd64"))
+                                    size_bytes=12345, platform="linux/amd64", release_version="1.2.3"))
+
+    def test_earlier_image_commit_and_legacy_repository_are_preserved(self):
+        old = "d" * 40
+        self.manifest["source_revision"] = old
+        self.manifest["image"] = self.manifest["image"].replace("/wukong@", "/re-agent-workbench@")
+        with patch.object(release_metadata, "download", side_effect=self.assets()):
+            image = release_metadata.release_image("1.2.3", self.revision)
+        self.assertEqual(image["source_revision"], old)
+        self.assertEqual(image["repository"], "example/re-agent-workbench")
+        self.assertEqual(image["release_version"], "1.2.3")
+
+    def test_separate_image_source_takes_precedence_over_client_source(self):
+        self.manifest["image_source_revision"] = "e" * 40
+        with patch.object(release_metadata, "download", side_effect=self.assets()):
+            image = release_metadata.release_image("1.2.3", self.revision)
+        self.assertEqual(image["source_revision"], "e" * 40)
 
     def test_bad_missing_and_duplicate_checksums_are_rejected(self):
         for mutate in (lambda text: "0" * 64 + "  release.json\n",
@@ -42,7 +58,7 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_incompatible_release_is_rejected_even_with_valid_checksums(self):
         original = dict(self.manifest)
-        for field, value in (("version", "1.2.4"), ("source_revision", "d" * 40), ("schema_version", 1),
+        for field, value in (("version", "1.2.4"), ("source_revision", "invalid"), ("schema_version", 1),
                              ("platform", "linux-amd64"), ("tool_platform", "linux/arm64"),
                              ("runtime_protocol", 2), ("data_schema", 2), ("image", "example/wukong:latest"),
                              ("image_id", None), ("image_size_bytes", -1)):

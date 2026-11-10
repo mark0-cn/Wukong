@@ -12,6 +12,14 @@ from scripts.release.cli import package, validate_image
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_formal_packaging_rejects_older_release_image(self):
+        image = dict(repository="example/wukong", digest="sha256:" + "a" * 64,
+                     image_id="sha256:" + "b" * 64, source_revision="c" * 40,
+                     platform="linux/amd64", size_bytes=10, release_version="1.2.3")
+        with self.assertRaisesRegex(ValueError, "same source commit"):
+            validate_image(image, "d" * 40)
+        validate_image(image, "d" * 40, released_version="1.2.3")
+
     def version_fixture(self, root, crlf=False):
         for name in (*VERSION_FILES, "rust-toolchain.toml"):
             destination = root / name

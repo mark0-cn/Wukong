@@ -45,8 +45,9 @@ def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
         image = read_json(metadata)
     else:
         image = release_image(number, revision, repository)
-    validate_image(image, revision)
-    print(f"Version: v{number}\nCommit: {revision}\nImage: {image['repository']}@{image['digest']}", flush=True)
+    validate_image(image, revision, released_version=number if metadata is None else None)
+    print(f"Version: v{number}\nClient commit: {revision}\nImage commit: {image['source_revision']}"
+          f"\nImage: {image['repository']}@{image['digest']}", flush=True)
     if check_only:
         print("Preflight passed. No build or package was created.")
         return
@@ -69,7 +70,7 @@ def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
         snapshot = staging / "image.json"
         write_json(snapshot, image)
         bundle = staging / "package"
-        package(binary, snapshot, bundle, "v" + number)
+        package(binary, snapshot, bundle, "v" + number, released_image=metadata is None)
         checksums(bundle)
         # The destination must be new; never replace a previous package or unrelated files.
         bundle.rename(output)

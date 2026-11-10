@@ -44,7 +44,9 @@ cargo package-local
 
 前提是 Windows x64，已安装项目固定版本的 Rust、MSVC C++ 编译工具、Node.js/npm 和 Python 3.11+。源码必须已提交且工作区干净。默认从 `mark0-cn/Wukong` 的 `v<项目版本>` Release 下载 `release.json` 和 `SHA256SUMS`，校验后在内存中转换为镜像元数据，无需手动准备 `image.json`。只使用精确版本，不回退到 `latest`，也不依赖 Actions artifact 或 GitHub API；公开附件无需登录。可用 `--repository OWNER/REPO` 指定自己的公开发布仓库。
 
-Release 必须已经发布，清单中的版本、平台、运行协议、数据格式及源码 commit 必须匹配。**仅版本号相同但本地 HEAD 已前进也会拒绝打包**；这条命令用于重打已发布源码的在线包，不能把旧版本镜像绑定到新源码。首次发布仍通过现有 Release 流程构建和验收镜像。镜像由安装器按 digest 拉取，本地打包不会下载镜像本体。
+Release 必须已经发布，清单中的版本、平台、运行协议及数据格式必须匹配。**本地 HEAD 可以晚于镜像的源码提交**，只要项目版本号对应同一个 Release，就复用该 Release 固定的镜像 digest。输出清单用 `source_revision` 记录本地客户端提交，用 `image_source_revision` 记录镜像原始提交，并用 `image_release_version` 记录所用 Release 版本；不会把旧镜像标成由当前源码构建。正式 CI 发布及显式 `--image-metadata` 输入仍要求客户端和镜像同提交。首次发布仍通过现有 Release 流程构建和验收镜像。
+
+镜像由安装器按 digest 拉取，本地打包不会下载镜像本体。兼容 Release 中的 `wukong` 和历史 `re-agent-workbench` 仓库名；接受旧镜像身份不等于验证新版客户端与旧 worker 的运行兼容，安装时仍必须通过 doctor。尤其跨项目改名的旧镜像可能使用不同的 `/opt/...` 路径，本地打包本身不会改写镜像或做运行时适配。
 
 默认输出到新目录 `target/local-package/`，包含 `wukong-v<版本>-windows-amd64.zip`、`release.json` 和 `SHA256SUMS`。已有输出目录会拒绝覆盖，可以指定其他目录。参数路径均相对仓库根目录：
 
@@ -55,7 +57,7 @@ cargo package-local --check
 cargo package-local --help
 ```
 
-`--check` 会下载并验证对应 Release 的小型元数据，同时检查平台、版本、工作区和工具入口，不编译、不写安装包、不运行镜像验收。显式传入 `--image-metadata` 则使用本地文件并跳过下载；该文件仍须匹配源码提交。Release 未发布、附件缺失、校验失败、镜像与源码提交不一致或构建失败时立即停止，不自动切换版本。打包过程复用已验证的元数据快照，并在编译后再次检查源码状态。实际的镜像可拉取性由原验收及安装时的 digest 拉取验证。
+`--check` 会下载并验证对应 Release 的小型元数据，同时检查平台、版本、工作区和工具入口，不编译、不写安装包、不运行镜像验收。显式传入 `--image-metadata` 则使用本地文件并跳过下载；该文件仍须匹配源码提交。Release 未发布、附件缺失、校验失败或构建失败时立即停止，不自动切换版本。打包过程复用已验证的元数据快照，并在编译后再次检查源码状态。实际的镜像可拉取性由原验收及安装时的 digest 拉取验证。
 
 独立 launcher 的检查命令为 `cargo fmt --manifest-path xtask/Cargo.toml -- --check` 和 `cargo clippy --locked --manifest-path xtask/Cargo.toml --target-dir target/xtask -- -D warnings`。
 
