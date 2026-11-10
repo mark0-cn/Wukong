@@ -122,16 +122,33 @@ jobs:
       - name: Python runtime and release tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y gdb patchelf gcc-multilib libwayland-dev libxkbcommon-dev
+          sudo apt-get install -y gdb patchelf gcc-multilib musl-tools libwayland-dev libxkbcommon-dev
           python -m pip install -r workers/runtime/requirements.txt pyelftools
           python -m compileall -q workers/runtime scripts
           python -m unittest discover -s tests/automation -p 'test_*.py' -v
           python workers/tests/run.py unit -p 'test_*.py' -v
           python -m evals.tests.test_analysis
           python -m evals.tests.test_compare_runs
+          python -m evals.tests.test_pwn
+          python -m evals.pwn.evaluate --build-dir "$RUNNER_TEMP/pwn-fixtures" --require-all
           python -m evals.analysis.evaluate --build-dir "$RUNNER_TEMP/analysis-fixtures"
           sh fixtures/build.sh "$RUNNER_TEMP/vulnerability-fixtures"
           python -m evals.vulnerability.evaluate --build-dir "$RUNNER_TEMP/vulnerability-fixtures" --repetitions 1
+      - name: Verify replay between sibling containers
+        run: |
+          python tests/acceptance/check_network_verify.py \
+            --image python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b \
+            --output-dir "$RUNNER_TEMP/pwn-network"
+      - name: Preserve Pwn fixture evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pwn-fixture-evidence
+          path: |
+            ${{ runner.temp }}/pwn-fixtures/
+            ${{ runner.temp }}/pwn-network/
+          if-no-files-found: ignore
+          retention-days: 14
 
   windows-client:
     needs: changes
