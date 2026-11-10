@@ -86,13 +86,42 @@ pub struct Service {
     operations: Arc<AtomicUsize>,
     closing: AtomicBool,
 }
-struct Operation(Arc<AtomicUsize>);
+pub(crate) struct Operation(Arc<AtomicUsize>);
 impl Drop for Operation {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 impl Service {
+    pub(crate) fn maintenance_context(
+        &self,
+        epoch: u64,
+    ) -> Result<(AppConfig, PathBuf, Operation)> {
+        let state = self.state.lock().unwrap();
+        let active = self.active.lock().unwrap();
+        ensure!(
+            state.epoch == epoch && !self.closing.load(Ordering::SeqCst),
+            "workspace changed or closing"
+        );
+        ensure!(
+            active.is_none() && self.operations.load(Ordering::SeqCst) == 0,
+            "请先结束分析、调试和其他文件操作。"
+        );
+        self.operations.fetch_add(1, Ordering::SeqCst);
+        Ok((
+            state.config.clone(),
+            state.path.clone(),
+            Operation(self.operations.clone()),
+        ))
+    }
+    pub(crate) fn reload_after_maintenance(&self) -> Result<()> {
+        let mut state = self.state.lock().unwrap();
+        state.config = AppConfig::load(Some(&state.path))?;
+        state.epoch += 1;
+        drop(state);
+        self.changed();
+        Ok(())
+    }
     pub fn new(
         config: AppConfig,
         store: Store,
@@ -312,6 +341,7 @@ impl Service {
         epoch: u64,
         request: crate::workbench::DesktopRequest,
     ) -> Result<serde_json::Value> {
+        let _maintenance = crate::updates::maintenance::assessment_guard()?;
         let (context, _operation) = {
             let state = self.state.lock().unwrap();
             let active = self.active.lock().unwrap();
