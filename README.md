@@ -4,6 +4,8 @@
 
 <h1 align="center">Wukong</h1>
 
+<p align="center">简体中文 · <a href="README.en.md">English</a></p>
+
 <p align="center">
   <strong>面向二进制逆向与分析的多 Agent 工作区</strong><br>
   行为理解 · 格式与算法还原 · 动态调试 · 独立验证
@@ -45,6 +47,7 @@ Wukong（悟空）使用 Rust 与 Rig 构建分析核心，通过 Tauri + React 
 | 多 Agent 协作 | 根 Agent 编排任务，分析 Agent 调查问题，独立验证 Agent 复核结论；共享笔记、待办和证据 |
 | 动态分析 | 隔离 worker 提供 GDB/MI、持久化进程、交互会话、AFL++ QEMU、angr、崩溃重放与输入最小化 |
 | 桌面与命令行 | 桌面查看会话、协作任务、发现与证据；CLI 支持启动、干预、恢复和导出 |
+| 多语言 | 中英文界面、CLI 帮助和可读报告；新任务输出语言独立设置，见[语言设置](docs/user/languages.md) |
 | 持久化与预算 | SQLite 状态、检查点与 Rig 会话日志；支持暂停恢复、并发控制、Token 与费用预算 |
 | 证据交付 | 导出 JSON、Markdown、HTML 报告、样本快照、原始证据及 SHA256 清单，并校验报告包完整性 |
 
