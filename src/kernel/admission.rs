@@ -2,8 +2,7 @@
 use super::*;
 
 pub(super) fn allowed(runner: &KernelHost, role: Role, name: &str) -> bool {
-    matches!(name, "task" | "message" | "wait")
-        || (name != "create_agent" && runner.allows(role, name))
+    matches!(name, "task" | "message" | "wait") || runner.allows(role, name)
 }
 
 pub(super) fn tool_access(runner: &KernelHost, agent: &AgentMetadata) -> Result<ToolAccess> {

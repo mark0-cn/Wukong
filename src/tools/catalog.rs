@@ -9,7 +9,14 @@ pub(super) struct Spec {
     pub(super) side_effecting: bool,
     pub(super) root_only: bool,
     pub(super) child_only: bool,
+    pub(super) model_visible: bool,
 }
+impl Spec {
+    pub(super) fn allows(&self, role: Role) -> bool {
+        (!self.root_only || role == Role::Root) && (!self.child_only || role != Role::Root)
+    }
+}
+
 type Handler = for<'a> fn(
     &'a ToolService,
     &'a AgentMetadata,
@@ -23,6 +30,7 @@ enum Visibility {
     All,
     Root,
     Child,
+    Internal,
 }
 
 fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema>(
@@ -49,6 +57,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         ),
         parse: |value| Ok(serde_json::to_value(serde_json::from_value::<A>(value)?)?),
         side_effecting,
+        model_visible: !matches!(visibility, Visibility::Internal),
         root_only: matches!(visibility, Visibility::Root),
         child_only: matches!(visibility, Visibility::Child) || (target && name != "runtime_doctor"),
     }
@@ -139,7 +148,7 @@ fn build_catalog() -> Vec<Spec> {
             ReplayPolicy::Transactional,
             false,
             handlers::handle_create_agent,
-            Visibility::All,
+            Visibility::Internal,
         ),
         spec::<args::ViewAgentGraphArgs>(
             "view_agent_graph",

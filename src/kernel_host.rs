@@ -119,7 +119,7 @@ impl KernelHost {
         self.tools.definitions(role)
     }
     pub(crate) fn allows(&self, role: Role, name: &str) -> bool {
-        self.tools.allows(role, name)
+        self.tools.model_allows(role, name)
     }
     pub(crate) fn tool_names(
         &self,

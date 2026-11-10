@@ -11,7 +11,6 @@ impl ToolService {
         Ok(self
             .definitions(agent.role)
             .into_iter()
-            .filter(|definition| definition.name.as_str() != "create_agent")
             .map(|definition| definition.name.to_string())
             .collect())
     }

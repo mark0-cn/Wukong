@@ -60,7 +60,7 @@ pub(crate) use catalog::child_schema;
 pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
     builtins()
         .iter()
-        .filter(|spec| spec.definition.name.as_str() != "create_agent")
+        .filter(|spec| spec.model_visible)
         .map(|spec| spec.definition.clone())
         .collect()
 }
@@ -72,7 +72,7 @@ pub fn builtin_catalog_markdown() -> String {
     );
     let mut specs = builtins()
         .iter()
-        .filter(|spec| spec.definition.name.as_str() != "create_agent")
+        .filter(|spec| spec.model_visible)
         .collect::<Vec<_>>();
     specs.sort_by_key(|spec| spec.definition.name.as_str());
     for spec in specs {
@@ -170,19 +170,22 @@ impl ToolService {
             .find(|item| item.definition.name.as_str() == name)
             .map_or_else(
                 || role != Role::Root && self.mcp.contains(name),
-                |item| {
-                    (!item.root_only || role == Role::Root)
-                        && (!item.child_only || role != Role::Root)
-                },
+                |item| item.allows(role),
             )
+    }
+
+    pub(crate) fn model_allows(&self, role: Role, name: &str) -> bool {
+        self.allows(role, name)
+            && builtins()
+                .iter()
+                .find(|item| item.definition.name.as_str() == name)
+                .is_none_or(|item| item.model_visible)
     }
 
     pub fn definitions(&self, role: Role) -> Vec<ToolDefinition> {
         let mut definitions = builtins()
             .iter()
-            .filter(|item| {
-                (!item.root_only || role == Role::Root) && (!item.child_only || role != Role::Root)
-            })
+            .filter(|item| item.model_visible && item.allows(role))
             .map(|item| item.definition.clone())
             .collect::<Vec<_>>();
         if role != Role::Root {

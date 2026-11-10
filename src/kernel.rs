@@ -178,9 +178,7 @@ pub(crate) fn drive(
     let mut definitions = HashMap::new();
     for role in [Role::Root, Role::Analyst, Role::Verifier] {
         for definition in runner.definitions(role) {
-            if definition.name.as_str() != "create_agent" {
-                definitions.insert(definition.name.to_string(), definition);
-            }
+            definitions.insert(definition.name.to_string(), definition);
         }
     }
     let application = app.world().resource::<Application>().clone();
