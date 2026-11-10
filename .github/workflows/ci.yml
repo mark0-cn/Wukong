@@ -5,6 +5,11 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      build_release_clients:
+        description: 'Prebuild release clients and seed master caches (no publication)'
+        type: boolean
+        default: false
   workflow_call:
 
 permissions:
@@ -25,6 +30,7 @@ jobs:
       frontend: ${{ steps.scope.outputs.frontend }}
       linux: ${{ steps.scope.outputs.linux }}
       reason: ${{ steps.scope.outputs.reason }}
+      release_clients: ${{ steps.scope.outputs.release_clients }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,6 +40,8 @@ jobs:
           python-version: '3.12'
       - name: Select checks (full for master, releases and manual runs)
         id: scope
+        env:
+          BUILD_RELEASE_CLIENTS: ${{ inputs.build_release_clients || false }}
         run: python scripts/ci_scope.py
 
   windows:
@@ -121,9 +129,23 @@ jobs:
           python fixtures/analysis/test_analysis.py
           python fixtures/analysis/test_compare_runs.py
 
+  windows-client:
+    needs: changes
+    if: needs.changes.outputs.release_clients == 'true'
+    uses: ./.github/workflows/build-client.yml
+    with:
+      target: windows
+
+  linux-client:
+    needs: changes
+    if: needs.changes.outputs.release_clients == 'true'
+    uses: ./.github/workflows/build-client.yml
+    with:
+      target: linux
+
   summary:
     if: always()
-    needs: [changes, windows, linux]
+    needs: [changes, windows, linux, windows-client, linux-client]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

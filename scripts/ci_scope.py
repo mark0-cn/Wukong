@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tomllib
 
 
 def select_scope(paths, event_name, head_branch=""):
@@ -33,7 +34,23 @@ def checks_passed(needs):
     if needs.get("windows", {}).get("result") != "success":
         return False
     expected_linux = "success" if outputs["linux"] == "true" else "skipped"
-    return needs.get("linux", {}).get("result") == expected_linux
+    if needs.get("linux", {}).get("result") != expected_linux:
+        return False
+    # Older callers omit these jobs; new CI explicitly gates every selected prebuild.
+    if "release_clients" in outputs or "windows-client" in needs or "linux-client" in needs:
+        if outputs.get("release_clients") not in ("true", "false"):
+            return False
+        expected = "success" if outputs["release_clients"] == "true" else "skipped"
+        return all(needs.get(name, {}).get("result") == expected for name in ("windows-client", "linux-client"))
+    return True
+
+
+def prebuild_clients(event_name, ref, requested, previous, current):
+    if ref != "refs/heads/master":
+        return False
+    if event_name == "workflow_dispatch":
+        return requested
+    return event_name == "push" and tuple(map(int, current.split("."))) > tuple(map(int, previous.split(".")))
 
 
 def main():
@@ -51,6 +68,12 @@ def main():
         paths = [p.decode("utf-8", errors="replace") for p in raw.split(b"\0") if p]
         head_branch = pr["head"]["ref"]
     scope = select_scope(paths, event_name, head_branch)
+    previous = current = "0.0.0"
+    if event_name == "push" and os.environ.get("GITHUB_REF") == "refs/heads/master":
+        previous = tomllib.loads(subprocess.check_output(["git", "show", "HEAD^1:Cargo.toml"]).decode())["package"]["version"]
+        current = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
+    scope["release_clients"] = prebuild_clients(event_name, os.environ.get("GITHUB_REF", ""),
+                                                 os.environ.get("BUILD_RELEASE_CLIENTS") == "true", previous, current)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
         for key, value in scope.items():
             stream.write(f"{key}={str(value).lower() if isinstance(value, bool) else value}\n")
