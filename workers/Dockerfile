@@ -19,8 +19,8 @@ RUN --mount=type=cache,target=/var/cache/apt \
 
 # Official Ghidra release and Temurin JDK 25 are fetched ONCE on the host by
 # scripts/fetch-worker-deps.ps1 into workers/deps/ (checksum-verified there),
-# so builds never re-download and never fail on network flakiness. The build
-# verifies the checksums again.
+# so unchanged attachments can be restored from the master download cache.
+# The build verifies their checksums again.
 # Set INSTALL_GHIDRA=0 for a smaller runtime-only worker.
 ARG INSTALL_GHIDRA=1
 ARG GHIDRA_SHA256=2c2cd776db3c1f6a097ba418922378ac3649cadd5e844a6f5f088ae628a7be67
