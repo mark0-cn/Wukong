@@ -50,6 +50,11 @@ jsonrpsee-core = { version = "0.26.0", features = ["async-client"] }
 askama = "0.14.0"
 tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+minisign-verify = "0.3"
+semver = "1"
+fs2 = "0.4"
 
 [profile.release]
 lto = "thin"
@@ -60,7 +65,7 @@ windows-sys = { version = "0.61", features = ["Win32_System_Registry"] }
 
 [features]
 default = ["desktop"]
-desktop = ["dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-build"]
+desktop = ["dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-build", "dep:tauri-plugin-updater"]
 custom-protocol = ["desktop", "tauri/custom-protocol"]
 
 [build-dependencies]

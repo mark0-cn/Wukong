@@ -16,6 +16,7 @@ pub struct AssessmentService {
 }
 
 pub struct PreparedAssessment {
+    _maintenance: std::fs::File,
     runner: AssessmentRunner,
     run: RunRecord,
     budget: Option<Budget>,
@@ -44,6 +45,7 @@ impl AssessmentService {
     }
 
     pub async fn start(&self, target: &Path, task: &str) -> Result<PreparedAssessment> {
+        let maintenance = crate::updates::maintenance::assessment_guard()?;
         let target = std::fs::canonicalize(target).context("target must be an existing file")?;
         ensure!(target.is_file(), "target must be a file");
         ensure!(!task.trim().is_empty(), "task must not be empty");
@@ -56,6 +58,7 @@ impl AssessmentService {
         );
         match created {
             Ok(run) => Ok(PreparedAssessment {
+                _maintenance: maintenance,
                 runner,
                 run,
                 budget: None,
@@ -68,6 +71,7 @@ impl AssessmentService {
     }
 
     pub async fn resume(&self, run_id: &str, budget: Option<Budget>) -> Result<PreparedAssessment> {
+        let maintenance = crate::updates::maintenance::assessment_guard()?;
         let run: RunRecord = self.store.load(run_id)?;
         ensure!(!run.status.terminal(), "terminal run cannot be resumed");
         let mut saved: AppConfig = serde_json::from_value(run.config.clone())
@@ -78,6 +82,7 @@ impl AssessmentService {
         let runner = AssessmentRunner::new(saved, self.store.clone()).await?;
         // Applying a budget is a supervised write, after ownership is acquired.
         Ok(PreparedAssessment {
+            _maintenance: maintenance,
             runner,
             run,
             budget,
