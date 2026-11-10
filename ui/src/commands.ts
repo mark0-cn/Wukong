@@ -1,4 +1,5 @@
 import type { Budget, ConfigDocument, ConfigEdit, Envelope, EvidenceView, FindingDetails, Json, ToolRecord } from './types';
+import type { Preferences, PreferenceSnapshot } from './i18n';
 
 export type UpdateAction = 'status' | 'check' | 'prepare' | 'setup' | 'install' | 'recover' | 'integrate' | 'clean_cache' | 'clean_images';
 export interface UpdateStatus {
@@ -19,6 +20,8 @@ type Command<A, R> = { args: A; result: R };
 
 /** Native command boundary: result types follow command names, never callers. */
 export interface Commands {
+  preferences_read: Command<undefined, PreferenceSnapshot>;
+  preferences_save: Command<{ preferences: Preferences }, PreferenceSnapshot>;
   workspace_read: Command<{ request: { run: string | null; agent: string | null; event_limit: number; known_revision: string | null } }, Envelope>;
   start_run: Command<Epoch & { target: string; task: string }, string>;
   resume_run: Command<Run & { budget: Budget }, string>;

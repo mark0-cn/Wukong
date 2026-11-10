@@ -13,6 +13,28 @@ type Reply<T> = std::result::Result<T, String>;
 fn failure(error: impl std::fmt::Display) -> String {
     format!("{error:#}")
 }
+#[tauri::command]
+async fn preferences_read() -> Reply<super::preferences::Snapshot> {
+    super::preferences::read().map_err(failure)
+}
+#[tauri::command]
+async fn preferences_save(
+    preferences: super::preferences::Preferences,
+    app: tauri::AppHandle,
+) -> Reply<super::preferences::Snapshot> {
+    let saved = super::preferences::write(&preferences).map_err(failure)?;
+    if let Some(window) = app.get_webview_window("main") {
+        window
+            .set_title(
+                &preferences
+                    .ui_language
+                    .resolve(saved.system_locale)
+                    .text("app-title"),
+            )
+            .map_err(failure)?;
+    }
+    Ok(saved)
+}
 async fn blocking<T: Send + 'static>(
     service: Arc<Service>,
     work: impl FnOnce(&Service) -> anyhow::Result<T> + Send + 'static,
@@ -280,6 +302,8 @@ pub fn run(
         .manage(controller.clone())
         .manage(service)
         .invoke_handler(tauri::generate_handler![
+            preferences_read,
+            preferences_save,
             workspace_read,
             update_action,
             update_storage,
@@ -310,6 +334,7 @@ pub fn run(
             });
             let development = app.config().build.dev_url.clone();
             tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
+                .title(super::preferences::locale().text("app-title"))
                 .on_navigation(move |url| {
                     (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
                         || (matches!(url.scheme(), "http" | "https")
