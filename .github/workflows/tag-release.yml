@@ -1,4 +1,5 @@
 name: Tag Merged Release
+run-name: ${{ github.event_name == 'workflow_dispatch' && 'Inspect tag eligibility' || 'Tag eligible version merge' }} · CI ${{ github.event.workflow_run.id || inputs.ci_run_id }}
 on:
   workflow_run:
     workflows: [CI]

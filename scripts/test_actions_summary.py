@@ -53,11 +53,12 @@ class SummaryTests(unittest.TestCase):
         folder.mkdir()
         (folder / "release.json").write_text(json.dumps({"version": "0.1.0", "image": "owner/tool@sha256:abc",
             "tool_platform": "linux/amd64", "image_size_bytes": 1024 ** 3}), encoding="utf-8")
-        (folder / "client.zip").write_bytes(b"test")
+        (folder / "archives.json").write_text(json.dumps([dict(name="client.zip", size_bytes=4 * 1024 ** 2)]))
         result = summary.render("release", self.needs, self.context, self.directory, artifacts=[{
             "id": 42, "name": "online-release", "size_in_bytes": 100, "expired": False}])
         self.assertIn("owner/tool@sha256:abc", result)
         self.assertIn("1.00 GiB", result)
+        self.assertIn("client.zip: 4.00 MiB", result)
         self.assertIn("/artifacts/42", result)
 
     def test_reusable_job_duration_and_missing_timestamps(self):
