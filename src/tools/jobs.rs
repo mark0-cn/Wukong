@@ -315,6 +315,28 @@ impl JobService {
         let passed = result["passed"]
             .as_bool()
             .context("worker passed flag missing")?;
+        let network = job.parameters["network"].is_object();
+        if network {
+            ensure!(
+                result["network_binding"] == job.parameters["network_binding"]
+                    && result["network_binding"]["target_sha256"] == run.target_sha256
+                    && result["expected"] == job.parameters["network"]
+                    && result["server_reset_per_trial"] == false
+                    && observations
+                        .iter()
+                        .all(|trial| trial["network_binding"] == result["network_binding"])
+                    && observations
+                        .iter()
+                        .filter(|trial| trial["network_success"] == true)
+                        .count() as u64
+                        == successes,
+                "network verification binding or observations differ from the admitted plan"
+            );
+            ensure!(
+                !passed || result["fresh_connection_per_trial"] == true,
+                "successful network trials must use fresh connections"
+            );
+        }
         ensure!(
             !passed || (successes == attempts && attempts == requested),
             "worker success verdict contradicts trial observations"
@@ -329,6 +351,22 @@ impl JobService {
             json!({"job_id":job_id,"finding_id":finding.id,"target_sha256":run.target_sha256}),
         )?;
         let artifacts = self.import_job_artifacts(agent, call_id, job_id).await?;
+        if network {
+            let imported = artifacts["artifacts"]
+                .as_array()
+                .context("network artifacts missing")?;
+            ensure!(
+                observations.iter().all(|trial| {
+                    trial["transcript_path"].is_string()
+                        && trial["transcript_sha256"].is_string()
+                        && imported.iter().any(|item| {
+                            item["artifact"]["path"] == trial["transcript_path"]
+                                && item["artifact"]["sha256"] == trial["transcript_sha256"]
+                        })
+                }),
+                "network transcript identity was not preserved in imported evidence"
+            );
+        }
         let mut evidence_ids = vec![raw_evidence.id];
         for artifact in artifacts["artifacts"]
             .as_array()
@@ -339,6 +377,9 @@ impl JobService {
         let observed_stage = result["observed_stage"].as_str().unwrap_or("unknown");
         let impact = match observed_stage {
             "crash" => "reproducible crash",
+            "network_behavior" => {
+                "observed network response matches the configured service plan; deployed runtime identity is unconfirmed"
+            }
             _ => "observed behavior matches the recorded expectation",
         };
         // These exact labels are deliberately limited to what the worker

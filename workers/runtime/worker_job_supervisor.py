@@ -160,17 +160,24 @@ def supervise_job(root, directory):
             for index in range(spec.get("trials", 1)):
                 if (directory / "cancel").exists():
                     break
-                results.append(replay(root, directory, spec, input_bytes, index))
-            successes = sum(expectation_matches(r, spec.get("expected")) for r in results)
+                if spec.get("network") is not None:
+                    from worker_network import replay_network
+                    results.append(replay_network(root,directory,spec,input_bytes,index))
+                else:
+                    results.append(replay(root, directory, spec, input_bytes, index))
+            successes = sum(r["network_success"] if spec.get("network") is not None else expectation_matches(r, spec.get("expected")) for r in results)
             result = {"trials": len(results), "attempts": len(results), "requested_trials": spec.get("trials", 1), "successes": successes,
                       "passed": bool(results) and len(results) == spec.get("trials", 1) and successes == len(results),
-                      "observed_stage": "crash" if results and all(r["crash_signature"] for r in results) else "behavior",
+                      "observed_stage": "network_behavior" if spec.get("network") is not None else "crash" if results and all(r["crash_signature"] for r in results) else "behavior",
                       "results": results, "verifier_agent_id": spec.get("verifier_agent_id"),
                       "producer_agent_id": spec.get("producer_agent_id"), "call_id": spec.get("call_id"),
                       "target": artifact(root, confined(root, spec["target"], True)),
                       "input": artifact(root, confined(root, spec["input"], True)),
                       "expected": spec.get("expected"), "environment": {"platform": platform.platform(), "python": platform.python_version()},
                       "fresh_working_directory_per_trial": True}
+            if spec.get("network") is not None:
+                result.update(network_binding=spec["network_binding"], expected=spec["network"],
+                              fresh_connection_per_trial=all(r["fresh_connection"] for r in results), server_reset_per_trial=False)
             meta["state"] = "cancelled" if (directory / "cancel").exists() else "completed"
         elif kind == "minimize":
             data = confined(root, spec["input"], True).read_bytes()

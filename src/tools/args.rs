@@ -821,6 +821,10 @@ pub(super) struct PocVerifyArgs {
     pub target: String,
     #[schemars(length(min = 1))]
     pub input: String,
+    /// Bounded TCP replay through the prepared challenge service. Requires launch_spec;
+    /// excludes input_mode/args/env/expected. Input supplies the bytes for send slices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<NetworkReplay>,
     /// How the input reaches the target: "argv" (AFL-style @@ file path,
     /// default) or "stdin" (bytes piped to stdin).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -843,6 +847,50 @@ pub(super) struct PocVerifyArgs {
     #[schemars(range(min = 1, max = 3600))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimize_timeout_secs: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct NetworkReplay {
+    #[schemars(length(min = 2, max = 64))]
+    pub steps: Vec<NetworkStep>,
+}
+
+choices!(CaptureEncoding { Hex, Little, Big });
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum NetworkStep {
+    Send {
+        offset: u64,
+        length: u64,
+        #[serde(default)]
+        patches: Vec<NetworkPatch>,
+    },
+    Receive {
+        until_base64: String,
+        max_bytes: u64,
+    },
+    Capture {
+        name: String,
+        offset: u64,
+        length: u64,
+        encoding: CaptureEncoding,
+    },
+    /// Assert bytes in the latest response after a send. Required as the last step.
+    Expect { contains_base64: String },
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct NetworkPatch {
+    pub offset: u64,
+    pub capture: String,
+    #[serde(default)]
+    pub addend: i64,
+    /// 1, 2, 4 or 8 bytes; values that do not fit are rejected.
+    pub width: u8,
+    pub endianness: ByteOrder,
 }
 
 choices!(AnalysisVerdict {

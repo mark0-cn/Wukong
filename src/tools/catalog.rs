@@ -599,7 +599,7 @@ fn build_catalog() -> Vec<Spec> {
         ),
         spec::<args::PocVerifyArgs>(
             "poc_verify",
-            "Independently replay a finding's input in fresh directories; worker observations determine trial success. input_mode selects delivery: \"argv\" (default, AFL-style @@ file path) or \"stdin\" (payload bytes piped to the target's stdin — use this for programs that read(0, ...)).",
+            "Independently replay a finding in fresh trial directories. Use argv/stdin delivery, or a bounded declarative network plan with the host-prepared launch_spec. Network trials use fresh TCP connections, capture/patch ASLR-dependent values and hash raw transcripts; server state is not reset and deployed runtime identity remains unconfirmed. Worker observations determine success.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,

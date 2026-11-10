@@ -62,6 +62,7 @@ def doctor(root, trusted, isolated):
             "input_minimize_signal_only": True, "runtime_profile": True,
             "runtime_prepare": python_toolchain["pyelftools"], "mitigation_profile": True,
             "seccomp_analyze": True, "libc_identify": python_toolchain["pyelftools"],
+            "network_poc_verify": bool(workbench.get("target") and workbench.get("service",{}).get("mode") in {"local_service","remote"}) if workbench else False,
             "process_mapping_observations": linux, "core_snapshot": python_toolchain["pwntools"],
             "cyclic_offset": python_toolchain["pwntools"], "poc_verify": True, "shell_exec": True,
             "py_run": True, "emulation": python_toolchain["unicorn"],
