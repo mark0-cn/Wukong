@@ -34,3 +34,13 @@ GEF 使用固定源码 commit，校验 Git blob 身份并计算 SHA256，标为�
 准备升级时审查 `candidates.json` 和上游变更，更新锁文件及 Dockerfile 中重复的
 SHA256/路径设置，执行下载校验，再构建镜像并完整验收。Temurin 保持 JDK 25；
 apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
+
+## 不可变 Release
+
+仓库 Settings → General → Releases 的 **Enable release immutability** 已启用。
+只作用于之后发布的 Release。发布后附件及关联 tag 锁定，升级需要新版本；
+标题、说明和 latest 标记仍可调整。不要删除正式版本后尝试复用其 tag。
+
+发布器先核对草稿的全部远端附件名称、大小和 SHA256，再发布；发布后校验
+`immutable=true` 才推进 latest。若管理员关闭此设置，正式发布检查会失败，
+不会悄悄把可变 Release 当作不可变版本。普通工作流无需管理员权限。

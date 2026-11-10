@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -35,6 +36,39 @@ class PromotionTests(unittest.TestCase):
     def test_missing_candidate_can_be_built(self):
         with patch.object(publish.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "manifest unknown: not found")):
             self.assertIsNone(publish.image_digest("example", missing_ok=True))
+
+
+class ImmutableReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.directory = Path(self.temporary.name)
+        self.asset = self.directory / "release.json"
+        self.asset.write_bytes(b"accepted bytes")
+        self.release = {"draft": False, "immutable": True, "assets": [{
+            "name": self.asset.name, "state": "uploaded", "size": self.asset.stat().st_size,
+            "digest": "sha256:" + publish.sha256(self.asset)}]}
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_exact_uploaded_assets_can_be_published_and_retried(self):
+        publish.verify_assets(self.directory, self.release)
+        publish.verify_assets(self.directory, self.release, require_immutable=True)
+
+    def test_stale_draft_asset_is_rejected_before_locking(self):
+        self.release["assets"].append({"name": "stale.zip"})
+        with self.assertRaisesRegex(ValueError, "accepted set"):
+            publish.verify_assets(self.directory, self.release)
+
+    def test_changed_uploaded_bytes_are_rejected(self):
+        self.release["assets"][0]["digest"] = "sha256:" + "0" * 64
+        with self.assertRaisesRegex(ValueError, "identity mismatch"):
+            publish.verify_assets(self.directory, self.release)
+
+    def test_mutable_release_cannot_advance_latest(self):
+        self.release["immutable"] = False
+        with self.assertRaisesRegex(ValueError, "not immutable"):
+            publish.verify_assets(self.directory, self.release, require_immutable=True)
 
 
 if __name__ == "__main__":
