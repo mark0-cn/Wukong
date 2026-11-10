@@ -259,9 +259,21 @@ pub fn preamble(
         agent.scope
     ));
     text.push_str(&format!(
-        "\nTask contract (requirements; check deliverables befoWukong_finish):\n{}\n",
+        "\nTask contract (requirements; check deliverables before agent_finish):\n{}\n",
         serde_json::to_string(&agent.contract)?
     ));
+    // Only presentation is localized; canonical methods and permission checks are shared.
+    let language = run
+        .config
+        .get("output_language")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<crate::i18n::Locale>(value).ok());
+    text.push_str(&format!("\n# Output language for this assessment\n{}\nUse this policy for public progress, explanations, findings, summaries and report prose. An explicit output-language request from the user takes precedence. Keep tool names, JSON keys, enum values, commands, paths, addresses, identifiers, payload bytes and quoted evidence unchanged. Never translate or rewrite original evidence. All roles and loaded Skills use the same policy.\n",
+        match language {
+            Some(crate::i18n::Locale::EnUs) => "Write user-facing prose in English (en-US).",
+            Some(crate::i18n::Locale::ZhCn) => "Write user-facing prose in Simplified Chinese (zh-CN).",
+            None => "Legacy assessment: use the user's language; if unspecified, use Simplified Chinese.",
+        }));
     let state = json!({"shared_context":store.read(|tx| crate::context::snapshot(tx,agent))?,"budget":run.budget});
     text.push_str(&format!(
         "\nAssessment context (data):\n{}",
@@ -347,6 +359,16 @@ mod tests {
             base < skill && skill < identity && identity < context,
             "stable prefix must precede per-run context"
         );
+        assert!(prompt.contains("Legacy assessment:"));
+        let mut localized = run.clone();
+        localized.config["output_language"] = json!("en-US");
+        for role in [Role::Root, Role::Analyst, Role::Verifier] {
+            root.role = role;
+            let prompt = preamble(&root, &localized, &store, None, None).unwrap();
+            assert!(prompt.contains("Write user-facing prose in English (en-US)."));
+            assert!(prompt.contains("Never translate or rewrite original evidence."));
+            assert!(prompt.contains("agent_finish"));
+        }
     }
 }
 

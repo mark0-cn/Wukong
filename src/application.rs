@@ -49,7 +49,11 @@ impl AssessmentService {
         let target = std::fs::canonicalize(target).context("target must be an existing file")?;
         ensure!(target.is_file(), "target must be a file");
         ensure!(!task.trim().is_empty(), "task must not be empty");
-        let runner = AssessmentRunner::new(self.config.clone(), self.store.clone()).await?;
+        let mut config = self.config.clone();
+        config.output_language.get_or_insert_with(|| {
+            crate::i18n::Locale::for_task(task, crate::i18n::Locale::system())
+        });
+        let runner = AssessmentRunner::new(config, self.store.clone()).await?;
         let created = runner.coordinator.create_run(
             &target,
             task,
@@ -117,6 +121,7 @@ mod tests {
         let mut config = AppConfig::default();
         config.model.provider = Provider::Ollama;
         config.model.base_url = Some("http://127.0.0.1:1".into());
+        config.output_language = Some(crate::i18n::Locale::EnUs);
         let target = dir.path().join("sample");
         std::fs::write(&target, b"fixture")?;
         let service = AssessmentService::new(config.clone(), store.clone());
@@ -127,11 +132,17 @@ mod tests {
         store.acquire_lease(&run.id, "other-controller", 20)?;
         let mut changed = config;
         changed.model.model = "different-default".into();
+        changed.output_language = Some(crate::i18n::Locale::ZhCn);
         let service = AssessmentService::new(changed, store.clone());
         let mut budget = run.budget.clone();
         budget.max_total_tokens += 10;
         let resumed = service.resume(&run.id, Some(budget)).await?;
         assert_eq!(resumed.runner.config().model.model, "gpt-5.2");
+        assert_eq!(
+            resumed.runner.config().output_language,
+            Some(crate::i18n::Locale::EnUs)
+        );
+        assert_eq!(resumed.run.config["output_language"], "en-US");
         assert_eq!(
             resumed.runner.config().model.base_url.as_deref(),
             Some("http://127.0.0.1:1")
