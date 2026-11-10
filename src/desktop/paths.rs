@@ -10,9 +10,25 @@ pub fn home() -> Result<PathBuf> {
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")));
+    // NSIS currentUser installs the program in LOCALAPPDATA/Wukong.
+    // Keep state and recovery files outside that directory.
     Ok(base
         .context("user application directory is unavailable")?
-        .join("Wukong"))
+        .join(if cfg!(windows) {
+            "WukongData"
+        } else {
+            "Wukong"
+        }))
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    #[test]
+    fn data_is_outside_nsis_default_install_directory() {
+        let installation =
+            std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap()).join("Wukong");
+        assert!(!super::home().unwrap().starts_with(installation));
+    }
 }
 
 pub fn default_config() -> Result<PathBuf> {
