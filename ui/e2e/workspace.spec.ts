@@ -49,6 +49,27 @@ async function mockDesktop(page: Page) {
   }, { data: workspace, host, tool, finding });
 }
 test.beforeEach(async ({ page }) => { await mockDesktop(page); });
+
+test('close requests use current draft state and preserve text when dismissed', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'parser.elf', exact: true })).toBeVisible();
+  await page.evaluate(() => { (window as any).__desktopTest.host.execution = null; (window as any).__emitDesktop('workspace-changed', null); });
+  await expect(page.getByRole('button', { name: '暂停分析', exact: true })).toHaveCount(0);
+  await page.getByLabel('发送给 Agent 的消息').fill('unsent evidence note');
+  await page.evaluate(() => (window as any).__emitDesktop('close-requested', { busy: false }));
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__desktopTest.requests.some((request: any) => request.command === 'shutdown_workspace'))).toBe(false);
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(page.getByLabel('发送给 Agent 的消息')).toHaveValue('unsent evidence note');
+});
+
+test('native drop opens a task with the selected target', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'parser.elf', exact: true })).toBeVisible();
+  await page.evaluate(() => (window as any).__emitDesktop('tauri://drag-drop', { paths: ['/samples/drop.elf'], position: { x: 10, y: 10 } }));
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByLabel('目标文件路径')).toHaveValue('/samples/drop.elf');
+});
 test('shows public progress and paired tool results without raw JSON', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
