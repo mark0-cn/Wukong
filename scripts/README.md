@@ -2,7 +2,7 @@
 
 Python 入口从仓库根目录使用 `python -m` 调用，避免依赖脚本同目录导入或调用者的 `PYTHONPATH`。
 
-本地 Windows 在线打包使用 `cargo package-local`，由 `.cargo/config.toml` 和独立 `xtask/` launcher 调用 `scripts.release.local_package`。镜像元数据准备、参数和产物见[发布文档](../docs/development/releases.md#本地一条-cargo-命令打包)。
+本地 Windows / Linux 原生打包使用 `cargo package-local`，由独立 `xtask/` launcher 调用 `scripts.release.native_package`。参数和产物见[发布文档](../docs/development/releases.md#本地生成原生安装文件)。
 
 | 目录 | 职责 / 入口示例 |
 | --- | --- |
@@ -13,7 +13,7 @@ Python 入口从仓库根目录使用 `python -m` 调用，避免依赖脚本同
 | `_lib/` | 仓库定位、版本/哈希规则、GitHub API 等公共实现 |
 
 PowerShell 包装入口会定位仓库；用户提供的路径按调用时的工作目录解释。
-用户安装器源码位于 [packaging/windows](../packaging/windows)，发行包中的安装器名称保持不变。
+原生安装器由 Tauri 平台配置生成；`installer_artifact` 的安装/卸载冒烟测试只在隔离 runner 中运行，避免改动开发机已有安装。`packaging/windows` 中的脚本用于保留的开发夹具。
 脚本与安装器测试位于 [tests/automation](../tests/automation)，真实镜像验收位于 [tests/acceptance](../tests/acceptance)。
 
 ```sh

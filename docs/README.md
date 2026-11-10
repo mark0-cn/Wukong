@@ -3,7 +3,7 @@
 ## 使用与安装
 
 - [使用指南](user/usage.md)：桌面、模型配置、任务管理与报告。
-- [在线安装与升级](user/online-install.md)：Windows 在线发行包。
+- [在线安装与升级](user/online-install.md)：Windows、Linux 安装程序与应用内更新。
 - [Pwn 工作环境](user/pwn-workbench.md)：工具容器、题目环境与迁移。
 
 ## 设计与开发
