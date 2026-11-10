@@ -11,6 +11,13 @@ worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录
 
 跨模块调用保持类型化，资源归属和业务完成门槛保留在统一入口。通用元数据查询不读取 checkpoint；需要继承、follow-up 或完整导出时显式使用完整读取接口。元数据写入不得清空会话，checkpoint 与邮箱确认仍在同一持久化事务提交。
 
+## 桌面界面样式
+
+前端使用现有的 Radix、assistant-ui 和 Lucide 组件。颜色统一定义在 `ui/src/theme.css`，组件样式引用语义变量；不要在组件中重新散布颜色值。
+默认采用中性深灰底色，金色表示主要操作或选中，蓝色表示执行中，绿色表示成功，黄色表示等待/警告，红色表示失败。状态同时保留图标和文字。
+正文使用 14px，辅助信息至少 12px，代码与原始证据使用 13px 等宽字体。调整布局时检查桌面最小窗口下的滚动、长路径和消息草稿保留。
+颜色层级参考 [Radix Colors](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale)，工作区分区参考 [VS Code](https://code.visualstudio.com/docs/editing/getting-started/userinterface)。
+
 ## 工具文档
 
 工具定义、参数 schema 和 Markdown 工具清单来自同一注册表：

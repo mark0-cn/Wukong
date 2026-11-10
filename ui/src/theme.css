@@ -1,0 +1,33 @@
+/* Neutral surfaces follow Radix's background / interaction / border / text roles.
+   Gold is reserved for selection and primary actions; status colors carry meaning. */
+:root {
+  color-scheme: dark;
+  --bg: #18191c;
+  --sidebar: #151619;
+  --surface: #202125;
+  --hover: #2a2c31;
+  --field: #1b1c20;
+  --border: #373940;
+  --border-strong: #575b65;
+  --text: #e8e8ed;
+  --muted: #a5a7b1;
+  --accent: #dec084;
+  --accent-hover: #eed5a3;
+  --accent-ink: #241d10;
+  --accent-surface: #302b22;
+  --accent-border: #6a5735;
+  --error: #f1a0a0;
+  --error-bg: #342326;
+  --error-border: #704046;
+  --success: #94cfad;
+  --success-bg: #20332c;
+  --success-border: #3b6150;
+  --info: #8bb5ef;
+  --info-bg: #202c40;
+  --info-border: #415e85;
+  --warning: #e0c188;
+  --warning-bg: #302b22;
+  --warning-border: #6a5735;
+  --overlay: #08090bcc;
+  --shadow: #0006;
+}
