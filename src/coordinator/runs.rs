@@ -12,7 +12,7 @@ impl Coordinator {
         if !target_path.is_file() {
             bail!("target is not a file");
         }
-        let target_sha256 = hex::encode(Sha256::digest(fs::read(&target_path)?));
+        let target_sha256 = crate::content::sha256_file(&target_path)?;
         let run_id = id("run");
         let root_id = id("agent");
         let timestamp = now();

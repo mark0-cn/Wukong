@@ -1,14 +1,14 @@
 //! Auditable reports and an integrity-checked, self-contained evidence bundle.
+use crate::content::{file_identity as hash_file, sha256_bytes as digest};
 use crate::{domain::*, store::Store};
 use anyhow::{Context, Result, ensure};
 use askama::Template;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::{Read, Write},
+    io::Write,
     path::{Component, Path, PathBuf},
 };
 
@@ -45,26 +45,6 @@ pub struct BundleVerification {
     pub files: usize,
     pub bytes: u64,
     pub target_sha256: String,
-}
-
-fn digest(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
-}
-
-fn hash_file(path: &Path) -> Result<(u64, String)> {
-    let mut input = fs::File::open(path)?;
-    let mut hash = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    let mut size = 0;
-    loop {
-        let read = input.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hash.update(&buffer[..read]);
-        size += read as u64;
-    }
-    Ok((size, hex::encode(hash.finalize())))
 }
 
 fn secret_key(key: &str) -> bool {

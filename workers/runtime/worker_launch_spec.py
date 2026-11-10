@@ -1,14 +1,8 @@
 """Shared artifact checks; execution and service policy stay with their callers."""
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
-from worker_common import confined
-
-
-def digest(path):
-    with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+from worker_common import confined, sha256_file as digest
 
 
 @dataclass(frozen=True)

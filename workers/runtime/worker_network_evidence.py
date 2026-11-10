@@ -1,7 +1,6 @@
 """Original wire chunks and trial evidence, independent of the replay policy."""
 import base64
-import hashlib
-from worker_common import atomic_json
+from worker_common import atomic_json, sha256_file
 
 
 class Transcript:
@@ -24,5 +23,5 @@ class Transcript:
         path = trial / "network-transcript.json"
         atomic_json(path, {"binding": binding, "events": self.events, "steps": self.steps,
                            "captures": captures, "result": result})
-        result["transcript_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        result["transcript_sha256"] = sha256_file(path)
         result["transcript_path"] = path.relative_to(root).as_posix()

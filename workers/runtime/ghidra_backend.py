@@ -8,21 +8,12 @@ import time
 import uuid
 from contextlib import contextmanager
 from filelock import FileLock, Timeout
-from worker_common import artifact, atomic_json, bounded_int, confined, load_json, safe_env
+from worker_common import artifact, atomic_json, bounded_int, confined, load_json, safe_env, sha256_file as digest
 from worker_processes import run_process
-
-
-def digest(path):
-    value = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(1048576), b""):
-            value.update(block)
-    return value.hexdigest()
 
 
 def identity(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
 
 
 def require_idle(project):

@@ -2,6 +2,7 @@ pub mod agents;
 pub mod application;
 pub mod binary;
 pub mod config;
+mod content;
 mod context;
 pub mod coordinator;
 mod credentials;

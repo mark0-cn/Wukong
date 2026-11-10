@@ -3,7 +3,8 @@ import hashlib
 import socket
 import time
 from worker_common import MAX_FILE, confined
-from worker_launch_spec import read_launch, digest
+from worker_common import sha256_file as digest
+from worker_launch_spec import read_launch
 
 from worker_network_plan import blob, validate_plan, ReplayState
 from worker_network_transport import ReplayConnection

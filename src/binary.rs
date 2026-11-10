@@ -2,9 +2,9 @@
 //!
 //! All addresses carry their address space. Static inspection never pretends to
 //! know a process's ASLR load address; unsupported mitigation checks stay unknown.
+pub use crate::content::{sha256_bytes, sha256_file};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::Read,
@@ -93,23 +93,6 @@ impl AddressRef {
     }
 }
 
-pub fn sha256_bytes(data: &[u8]) -> String {
-    hex::encode(Sha256::digest(data))
-}
-pub fn sha256_file(path: impl AsRef<Path>) -> Result<String> {
-    let mut file = fs::File::open(path.as_ref())
-        .with_context(|| format!("open {}", path.as_ref().display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        let n = file.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-    Ok(hex::encode(hasher.finalize()))
-}
 fn read_binary(path: &Path) -> Result<Vec<u8>> {
     let file = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
     if !file.metadata()?.is_file() {

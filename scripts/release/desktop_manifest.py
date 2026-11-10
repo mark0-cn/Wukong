@@ -1,6 +1,6 @@
 """Create the cross-platform updater catalog after image acceptance and signing."""
 import argparse
-import hashlib
+from scripts._lib.checksums import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -24,7 +24,7 @@ def generate(directory, validation):
         file = files[0]
         platforms[target] = dict(url=f'https://github.com/mark0-cn/Wukong/releases/download/v{number}/{file.name}',
             signature=file.with_name(file.name + '.sig').read_text().strip(),
-            size=file.stat().st_size, sha256=hashlib.sha256(file.read_bytes()).hexdigest())
+            size=file.stat().st_size, sha256=sha256(file))
     manifest = dict(schema=1, version=number, notes=f'Wukong {number}', minimum_version='0.1.2',
         runtime_protocol=1, data_schema=3, image=reference, image_size=image['size_bytes'],
         source_revision=revision, platforms=platforms)
