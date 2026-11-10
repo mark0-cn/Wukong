@@ -12,7 +12,7 @@ export function EvidenceReader({ evidence, epoch, run }: { evidence: Evidence; e
   useEffect(() => {
     let alive = true;
     setPreview(undefined); setError('');
-    void api<EvidenceView>('evidence_preview', { epoch, run, id: evidence.id, offset }).then(value => { if (alive) setPreview(value); })
+    void api('evidence_preview', { epoch, run, id: evidence.id, offset }).then(value => { if (alive) setPreview(value); })
       .catch(error => { if (alive) setError(errorText(error)); });
     return () => { alive = false; };
   }, [epoch, run, evidence.id, offset]);
@@ -31,7 +31,7 @@ function FindingInspector({ epoch, run, finding, onAgent }: { epoch: number; run
   useEffect(() => {
     let alive = true;
     setDetails(undefined); setError(''); setEvidence(undefined);
-    void api<FindingDetails>('finding_details', { epoch, run, id: finding.id }).then(value => { if (alive) setDetails(value); })
+    void api('finding_details', { epoch, run, id: finding.id }).then(value => { if (alive) setDetails(value); })
       .catch(error => { if (alive) setError(errorText(error)); });
     return () => { alive = false; };
   }, [epoch, run, finding.id, finding.updated_at]);

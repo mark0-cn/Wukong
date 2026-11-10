@@ -9,13 +9,13 @@ export function StorageLocations({ epoch, disabled, onChanged }: { epoch: number
   const [error, setError] = useState('');
   useEffect(() => {
     let alive = true;
-    void api<{ data_dir: string; cache_dir: string }>('update_storage', { epoch }).then(value => {
+    void api('update_storage', { epoch }).then(value => {
       if (alive) { setData(value.data_dir ?? ''); setCache(value.cache_dir ?? ''); }
     }).catch(e => { if (alive) setError(errorText(e)); });
     return () => { alive = false; };
   }, [epoch]);
   const choose = async (set: (path: string) => void) => {
-    try { const path = await api<string | null>('pick_directory'); if (path) set(path); }
+    try { const path = await api('pick_directory'); if (path) set(path); }
     catch (e) { setError(errorText(e)); }
   };
   const save = async (kind: 'data' | 'cache') => {

@@ -13,7 +13,7 @@ export function NewTask({ target, task, setTarget, setTask, onClose, onStart, bu
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const pick = async () => {
-    try { const path = await api<string | null>('pick_target'); if (path) setTarget(path); }
+    try { const path = await api('pick_target'); if (path) setTarget(path); }
     catch (error) { setError(errorText(error)); }
   };
   return <Modal title="开始新的分析" description="选择本地目标并描述你希望 Agent 完成的工作。" onClose={onClose}>
