@@ -11,6 +11,7 @@
 - [实现架构](design/architecture.md)与[实现契约](design/implementation-contract.md)：模块职责、运行语义及验收不变量。
 - [维护约定](development/maintenance.md)：代码边界、工具文档生成及检查入口。
 - [发布流程](development/releases.md)与[GitHub 维护](development/github-maintenance.md)：版本、CI、缓存及发布演练。
+- [仓库自动化](../scripts/README.md)、[worker 测试](../workers/tests/README.md)、[行为评测](../evals/README.md)：目录职责与执行入口。
 
 ## 参考与历史
 

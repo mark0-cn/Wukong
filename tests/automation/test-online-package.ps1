@@ -19,3 +19,25 @@ try { & (Join-Path $temporary 'install-workbench.ps1') -ValidateOnly } catch {
 }
 if (-not $rejected) { throw 'Tampered client was accepted.' }
 Write-Output 'PASS: online package validation accepts matching files and rejects tampering.'
+
+# Exercise the relocated packaging wrapper from a different PowerShell location.
+Push-Location -LiteralPath $root
+try {
+    $version = & python -m scripts.release.cli check
+    if ($LASTEXITCODE) { throw 'Version check failed.' }
+    $revision = & git rev-parse HEAD
+    if ($LASTEXITCODE) { throw 'Source revision check failed.' }
+} finally { Pop-Location }
+$metadata = @{ repository='hlmark0/re-agent-workbench'; digest=('sha256:' + ('a'*64)); image_id=('sha256:' + ('b'*64)); platform='linux/amd64'; source_revision=$revision; size_bytes=123 }
+$metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $temporary 'image.json') -Encoding utf8
+Push-Location -LiteralPath $temporary
+try {
+    & (Join-Path $root 'scripts/release/package-workbench.ps1') -Destination './output with spaces' -ImageMetadata './image.json' -BinaryPath './re-agent.exe' -Tag "v$version"
+    if ((Get-Location).Path -ne $temporary) { throw 'Packaging changed the caller location.' }
+    $output = Join-Path $temporary 'output with spaces'
+    $archive = Join-Path $output "re-agent-v$version-windows-amd64.zip"
+    Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $output 'expanded')
+    & (Join-Path $output 'expanded/install-workbench.ps1') -ValidateOnly
+    if (-not (Test-Path -LiteralPath (Join-Path $output 'SHA256SUMS'))) { throw 'Packaging omitted checksums.' }
+} finally { Pop-Location }
+Write-Output 'PASS: packaging resolves caller-relative paths and validates the relocated installer payload.'
