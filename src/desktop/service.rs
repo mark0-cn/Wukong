@@ -3,6 +3,7 @@ use super::{
     configuration::{ConfigDocument, ConfigEdit},
     workspace::{self, WorkspaceRequest, WorkspaceResponse},
 };
+use crate::i18n::Message as UiMessage;
 use crate::{
     application::AssessmentService,
     config::AppConfig,
@@ -45,7 +46,7 @@ struct Active {
 pub struct Notice {
     pub id: u64,
     pub error: bool,
-    pub message: String,
+    pub message: UiMessage,
 }
 #[derive(Serialize)]
 pub struct HostStatus {
@@ -94,15 +95,18 @@ impl Drop for Operation {
 }
 impl Service {
     pub(crate) fn set_data_directory(&self, epoch: u64, directory: PathBuf) -> Result<()> {
-        ensure!(directory.is_absolute(), "请选择绝对路径");
+        ensure!(
+            directory.is_absolute(),
+            UiMessage::new("system-choose-an-absolute-path")
+        );
         ensure!(
             self.context(epoch)?.state_override.is_none(),
-            "当前使用 --state 指定目录，请重新启动后在界面修改"
+            UiMessage::new("system-the-directory-was-set-with-state-restart-without")
         );
         let _lock = crate::updates::maintenance::lock(&crate::updates::recovery::root()?, true)?;
         ensure!(
             crate::updates::recovery::pending()?.is_none(),
-            "先完成或恢复待处理更新"
+            UiMessage::new("system-finish-or-recover-the-pending-update-first")
         );
         let document = self.current_configuration(epoch)?;
         self.save_configuration(
@@ -127,7 +131,7 @@ impl Service {
         );
         ensure!(
             active.is_none() && self.operations.load(Ordering::SeqCst) == 0,
-            "请先结束分析、调试和其他文件操作。"
+            UiMessage::new("system-finish-analysis-debugging-and-file-operations-first")
         );
         self.operations.fetch_add(1, Ordering::SeqCst);
         Ok((
@@ -174,19 +178,21 @@ impl Service {
         self.changes
             .send_modify(|version| *version = version.wrapping_add(1));
     }
-    fn notice(&self, error: bool, message: impl Into<String>) {
+    fn notice(&self, error: bool, message: UiMessage) {
         let id = self.changes.borrow().wrapping_add(1);
-        *self.notice.lock().unwrap() = Some(Notice {
-            id,
-            error,
-            message: message.into(),
-        });
+        *self.notice.lock().unwrap() = Some(Notice { id, error, message });
         self.changed();
     }
     fn context(&self, epoch: u64) -> Result<ContextState> {
         let state = self.state.lock().unwrap();
-        ensure!(state.epoch == epoch, "工作区配置已变化，请刷新后重试。");
-        ensure!(!self.closing.load(Ordering::SeqCst), "工作区正在关闭。");
+        ensure!(
+            state.epoch == epoch,
+            UiMessage::new("system-workspace-configuration-changed-refresh-and-retry")
+        );
+        ensure!(
+            !self.closing.load(Ordering::SeqCst),
+            UiMessage::new("system-the-workspace-is-closing")
+        );
         Ok(state.clone())
     }
     pub fn status(&self) -> HostStatus {
@@ -214,7 +220,7 @@ impl Service {
         let host = self.status();
         ensure!(
             host.epoch == context.epoch,
-            "读取期间工作区已切换，请重试。"
+            UiMessage::new("system-the-workspace-changed-while-reading-retry")
         );
         Ok(WorkspaceEnvelope { host, workspace })
     }
@@ -230,11 +236,17 @@ impl Service {
         let context = {
             let state = self.state.lock().unwrap();
             let mut active = self.active.lock().unwrap();
-            ensure!(state.epoch == epoch, "工作区已切换，请刷新后重试。");
-            ensure!(!self.closing.load(Ordering::SeqCst), "工作区正在关闭。");
+            ensure!(
+                state.epoch == epoch,
+                UiMessage::new("system-the-workspace-changed-refresh-and-retry")
+            );
+            ensure!(
+                !self.closing.load(Ordering::SeqCst),
+                UiMessage::new("system-the-workspace-is-closing")
+            );
             ensure!(
                 active.is_none() && self.operations.load(Ordering::SeqCst) == 0,
-                "当前操作尚未结束，请等待保存完成。"
+                UiMessage::new("system-an-operation-is-still-running-wait-for-it")
             );
             *active = Some(Active {
                 info: ExecutionInfo {
@@ -262,7 +274,10 @@ impl Service {
             Ok(prepared) => prepared,
             Err(error) => {
                 *self.active.lock().unwrap() = None;
-                self.notice(true, format!("启动失败：{error:#}"));
+                self.notice(
+                    true,
+                    UiMessage::new("system-start-failed").detail(format!("{error:#}")),
+                );
                 return Err(error);
             }
         };
@@ -271,7 +286,10 @@ impl Service {
             active.info.run_id = Some(id.clone());
             active.info.phase = "running";
         }
-        self.notice(false, "分析已开始，进展和操作会显示在会话中。");
+        self.notice(
+            false,
+            UiMessage::new("system-analysis-started-updates-and-operations-will-appear-in"),
+        );
         let controller = Arc::clone(self);
         let mut events = prepared.subscribe();
         tokio::spawn(async move {
@@ -291,13 +309,22 @@ impl Service {
                 Ok(run) => controller.notice(
                     run.status == Status::Failed,
                     match run.status {
-                        Status::Completed => "分析已完成，可以查看结论与证据。",
-                        Status::BudgetPaused => "分析已暂停，进度已保存。",
-                        Status::Failed => "分析失败，请查看任务错误与已有证据。",
-                        _ => "本轮工作已结束，进度已保存。",
+                        Status::Completed => UiMessage::new(
+                            "system-analysis-completed-review-the-conclusions-and-evidence",
+                        ),
+                        Status::BudgetPaused => {
+                            UiMessage::new("system-analysis-paused-progress-is-saved")
+                        }
+                        Status::Failed => UiMessage::new(
+                            "system-analysis-failed-review-the-task-error-and-available",
+                        ),
+                        _ => UiMessage::new("system-this-round-ended-progress-is-saved"),
                     },
                 ),
-                Err(error) => controller.notice(true, format!("分析中断：{error:#}")),
+                Err(error) => controller.notice(
+                    true,
+                    UiMessage::new("system-analysis-interrupted").detail(format!("{error:#}")),
+                ),
             }
         });
         Ok(id)
@@ -311,13 +338,19 @@ impl Service {
         {
             active.cancel.cancel();
         }
-        self.notice(false, "已请求暂停，正在保存进行中的工作。");
+        self.notice(
+            false,
+            UiMessage::new("system-pause-requested-saving-work-in-progress"),
+        );
         Ok(())
     }
     pub fn stop(&self, epoch: u64, run: &str, agent: &str) -> Result<()> {
         let (context, _operation) = self.operation(epoch)?;
         let record: AgentMetadata = context.store.load(agent)?;
-        ensure!(record.run_id == run, "Agent 不属于当前任务");
+        ensure!(
+            record.run_id == run,
+            UiMessage::new("system-the-agent-does-not-belong-to-this-task")
+        );
         AssessmentService::new(context.config, context.store)
             .stop(agent, "operator stopped from desktop")?;
         self.changed();
@@ -334,7 +367,10 @@ impl Service {
     ) -> Result<MessageReceipt> {
         let (context, _operation) = self.operation(epoch)?;
         let record: AgentMetadata = context.store.load(agent)?;
-        ensure!(record.run_id == run, "Agent 不属于当前任务");
+        ensure!(
+            record.run_id == run,
+            UiMessage::new("system-the-agent-does-not-belong-to-this-task")
+        );
         let receipt = AssessmentService::new(context.config, context.store).message(
             agent,
             text,
@@ -353,8 +389,14 @@ impl Service {
     }
     fn operation(&self, epoch: u64) -> Result<(ContextState, Operation)> {
         let state = self.state.lock().unwrap();
-        ensure!(state.epoch == epoch, "工作区已切换，请刷新后重试。");
-        ensure!(!self.closing.load(Ordering::SeqCst), "工作区正在关闭。");
+        ensure!(
+            state.epoch == epoch,
+            UiMessage::new("system-the-workspace-changed-refresh-and-retry")
+        );
+        ensure!(
+            !self.closing.load(Ordering::SeqCst),
+            UiMessage::new("system-the-workspace-is-closing")
+        );
         self.operations.fetch_add(1, Ordering::SeqCst);
         Ok((state.clone(), Operation(self.operations.clone())))
     }
@@ -405,7 +447,7 @@ impl Service {
         let (context, _operation) = self.operation(epoch)?;
         context.store.require::<RunRecord>("run", run)?;
         let Some(parent) = rfd::FileDialog::new()
-            .set_title("选择报告保存目录")
+            .set_title(super::preferences::locale().text("dialog-report"))
             .pick_folder()
         else {
             return Ok(None);
@@ -415,7 +457,10 @@ impl Service {
             chrono::Local::now().format("%Y%m%d-%H%M%S")
         ));
         report::export(&context.store, run, &path)?;
-        self.notice(false, format!("报告已导出：{}", path.display()));
+        self.notice(
+            false,
+            UiMessage::new("system-report-exported").arg("path", path.display().to_string()),
+        );
         Ok(Some(path))
     }
     pub fn configuration(
@@ -447,11 +492,17 @@ impl Service {
     ) -> Result<ConfigDocument> {
         let mut state = self.state.lock().unwrap();
         let active = self.active.lock().unwrap();
-        ensure!(state.epoch == epoch, "工作区已变化，请重新打开设置。");
-        ensure!(!self.closing.load(Ordering::SeqCst), "工作区正在关闭。");
+        ensure!(
+            state.epoch == epoch,
+            UiMessage::new("system-the-workspace-changed-reopen-settings")
+        );
+        ensure!(
+            !self.closing.load(Ordering::SeqCst),
+            UiMessage::new("system-the-workspace-is-closing")
+        );
         ensure!(
             active.is_none() && self.operations.load(Ordering::SeqCst) == 0,
-            "分析或导出尚未结束，请先暂停并等待保存完成。"
+            UiMessage::new("system-analysis-or-export-is-still-active-pause-and")
         );
         document.patch(&edits)?;
         let (config, store) = document.save(state.state_override.as_deref())?;
@@ -464,7 +515,7 @@ impl Service {
         drop(state);
         self.notice(
             false,
-            "配置已保存。新任务使用新配置，恢复任务沿用历史配置。",
+            UiMessage::new("system-configuration-saved-new-tasks-use-it-resumed-tasks"),
         );
         Ok(document)
     }
@@ -518,7 +569,10 @@ impl Service {
     }
     pub fn call(&self, epoch: u64, run: &str, id: &str) -> Result<ToolCallRecord> {
         let record: ToolCallRecord = self.context(epoch)?.store.load(id)?;
-        ensure!(record.run_id == run, "工具调用不属于当前任务");
+        ensure!(
+            record.run_id == run,
+            UiMessage::new("system-the-tool-call-does-not-belong-to-this")
+        );
         Ok(record)
     }
     pub async fn shutdown(&self) -> Result<()> {

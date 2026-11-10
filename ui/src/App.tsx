@@ -1,8 +1,8 @@
-import { t, useLocale } from './i18n';
+import { t, message, text, useLocale } from './i18n';
 import brandIcon from '../../icons/icon.svg';
 import { useCallback, useRef, useState } from 'react';
 import { Activity, ArrowRight, Bot, CircleAlert, Download, FileSearch, Focus, GitBranch, MessageSquare, PanelLeft, Pause, Play, RefreshCw, X } from 'lucide-react';
-import { api, errorText } from './bridge';
+import { api, errorText, errorValue } from './bridge';
 import { useWorkspace } from './workspace';
 import type { Agent, Budget, Run } from './types';
 import { Agents } from './components/Agents';
@@ -45,7 +45,7 @@ export default function App() {
   const [resume, setResume] = useState<Run>();
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [dismissed, setDismissed] = useState<number>();
   const selectedRun = data?.runs.find(run => run.id === data.selected);
   const selectedAgent = data?.agents.find(agent => agent.id === workspace.agent);
@@ -60,7 +60,7 @@ export default function App() {
   const command = async (action: () => Promise<unknown>) => {
     setPending(true); setError('');
     try { await action(); workspace.refresh(); }
-    catch (error) { setError(errorText(error)); }
+    catch (error) { setError(errorValue(error)); }
     finally { setPending(false); }
   };
   const selectAgent = (id?: string) => { workspace.selectAgent(id); setTab('conversation'); };
@@ -88,8 +88,8 @@ export default function App() {
             {['running', 'waiting', 'queued'].includes(selectedRun.status) ? <button disabled={pending || closing} onClick={() => { void command(() => api('pause_run', { epoch: host.epoch, run: selectedRun.id })); }}><Pause size={14} />{t('workspace-pause')}</button> :
               <button className="primary" disabled={busy || closing} onClick={() => setResume(selectedRun)}><Play size={14} />{t('workspace-resume-analysis')}</button>}</>}
         </div></header>
-      {(error || workspace.error) && <div className="error-banner" role="alert"><CircleAlert size={16} /><span>{error || workspace.error}</span><button className="icon-button" aria-label={t('workspace-retry-connection')} onClick={() => { setError(''); workspace.refresh(); }}><RefreshCw size={14} /></button></div>}
-      {host?.notice && dismissed !== host.notice.id && <div className={`notice ${host.notice.error ? 'notice-error' : ''}`} role="status"><span>{host.notice.message}</span><button className="icon-button" aria-label={t('workspace-dismiss-notification')} onClick={() => setDismissed(host.notice!.id)}><X size={13} /></button></div>}
+      {(error || workspace.error) && <div className="error-banner" role="alert"><CircleAlert size={16} /><span>{errorText(error || workspace.error)}</span><button className="icon-button" aria-label={t('workspace-retry-connection')} onClick={() => { setError(''); workspace.refresh(); }}><RefreshCw size={14} /></button></div>}
+      {host?.notice && dismissed !== host.notice.id && <div className={`notice ${host.notice.error ? 'notice-error' : ''}`} role="status"><span>{message(host.notice.message)}</span><button className="icon-button" aria-label={t('workspace-dismiss-notification')} onClick={() => setDismissed(host.notice!.id)}><X size={13} /></button></div>}
       {selectedRun && <><nav className="workspace-tabs" aria-label={t('workspace-workspace-views')}>
         <button className={tab === 'conversation' ? 'active' : ''} onClick={() => setTab('conversation')}><MessageSquare size={15} />{t('workspace-analysis-progress')}</button>
         <button className={tab === 'findings' ? 'active' : ''} onClick={() => setTab('findings')}><FileSearch size={15} />{t('workspace-findings-and-evidence')}<span>{data?.findings.length ?? 0}</span></button>
@@ -98,7 +98,7 @@ export default function App() {
       </nav>
         {data && <div data-status={selectedRun.status} className={`work-status ${['failed', 'crashed'].includes(selectedRun.status) ? 'work-error' : ''}`}>
           <span className="work-status-icon"><StateIcon state={data.active_tools.some(tool => tool.state === 'running') ? 'running' : selectedRun.status} /></span>
-          <div><strong>{data.active_tools.length ? data.active_tools[0].title : selectedRun.status === 'running' ? t('workspace-analysis-in-progress') : selectedRun.status === 'waiting' ? t('workspace-waiting-for-collaborators') : selectedRun.status === 'budget_paused' ? t('workspace-progress-saved-ready-to-resume') : terminal(selectedRun.status) ? t('workspace-this-round-has-ended') : t('workspace-waiting-to-start')}</strong>
+          <div><strong>{data.active_tools.length ? text(data.active_tools[0].title) : selectedRun.status === 'running' ? t('workspace-analysis-in-progress') : selectedRun.status === 'waiting' ? t('workspace-waiting-for-collaborators') : selectedRun.status === 'budget_paused' ? t('workspace-progress-saved-ready-to-resume') : terminal(selectedRun.status) ? t('workspace-this-round-has-ended') : t('workspace-waiting-to-start')}</strong>
             <p>{data.active_tools.length ? `${data.active_tools[0].target || data.active_tools[0].purpose}${data.active_tools.length > 1 ? t('workspace-more-operations', { v0: data.active_tools.length - 1 }) : ''}` : selectedRun.task}</p></div>
           <div className="budget-compact"><span>{compact(selectedRun.total_tokens)} / {compact(selectedRun.budget.max_total_tokens)} tokens</span><span>{t('workspace-agent-count', { count: data.agents.length })}</span></div>
         </div>}

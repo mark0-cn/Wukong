@@ -1,7 +1,7 @@
-import { t, useLocale } from '../i18n';
+import { t, message, useLocale } from '../i18n';
 import { useEffect, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { api, errorText } from '../bridge';
+import { api, errorText, errorValue } from '../bridge';
 import { Modal } from './Modal';
 import { StorageLocations } from './StorageLocations';
 
@@ -11,19 +11,19 @@ export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose:
   useLocale();
   const [status, setStatus] = useState<UpdateStatus>();
   const [working, setWorking] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [storage, setStorage] = useState(false);
   const [confirm, setConfirm] = useState<'install' | 'recover' | 'clean_cache' | 'clean_images'>();
   useEffect(() => {
     let alive = true;
-    const refresh = () => { void api('update_action', { action: 'status', epoch }).then(value => { if (alive) setStatus(value); }).catch(e => { if (alive) setError(errorText(e)); }); };
+    const refresh = () => { void api('update_action', { action: 'status', epoch }).then(value => { if (alive) setStatus(value); }).catch(e => { if (alive) setError(errorValue(e)); }); };
     refresh(); const timer = window.setInterval(refresh, 1000);
     return () => { alive = false; window.clearInterval(timer); };
   }, [epoch]);
   const run = async (action: UpdateAction) => {
     setWorking(true); setError(''); setConfirm(undefined);
     try { setStatus(await api('update_action', { action, epoch })); onChanged(); }
-    catch (e) { setError(errorText(e)); }
+    catch (e) { setError(errorValue(e)); }
     finally { setWorking(false); }
   };
   const linux = navigator.userAgent.includes('Linux');
@@ -31,10 +31,10 @@ export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose:
     <div className="update-summary"><div><span className="muted">{t('updates-current-client')}</span><h3>{status?.version ?? t('updates-loading')}</h3></div><div><span className="muted">{t('updates-available-version')}</span><h3>{status?.available ?? t('updates-no-update-found-yet')}</h3></div></div>
     {status?.needs_setup && <ol className="setup-steps"><li>{t('updates-install-and-start-docker-with-support-for')}</li><li>{t('updates-select-prepare-tool-environment-to-download-and')}</li><li>{t('updates-once-ready-configure-your-model-provider-in')}</li></ol>}
     <div className="header-actions"><button onClick={() => void openUrl(linux ? 'https://docs.docker.com/engine/install/' : 'https://docs.docker.com/desktop/setup/install/windows-install/')}>{t('updates-docker-installation-guide')}</button>{linux && <button disabled={working} onClick={() => void run('integrate')}>{t('updates-add-to-application-menu-and-restart')}</button>}</div>
-    <p role="status">{status?.message || t('updates-check-for-updates-or-prepare-the-current')}</p>
+    <p role="status">{(status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>
     {status?.phase === 'downloading' && status.total && <div><progress aria-label={t('updates-client-download-progress')} max={status.total} value={status.downloaded} /><p className="muted">{(status.downloaded / 1048576).toFixed(1)} / {(status.total / 1048576).toFixed(1)} MiB</p></div>}
     {working && <p className="muted">{t('updates-keep-the-application-open-while-processing-image')}</p>}
-    {(error || status?.phase === 'error') && <p className="error-banner" role="alert">{error || status?.message}</p>}
+    {(error || status?.phase === 'error') && <p className="error-banner" role="alert">{errorText(error) || (status?.message && message(status.message))}</p>}
     {status?.notes && <details><summary>{t('updates-release-notes')}</summary><p>{status.notes}</p></details>}
     <details onToggle={event => setStorage(event.currentTarget.open)}><summary>{t('updates-configure-storage-locations')}</summary>{storage && <StorageLocations epoch={epoch} disabled={working || Boolean(status?.pending)} onChanged={onChanged} />}</details>
     {status?.pending && <p className="error-banner">{t('updates-the-previous-update-is-not-confirmed-new')}</p>}

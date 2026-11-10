@@ -1,11 +1,11 @@
-import { t, useLocale, currentLocale } from '../i18n';
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { t, text, message as formatMessage, useLocale, currentLocale } from '../i18n';
+import { createContext, useContext, useMemo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { AssistantRuntimeProvider, ThreadPrimitive, MessagePrimitive, useExternalStoreRuntime,
   useAuiState, groupPartByType, type ThreadMessageLike } from '@assistant-ui/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import * as Collapsible from '@radix-ui/react-collapsible';
 import { ArrowDown, ArrowUp, Bot, ChevronRight, Code2, User } from 'lucide-react';
-import { api, errorText } from '../bridge';
+import { api, errorText, errorValue } from '../bridge';
 import type { Agent, ChatMessage, Host, ToolDisplay, ToolRecord, Workspace } from '../types';
 import { Markdown } from './Markdown';
 import { labels, StateIcon, Status, terminal } from './Status';
@@ -18,30 +18,30 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
   const context = useContext(TranscriptContext);
   const [open, setOpen] = useState(false);
   const [record, setRecord] = useState<ToolRecord>();
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (!open) return;
     let alive = true;
     setLoading(true); setError('');
     void api('tool_details', { epoch: context.epoch, run: context.run, id: display.call_id })
-      .then(value => { if (alive) setRecord(value); }).catch(error => { if (alive) setError(errorText(error)); })
+      .then(value => { if (alive) setRecord(value); }).catch(error => { if (alive) setError(errorValue(error)); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [open, display.call_id, display.state, context.epoch, context.run]);
   return <Collapsible.Root open={open} onOpenChange={setOpen} className={`tool-step tool-${display.state}`}>
     <Collapsible.Trigger className="tool-trigger">
       <span className="tool-symbol"><StateIcon state={display.state} /></span>
-      <span className="tool-label"><strong>{display.title}</strong>{display.target && <span className="tool-target" title={display.target}>{display.target}</span>}</span>
+      <span className="tool-label"><strong>{text(display.title)}</strong>{display.target && <span className="tool-target" title={display.target}>{display.target}</span>}</span>
       <span className="tool-state">{labels[display.state] ?? display.state}</span>
       {display.duration_ms != null && <span className="tool-duration">{(display.duration_ms / 1000).toFixed(1)}s</span>}
       <ChevronRight size={13} className={open ? 'rotate' : ''} />
     </Collapsible.Trigger>
     {display.purpose && <p className="tool-purpose">{display.purpose}</p>}
-    {display.summary && <p className="tool-summary">{display.summary}</p>}
+    {display.summary && <p className="tool-summary">{formatMessage(display.summary)}</p>}
     <Collapsible.Content className="tool-details">
       {loading && <p className="muted">{t('workspace-loading-operation-details')}</p>}
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <p className="error" role="alert">{errorText(error)}</p>}
       {record && <><div className="detail-caption"><Code2 size={13} />{t('workspace-raw-operation-details')}</div>
         <pre>{JSON.stringify(record.arguments, null, 2)}</pre>
         {record.result != null && <><div className="detail-caption">{t('workspace-raw-result')}</div><pre>{typeof record.result === 'string' ? record.result : JSON.stringify(record.result, null, 2)}</pre></>}
@@ -97,8 +97,8 @@ const messageComponents = { Message };
 export function convertMessage(message: ChatMessage): ThreadMessageLike {
   return { id: message.id, role: message.role, createdAt: new Date(message.created_at),
     status: message.role === 'assistant' ? { type: 'complete', reason: 'stop' } : undefined,
-    content: message.content as unknown as ThreadMessageLike['content'],
-    metadata: { custom: { author: message.author, agent: message.agent_id, delivery: message.delivery } } };
+    content: message.content.map(part => part.type === 'text' ? { ...part, text: formatMessage(part.text) } : part) as unknown as ThreadMessageLike['content'],
+    metadata: { custom: { author: formatMessage(message.author), agent: message.agent_id, delivery: message.delivery } } };
 }
 function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier: () => void; limit: number }) {
   useLocale();
@@ -144,7 +144,9 @@ export function Conversation({ data, host, agent, onAgent, loadEarlier, limit, c
   loadEarlier: () => void; limit: number; composer: ReactNode;
 }) {
   useLocale();
-  const runtime = useExternalStoreRuntime({ messages: data.transcript, convertMessage,
+  const locale = currentLocale();
+  const messages = useMemo(() => data.transcript.map(convertMessage), [data.transcript, locale]);
+  const runtime = useExternalStoreRuntime({ messages, convertMessage: (message: ThreadMessageLike) => message,
     isRunning: host.execution?.run_id === data.selected,
     onNew: async () => { throw new Error(t('workspace-use-the-message-composer-below')); }, isSendDisabled: true });
   return <TranscriptContext.Provider value={{ epoch: host.epoch, run: data.selected ?? '', onAgent }}>
@@ -161,7 +163,7 @@ export function Composer({ target, draft, onDraft, send, busy }: {
   send: (draft: Draft, target: Agent) => Promise<void>; busy: boolean;
 }) {
   useLocale();
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [sending, setSending] = useState(false);
   const submit = async () => {
     if (!target || !draft.text.trim() || sending || busy) return;
@@ -170,7 +172,7 @@ export function Composer({ target, draft, onDraft, send, busy }: {
     setSending(true); setError('');
     try {
       await send(submitted, target);
-    } catch (error) { setError(errorText(error)); }
+    } catch (error) { setError(errorValue(error)); }
     finally { setSending(false); }
   };
   return <div className="composer-wrap"><div className="composer">
@@ -181,5 +183,5 @@ export function Composer({ target, draft, onDraft, send, busy }: {
       <label className="checkbox"><input type="checkbox" checked={draft.followUp} onChange={event => onDraft({ ...draft, followUp: event.target.checked })} />{t('workspace-schedule-follow-up')}</label>
       <button className="send-button" aria-label={t('workspace-send-message')} disabled={!target || !draft.text.trim() || sending || busy} onClick={() => { void submit(); }}>{sending ? <StateIcon state="running" /> : <ArrowUp size={17} />}</button>
     </div>
-  </div>{error ? <p className="error composer-hint" role="alert">{error}</p> : <p className="composer-hint">{target && terminal(target.status) ? t('workspace-follow-up-work-will-queue-and-execute') : t('workspace-messages-target-an-agent-generation-delivery-status')}<span>{t('workspace-ctrl-enter-to-send')}</span></p>}</div>;
+  </div>{error ? <p className="error composer-hint" role="alert">{errorText(error)}</p> : <p className="composer-hint">{target && terminal(target.status) ? t('workspace-follow-up-work-will-queue-and-execute') : t('workspace-messages-target-an-agent-generation-delivery-status')}<span>{t('workspace-ctrl-enter-to-send')}</span></p>}</div>;
 }

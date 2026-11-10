@@ -1,5 +1,6 @@
 //! Desktop update orchestration. Network preparation never switches the live worker.
 use super::service::Service;
+use crate::i18n::Message as UiMessage;
 use crate::updates::{
     environment, maintenance,
     manifest::{self, Manifest},
@@ -18,7 +19,7 @@ use tauri_plugin_updater::UpdaterExt;
 pub struct Status {
     pub version: String,
     pub phase: String,
-    pub message: String,
+    pub message: UiMessage,
     pub available: Option<String>,
     pub notes: String,
     pub downloaded: u64,
@@ -65,25 +66,33 @@ impl Controller {
         epoch: u64,
         service: Arc<Service>,
     ) -> Result<PathBuf> {
-        let _serial = self.operation.try_lock().context("更新操作正在进行")?;
+        let _serial = self.operation.try_lock().context(UiMessage::new(
+            "system-an-update-operation-is-already-running",
+        ))?;
         let (_config, _path, _operation) = service.maintenance_context(epoch)?;
-        self.phase("storage", "正在验证并复制更新缓存");
+        self.phase(
+            "storage",
+            UiMessage::new("system-validating-and-copying-the-update-cache"),
+        );
         let result =
             tokio::task::spawn_blocking(move || crate::updates::storage::set_cache(&destination))
                 .await?;
         match &result {
             Ok(_) => self.phase(
                 "idle",
-                "更新缓存位置已保存；原目录文件保留，可以确认后手动清理",
+                UiMessage::new("system-cache-location-saved-original-files-are-retained-for"),
             ),
-            Err(error) => self.phase("error", &format!("缓存切换失败：{error:#}")),
+            Err(error) => self.phase(
+                "error",
+                UiMessage::new("system-cache-failed").detail(format!("{error:#}")),
+            ),
         }
         result
     }
-    fn phase(&self, phase: &str, message: &str) {
+    fn phase(&self, phase: &str, message: UiMessage) {
         let mut state = self.status.lock().unwrap();
         state.phase = phase.into();
-        state.message = message.into();
+        state.message = message;
     }
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
@@ -115,15 +124,29 @@ impl Controller {
         match result {
             Ok(Ok(true)) => {
                 if let Err(error) = service.reload_after_maintenance() {
-                    self.phase("error", &format!("更新已安装，但配置重载失败：{error:#}"));
+                    self.phase(
+                        "error",
+                        UiMessage::new("system-reload-failed").detail(format!("{error:#}")),
+                    );
                 } else {
-                    self.phase("idle", "更新已完成，客户端与工具环境自检通过");
+                    self.phase(
+                        "idle",
+                        UiMessage::new(
+                            "system-update-completed-client-and-tool-environment-checks-passed",
+                        ),
+                    );
                     self.status.lock().unwrap().pending = false;
                 }
             }
             Ok(Ok(false)) => {}
-            Ok(Err(error)) => self.phase("error", &format!("更新需要恢复：{error:#}")),
-            Err(error) => self.phase("error", &error.to_string()),
+            Ok(Err(error)) => self.phase(
+                "error",
+                UiMessage::new("system-recovery-required").detail(format!("{error:#}")),
+            ),
+            Err(error) => self.phase(
+                "error",
+                UiMessage::new("error-operation").detail(error.to_string()),
+            ),
         }
     }
     async fn remember(&self, version: Option<&str>) -> Result<Manifest> {
@@ -143,11 +166,11 @@ impl Controller {
         }
         ensure!(
             fs2::available_space(path.parent().unwrap())? > artifact.size * 3 + 512 * 1024 * 1024,
-            "客户端所在磁盘空间不足"
+            UiMessage::new("system-insufficient-space-on-the-client-disk")
         );
         self.phase(
             "downloading",
-            &format!("正在下载客户端 {}", manifest.version),
+            UiMessage::new("system-downloading-client").arg("version", manifest.version.clone()),
         );
         let client = reqwest::Client::builder()
             .https_only(true)
@@ -181,11 +204,13 @@ impl Controller {
         if matches!(action, Action::Status) {
             return Ok(self.status());
         }
-        let _serial = self.operation.try_lock().context("更新操作正在进行")?;
+        let _serial = self.operation.try_lock().context(UiMessage::new(
+            "system-an-update-operation-is-already-running",
+        ))?;
         let _cache = crate::updates::storage::cache_lock(false)?;
         let result = self.perform(action, epoch, service, app).await;
         if let Err(error) = &result {
-            self.phase("error", &format!("{error:#}"));
+            self.phase("error", UiMessage::from_error_ref(error));
         }
         result?;
         Ok(self.status())
@@ -198,7 +223,10 @@ impl Controller {
         app: tauri::AppHandle,
     ) -> Result<()> {
         if matches!(action, Action::Check) {
-            self.phase("checking", "正在检查正式版本");
+            self.phase(
+                "checking",
+                UiMessage::new("system-checking-official-releases"),
+            );
             let manifest = self.remember(None).await?;
             let available = manifest.can_upgrade(env!("CARGO_PKG_VERSION"))?;
             let mut state = self.status.lock().unwrap();
@@ -206,9 +234,9 @@ impl Controller {
             state.notes = manifest.notes;
             state.phase = "idle".into();
             state.message = if available {
-                "有可用更新"
+                UiMessage::new("system-an-update-is-available")
             } else {
-                "当前已是最新版本"
+                UiMessage::new("system-already-up-to-date")
             }
             .into();
             return Ok(());
@@ -222,7 +250,10 @@ impl Controller {
         }
         if matches!(action, Action::CleanCache | Action::CleanImages) {
             let _lock = maintenance::lock(&recovery::root()?, true)?;
-            ensure!(recovery::pending()?.is_none(), "先完成或恢复待处理更新");
+            ensure!(
+                recovery::pending()?.is_none(),
+                UiMessage::new("system-finish-or-recover-the-pending-update-first")
+            );
             let previous_path = recovery::root()?.join("previous.json");
             let previous: Option<recovery::Journal> = if previous_path.exists() {
                 Some(crate::workbench::read_json(&previous_path)?)
@@ -290,7 +321,9 @@ impl Controller {
             }
             self.phase(
                 "idle",
-                "清理已完成，当前版本、恢复版本和容器引用的镜像均保留",
+                UiMessage::new(
+                    "system-cleanup-completed-current-recovery-and-container-referenced-images",
+                ),
             );
             return Ok(());
         }
@@ -300,7 +333,10 @@ impl Controller {
             } else {
                 "Wukong-Recovery.AppImage"
             });
-            ensure!(helper.is_file(), "尚无恢复入口");
+            ensure!(
+                helper.is_file(),
+                UiMessage::new("system-no-recovery-program-is-available-yet")
+            );
             std::process::Command::new(helper).spawn()?;
             app.exit(0);
             return Ok(());
@@ -309,25 +345,30 @@ impl Controller {
         if let Some(container) = &config.runtime.docker_container {
             ensure!(
                 container == &workbench.name("tools"),
-                "请先切换到工具环境，再安装或更新"
+                UiMessage::new("system-switch-to-the-tool-environment-before-installing-or")
             );
         }
         if matches!(action, Action::Install) {
-            let version = self.status().prepared.context("请先下载并验证更新")?;
+            let version = self.status().prepared.context(UiMessage::new(
+                "system-download-and-verify-the-update-first",
+            ))?;
             let manifest = recovery::cached(&version)?;
             ensure!(
                 manifest.can_upgrade(env!("CARGO_PKG_VERSION"))?,
-                "不是更新版本"
+                UiMessage::new("system-this-is-not-a-newer-version")
             );
             let _lock = maintenance::lock(&recovery::root()?, true)?;
-            ensure!(recovery::pending()?.is_none(), "已有待恢复更新");
+            ensure!(
+                recovery::pending()?.is_none(),
+                UiMessage::new("system-an-update-already-needs-recovery")
+            );
             let _workbench_lock = workbench.lock()?;
             workbench.require_idle()?;
             let previous = workbench.environment()?;
             let previous_manifest = recovery::cached(env!("CARGO_PKG_VERSION"))?;
             ensure!(
                 previous.image == previous_manifest.image,
-                "当前环境不属于已验证版本，请先修复环境"
+                UiMessage::new("system-the-environment-is-not-a-verified-version-repair")
             );
             let journal = recovery::Journal {
                 from: env!("CARGO_PKG_VERSION").into(),
@@ -344,7 +385,7 @@ impl Controller {
                 .pubkey(manifest::PUBLIC_KEY.trim())
                 .build()?
                 .restore_update(raw)?
-                .context("更新不可用")?;
+                .context(UiMessage::new("system-the-update-is-unavailable"))?;
             let bytes = std::fs::read(recovery::payload(&manifest)?)?;
             update.verify(&bytes)?;
             let helper = recovery::stage(&journal)?;
@@ -353,20 +394,26 @@ impl Controller {
                 state.pending = true;
                 state.recovery = Some(helper);
             }
-            self.phase("installing", "正在安装，客户端即将重启");
+            self.phase(
+                "installing",
+                UiMessage::new("system-installing-the-client-will-restart-shortly"),
+            );
             update.install(bytes)?;
             #[cfg(not(windows))]
             app.restart();
             return Ok(());
         }
-        ensure!(recovery::pending()?.is_none(), "先恢复或确认待处理更新");
+        ensure!(
+            recovery::pending()?.is_none(),
+            UiMessage::new("system-recover-or-confirm-the-pending-update-first")
+        );
         let setup = matches!(action, Action::Setup);
         self.phase(
             "checking",
             if setup {
-                "正在读取当前版本的配套环境"
+                UiMessage::new("system-reading-the-tool-environment-for-the-current-version")
             } else {
-                "正在准备更新"
+                UiMessage::new("system-preparing-update")
             },
         );
         let manifest = self
@@ -379,7 +426,7 @@ impl Controller {
         if !setup {
             ensure!(
                 manifest.can_upgrade(env!("CARGO_PKG_VERSION"))?,
-                "没有可安装的新版本"
+                UiMessage::new("system-no-newer-version-is-available-to-install")
             );
             self.download(&manifest).await?;
             let previous = self.remember(Some(env!("CARGO_PKG_VERSION"))).await?;
@@ -403,10 +450,16 @@ impl Controller {
             .await??;
             service.reload_after_maintenance()?;
             self.status.lock().unwrap().needs_setup = false;
-            self.phase("idle", "工具环境已准备完成，自检通过");
+            self.phase(
+                "idle",
+                UiMessage::new("system-tool-environment-prepared-validation-passed"),
+            );
         } else {
             self.status.lock().unwrap().prepared = Some(manifest.version);
-            self.phase("ready", "下载和环境自检已完成，可以安装并重启");
+            self.phase(
+                "ready",
+                UiMessage::new("system-download-and-environment-checks-completed-ready-to-install"),
+            );
         }
         Ok(())
     }

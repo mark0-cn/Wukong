@@ -9,9 +9,9 @@ use serde::Serialize;
 use std::{path::PathBuf, sync::Arc};
 use tauri::{Emitter, Manager, State};
 
-type Reply<T> = std::result::Result<T, String>;
-fn failure(error: impl std::fmt::Display) -> String {
-    format!("{error:#}")
+type Reply<T> = std::result::Result<T, crate::i18n::Message>;
+fn failure(error: impl Into<anyhow::Error>) -> crate::i18n::Message {
+    crate::i18n::Message::from_error(error.into())
 }
 #[tauri::command]
 async fn preferences_read() -> Reply<super::preferences::Snapshot> {
@@ -92,7 +92,7 @@ async fn update_cache_directory(
 async fn pick_directory() -> Reply<Option<PathBuf>> {
     tauri::async_runtime::spawn_blocking(|| {
         rfd::FileDialog::new()
-            .set_title("选择保存目录")
+            .set_title(super::preferences::locale().text("dialog-directory"))
             .pick_folder()
     })
     .await
@@ -178,7 +178,9 @@ async fn send_message(
 #[tauri::command]
 async fn pick_target() -> Reply<Option<PathBuf>> {
     tauri::async_runtime::spawn_blocking(|| {
-        rfd::FileDialog::new().set_title("选择分析目标").pick_file()
+        rfd::FileDialog::new()
+            .set_title(super::preferences::locale().text("dialog-target"))
+            .pick_file()
     })
     .await
     .map_err(failure)

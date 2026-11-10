@@ -1,6 +1,6 @@
 import { t, useLocale } from '../i18n';
 import { useState } from 'react';
-import { api, errorText } from '../bridge';
+import { api, errorText, errorValue } from '../bridge';
 import type { WorkbenchRequest } from '../commands';
 import { Modal } from './Modal';
 
@@ -12,11 +12,11 @@ export function Workbench({ epoch, onClose, onChanged }: { epoch: number; onClos
   const [destination, setDestination] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<unknown>();
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const run = async (request: WorkbenchRequest) => {
     setBusy(true); setError('');
     try { setResult(await api('workbench_action', { epoch, request })); onChanged(); }
-    catch (e) { setError(errorText(e)); }
+    catch (e) { setError(errorValue(e)); }
     finally { setBusy(false); }
   };
   return <Modal title={t('updates-pwn-workbench')} description={t('updates-tools-and-challenges-run-separately-each-challenge')} wide onClose={() => { if (!busy) onClose(); }}>
@@ -46,7 +46,7 @@ export function Workbench({ epoch, onClose, onChanged }: { epoch: number; onClos
       <button disabled={!destination} onClick={() => void run({ action: 'export', destination })}>{t('updates-export-offline-migration-package')}</button>
     </fieldset>
     {busy && <p role="status">{t('updates-processing-please-wait-for-completion')}</p>}
-    {error && <p className="error-banner" role="alert">{error}</p>}
+    {error && <p className="error-banner" role="alert">{errorText(error)}</p>}
     {result !== undefined && <details open><summary>{t('updates-operation-result')}</summary><pre className="workbench-result">{JSON.stringify(result, null, 2)}</pre></details>}
   </Modal>;
 }

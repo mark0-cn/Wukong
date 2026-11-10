@@ -195,3 +195,25 @@ workspace-expand-all-operations = Expand all { $count } operations
 workspace-source-operation-count = { $count } source operations
 workspace-verification-count = Successful: { $successes } / { $attempts } attempts
 workspace-welcome-description = Start with a local file. Agents break down the task, run analyses, and return traceable conclusions and evidence.
+transcript-workspace = Workspace
+transcript-error = **Analysis encountered a problem**
+
+    { $body }
+transcript-conclusion = **Task conclusion**
+
+    { $body }
+transcript-stopped = This Agent branch stopped. Existing evidence and results were preserved.
+transcript-paused-reason = Analysis paused: { $reason }
+transcript-resumed = Analysis resumed. Continuing unfinished work.
+transcript-you = You
+transcript-recipient = You → { $name }
+result-matches = Returned { $count } matches
+result-functions = Returned { $count } functions
+result-strings = Returned { $count } strings
+result-findings = Returned { $count } findings
+result-results = Returned { $count } results
+result-completed = Operation completed. Expand to see the raw result.
+result-failed = Operation failed. Expand to see error details.
+result-uncertain = The outcome is uncertain. Reconcile before continuing.
+result-paused = Analysis paused. Operation state is preserved.
+result-interrupted = The task ended without confirming completion of this operation.

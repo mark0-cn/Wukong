@@ -1,7 +1,7 @@
 import { t, useLocale, currentLocale } from '../i18n';
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, FileSearch, ShieldCheck } from 'lucide-react';
-import { api, errorText } from '../bridge';
+import { api, errorText, errorValue } from '../bridge';
 import type { Evidence, EvidenceView, Finding, FindingDetails } from '../types';
 import { Markdown } from './Markdown';
 import { Status } from './Status';
@@ -10,35 +10,35 @@ export function EvidenceReader({ evidence, epoch, run }: { evidence: Evidence; e
   useLocale();
   const [offset, setOffset] = useState(0);
   const [preview, setPreview] = useState<EvidenceView>();
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   useEffect(() => {
     let alive = true;
     setPreview(undefined); setError('');
     void api('evidence_preview', { epoch, run, id: evidence.id, offset }).then(value => { if (alive) setPreview(value); })
-      .catch(error => { if (alive) setError(errorText(error)); });
+      .catch(error => { if (alive) setError(errorValue(error)); });
     return () => { alive = false; };
   }, [epoch, run, evidence.id, offset]);
   return <section className="evidence-reader"><div className="evidence-heading"><strong>{evidence.source}</strong><span>{evidence.media_type} · {evidence.size.toLocaleString(currentLocale())} B</span></div>
     <div className="evidence-paging"><button aria-label={t('workspace-previous-evidence-page')} disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 16_384))}><ChevronLeft size={14} /></button>
       <span>{preview ? `${preview.offset.toLocaleString(currentLocale())}–${preview.end.toLocaleString(currentLocale())} / ${preview.size.toLocaleString(currentLocale())} B${preview.binary ? t('workspace-hexadecimal') : ''}` : t('workspace-loading-evidence')}</span>
       <button aria-label={t('workspace-next-evidence-page')} disabled={!preview || preview.end >= preview.size} onClick={() => { if (preview) setOffset(preview.end); }}><ChevronRight size={14} /></button></div>
-    {error && <p className="error" role="alert">{error}</p>}{preview && <pre>{preview.text || t('workspace-empty-file')}</pre>}
+    {error && <p className="error" role="alert">{errorText(error)}</p>}{preview && <pre>{preview.text || t('workspace-empty-file')}</pre>}
     <div className="evidence-hash">SHA-256 {evidence.sha256}</div>
   </section>;
 }
 function FindingInspector({ epoch, run, finding, onAgent }: { epoch: number; run: string; finding: Finding; onAgent: (id: string) => void }) {
   useLocale();
   const [details, setDetails] = useState<FindingDetails>();
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [evidence, setEvidence] = useState<string>();
   useEffect(() => {
     let alive = true;
     setDetails(undefined); setError(''); setEvidence(undefined);
     void api('finding_details', { epoch, run, id: finding.id }).then(value => { if (alive) setDetails(value); })
-      .catch(error => { if (alive) setError(errorText(error)); });
+      .catch(error => { if (alive) setError(errorValue(error)); });
     return () => { alive = false; };
   }, [epoch, run, finding.id, finding.updated_at]);
-  if (error) return <p className="error" role="alert">{error}</p>;
+  if (error) return <p className="error" role="alert">{errorText(error)}</p>;
   if (!details) return <p className="muted">{t('workspace-loading-finding-and-verification')}</p>;
   const selected = details.evidence.find(value => value.id === evidence);
   return <article className="finding-inspector"><div className="finding-tags"><Status value={finding.stage} />{finding.severity && <span className={`severity severity-${finding.severity}`}>{finding.severity}</span>}</div>

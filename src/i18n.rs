@@ -118,10 +118,23 @@ impl Message {
         }
     }
     pub fn from_error(error: anyhow::Error) -> Self {
-        error
-            .downcast_ref::<Self>()
-            .cloned()
-            .unwrap_or_else(|| Self::new("error-operation").detail(format!("{error:#}")))
+        Self::from_error_ref(&error)
+    }
+    pub fn from_error_ref(error: &anyhow::Error) -> Self {
+        if let Some(message) = error.downcast_ref::<Self>() {
+            let mut message = message.clone();
+            let details = error
+                .chain()
+                .filter(|cause| !cause.is::<Self>())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            if !details.is_empty() {
+                message.detail = Some(details.join(": "));
+            }
+            message
+        } else {
+            Self::new("error-operation").detail(format!("{error:#}"))
+        }
     }
 }
 impl std::fmt::Display for Message {
@@ -130,6 +143,44 @@ impl std::fmt::Display for Message {
     }
 }
 impl std::error::Error for Message {}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum DisplayText {
+    Raw(String),
+    Localized(Message),
+}
+impl DisplayText {
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Raw(value) if value.is_empty())
+    }
+    pub fn render(&self, locale: Locale) -> String {
+        match self {
+            Self::Raw(value) => value.clone(),
+            Self::Localized(message) => message.render(locale),
+        }
+    }
+}
+impl Default for DisplayText {
+    fn default() -> Self {
+        Self::Raw(String::new())
+    }
+}
+impl From<String> for DisplayText {
+    fn from(value: String) -> Self {
+        Self::Raw(value)
+    }
+}
+impl From<&str> for DisplayText {
+    fn from(value: &str) -> Self {
+        Self::Raw(value.into())
+    }
+}
+impl From<Message> for DisplayText {
+    fn from(value: Message) -> Self {
+        Self::Localized(value)
+    }
+}
 
 #[cfg(test)]
 mod tests {

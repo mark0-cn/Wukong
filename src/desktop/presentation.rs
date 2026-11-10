@@ -1,5 +1,9 @@
 //! Public progress and tool outcomes form a readable transcript, independently of UI widgets.
-use crate::{domain::*, queries::AgentSummary};
+use crate::{
+    domain::*,
+    i18n::{DisplayText, Message as UiMessage},
+    queries::AgentSummary,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,7 +14,7 @@ pub struct ToolDisplay {
     pub target: String,
     pub purpose: String,
     pub state: String,
-    pub summary: String,
+    pub summary: DisplayText,
     pub duration_ms: Option<i64>,
     pub evidence_id: Option<String>,
 }
@@ -19,7 +23,7 @@ pub struct ChatMessage {
     pub id: String,
     pub role: &'static str,
     pub agent_id: Option<String>,
-    pub author: String,
+    pub author: DisplayText,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub content: Vec<ChatPart>,
     pub delivery: Option<MessageDelivery>,
@@ -28,7 +32,7 @@ pub struct ChatMessage {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ChatPart {
     Text {
-        text: String,
+        text: DisplayText,
     },
     ToolCall {
         #[serde(rename = "toolCallId")]
@@ -63,19 +67,19 @@ fn text<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
             .filter(|text| !text.trim().is_empty())
     })
 }
-pub fn result_summary(value: &Value) -> String {
+pub fn result_summary(value: &Value) -> DisplayText {
     summary(value, 0)
 }
-fn summary(value: &Value, depth: usize) -> String {
+fn summary(value: &Value, depth: usize) -> DisplayText {
     if depth > 6 {
-        return String::new();
+        return DisplayText::default();
     }
     match value {
         Value::String(text) => serde_json::from_str::<Value>(text)
             .ok()
             .map(|value| summary(&value, depth + 1))
             .filter(|text| !text.is_empty())
-            .unwrap_or_else(|| excerpt(text, 600)),
+            .unwrap_or_else(|| excerpt(text, 600).into()),
         Value::Array(items) => items
             .iter()
             .map(|item| summary(item, depth + 1))
@@ -95,46 +99,33 @@ fn summary(value: &Value, depth: usize) -> String {
                     "description",
                 ],
             ) {
-                return excerpt(text, 600);
+                return excerpt(text, 600).into();
             }
-            let facts = [
-                ("format", "格式"),
-                ("architecture", "架构"),
-                ("arch", "架构"),
-                ("status", "状态"),
-                ("exit_code", "退出码"),
-            ]
-            .into_iter()
-            .filter_map(|(key, label)| {
-                map.get(key)
-                    .filter(|v| v.is_string() || v.is_number())
-                    .map(|value| {
-                        format!(
-                            "{label}：{}",
-                            value
-                                .as_str()
-                                .map(str::to_owned)
-                                .unwrap_or_else(|| value.to_string())
-                        )
-                    })
-            })
-            .collect::<Vec<_>>();
+            // These are technical result fields, not translated raw evidence.
+            let facts = ["format", "architecture", "arch", "status", "exit_code"]
+                .into_iter()
+                .filter_map(|key| {
+                    map.get(key)
+                        .filter(|v| v.is_string() || v.is_number())
+                        .map(|value| {
+                            format!(
+                                "{key}: {}",
+                                value
+                                    .as_str()
+                                    .map(str::to_owned)
+                                    .unwrap_or_else(|| value.to_string())
+                            )
+                        })
+                })
+                .collect::<Vec<_>>();
             if !facts.is_empty() {
-                return facts.join(" · ");
+                return facts.join(" · ").into();
             }
             for key in ["matches", "functions", "strings", "findings", "results"] {
                 if let Some(Value::Array(items)) = map.get(key) {
-                    return format!(
-                        "返回 {} 项{}",
-                        items.len(),
-                        match key {
-                            "matches" => "匹配",
-                            "functions" => "函数",
-                            "strings" => "字符串",
-                            "findings" => "发现",
-                            _ => "结果",
-                        }
-                    );
+                    return UiMessage::new(format!("result-{key}"))
+                        .arg("count", items.len())
+                        .into();
                 }
             }
             for key in ["result", "content", "output", "value", "data"] {
@@ -145,9 +136,9 @@ fn summary(value: &Value, depth: usize) -> String {
                     }
                 }
             }
-            String::new()
+            DisplayText::default()
         }
-        _ => String::new(),
+        _ => DisplayText::default(),
     }
 }
 pub fn tool_display(call: &ToolCallRecord, agent: Option<&AgentSummary>) -> ToolDisplay {
@@ -201,16 +192,11 @@ pub fn tool_display(call: &ToolCallRecord, agent: Option<&AgentSummary>) -> Tool
         .as_ref()
         .map(result_summary)
         .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| {
-            match state {
-                "completed" => "操作已完成，可展开查看原始结果。",
-                "failed" => "操作执行失败，可展开查看错误详情。",
-                "uncertain" => "执行结果尚未确认，需要核对后再继续。",
-                "paused" => "分析已暂停，保留当前操作状态。",
-                "interrupted" => "所属任务已结束，本次操作未确认完成。",
-                _ => "",
+        .unwrap_or_else(|| match state {
+            "completed" | "failed" | "uncertain" | "paused" | "interrupted" => {
+                UiMessage::new(format!("result-{state}")).into()
             }
-            .into()
+            _ => DisplayText::default(),
         });
     ToolDisplay {
         call_id: call.id.clone(),
@@ -245,8 +231,10 @@ pub fn transcript(
             .agent_id
             .as_deref()
             .and_then(|id| agents.get(id))
-            .map_or("工作区", |agent| agent.name.as_str())
-            .to_owned();
+            .map_or_else(
+                || UiMessage::new("transcript-workspace").into(),
+                |agent| agent.name.clone().into(),
+            );
         let mut message = ChatMessage {
             id: format!("event-{}", event.seq),
             role: "assistant",
@@ -280,26 +268,31 @@ pub fn transcript(
             let content = match event.kind.as_str() {
                 "model.text" => text(&event.data, &["text"])
                     .filter(|text| !text.starts_with("requested tools:"))
-                    .map(str::to_owned),
+                    .map(|value| DisplayText::from(value.to_owned())),
                 "agent.error" => text(&event.data, &["message", "error"])
-                    .map(|text| format!("**分析遇到问题**\n\n{text}")),
+                    .map(|text| UiMessage::new("transcript-error").arg("body", text).into()),
                 "agent.status"
                     if matches!(event.data["status"].as_str(), Some("failed" | "crashed")) =>
                 {
-                    text(&event.data, &["error"]).map(|text| format!("**分析遇到问题**\n\n{text}"))
+                    text(&event.data, &["error"])
+                        .map(|text| UiMessage::new("transcript-error").arg("body", text).into())
                 }
-                "agent.completed" => {
-                    text(&event.data, &["summary"]).map(|text| format!("**任务结论**\n\n{text}"))
-                }
-                "agents.stopped" => Some("此 Agent 分支已停止，已有证据和分析结果已保留。".into()),
+                "agent.completed" => text(&event.data, &["summary"]).map(|text| {
+                    UiMessage::new("transcript-conclusion")
+                        .arg("body", text)
+                        .into()
+                }),
+                "agents.stopped" => Some(UiMessage::new("transcript-stopped").into()),
                 "run.budget_paused" => Some(match event.data["reason"].as_str() {
                     Some("operator paused from desktop" | "operator paused assessment") => {
-                        "分析已暂停，进度已保存。".into()
+                        UiMessage::new("system-analysis-paused-progress-is-saved").into()
                     }
-                    Some(reason) => format!("分析已暂停：{reason}"),
-                    None => "分析已暂停，进度已保存。".into(),
+                    Some(reason) => UiMessage::new("transcript-paused-reason")
+                        .arg("reason", reason)
+                        .into(),
+                    None => UiMessage::new("system-analysis-paused-progress-is-saved").into(),
                 }),
-                "run.resumed" => Some("已恢复分析，继续处理未完成的工作。".into()),
+                "run.resumed" => Some(UiMessage::new("transcript-resumed").into()),
                 _ => None,
             };
             let Some(content) = content else {
@@ -314,12 +307,17 @@ pub fn transcript(
             id: format!("operator-{}", mail.id),
             role: "user",
             agent_id: Some(mail.recipient.clone()),
-            author: agents
-                .get(mail.recipient.as_str())
-                .map_or_else(|| "你".into(), |agent| format!("你 → {}", agent.name)),
+            author: agents.get(mail.recipient.as_str()).map_or_else(
+                || UiMessage::new("transcript-you").into(),
+                |agent| {
+                    UiMessage::new("transcript-recipient")
+                        .arg("name", agent.name.clone())
+                        .into()
+                },
+            ),
             created_at: mail.created_at,
             content: vec![ChatPart::Text {
-                text: mail.content.clone(),
+                text: mail.content.clone().into(),
             }],
             delivery: Some(mail.envelope.delivery),
         });
@@ -386,6 +384,11 @@ mod tests {
         assert_eq!(args["display"]["state"], "failed");
         call.state = CallState::Completed;
         call.result = Some(json!({"matches":[1,2,3]}));
-        assert_eq!(tool_display(&call, None).summary, "返回 3 项匹配");
+        assert_eq!(
+            tool_display(&call, None)
+                .summary
+                .render(crate::i18n::Locale::ZhCn),
+            "返回 3 项匹配"
+        );
     }
 }

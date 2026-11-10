@@ -1,5 +1,6 @@
 //! Relocatable bulk cache; recovery journals and process locks stay at a stable address.
 use super::{maintenance, manifest::Manifest, recovery};
+use crate::i18n::Message as UiMessage;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -16,7 +17,10 @@ pub fn cache_root() -> Result<PathBuf> {
     let settings = control.join("cache-location.json");
     if settings.exists() {
         let location: Location = crate::workbench::read_json(&settings)?;
-        ensure!(location.directory.is_absolute(), "缓存目录必须是绝对路径");
+        ensure!(
+            location.directory.is_absolute(),
+            UiMessage::new("system-the-cache-directory-must-be-an-absolute-path")
+        );
         Ok(location.directory)
     } else {
         Ok(control)
@@ -32,9 +36,12 @@ pub fn cache_lock(exclusive: bool) -> Result<fs::File> {
         .write(true)
         .open(root.join("cache.lock"))?;
     if exclusive {
-        file.try_lock().context("更新下载或恢复正在使用缓存")?;
+        file.try_lock().context(UiMessage::new(
+            "system-an-update-download-or-recovery-is-using-the",
+        ))?;
     } else {
-        file.try_lock_shared().context("缓存位置正在切换")?;
+        file.try_lock_shared()
+            .context(UiMessage::new("system-the-cache-location-is-changing"))?;
     }
     Ok(file)
 }
@@ -44,9 +51,12 @@ pub fn set_cache(destination: &Path) -> Result<PathBuf> {
     let _maintenance = maintenance::lock(&recovery::root()?, true)?;
     ensure!(
         recovery::pending()?.is_none(),
-        "先完成待处理更新或恢复，再修改缓存目录"
+        UiMessage::new("system-finish-the-pending-update-or-recovery-before-changing")
     );
-    ensure!(destination.is_absolute(), "请选择绝对路径");
+    ensure!(
+        destination.is_absolute(),
+        UiMessage::new("system-choose-an-absolute-path")
+    );
     fs::create_dir_all(destination)?;
     let destination = fs::canonicalize(destination)?;
     let source = cache_root()?;
@@ -57,17 +67,17 @@ pub fn set_cache(destination: &Path) -> Result<PathBuf> {
     }
     ensure!(
         !source.starts_with(&destination) && !destination.starts_with(&source),
-        "新旧缓存目录不能相互包含"
+        UiMessage::new("system-the-old-and-new-cache-directories-cannot-contain")
     );
     if let Some(program) = recovery::executable()?.parent() {
         ensure!(
             !destination.starts_with(fs::canonicalize(program)?),
-            "缓存目录不能位于程序安装目录内"
+            UiMessage::new("system-the-cache-cannot-be-inside-the-installation-directory")
         );
     }
     ensure!(
         fs::read_dir(&destination)?.next().is_none(),
-        "请选择一个空目录；不会覆盖已有文件"
+        UiMessage::new("system-choose-an-empty-directory-existing-files-will-not")
     );
     let staging = tempfile::tempdir_in(&destination)?;
     let releases = source.join("releases");
@@ -93,7 +103,7 @@ fn copy_releases(source: &Path, destination: &Path) -> Result<()> {
         let entry = entry?;
         ensure!(
             entry.file_type()?.is_dir() && !entry.file_type()?.is_symlink(),
-            "缓存包含非版本目录"
+            UiMessage::new("system-the-cache-contains-an-unrecognized-version-directory")
         );
         let version = entry.file_name().to_string_lossy().to_string();
         semver::Version::parse(&version)?;
@@ -101,7 +111,10 @@ fn copy_releases(source: &Path, destination: &Path) -> Result<()> {
         let bytes = fs::read(path.join("latest.json"))?;
         let signature = fs::read_to_string(path.join("latest.json.sig"))?;
         let manifest = Manifest::parse(&bytes, &signature)?;
-        ensure!(manifest.version == version, "缓存版本身份不一致");
+        ensure!(
+            manifest.version == version,
+            UiMessage::new("system-cache-version-identity-mismatch")
+        );
         let output = destination.join(&version);
         fs::create_dir_all(&output)?;
         for file in ["latest.json", "latest.json.sig"] {
@@ -111,11 +124,14 @@ fn copy_releases(source: &Path, destination: &Path) -> Result<()> {
         let filename = artifact.url.rsplit('/').next().unwrap();
         let payload = path.join(filename);
         if payload.exists() {
-            ensure!(!payload.is_symlink(), "缓存文件不能是符号链接");
+            ensure!(
+                !payload.is_symlink(),
+                UiMessage::new("system-cache-files-cannot-be-symbolic-links")
+            );
             super::manifest::verify_file(&payload, artifact)?;
             ensure!(
                 fs2::available_space(&output)? > artifact.size + 64 * 1024 * 1024,
-                "新缓存目录空间不足"
+                UiMessage::new("system-insufficient-space-in-the-new-cache-directory")
             );
             fs::copy(payload, output.join(filename))?;
             super::manifest::verify_file(&output.join(filename), artifact)?;

@@ -1,4 +1,4 @@
-import { t } from './i18n';
+import { t, message, type LocalizedMessage } from './i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type EventCallback } from '@tauri-apps/api/event';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -12,4 +12,6 @@ export const openLink = (url: string) => {
   if (/^https?:\/\//i.test(url)) return openUrl(url);
   return Promise.reject(new Error(t('workspace-only-http-and-https-links-can-be')));
 };
-export const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+export const errorValue = (error: unknown): string | LocalizedMessage => error && typeof error === 'object' && 'code' in error && 'args' in error
+  ? error as LocalizedMessage : error instanceof Error ? error.message : String(error ?? '');
+export const errorText = (error: unknown) => message(errorValue(error));
