@@ -24,3 +24,23 @@
 该工具**不提取进程当前过滤器**，也不从有限探测推出完整 allowlist。必须另外
 证明过滤器来源、安装时机、线程与叠加过滤器，原生重放所需 syscall。USER_NOTIF、
 TRACE 等返回还依赖外部参与者，不能解释成 syscall 最终成功。
+
+## libc_identify
+
+保留单泄漏 `leaked`/`symbol` 调用；增加同进程 `leaks`、同任务 `candidates` 和
+可选 `target`。省略 candidates 时仍只检查 worker 自身的常见 libc 路径。
+
+```json
+{"target":"targets/TARGET_HASH/sample.bin","candidates":["files/libc-a.so","files/libc-b.so"],"leaks":[{"address":139706696499200,"symbol":"puts","addend":0},{"address":139706696548352,"symbol":"read","addend":0}]}
+```
+
+示例地址只是 schema 示意，实际地址必须来自同一进程的原始观察。addend 表示
+已识别的符号内偏移，基址由 `address - symbol_offset - addend` 推导。
+
+最多 16 个候选、16 个泄漏，每文件 32 MiB、候选总计 64 MiB。使用 pyelftools
+静态解析 ELF，不加载 DSO。结果保存哈希、Build ID、架构、位宽、字节序及每个
+泄漏的推导，检查可选目标 ABI，并保留多个匹配。不支持用 IFUNC 符号入口偏移
+解释已解析的实现地址。同内容候选按哈希去重。
+
+`matched` 保持 false；`candidate_match` 仅表示在该集合中满足约束。单一候选、
+对齐基址和无匹配都不能确定真实映射，仍须通过实际文件/进程身份证据确认。
