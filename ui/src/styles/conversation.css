@@ -6,18 +6,18 @@
   flex-direction:column;
 }
 .transcript {
-  flex:1;
-  min-height:0;
-  overflow:auto;
-  overflow-anchor:none;
-  padding:0 26px;
-  position:relative;
+  flex: 1 1 0%;
+  min-height: 0px;
+  overflow: auto;
+  overflow-anchor: none;
+  position: relative;
+  padding: 0px 28px;
 }
 .transcript-inner {
-  max-width:800px;
-  margin:0 auto;
-  padding:26px 0 22px;
-  min-height:100%;
+  margin: 0px auto;
+  padding: 24px 0px 22px;
+  min-height: 100%;
+  max-width: 880px;
 }
 .virtual-message {
   padding-bottom:28px;
@@ -27,10 +27,10 @@
   min-width:0;
 }
 .message-heading {
-  display:flex;
-  align-items:center;
-  gap:9px;
-  margin-bottom:12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 10px;
 }
 .avatar {
   width:27px;
@@ -72,14 +72,14 @@
   margin-left:1px;
 }
 .message-content {
-  padding-left:36px;
-  min-width:0;
+  min-width: 0px;
+  padding-left: 0px;
 }
 .message-user .message-content>.markdown {
-  background:var(--hover);
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:9px 15px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 15px;
+  background: var(--surface);
 }
 .delivery {
   font-size:12px;
@@ -194,9 +194,9 @@
   line-height:1.7;
 }
 .tool-group {
-  border-left:1px solid var(--border);
-  padding-left:13px;
-  margin:15px 0 4px;
+  margin: 18px 0px 4px;
+  padding-left: 0px;
+  border: 0px;
 }
 .tool-group-heading {
   display:flex;
@@ -223,20 +223,22 @@
   color:var(--text);
 }
 .tool-step {
-  margin:0 0 5px;
-  border-radius:5px;
-  overflow:hidden;
+  margin: 0px 0px 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 7px;
 }
 .tool-trigger {
-  width:100%;
-  display:flex;
-  gap:8px;
-  background:transparent;
-  border:0;
-  text-align:left;
-  padding:6px 0;
-  border-radius:4px;
-  min-height:30px;
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  background: transparent;
+  border: 0px;
+  text-align: left;
+  border-radius: 4px;
+  min-height: 30px;
+  padding: 9px 11px;
 }
 .tool-trigger:hover:not(:disabled) {
   background:var(--hover);
@@ -263,9 +265,9 @@
   overflow:hidden;
 }
 .tool-label strong {
-  font-weight:500;
-  font-size:12px;
-  white-space:nowrap;
+  font-weight: 500;
+  white-space: nowrap;
+  font-size: 13px;
 }
 .tool-target {
   font-size:12px;
@@ -284,26 +286,26 @@
   flex-shrink:0;
 }
 .tool-purpose {
-  color:var(--muted);
-  font-size:12px;
-  margin:0 0 3px 22px;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0px 12px 3px 33px;
 }
 .tool-summary {
-  color:var(--muted);
-  font-size:12px;
-  line-height:1.7;
-  margin:0 0 7px 22px;
-  white-space:pre-wrap;
-  overflow-wrap:anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0px 12px 10px 33px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .tool-details {
-  background:var(--field);
-  border:1px solid var(--border);
-  margin:5px 0 12px 21px;
-  border-radius:6px;
-  padding:12px;
-  max-height:450px;
-  overflow:auto;
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 450px;
+  overflow: auto;
+  margin: 0px 10px 10px;
+  border: 1px solid var(--border);
+  background: var(--field);
 }
 .tool-details pre {
   font-size: 13px;
@@ -384,44 +386,45 @@
   text-overflow:ellipsis;
 }
 .composer-wrap {
-  padding:12px 26px 10px;
-  flex-shrink:0;
+  flex-shrink: 0;
+  padding: 12px 28px 10px;
 }
 .composer {
-  max-width:800px;
-  margin:0 auto;
-  border:1px solid var(--border-strong);
-  background:var(--hover);
-  border-radius:11px;
-  box-shadow:0 2px 7px var(--shadow);
-  overflow:hidden;
+  margin: 0px auto;
+  border-radius: 11px;
+  overflow: hidden;
+  max-width: 880px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: none;
 }
 .composer:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent-border);
 }
 .composer textarea {
-  display:block;
-  background:none;
-  border:0;
-  outline:none;
-  box-shadow:none;
-  width:100%;
-  resize:none;
-  padding:14px 15px 4px;
-  min-height:75px;
-  max-height:180px;
+  display: block;
+  background: none;
+  border: 0px;
+  outline: none;
+  box-shadow: none;
+  width: 100%;
+  resize: none;
+  padding: 12px 15px 4px;
+  max-height: 180px;
   font-size: 14px;
-  border-radius:0;
+  border-radius: 0px;
+  min-height: 68px;
 }
 .composer textarea:focus-visible {
   outline:none;
 }
 .composer-controls {
-  display:flex;
-  gap:10px;
-  align-items:center;
-  padding:8px 11px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 11px;
+  flex-wrap: wrap;
 }
 .composer-target {
   display:flex;
@@ -463,14 +466,14 @@
   background: var(--accent-hover);
 }
 .composer-hint {
-  max-width:800px;
-  margin:7px auto 0;
-  font-size:12px;
-  line-height:1.6;
-  display:flex;
-  justify-content:space-between;
-  gap:8px;
-  color:var(--muted);
+  margin: 7px auto 0px;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  max-width: 880px;
+  line-height: 1.5;
 }
 .composer-hint>span {
   white-space:nowrap;
