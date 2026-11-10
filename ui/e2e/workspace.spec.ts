@@ -105,3 +105,45 @@ test('loads scoped evidence pages and preserves settings drafts', async ({ page 
   await expect(page.getByRole('button', { name: '下载并验证更新', exact: true })).toBeEnabled();
   await page.screenshot({ path: join(tmpdir(), 'wukong-update-center.png'), fullPage: true });
 });
+
+test('focus mode restores side panels without losing the current draft', async ({ page }) => {
+  await page.goto('/');
+  const composer = page.getByLabel('发送给 Agent 的消息');
+  await composer.fill('保留专注模式前的草稿');
+  await page.getByRole('button', { name: '专注模式', exact: true }).click();
+  await expect(page.locator('.sidebar')).toHaveCount(0);
+  await expect(page.locator('.agents-panel')).toHaveCount(0);
+  await expect(composer).toHaveValue('保留专注模式前的草稿');
+  await page.getByRole('button', { name: '专注模式', exact: true }).click();
+  await expect(page.locator('.sidebar')).toBeVisible();
+  await expect(page.locator('.agents-panel')).toBeVisible();
+  await expect(composer).toHaveValue('保留专注模式前的草稿');
+  await page.getByRole('button', { name: '收起协作任务', exact: true }).click();
+  await page.getByRole('button', { name: '专注模式', exact: true }).click();
+  await page.getByRole('button', { name: '专注模式', exact: true }).click();
+  await expect(page.locator('.agents-panel')).toHaveCount(0);
+});
+
+test('keyboard resizing persists and minimum desktop size keeps controls reachable', async ({ page }) => {
+  await page.goto('/');
+  const width = () => page.locator('.sidebar').evaluate(el => el.getBoundingClientRect().width);
+  const initial = await width();
+  await page.getByRole('separator', { name: '调整任务列表宽度' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(width).toBeGreaterThan(initial + 5);
+  const resized = await width();
+  await page.reload();
+  await expect.poll(width).toBeCloseTo(resized, 0);
+  await page.setViewportSize({ width: 860, height: 600 });
+  await expect(page.locator('.agents-panel')).toHaveCount(0);
+  await expect(page.getByLabel('发送消息', { exact: true })).toBeInViewport();
+  await expect(page.getByRole('button', { name: '更新与环境', exact: true })).toBeInViewport();
+  await page.getByRole('button', { name: '发现与证据', exact: false }).click();
+  await page.getByRole('button', { name: 'reproduction.txt', exact: true }).click();
+  await expect(page.getByText('first evidence page: controlled reproduction')).toBeVisible();
+  await page.getByLabel('下一页证据').scrollIntoViewIfNeeded();
+  await expect(page.getByLabel('下一页证据')).toBeInViewport();
+  await page.getByLabel('下一页证据').click();
+  await expect(page.getByText('second evidence page: end of output')).toBeVisible();
+  await page.screenshot({ path: join(tmpdir(), 'wukong-workspace-narrow.png'), fullPage: true });
+});

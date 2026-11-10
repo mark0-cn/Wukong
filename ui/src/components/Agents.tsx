@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Bot, ChevronDown, ChevronRight, GitBranch, LayoutList } from 'lucide-react';
+import { Bot, ChevronDown, ChevronRight, GitBranch, LayoutList, PanelRightClose } from 'lucide-react';
 import type { Agent } from '../types';
 import { compact, labels, Status, terminal } from './Status';
 
-export function Agents({ agents, selected, onSelect, onStop, canStop }: {
+export function Agents({ agents, selected, onSelect, onStop, canStop, onClose }: {
   agents: Agent[]; selected?: string; onSelect: (id?: string) => void;
-  onStop: (agent: Agent) => void; canStop: boolean;
+  onStop: (agent: Agent) => void; canStop: boolean; onClose: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const ordered = useMemo(() => {
@@ -29,7 +29,7 @@ export function Agents({ agents, selected, onSelect, onStop, canStop }: {
     return rows;
   }, [agents, collapsed]);
   const current = agents.find(agent => agent.id === selected);
-  return <aside className="agents-panel"><div className="panel-heading"><GitBranch size={14} /><strong>协作任务</strong><span>{agents.length}</span></div>
+  return <aside className="agents-panel"><div className="panel-heading"><GitBranch size={14} /><strong>协作任务</strong><span>{agents.length}</span><button className="icon-button" aria-label="收起协作任务" onClick={onClose}><PanelRightClose size={16} /></button></div>
     <button className={`agent-all ${!selected ? 'selected' : ''}`} onClick={() => onSelect()}><LayoutList size={15} />全部进展</button>
     <div className="agent-list">{ordered.map(({ agent, depth, hasChildren }) => <div className="agent-row" key={agent.id} style={{ paddingLeft: Math.min(depth, 6) * 12 }}>
       <button className="agent-chevron" aria-label={collapsed.has(agent.id) ? `展开 ${agent.name}` : `折叠 ${agent.name}`} disabled={!hasChildren}
