@@ -4,8 +4,8 @@ use anyhow::{Context, Result, ensure};
 use std::path::Path;
 
 pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(&str)) -> Result<()> {
-    let root = crate::desktop::paths::home()?
-        .join("updates/probes")
+    let root = super::storage::cache_root()?
+        .join("probes")
         .join(uuid::Uuid::new_v4().to_string());
     let mut probe = config.clone();
     probe.workbench.root = root.clone();

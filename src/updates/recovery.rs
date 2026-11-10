@@ -23,7 +23,7 @@ pub fn root() -> Result<PathBuf> {
 pub fn cache(version: &str) -> Result<PathBuf> {
     semver::Version::parse(version)?;
     ensure!(!version.contains(['/', '\\']), "invalid version path");
-    Ok(root()?.join("releases").join(version))
+    Ok(super::storage::cache_root()?.join("releases").join(version))
 }
 pub fn cached(version: &str) -> Result<Manifest> {
     let path = cache(version)?;
@@ -79,6 +79,7 @@ pub fn pending() -> Result<Option<Journal>> {
     }
 }
 pub fn confirm() -> Result<bool> {
+    let _cache = super::storage::cache_lock(false)?;
     let Some(journal) = pending()? else {
         return Ok(false);
     };
@@ -94,6 +95,7 @@ pub fn confirm() -> Result<bool> {
     Ok(true)
 }
 pub fn recover() -> Result<()> {
+    let _cache = super::storage::cache_lock(false)?;
     let _lock = maintenance::lock(&root()?, true)?;
     let journal = pending()?
         .or_else(|| read_json::<Journal>(&root().ok()?.join("previous.json")).ok())

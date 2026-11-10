@@ -96,7 +96,7 @@ export default function App() {
     workspace.selectRun(id); workspace.refresh(); setResume(undefined); setTab('conversation');
   };
   return <div className="app-shell">
-    {updates && host && <Updates epoch={host.epoch} onClose={() => setUpdates(false)} onChanged={workspace.refresh} />}
+    {updates && host && <Updates epoch={host.epoch} onClose={() => setUpdates(false)} onChanged={workspace.reset} />}
     {workbench && host && <Workbench epoch={host.epoch} onClose={() => setWorkbench(false)} onChanged={workspace.refresh} />}
     <Sidebar runs={data?.runs ?? []} selected={data?.selected} host={host} onSelect={id => { workspace.selectRun(id); setTab('conversation'); }}
       onNew={() => setNewTask(true)} onSettings={() => setSettings(true)} />

@@ -59,6 +59,27 @@ impl Default for Controller {
     }
 }
 impl Controller {
+    pub async fn relocate_cache(
+        &self,
+        destination: PathBuf,
+        epoch: u64,
+        service: Arc<Service>,
+    ) -> Result<PathBuf> {
+        let _serial = self.operation.try_lock().context("更新操作正在进行")?;
+        let (_config, _path, _operation) = service.maintenance_context(epoch)?;
+        self.phase("storage", "正在验证并复制更新缓存");
+        let result =
+            tokio::task::spawn_blocking(move || crate::updates::storage::set_cache(&destination))
+                .await?;
+        match &result {
+            Ok(_) => self.phase(
+                "idle",
+                "更新缓存位置已保存；原目录文件保留，可以确认后手动清理",
+            ),
+            Err(error) => self.phase("error", &format!("缓存切换失败：{error:#}")),
+        }
+        result
+    }
     fn phase(&self, phase: &str, message: &str) {
         let mut state = self.status.lock().unwrap();
         state.phase = phase.into();
@@ -161,6 +182,7 @@ impl Controller {
             return Ok(self.status());
         }
         let _serial = self.operation.try_lock().context("更新操作正在进行")?;
+        let _cache = crate::updates::storage::cache_lock(false)?;
         let result = self.perform(action, epoch, service, app).await;
         if let Err(error) = &result {
             self.phase("error", &format!("{error:#}"));
@@ -219,7 +241,7 @@ impl Controller {
                 .map(|v| recovery::cached(v).map(|m| m.image))
                 .collect::<Result<_>>()?;
             let docker = crate::workbench::Docker::new(&config.runtime.docker_executable);
-            let directory = recovery::root()?.join("releases");
+            let directory = crate::updates::storage::cache_root()?.join("releases");
             if directory.exists() {
                 for entry in std::fs::read_dir(&directory)? {
                     let entry = entry?;

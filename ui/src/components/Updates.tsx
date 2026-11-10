@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { api, errorText } from '../bridge';
 import { Modal } from './Modal';
+import { StorageLocations } from './StorageLocations';
 
 export type UpdateStatus = {
   version: string; phase: string; message: string; available: string | null; notes: string;
@@ -12,6 +13,7 @@ export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose:
   const [status, setStatus] = useState<UpdateStatus>();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
+  const [storage, setStorage] = useState(false);
   const [confirm, setConfirm] = useState<'install' | 'recover' | 'clean_cache' | 'clean_images'>();
   useEffect(() => {
     let alive = true;
@@ -35,6 +37,7 @@ export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose:
     {working && <p className="muted">正在处理，请保持应用打开。镜像下载可在失败后重试，已下载的层会被复用。</p>}
     {(error || status?.phase === 'error') && <p className="error-banner" role="alert">{error || status?.message}</p>}
     {status?.notes && <details><summary>版本说明</summary><p>{status.notes}</p></details>}
+    <details onToggle={event => setStorage(event.currentTarget.open)}><summary>配置存储目录</summary>{storage && <StorageLocations epoch={epoch} disabled={working || Boolean(status?.pending)} onChanged={onChanged} />}</details>
     {status?.pending && <p className="error-banner">上一次更新尚未确认。完成恢复前不会启动新的分析任务。</p>}
     <fieldset disabled={working} className="workbench-controls"><legend>版本与环境</legend><div className="header-actions">
       <button onClick={() => void run('check')}>检查更新</button>
