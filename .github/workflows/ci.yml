@@ -127,8 +127,11 @@ jobs:
           python -m compileall -q workers/runtime scripts
           python -m unittest discover -s tests/automation -p 'test_*.py' -v
           python workers/tests/run.py unit -p 'test_*.py' -v
-          python fixtures/analysis/test_analysis.py
-          python fixtures/analysis/test_compare_runs.py
+          python -m evals.tests.test_analysis
+          python -m evals.tests.test_compare_runs
+          python -m evals.analysis.evaluate --build-dir "$RUNNER_TEMP/analysis-fixtures"
+          sh fixtures/build.sh "$RUNNER_TEMP/vulnerability-fixtures"
+          python -m evals.vulnerability.evaluate --build-dir "$RUNNER_TEMP/vulnerability-fixtures" --repetitions 1
 
   windows-client:
     needs: changes

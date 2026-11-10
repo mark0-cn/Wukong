@@ -15,13 +15,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
     & python -m compileall -q workers/runtime 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Worker module syntax check failed.' }
-    & python -m py_compile fixtures/evaluate.py fixtures/score_reports.py fixtures/analysis/evaluate.py fixtures/analysis/score.py 2>&1
+    & python -m py_compile evals/vulnerability/evaluate.py evals/vulnerability/score_reports.py evals/analysis/evaluate.py evals/analysis/score.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed.' }
     & python workers/tests/run.py unit -p test_bridge.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Worker integration tests failed.' }
-    & python fixtures/analysis/test_analysis.py 2>&1
+    & python -m evals.tests.test_analysis 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'General analysis scoring tests failed.' }
-    & python fixtures/analysis/test_compare_runs.py 2>&1
+    & python -m evals.tests.test_compare_runs 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Agent experiment scoring tests failed.' }
     & python workers/tests/run.py unit -p test_profile.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Runtime identity tests failed.' }

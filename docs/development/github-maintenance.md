@@ -54,7 +54,7 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
 
 PR 使用 `scripts/ci/ci_scope.py` 选择检查：仅 README/docs Markdown 改动执行轻量检查；
-`ui/` 增加前端检查；`workers/runtime/`、`fixtures/analysis/` 增加 Linux 测试。
+`ui/` 增加前端检查；`workers/runtime/`、`workers/tests/`、`fixtures/`、`evals/` 增加 Linux 测试。
 Rust、公共脚本、锁文件、工作流、未知路径或版本准备 PR 都执行全量检查。
 重命名同时检查旧路径和新路径；计算范围失败直接阻止 CI 通过。
 Windows 版本一致性、发布脚本和安装器测试始终运行。`master`、手动运行和发布调用始终全量。

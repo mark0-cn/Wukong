@@ -37,7 +37,8 @@ class ScopeTests(unittest.TestCase):
                                 (["ui/src/App.tsx"], (False, True, False)),
                                 (["workers/runtime/requirements.txt"], (False, False, True)),
                                 (["workers/tests/unit/test_profile.py"], (False, False, True)),
-                                (["fixtures/analysis/test_analysis.py", "ui/package.json"], (False, True, True))]:
+                                (["evals/analysis/score.py", "fixtures/src/benign.c"], (False, False, True)),
+                                (["evals/tests/test_analysis.py", "ui/package.json"], (False, True, True))]:
             with self.subTest(paths=paths):
                 scope = select_scope(paths, "pull_request")
                 self.assertEqual(tuple(scope[name] for name in ("rust", "frontend", "linux")), expected)

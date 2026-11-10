@@ -1,6 +1,6 @@
 import copy
 import unittest
-from compare_runs import compare
+from evals.analysis.compare_runs import compare
 
 class ExperimentTests(unittest.TestCase):
     def fixture(self):

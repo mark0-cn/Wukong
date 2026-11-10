@@ -6,8 +6,8 @@
 `analysis/tasks.json` 定义用户问题与逐题评分项，不以漏洞发现或 flag 为完成条件。
 
 ```sh
-python3 fixtures/analysis/evaluate.py --build-dir /tmp/re-agent-analysis-fixtures
-python3 fixtures/analysis/test_analysis.py
+python3 -m evals.analysis.evaluate --build-dir /tmp/re-agent-analysis-fixtures
+python3 -m evals.tests.test_analysis
 ```
 
 行为 harness 使用 C11 编译器构建四个可信程序，并检查有效/无效记录、整数边界和
@@ -27,7 +27,7 @@ python3 fixtures/analysis/test_analysis.py
 ```
 
 ```sh
-python3 fixtures/analysis/score.py --build-dir /tmp/re-agent-analysis-fixtures \
+python3 -m evals.analysis.score --build-dir /tmp/re-agent-analysis-fixtures \
   --reports reports/analysis-index.json --adjudications reports/analysis-reviewed.json \
   --output reports/analysis-metrics.json
 ```
@@ -45,7 +45,7 @@ python3 fixtures/analysis/score.py --build-dir /tmp/re-agent-analysis-fixtures \
 
 ```sh
 sh fixtures/build.sh
-python3 fixtures/evaluate.py --repetitions 3
+python3 -m evals.vulnerability.evaluate --repetitions 3
 ```
 
 `CC`、`STRIP` 可指定编译器工具。构建需要 C 编译器、binutils 与 Python 3；产物写入 `fixtures/build/`。漏洞版本关闭栈保护与 PIE，使越界回归不依赖具体保护器诊断，保留 NX；正常程序启用 PIE、栈保护与完整 RELRO。`overflow.bin` 是 256 个 `A`，只用于观察本地崩溃。
@@ -65,7 +65,7 @@ python3 fixtures/evaluate.py --repetitions 3
 ```
 
 ```sh
-python3 fixtures/score_reports.py --reports reports/index.json \
+python3 -m evals.vulnerability.score_reports --reports reports/index.json \
   --adjudications reports/reviewed.json --output reports/metrics.json
 ```
 

@@ -14,7 +14,7 @@ import shlex
 import subprocess
 import sys
 
-ROOT = Path(__file__).resolve().parent
+from evals.paths import ANALYSIS as ROOT
 
 
 def sha256(path):
@@ -49,9 +49,9 @@ def main():
         ("session", "session.c", []),
     ]:
         target = build / (name + (".exe" if os.name == "nt" else ""))
-        command = compiler + ["-std=c11", "-O0", "-g", "-Wall", "-Wextra", "-Werror"] + extra + [str(ROOT / source), "-o", str(target)]
+        command = compiler + ["-std=c11", "-O0", "-g", "-Wall", "-Wextra", "-Werror"] + extra + [str(ROOT / "src" / source), "-o", str(target)]
         subprocess.run(command, check=True, capture_output=True, timeout=30)
-        targets[name] = {"path": str(target), "sha256": sha256(target), "source_sha256": sha256(ROOT / source), "command": command}
+        targets[name] = {"path": str(target), "sha256": sha256(target), "source_sha256": sha256(ROOT / "src" / source), "command": command}
 
     observations = []
     def observe(binary, label, argv, expected_code, expected_stdout, stdin=None, input_hex=None):

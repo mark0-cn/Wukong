@@ -213,9 +213,11 @@ re_agent/
 ├── prompts/                # 角色、能力、方法与示例提示词
 ├── workers/                # Python 执行 worker 与 Ghidra 桥接
 ├── templates/              # 报告模板
-├── tests/                  # Rust 集成测试
-├── fixtures/               # 可信回归样本与评测脚本
-├── scripts/                # 检查、worker 启动与 Windows 发布脚本
+├── tests/                  # Rust 集成测试、自动化测试与真实环境验收
+├── fixtures/               # 可信回归样本、任务与人工真值
+├── evals/                  # 行为评测、评分器与评测测试
+├── scripts/                # CI、发布、工具链和开发脚本
+├── packaging/              # 随在线包分发的安装与回滚脚本
 ├── docs/                   # 使用、架构与验收文档
 └── re-agent.example.toml    # 配置示例
 ```
