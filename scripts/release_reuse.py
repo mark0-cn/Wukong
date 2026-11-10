@@ -39,7 +39,13 @@ def discover(repository, sha, current_run, request=api):
     result = dict(ci_run="", windows_run="", linux_run="")
     runs = request(f"repos/{repository}/actions/runs?head_sha={sha}&per_page=100")["workflow_runs"]
     for run in runs:
-        if str(run["id"]) == str(current_run) or not trusted_run(run, repository, sha):
+        if str(run["id"]) == str(current_run):
+            if run.get("run_attempt", 1) <= 1:
+                continue
+            # Re-run all jobs can retain clients from the immediately previous
+            # completed attempt. Never consume output from this running attempt.
+            run = request(f"repos/{repository}/actions/runs/{run['id']}/attempts/{run['run_attempt'] - 1}")
+        if not trusted_run(run, repository, sha):
             continue
         endpoint = f"repos/{repository}/actions/runs/{run['id']}"
         data = request(endpoint + f"/attempts/{run['run_attempt']}/jobs?per_page=100")
