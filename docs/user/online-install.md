@@ -29,7 +29,7 @@ chmod +x Wukong_*.AppImage
 - 工具镜像 `hlmark0/wukong` 公开，可以匿名拉取；遇到 Docker Hub 限流可自行登录自己的账号。
 - 每个版本清单绑定固定镜像 digest，不因 Docker `latest` 变化而改变运行环境。
 - 为 Docker 镜像及临时层至少预留 25 GiB。客户端会检查下载目录空间；Docker Desktop 虚拟磁盘容量仍需在其设置中检查。
-- 新桌面安装的数据位于 Windows `%LOCALAPPDATA%/Wukong` 或 Linux `$XDG_DATA_HOME/Wukong`，Linux 默认 `~/.local/share/Wukong`。
+- 新桌面安装的数据位于 Windows `%LOCALAPPDATA%/WukongData` 或 Linux `$XDG_DATA_HOME/Wukong`，Linux 默认 `~/.local/share/Wukong`。
 - 显式 `--config` 和已有便携配置继续优先；配置、数据库与题目文件不随安装器替换。
 - 未准备好工具环境时，可以查看历史和编辑配置；需要 worker 的任务不能运行。
 
@@ -52,7 +52,7 @@ chmod +x Wukong_*.AppImage
 
 更新前会保存独立恢复程序：
 
-- Windows：`%LOCALAPPDATA%/Wukong/updates/Wukong-Recovery.exe`
+- Windows：`%LOCALAPPDATA%/WukongData/updates/Wukong-Recovery.exe`
 - Linux：`~/.local/share/Wukong/updates/Wukong-Recovery.AppImage`（遵循 XDG_DATA_HOME）
 
 在应用中点击“恢复上一版本”，或在无法打开应用时先关闭 Wukong，再运行该文件。恢复需要 Docker 可用，但不需要重新联网下载安装文件。恢复失败会保留记录供重试；镜像回滚不撤销题目数据变化。
