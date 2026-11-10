@@ -40,19 +40,22 @@ App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发
 cargo package-local
 ```
 
-入口使用独立的轻量 Rust launcher 调用现有 Python 发布工具，依次执行 `npm ci`、前端构建、Windows x64 MSVC Release 编译及在线 ZIP 打包。不会创建 tag、推送镜像或发布 GitHub Release。
+入口使用独立的轻量 Rust launcher 调用现有 Python 发布工具：读取项目版本，下载对应 GitHub Release 的镜像元数据，再依次执行 `npm ci`、前端构建、Windows x64 MSVC Release 编译及在线 ZIP 打包。不会创建 tag、推送镜像或发布 GitHub Release。
 
-前提是 Windows x64，已安装项目固定版本的 Rust、MSVC C++ 编译工具、Node.js/npm 和 Python 3.11+。源码必须已提交且工作区干净。先从**当前源码提交**对应发布运行的 `image-validation` artifact 中取出 `image.json`，放到 `target/release-validation/image.json`。镜像应已经在 Docker Hub 可拉取；该命令不构建或上传镜像，也不把旧镜像冒充为当前提交的产物。
+前提是 Windows x64，已安装项目固定版本的 Rust、MSVC C++ 编译工具、Node.js/npm 和 Python 3.11+。源码必须已提交且工作区干净。默认从 `mark0-cn/Wukong` 的 `v<项目版本>` Release 下载 `release.json` 和 `SHA256SUMS`，校验后在内存中转换为镜像元数据，无需手动准备 `image.json`。只使用精确版本，不回退到 `latest`，也不依赖 Actions artifact 或 GitHub API；公开附件无需登录。可用 `--repository OWNER/REPO` 指定自己的公开发布仓库。
+
+Release 必须已经发布，清单中的版本、平台、运行协议、数据格式及源码 commit 必须匹配。**仅版本号相同但本地 HEAD 已前进也会拒绝打包**；这条命令用于重打已发布源码的在线包，不能把旧版本镜像绑定到新源码。首次发布仍通过现有 Release 流程构建和验收镜像。镜像由安装器按 digest 拉取，本地打包不会下载镜像本体。
 
 默认输出到新目录 `target/local-package/`，包含 `wukong-v<版本>-windows-amd64.zip`、`release.json` 和 `SHA256SUMS`。已有输出目录会拒绝覆盖，可以指定其他目录。参数路径均相对仓库根目录：
 
 ```powershell
 cargo package-local --image-metadata target/validation/image.json --output target/packages/local-1
+cargo package-local --repository your-account/Wukong
 cargo package-local --check
 cargo package-local --help
 ```
 
-`--check` 仅检查平台、版本、工作区、镜像元数据和工具入口，不进行编译或联网验收；不能替代镜像验收。缺少元数据、镜像与源码提交不一致或构建失败时立即停止。打包过程复用已验证的元数据快照，并在编译后再次检查源码状态。实际的镜像可拉取性由原验收及安装时的 digest 拉取验证。
+`--check` 会下载并验证对应 Release 的小型元数据，同时检查平台、版本、工作区和工具入口，不编译、不写安装包、不运行镜像验收。显式传入 `--image-metadata` 则使用本地文件并跳过下载；该文件仍须匹配源码提交。Release 未发布、附件缺失、校验失败、镜像与源码提交不一致或构建失败时立即停止，不自动切换版本。打包过程复用已验证的元数据快照，并在编译后再次检查源码状态。实际的镜像可拉取性由原验收及安装时的 digest 拉取验证。
 
 独立 launcher 的检查命令为 `cargo fmt --manifest-path xtask/Cargo.toml -- --check` 和 `cargo clippy --locked --manifest-path xtask/Cargo.toml --target-dir target/xtask -- -D warnings`。
 

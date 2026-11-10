@@ -80,6 +80,25 @@ class LocalPackageTests(unittest.TestCase):
         self.runner.assert_not_called()
         self.assertFalse(self.output.exists())
 
+    def test_default_downloads_matching_release_without_local_metadata(self):
+        self.metadata.unlink()
+        with patch.object(local_package, "release_image", return_value=self.image) as fetch:
+            local_package.build(None, self.output)
+        fetch.assert_called_once_with("1.2.3", self.revision, "mark0-cn/Wukong")
+        self.assertTrue((self.output / "wukong-v1.2.3-windows-amd64.zip").is_file())
+
+    def test_release_download_failure_stops_before_compiling(self):
+        with patch.object(local_package, "release_image", side_effect=ValueError("Release asset not found")):
+            with self.assertRaisesRegex(ValueError, "Release asset not found"):
+                local_package.build(None, self.output)
+        self.runner.assert_not_called()
+        self.assertFalse(self.output.exists())
+
+    def test_explicit_metadata_does_not_access_release(self):
+        with patch.object(local_package, "release_image") as fetch:
+            local_package.build(self.metadata, self.output, check_only=True)
+        fetch.assert_not_called()
+
     def test_failed_frontend_stops_compilation_and_packaging(self):
         self.runner.side_effect = [None, subprocess.CalledProcessError(7, "npm")]
         with self.assertRaises(subprocess.CalledProcessError):
