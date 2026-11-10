@@ -1,6 +1,7 @@
 //! Built-in prompt metadata. Names, discovery, bodies and example references
 //! are maintained together; only selected bodies are installed in a prompt.
 use crate::domain::Role;
+pub(crate) mod coverage;
 
 pub(crate) const BASE: &str = include_str!("../prompts/base.md");
 pub(crate) const EXAMPLES_DIR: &str = "prompts/examples";
