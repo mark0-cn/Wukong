@@ -245,3 +245,4 @@ TCP verification. The job supervisor retains lifecycle/cancellation ownership;
 network replay never executes a model-provided program inside the privileged
 supervisor. See [Pwn tool contracts](../../docs/reference/pwn-tools.md).
 `worker_launch_spec` owns shared LaunchSpec parsing and artifact checks; local launch and network replay retain their own execution policy and explicit resource budgets.
+`worker_network` coordinates each trial; plan validation and capture state, bounded TCP transport, and transcript persistence live in worker_network_plan, worker_network_transport, and worker_network_evidence respectively.
