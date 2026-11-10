@@ -57,7 +57,7 @@ def main():
         print("PASS: volume round trip preserves data and discards process/auth authority")
         flags=["--cap-drop","ALL"]
         for cap in ["CHOWN","SETUID","SETGID","SYS_PTRACE","DAC_OVERRIDE"]:flags.extend(["--cap-add",cap])
-        output=docker("run","--rm","--network","none","--read-only","--tmpfs","/tmp:rw,size=1g,exec",*flags,"--security-opt","no-new-privileges","--security-opt","seccomp=unconfined","--entrypoint","python3",args.image,"-m","unittest","discover","-s","/opt/re-agent/runtime","-p","test_workbench*.py","-v")
+        output=docker("run","--rm","--network","none","--read-only","--tmpfs","/tmp:rw,size=1g,exec",*flags,"--security-opt","no-new-privileges","--security-opt","seccomp=unconfined","--entrypoint","python3",args.image,"/opt/re-agent/tests/run.py","unit","-p","test_workbench*.py","-v")
         print("PASS: shared launch runtime and archive functional tests")
     finally:
         for name in reversed(containers):

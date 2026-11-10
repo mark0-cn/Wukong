@@ -90,5 +90,6 @@ COPY workers/runtime/requirements.txt /tmp/re-agent-runtime-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --break-system-packages -i "$PIP_INDEX_URL" -r /tmp/re-agent-runtime-requirements.txt
 COPY workers/runtime /opt/re-agent/runtime
+COPY workers/tests /opt/re-agent/tests
 COPY workers/ghidra /opt/re-agent/ghidra
 COPY workers/deps/gef.py /opt/gef.py

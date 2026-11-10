@@ -2,7 +2,7 @@
 """Live Ghidra worker acceptance test. Read-only headless analysis of a compiled fixture.
 
 Run inside a worker image that has Ghidra installed (workers/Dockerfile):
-  python3 /opt/re-agent/runtime/ghidra_test.py --state /state/ghidra-acceptance
+  python3 /opt/re-agent/tests/run.py ghidra --state /state/ghidra-acceptance
 
 The fixture is compiled locally with gcc and Ghidra only imports/analyses it;
 the target program is never executed.
@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from integration_test import Client
+from support.client import Client
 
 FIXTURE = r'''
 #include <stdio.h>

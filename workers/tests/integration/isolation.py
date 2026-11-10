@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import time
-from integration_test import Client
+from support.client import Client
 
 
 def main():

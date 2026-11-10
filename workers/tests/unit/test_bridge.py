@@ -8,7 +8,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
-from integration_test import Client
+from support.client import Client
 
 
 class SessionLaunchTests(unittest.TestCase):

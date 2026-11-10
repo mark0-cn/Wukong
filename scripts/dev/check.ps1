@@ -17,25 +17,25 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Worker module syntax check failed.' }
     & python -m py_compile fixtures/evaluate.py fixtures/score_reports.py fixtures/analysis/evaluate.py fixtures/analysis/score.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Python syntax check failed.' }
-    & python workers/runtime/test_bridge.py 2>&1
+    & python workers/tests/run.py unit -p test_bridge.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Worker integration tests failed.' }
     & python fixtures/analysis/test_analysis.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'General analysis scoring tests failed.' }
     & python fixtures/analysis/test_compare_runs.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Agent experiment scoring tests failed.' }
-    & python workers/runtime/test_profile.py 2>&1
+    & python workers/tests/run.py unit -p test_profile.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Runtime identity tests failed.' }
-    & python workers/runtime/test_mitigations.py 2>&1
+    & python workers/tests/run.py unit -p test_mitigations.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Mitigation observation tests failed.' }
-    & python workers/runtime/test_crash_observations.py 2>&1
+    & python workers/tests/run.py unit -p test_crash_observations.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Crash observation tests failed.' }
-    & python workers/runtime/test_differential.py 2>&1
+    & python workers/tests/run.py unit -p test_differential.py 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Differential harness tests failed.' }
     if ($DockerContainer) {
         $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
         $dockerExe = if ($dockerCommand) { $dockerCommand.Source } else { Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe' }
         $testState = '/state/acceptance-' + [Guid]::NewGuid().ToString('N')
-        & $dockerExe exec $DockerContainer python3 /opt/re-agent/runtime/integration_test.py --state $testState --fuzz 2>&1
+        & $dockerExe exec $DockerContainer python3 /opt/re-agent/tests/run.py integration --state $testState --fuzz 2>&1
         if ($LASTEXITCODE -ne 0) { throw 'Linux worker acceptance failed.' }
     }
     if ($Release) {

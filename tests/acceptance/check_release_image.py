@@ -57,7 +57,7 @@ def main():
             assert doctor["passed"], "Tool doctor failed"
             checks["doctor"] = True
             tool = f"re-agent-{workspace_id}-tools"
-            output = docker("exec", "--user", "10001:10001", tool, "python3", "-m", "unittest", "discover", "-s", "/opt/re-agent/runtime", "-p", "test_workbench*.py", "-v")
+            output = docker("exec", "--user", "10001:10001", tool, "python3", "/opt/re-agent/tests/run.py", "unit", "-p", "test_workbench*.py", "-v")
             (args.output / "worker-tests.txt").write_text(output, encoding="utf-8")
             checks["launch_and_archive"] = True
             fixture = root / "fixture"

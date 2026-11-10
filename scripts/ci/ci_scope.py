@@ -17,7 +17,7 @@ def select_scope(paths, event_name, head_branch=""):
             continue
         if path.startswith("ui/"):
             result["frontend"] = True
-        elif path.startswith(("workers/runtime/", "fixtures/analysis/")):
+        elif path.startswith(("workers/runtime/", "workers/tests/", "fixtures/analysis/")):
             result["linux"] = True
         else:
             # Workflow, build, protocol, installer and unknown changes run everything.

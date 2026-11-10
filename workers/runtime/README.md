@@ -166,24 +166,24 @@ imports; the transport supports up to 300 seconds.
 Portable trusted fixture process tests:
 
 ```powershell
-python -m unittest discover -s workers/runtime -p test_bridge.py -v
+python workers/tests/run.py unit -p test_bridge.py -v
 cargo test --test runtime_jobs
 ```
 
 Actual Linux GDB, replay, independent verification and minimization:
 
 ```powershell
-& $docker exec re-agent-worker python3 /opt/re-agent/runtime/integration_test.py --state /state/acceptance --fuzz
+& $docker exec re-agent-worker python3 /opt/re-agent/tests/run.py integration --state /state/acceptance --fuzz
 ```
 
 Actual Ghidra headless import, analysis, functions/decompile/xrefs queries, cache
 identity and hash-mismatch rejection:
 
 ```powershell
-& $docker exec re-agent-worker python3 /opt/re-agent/runtime/ghidra_test.py --state /state/ghidra-acceptance
+& $docker exec re-agent-worker python3 /opt/re-agent/tests/run.py ghidra --state /state/ghidra-acceptance
 ```
 
-`ghidra_test.py` compiles its own small C fixture, imports it through the
+The `ghidra` test suite compiles its own small C fixture, imports it through the
 read-only Ghidra worker adapter, resolves `main` and a helper function,
 decompiles `main` (the C code must contain the `memcpy` data flow), checks the
 caller xref, proves that identical repeat queries hit the identity-bound cache
