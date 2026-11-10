@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import urllib.error
 import urllib.request
+from ci_scope import checks_passed
 
 
 def cell(value):
@@ -51,7 +52,7 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         if context.get("event") == "push":
             passed = passed and needs.get("publish", {}).get("result") == "success"
     else:
-        passed = all(needs.get(n, {}).get("result") == "success" for n in ("windows", "linux"))
+        passed = checks_passed(needs) if "changes" in needs else all(needs.get(n, {}).get("result") == "success" for n in ("windows", "linux"))
     state = "通过 / Passed" if passed and not failed else "未完成或失败 / Incomplete or failed"
     run_url = context["run_url"]
     lines = [f"## {kind.upper()} — {state}", "", f"- Ref: {cell(context['ref'])}",
@@ -60,6 +61,11 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
     for name, value in needs.items():
         lines.append(f"| {cell(name)} | {cell(value['result'])} | {duration(name, jobs)} |")
     lines += ["", "耗时来自本次尝试的 GitHub job 记录，不含排队；组合任务显示起止跨度。缺失时显示 —。", ""]
+    if kind == "ci" and "changes" in needs:
+        scope = needs["changes"].get("outputs", {})
+        lines += ["### 检查范围", "", cell(scope.get("reason", "范围计算失败")), "",
+                  "Windows 版本及安装器检查始终执行；未选择的重型检查按规则跳过。",
+                  *[f"- {name}: {cell(scope.get(name, 'unknown'))}" for name in ("rust", "frontend", "linux")], ""]
     if kind == "release":
         manifest = read(directory / "release/release.json")
         validation = read(directory / "validation/validation-summary.json") or read(directory / "release/validation-summary.json")
