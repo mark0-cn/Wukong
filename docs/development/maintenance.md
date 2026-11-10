@@ -14,6 +14,8 @@ worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录
 
 ## 桌面界面样式
 
+界面、原生消息和报告的双语资源及验收要求见[多语言维护](localization.md)。用户语言偏好不得通过工作区配置保存流程修改。
+
 `ui/src/styles.css` 只按固定顺序导入 `styles/` 中的基础、工作区、聊天、Agent、证据、设置、响应式及维护界面样式；移动规则时保持层叠顺序。
 前端使用现有的 Radix、assistant-ui 和 Lucide 组件。颜色统一定义在 `ui/src/theme.css`，组件样式引用语义变量；不要在组件中重新散布颜色值。
 `ui/src/workspace-layout.css` 只放分栏容器和拖动分隔条；组件的尺寸、间距、边框直接归入 `styles/` 对应文件，响应式规则统一放在 `styles/responsive.css`，不叠加一层旧布局覆盖。分栏使用 `react-resizable-panels`，与 shadcn/ui 的分栏采用同一基础组件，保留键盘调整和宽度记忆。
@@ -23,7 +25,7 @@ worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录
 
 ## 工具文档
 
-工具定义、参数 schema、角色权限、模型可见性和中文显示标题来自同一注册表。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供标题。Markdown 工具清单也从注册表生成：
+工具定义、参数 schema、角色权限、模型可见性和显示消息 ID 来自同一注册表；双语文案来自共享 Fluent 资源。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供消息 ID 并补齐双语标题。Markdown 工具清单也从注册表生成：
 
 ```sh
 cargo run -- tool-catalog > docs/reference/tool-catalog.md
