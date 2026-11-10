@@ -20,12 +20,12 @@
 
 | 任务 | 优先阅读 |
 | --- | --- |
-| 架构、模块职责与状态管理 | [架构](docs/architecture.md)、[维护约定](docs/maintenance.md) |
-| Agent、Skill、任务协议与证据 | [实现契约](docs/implementation-contract.md)、[报告格式](docs/report-format.md) |
-| 工具注册与调用 | [工具目录](docs/tool-catalog.md)、[维护约定中的工具文档生成](docs/maintenance.md#工具文档) |
+| 架构、模块职责与状态管理 | [架构](docs/design/architecture.md)、[维护约定](docs/development/maintenance.md) |
+| Agent、Skill、任务协议与证据 | [实现契约](docs/design/implementation-contract.md)、[报告格式](docs/reference/report-format.md) |
+| 工具注册与调用 | [工具目录](docs/reference/tool-catalog.md)、[维护约定中的工具文档生成](docs/development/maintenance.md#工具文档) |
 | worker、调试与隔离执行 | [worker 说明](workers/runtime/README.md) |
-| Pwn 环境、题目容器与启动配置 | [Pwn 工作环境](docs/pwn-workbench.md) |
-| 安装、CI、版本及发布 | [在线安装](docs/online-install.md)、[发布流程](docs/releases.md)、[GitHub 维护](docs/github-maintenance.md) |
+| Pwn 环境、题目容器与启动配置 | [Pwn 工作环境](docs/user/pwn-workbench.md) |
+| 安装、CI、版本及发布 | [在线安装](docs/user/online-install.md)、[发布流程](docs/development/releases.md)、[GitHub 维护](docs/development/github-maintenance.md) |
 
 - 按模块职责放置实现；新增功能不要把业务逻辑重新集中到装配入口或桥接入口。
 - 文档与实现不一致时，核对代码、测试及需求，修正受影响文档；历史验证记录不能代替当前验证。

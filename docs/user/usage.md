@@ -1,8 +1,8 @@
 # 使用指南
 
-[返回项目首页](../README.md)
+[返回项目首页](../../README.md)
 
-本文补充桌面工作区、模型配置、任务恢复与协作约定。首次构建和初始化见 [快速开始](../README.md#快速开始)。
+本文补充桌面工作区、模型配置、任务恢复与协作约定。首次构建和初始化见 [快速开始](../../README.md#快速开始)。
 
 ## 目录
 
@@ -52,7 +52,7 @@ API key 内容不写入 TOML。Windows 下优先读取进程环境变量；缺�
 
 ### Windows 发布与启动
 
-若构建目录带有 Low 完整性标签，EXE 会继承该标签，启动后可能无法访问 Docker Desktop 的命名管道。可使用 [发布脚本](../scripts/publish-gui.ps1) 将程序复制到工作区之外的普通应用目录，并生成指向所选配置文件的快捷方式。
+若构建目录带有 Low 完整性标签，EXE 会继承该标签，启动后可能无法访问 Docker Desktop 的命名管道。可使用 [发布脚本](../../scripts/publish-gui.ps1) 将程序复制到工作区之外的普通应用目录，并生成指向所选配置文件的快捷方式。
 
 在仓库根目录运行，以下示例使用快速开始生成的 release 程序与根目录配置：
 
@@ -64,7 +64,7 @@ API key 内容不写入 TOML。Windows 下优先读取进程环境变量；缺�
 
 ## 配置与模型
 
-完整字段见 [re-agent.example.toml](../re-agent.example.toml)。相对文件路径按配置文件所在目录解析。
+完整字段见 [re-agent.example.toml](../../re-agent.example.toml)。相对文件路径按配置文件所在目录解析。
 
 ### 配置查找顺序
 
@@ -113,7 +113,7 @@ verifier = { model = "your-verifier-model", max_tokens = 16384 }
 
 ### 执行后端
 
-执行工具默认关闭。Docker、SSH / VM 部署见 [执行 worker](../workers/runtime/README.md)，本地 Ghidra 配置见 [Ghidra 后端](../workers/ghidra/README.md)。`doctor` 会报告实际可用能力；模型服务与外部引擎是否可用取决于实际环境。
+执行工具默认关闭。Docker、SSH / VM 部署见 [执行 worker](../../workers/runtime/README.md)，本地 Ghidra 配置见 [Ghidra 后端](../../workers/ghidra/README.md)。`doctor` 会报告实际可用能力；模型服务与外部引擎是否可用取决于实际环境。
 
 `trusted_local` 直接在所在机器运行进程，仅适用于明确选择的可信测试样本。日常动态分析使用隔离 worker。
 
@@ -161,7 +161,7 @@ Token 预算按 provider 返回的用量累计。缺少必要用量时，系统�
 
 已经发出的并行请求仍可能使观测用量超过阈值；取消或重发的请求也可能产生 provider 未回报的费用。配置的 USD 单价用于估算，并非账单保证。
 
-使用费用预算前，在 `[pricing]` 中配置实际的每百万 Token 输入与输出价格。默认零价格关闭 USD 计价；`max_usd` 需要相应价格配置。完整预算字段见 [配置示例](../re-agent.example.toml)。
+使用费用预算前，在 `[pricing]` 中配置实际的每百万 Token 输入与输出价格。默认零价格关闭 USD 计价；`max_usd` 需要相应价格配置。完整预算字段见 [配置示例](../../re-agent.example.toml)。
 
 ## Agent 角色与能力
 
@@ -194,7 +194,7 @@ Token 预算按 provider 返回的用量累计。缺少必要用量时，系统�
 
 ### 自定义提示词
 
-提示词集中于 [`prompts/`](../prompts/)，公共规则位于 `base.md`：
+提示词集中于 [`prompts/`](../../prompts)，公共规则位于 `base.md`：
 
 | 目录 | 内容 |
 | --- | --- |
@@ -204,7 +204,7 @@ Token 预算按 provider 返回的用量累计。缺少必要用量时，系统�
 | `support/` | 工具与恢复指导 |
 | `examples/` | 分析示例 |
 
-[`src/prompts.rs`](../src/prompts.rs) 统一注册内置名称、用途、正文和示例引用；模型仅获取能力目录与已选择的正文。目录分类不改变 skill 调用名。
+[`src/prompts.rs`](../../src/prompts.rs) 统一注册内置名称、用途、正文和示例引用；模型仅获取能力目录与已选择的正文。目录分类不改变 skill 调用名。
 
 可通过 `skills_dir/<name>.md` 覆盖内置正文或提供自定义方法，通过 `demos_dir/<name>.md` 提供示例。默认示例目录为 `prompts/examples`，目录缺失时跳过示例。内置正文嵌入程序，不依赖运行时读取仓库文件。
 
@@ -215,11 +215,11 @@ re-agent report RUN_ID --output ./reports/assessment-01
 re-agent verify-bundle ./reports/assessment-01
 ```
 
-导出目录必须是新目录。报告包包含目标快照、原始证据、配置与复现元数据、JSON、Markdown、HTML 及 SHA256 清单。导出不执行目标；`verify-bundle` 校验文件与映射的完整性。文件清单和复现方法见 [报告格式](report-format.md)。
+导出目录必须是新目录。报告包包含目标快照、原始证据、配置与复现元数据、JSON、Markdown、HTML 及 SHA256 清单。导出不执行目标；`verify-bundle` 校验文件与映射的完整性。文件清单和复现方法见 [报告格式](../reference/report-format.md)。
 
 独立复核必须由不同 Agent 执行，并关联实际 worker 结果。静态可疑特征或单纯崩溃不会自动升级为已验证影响。
 
-[`fixtures/`](../fixtures/README.md) 提供本地评测构建与行为回归定义，区分样本真值、执行观察和 Agent 检测结论；行为回归通过不代表 Agent 分析质量已经通过评测。
+[`fixtures/`](../../fixtures/README.md) 提供本地评测构建与行为回归定义，区分样本真值、执行观察和 Agent 检测结论；行为回归通过不代表 Agent 分析质量已经通过评测。
 
 ### 自定义 Skill 元数据
 
@@ -233,7 +233,7 @@ re-agent verify-bundle ./reports/assessment-01
 
 ### Pwn 方法：堆分析
 
-`heap_ptmalloc` 已加入内置能力目录。它按实际 allocator 身份、ABI 和版本解释分配／释放时间线，要求 chunk 快照、原语证据、反例和未知项。版本表只是上游检查点，不能替代发行版补丁或运行时观察。来源见 `docs/pwn-knowledge.md`。
+`heap_ptmalloc` 已加入内置能力目录。它按实际 allocator 身份、ABI 和版本解释分配／释放时间线，要求 chunk 快照、原语证据、反例和未知项。版本表只是上游检查点，不能替代发行版补丁或运行时观察。来源见 `docs/reference/pwn-knowledge.md`。
 
 ### 固定 pwn 运行环境
 

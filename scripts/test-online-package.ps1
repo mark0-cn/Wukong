@@ -3,7 +3,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('re-agent-package-test-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temporary | Out-Null
 foreach ($name in @('install-workbench.ps1','rollback-workbench.ps1')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $temporary }
-Copy-Item -LiteralPath (Join-Path $root 'docs/online-install.md') -Destination (Join-Path $temporary 'README.md')
+Copy-Item -LiteralPath (Join-Path $root 'docs/user/online-install.md') -Destination (Join-Path $temporary 'README.md')
 Set-Content -LiteralPath (Join-Path $temporary 're-agent.exe') -Value 'checksum fixture; never executed'
 $files = @{}
 foreach ($name in @('install-workbench.ps1','rollback-workbench.ps1','README.md','re-agent.exe')) { $files[$name] = (Get-FileHash -LiteralPath (Join-Path $temporary $name) -Algorithm SHA256).Hash.ToLowerInvariant() }

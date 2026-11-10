@@ -18,7 +18,7 @@
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
-  <a href="docs/usage.md">使用指南</a> ·
+  <a href="docs/user/usage.md">使用指南</a> ·
   <a href="#文档">文档导航</a> ·
   <a href="https://github.com/mark0-cn/re_agent/issues">反馈问题</a>
 </p>
@@ -119,7 +119,7 @@ $env:OPENAI_API_KEY = "your-provider-key"
 export OPENAI_API_KEY="your-provider-key"
 ```
 
-支持 `openai`（Chat Completions）、`openai_responses`、`anthropic` 和 `ollama`。凭据通过环境变量读取，不写入配置或检查点；本地 Ollama 可使用无凭据配置。角色模型与配置查找规则见 [使用指南](docs/usage.md#配置与模型)。
+支持 `openai`（Chat Completions）、`openai_responses`、`anthropic` 和 `ollama`。凭据通过环境变量读取，不写入配置或检查点；本地 Ollama 可使用无凭据配置。角色模型与配置查找规则见 [使用指南](docs/user/usage.md#配置与模型)。
 
 ### 4. 检查环境并开始分析
 
@@ -143,7 +143,7 @@ re-agent gui
 - 暂停、调整预算后恢复、停止分支，以及导出报告与证据包。
 - 在“工作区设置”中编辑模型、预算与后端，或切换到 TOML 源码编辑完整配置。
 
-详细操作与 Windows 发布说明见 [桌面工作区指南](docs/usage.md#桌面工作区)。
+详细操作与 Windows 发布说明见 [桌面工作区指南](docs/user/usage.md#桌面工作区)。
 
 ### 命令行
 
@@ -164,7 +164,7 @@ re-agent report RUN_ID --output ./reports/analysis-02
 re-agent verify-bundle ./reports/analysis-02
 ```
 
-`RUN_ID` 为任务 ID。完整选项可通过 `re-agent --help` 或 `re-agent <command> --help` 查看；消息、分支停止与恢复约定见 [任务管理指南](docs/usage.md#任务管理与恢复)。
+`RUN_ID` 为任务 ID。完整选项可通过 `re-agent --help` 或 `re-agent <command> --help` 查看；消息、分支停止与恢复约定见 [任务管理指南](docs/user/usage.md#任务管理与恢复)。
 
 ## 配置执行环境
 
@@ -191,16 +191,18 @@ remote_state_dir = "/state"
 
 ## 文档
 
+完整分类见 [文档索引](docs/README.md)。
+
 | 文档 | 内容 |
 | --- | --- |
-| [使用指南](docs/usage.md) | 桌面操作、模型配置、任务恢复、预算与 Agent 协作 |
+| [使用指南](docs/user/usage.md) | 桌面操作、模型配置、任务恢复、预算与 Agent 协作 |
 | [配置示例](re-agent.example.toml) | 模型、角色、预算、worker 与工具配置 |
-| [工具目录](docs/tool-catalog.md) | 从工具注册表生成的完整工具与参数说明 |
-| [实现架构](docs/architecture.md) | 模块边界、执行循环、状态与协作语义 |
-| [架构方案](docs/strix-rig-binary-agent-plan.md) / [实现契约](docs/implementation-contract.md) | 需求基线与验收约定 |
-| [报告格式](docs/report-format.md) | 报告包结构、证据、完整性校验与复现 |
-| [维护约定](docs/maintenance.md) | 开发检查、工具文档生成与性能基准 |
-| [评测夹具](fixtures/README.md) / [验收记录](docs/validation/README.md) | 本地行为回归、独立复核与已有验证证据 |
+| [工具目录](docs/reference/tool-catalog.md) | 从工具注册表生成的完整工具与参数说明 |
+| [实现架构](docs/design/architecture.md) | 模块边界、执行循环、状态与协作语义 |
+| [架构方案](docs/history/strix-rig-binary-agent-plan.md) / [实现契约](docs/design/implementation-contract.md) | 需求基线与验收约定 |
+| [报告格式](docs/reference/report-format.md) | 报告包结构、证据、完整性校验与复现 |
+| [维护约定](docs/development/maintenance.md) | 开发检查、工具文档生成与性能基准 |
+| [评测夹具](fixtures/README.md) / [验收记录](docs/history/validation/2026-11-06/README.md) | 本地行为回归、独立复核与已有验证证据 |
 
 ## 项目结构
 
@@ -240,7 +242,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 ```
 
-worker 测试、环境依赖和性能检查见 [维护约定](docs/maintenance.md)；评测时应区分样本行为回归与 Agent 分析质量，独立复核须关联实际证据。
+worker 测试、环境依赖和性能检查见 [维护约定](docs/development/maintenance.md)；评测时应区分样本行为回归与 Agent 分析质量，独立复核须关联实际证据。
 
 ## 致谢
 
@@ -253,8 +255,8 @@ worker 测试、环境依赖和性能检查见 [维护约定](docs/maintenance.m
 
 ## Pwn 工作环境
 
-发行版通过 GitHub Release 提供 Windows 在线安装包，安装器从私有 Docker Hub 仓库拉取固定 digest 的工具镜像。见 [在线安装与升级](docs/online-install.md) 和 [CI/tag 发布流程](docs/releases.md)。
+发行版通过 GitHub Release 提供 Windows 在线安装包，安装器从私有 Docker Hub 仓库拉取固定 digest 的工具镜像。见 [在线安装与升级](docs/user/online-install.md) 和 [CI/tag 发布流程](docs/development/releases.md)。
 
-依赖更新、上游工具版本检查、不可变 Release 与运行摘要见 [GitHub 维护功能](docs/github-maintenance.md)。
+依赖更新、上游工具版本检查、不可变 Release 与运行摘要见 [GitHub 维护功能](docs/development/github-maintenance.md)。
 
-工具 Docker 与题目 Docker 由宿主机统一管理，每题独立网络。使用 `env up/doctor`、`challenge import/prepare/build/up` 和离线迁移命令；桌面右上角也有“Pwn 环境”入口。详见 [Pwn 工作环境](docs/pwn-workbench.md)。
+工具 Docker 与题目 Docker 由宿主机统一管理，每题独立网络。使用 `env up/doctor`、`challenge import/prepare/build/up` 和离线迁移命令；桌面右上角也有“Pwn 环境”入口。详见 [Pwn 工作环境](docs/user/pwn-workbench.md)。

@@ -16,7 +16,7 @@ worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录
 工具定义、参数 schema 和 Markdown 工具清单来自同一注册表：
 
 ```sh
-cargo run -- tool-catalog > docs/tool-catalog.md
+cargo run -- tool-catalog > docs/reference/tool-catalog.md
 cargo run -- --json tool-catalog
 cargo test --test tool_catalog
 ```

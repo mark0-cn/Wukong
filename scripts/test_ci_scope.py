@@ -28,12 +28,12 @@ class ScopeTests(unittest.TestCase):
 
     def test_master_manual_and_release_always_run_full_checks(self):
         for event in ("push", "workflow_dispatch", "workflow_call"):
-            scope = select_scope(["docs/releases.md"], event)
+            scope = select_scope(["docs/development/releases.md"], event)
             self.assertTrue(all(scope[name] for name in ("rust", "frontend", "linux")))
         self.assertTrue(select_scope(["ui/package.json"], "pull_request", "codex/release-v0.2.0")["rust"])
 
     def test_known_paths_select_only_relevant_expensive_checks(self):
-        for paths, expected in [(["README.md", "docs/releases.md"], (False, False, False)),
+        for paths, expected in [(["README.md", "docs/development/releases.md"], (False, False, False)),
                                 (["ui/src/App.tsx"], (False, True, False)),
                                 (["workers/runtime/requirements.txt"], (False, False, True)),
                                 (["fixtures/analysis/test_analysis.py", "ui/package.json"], (False, True, True))]:

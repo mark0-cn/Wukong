@@ -6,7 +6,7 @@ use std::process::Command;
 fn generated_catalog_matches_the_executable_registry() {
     assert_eq!(
         re_agent::tools::builtin_catalog_markdown(),
-        include_str!("../docs/tool-catalog.md")
+        include_str!("../docs/reference/tool-catalog.md")
     );
 }
 

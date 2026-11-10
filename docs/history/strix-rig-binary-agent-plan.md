@@ -1,7 +1,7 @@
 # 基于 Strix 架构的 Rust / Rig 二进制逆向与利用验证 Agent 方案
 
 - 编写日期：2026-11-06
-- 文档状态：历史需求与设计基线；当前实现以 [实现架构](architecture.md) 和 [实现契约](implementation-contract.md) 为准
+- 文档状态：历史需求与设计基线；当前实现以 [实现架构](../design/architecture.md) 和 [实现契约](../design/implementation-contract.md) 为准
 - Strix 参照基线：`06015506625a78b981ae0b34be40239fc1b389be`
 - Rig 参照基线：`v0.46.0`
 - 首版建议范围：Linux x86_64 ELF、无源码样本、CLI / GUI、本地实验环境

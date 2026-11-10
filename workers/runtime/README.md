@@ -200,8 +200,8 @@ acceptance test passed GDB, reconnect, replay, verification 3/3, minimization to
 three bytes, and real AFL++ QEMU (17,059 executions in eight seconds, one saved
 SIGABRT crash). The Ghidra acceptance test passed headless import, auto-analysis,
 functions/decompile/xrefs queries, cache identity and hash-mismatch rejection on
-Ghidra 12.2 with Temurin JDK 25. Raw records are in `docs/validation/runtime-linux.json`
-and `docs/validation/ghidra-linux.json`.
+Ghidra 12.2 with Temurin JDK 25. Raw records are in `docs/history/validation/2026-11-06/runtime-linux.json`
+and `docs/history/validation/2026-11-06/ghidra-linux.json`.
 
 Docker Desktop's current host core pattern invokes an external handler. AFL++
 rejects that setting by default. The acceptance fixture explicitly sets

@@ -57,7 +57,7 @@ jobs:
           APP_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
         run: |
           if [[ -z "$APP_ID" || -z "$APP_KEY" ]]; then
-            echo '::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY; see docs/releases.md.'
+            echo '::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY; see docs/development/releases.md.'
             exit 1
           fi
       - name: Create repository-scoped release App token
