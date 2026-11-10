@@ -26,18 +26,35 @@ if (-not (Get-Command $DockerExecutable -ErrorAction SilentlyContinue)) {
 $engine = & $DockerExecutable info --format '{{.OSType}}'
 if ($LASTEXITCODE -ne 0 -or ($engine -join '').Trim() -ne 'linux') { throw 'Start Docker Desktop and switch to Linux containers, then retry.' }
 Write-Host "Preparing tool image for version $($release.version)..."
-& $DockerExecutable image inspect $release.image *> $null
-if ($LASTEXITCODE -ne 0) {
+function Get-LocalImageIdentity([string]$Reference) {
+    # A cache miss is expected; native stderr must not terminate Windows PowerShell 5.1.
+    $ErrorActionPreference = 'Continue'
+    $value = & $DockerExecutable image inspect $Reference --format '{{.Id}}|{{.Os}}|{{.Architecture}}' 2>$null
+    if ($LASTEXITCODE -eq 0) { return ($value -join '').Trim() }
+    return $null
+}
+$expectedIdentity = "$($release.image_id)|linux|amd64"
+$runtimeImage = $release.image
+$actual = Get-LocalImageIdentity $runtimeImage
+if ($null -eq $actual) {
+    # docker load / local builds may retain the config ID without its registry digest reference.
+    $actual = Get-LocalImageIdentity $release.image_id
+    if ($null -ne $actual) { $runtimeImage = $release.image_id }
+}
+if ($null -ne $actual) {
+    if ($actual -ne $expectedIdentity) { throw 'Local image identity/platform mismatch.' }
+    Write-Host "Using existing local tool image $($release.image_id); no image download needed."
+} else {
     $pulled = $false
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         & $DockerExecutable pull --platform linux/amd64 $release.image
         if ($LASTEXITCODE -eq 0) { $pulled = $true; break }
         if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
     }
-    if (-not $pulled) { throw 'Image pull failed. For this private repository, run: docker login --username hlmark0 (or another authorized account). Also check network and Docker disk space, then retry. Do not use the CI write token on client machines.' }
+    if (-not $pulled) { throw 'Image pull failed. Check network and Docker disk space, or use docker login if authentication or pull limits require it. Do not use the CI write token on client machines.' }
+    $actual = Get-LocalImageIdentity $release.image
+    if ($actual -ne $expectedIdentity) { throw 'Downloaded image identity/platform mismatch.' }
 }
-$actual = & $DockerExecutable image inspect $release.image --format '{{.Id}}|{{.Os}}|{{.Architecture}}'
-if ($LASTEXITCODE -ne 0 -or ($actual -join '').Trim() -ne "$($release.image_id)|linux|amd64") { throw 'Downloaded image identity/platform mismatch.' }
 $destinationPath = [IO.Path]::GetFullPath($Destination)
 New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
 $exe = Join-Path $destinationPath 'wukong.exe'
@@ -73,7 +90,7 @@ try {
         }
     } else {
         $docker = $DockerExecutable | ConvertTo-Json -Compress
-        $image = $release.image | ConvertTo-Json -Compress
+        $image = $runtimeImage | ConvertTo-Json -Compress
         @"
 state_dir = "data/assessments"
 [runtime]
@@ -84,9 +101,9 @@ image = $image
 "@ | Set-Content -LiteralPath $config -Encoding utf8
     }
     if ($previousImage -and $previousImage -ne $release.image_id) {
-        $up = Invoke-WorkbenchJson -Arguments @('env','update','--image',$release.image)
+        $up = Invoke-WorkbenchJson -Arguments @('env','update','--image',$runtimeImage)
     } else {
-        $up = Invoke-WorkbenchJson -Arguments @('env','up','--image',$release.image)
+        $up = Invoke-WorkbenchJson -Arguments @('env','up','--image',$runtimeImage)
     }
     $switched = $true
     $doctor = Invoke-WorkbenchJson -Arguments @('env','doctor')
