@@ -69,6 +69,23 @@ the target never runs natively. Hand-written harnesses have historically
 burned turns on hook-page and endianness bugs; this tool is those bugs
 pre-fixed.
 
+## Multi-gate argv validation: solve one gate at a time
+
+When the target validates an input argument through several sequential
+checks, each comparing a transformed copy against a per-gate constant:
+
+1. Identify the gates in the order the target evaluates them; the target's
+   own feedback (which check fails) is the oracle — use it.
+2. Solve ONE gate at a time and verify incrementally against the real
+   binary before moving on: a candidate passing earlier gates is the
+   precondition for probing the next one.
+3. Placeholder characters inside a gate's transform template refer to bytes
+   from earlier positions of the same input — resolve them by position, not
+   as literals.
+4. Prefer whole-chain symbolic solving (angr_solve with find=success) only
+   when the gates interleave; otherwise the per-gate order is cheaper and
+   each step has its own evidence.
+
 ## Control-flow flattening — stop static deobfuscation early
 
 When a check function is control-flow-flattened (a large dispatcher/state
