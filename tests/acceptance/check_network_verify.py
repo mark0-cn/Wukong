@@ -9,6 +9,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -105,7 +106,10 @@ def main():
         docker('network','create','--internal','--label','wukong.acceptance='+prefix,prefix)
         created_network=True
         service=prefix+'-service';containers.append(service)
-        common=['--network',prefix,'--cap-drop','ALL','--read-only','--security-opt','no-new-privileges',
+        # With all capabilities dropped, container root cannot bypass a Linux
+        # runner's directory permissions. Keep evidence owned by the caller.
+        user=f'{os.getuid()}:{os.getgid()}' if os.name=='posix' else '1000:1000'
+        common=['--user',user,'--network',prefix,'--cap-drop','ALL','--read-only','--security-opt','no-new-privileges',
                 '--label','wukong.acceptance='+prefix]
         docker('run','-d','--name',service,*common,'--network-alias','challenge',
                '--entrypoint','python3',args.image,'-u','-c',SERVER)
