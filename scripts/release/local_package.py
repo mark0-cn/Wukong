@@ -10,6 +10,7 @@ import tempfile
 from scripts._lib.repository import ROOT
 from scripts._lib.versioning import read_json, version, write_json
 from scripts.release.cli import checksums, package, validate_image
+from scripts.release.release_metadata import DEFAULT_REPOSITORY, release_image
 
 
 def checkout_identity():
@@ -27,24 +28,24 @@ def run(command):
     subprocess.run(command, cwd=ROOT, check=True)
 
 
-def build(metadata, output, check_only=False):
+def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
     if platform.system() != "Windows" or platform.machine().lower() not in ("amd64", "x86_64"):
         raise ValueError("Local online packaging requires Windows x64 and the MSVC C++ build tools.")
-    if not metadata.is_file():
-        raise ValueError(
-            f"Missing image metadata: {metadata}. Download image.json from the same commit's "
-            "image-validation artifact and use --image-metadata PATH. No build was started."
-        )
     number = version()
     revision = checkout_identity()
-    image = read_json(metadata)
-    validate_image(image, revision)
     if output.exists():
         raise ValueError(f"Output already exists: {output}. Choose a new directory with --output.")
     npm = shutil.which("npm.cmd")
     cargo = shutil.which(os.environ.get("CARGO", "cargo"))
     if not npm or not cargo:
         raise ValueError("Node.js/npm and Cargo must be installed and available on PATH.")
+    if metadata is not None:
+        if not metadata.is_file():
+            raise ValueError(f"Missing image metadata: {metadata}. Omit --image-metadata to download from Release.")
+        image = read_json(metadata)
+    else:
+        image = release_image(number, revision, repository)
+    validate_image(image, revision)
     print(f"Version: v{number}\nCommit: {revision}\nImage: {image['repository']}@{image['digest']}", flush=True)
     if check_only:
         print("Preflight passed. No build or package was created.")
@@ -77,14 +78,17 @@ def build(metadata, output, check_only=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image-metadata", type=Path, default=Path("target/release-validation/image.json"),
-                        help="Same-commit image.json from image-validation (default: %(default)s)")
+    parser.add_argument("--image-metadata", type=Path,
+                        help="Use a local same-commit image.json instead of downloading Release metadata")
+    parser.add_argument("--repository", default=DEFAULT_REPOSITORY,
+                        help="Public GitHub repository for the exact version's Release (default: %(default)s)")
     parser.add_argument("--output", type=Path, default=Path("target/local-package"),
                         help="New output directory (default: %(default)s)")
-    parser.add_argument("--check", action="store_true", help="Validate inputs without building")
+    parser.add_argument("--check", action="store_true", help="Fetch and validate metadata without building")
     args = parser.parse_args()
     try:
-        build((ROOT / args.image_metadata).resolve(), (ROOT / args.output).resolve(), args.check)
+        metadata = (ROOT / args.image_metadata).resolve() if args.image_metadata else None
+        build(metadata, (ROOT / args.output).resolve(), args.check, args.repository)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Local packaging failed: {error}\n")
 
