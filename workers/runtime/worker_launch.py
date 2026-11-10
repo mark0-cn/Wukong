@@ -46,7 +46,7 @@ def load(root,params):
     env=safe_env()
     for key,value in spec.get("env",{}).items():
         # These could execute code inside a privileged exec-wrapper/interpreter.
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*",key) or key.startswith(("LD_","DYLD_","PYTHON","GDB","RE_AGENT_")) or key in {"PATH","ENV","BASH_ENV","SHELLOPTS","HOME","TMPDIR"}:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*",key) or key.startswith(("LD_","DYLD_","PYTHON","GDB","WUKONG_")) or key in {"PATH","ENV","BASH_ENV","SHELLOPTS","HOME","TMPDIR"}:
             raise ValueError("unsafe launch environment variable: "+key)
         if not isinstance(value,str) or "\0" in value: raise ValueError("invalid launch environment value")
         env[key]=value
@@ -58,7 +58,7 @@ def load(root,params):
 def patched_runtime(base,spec):
     """Public, root-owned immutable runtime. Stable paths keep trial hashes stable."""
     import fcntl
-    parent=Path("/tmp/re-agent-launches")
+    parent=Path("/tmp/wukong-launches")
     parent.mkdir(mode=0o755,exist_ok=True)
     st=parent.lstat()
     if parent.is_symlink() or st.st_uid!=os.geteuid() or st.st_mode&0o022:

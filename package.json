@@ -1,5 +1,5 @@
 {
-  "name": "re-agent-desktop",
+  "name": "wukong-desktop",
   "private": true,
   "workspaces": [
     "ui"

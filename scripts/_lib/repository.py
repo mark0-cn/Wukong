@@ -7,7 +7,7 @@ def find_root(start):
     for candidate in (path, *path.parents):
         if (candidate / 'Cargo.toml').is_file() and (candidate / 'rust-toolchain.toml').is_file():
             return candidate
-    raise RuntimeError('Cannot locate re-agent repository root')
+    raise RuntimeError('Cannot locate wukong repository root')
 
 
 ROOT = find_root(__file__)

@@ -1,5 +1,5 @@
-# Copy to re-agent.toml and set a model/endpoint available to your account.
-state_dir = ".re-agent"
+# Copy to wukong.toml and set a model/endpoint available to your account.
+state_dir = ".wukong"
 # Optional role/capability examples (<name>.md); missing directories skip examples.
 # Example values demonstrate methods and are never target facts.
 demos_dir = "prompts/examples"
@@ -54,12 +54,12 @@ output_usd_per_million = 0.0
 
 [runtime]
 backend = "disabled"
-state_dir = ".re-agent/worker"
+state_dir = ".wukong/worker"
 python = "python"
 bridge_path = "workers/runtime/bridge.py"
 # backend = "docker"
-# docker_container = "re-agent-worker"
-remote_bridge_path = "/opt/re-agent/runtime/bridge.py"
+# docker_container = "wukong-worker"
+remote_bridge_path = "/opt/wukong/runtime/bridge.py"
 remote_state_dir = "/state"
 # Must cover analysis.timeout_seconds (validated at startup): a shorter
 # transport timeout would cut off worker-side Ghidra queries mid-flight.
@@ -68,7 +68,7 @@ request_timeout_secs = 300
 [analysis]
 # Optional local Ghidra launcher; use the version required by your installed JDK.
 # ghidra_executable = "C:/tools/ghidra/support/analyzeHeadless.bat"
-ghidra_cache_dir = ".re-agent/ghidra"
+ghidra_cache_dir = ".wukong/ghidra"
 # timeout_seconds must cover analysis_timeout_seconds (validated at startup).
 timeout_seconds = 300
 analysis_timeout_seconds = 240
@@ -106,7 +106,7 @@ summarize_max_tokens = 400
 
 # Host-owned portable Pwn environment; challenge containers are siblings.
 [workbench]
-root = ".re-agent/workbench"
-image = "re-agent-workbench:0.1"
+root = ".wukong/workbench"
+image = "wukong:0.1"
 memory = "4g"
 cpus = 2

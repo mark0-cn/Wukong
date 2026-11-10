@@ -1,11 +1,11 @@
 .git
 .github
 .env
-re-agent.toml
+wukong.toml
 node_modules
 ui/node_modules
 ui/dist
-.re-agent
+.wukong
 target
 work
 dist
@@ -16,3 +16,7 @@ test-results
 playwright-report
 **/__pycache__
 **/*.pyc
+
+# Legacy local credentials and state
+re-agent.toml
+.re-agent

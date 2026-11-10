@@ -27,8 +27,8 @@ pub struct WorkbenchConfig {
 impl Default for WorkbenchConfig {
     fn default() -> Self {
         Self {
-            root: ".re-agent/workbench".into(),
-            image: "re-agent-workbench:0.1".into(),
+            root: ".wukong/workbench".into(),
+            image: "wukong:0.1".into(),
             memory: "4g".into(),
             cpus: 2,
         }
@@ -86,7 +86,7 @@ impl Workbench {
         Ok(file)
     }
     pub fn name(&self, suffix: &str) -> String {
-        format!("re-agent-{}-{suffix}", self.id)
+        format!("wukong-{}-{suffix}", self.id)
     }
     pub fn owned(&self, object: &Value, resource: &str) -> Result<()> {
         let labels = object
@@ -94,7 +94,7 @@ impl Workbench {
             .and_then(|c| c.get("Labels"))
             .unwrap_or(&object["Labels"]);
         ensure!(
-            labels["re-agent.workspace"].as_str() == Some(&self.id),
+            labels["wukong.workspace"].as_str() == Some(&self.id),
             "refusing to modify foreign Docker resource {resource}"
         );
         Ok(())
@@ -142,16 +142,13 @@ mod tests {
         assert!(second.lock().is_ok());
         assert!(
             first
-                .owned(
-                    &json!({"Labels":{"re-agent.workspace":first.id}}),
-                    "network"
-                )
+                .owned(&json!({"Labels":{"wukong.workspace":first.id}}), "network")
                 .is_ok()
         );
         assert!(
             first
                 .owned(
-                    &json!({"Config":{"Labels":{"re-agent.workspace":"foreign"}}}),
+                    &json!({"Config":{"Labels":{"wukong.workspace":"foreign"}}}),
                     "container"
                 )
                 .is_err()

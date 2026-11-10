@@ -1,24 +1,24 @@
 //! Real-adapter acceptance tests for the Linux execution worker.
 //!
 //! Every test here is `#[ignore]`d and demands a live configured worker: set
-//! `RE_AGENT_TEST_DOCKER_CONTAINER` to a running worker container (see
+//! `WUKONG_TEST_DOCKER_CONTAINER` to a running worker container (see
 //! `workers/runtime/README.md` and `scripts/dev/start-worker.ps1`), then run with
 //! `cargo test --test runtime_adapters -- --ignored`. They exercise the real
 //! GDB/MI bridge, crash replay/minimization, AFL++ QEMU campaigns and the angr
 //! solver against a freshly compiled fixture. No test substitutes a mock for
 //! the tool it verifies.
 use anyhow::{Context, Result, bail};
-use re_agent::runtime::{RuntimeBackend, RuntimeClient, RuntimeConfig};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
+use wukong::runtime::{RuntimeBackend, RuntimeClient, RuntimeConfig};
 
 fn worker_config(root: &std::path::Path) -> Result<RuntimeConfig> {
-    let container = std::env::var("RE_AGENT_TEST_DOCKER_CONTAINER")
-        .context("set RE_AGENT_TEST_DOCKER_CONTAINER to a running worker container")?;
+    let container = std::env::var("WUKONG_TEST_DOCKER_CONTAINER")
+        .context("set WUKONG_TEST_DOCKER_CONTAINER to a running worker container")?;
     Ok(RuntimeConfig {
         backend: RuntimeBackend::Docker,
         docker_container: Some(container),
-        remote_state_dir: format!("/tmp/re-agent-adapters-{}", uuid::Uuid::new_v4().simple()),
+        remote_state_dir: format!("/tmp/wukong-adapters-{}", uuid::Uuid::new_v4().simple()),
         state_dir: root.to_path_buf(),
         ..Default::default()
     })
@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
 "#;
 
 #[tokio::test]
-#[ignore = "requires a live configured Linux worker; set RE_AGENT_TEST_DOCKER_CONTAINER"]
+#[ignore = "requires a live configured Linux worker; set WUKONG_TEST_DOCKER_CONTAINER"]
 async fn real_gdb_breakpoints_registers_and_memory_reads() -> Result<()> {
     let root = tempfile::tempdir()?;
     let client = RuntimeClient::connect(worker_config(root.path())?).await?;
@@ -159,7 +159,7 @@ async fn real_gdb_breakpoints_registers_and_memory_reads() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "requires a live configured Linux worker; set RE_AGENT_TEST_DOCKER_CONTAINER"]
+#[ignore = "requires a live configured Linux worker; set WUKONG_TEST_DOCKER_CONTAINER"]
 async fn real_crash_replay_reproduces_and_minimizes_keeps_the_signal() -> Result<()> {
     let root = tempfile::tempdir()?;
     let client = RuntimeClient::connect(worker_config(root.path())?).await?;
@@ -222,7 +222,7 @@ async fn real_crash_replay_reproduces_and_minimizes_keeps_the_signal() -> Result
 }
 
 #[tokio::test]
-#[ignore = "requires a live configured Linux worker with AFL++; set RE_AGENT_TEST_DOCKER_CONTAINER"]
+#[ignore = "requires a live configured Linux worker with AFL++; set WUKONG_TEST_DOCKER_CONTAINER"]
 async fn real_afl_campaign_executes_and_emits_stats() -> Result<()> {
     let root = tempfile::tempdir()?;
     let client = RuntimeClient::connect(worker_config(root.path())?).await?;
@@ -266,7 +266,7 @@ async fn real_afl_campaign_executes_and_emits_stats() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "requires a live configured Linux worker with angr; set RE_AGENT_TEST_DOCKER_CONTAINER"]
+#[ignore = "requires a live configured Linux worker with angr; set WUKONG_TEST_DOCKER_CONTAINER"]
 async fn real_angr_solve_reaches_a_module_relative_address() -> Result<()> {
     let root = tempfile::tempdir()?;
     let client = RuntimeClient::connect(worker_config(root.path())?).await?;

@@ -26,6 +26,6 @@ class ClientTests(unittest.TestCase):
                     with self.subTest(key=key), self.assertRaises(ValueError):
                         client.verify("windows", folder, root)
                 manifest_path.write_text(json.dumps(original))
-                (folder / "re-agent.exe").write_bytes(b"tamper")
+                (folder / "wukong.exe").write_bytes(b"tamper")
                 with self.assertRaises(ValueError):
                     client.verify("windows", folder, root)

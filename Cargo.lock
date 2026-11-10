@@ -7576,48 +7576,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "re-agent"
-version = "0.1.2"
-dependencies = [
- "anyhow",
- "askama",
- "async-trait",
- "base64 0.22.1",
- "bevy_ecs",
- "chrono",
- "clap",
- "futures",
- "hex",
- "jsonrpsee-core",
- "object",
- "process-wrap",
- "regex",
- "rfd",
- "rig",
- "rig-basics",
- "rig-core",
- "rig-ecs",
- "rig-harness",
- "rusqlite",
- "schemars 1.2.3",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tempfile",
- "tokio",
- "tokio-util",
- "toml 1.2.1+spec-1.1.0",
- "toml_edit 0.25.19+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "reborrow"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11642,6 +11600,48 @@ dependencies = [
  "windows-core 0.62.2",
  "windows-version",
  "x11-dl",
+]
+
+[[package]]
+name = "wukong"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "askama",
+ "async-trait",
+ "base64 0.22.1",
+ "bevy_ecs",
+ "chrono",
+ "clap",
+ "futures",
+ "hex",
+ "jsonrpsee-core",
+ "object",
+ "process-wrap",
+ "regex",
+ "rfd",
+ "rig",
+ "rig-basics",
+ "rig-core",
+ "rig-ecs",
+ "rig-harness",
+ "rusqlite",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "toml 1.2.1+spec-1.1.0",
+ "toml_edit 0.25.19+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

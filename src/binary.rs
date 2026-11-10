@@ -714,12 +714,12 @@ impl GhidraBackend {
             .to_owned();
         let (script_bytes, script_dir) = if let Some(path) = &self.config.script_dir {
             (
-                fs::read(path.join("ReAgentBridge.java"))
+                fs::read(path.join("WukongBridge.java"))
                     .context("read configured Ghidra bridge script")?,
                 fs::canonicalize(path)?,
             )
         } else {
-            let bytes = include_bytes!("../workers/ghidra/ReAgentBridge.java").to_vec();
+            let bytes = include_bytes!("../workers/ghidra/WukongBridge.java").to_vec();
             // A versioned directory prevents concurrent processes overwriting a running bridge.
             let dir = self
                 .config
@@ -727,7 +727,7 @@ impl GhidraBackend {
                 .join("scripts")
                 .join(sha256_bytes(&bytes));
             fs::create_dir_all(&dir)?;
-            let script = dir.join("ReAgentBridge.java");
+            let script = dir.join("WukongBridge.java");
             if !script.is_file() {
                 fs::write(&script, &bytes)?;
             }
@@ -827,7 +827,7 @@ impl GhidraBackend {
             .arg("-scriptPath")
             .arg(&script_dir)
             .arg("-postScript")
-            .arg("ReAgentBridge.java")
+            .arg("WukongBridge.java")
             .arg(&request)
             .arg(&output)
             .stdin(Stdio::null())
@@ -1057,14 +1057,14 @@ subprocess.Popen([sys.executable,'-c',"import pathlib,time,sys;pathlib.Path(sys.
     fn analysis_key(backend: &GhidraBackend, target: &Path) -> Result<String> {
         let hash = sha256_file(target)?;
         let executable = fs::canonicalize(&backend.config.executable)?;
-        let binding = json!({"schema":1,"target_sha256":hash,"tool_version":"unknown","tool_properties":sha256_bytes(b""),"launcher":sha256_file(&executable)?,"bridge":sha256_bytes(include_bytes!("../workers/ghidra/ReAgentBridge.java")),"analysis_timeout_seconds":backend.config.analysis_timeout_seconds,"max_cpu":backend.config.max_cpu});
+        let binding = json!({"schema":1,"target_sha256":hash,"tool_version":"unknown","tool_properties":sha256_bytes(b""),"launcher":sha256_file(&executable)?,"bridge":sha256_bytes(include_bytes!("../workers/ghidra/WukongBridge.java")),"analysis_timeout_seconds":backend.config.analysis_timeout_seconds,"max_cpu":backend.config.max_cpu});
         Ok(sha256_bytes(&serde_json::to_vec(&binding)?))
     }
 
     fn query_key(backend: &GhidraBackend, target: &Path, query: &GhidraQuery) -> Result<String> {
         let hash = sha256_file(target)?;
         let executable = fs::canonicalize(&backend.config.executable)?;
-        let analysis_binding = json!({"schema":1,"target_sha256":hash,"tool_version":"unknown","tool_properties":sha256_bytes(b""),"launcher":sha256_file(&executable)?,"bridge":sha256_bytes(include_bytes!("../workers/ghidra/ReAgentBridge.java")),"analysis_timeout_seconds":backend.config.analysis_timeout_seconds,"max_cpu":backend.config.max_cpu});
+        let analysis_binding = json!({"schema":1,"target_sha256":hash,"tool_version":"unknown","tool_properties":sha256_bytes(b""),"launcher":sha256_file(&executable)?,"bridge":sha256_bytes(include_bytes!("../workers/ghidra/WukongBridge.java")),"analysis_timeout_seconds":backend.config.analysis_timeout_seconds,"max_cpu":backend.config.max_cpu});
         Ok(sha256_bytes(&serde_json::to_vec(
             &json!({"analysis":analysis_binding,"query":query}),
         )?))

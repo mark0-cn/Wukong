@@ -66,7 +66,7 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
 /// Generated documentation deliberately excludes runtime-configured MCP tools.
 pub fn builtin_catalog_markdown() -> String {
     let mut output = String::from(
-        "# 内置工具目录\n\n由 `re-agent tool-catalog` 从工具注册表生成。不要手动编辑。\n\n原生协调工具 `task`、`message`、`wait` 由 Rig 提供；MCP 工具取决于配置。下表列出模型可见的内置业务工具及生命周期可见性，具体执行仍校验目标、证据、会话归属和后端能力。\n\n| 工具 | 可见角色 | 有副作用 | 用途 |\n|---|---|---|---|\n",
+        "# 内置工具目录\n\n由 `wukong tool-catalog` 从工具注册表生成。不要手动编辑。\n\n原生协调工具 `task`、`message`、`wait` 由 Rig 提供；MCP 工具取决于配置。下表列出模型可见的内置业务工具及生命周期可见性，具体执行仍校验目标、证据、会话归属和后端能力。\n\n| 工具 | 可见角色 | 有副作用 | 用途 |\n|---|---|---|---|\n",
     );
     let mut specs = builtins()
         .iter()

@@ -26,7 +26,7 @@ impl Default for StaticConfig {
     fn default() -> Self {
         Self {
             ghidra_executable: None,
-            ghidra_cache_dir: PathBuf::from(".re-agent/ghidra"),
+            ghidra_cache_dir: PathBuf::from(".wukong/ghidra"),
             ghidra_script_dir: None,
             timeout_seconds: 300,
             analysis_timeout_seconds: 240,
@@ -96,7 +96,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            state_dir: PathBuf::from(".re-agent"),
+            state_dir: PathBuf::from(".wukong"),
             model: ModelConfig::default(),
             budget: Budget::default(),
             runtime: RuntimeConfig::default(),
@@ -236,9 +236,9 @@ mod tests {
     #[test]
     fn example_directories_are_top_level_overrides_resolved_from_config() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("re-agent.toml");
+        let path = directory.path().join("wukong.toml");
         let mut example: toml::Value =
-            toml::from_str(include_str!("../re-agent.example.toml")).unwrap();
+            toml::from_str(include_str!("../wukong.example.toml")).unwrap();
         let table = example.as_table_mut().unwrap();
         assert!(table.contains_key("demos_dir"));
         table.insert(

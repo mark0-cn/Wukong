@@ -106,7 +106,7 @@ impl Service {
                 config,
                 store,
                 selected,
-                path: path.unwrap_or_else(|| PathBuf::from("re-agent.toml")),
+                path: path.unwrap_or_else(|| PathBuf::from("wukong.toml")),
                 state_override,
             }),
             active: Mutex::new(None),
@@ -330,9 +330,9 @@ impl Service {
         let _lock = workbench.lock()?;
         if let crate::workbench::DesktopRequest::Select { id } = &request {
             let config_path = if let Some(id) = id {
-                workbench.challenge_dir(id)?.join("re-agent.toml")
+                workbench.challenge_dir(id)?.join("wukong.toml")
             } else {
-                workbench.root.join("re-agent.toml")
+                workbench.root.join("wukong.toml")
             };
             let config = AppConfig::load(Some(&config_path))?;
             let mut state = self.state.lock().unwrap();

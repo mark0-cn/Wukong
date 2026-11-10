@@ -1,7 +1,7 @@
 use anyhow::Result;
-use re_agent::runtime::{RuntimeBackend, RuntimeClient, RuntimeConfig};
 use serde_json::{Value, json};
 use std::time::Duration;
+use wukong::runtime::{RuntimeBackend, RuntimeClient, RuntimeConfig};
 
 fn config(root: &std::path::Path) -> RuntimeConfig {
     RuntimeConfig {
@@ -338,14 +338,14 @@ async fn desktop_runtime_does_not_inherit_invalid_console_stderr() -> Result<()>
         fn SetStdHandle(kind: u32, handle: *mut c_void) -> i32;
     }
     // Keep process-wide Win32 handle changes out of the parallel test runner.
-    if std::env::var_os("RE_AGENT_STDERR_TEST_CHILD").is_none() {
+    if std::env::var_os("WUKONG_STDERR_TEST_CHILD").is_none() {
         let output = std::process::Command::new(std::env::current_exe()?)
             .args([
                 "--exact",
                 "desktop_runtime_does_not_inherit_invalid_console_stderr",
                 "--nocapture",
             ])
-            .env("RE_AGENT_STDERR_TEST_CHILD", "1")
+            .env("WUKONG_STDERR_TEST_CHILD", "1")
             .output()?;
         assert!(
             output.status.success(),

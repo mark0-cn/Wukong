@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
 #[command(
-    name = "re-agent",
+    name = "wukong",
     version,
     about = "Strix-inspired Rust/Rig binary analysis agents"
 )]
@@ -43,7 +43,7 @@ pub enum Command {
     },
     /// Write a configuration without overwriting an existing file.
     Init {
-        #[arg(default_value = "re-agent.toml")]
+        #[arg(default_value = "wukong.toml")]
         path: PathBuf,
     },
     /// Print the built-in tool catalog without opening state or connecting to a model.
@@ -374,10 +374,10 @@ fn config_path(
     if explicit.is_some() {
         return explicit;
     }
-    let local = cwd.join("re-agent.toml");
+    let local = cwd.join("wukong.toml");
     let portable = executable
         .and_then(|exe| exe.parent())
-        .map(|dir| dir.join("re-agent.toml"));
+        .map(|dir| dir.join("wukong.toml"));
     let candidates = if desktop {
         [portable, Some(local)]
     } else {
@@ -395,9 +395,9 @@ mod config_path_tests {
         let temp = tempfile::tempdir()?;
         let bin = temp.path().join("bin");
         std::fs::create_dir(&bin)?;
-        let local = temp.path().join("re-agent.toml");
-        let portable = bin.join("re-agent.toml");
-        let exe = bin.join("re-agent.exe");
+        let local = temp.path().join("wukong.toml");
+        let portable = bin.join("wukong.toml");
+        let exe = bin.join("wukong.exe");
         std::fs::write(&local, "")?;
         std::fs::write(&portable, "")?;
         assert_eq!(

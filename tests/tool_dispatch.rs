@@ -1,5 +1,7 @@
 use anyhow::Result;
-use re_agent::{
+use serde_json::{Value, json};
+use std::{collections::BTreeSet, fs, path::Path, time::Duration};
+use wukong::{
     config::AppConfig,
     coordinator::{ChildRequest, Coordinator},
     domain::*,
@@ -8,8 +10,6 @@ use re_agent::{
     store::Store,
     tools::{ToolOutcome, ToolService},
 };
-use serde_json::{Value, json};
-use std::{collections::BTreeSet, fs, path::Path, time::Duration};
 
 fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Result<AgentSnapshot> {
     Ok(coordinator
@@ -55,7 +55,7 @@ async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()
         Role::Analyst,
         "unrelated cryptography",
     )?;
-    let before = re_agent::agents::preamble(&agent, &run, &store, None, None)?.len();
+    let before = wukong::agents::preamble(&agent, &run, &store, None, None)?.len();
     let mut wanted = None;
     for index in 0..30 {
         let own = index < 3;
@@ -79,7 +79,7 @@ async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()
         }
         store.put("note", &document.id, &run.id, &document)?;
     }
-    let prompt = re_agent::agents::preamble(&agent, &run, &store, None, None)?;
+    let prompt = wukong::agents::preamble(&agent, &run, &store, None, None)?;
     let context: Value =
         serde_json::from_str(prompt.split("Assessment context (data):\n").nth(1).unwrap())?;
     let shared = &context["shared_context"];
@@ -796,7 +796,7 @@ async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Re
         .await?;
     assert!(!closed.is_error, "{closed:?}");
     coordinator.finish(&cleaner.id, "sessions closed")?;
-    let runtime = re_agent::runtime::RuntimeClient::connect(runtime_config).await?;
+    let runtime = wukong::runtime::RuntimeClient::connect(runtime_config).await?;
     runtime.call("worker.shutdown", json!({})).await?;
     runtime.close().await?;
     service.close().await;
@@ -1407,9 +1407,9 @@ async fn runaway_mcp_stdout_is_bounded_by_the_line_cap() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "requires a live configured Linux Docker worker; set RE_AGENT_TEST_DOCKER_CONTAINER"]
+#[ignore = "requires a live configured Linux Docker worker; set WUKONG_TEST_DOCKER_CONTAINER"]
 async fn docker_independent_verification_uses_real_trials_and_limits_impact() -> Result<()> {
-    let container = std::env::var("RE_AGENT_TEST_DOCKER_CONTAINER")?;
+    let container = std::env::var("WUKONG_TEST_DOCKER_CONTAINER")?;
     let temp = tempfile::tempdir()?;
     let store = Store::open(temp.path().join("state"))?;
     let coordinator = Coordinator::new(store.clone());
@@ -1425,7 +1425,7 @@ async fn docker_independent_verification_uses_real_trials_and_limits_impact() ->
     let mut config = AppConfig::default();
     config.runtime.backend = RuntimeBackend::Docker;
     config.runtime.docker_container = Some(container);
-    config.runtime.remote_state_dir = format!("/tmp/{}", id("re_agent_tool_test"));
+    config.runtime.remote_state_dir = format!("/tmp/{}", id("wukong_tool_test"));
     config.tools.timeout_seconds = 180;
     let service = ToolService::new(config, store.clone()).await?;
     let staged = service
@@ -1566,7 +1566,7 @@ async fn contracted_tool_tasks_deliver_structured_results_without_vulnerability_
     assert!(!created.is_error, "{created:?}");
     let child_id = result(&created)["agent"]["id"].as_str().unwrap();
     let child: AgentSnapshot = store.require("agent", child_id)?;
-    let prompt = re_agent::agents::preamble(&child, &run, &store, None, None)?;
+    let prompt = wukong::agents::preamble(&child, &run, &store, None, None)?;
     assert!(prompt.contains("static only") && prompt.contains("fields covered"));
     let invalid = service
         .execute(

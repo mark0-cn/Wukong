@@ -47,7 +47,7 @@ def doctor(root):
         check("pwntools",[sys.executable,"-c","from pwn import *; p=process(["+repr(str(binary))+"]); p.sendline(b'probe'); assert b'probe' in p.recvall(timeout=2); assert p.poll()==0"])
         for name in ["pwninit","patchelf","seccomp-tools","pwndbg","eu-unstrip"]: check(name,[name,"--version"])
         check("python_analysis",[sys.executable,"-c","import angr,z3,capstone,unicorn,elftools,pygdbmi; print('imports OK')"])
-        ghidra=os.environ.get("RE_AGENT_GHIDRA_HEADLESS")
+        ghidra=os.environ.get("WUKONG_GHIDRA_HEADLESS")
         if ghidra and Path(ghidra).is_file():
             check("ghidra",[ghidra,str(directory),"doctor-project","-import",str(binary),"-analysisTimeoutPerFile","20","-deleteProject"])
         else: checks["ghidra"]={"passed":False,"error":"headless Ghidra unavailable"}

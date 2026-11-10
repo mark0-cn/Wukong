@@ -6,8 +6,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\_lib\repository.ps1')
-$root = Get-ReAgentRoot $PSScriptRoot
-if (-not $BinaryPath) { $BinaryPath = Join-Path $root 'target/release/re-agent.exe' }
+$root = Get-WukongRoot $PSScriptRoot
+if (-not $BinaryPath) { $BinaryPath = Join-Path $root 'target/release/wukong.exe' }
 # Resolve user paths before changing cwd for Python module execution.
 $BinaryPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($BinaryPath)
 $ImageMetadata = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ImageMetadata)

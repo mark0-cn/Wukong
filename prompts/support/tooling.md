@@ -99,8 +99,8 @@ Terminal job results arrive automatically in the next request's
   from `sys.argv[2]`. In isolated jobs that argv entry is staged automatically.
 - Pass every additional input file or directory as a direct argv entry too;
   staging resolves it to the experiment's read-only copy. Read the resulting
-  `sys.argv` values inside the script. `RE_AGENT_STATE_DIR` and
-  `RE_AGENT_JOB_DIR` identify private worker metadata in isolated mode, not
+  `sys.argv` values inside the script. `WUKONG_STATE_DIR` and
+  `WUKONG_JOB_DIR` identify private worker metadata in isolated mode, not
   accessible input/output directories. Write outputs under the process's
   current working directory and collect them with `job_artifacts`.
 - Match the input channel: `job_start` itself has no stdin payload field.

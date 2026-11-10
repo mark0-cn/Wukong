@@ -58,7 +58,7 @@ impl AnalysisService {
             .config
             .ghidra_executable
             .clone()
-            .or_else(|| std::env::var_os("RE_AGENT_GHIDRA_HEADLESS").map(PathBuf::from));
+            .or_else(|| std::env::var_os("WUKONG_GHIDRA_HEADLESS").map(PathBuf::from));
         if executable.is_none() && self.gateway.client.is_some() {
             let staged = if secondary.is_some() {
                 self.files.file_put(agent, &format!("{call_id}:target"), &json!({"path":format!("files/{}.bin",run.target_sha256),"evidence_id":args["target_evidence_id"],"executable":false})).await?["file"].clone()
@@ -100,7 +100,7 @@ impl AnalysisService {
             }
             return Ok(json!({"analysis":result,"artifact_evidence_ids":evidence_ids}));
         }
-        let executable=executable.context("Ghidra is not configured; set analysis.ghidra_executable, RE_AGENT_GHIDRA_HEADLESS, or a worker with Ghidra")?;
+        let executable=executable.context("Ghidra is not configured; set analysis.ghidra_executable, WUKONG_GHIDRA_HEADLESS, or a worker with Ghidra")?;
         let backend = GhidraBackend::new(GhidraConfig {
             executable,
             cache_dir: self.config.ghidra_cache_dir.clone(),

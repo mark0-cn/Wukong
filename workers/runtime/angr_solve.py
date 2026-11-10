@@ -11,7 +11,7 @@ Arguments: a single JSON object on argv[1]:
 }
 Prints a single JSON line with the solved stdin (base64) and exploration
 statistics, or an explicit error. The solved input is also persisted as job
-artifacts (solved-input.bin, solved.json): RE_AGENT_JOB_DIR when the worker
+artifacts (solved-input.bin, solved.json): WUKONG_JOB_DIR when the worker
 provides it, otherwise the job working directory. This script runs inside the
 isolated job; it never trusts the target and never touches worker metadata.
 
@@ -175,7 +175,7 @@ def main():
     # as evidence instead of scraping a bounded stdout tail. Isolated jobs
     # cannot write the worker-provided job directory and fall back to their
     # working directory, which the worker collects after the job finishes.
-    for output_dir in (os.environ.get("RE_AGENT_JOB_DIR"), os.getcwd()):
+    for output_dir in (os.environ.get("WUKONG_JOB_DIR"), os.getcwd()):
         if not output_dir:
             continue
         try:

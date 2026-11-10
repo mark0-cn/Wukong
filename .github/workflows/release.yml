@@ -46,8 +46,8 @@ jobs:
           [[ "$NAMESPACE" =~ ^[a-z0-9][a-z0-9_-]*$ && -n "$USERNAME" ]]
           git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "image=$NAMESPACE/re-agent-workbench" >> "$GITHUB_OUTPUT"
-          echo "candidate=$NAMESPACE/re-agent-workbench:build-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "image=$NAMESPACE/wukong" >> "$GITHUB_OUTPUT"
+          echo "candidate=$NAMESPACE/wukong:build-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Find verified checks and client artifacts for this exact commit
         id: reuse
@@ -185,7 +185,7 @@ jobs:
         run: |
           bash scripts/ci/prepare-ci-disk.sh 20
           docker pull --platform linux/amd64 "$IMAGE"
-          chmod +x acceptance-client/re-agent
+          chmod +x acceptance-client/wukong
       - name: Container and CLI acceptance
         shell: bash # Explicit Bash enables pipefail so tee cannot hide a failed network check.
         env:
@@ -193,7 +193,7 @@ jobs:
         run: |
           mkdir -p validation
           python tests/acceptance/check_workbench.py --image "$IMAGE" | tee validation/networks.txt
-          python tests/acceptance/check_release_image.py --image "$IMAGE" --revision "$GITHUB_SHA" --client acceptance-client/re-agent --output validation
+          python tests/acceptance/check_release_image.py --image "$IMAGE" --revision "$GITHUB_SHA" --client acceptance-client/wukong --output validation
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -233,11 +233,11 @@ jobs:
         env:
           RELEASE_TAG: v${{ needs.metadata.outputs.version }}
         run: |
-          ./scripts/release/package-workbench.ps1 -Destination dist -ImageMetadata validation/image.json -Tag $env:RELEASE_TAG -BinaryPath client/re-agent.exe
+          ./scripts/release/package-workbench.ps1 -Destination dist -ImageMetadata validation/image.json -Tag $env:RELEASE_TAG -BinaryPath client/wukong.exe
           Copy-Item validation/validation-summary.json, validation/doctor.json -Destination dist
           python -m scripts.release.cli checksums dist
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Expand-Archive -LiteralPath "dist/re-agent-$env:RELEASE_TAG-windows-amd64.zip" -DestinationPath package-check
+          Expand-Archive -LiteralPath "dist/wukong-$env:RELEASE_TAG-windows-amd64.zip" -DestinationPath package-check
           ./package-check/install-workbench.ps1 -ValidateOnly
           python -m scripts.release.release_report
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

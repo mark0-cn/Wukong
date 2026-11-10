@@ -15,7 +15,7 @@ def cell(value):
 
 
 def api(path):
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "re-agent-actions-summary"}
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "wukong-actions-summary"}
     if os.environ.get("GH_TOKEN"):
         headers["Authorization"] = "Bearer " + os.environ["GH_TOKEN"]
     # REST endpoints used here return JSON directly; do not forward tokens on redirects.

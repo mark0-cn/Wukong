@@ -23,7 +23,7 @@ impl Workbench {
                     "exec",
                     &env.container,
                     "python3",
-                    "/opt/re-agent/runtime/workbench_control.py",
+                    "/opt/wukong/runtime/workbench_control.py",
                     "idle",
                     "/state",
                 ])?)?;
@@ -68,7 +68,7 @@ impl Workbench {
             "exec",
             &env.container,
             "python3",
-            "/opt/re-agent/runtime/workbench_prepare.py",
+            "/opt/wukong/runtime/workbench_prepare.py",
             "/state/files/challenge",
         ])?)?;
         self.docker.copy_from(
@@ -87,9 +87,9 @@ impl Workbench {
         lock["launch"] = observation;
         lock["status"] = json!("prepared");
         write_json(&root.join("environment.lock.json"), &lock)?;
-        self.write_worker_config(&env, &root.join("re-agent.toml"))?;
+        self.write_worker_config(&env, &root.join("wukong.toml"))?;
         Ok(
-            json!({"id":id,"environment":env,"launch":lock["launch"],"config":root.join("re-agent.toml")}),
+            json!({"id":id,"environment":env,"launch":lock["launch"],"config":root.join("wukong.toml")}),
         )
     }
     pub fn build_challenge(&self, id: &str) -> Result<Value> {
@@ -109,7 +109,7 @@ impl Workbench {
                 "--platform".into(),
                 "linux/amd64".into(),
                 "--label".into(),
-                format!("re-agent.workspace={}", self.id),
+                format!("wukong.workspace={}", self.id),
                 "-t".into(),
                 image.clone(),
                 "-f".into(),
@@ -193,7 +193,7 @@ impl Workbench {
                 self.docker.run(&["start", &service])?;
             } else {
                 let mut args = vec!["run", "-d", "--name", &service, "--label"];
-                let label = format!("re-agent.workspace={}", self.id);
+                let label = format!("wukong.workspace={}", self.id);
                 args.extend([
                     &label,
                     "--network",
@@ -216,7 +216,7 @@ impl Workbench {
         } else if challenge.network.mode == "remote" {
             self.start_relay(&challenge, &env, &service)?;
         }
-        self.write_worker_config(&env, &self.challenge_dir(id)?.join("re-agent.toml"))?;
+        self.write_worker_config(&env, &self.challenge_dir(id)?.join("wukong.toml"))?;
         self.challenge_status(id)
     }
     fn start_relay(&self, challenge: &Challenge, env: &Environment, service: &str) -> Result<()> {
@@ -228,7 +228,7 @@ impl Workbench {
                 "network",
                 "create",
                 "--label",
-                &format!("re-agent.workspace={}", self.id),
+                &format!("wukong.workspace={}", self.id),
                 &egress,
             ])?;
         }
@@ -241,7 +241,7 @@ impl Workbench {
             "--name",
             service,
             "--label",
-            &format!("re-agent.workspace={}", self.id),
+            &format!("wukong.workspace={}", self.id),
             "--network",
             &egress,
             "--read-only",
@@ -258,7 +258,7 @@ impl Workbench {
             "--entrypoint",
             "python3",
             &env.image_id,
-            "/opt/re-agent/runtime/workbench_relay.py",
+            "/opt/wukong/runtime/workbench_relay.py",
             challenge.network.host.as_deref().unwrap(),
             &challenge.network.port.to_string(),
         ])?;
@@ -278,7 +278,7 @@ impl Workbench {
         let env = self.challenge_environment(id)?;
         let service = self.name(&format!("{id}-service"));
         Ok(
-            json!({"id":id,"mode":challenge.network.mode,"endpoint":if challenge.network.mode=="offline" {Value::Null}else{json!({"host":"challenge","port":challenge.network.port})},"tool_container":self.docker.inspect("container",&env.container)?,"service_container":self.docker.inspect("container",&service)?,"network":env.network,"config":self.challenge_dir(id)?.join("re-agent.toml")}),
+            json!({"id":id,"mode":challenge.network.mode,"endpoint":if challenge.network.mode=="offline" {Value::Null}else{json!({"host":"challenge","port":challenge.network.port})},"tool_container":self.docker.inspect("container",&env.container)?,"service_container":self.docker.inspect("container",&service)?,"network":env.network,"config":self.challenge_dir(id)?.join("wukong.toml")}),
         )
     }
     pub fn down_challenge(&self, id: &str) -> Result<Value> {
@@ -318,7 +318,7 @@ impl Workbench {
             "--name",
             &name,
             "--label",
-            &format!("re-agent.workspace={}", self.id),
+            &format!("wukong.workspace={}", self.id),
             "--network",
             "none",
             &image,
@@ -370,7 +370,7 @@ impl Workbench {
             "--name",
             &name,
             "--label",
-            &format!("re-agent.workspace={}", self.id),
+            &format!("wukong.workspace={}", self.id),
             "--network",
             "none",
             &image,
@@ -440,7 +440,7 @@ impl Workbench {
             "--name",
             &name,
             "--label",
-            &format!("re-agent.workspace={}", self.id),
+            &format!("wukong.workspace={}", self.id),
             "--network",
             "bridge",
             "--cap-drop",
@@ -486,7 +486,7 @@ impl Workbench {
             // Match the immutable image's symbol cache by Build-ID before downloading.
             let cached_symbols = r#"import sys,re,json,subprocess
 from pathlib import Path
-sys.path.insert(0,'/opt/re-agent/runtime')
+sys.path.insert(0,'/opt/wukong/runtime')
 from worker_profile import file_identity
 identity=file_identity('libc.so.6'); build=identity.get('build_id') or ''
 source='pwninit_download'
@@ -571,9 +571,9 @@ impl Workbench {
                 "--name",
                 &name,
                 "--label",
-                &format!("re-agent.workspace={}", self.id),
+                &format!("wukong.workspace={}", self.id),
                 "--label",
-                "re-agent.kind=debug-companion",
+                "wukong.kind=debug-companion",
                 "--pid",
                 &format!("container:{service}"),
                 "--network",

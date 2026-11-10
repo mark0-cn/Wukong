@@ -32,7 +32,7 @@ class CommandService:
                 base = Path(os.environ.get("TEMP") or os.environ.get("TMP") or str(self.root))
             else:
                 base = Path("/tmp")
-            workdir = base / "re-agent-exec" / uuid.uuid4().hex
+            workdir = base / "wukong-exec" / uuid.uuid4().hex
             workdir.mkdir(parents=True)
             env = safe_env(params.get("env"))
             state_value, job_value = str(self.root), str(workdir)
@@ -40,7 +40,7 @@ class CommandService:
                 # MSYS bash handles drive-letter paths in forward-slash form.
                 state_value = state_value.replace("\\", "/")
                 job_value = job_value.replace("\\", "/")
-            env.update({"RE_AGENT_STATE_DIR": state_value, "RE_AGENT_JOB_DIR": job_value})
+            env.update({"WUKONG_STATE_DIR": state_value, "WUKONG_JOB_DIR": job_value})
             experiment = None
             cwd = workdir
             resolved_target = None

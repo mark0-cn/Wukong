@@ -13,7 +13,7 @@ target "worker" {
 target "workbench" {
   context = "."
   dockerfile = "workers/Dockerfile.workbench"
-  contexts = { "re-agent-worker:0.1" = "target:toolchain" }
+  contexts = { "wukong-worker:0.1" = "target:toolchain" }
   platforms = ["linux/amd64"]
 }
 

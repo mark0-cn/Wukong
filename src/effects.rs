@@ -569,7 +569,7 @@ mod tests {
         let mut config = AppConfig::default();
         config.runtime.backend = RuntimeBackend::TrustedLocal;
         config.runtime.state_dir = dir.path().join("worker");
-        let args = json!({"command":"printf x >> \"$RE_AGENT_STATE_DIR/counter\"; printf done"});
+        let args = json!({"command":"printf x >> \"$WUKONG_STATE_DIR/counter\"; printf done"});
         let mut tools = ToolService::new(config.clone(), store.clone()).await?;
         let first = tools
             .execute(&agent.id, "crash-boundary", "exec_command", args.clone())

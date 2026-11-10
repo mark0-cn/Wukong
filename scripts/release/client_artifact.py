@@ -8,8 +8,8 @@ import subprocess
 from scripts._lib.versioning import ROOT, version
 
 TARGETS = {
-    "windows": ("windows-client-v1", "target/release/re-agent.exe", "release/custom-protocol/windows-amd64"),
-    "linux": ("linux-acceptance-client-v1", "target/debug/re-agent", "dev/debug=1/no-default-features/linux-amd64"),
+    "windows": ("windows-client-v1", "target/release/wukong.exe", "release/custom-protocol/windows-amd64"),
+    "linux": ("linux-acceptance-client-v1", "target/debug/wukong", "dev/debug=1/no-default-features/linux-amd64"),
 }
 
 
