@@ -20,6 +20,9 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       image: ${{ steps.meta.outputs.image }}
       candidate: ${{ steps.meta.outputs.candidate }}
+      ci_run: ${{ steps.reuse.outputs.ci_run }}
+      windows_run: ${{ steps.reuse.outputs.windows_run }}
+      linux_run: ${{ steps.reuse.outputs.linux_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,61 +48,49 @@ jobs:
           echo "image=$NAMESPACE/re-agent-workbench" >> "$GITHUB_OUTPUT"
           echo "candidate=$NAMESPACE/re-agent-workbench:build-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
-  checks:
+      - name: Find verified checks and client artifacts for this exact commit
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_reuse.py
+
+  checks-fallback:
     needs: metadata
+    if: needs.metadata.outputs.ci_run == ''
     uses: ./.github/workflows/ci.yml
+
+  checks:
+    if: always()
+    needs: [metadata, checks-fallback]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require verified prior CI or successful fallback
+        env:
+          METADATA_RESULT: ${{ needs.metadata.result }}
+          PRIOR_CI: ${{ needs.metadata.outputs.ci_run }}
+          FALLBACK_RESULT: ${{ needs.checks-fallback.result }}
+        run: |
+          test "$METADATA_RESULT" = success
+          if [[ -n "$PRIOR_CI" ]]; then
+            echo "Reused full master CI: https://github.com/$GITHUB_REPOSITORY/actions/runs/$PRIOR_CI" >> "$GITHUB_STEP_SUMMARY"
+          else
+            test "$FALLBACK_RESULT" = success
+          fi
 
   windows-client:
     needs: metadata
-    runs-on: windows-2025
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: npm
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: windows-release
-      - name: Build embedded Windows release
-        shell: pwsh
-        run: |
-          npm ci
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npm run build
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo build --locked --release --features custom-protocol
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ./target/release/re-agent.exe --version
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-client
-          path: target/release/re-agent.exe
-          retention-days: 7
-          if-no-files-found: error
+    if: needs.metadata.outputs.windows_run == ''
+    uses: ./.github/workflows/build-client.yml
+    with:
+      target: windows
 
   linux-client:
     needs: metadata
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        with:
-          key: linux-acceptance
-      - name: Build host CLI for container acceptance
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev
-          cargo build --locked --no-default-features
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: linux-acceptance-client
-          path: target/debug/re-agent
-          retention-days: 7
-          if-no-files-found: error
+    if: needs.metadata.outputs.linux_run == ''
+    uses: ./.github/workflows/build-client.yml
+    with:
+      target: linux
 
   image:
     needs: metadata
@@ -156,6 +147,9 @@ jobs:
           df -h /
 
   acceptance:
+    if: >-
+      always() && needs.metadata.result == 'success' && needs.image.result == 'success' &&
+      (needs.linux-client.result == 'success' || needs.metadata.outputs.linux_run != '')
     needs: [metadata, image, linux-client]
     runs-on: ${{ vars.WORKBENCH_LINUX_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 60
@@ -166,8 +160,12 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: linux-acceptance-client
+          name: linux-acceptance-client-v1
           path: acceptance-client
+          run-id: ${{ needs.metadata.outputs.linux_run || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify downloaded Linux client before execution
+        run: python scripts/client_artifact.py verify --target linux --directory acceptance-client
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
@@ -196,6 +194,10 @@ jobs:
           if-no-files-found: warn
 
   package:
+    if: >-
+      always() && needs.metadata.result == 'success' && needs.acceptance.result == 'success' &&
+      needs.checks.result == 'success' &&
+      (needs.windows-client.result == 'success' || needs.metadata.outputs.windows_run != '')
     needs: [metadata, acceptance, windows-client, checks]
     runs-on: windows-2025
     timeout-minutes: 15
@@ -206,8 +208,12 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: windows-client
+          name: windows-client-v1
           path: client
+          run-id: ${{ needs.metadata.outputs.windows_run || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify downloaded Windows client before packaging
+        run: python scripts/client_artifact.py verify --target windows --directory client
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: image-validation

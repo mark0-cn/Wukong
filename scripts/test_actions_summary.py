@@ -40,6 +40,14 @@ class SummaryTests(unittest.TestCase):
         result = summary.render("release", self.needs, self.context, self.directory)
         self.assertIn("Incomplete or failed", result)
 
+    def test_reused_clients_only_count_when_source_is_present(self):
+        self.needs["windows-client"]["result"] = "skipped"
+        self.assertIn("Incomplete or failed", summary.render("release", self.needs, self.context, self.directory))
+        self.needs["metadata"]["outputs"] = dict(windows_run="123")
+        result = summary.render("release", self.needs, self.context, self.directory)
+        self.assertIn("通过 / Passed", result)
+        self.assertIn("/actions/runs/123", result)
+
     def test_package_details_and_artifact_link_come_from_real_metadata(self):
         folder = self.directory / "release"
         folder.mkdir()
