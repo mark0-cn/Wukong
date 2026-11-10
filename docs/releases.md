@@ -50,7 +50,12 @@ tag 必须匹配源码版本，并且 commit 已包含在默认分支。`v0.2.0-
 
 发布使用全局 concurrency 锁，避免并行更改 latest。GitHub concurrency 对待运行任务不保证 FIFO；不要连续推送多个待发布 tag，若某次等待任务被替换，手动重跑该 tag 对应的工作流。
 
-可启用 GitHub immutable releases；所有附件均在草稿阶段上传。仓库规则可保护 `v*` tag，Docker Hub 如支持也可将精确版本标签设为不可变，但 `latest`、`buildcache` 必须可更新。
+本仓库启用 GitHub immutable releases，后续正式发布会锁定附件及关联 tag。
+所有附件均在草稿阶段上传，发布前检查远端附件名称、大小、SHA256 与本地产物完全一致；
+发布后确认 `immutable=true` 才推进 latest。草稿中有旧附件时会拒绝发布，先清理草稿再重试。
+不向 Actions 提供管理员 Token；仓库设置由管理员开启，流水线只读取 Release 的锁定状态。
+这不锁定 Docker Hub 标签；固定镜像版本仍由发布脚本的禁止覆盖检查保护，
+Docker Hub 如支持也可将精确版本标签设为不可变，但 `latest`、`buildcache` 必须可更新。
 
 ## 演练与排错
 

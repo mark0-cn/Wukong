@@ -1,6 +1,5 @@
 """Promote an accepted image and finish a retryable GitHub Release."""
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -42,6 +41,23 @@ def releases(repository):
     return json.loads(run(["gh", "api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"]))
 
 
+def release_by_tag(repository, tag):
+    return json.loads(run(["gh", "api", f"repos/{repository}/releases/tags/{tag}"]))
+
+
+def verify_assets(directory, release, require_immutable=False):
+    expected = {path.name: path for path in directory.iterdir() if path.is_file()}
+    assets = release["assets"]
+    if len(assets) != len(expected) or {a["name"] for a in assets} != set(expected):
+        raise ValueError("Release assets differ from the accepted set; fix the draft before publication")
+    for asset in assets:
+        path = expected[asset["name"]]
+        if asset.get("state") != "uploaded" or asset.get("size") != path.stat().st_size or asset.get("digest") != "sha256:" + sha256(path):
+            raise ValueError("Uploaded release asset identity mismatch: " + path.name)
+    if require_immutable and (release.get("draft") or release.get("immutable") is not True):
+        raise ValueError("Published release is not immutable; check repository release settings before advancing latest")
+
+
 def publish(directory, tag):
     number = version(tag)
     repository = os.environ["GITHUB_REPOSITORY"]
@@ -80,8 +96,15 @@ def publish(directory, tag):
         if not existing:
             run(["gh", "release", "create", tag, "--repo", repository, "--verify-tag", "--draft", "--title", tag, "--notes-file", str(notes), "--target", revision])
         run(["gh", "release", "upload", tag, "--repo", repository, "--clobber", *map(str, sorted(directory.iterdir()))])
+        draft = release_by_tag(repository, tag)
+        if not draft["draft"]:
+            raise ValueError("Release changed during upload; refusing to publish")
+        # Check exact bytes and remove ambiguity before publication locks the assets.
+        verify_assets(directory, draft)
         promote(repo, digest, number)
         run(["gh", "release", "edit", tag, "--repo", repository, "--draft=false", "--prerelease=" + str("-" in number).lower(), "--latest=false", "--notes-file", str(notes)])
+    verified = release_by_tag(repository, tag)
+    verify_assets(directory, verified, require_immutable=True)
     promote(repo, digest, number)
     if "-" not in number:
         current = tuple(map(int, number.split(".")))
@@ -90,10 +113,7 @@ def publish(directory, tag):
         if not newer:
             promote(repo, digest, "latest")
             run(["gh", "release", "edit", tag, "--repo", repository, "--latest"])
-    verified = json.loads(run(["gh", "release", "view", tag, "--repo", repository, "--json", "url,isDraft,assets"]))
-    if verified["isDraft"] or {p.name for p in directory.iterdir()} != {a["name"] for a in verified["assets"]}:
-        raise ValueError("Published release assets are incomplete")
-    print(verified["url"])
+    print(verified["html_url"])
 
 
 if __name__ == "__main__":
