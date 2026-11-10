@@ -56,11 +56,16 @@ never runs natively. Use `init_regs` for register preconditions and
 - `one_gadget` (ruby) is in the worker: `one_gadget -l 1 /lib/x86_64-linux-gnu/libc.so.6`
   lists single-shot execve gadgets with their constraints.
 - Symbol offsets from the worker's own libc: `python3 -c "from pwn import ELF; print(hex(ELF('/lib/x86_64-linux-gnu/libc.so.6').symbols['system']))"`.
-  Compare against the leaked address to compute the libc base in one step.
-- `libc_identify` does the same offline in one call: pass the leaked
-  runtime address and the leaked symbol name; it returns the libc base,
-  system_offset and a /bin/sh offset when the worker's own libc matches.
-  A no-match means the target runs a different libc than the worker.
+  Subtract only after establishing the correct symbol/addend and runtime;
+  using the worker's libc supplies a candidate base, not a confirmed mapping.
+- `libc_identify` compares same-process symbol leaks against supplied in-run
+  ELF candidates. Use `leaks` for multiple observations and `candidates` for
+  the available libc files; legacy `leaked`/`symbol` remains supported.
+  Omission of candidates checks only the worker's libc. Each candidate retains
+  its hash, Build ID, ABI and derived base/offsets; keep ambiguous matches.
+  `candidate_match` never confirms the mapped runtime, and `matched` remains
+  false. No match describes only this corpus and these leak assumptions;
+  confirm the real files/mappings with runtime identity evidence.
 
 ## patchelf and gef
 
