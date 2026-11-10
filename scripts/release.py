@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 RELEASE_TAG = re.compile("v" + VERSION.pattern)
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+VERSION_FILES = ("Cargo.toml", "Cargo.lock", "tauri.conf.json", "ui/package.json", "package-lock.json")
 
 
 def read_json(path):
@@ -55,6 +56,53 @@ def version(tag=None, root=ROOT):
     if tag is not None and tag != "v" + cargo:
         raise ValueError(f"Tag {tag!r} does not match v{cargo}")
     return cargo
+
+
+def bump_version(tag, root=ROOT):
+    """Update only the application versions; never resolve or upgrade dependencies."""
+    target = validate_tag(tag)
+    current = version(root=root)
+    if tuple(map(int, target.split("."))) <= tuple(map(int, current.split("."))):
+        raise ValueError(f"New version {target} must be greater than {current}")
+    original = {name: (root / name).read_bytes() for name in VERSION_FILES}
+    updated = {}
+    for name, raw in original.items():
+        source = raw.decode("utf-8")
+        if name in ("Cargo.toml", "Cargo.lock"):
+            header = "[package]" if name == "Cargo.toml" else "[[package]]"
+            blocks = re.split(r"(?=^\[)", source, flags=re.MULTILINE)
+            matched = 0
+            for index, block in enumerate(blocks):
+                if block.splitlines()[:1] != [header]:
+                    continue
+                data = tomllib.loads(block)["package"]
+                package_data = data if name == "Cargo.toml" else data[0]
+                if package_data.get("name") != "re-agent":
+                    continue
+                blocks[index], count = re.subn(r'^version = "' + re.escape(current) + r'"(\r?)$',
+                                               lambda match: f'version = "{target}"' + match[1],
+                                               block, flags=re.MULTILINE)
+                matched += count
+            if matched != 1:
+                raise ValueError(f"Expected one application version in {name}, got {matched}")
+            updated[name] = "".join(blocks).encode("utf-8")
+        else:
+            data = json.loads(source)
+            if name == "package-lock.json":
+                data["packages"]["ui"]["version"] = target
+            else:
+                data["version"] = target
+            newline = "\r\n" if "\r\n" in source else "\n"
+            updated[name] = (json.dumps(data, indent=2, ensure_ascii=False) + "\n").replace("\n", newline).encode("utf-8")
+    try:
+        for name, raw in updated.items():
+            (root / name).write_bytes(raw)
+        version(tag, root=root)
+    except Exception:
+        for name, raw in original.items():
+            (root / name).write_bytes(raw)
+        raise
+    return target
 
 
 def validate_image(data, revision):
@@ -105,6 +153,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check")
     check.add_argument("--tag")
+    bump = commands.add_parser("bump", help="Synchronize all application versions without changing dependencies")
+    bump.add_argument("--tag", required=True)
     pack = commands.add_parser("package")
     pack.add_argument("--tag", required=True)
     pack.add_argument("--binary", type=Path, required=True)
@@ -115,6 +165,8 @@ def main():
     args = parser.parse_args()
     if args.command == "check":
         print(version(args.tag))
+    elif args.command == "bump":
+        print(bump_version(args.tag))
     elif args.command == "package":
         print(json.dumps(package(args.binary, args.image_metadata, args.output, args.tag)))
     else:
