@@ -26,14 +26,28 @@ Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。�
 
 ## 发布版本
 
-1. 同步修改 `Cargo.toml`、`Cargo.lock` 中 re-agent 的版本、`tauri.conf.json`、`ui/package.json`、`package-lock.json` 中 ui 的版本。
-2. 执行 `python scripts/release.py check`，提交并推送默认分支。
-3. 创建并推送 tag，例如：
+1. 打开 **Actions → Prepare release → Run workflow**，分支选择 `master`，填写完整的新 tag，例如 `v0.2.0`。正常准备版本时不要勾选 `dry_run`。
+2. 工作流同步 `Cargo.toml`、`Cargo.lock` 中 re-agent 的版本、`tauri.conf.json`、`ui/package.json`、`package-lock.json` 中 ui 的版本；检查格式、版本递增和一致性，运行发布脚本测试，然后创建 `codex/release-v0.2.0` 分支及目标为 `master` 的 PR。
+3. 工作流显式启动版本分支的完整 CI。查看 PR 和 CI 结果，Windows、Linux 检查通过后，由维护者确认合并。
+4. 更新本地 `master`，检查版本并创建、推送 tag，触发正式发布。例如：
 
 ```sh
+git switch master
+git pull --ff-only origin master
+python scripts/release.py check --tag v0.2.0
 git tag -a v0.2.0 -m "Release v0.2.0"
 git push origin v0.2.0
 ```
+
+`Prepare release` 使用标准 GitHub 托管 runner 和内置 `GITHUB_TOKEN`，无需额外 PAT。
+仓库 Settings → Actions → General → Workflow permissions 需允许 **Allow GitHub Actions to create and approve pull requests**；工作流只创建 PR，不提交审批或自动合并。
+机器人推送不会可靠触发后续工作流，因此显式 `workflow_dispatch` 启动 `ci.yml`，不要把“版本 PR 已创建”当作完整 CI 已通过。
+版本准备不创建 tag、不构建镜像、不发布 Release。输入的版本必须高于当前版本；已存在的 tag 会被拒绝。
+重试只复用文件树与本次准备完全一致的版本分支，不强推覆盖。若 `master` 或版本分支已有变化导致重试失败，先处理已有 PR/分支，再重新准备。
+
+勾选 `dry_run` 可以查看同步后的 diff 和测试结果，不创建远端分支或 PR。
+本地也可以执行 `python scripts/release.py bump --tag v0.2.0` 一次同步全部版本文件，然后提交 PR。
+该命令不更新依赖，也不运行 Cargo/npm 依赖解析；原有版本不一致、版本倒退或格式错误时拒绝修改。
 
 tag 只允许 `v主版本.次版本.补丁版本`，例如 `v0.1.0`、`v12.3.45`。
 每段使用 ASCII 数字，允许单独的 `0`，不允许前导零。
