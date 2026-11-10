@@ -9,9 +9,9 @@ $ErrorActionPreference = 'Stop'
 $root = Get-ReAgentRoot $PSScriptRoot
 if (-not $BinaryPath) { $BinaryPath = Join-Path $root 'target/release/re-agent.exe' }
 # Resolve user paths before changing cwd for Python module execution.
-$BinaryPath = [IO.Path]::GetFullPath($BinaryPath)
-$ImageMetadata = [IO.Path]::GetFullPath($ImageMetadata)
-$Destination = [IO.Path]::GetFullPath($Destination)
+$BinaryPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($BinaryPath)
+$ImageMetadata = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ImageMetadata)
+$Destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)
 Push-Location -LiteralPath $root
 try {
     & python -m scripts.release.cli package --tag $Tag --binary $BinaryPath --image-metadata $ImageMetadata --output $Destination

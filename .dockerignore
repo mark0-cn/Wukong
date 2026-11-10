@@ -11,5 +11,8 @@ work
 dist
 reports
 fixtures/build
+fixtures/analysis/build
+test-results
+playwright-report
 **/__pycache__
 **/*.pyc
