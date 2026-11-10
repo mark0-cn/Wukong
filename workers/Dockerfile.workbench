@@ -18,7 +18,8 @@ RUN --mount=type=bind,source=workers/deps/pwndbg.tar.xz,target=/deps/pwndbg.tar.
 COPY workers/runtime/requirements.txt /tmp/re-agent-runtime-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --break-system-packages -r /tmp/re-agent-runtime-requirements.txt
-RUN python3 -m pip freeze > /opt/re-agent/python.freeze.txt \
+RUN mkdir -p /opt/re-agent \
+    && python3 -m pip freeze > /opt/re-agent/python.freeze.txt \
     && dpkg-query -W > /opt/re-agent/debian-packages.txt \
     && python3 -c "import pwn,angr,elftools,pygdbmi; print('toolchain imports OK')" \
     && pwninit --version && /opt/pwndbg/bin/pwndbg --version
