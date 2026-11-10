@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Wukong · 分析工作区",
+        "title": "Wukong",
         "width": 1320,
         "height": 860,
         "minWidth": 860,
@@ -31,7 +31,13 @@
     "active": true,
     "targets": "all",
     "category": "DeveloperTool",
-    "shortDescription": "二进制分析与多 Agent 协作工作区",
+    "shortDescription": "Binary analysis and multi-agent verification workspace",
+    "windows": {
+      "nsis": {
+        "languages": ["English", "SimpChinese"],
+        "displayLanguageSelector": true
+      }
+    },
     "icon": [
       "icons/icon.png",
       "icons/icon.icns",
