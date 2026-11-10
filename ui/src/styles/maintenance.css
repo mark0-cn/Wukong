@@ -1,0 +1,62 @@
+.modal-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:16px;
+}
+.link-target {
+  background:var(--field);
+  border:1px solid var(--border);
+  border-radius:7px;
+  padding:10px;
+  max-height:120px;
+  overflow:auto;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  color:var(--text);
+}
+.workbench-controls {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.workbench-controls label {
+  display: grid;
+  gap: 6px;
+}
+.workbench-controls .header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.workbench-result {
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+/* Desktop lifecycle controls share the workbench's spacing and color tokens. */
+.update-summary {
+  display: flex;
+  gap: 3rem;
+  margin: 1rem 0;
+}
+.update-summary h3 {
+  margin: .35rem 0;
+}
+.setup-steps {
+  padding-left: 1.5rem;
+  line-height: 1.9;
+}
+progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+/* Status is readable without color through the existing icon and label. */
+.status-running { color: var(--info); }
+.status-completed, .status-verified { color: var(--success); }
+.tool-running .tool-symbol { color: var(--info); }
+.tool-completed .tool-symbol { color: var(--success); }
+::selection { background: var(--accent-surface); color: var(--text); }

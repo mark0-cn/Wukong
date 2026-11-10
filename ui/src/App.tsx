@@ -1,8 +1,7 @@
 import brandIcon from '../../icons/icon.svg';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Activity, ArrowRight, Bot, CircleAlert, Download, FileSearch, Focus, GitBranch, MessageSquare, PanelLeft, Pause, Play, RefreshCw, X } from 'lucide-react';
-import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { api, errorText, subscribe } from './bridge';
+import { api, errorText } from './bridge';
 import { useWorkspace } from './workspace';
 import type { Agent, Budget, Run } from './types';
 import { Agents } from './components/Agents';
@@ -11,12 +10,15 @@ import { Findings } from './components/Findings';
 import { Markdown } from './components/Markdown';
 import { Modal } from './components/Modal';
 import { Workbench } from './components/Workbench';
-import { Updates, type UpdateStatus } from './components/Updates';
+import { Updates } from './components/Updates';
 import { Settings } from './components/Settings';
 import { Sidebar } from './components/Sidebar';
 import { WorkspaceSplit, useWideWorkspace } from './components/WorkspaceSplit';
 import { compact, fileName, StateIcon, Status, terminal } from './components/Status';
 import { defaultTask, NewTask, ResumeTask } from './components/TaskDialogs';
+
+import { useDesktopLifecycle } from './hooks/useDesktopLifecycle';
+import { useStartupUpdates } from './hooks/useStartupUpdates';
 
 type Confirmation = { kind: 'close'; busy: boolean } | { kind: 'stop'; agent: Agent; run: string; epoch: number };
 export default function App() {
@@ -32,15 +34,7 @@ export default function App() {
   const [settings, setSettings] = useState(false);
   const [workbench, setWorkbench] = useState(false);
   const [updates, setUpdates] = useState(false);
-  const checkedUpdates = useRef(false);
-  useEffect(() => {
-    if (!host || checkedUpdates.current) return;
-    checkedUpdates.current = true;
-    void api('update_action', { action: 'status', epoch: host.epoch }).then(status => {
-      if (status.needs_setup || status.pending) setUpdates(true);
-      else void api('update_action', { action: 'check', epoch: host.epoch }).catch(() => {});
-    }).catch(() => {});
-  }, [host]);
+  useStartupUpdates(host, useCallback(() => setUpdates(true), []));
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [target, setTarget] = useState('');
   const [task, setTask] = useState(defaultTask);
@@ -48,7 +42,6 @@ export default function App() {
   const [resume, setResume] = useState<Run>();
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [pending, setPending] = useState(false);
-  const [closing, setClosing] = useState(false);
   const [error, setError] = useState('');
   const [dismissed, setDismissed] = useState<number>();
   const selectedRun = data?.runs.find(run => run.id === data.selected);
@@ -58,30 +51,9 @@ export default function App() {
   const draft = drafts[draftKey] ?? { text: '', followUp: false };
   const busy = Boolean(host?.execution || host?.pending_operations || pending);
   const anyDraft = settingsDirty || Object.values(drafts).some(value => value.text.trim()) || Boolean(target.trim() || task !== defaultTask);
-  const closeState = useRef({ busy, anyDraft }); closeState.current = { busy, anyDraft };
-  const close = async () => {
-    setClosing(true); setError('');
-    try { await api('shutdown_workspace'); }
-    catch (error) { setError(errorText(error)); setClosing(false); }
-  };
-  useEffect(() => {
-    let alive = true; const disposers: (() => void)[] = [];
-    const register = (promise: Promise<() => void>) => { void promise.then(dispose => { if (alive) disposers.push(dispose); else dispose(); }).catch(() => {}); };
-    register(subscribe('close-requested', event => {
-      if (closeState.current.busy || closeState.current.anyDraft || event.payload.busy) setConfirmation({ kind: 'close', busy: closeState.current.busy || event.payload.busy });
-      else void close();
-    }));
-    try {
-      register(getCurrentWebview().onDragDropEvent(event => {
-        if (event.payload.type === 'drop' && event.payload.paths[0]) { setTarget(event.payload.paths[0]); setNewTask(true); }
-      }));
-    } catch { /* A browser preview has no native drop surface. */ }
-    const keyboard = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); setNewTask(true); }
-    };
-    window.addEventListener('keydown', keyboard);
-    return () => { alive = false; disposers.forEach(dispose => dispose()); window.removeEventListener('keydown', keyboard); };
-  }, []);
+  const { close, closing } = useDesktopLifecycle({ busy, hasDraft: anyDraft,
+    onConfirm: busy => setConfirmation({ kind: 'close', busy }),
+    onTarget: path => { if (path) setTarget(path); setNewTask(true); }, onError: setError });
   const command = async (action: () => Promise<unknown>) => {
     setPending(true); setError('');
     try { await action(); workspace.refresh(); }
