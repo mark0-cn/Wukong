@@ -36,7 +36,7 @@ export default function App() {
   useEffect(() => {
     if (!host || checkedUpdates.current) return;
     checkedUpdates.current = true;
-    void api<UpdateStatus>('update_action', { action: 'status', epoch: host.epoch }).then(status => {
+    void api('update_action', { action: 'status', epoch: host.epoch }).then(status => {
       if (status.needs_setup || status.pending) setUpdates(true);
       else void api('update_action', { action: 'check', epoch: host.epoch }).catch(() => {});
     }).catch(() => {});
@@ -67,7 +67,7 @@ export default function App() {
   useEffect(() => {
     let alive = true; const disposers: (() => void)[] = [];
     const register = (promise: Promise<() => void>) => { void promise.then(dispose => { if (alive) disposers.push(dispose); else dispose(); }).catch(() => {}); };
-    register(subscribe<{ busy: boolean }>('close-requested', event => {
+    register(subscribe('close-requested', event => {
       if (closeState.current.busy || closeState.current.anyDraft || event.payload.busy) setConfirmation({ kind: 'close', busy: closeState.current.busy || event.payload.busy });
       else void close();
     }));
@@ -92,12 +92,12 @@ export default function App() {
   const onDirty = useCallback((value: boolean) => setSettingsDirty(value), []);
   const start = async () => {
     if (!host) return;
-    const id = await api<string>('start_run', { epoch: host.epoch, target, task });
+    const id = await api('start_run', { epoch: host.epoch, target, task });
     workspace.selectRun(id); workspace.refresh(); setNewTask(false); setTarget(''); setTask(defaultTask); setTab('conversation');
   };
   const resumeRun = async (budget: Budget) => {
     if (!host || !resume) return;
-    const id = await api<string>('resume_run', { epoch: host.epoch, run: resume.id, budget });
+    const id = await api('resume_run', { epoch: host.epoch, run: resume.id, budget });
     workspace.selectRun(id); workspace.refresh(); setResume(undefined); setTab('conversation');
   };
   return <div className="app-shell">

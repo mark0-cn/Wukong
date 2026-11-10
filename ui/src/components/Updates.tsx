@@ -4,11 +4,8 @@ import { api, errorText } from '../bridge';
 import { Modal } from './Modal';
 import { StorageLocations } from './StorageLocations';
 
-export type UpdateStatus = {
-  version: string; phase: string; message: string; available: string | null; notes: string;
-  downloaded: number; total: number | null; prepared: string | null; recovery: string | null;
-  needs_setup: boolean; pending: boolean;
-};
+import type { UpdateAction, UpdateStatus } from '../commands';
+export type { UpdateStatus } from '../commands';
 export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose: () => void; onChanged: () => void }) {
   const [status, setStatus] = useState<UpdateStatus>();
   const [working, setWorking] = useState(false);
@@ -17,13 +14,13 @@ export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose:
   const [confirm, setConfirm] = useState<'install' | 'recover' | 'clean_cache' | 'clean_images'>();
   useEffect(() => {
     let alive = true;
-    const refresh = () => { void api<UpdateStatus>('update_action', { action: 'status', epoch }).then(value => { if (alive) setStatus(value); }).catch(e => { if (alive) setError(errorText(e)); }); };
+    const refresh = () => { void api('update_action', { action: 'status', epoch }).then(value => { if (alive) setStatus(value); }).catch(e => { if (alive) setError(errorText(e)); }); };
     refresh(); const timer = window.setInterval(refresh, 1000);
     return () => { alive = false; window.clearInterval(timer); };
   }, [epoch]);
-  const run = async (action: string) => {
+  const run = async (action: UpdateAction) => {
     setWorking(true); setError(''); setConfirm(undefined);
-    try { setStatus(await api<UpdateStatus>('update_action', { action, epoch })); onChanged(); }
+    try { setStatus(await api('update_action', { action, epoch })); onChanged(); }
     catch (e) { setError(errorText(e)); }
     finally { setWorking(false); }
   };

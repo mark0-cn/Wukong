@@ -1,0 +1,48 @@
+import type { Budget, ConfigDocument, ConfigEdit, Envelope, EvidenceView, FindingDetails, Json, ToolRecord } from './types';
+
+export type UpdateAction = 'status' | 'check' | 'prepare' | 'setup' | 'install' | 'recover' | 'integrate' | 'clean_cache' | 'clean_images';
+export interface UpdateStatus {
+  version: string; phase: string; message: string; available: string | null; notes: string;
+  downloaded: number; total: number | null; prepared: string | null; recovery: string | null;
+  needs_setup: boolean; pending: boolean;
+}
+export type WorkbenchRequest =
+  | { action: 'status' | 'up' | 'down' | 'doctor' | 'list' }
+  | { action: 'import'; source: string; id: string; binary: string | null }
+  | { action: 'prepare' | 'build' | 'start' | 'stop'; id: string }
+  | { action: 'select'; id: string | null }
+  | { action: 'export'; destination: string };
+type Epoch = { epoch: number };
+type Run = Epoch & { run: string };
+type Item = Run & { id: string };
+type Command<A, R> = { args: A; result: R };
+
+/** Native command boundary: result types follow command names, never callers. */
+export interface Commands {
+  workspace_read: Command<{ request: { run: string | null; agent: string | null; event_limit: number; known_revision: string | null } }, Envelope>;
+  start_run: Command<Epoch & { target: string; task: string }, string>;
+  resume_run: Command<Run & { budget: Budget }, string>;
+  pause_run: Command<Run, void>;
+  stop_agent: Command<Run & { agent: string }, void>;
+  send_message: Command<Run & { agent: string; generation: number; text: string; followUp: boolean }, Json>;
+  pick_target: Command<undefined, string | null>;
+  pick_directory: Command<undefined, string | null>;
+  export_report: Command<Run, string | null>;
+  config_read: Command<Epoch, ConfigDocument>;
+  config_open: Command<Epoch, ConfigDocument | null>;
+  config_preview: Command<{ document: ConfigDocument; edits: ConfigEdit[] }, ConfigDocument>;
+  config_save: Command<Epoch & { document: ConfigDocument; edits: ConfigEdit[] }, ConfigDocument>;
+  finding_details: Command<Item, FindingDetails>;
+  evidence_preview: Command<Item & { offset: number }, EvidenceView>;
+  tool_details: Command<Item, ToolRecord>;
+  shutdown_workspace: Command<undefined, void>;
+  update_action: Command<Epoch & { action: UpdateAction }, UpdateStatus>;
+  update_storage: Command<Epoch, { data_dir: string; cache_dir: string }>;
+  update_cache_directory: Command<Epoch & { destination: string }, string>;
+  update_data_directory: Command<Epoch & { destination: string }, void>;
+  workbench_action: Command<Epoch & { request: WorkbenchRequest }, Json>;
+}
+export interface Events {
+  'workspace-changed': unknown;
+  'close-requested': { busy: boolean };
+}

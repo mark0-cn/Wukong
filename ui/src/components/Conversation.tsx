@@ -22,7 +22,7 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
     if (!open) return;
     let alive = true;
     setLoading(true); setError('');
-    void api<ToolRecord>('tool_details', { epoch: context.epoch, run: context.run, id: display.call_id })
+    void api('tool_details', { epoch: context.epoch, run: context.run, id: display.call_id })
       .then(value => { if (alive) setRecord(value); }).catch(error => { if (alive) setError(errorText(error)); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };

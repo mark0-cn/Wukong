@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api, errorText } from '../bridge';
+import type { WorkbenchRequest } from '../commands';
 import { Modal } from './Modal';
 
 export function Workbench({ epoch, onClose, onChanged }: { epoch: number; onClose: () => void; onChanged: () => void }) {
@@ -10,7 +11,7 @@ export function Workbench({ epoch, onClose, onChanged }: { epoch: number; onClos
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<unknown>();
   const [error, setError] = useState('');
-  const run = async (request: Record<string, unknown>) => {
+  const run = async (request: WorkbenchRequest) => {
     setBusy(true); setError('');
     try { setResult(await api('workbench_action', { epoch, request })); onChanged(); }
     catch (e) { setError(errorText(e)); }

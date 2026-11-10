@@ -34,7 +34,7 @@ export function useWorkspace() {
       if (inFlight) { requested = true; return; }
       inFlight = true;
       try {
-        const response = await api<Envelope>('workspace_read', { request: {
+        const response = await api('workspace_read', { request: {
           run: run ?? null, agent: agent ?? null, event_limit: limit, known_revision: revision ?? null,
         } });
         if (!alive) return;

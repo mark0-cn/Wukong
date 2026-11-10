@@ -54,7 +54,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     if (!open || document) return;
     let alive = true;
     setBusy(true); setError('');
-    void api<ConfigDocument>('config_read', { epoch: host.epoch }).then(value => { if (alive) { setBusy(false); setDocument(value); setLoadedEpoch(host.epoch); } })
+    void api('config_read', { epoch: host.epoch }).then(value => { if (alive) { setBusy(false); setDocument(value); setLoadedEpoch(host.epoch); } })
       .catch(error => { if (alive) setError(errorText(error)); }).finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; };
   }, [open, document, host.epoch]);
@@ -63,7 +63,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     if (dirty && !window.confirm('放弃当前设置草稿并重新加载？')) return;
     setBusy(true); setError('');
     try {
-      const value = await api<ConfigDocument | null>(choose ? 'config_open' : 'config_read', { epoch: host.epoch });
+      const value = await api(choose ? 'config_open' : 'config_read', { epoch: host.epoch });
       if (value) { setDocument(value); setEdits({}); setLoadedEpoch(host.epoch); }
     } catch (error) { setError(errorText(error)); }
     finally { setBusy(false); }
@@ -72,7 +72,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     if (!document) return;
     setBusy(true); setError('');
     try {
-      const value = await api<ConfigDocument>('config_preview', { document, edits: patch() });
+      const value = await api('config_preview', { document, edits: patch() });
       setDocument(value); setEdits({}); setRaw(value => !value);
     } catch (error) { setError(errorText(error)); }
     finally { setBusy(false); }
@@ -81,7 +81,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     if (!document) return;
     setBusy(true); setError('');
     try {
-      const value = await api<ConfigDocument>('config_save', { epoch: loadedEpoch, document, edits: patch() });
+      const value = await api('config_save', { epoch: loadedEpoch, document, edits: patch() });
       setDocument(value); setEdits({}); onDirty(false); onSaved(); onClose();
       // A later opening reads the current document and workspace epoch.
       setDocument(undefined);
