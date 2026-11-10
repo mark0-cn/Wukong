@@ -56,6 +56,14 @@ mod verification_protocol;
 use catalog::builtins;
 pub(crate) use catalog::child_schema;
 
+/// Current builtin display labels share the execution registry.
+pub fn tool_display_title(name: &str) -> Option<&'static str> {
+    builtins()
+        .iter()
+        .find(|item| item.definition.name.as_str() == name)
+        .map(|item| item.display_title)
+}
+
 /// Machine-readable schemas from the same registry used for model requests.
 pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
     builtins()

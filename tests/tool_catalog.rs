@@ -74,3 +74,13 @@ fn catalog_export_does_not_open_configuration_or_state() -> Result<()> {
     assert!(!directory.path().join("must-not-exist").exists());
     Ok(())
 }
+
+#[test]
+fn every_current_tool_has_a_display_label_and_unknown_tools_keep_their_name() {
+    for tool in wukong::tools::builtin_tool_definitions() {
+        let title = wukong::tools::tool_display_title(tool.name.as_str()).expect("missing label");
+        assert!(!title.is_empty());
+        assert_ne!(title, tool.name.as_str());
+    }
+    assert!(wukong::tools::tool_display_title("mcp_custom_tool").is_none());
+}
