@@ -24,6 +24,7 @@ RUN mkdir -p /opt/re-agent \
     && python3 -c "import pwn,angr,elftools,pygdbmi; print('toolchain imports OK')" \
     && pwninit --version && /opt/pwndbg/bin/pwndbg --version
 COPY workers/runtime /opt/re-agent/runtime
+COPY workers/tests /opt/re-agent/tests
 COPY workers/ghidra /opt/re-agent/ghidra
 COPY workers/deps/gef.py /opt/gef.py
 COPY workers/toolchain.lock.json /opt/re-agent/toolchain.lock.json

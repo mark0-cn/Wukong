@@ -36,6 +36,7 @@ class ScopeTests(unittest.TestCase):
         for paths, expected in [(["README.md", "docs/development/releases.md"], (False, False, False)),
                                 (["ui/src/App.tsx"], (False, True, False)),
                                 (["workers/runtime/requirements.txt"], (False, False, True)),
+                                (["workers/tests/unit/test_profile.py"], (False, False, True)),
                                 (["fixtures/analysis/test_analysis.py", "ui/package.json"], (False, True, True))]:
             with self.subTest(paths=paths):
                 scope = select_scope(paths, "pull_request")

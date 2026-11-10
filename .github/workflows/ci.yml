@@ -126,7 +126,7 @@ jobs:
           python -m pip install -r workers/runtime/requirements.txt pyelftools
           python -m compileall -q workers/runtime scripts
           python -m unittest discover -s tests/automation -p 'test_*.py' -v
-          python -m unittest discover -s workers/runtime -p 'test_*.py' -v
+          python workers/tests/run.py unit -p 'test_*.py' -v
           python fixtures/analysis/test_analysis.py
           python fixtures/analysis/test_compare_runs.py
 

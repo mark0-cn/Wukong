@@ -29,7 +29,7 @@ cargo test --test tool_catalog
 cargo fmt --all -- --check
 cargo clippy --offline --all-targets -- -D warnings
 cargo test --offline --all-targets
-python -m unittest discover -s workers/runtime -p test_bridge.py
+python workers/tests/run.py unit -p test_bridge.py
 ```
 
 运行 worker 测试前，在虚拟环境中安装 `workers/runtime/requirements.txt` 并确保 `python` 命令可用。普通测试使用可信本地夹具和回环服务；被忽略的真实 Ghidra/Docker 验收需要按各测试说明配置环境。

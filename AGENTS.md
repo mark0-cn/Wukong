@@ -68,7 +68,7 @@
 | --- | --- |
 | Rust 逻辑、协议或状态 | `cargo fmt --all -- --check`；相关测试；需要完整检查时运行 `cargo clippy --locked --all-targets -- -D warnings` 和 `cargo test --locked --all-targets` |
 | 前端 | `npm ci`、`npm test`、`npm run build`；交互变化补充相应界面验证 |
-| Python worker | 安装 worker requirements，运行相关测试；完整测试入口为 `python -m unittest discover -s workers/runtime -p 'test_*.py'`，分析夹具见 CI |
+| Python worker | 安装 worker requirements，运行相关测试；完整测试入口为 `python workers/tests/run.py unit -p 'test_*.py'`，分析夹具见 CI |
 | 发布脚本或安装器 | `python -m scripts.release.cli check`、`python -m unittest discover -s tests/automation -p 'test_*.py'`；安装器改动运行 `tests/automation/test-online-package.ps1` 和 `tests/automation/test-installer.ps1` |
 | Actions、Docker 或工具链 | 工作流语法检查、下载校验及 Bake 配置检查；按影响补充实际构建、容器验收或手动发布演练 |
 | 纯文档 | 检查内容、链接目标及 `git diff --check`；不为纯文档编辑新增行为测试 |
