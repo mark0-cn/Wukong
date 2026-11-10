@@ -32,6 +32,30 @@ App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发
 
 本项目 GitHub 仓库公开，标准托管 runner 的运行时间免费；镜像首次无缓存构建较慢。缓存写入同一公开 Docker Hub 仓库的 `buildcache` 标签。只保留客户端和报告类 Actions artifacts，默认 7–14 天过期。
 
+## 本地一条 Cargo 命令打包
+
+在仓库根目录执行：
+
+```powershell
+cargo package-local
+```
+
+入口使用独立的轻量 Rust launcher 调用现有 Python 发布工具，依次执行 `npm ci`、前端构建、Windows x64 MSVC Release 编译及在线 ZIP 打包。不会创建 tag、推送镜像或发布 GitHub Release。
+
+前提是 Windows x64，已安装项目固定版本的 Rust、MSVC C++ 编译工具、Node.js/npm 和 Python 3.11+。源码必须已提交且工作区干净。先从**当前源码提交**对应发布运行的 `image-validation` artifact 中取出 `image.json`，放到 `target/release-validation/image.json`。镜像应已经在 Docker Hub 可拉取；该命令不构建或上传镜像，也不把旧镜像冒充为当前提交的产物。
+
+默认输出到新目录 `target/local-package/`，包含 `wukong-v<版本>-windows-amd64.zip`、`release.json` 和 `SHA256SUMS`。已有输出目录会拒绝覆盖，可以指定其他目录。参数路径均相对仓库根目录：
+
+```powershell
+cargo package-local --image-metadata target/validation/image.json --output target/packages/local-1
+cargo package-local --check
+cargo package-local --help
+```
+
+`--check` 仅检查平台、版本、工作区、镜像元数据和工具入口，不进行编译或联网验收；不能替代镜像验收。缺少元数据、镜像与源码提交不一致或构建失败时立即停止。打包过程复用已验证的元数据快照，并在编译后再次检查源码状态。实际的镜像可拉取性由原验收及安装时的 digest 拉取验证。
+
+独立 launcher 的检查命令为 `cargo fmt --manifest-path xtask/Cargo.toml -- --check` 和 `cargo clippy --locked --manifest-path xtask/Cargo.toml --target-dir target/xtask -- -D warnings`。
+
 ## 日常 CI
 
 `ci.yml` 在 `master` push、面向 `master` 的 PR 和手动触发时运行。PR 按改动范围选择检查；`master`、手动运行、版本 PR 和发布调用执行全量检查。Windows 执行 Rust fmt/clippy/test、前端测试与构建、在线包校验测试；Linux 执行 Python runtime 和分析评测工具测试。外部 PR 不获取 Docker Hub Secret。范围规则与缓存策略见 [GitHub 维护功能](github-maintenance.md)。

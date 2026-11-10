@@ -2,6 +2,8 @@
 
 Python 入口从仓库根目录使用 `python -m` 调用，避免依赖脚本同目录导入或调用者的 `PYTHONPATH`。
 
+本地 Windows 在线打包使用 `cargo package-local`，由 `.cargo/config.toml` 和独立 `xtask/` launcher 调用 `scripts.release.local_package`。镜像元数据准备、参数和产物见[发布文档](../docs/development/releases.md#本地一条-cargo-命令打包)。
+
 | 目录 | 职责 / 入口示例 |
 | --- | --- |
 | `ci/` | 范围选择、运行摘要、关闭 PR 缓存回收及 runner 磁盘准备 |

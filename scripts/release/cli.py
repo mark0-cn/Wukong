@@ -52,6 +52,11 @@ def package(binary, metadata, output, tag):
     return manifest
 
 
+def checksums(directory):
+    files = sorted(p for p in directory.iterdir() if p.is_file() and p.name != "SHA256SUMS")
+    (directory / "SHA256SUMS").write_text("".join(f"{sha256(p)}  {p.name}\n" for p in files), encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -74,8 +79,7 @@ def main():
     elif args.command == "package":
         print(json.dumps(package(args.binary, args.image_metadata, args.output, args.tag)))
     else:
-        files = sorted(p for p in args.directory.iterdir() if p.is_file() and p.name != "SHA256SUMS")
-        (args.directory / "SHA256SUMS").write_text("".join(f"{sha256(p)}  {p.name}\n" for p in files), encoding="utf-8")
+        checksums(args.directory)
 
 
 if __name__ == "__main__":
