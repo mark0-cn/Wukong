@@ -1,0 +1,8 @@
+[package]
+name = "wukong-xtask"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Keep the launcher independent of the desktop application's dependencies.
+[workspace]
