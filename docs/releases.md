@@ -43,7 +43,7 @@ Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。�
 1. 打开 **Actions → Prepare Version PR → Run workflow**，分支选择 `master`，填写完整的新 tag，例如 `v0.2.0`。正常准备版本时不要勾选 `dry_run`。
 2. 工作流同步 `Cargo.toml`、`Cargo.lock` 中 re-agent 的版本、`tauri.conf.json`、`ui/package.json`、`package-lock.json` 中 ui 的版本；检查格式、版本递增和一致性，运行发布脚本测试，然后创建 `codex/release-v0.2.0` 分支及目标为 `master` 的 PR。
 3. App 创建 PR 后，原生 CI 自动启动并显示在 PR 页面。Windows、Linux、summary 通过后，由维护者确认合并；**合并版本 PR 即批准发布**。
-4. 合并提交在 `master` 上执行全量 CI。成功后 **Tag Merged Release** 自动校验并推送 tag，指向经过检查的合并提交；即使随后 `master` 前进，也不会误标到新提交。
+4. 合并提交在 `master` 上执行全量 CI，并行预构建 Windows Release 客户端和 Linux 验收客户端。全部成功后 **Tag Merged Release** 自动校验并推送 tag，指向经过检查的合并提交；即使随后 `master` 前进，也不会误标到新提交。
 5. tag 自动触发 **Build and Publish**，完成构建、验收并发布 Docker Hub 镜像和 GitHub Release。无需本地操作或手动推送 tag。
 
 `Prepare Version PR` 使用标准 GitHub 托管 runner 和发布 App，不需要个人 PAT；内置 `GITHUB_TOKEN` 仅承担只读工作。
@@ -70,14 +70,18 @@ tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `mas
 
 `release.yml` 自动执行：
 
-1. 校验版本与来源；并行执行完整 CI、Windows Release 编译和镜像构建。
-2. 使用 Bake 联合构建基础 worker 和 workbench，不依赖本机镜像；所有外部工具按 `workers/toolchain.lock.json` 下载并校验。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
+1. 校验版本与来源；查询同仓库、同 SHA 的成功 master push CI，核对当前尝试的 changes/windows/linux/summary 后复用结果。无合格记录或 API 查询失败时执行完整 CI。
+2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
 3. 新 runner 按 digest 拉取候选，运行网络隔离、固定目标转发、LaunchSpec、归档测试，以及 host CLI 的 doctor、题目导入/构建/提取/启动/连接、GDB 附加、更新回滚。
 4. 生成 Windows 在线 zip、release.json、SHA256SUMS、doctor.json、validation-summary.json。
 5. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
 6. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
 
 固定版本不会覆盖已发布镜像。GitHub 与 Docker Hub 没有跨服务原子事务，失败时可能留有候选或草稿/固定镜像标签；修复后使用 Actions **Re-run failed jobs**，复用原始 artifacts 和候选 digest。已经发布的附件若与重试产物不同，流程拒绝覆盖，应发布新版本。
+
+完整重跑也可复用上一尝试中成功上传、尚未过期的客户端；其他同 SHA 的可信运行也可提供产物。仅接受当前所查询尝试中成功的构建 job，PR 产物不进入发布链。元数据不符、文件损坏会直接失败，不执行可疑客户端。产物过期、被删除或构建配方变化时需要重建；缓存只加速编译，不能替代这些校验。
+
+客户端和报告保留 14 天。客户端以低压缩级别上传；在线 ZIP 上传不再重复压缩。摘要只下载 `release-report` 小型元数据与验收报告，不下载完整安装包。运行名区分 CI、版本打 tag、正式发布与手动演练，摘要链接到实际复用的运行。
 
 发布使用全局 concurrency 锁，避免并行更改 latest。GitHub concurrency 对待运行任务不保证 FIFO；不要连续推送多个待发布 tag，若某次等待任务被替换，手动重跑该 tag 对应的工作流。
 
@@ -91,6 +95,8 @@ Docker Hub 如支持也可将精确版本标签设为不可变，但 `latest`、
 ## 演练与排错
 
 Actions → Build and Publish → Run workflow，选择默认分支。手动演练会推送私有候选镜像并生成 `online-release` artifact，**不创建 GitHub Release、不更新版本标签或 latest**。正式发布由 tag push 触发。
+
+首次预热或验证客户端复用时，先运行 **CI**，选择 `master` 并勾选 `build_release_clients`；成功后在同一提交上运行发布演练。正常版本合并自动预构建，不需每次手工预热。普通 master push 不额外编译 Release 客户端。
 
 Actions → Tag Merged Release → Run workflow，选择 `master`，填写一个已成功的 master push CI run ID，只读检查该提交是否符合自动打 tag 条件。手动入口永远不创建 tag，也不签发 App token；只有成功 CI 的 `workflow_run` 事件可以进入自动打 tag 步骤。
 

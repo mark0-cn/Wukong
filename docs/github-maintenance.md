@@ -59,12 +59,14 @@ Rust、公共脚本、锁文件、工作流、未知路径或版本准备 PR 都
 重命名同时检查旧路径和新路径；计算范围失败直接阻止 CI 通过。
 Windows 版本一致性、发布脚本和安装器测试始终运行。`master`、手动运行和发布调用始终全量。
 
-`summary` 是最终检查门禁：要求范围计算及 Windows 检查成功，Linux 的结果必须与选择范围一致。
+`summary` 是最终检查门禁：要求范围计算及 Windows 检查成功，Linux 的结果必须与选择范围一致；选中的版本客户端预构建也必须成功。
 以后配置 required checks 时应包含 `summary`，不要仅依赖可能按规则跳过的 `linux`。
 正常范围跳过会明确记录，失败/取消/异常跳过不能通过最终门禁。
 
 Rust 使用固定工具链和参数派生缓存键，主分支负责写入，PR 只恢复。
 CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。首次或工具链/参数变化仍需重新编译。
+`windows-client-v1` 和 `linux-client-v1` 在 master 版本预构建或显式预热时写入，tag 只恢复。
+这使不同版本 tag 都能读取 master 缓存，避免把大量编译缓存只保存在无法跨 tag 复用的作用域。
 摘要显示精确缓存命中状态及恢复、保存、fmt、Clippy、test 的独立耗时。
 非精确命中可能是回退缓存或无缓存，实际恢复键见 Rust cache 日志。
 Clippy 与测试保持在同一 Windows job 复用编译目录，不为并行而重复下载和编译依赖。
@@ -84,3 +86,23 @@ CI 与 Release 在各任务结束后运行 `summary` job，包括前面任务失
 API 暂不可用时展示缺失提示，不把未知耗时写成 0，也不把缺失验收报告当成通过。
 摘要 job 在运行被强制取消或 GitHub 调度异常时仍可能无法执行，原始 job 日志为准。
 工具链检查有独立摘要及 30 天报告，Release 的在线包与验收报告保留 14 天。
+
+### Docker 与附件缓存
+
+`Cache Worker Dependencies` 在 master 的锁文件、下载器或该工作流变更时预热，也可手动运行。
+缓存键包含工具锁文件哈希；发布恢复 master 附件缓存，逐个 SHA256 校验后使用。
+默认最多并行下载 3 个附件，可用 `--jobs 1` 串行下载；临时文件校验成功才替换正式文件。
+网络错误或损坏内容不能作为有效缓存输入。缓存被淘汰时自动重新下载。
+
+workbench 继承独立的稳定 toolchain stage，runtime、prompts、版本标签在工具安装之后加入。
+各工具只挂载自己的附件，某个附件变化不会仅因共享目录变化就使所有附件层失效。
+Docker Hub `buildcache` 保存完整中间层。pip cache mount 用于同一 builder 内复用；
+标准临时 runner 之间的持久化依靠 registry 层缓存和附件缓存，不假定 cache mount 自动跨机器保留。
+
+### 关闭 PR 后的缓存回收
+
+`Clean Closed PR Caches` 每天北京时间 06:41 运行，读取最新 PR 状态后按缓存 ID 删除：
+已关闭 PR 的 `refs/pull/N/merge` 缓存，以及对应已关闭 Dependabot PR 的机器人分支缓存。
+master、tag、仍打开的 PR 及未知普通分支均保留。定时任务可能延迟。
+手动运行默认只列出候选；勾选 `apply` 才删除。摘要显示数量和回收字节数。
+只在 master 上执行，不使用 `pull_request_target` 或运行 PR 代码，不需要个人管理员 Token。
