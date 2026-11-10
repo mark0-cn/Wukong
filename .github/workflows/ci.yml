@@ -13,7 +13,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Let master finish and populate caches; superseded PR runs can be cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   windows:
@@ -32,8 +33,10 @@ jobs:
         with:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        id: rust-cache
         with:
-          key: windows-checks-v1
+          shared-key: windows-checks-v2
+          save-if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
       - name: Version and release tooling tests
         run: |
           python scripts/release.py check
