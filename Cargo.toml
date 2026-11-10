@@ -19,7 +19,7 @@ anyhow = "1"
 async-trait = "0.1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env", "string"] }
 futures = "0.3"
 rfd = "0.15"
 hex = "0.4"

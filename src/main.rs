@@ -1,8 +1,7 @@
-use clap::Parser;
-
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    let mut cli = wukong::interface::Cli::parse();
+    let mut cli = wukong::interface::Cli::parse_localized();
+    let locale = cli.resolved_locale();
     let recovery = std::env::var_os("APPIMAGE")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
@@ -13,10 +12,8 @@ async fn main() -> std::process::ExitCode {
         .is_some_and(|name| name == "Wukong-Recovery");
     if recovery && cli.command.is_none() {
         if !rfd::MessageDialog::new()
-            .set_title("Wukong · 恢复上一版本")
-            .set_description(
-                "请先关闭 Wukong。恢复将重新安装上一版本客户端和工具环境，保留题目与模型配置。",
-            )
+            .set_title(locale.text("cli-recovery-title"))
+            .set_description(locale.text("cli-recovery-description"))
             .set_buttons(rfd::MessageButtons::OkCancel)
             .show()
             .eq(&rfd::MessageDialogResult::Ok)
@@ -53,11 +50,12 @@ async fn main() -> std::process::ExitCode {
     match wukong::interface::run(cli).await {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("wukong: {error:#}");
+            let message = wukong::i18n::Message::from_error(error).render(locale);
+            eprintln!("wukong: {message}");
             if desktop || recovery {
                 rfd::MessageDialog::new()
-                    .set_title("Wukong · 启动失败")
-                    .set_description(format!("{error:#}"))
+                    .set_title(locale.text("cli-startup-failed"))
+                    .set_description(message)
                     .set_level(rfd::MessageLevel::Error)
                     .show();
             }

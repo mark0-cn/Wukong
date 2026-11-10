@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ locale.tag() }}">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Binary analysis report</title>
+<title>{{ self.label("report-title") }}</title>
 <style>
 body{max-width:1050px;margin:2rem auto;padding:0 1rem;font:16px/1.6 system-ui;color:#202a36}
 code,pre{background:#f1f4f7;overflow-wrap:anywhere}pre{padding:1rem;white-space:pre-wrap}
@@ -13,37 +13,37 @@ td,th{border:1px solid #cbd2da;padding:.5rem;text-align:left}.unconfirmed{color:
 </style>
 </head>
 <body>
-<h1>Binary analysis report</h1>
-<p>Run: <code>{{ snapshot.run.id }}</code></p>
-<p>Target SHA256: <code>{{ snapshot.run.target_sha256 }}</code></p>
-<p>Status: {{ snapshot.run.status }}</p>
-<h2>Task</h2><pre>{{ snapshot.run.task }}</pre>
-<h2>Summary</h2><pre>{{ summary }}</pre>
-<h2>Findings</h2>
+<h1>{{ self.label("report-title") }}</h1>
+<p>{{ self.label("report-run") }}: <code>{{ snapshot.run.id }}</code></p>
+<p>{{ self.label("report-target") }}: <code>{{ snapshot.run.target_sha256 }}</code></p>
+<p>{{ self.label("report-status") }}: {{ status }}</p>
+<h2>{{ self.label("report-task") }}</h2><pre>{{ snapshot.run.task }}</pre>
+<h2>{{ self.label("report-summary") }}</h2><pre>{{ summary }}</pre>
+<h2>{{ self.label("report-findings") }}</h2>
 {% for entry in findings %}
 <article>
 <h3>{{ entry.finding.title }}</h3>
 <p>ID: <code>{{ entry.finding.id }}</code></p>
-<p class="unconfirmed">Recorded stage: {{ entry.label }}</p>
+<p class="unconfirmed">{{ self.label("report-stage") }}: {{ entry.label }}</p>
 <pre>{{ entry.finding.description }}</pre>
 {% for (name, value) in entry.fields %}<h4>{{ name }}</h4><pre>{{ value }}</pre>{% endfor %}
 {% if let Some(verification) = entry.verification %}
-<p>Independent replay: {{ verification.successes }} / {{ verification.attempts }} successful attempts.</p>
-<h4>Verified impact</h4><pre>{{ verification.impact }}</pre>
+<p>{{ self.label("report-replay") }}: {{ verification.successes }} / {{ verification.attempts }} {{ self.label("report-attempts") }}.</p>
+<h4>{{ self.label("report-verified-impact") }}</h4><pre>{{ verification.impact }}</pre>
 {% endif %}
-<p>Evidence IDs: {{ entry.evidence }}</p>
+<p>{{ self.label("report-evidence") }}: {{ entry.evidence }}</p>
 </article>
 {% else %}
-<p>No findings recorded. This does not prove the target is free of vulnerabilities.</p>
+<p>{{ self.label("report-no-findings") }}</p>
 {% endfor %}
-<h2>Coverage</h2>
-<table><thead><tr><th>Scope</th><th>Kind</th><th>Outcome</th><th>Notes</th></tr></thead><tbody>
+<h2>{{ self.label("report-coverage") }}</h2>
+<table><thead><tr><th>{{ self.label("report-scope") }}</th><th>{{ self.label("report-kind") }}</th><th>{{ self.label("report-outcome") }}</th><th>{{ self.label("report-notes") }}</th></tr></thead><tbody>
 {% for coverage in snapshot.coverage %}
 <tr><td>{{ coverage.scope }}</td><td>{{ coverage.kind }}</td><td>{{ coverage.outcome }}</td><td>{{ coverage.notes }}</td></tr>
 {% endfor %}
 </tbody></table>
-<h2>Accounting</h2>
-<p>{{ snapshot.agents.len() }} agents; {{ snapshot.calls.len() }} tool calls; {{ snapshot.evidence.len() }} evidence records; {{ snapshot.run.total_tokens }} tokens; USD {{ cost }}.</p>
-<p>See report.json and replay.json for environment, conditions, exact tool arguments, and evidence references.</p>
+<h2>{{ self.label("report-accounting") }}</h2>
+<p>{{ accounting }}</p>
+<p>{{ self.label("report-raw-guide") }}</p>
 </body>
 </html>

@@ -473,7 +473,7 @@ impl Service {
             "{run}-{}",
             chrono::Local::now().format("%Y%m%d-%H%M%S")
         ));
-        report::export(&context.store, run, &path)?;
+        report::export_with_locale(&context.store, run, &path, super::preferences::locale())?;
         self.notice(
             false,
             UiMessage::new("system-report-exported").arg("path", path.display().to_string()),

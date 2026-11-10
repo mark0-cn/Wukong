@@ -168,6 +168,29 @@ fn exports_complete_original_bundle_redacts_config_and_does_not_assert_unverifie
         b"original crash log"
     );
     assert!(report::export(&store, &run_id, &output).is_err());
+    let translated = temp.path().join("bundle-zh");
+    report::export_with_locale(&store, &run_id, &translated, wukong::i18n::Locale::ZhCn).unwrap();
+    report::verify_bundle(&translated).unwrap();
+    let translated_html = fs::read_to_string(translated.join("report.html")).unwrap();
+    assert!(translated_html.contains("lang=\"zh-CN\""));
+    assert!(translated_html.contains("独立验证缺失或不完整"));
+    assert!(!translated_html.contains("<script>"));
+    let translated_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(translated.join("report.json")).unwrap()).unwrap();
+    for field in ["snapshot", "finding_assessments", "evidence_index"] {
+        assert_eq!(translated_json[field], json[field]);
+    }
+    for file in [
+        artifact,
+        "replay.json",
+        "config.redacted.json",
+        "target/sample.bin",
+    ] {
+        assert_eq!(
+            fs::read(output.join(file)).unwrap(),
+            fs::read(translated.join(file)).unwrap()
+        );
+    }
 }
 
 #[test]

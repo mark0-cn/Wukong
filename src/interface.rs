@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
+mod localization;
 
 #[derive(Parser)]
 #[command(
@@ -20,6 +21,10 @@ use tokio_util::sync::CancellationToken;
     about = "Strix-inspired Rust/Rig binary analysis agents"
 )]
 pub struct Cli {
+    #[arg(long, global = true, env = "WUKONG_LOCALE", default_value = "auto", value_parser = ["auto", "en-US", "zh-CN"])]
+    pub locale: String,
+    #[arg(long, global = true, env = "WUKONG_OUTPUT_LANGUAGE", value_enum)]
+    pub output_language: Option<crate::i18n::Locale>,
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
     #[arg(long, global = true)]
@@ -134,6 +139,7 @@ pub enum Command {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
+    let locale = cli.resolved_locale();
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
     if matches!(command, Command::RecoverUpdate) {
         return crate::updates::recovery::recover();
@@ -147,7 +153,12 @@ pub async fn run(cli: Cli) -> Result<()> {
             let filename = artifact.url.rsplit('/').next().unwrap();
             crate::updates::manifest::verify_file(&directory.join(filename), artifact)?;
         }
-        println!("Verified signed desktop release {}", manifest.version);
+        println!(
+            "{}",
+            crate::i18n::Message::new("cli-release-verified")
+                .arg("version", manifest.version)
+                .render(locale)
+        );
         return Ok(());
     }
     if let Command::Init { path } = &command {
@@ -185,6 +196,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         path = Some(crate::desktop::paths::default_config()?);
     }
     let mut config = AppConfig::load(path.as_deref())?;
+    if let Some(language) = cli.output_language {
+        config.output_language = Some(language);
+    }
     if let Some(state) = &cli.state {
         config.state_dir = state.clone();
     }
@@ -260,8 +274,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             );
             let result = drive_with_events(prepared, cli.json).await?;
             if let Some(path) = output {
-                print_json(&serde_json::to_value(report::export(
-                    &store, &run.id, &path,
+                print_json(&serde_json::to_value(report::export_with_locale(
+                    &store, &run.id, &path, locale,
                 )?)?)?;
             }
             print_json(&serde_json::to_value(&result)?)?;
@@ -286,8 +300,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             let prepared = service.resume(&run_id, Some(budget)).await?;
             let result = drive_with_events(prepared, cli.json).await?;
             if let Some(path) = output {
-                print_json(&serde_json::to_value(report::export(
-                    &store, &run_id, &path,
+                print_json(&serde_json::to_value(report::export_with_locale(
+                    &store, &run_id, &path, locale,
                 )?)?)?;
             }
             print_json(&serde_json::to_value(&result)?)?;
@@ -330,9 +344,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Stop { agent_id, reason } => {
             print_json(&json!({"stopped_agents":service.stop(&agent_id,&reason)?}))?
         }
-        Command::Report { run_id, output } => print_json(&serde_json::to_value(report::export(
-            &store, &run_id, &output,
-        )?)?)?,
+        Command::Report { run_id, output } => print_json(&serde_json::to_value(
+            report::export_with_locale(&store, &run_id, &output, locale)?,
+        )?)?,
         Command::VerifyBundle { path } => {
             print_json(&serde_json::to_value(report::verify_bundle(&path)?)?)?
         }
@@ -401,7 +415,7 @@ async fn drive_with_events(prepared: PreparedAssessment, json_events: bool) -> R
 }
 
 /// Default objective shared by CLI and desktop assessments.
-pub(crate) const DEFAULT_TASK: &str = "分析二进制文件的用途、结构、输入输出和关键行为，还原相关格式或算法，在可行时验证观察结果，并报告证据、不确定性与限制。仅在明确要求时调查漏洞。请用中文提供简短的公开进展说明和分析结论，保留必要的技术标识与证据引用。";
+pub(crate) const DEFAULT_TASK: &str = "Analyze the binary's purpose, structure, inputs, outputs and key behavior. Recover relevant formats or algorithms, validate observations where feasible, and report evidence, uncertainty and limitations. Investigate vulnerabilities only when explicitly requested.";
 
 fn config_path(
     explicit: Option<PathBuf>,

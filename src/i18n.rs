@@ -49,6 +49,12 @@ impl Locale {
     pub fn text(self, code: &str) -> String {
         self.format(code, &BTreeMap::new())
     }
+    pub fn has(self, code: &str) -> bool {
+        match self {
+            Self::EnUs => EN.has_message(code),
+            Self::ZhCn => ZH.has_message(code),
+        }
+    }
     pub fn format(self, code: &str, args: &BTreeMap<String, serde_json::Value>) -> String {
         let bundle = match self {
             Self::EnUs => &*EN,
@@ -207,5 +213,9 @@ mod tests {
                 .ends_with("sha256=原始证据\n0x123")
         );
         assert!(message.render(Locale::ZhCn).starts_with("操作未能完成"));
+        let native = anyhow::anyhow!("raw cause: 0x42").context(Message::new("error-operation"));
+        let native = Message::from_error(native);
+        assert_eq!(native.code, "error-operation");
+        assert_eq!(native.detail.as_deref(), Some("raw cause: 0x42"));
     }
 }
