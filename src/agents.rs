@@ -16,6 +16,9 @@ pub struct SkillManifest {
     pub deliverables: Vec<String>,
     pub validation: Vec<String>,
     pub version: String,
+    pub related_tools: Vec<String>,
+    pub sources: Vec<String>,
+    pub fixtures: Vec<String>,
 }
 
 /// Discover effective content, including custom-only capabilities. Metadata never grants permissions.
@@ -61,6 +64,11 @@ pub fn skill_catalog(custom_dir: Option<&Path>) -> Result<serde_json::Value> {
             }
         }
         let custom = custom_dir.is_some_and(|dir| dir.join(format!("{name}.md")).exists());
+        if !custom && let Some(coverage) = crate::prompts::coverage::builtins().get(&name) {
+            manifest.related_tools = coverage.related_tools.clone();
+            manifest.sources = coverage.sources.clone();
+            manifest.fixtures = coverage.fixtures.clone();
+        }
         if let Some(dir) = custom_dir.filter(|_| custom) {
             let path = dir.join(format!("{name}.json"));
             if path.exists() {
@@ -369,4 +377,9 @@ mod catalog_tests {
         assert!(skill_catalog(Some(dir.path())).is_err());
         Ok(())
     }
+}
+
+/// Generated built-in method/tool/fixture index, without opening runtime state.
+pub fn skill_coverage_markdown() -> Result<String> {
+    crate::prompts::coverage::markdown()
 }

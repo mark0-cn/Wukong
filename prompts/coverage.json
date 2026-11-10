@@ -1,0 +1,109 @@
+{
+  "fsop": {
+    "related_tools": [
+      "runtime_profile",
+      "debug_command",
+      "poc_verify",
+      "verification_record"
+    ],
+    "sources": [
+      "docs/reference/pwn-knowledge.md"
+    ],
+    "fixtures": [
+      "pwn/file-buffer-trigger"
+    ]
+  },
+  "exit_handlers": {
+    "related_tools": [
+      "runtime_profile",
+      "debug_command",
+      "poc_verify",
+      "verification_record"
+    ],
+    "sources": [
+      "docs/reference/pwn-knowledge.md"
+    ],
+    "fixtures": [
+      "pwn/exit-consumer"
+    ]
+  },
+  "seccomp_io": {
+    "related_tools": [
+      "seccomp_analyze",
+      "mitigation_profile",
+      "poc_verify"
+    ],
+    "sources": [
+      "docs/reference/pwn-knowledge.md"
+    ],
+    "fixtures": [
+      "pwn/filtered-fd"
+    ]
+  },
+  "payload_constraints": {
+    "related_tools": [
+      "file_put",
+      "py_run",
+      "poc_verify"
+    ],
+    "sources": [
+      "docs/reference/pwn-knowledge.md"
+    ],
+    "fixtures": [
+      "pwn/utf8-buffer",
+      "pwn/float-roundtrip"
+    ]
+  },
+  "heap_ptmalloc": {
+    "related_tools": [
+      "runtime_profile",
+      "debug_command",
+      "poc_verify"
+    ],
+    "sources": [
+      "docs/reference/pwn-knowledge.md"
+    ],
+    "fixtures": [
+      "pwn/heap-lifetime"
+    ]
+  },
+  "formats": {
+    "related_tools": [
+      "binary_strings",
+      "function_decompile",
+      "differential_test"
+    ],
+    "sources": [
+      "docs/reference/pwn-knowledge.md"
+    ],
+    "fixtures": [
+      "pwn/compressed-input"
+    ]
+  },
+  "interpreter": {
+    "related_tools": [
+      "function_decompile",
+      "emulate_run",
+      "debug_command"
+    ],
+    "sources": [
+      "docs/reference/pwn-knowledge.md"
+    ],
+    "fixtures": [
+      "pwn/gc-stale-handle"
+    ]
+  },
+  "musl": {
+    "related_tools": [
+      "runtime_profile",
+      "libc_identify",
+      "poc_verify"
+    ],
+    "sources": [
+      "docs/reference/pwn-knowledge.md"
+    ],
+    "fixtures": [
+      "pwn/musl-format"
+    ]
+  }
+}

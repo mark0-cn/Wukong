@@ -31,6 +31,18 @@ cargo test --test tool_catalog
 
 导出目录无需模型凭据，也不会打开配置或状态目录。测试比较生成结果与已提交文档，防止工具改动后遗漏更新。
 
+## Skill 覆盖清单
+
+内置方法的工具、来源及机制夹具关联记录在 `prompts/coverage.json`，复用 `SkillManifest` 的 `related_tools`、`sources`、`fixtures` 字段。更新后生成 [覆盖清单](../reference/skill-coverage.md)：
+
+```sh
+cargo run -- skill-catalog > docs/reference/skill-coverage.md
+cargo run -- --json skill-catalog
+cargo test --test tool_catalog
+```
+
+这些字段只用于维护和查询，不授予工具权限，也不证明当前后端可用、原题复现或 Agent 解题成功率。未登记表示没有关联记录。自定义 Skill 可在原有 manifest 中填写这些字段；覆盖内置正文时不会自动继承内置夹具声明。单元测试校验内置关联的工具、来源文件及夹具 ID 存在，导出不读取模型凭据或状态目录。
+
 ## 验证
 
 ```sh

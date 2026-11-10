@@ -55,6 +55,8 @@ pub enum Command {
     },
     /// Print the built-in tool catalog without opening state or connecting to a model.
     ToolCatalog,
+    /// Print built-in skill provenance and mechanism coverage without opening state.
+    SkillCatalog,
     /// Inspect model settings and installed analysis capabilities without calling a model.
     Doctor,
     /// Parse a binary without running it or calling a model.
@@ -153,6 +155,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         println!("{}", json!({"config":path}));
         return Ok(());
     }
+    if matches!(command, Command::SkillCatalog) {
+        if cli.json {
+            print_json(&crate::agents::skill_catalog(None)?)?;
+        } else {
+            print!("{}", crate::agents::skill_coverage_markdown()?);
+        }
+        return Ok(());
+    }
     if matches!(command, Command::ToolCatalog) {
         if cli.json {
             print_json(&serde_json::to_value(
@@ -204,6 +214,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         | Command::Init { .. }
         | Command::Inspect { .. }
         | Command::ToolCatalog
+        | Command::SkillCatalog
         | Command::Env { .. }
         | Command::Challenge { .. } => unreachable!(),
         Command::Doctor => {
