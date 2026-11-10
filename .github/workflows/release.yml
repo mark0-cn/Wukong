@@ -1,4 +1,5 @@
 name: Build and Publish
+run-name: ${{ github.event_name == 'push' && 'Publish' || 'Release rehearsal' }} · ${{ github.ref_name }} · ${{ github.sha }}
 on:
   push:
     tags: ['**'] # Check every tag; release.py enforces the exact vMAJOR.MINOR.PATCH format.
@@ -197,6 +198,7 @@ jobs:
         if: always()
         with:
           name: image-validation
+          overwrite: true
           path: validation/
           retention-days: 14
           if-no-files-found: warn
@@ -237,10 +239,21 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Expand-Archive -LiteralPath "dist/re-agent-$env:RELEASE_TAG-windows-amd64.zip" -DestinationPath package-check
           ./package-check/install-workbench.ps1 -ValidateOnly
+          python scripts/release_report.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-report
+          path: release-report/
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: online-release
           path: dist/
+          compression-level: 0 # The online bundle is already a ZIP archive.
+          overwrite: true
           retention-days: 14
           if-no-files-found: error
 
@@ -289,7 +302,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.package.result == 'success'
         with:
-          name: online-release
+          name: release-report
           path: summary-artifacts/release
       - name: Summarize release results and downloads
         if: always()

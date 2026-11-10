@@ -102,8 +102,8 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         if manifest:
             lines += [f"- Tool platform: {cell(manifest['tool_platform'])}",
                       f"- 镜像解包大小: {manifest['image_size_bytes'] / (1024 ** 3):.2f} GiB"]
-            for archive in sorted((directory / "release").glob("*.zip")):
-                lines.append(f"- {cell(archive.name)}: {archive.stat().st_size / (1024 ** 2):.2f} MiB")
+            for archive in read(directory / "release/archives.json") or []:
+                lines.append(f"- {cell(archive['name'])}: {archive['size_bytes'] / (1024 ** 2):.2f} MiB")
         if validation:
             lines.append("- 容器验收: " + ("通过" if validation.get("passed") else "失败"))
             for name, result in validation.get("checks", {}).items():
