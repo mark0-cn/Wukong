@@ -23,21 +23,36 @@ jobs:
   prepare:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: write
-      pull-requests: write
-      actions: write # Explicit CI dispatch; bot pushes do not reliably start CI.
     env:
       RELEASE_TAG: ${{ inputs.tag }}
-      GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
       - name: Require master workflow
         run: test "$GITHUB_REF" = refs/heads/master
+      - name: Require release App configuration
+        if: ${{ !inputs.dry_run }}
+        env:
+          APP_ID: ${{ vars.RELEASE_APP_ID }}
+          APP_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$APP_ID" || -z "$APP_KEY" ]]; then
+            echo '::error::Configure RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY; see docs/releases.md.'
+            exit 1
+          fi
+      - name: Create repository-scoped release App token
+        if: ${{ !inputs.dry_run }}
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: master
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
@@ -60,6 +75,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Create version branch and pull request
         if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           branch="codex/release-$RELEASE_TAG"
           # Never force-push or overwrite an existing branch. A retry may reuse
@@ -68,8 +86,8 @@ jobs:
             git diff --exit-code "origin/$branch" --
           else
             git switch -c "$branch"
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git config user.name "$APP_SLUG[bot]"
+            git config user.email "$APP_SLUG[bot]@users.noreply.github.com"
             git add Cargo.toml Cargo.lock tauri.conf.json ui/package.json package-lock.json
             git commit -m "release: prepare $RELEASE_TAG"
             git push origin "HEAD:refs/heads/$branch"
@@ -79,23 +97,14 @@ jobs:
             cat > "$RUNNER_TEMP/release-pr.md" <<EOF
           Prepare $RELEASE_TAG by synchronizing the application version in Cargo, Tauri and npm manifests and lockfiles. Dependency versions are unchanged.
 
-          Version consistency, release script tests and diff checks passed. The preparation workflow explicitly dispatches full CI for this branch; wait for both Windows and Linux checks before merging into master.
+          Version consistency, release script tests and diff checks passed. This PR is created by the release GitHub App so normal pull_request CI starts automatically and appears on the PR. Wait for Windows, Linux and summary to pass before merging into master.
 
-          This PR does not publish a release. After merging, update local master and push the matching tag to start the existing Docker Hub and GitHub Release pipeline:
-
-          \`\`\`sh
-          git switch master
-          git pull --ff-only origin master
-          python scripts/release.py check --tag $RELEASE_TAG
-          git tag -a $RELEASE_TAG -m "Release $RELEASE_TAG"
-          git push origin $RELEASE_TAG
-          \`\`\`
+          Merging this version PR approves publication. Once full CI passes on the merge commit in master, Tag Merged Release validates the version-only change and automatically pushes $RELEASE_TAG at that exact commit. Build and Publish then builds, validates and publishes Docker Hub and GitHub Release artifacts. No manual tag push is needed.
           EOF
             pr=$(gh pr create --base master --head "$branch" --title "release: prepare $RELEASE_TAG" --body-file "$RUNNER_TEMP/release-pr.md")
           fi
           echo "Version PR: $pr" >> "$GITHUB_STEP_SUMMARY"
-          gh workflow run ci.yml --ref "$branch"
-          echo 'Full CI requested for the version branch. Review and merge the PR before tagging; no release has been published.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Native PR CI starts through the release App. Merge approves automatic tagging and publication after master CI passes.' >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize dry run
         if: inputs.dry_run
         run: echo 'Dry run passed. No remote branch, PR, tag, image or release was created.' >> "$GITHUB_STEP_SUMMARY"
