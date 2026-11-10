@@ -7,6 +7,7 @@ import re
 import socket
 import time
 from worker_common import MAX_FILE, atomic_json, confined
+from worker_launch_spec import read_launch, digest
 
 LIMIT = 1024 * 1024
 LAUNCH = "files/challenge/launch.json"
@@ -18,29 +19,17 @@ def sha(data): return hashlib.sha256(data).hexdigest()
 def network_profile(root, params, trusted=False):
     if params.get("launch_spec") != LAUNCH:
         raise ValueError("network verification requires the host-prepared files/challenge/launch.json")
-    path = confined(root, LAUNCH, True)
-    if path.stat().st_size > 65536: raise ValueError("LaunchSpec exceeds 64 KiB")
-    raw = path.read_bytes()
-    spec = json.loads(raw)
+    document = read_launch(root, LAUNCH)
+    raw, spec = document.raw, document.spec
     service = spec.get("service") or {}
     port = service.get("port")
     if (spec.get("schema_version") != 1 or spec.get("base") != "files/challenge"
             or service.get("mode") not in {"local_service", "remote"}
             or not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535):
         raise ValueError("LaunchSpec has no supported configured network service")
-    files = spec.get("files") or {}
-    if not spec.get("target") or spec["target"] not in files or len(files) > 1024:
-        raise ValueError("network verification requires an imported binary identity")
-    total = 0
-    for name, expected in files.items():
-        if not isinstance(name, str) or Path(name).is_absolute() or ".." in Path(name).parts:
-            raise ValueError("invalid launch member")
-        member = confined(root, spec["base"]+"/"+name, True)
-        total += member.stat().st_size
-        if member.stat().st_size > MAX_FILE or total > 64*1024*1024: raise ValueError("launch files exceed identity budget")
-        if sha(member.read_bytes()) != expected: raise ValueError("launch input changed: "+name)
+    files = document.check_files(max_file=MAX_FILE, max_total=64*1024*1024)
     target = confined(root, params["target"], True)
-    if target.stat().st_size > MAX_FILE or sha(target.read_bytes()) != files[spec["target"]]:
+    if target.stat().st_size > MAX_FILE or digest(target) != files[spec["target"]]:
         raise ValueError("network target differs from LaunchSpec")
     return {"launch_spec_sha256":sha(raw), "challenge_id":spec["challenge_id"],
             "target_sha256":files[spec["target"]], "service":service,
