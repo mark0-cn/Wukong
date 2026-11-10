@@ -1,4 +1,4 @@
-name: 构建与发布
+name: Build and Publish
 on:
   push:
     tags: ['**'] # Check every tag; release.py enforces the exact vMAJOR.MINOR.PATCH format.
