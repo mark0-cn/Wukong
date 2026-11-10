@@ -178,6 +178,31 @@ pub(super) fn handle_libc_identify<'a>(
     })
 }
 
+pub(super) fn handle_seccomp_analyze<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    call_id: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        let file = tools
+            .execution
+            .files
+            .known_file(agent, text(&args, "filter")?, false)?;
+        let raw = tools
+            .execution
+            .gateway
+            .worker_call(agent, call_id, "seccomp.analyze", args)
+            .await?;
+        ensure!(
+            raw["filter_sha256"] == file.sha256,
+            "seccomp filter changed from the registered artifact"
+        );
+        Ok(raw)
+    })
+}
+
 pub(super) fn handle_agent_finish<'a>(
     tools: &'a ToolService,
     agent: &'a AgentMetadata,

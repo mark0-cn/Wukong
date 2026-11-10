@@ -649,6 +649,33 @@ pub(super) struct LibcIdentifyArgs {
     pub symbol: Option<String>,
 }
 
+choices!(ByteOrder { Little, Big });
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SeccompProbe {
+    /// AUDIT_ARCH value, not the ELF machine number.
+    pub arch: u32,
+    pub nr: u32,
+    #[schemars(length(max = 6))]
+    #[serde(default)]
+    pub args: Vec<u64>,
+    #[serde(default)]
+    pub instruction_pointer: u64,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SeccompAnalyzeArgs {
+    /// In-run raw sock_filter array, without a sock_fprog header.
+    pub filter: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endianness: Option<ByteOrder>,
+    #[schemars(length(max = 64))]
+    #[serde(default)]
+    pub probes: Vec<SeccompProbe>,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct EmulateRunArgs {
