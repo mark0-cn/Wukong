@@ -46,7 +46,7 @@ def version(tag=None, root=ROOT):
         "tauri.conf.json": read_json(root / "tauri.conf.json")["version"],
         "ui/package.json": read_json(root / "ui/package.json")["version"],
         "package-lock.json": read_json(root / "package-lock.json")["packages"]["ui"]["version"],
-        "Cargo.lock": next(p["version"] for p in tomllib.loads((root / "Cargo.lock").read_text())["package"] if p["name"] == "re-agent"),
+        "Cargo.lock": next(p["version"] for p in tomllib.loads((root / "Cargo.lock").read_text())["package"] if p["name"] == "wukong"),
     }
     if set(versions.values()) != {cargo}:
         raise ValueError("Versions differ: " + str(versions))
@@ -74,7 +74,7 @@ def bump_version(tag, root=ROOT):
                     continue
                 data = tomllib.loads(block)["package"]
                 package_data = data if name == "Cargo.toml" else data[0]
-                if package_data.get("name") != "re-agent":
+                if package_data.get("name") != "wukong":
                     continue
                 blocks[index], count = re.subn(r'^version = "' + re.escape(current) + r'"(\r?)$',
                                                lambda match: f'version = "{target}"' + match[1],

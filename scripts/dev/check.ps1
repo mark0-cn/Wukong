@@ -1,6 +1,6 @@
 param([switch]$Release, [string]$DockerContainer)
 . (Join-Path $PSScriptRoot '..\_lib\repository.ps1')
-$projectRoot = Get-ReAgentRoot $PSScriptRoot
+$projectRoot = Get-WukongRoot $PSScriptRoot
 Push-Location -LiteralPath $projectRoot -ErrorAction Stop
 try {
     # Do not set ErrorActionPreference='Stop' globally: on Windows PowerShell
@@ -35,7 +35,7 @@ try {
         $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
         $dockerExe = if ($dockerCommand) { $dockerCommand.Source } else { Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe' }
         $testState = '/state/acceptance-' + [Guid]::NewGuid().ToString('N')
-        & $dockerExe exec $DockerContainer python3 /opt/re-agent/tests/run.py integration --state $testState --fuzz 2>&1
+        & $dockerExe exec $DockerContainer python3 /opt/wukong/tests/run.py integration --state $testState --fuzz 2>&1
         if ($LASTEXITCODE -ne 0) { throw 'Linux worker acceptance failed.' }
     }
     if ($Release) {

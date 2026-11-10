@@ -1,12 +1,12 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\..\scripts\_lib\repository.ps1')
-$root = Get-ReAgentRoot $PSScriptRoot
-$temporary = Join-Path ([IO.Path]::GetTempPath()) ('re-agent-install-test-' + [Guid]::NewGuid().ToString('N'))
+$root = Get-WukongRoot $PSScriptRoot
+$temporary = Join-Path ([IO.Path]::GetTempPath()) ('wukong-install-test-' + [Guid]::NewGuid().ToString('N'))
 $package = Join-Path $temporary 'package'
 $destination = Join-Path $temporary 'installed'
 New-Item -ItemType Directory -Path $package -Force | Out-Null
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-& $compiler /nologo /target:exe "/out:$package\re-agent.exe" (Join-Path $PSScriptRoot 'fixtures\installer-client.cs')
+& $compiler /nologo /target:exe "/out:$package\wukong.exe" (Join-Path $PSScriptRoot 'fixtures\installer-client.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Could not compile installer process fixture.' }
 foreach ($name in @('install-workbench.ps1','rollback-workbench.ps1')) { Copy-Item -LiteralPath (Join-Path $root ('packaging/windows/' + $name)) -Destination $package }
 Copy-Item -LiteralPath (Join-Path $root 'docs\user\online-install.md') -Destination (Join-Path $package 'README.md')
@@ -21,16 +21,16 @@ $global:LASTEXITCODE = 0
 '@ | Set-Content -LiteralPath $dockerFixture -Encoding utf8
 function Set-Package([string]$Identity) {
     $files = @{}
-    foreach ($name in @('install-workbench.ps1','rollback-workbench.ps1','README.md','re-agent.exe')) {
+    foreach ($name in @('install-workbench.ps1','rollback-workbench.ps1','README.md','wukong.exe')) {
         $files[$name] = (Get-FileHash -LiteralPath (Join-Path $package $name) -Algorithm SHA256).Hash.ToLowerInvariant()
     }
-    @{ schema_version=2; version='0.1.0'; platform='windows-amd64'; tool_platform='linux/amd64'; image=('hlmark0/re-agent-workbench@' + $Identity); image_id=$Identity; files=$files } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $package 'release.json') -Encoding utf8
+    @{ schema_version=2; version='0.1.0'; platform='windows-amd64'; tool_platform='linux/amd64'; image=('hlmark0/wukong@' + $Identity); image_id=$Identity; files=$files } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $package 'release.json') -Encoding utf8
 }
 $old = 'sha256:' + ('a'*64)
 $new = 'sha256:' + ('b'*64)
 Set-Package $old
 & (Join-Path $package 'install-workbench.ps1') -Destination $destination -DockerExecutable $dockerFixture
-$config = Join-Path $destination 're-agent.toml'
+$config = Join-Path $destination 'wukong.toml'
 Add-Content -LiteralPath $config -Value "`n# preserve-user-settings"
 $originalConfig = Get-Content -LiteralPath $config -Raw
 Set-Package $new

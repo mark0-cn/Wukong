@@ -34,7 +34,7 @@ impl Workbench {
                 "create",
                 "--internal",
                 "--label",
-                &format!("re-agent.workspace={}", self.id),
+                &format!("wukong.workspace={}", self.id),
                 name,
             ])?;
         }
@@ -71,9 +71,9 @@ impl Workbench {
         };
         self.start_worker(&env)?;
         write_json(&self.root.join("environment.json"), &env)?;
-        self.write_worker_config(&env, &self.root.join("re-agent.toml"))?;
+        self.write_worker_config(&env, &self.root.join("wukong.toml"))?;
         Ok(
-            json!({"environment":env,"config":self.root.join("re-agent.toml"),"transport":"host docker exec; no Docker socket mounted"}),
+            json!({"environment":env,"config":self.root.join("wukong.toml"),"transport":"host docker exec; no Docker socket mounted"}),
         )
     }
     pub fn start_worker(&self, env: &Environment) -> Result<()> {
@@ -95,7 +95,7 @@ impl Workbench {
                     "volume",
                     "create",
                     "--label",
-                    &format!("re-agent.workspace={}", self.id),
+                    &format!("wukong.workspace={}", self.id),
                     &env.volume,
                 ])?;
             }
@@ -105,9 +105,9 @@ impl Workbench {
                 "--name",
                 &env.container,
                 "--label",
-                &format!("re-agent.workspace={}", self.id),
+                &format!("wukong.workspace={}", self.id),
                 "--label",
-                "re-agent.kind=tools",
+                "wukong.kind=tools",
                 "--network",
                 &env.network,
                 "--cap-drop",
@@ -154,7 +154,7 @@ impl Workbench {
         config.runtime.backend = crate::runtime::RuntimeBackend::Docker;
         config.runtime.docker_container = Some(env.container.clone());
         config.runtime.remote_state_dir = "/state".into();
-        config.runtime.remote_bridge_path = "/opt/re-agent/runtime/bridge.py".into();
+        config.runtime.remote_bridge_path = "/opt/wukong/runtime/bridge.py".into();
         config.workbench.root = self.root.clone();
         config.workbench.image = env.image_id.clone();
         fs::write(path, toml::to_string_pretty(&config)?)?;
@@ -162,7 +162,7 @@ impl Workbench {
     }
     pub fn doctor(&self) -> Result<Value> {
         let result = self.worker_json(&[
-            "/opt/re-agent/runtime/workbench_control.py",
+            "/opt/wukong/runtime/workbench_control.py",
             "doctor",
             "/state",
         ])?;
@@ -181,7 +181,7 @@ impl Workbench {
             self.owned(&container, &env.container)?;
             if container["State"]["Running"] == true {
                 let result = self.worker_json(&[
-                    "/opt/re-agent/runtime/workbench_control.py",
+                    "/opt/wukong/runtime/workbench_control.py",
                     "idle",
                     "/state",
                 ])?;

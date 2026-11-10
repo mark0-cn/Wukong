@@ -11,7 +11,7 @@ PROTOCOL = 1
 MAX_RPC = 48 * 1024 * 1024
 MAX_FILE = 32 * 1024 * 1024
 TERMINAL = {"completed", "failed", "cancelled", "timed_out", "lost"}
-ENV_KEYS = {"PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC", "HOME", "USERPROFILE", "LANG", "LC_ALL", "JAVA_HOME", "RE_AGENT_GHIDRA_HEADLESS", "RE_AGENT_GHIDRA_SCRIPT_DIR"}
+ENV_KEYS = {"PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC", "HOME", "USERPROFILE", "LANG", "LC_ALL", "JAVA_HOME", "WUKONG_GHIDRA_HEADLESS", "WUKONG_GHIDRA_SCRIPT_DIR"}
 BRIDGE_PATH = Path(__file__).with_name("bridge.py").resolve()
 
 class WorkerError(ValueError):

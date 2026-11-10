@@ -3,7 +3,7 @@
 Use when a challenge has a Dockerfile, supplied libc/loader, service endpoint or a
 prepared workbench. Begin with `runtime_doctor`; its `workbench` field identifies
 the worker-relative LaunchSpec, target and service mode. The host operator manages
-`re-agent env` and `re-agent challenge` commands; never install Docker in a target
+`wukong env` and `wukong challenge` commands; never install Docker in a target
 worker or request the host Docker socket.
 
 ## Local experiments

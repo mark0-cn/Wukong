@@ -2,7 +2,7 @@
 """Live Linux acceptance test. Executes only the embedded crash fixture.
 
 Run inside the isolated worker image:
-  python3 /opt/re-agent/tests/run.py integration --state /state/acceptance
+  python3 /opt/wukong/tests/run.py integration --state /state/acceptance
 Add --fuzz to require AFL++ QEMU and prove that it executes and emits stats.
 """
 import argparse

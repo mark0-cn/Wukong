@@ -1,5 +1,5 @@
-use re_agent::binary::{self, AddressRef, AddressSpace, MitigationState, StringsQuery};
 use std::fs;
+use wukong::binary::{self, AddressRef, AddressSpace, MitigationState, StringsQuery};
 
 fn put16(b: &mut [u8], i: usize, n: u16) {
     b[i..i + 2].copy_from_slice(&n.to_le_bytes());
@@ -200,7 +200,7 @@ async fn missing_ghidra_is_an_error_not_a_fake_analysis() {
     );
 }
 
-/// Explicit external-tool test: RE_AGENT_GHIDRA_HEADLESS must point at a real
+/// Explicit external-tool test: WUKONG_GHIDRA_HEADLESS must point at a real
 /// Ghidra installation with its JDK configured. It never substitutes fixtures
 /// for decompilation, and validates import, cached queries and project reuse.
 #[tokio::test]
@@ -208,9 +208,9 @@ async fn missing_ghidra_is_an_error_not_a_fake_analysis() {
 async fn real_ghidra_import_decompile_xrefs_and_cache() {
     let dir = tempfile::tempdir().unwrap();
     let backend = binary::GhidraBackend::new(binary::GhidraConfig {
-        executable: std::env::var_os("RE_AGENT_GHIDRA_HEADLESS")
+        executable: std::env::var_os("WUKONG_GHIDRA_HEADLESS")
             .map(std::path::PathBuf::from)
-            .expect("set RE_AGENT_GHIDRA_HEADLESS to Ghidra support/analyzeHeadless[.bat]"),
+            .expect("set WUKONG_GHIDRA_HEADLESS to Ghidra support/analyzeHeadless[.bat]"),
         cache_dir: dir.path().join("ghidra"),
         script_dir: None,
         timeout_seconds: 300,

@@ -28,7 +28,7 @@ def api(path):
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "re-agent-toolchain-check"}
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "wukong-toolchain-check"}
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = "Bearer " + token

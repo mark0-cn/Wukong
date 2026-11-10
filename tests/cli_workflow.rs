@@ -1,6 +1,5 @@
 //! Exercises the real CLI, scheduler, SQLite and Rig over a local HTTP wire.
 use anyhow::{Context, Result, ensure};
-use re_agent::{config::AppConfig, domain::*, llm::Provider, report, store::Store};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
 use tokio::{
@@ -8,6 +7,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::Mutex,
 };
+use wukong::{config::AppConfig, domain::*, llm::Provider, report, store::Store};
 
 async fn read_request(stream: &mut TcpStream) -> Result<Value> {
     let mut bytes = Vec::new();
@@ -185,12 +185,12 @@ async fn cli_with_base(
     args: &[&str],
     base: Option<&str>,
 ) -> Result<std::process::Output> {
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_re-agent"));
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_wukong"));
     command
         .arg("--config")
         .arg(config)
         .args(args)
-        .env("RE_AGENT_TEST_PROVIDER_KEY", "not-a-real-secret")
+        .env("WUKONG_TEST_PROVIDER_KEY", "not-a-real-secret")
         .kill_on_drop(true);
     if let Some(base) = base {
         command.env("OPENAI_BASE_URL", base);
@@ -217,7 +217,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
     config.model.provider = Provider::OpenAi;
     config.model.model = "test-model".into();
     config.model.base_url = None;
-    config.model.api_key_env = Some("RE_AGENT_TEST_PROVIDER_KEY".into());
+    config.model.api_key_env = Some("WUKONG_TEST_PROVIDER_KEY".into());
     config.execution.stream = false;
     config.execution.model_retries = 0;
     if pause_then_resume {

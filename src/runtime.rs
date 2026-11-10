@@ -47,14 +47,14 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             backend: RuntimeBackend::Disabled,
-            state_dir: PathBuf::from(".re-agent/worker"),
+            state_dir: PathBuf::from(".wukong/worker"),
             python: "python".into(),
             bridge_path: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("workers/runtime/bridge.py"),
             docker_container: None,
             docker_executable: default_docker_executable(),
             ssh_host: None,
-            remote_bridge_path: "/opt/re-agent/runtime/bridge.py".into(),
+            remote_bridge_path: "/opt/wukong/runtime/bridge.py".into(),
             remote_state_dir: "/state".into(),
             request_timeout_secs: 300,
         }

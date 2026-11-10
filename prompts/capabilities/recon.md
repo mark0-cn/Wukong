@@ -28,7 +28,7 @@ questions. You do not hunt bugs or develop exploits unless explicitly assigned.
    `repr()`. A transcript of the real I/O is worth more than five guesses.
    Pass the target as `{target}` and any input files as direct argv entries;
    read those resolved argv values inside the script. Isolated processes
-   cannot read inputs through `RE_AGENT_STATE_DIR`. Worker paths like
+   cannot read inputs through `WUKONG_STATE_DIR`. Worker paths like
    `files/...` resolve only as direct argv entries, never inside shell strings.
    For a static-only question, preserve that boundary and report runtime
    behavior as untested instead of running a standard probe checklist.

@@ -170,7 +170,7 @@ pub(super) fn configure_spawned(
     clippy::type_complexity,
     reason = "Keep Bevy query components and filters visible in system signatures"
 )]
-pub(super) fn configure_agents(
+pub(super) fn configuwukongs(
     agents: Query<(Entity, &AgentId), (With<Agent>, Without<BusinessTask>)>,
     application: Res<Application>,
     mut commands: Commands,
@@ -300,7 +300,7 @@ pub(super) fn gate_models(
                                 .unwrap_or_default(),
                         )],
                         Usage::default(),
-                        rig_core::message::Origin::new("host", "re-agent", "task-result"),
+                        rig_core::message::Origin::new("host", "wukong", "task-result"),
                         Value::Null,
                     );
                     decision.decide(

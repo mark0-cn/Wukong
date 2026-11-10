@@ -20,12 +20,12 @@ def ensure_uid_entries(start=20000, count=512):
     """
     if os.geteuid() != 0:
         return
-    marker = "/etc/re-agent-passwd.ready"
+    marker = "/etc/wukong-passwd.ready"
     if os.path.exists(marker):
         return
     with open("/etc/passwd", "a", encoding="utf-8") as stream:
         for uid in range(start, start + count):
-            stream.write("re-agent-%d:x:%d:%d::/nonexistent:/bin/false\n" % (uid, uid, uid))
+            stream.write("wukong-%d:x:%d:%d::/nonexistent:/bin/false\n" % (uid, uid, uid))
     with open(marker, "w", encoding="utf-8"):
         pass
 
@@ -53,14 +53,14 @@ def allocate_uid(root):
             pwd.getpwuid(value)
         except (ImportError, KeyError):
             with open("/etc/passwd", "a", encoding="utf-8") as entries:
-                entries.write("re-agent-%d:x:%d:%d::/nonexistent:/bin/false\n"
+                entries.write("wukong-%d:x:%d:%d::/nonexistent:/bin/false\n"
                               % (value, value, value))
         return value
 
 
 def sandbox(root, uid):
     namespace = hashlib.sha256(str(root).encode()).hexdigest()[:24]
-    parent = Path("/tmp/re-agent-executions") / namespace
+    parent = Path("/tmp/wukong-executions") / namespace
     parent.mkdir(parents=True, exist_ok=True)
     parent.chmod(0o711)
     directory = parent / uuid.uuid4().hex

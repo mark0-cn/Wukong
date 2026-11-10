@@ -1,5 +1,5 @@
 [package]
-name = "re-agent"
+name = "wukong"
 version = "0.1.2"
 edition = "2024"
 rust-version = "1.97.1"
@@ -7,11 +7,11 @@ description = "Strix-inspired binary reverse engineering and vulnerability valid
 license = "Apache-2.0"
 
 [lib]
-name = "re_agent"
+name = "wukong"
 path = "src/lib.rs"
 
 [[bin]]
-name = "re-agent"
+name = "wukong"
 path = "src/main.rs"
 
 [dependencies]

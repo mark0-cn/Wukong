@@ -1,4 +1,4 @@
-# Build from the project root: docker build -f workers/Dockerfile -t re-agent-worker:0.1 .
+# Build from the project root: docker build -f workers/Dockerfile -t wukong-worker:0.1 .
 # Layer order matters for iteration speed:
 #   1. big, stable downloads (Ghidra, Temurin JDK) come FIRST so toolchain
 #      iterations never invalidate them;
@@ -31,7 +31,7 @@ RUN --mount=type=bind,source=workers/deps/ghidra.zip,target=/deps/ghidra.zip,ro 
       && mv /opt/ghidra_*_PUBLIC /opt/ghidra \
       ; \
     fi
-ENV RE_AGENT_GHIDRA_HEADLESS=/opt/ghidra/support/analyzeHeadless
+ENV WUKONG_GHIDRA_HEADLESS=/opt/ghidra/support/analyzeHeadless
 
 # Ghidra 11.3+ no longer auto-detects java on PATH; the headless launcher
 # requires JAVA_HOME or it tries an interactive JDK prompt and fails.
@@ -67,7 +67,7 @@ ENV PATH="/opt/jdk-25/bin:/AFLplusplus:/usr/local/bin:${PATH}"
 # container root filesystem is read-only, so bridge.py cannot append them at
 # first use (isolation.py ensure_uid_entries). Numeric UIDs without passwd
 # entries break pyvex/getpass inside isolated jobs.
-RUN python3 -c "f=open('/etc/passwd','a');[f.write('re-agent-%d:x:%d:%d::/nonexistent:/bin/false\n'%(u,u,u)) for u in range(20000,20512)];f.close();open('/etc/re-agent-passwd.ready','w').close()"
+RUN python3 -c "f=open('/etc/passwd','a');[f.write('wukong-%d:x:%d:%d::/nonexistent:/bin/false\n'%(u,u,u)) for u in range(20000,20512)];f.close();open('/etc/wukong-passwd.ready','w').close()"
 RUN python3 -c "import angr, claripy, pwn, z3; print('toolchain ok:', angr.__version__)"
 RUN useradd --create-home --uid 10001 worker && mkdir -p /state && chown worker:worker /state
 # Java derives user.home from the passwd entry (root -> /root), ignoring the
@@ -86,10 +86,10 @@ ENTRYPOINT ["sleep", "infinity"]
 # Standalone worker keeps its original runtime layout. Workbench inherits the
 # stable toolchain stage instead, so runtime edits cannot invalidate its tools.
 FROM toolchain AS worker
-COPY workers/runtime/requirements.txt /tmp/re-agent-runtime-requirements.txt
+COPY workers/runtime/requirements.txt /tmp/wukong-runtime-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --break-system-packages -i "$PIP_INDEX_URL" -r /tmp/re-agent-runtime-requirements.txt
-COPY workers/runtime /opt/re-agent/runtime
-COPY workers/tests /opt/re-agent/tests
-COPY workers/ghidra /opt/re-agent/ghidra
+    pip3 install --break-system-packages -i "$PIP_INDEX_URL" -r /tmp/wukong-runtime-requirements.txt
+COPY workers/runtime /opt/wukong/runtime
+COPY workers/tests /opt/wukong/tests
+COPY workers/ghidra /opt/wukong/ghidra
 COPY workers/deps/gef.py /opt/gef.py

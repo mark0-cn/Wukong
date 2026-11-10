@@ -10,7 +10,7 @@ impl Workbench {
             "ps",
             "-a",
             "--filter",
-            &format!("label=re-agent.workspace={}", self.id),
+            &format!("label=wukong.workspace={}", self.id),
             "--format",
             "{{.Names}}",
         ])?;
@@ -33,12 +33,12 @@ impl Workbench {
                 .context("container disappeared")?;
             self.owned(&container, name)?;
             if container["State"]["Running"] == true {
-                if container["Config"]["Labels"]["re-agent.kind"] == "tools" {
+                if container["Config"]["Labels"]["wukong.kind"] == "tools" {
                     let probe: Value = serde_json::from_str(&self.docker.run(&[
                         "exec",
                         name,
                         "python3",
-                        "/opt/re-agent/runtime/workbench_control.py",
+                        "/opt/wukong/runtime/workbench_control.py",
                         "idle",
                         "/state",
                     ])?)?;
@@ -134,7 +134,7 @@ impl Workbench {
             "volume",
             "ls",
             "--filter",
-            &format!("label=re-agent.workspace={}", self.id),
+            &format!("label=wukong.workspace={}", self.id),
             "--format",
             "{{.Name}}",
         ])?;
@@ -146,7 +146,7 @@ impl Workbench {
                 .inspect("volume", volume)?
                 .context("volume disappeared")?;
             self.owned(&inspect, volume)?;
-            let prefix = format!("re-agent-{}-", self.id);
+            let prefix = format!("wukong-{}-", self.id);
             let suffix = volume
                 .strip_prefix(&prefix)
                 .context("unexpected managed volume name")?;
@@ -247,7 +247,7 @@ impl Workbench {
                 "--entrypoint",
                 "python3",
                 image,
-                "/opt/re-agent/runtime/workbench_archive.py",
+                "/opt/wukong/runtime/workbench_archive.py",
                 action,
                 "/snapshot",
                 &format!("/bundle/{suffix}.tar"),
@@ -327,7 +327,7 @@ impl Workbench {
                 "volume",
                 "create",
                 "--label",
-                &format!("re-agent.workspace={}", self.id),
+                &format!("wukong.workspace={}", self.id),
                 &volume,
             ])?;
             self.archive_volume("restore", &volume, &source.join("volumes"), suffix, image)?;
@@ -356,7 +356,7 @@ impl Workbench {
                 volume: self.name(&format!("{id}-state")),
                 network: self.name(&format!("{id}-net")),
             };
-            self.write_worker_config(&env, &self.challenge_dir(id)?.join("re-agent.toml"))?;
+            self.write_worker_config(&env, &self.challenge_dir(id)?.join("wukong.toml"))?;
         }
         Ok(
             json!({"environment":result,"imported":true,"history_read_only":true,"credentials_required":true}),

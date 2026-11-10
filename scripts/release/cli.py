@@ -17,7 +17,7 @@ def validate_image(data, revision):
     for field in ("digest", "image_id"):
         if not DIGEST.fullmatch(data.get(field, "")):
             raise ValueError("Invalid " + field)
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*/re-agent-workbench", data.get("repository", "")):
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*/wukong", data.get("repository", "")):
         raise ValueError("Invalid Docker Hub repository")
     if not isinstance(data.get("size_bytes"), int) or data["size_bytes"] <= 0:
         raise ValueError("Missing image size")
@@ -30,7 +30,7 @@ def package(binary, metadata, output, tag):
     validate_image(image, revision)
     output.mkdir(parents=True, exist_ok=True)
     members = {
-        "re-agent.exe": binary,
+        "wukong.exe": binary,
         "install-workbench.ps1": ROOT / "packaging/windows/install-workbench.ps1",
         "rollback-workbench.ps1": ROOT / "packaging/windows/rollback-workbench.ps1",
         "README.md": ROOT / "docs/user/online-install.md",
@@ -44,7 +44,7 @@ def package(binary, metadata, output, tag):
         "files": {name: sha256(path) for name, path in members.items()},
     }
     write_json(output / "release.json", manifest)
-    archive = output / f"re-agent-v{number}-windows-amd64.zip"
+    archive = output / f"wukong-v{number}-windows-amd64.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         for name, path in members.items():
             bundle.write(path, name)

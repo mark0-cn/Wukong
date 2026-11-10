@@ -35,7 +35,7 @@ async function mockDesktop(page: Page) {
         }
         if (command === 'finding_details') return { finding, verification: null, evidence: [{ id: 'evidence-a', agent_id: 'analyst', tool_call_id: 'call-copy', source: 'reproduction.txt', media_type: 'text/plain', size: 20000, sha256: 'fixture-sha256' }], calls: [], missing_evidence: [] };
         if (command === 'evidence_preview') return { id: args.id, source: 'reproduction.txt', media_type: 'text/plain', size: 20000, sha256: 'fixture-sha256', offset: args.offset, end: args.offset === 0 ? 16384 : 20000, text: args.offset === 0 ? 'first evidence page: controlled reproduction' : 'second evidence page: end of output', binary: false };
-        if (command === 'config_read') return { path: '/tmp/re-agent.toml', source: '# retain this comment\n[model]\nmodel = "gpt-5.2"\n', original: '# retain this comment\n[model]\nmodel = "gpt-5.2"\n', form: { model: { provider: 'openai', model: 'gpt-5.2' }, budget: state.host.budget, state_dir: 'state' } };
+        if (command === 'config_read') return { path: '/tmp/wukong.toml', source: '# retain this comment\n[model]\nmodel = "gpt-5.2"\n', original: '# retain this comment\n[model]\nmodel = "gpt-5.2"\n', form: { model: { provider: 'openai', model: 'gpt-5.2' }, budget: state.host.budget, state_dir: 'state' } };
         if (command === 'config_save') { state.host = { ...state.host, epoch: state.host.epoch + 1, execution: null }; return { ...args.document, original: args.document.source }; }
         if (command === 'pause_run') { state.host.execution = null; state.data.runs[0].status = 'budget_paused'; state.revision++; emit('workspace-changed', null); return; }
         if (command === 'pick_target') return '/samples/new.elf';
@@ -61,7 +61,7 @@ test('shows public progress and paired tool results without raw JSON', async ({ 
   await expect(page.getByText(/visible-on-demand/)).toBeVisible();
   await expect(page.locator('.agent-card')).toHaveCount(3);
   expect(errors).toEqual([]);
-  await page.screenshot({ path: join(tmpdir(), 're-agent-web-transcript.png'), fullPage: true });
+  await page.screenshot({ path: join(tmpdir(), 'wukong-web-transcript.png'), fullPage: true });
 });
 test('retains per-agent drafts and targets message delivery after navigation', async ({ page }) => {
   await page.goto('/');

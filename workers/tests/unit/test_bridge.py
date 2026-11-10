@@ -118,9 +118,9 @@ class GhidraProjectLockTests(unittest.TestCase):
             properties.write_text("application.version=fixture")
             scripts = root / "scripts"
             scripts.mkdir()
-            (scripts / "ReAgentBridge.java").write_text("fixture bridge")
+            (scripts / "WukongBridge.java").write_text("fixture bridge")
             params = {"target": "files/sample", "target_sha256": hashlib.sha256(b"fixture").hexdigest(), "query": {"operation": "functions"}}
-            with patch.dict(os.environ, {"RE_AGENT_GHIDRA_HEADLESS": str(headless), "RE_AGENT_GHIDRA_SCRIPT_DIR": str(scripts)}), \
+            with patch.dict(os.environ, {"WUKONG_GHIDRA_HEADLESS": str(headless), "WUKONG_GHIDRA_SCRIPT_DIR": str(scripts)}), \
                     patch.object(ghidra_backend, "run_process", side_effect=RuntimeError("owner lost")) as execute:
                 with self.assertRaisesRegex(RuntimeError, "owner lost"):
                     ghidra_backend.query(root, params)
@@ -248,7 +248,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.client.call("doctor")["protocol"], 1)
 
     def test_job_environment_carries_state_and_job_dirs(self):
-        result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(os.environ['RE_AGENT_STATE_DIR']);print(os.environ['RE_AGENT_JOB_DIR'])"]))
+        result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(os.environ['WUKONG_STATE_DIR']);print(os.environ['WUKONG_JOB_DIR'])"]))
         state_dir, job_dir = result["result"]["stdout"].strip().splitlines()
         self.assertTrue(Path(state_dir).is_dir())
         self.assertTrue(Path(job_dir).is_dir())

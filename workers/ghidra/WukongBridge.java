@@ -1,5 +1,5 @@
-// ReAgent headless JSON bridge. Invoked by Rust with request and response paths.
-// @category ReAgent
+// Wukong headless JSON bridge. Invoked by Rust with request and response paths.
+// @category Wukong
 import ghidra.app.util.headless.HeadlessScript;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-public class ReAgentBridge extends HeadlessScript {
+public class WukongBridge extends HeadlessScript {
     private String targetHash;
     private JsonObject address(Address a) {
         JsonObject out = new JsonObject();

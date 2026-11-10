@@ -125,7 +125,7 @@ impl McpRegistry {
             let timeout = Duration::from_secs(config.timeout_seconds.clamp(1, 600));
             let client = rmcp::model::ClientConfig::new(
                 rmcp::model::ClientCapabilities::default(),
-                rmcp::model::Implementation::new("re-agent", env!("CARGO_PKG_VERSION")),
+                rmcp::model::Implementation::new("wukong", env!("CARGO_PKG_VERSION")),
             );
             let service = tokio::time::timeout(timeout, client.serve(transport))
                 .await

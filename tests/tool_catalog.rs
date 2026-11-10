@@ -5,7 +5,7 @@ use std::process::Command;
 #[test]
 fn generated_catalog_matches_the_executable_registry() {
     assert_eq!(
-        re_agent::tools::builtin_catalog_markdown(),
+        wukong::tools::builtin_catalog_markdown(),
         include_str!("../docs/reference/tool-catalog.md")
     );
 }
@@ -13,7 +13,7 @@ fn generated_catalog_matches_the_executable_registry() {
 #[test]
 fn catalog_export_does_not_open_configuration_or_state() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let output = Command::new(env!("CARGO_BIN_EXE_re-agent"))
+    let output = Command::new(env!("CARGO_BIN_EXE_wukong"))
         .args(["--json", "--config"])
         .arg(directory.path().join("missing.toml"))
         .arg("--state")

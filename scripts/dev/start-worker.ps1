@@ -1,12 +1,12 @@
 param(
-    [string]$Container = 're-agent-worker',
-    [string]$Image = 're-agent-worker:0.1',
+    [string]$Container = 'wukong-worker',
+    [string]$Image = 'wukong-worker:0.1',
     [switch]$RuntimeOnly,
     [switch]$BuildOnly
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\_lib\repository.ps1')
-$projectRoot = Get-ReAgentRoot $PSScriptRoot
+$projectRoot = Get-WukongRoot $PSScriptRoot
 $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
 if ($dockerCommand) {
     $dockerExe = $dockerCommand.Source

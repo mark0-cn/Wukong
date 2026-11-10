@@ -127,7 +127,7 @@ pub(crate) fn drive(
                 inform_terminal.in_set(PrepareSystems::Edit),
                 bind_reports.in_set(PrepareSystems::Edit),
                 acknowledge_mail.in_set(Stage::Gate).before(admit_spawns),
-                configure_agents.in_set(Stage::Admit),
+                configuwukongs.in_set(Stage::Admit),
                 carry_native_turns.in_set(Stage::Prepare),
                 ensure_owner_requests
                     .in_set(Stage::Prepare)

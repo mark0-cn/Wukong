@@ -2,7 +2,7 @@ import type { Agent, Envelope, Finding, Host, Run, ToolDisplay, Workspace } from
 
 export const budget = { max_agents: 24, max_depth: 4, max_concurrent_agents: 4, max_turns_per_agent: 40,
   max_total_tokens: 500000, max_usd: null, max_wall_seconds: 3600, role_token_shares: {} };
-export const host: Host = { epoch: 1, initial_run: null, config_path: '/tmp/re-agent.toml', state_dir: '/tmp/re-agent-state',
+export const host: Host = { epoch: 1, initial_run: null, config_path: '/tmp/wukong.toml', state_dir: '/tmp/wukong-state',
   model: 'gpt-5.2', budget, execution: { operation: 'execution-1', run_id: 'run-a', phase: 'running' }, pending_operations: 0, notice: null };
 export const runs: Run[] = [{ id: 'run-a', target_path: '/samples/parser.elf', task: '分析输入解析逻辑，调查长度检查并独立验证可疑问题。',
   status: 'running', root_id: 'root', budget, created_at: '2026-11-09T03:10:00Z', total_tokens: 42800, cost_usd: 0.1482, summary: null },

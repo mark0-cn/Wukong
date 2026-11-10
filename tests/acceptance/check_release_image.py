@@ -41,9 +41,9 @@ def main():
         image = dict(repository=repository, digest=digest, image_id=inspection["Id"],
                      source_revision=args.revision, platform="linux/amd64", size_bytes=inspection["Size"])
         save("image.json", image)
-        with tempfile.TemporaryDirectory(prefix="re-agent-release-") as directory:
+        with tempfile.TemporaryDirectory(prefix="wukong-release-") as directory:
             root = Path(directory)
-            config = root / "re-agent.toml"
+            config = root / "wukong.toml"
             config.write_text('state_dir = ' + json.dumps(str(root / "assessments")) + '\n[runtime]\ndocker_executable = ' + json.dumps(args.docker) + '\n[workbench]\nroot = ' + json.dumps(str(root / "workbench")) + '\nimage = ' + json.dumps(args.image) + '\n', encoding="utf-8")
 
             def cli(*argv):
@@ -56,8 +56,8 @@ def main():
             save("doctor.json", doctor)
             assert doctor["passed"], "Tool doctor failed"
             checks["doctor"] = True
-            tool = f"re-agent-{workspace_id}-tools"
-            output = docker("exec", "--user", "10001:10001", tool, "python3", "/opt/re-agent/tests/run.py", "unit", "-p", "test_workbench*.py", "-v")
+            tool = f"wukong-{workspace_id}-tools"
+            output = docker("exec", "--user", "10001:10001", tool, "python3", "/opt/wukong/tests/run.py", "unit", "-p", "test_workbench*.py", "-v")
             (args.output / "worker-tests.txt").write_text(output, encoding="utf-8")
             checks["launch_and_archive"] = True
             fixture = root / "fixture"
@@ -73,7 +73,7 @@ def main():
                 cli("challenge", "extract", "release-check", "--path", path, "--role", role)
             cli("challenge", "prepare", "release-check")
             cli("challenge", "up", "release-check")
-            challenge_tool = f"re-agent-{workspace_id}-release-check-tools"
+            challenge_tool = f"wukong-{workspace_id}-release-check-tools"
             request = "import socket; s=socket.create_connection(('challenge',1337),5); s.sendall(b'ci\\n'); assert s.recv(64)==b'fixture:ci\\n'"
             for attempt in range(20):
                 try:
@@ -85,7 +85,7 @@ def main():
                     time.sleep(.2)
             checks["cli_import_build_extract_prepare_connect"] = True
             cli("challenge", "debug", "release-check")
-            debug = f"re-agent-{workspace_id}-release-check-debug"
+            debug = f"wukong-{workspace_id}-release-check-debug"
             attach = docker("exec", debug, "gdb", "-nx", "-nh", "-batch", "-ex", "set sysroot /proc/1/root", "-ex", "attach 1", "-ex", "info threads", "-ex", "detach")
             assert "Thread" in attach and "detached" in attach, attach
             (args.output / "debug-attach.txt").write_text(attach, encoding="utf-8")
@@ -94,8 +94,8 @@ def main():
             cli("challenge", "down", "release-check")
             # A distinct image ID catches upgrades that accidentally keep the old worker.
             update_dockerfile = fixture / "Dockerfile.update"
-            update_dockerfile.write_text(f'FROM {args.image}\nLABEL re-agent.acceptance="{workspace_id}"\n')
-            update_tag = "re-agent-release-update:" + workspace_id
+            update_dockerfile.write_text(f'FROM {args.image}\nLABEL wukong.acceptance="{workspace_id}"\n')
+            update_tag = "wukong-release-update:" + workspace_id
             docker("build", "-f", update_dockerfile, "-t", update_tag, fixture)
             updated_id = json.loads(docker("image", "inspect", update_tag))[0]["Id"]
             assert updated_id != image["image_id"]
@@ -111,7 +111,7 @@ def main():
         raise
     finally:
         if workspace_id:
-            label = "label=re-agent.workspace=" + workspace_id
+            label = "label=wukong.workspace=" + workspace_id
             for kind, listing in [("container", ["ps", "-aq"]), ("network", ["network", "ls", "-q"]), ("volume", ["volume", "ls", "-q"])]:
                 ids = docker(*listing, "--filter", label).split()
                 if ids:

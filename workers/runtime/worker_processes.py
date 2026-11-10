@@ -38,15 +38,15 @@ def attach_windows_job(process):
     limits = ExtendedLimits()
     limits.Basic.Flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     if handle and kernel.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)) and kernel.AssignProcessToJobObject(handle, int(process._handle)):
-        process._re_agent_job = (kernel, handle)
+        process._wukong_job = (kernel, handle)
     elif handle:
         kernel.CloseHandle(handle)
 
 def close_windows_job(process):
-    job = getattr(process, "_re_agent_job", None)
+    job = getattr(process, "_wukong_job", None)
     if job:
         job[0].CloseHandle(job[1])
-        process._re_agent_job = None
+        process._wukong_job = None
         return True
     return False
 

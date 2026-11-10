@@ -41,7 +41,7 @@ class ReleaseTests(unittest.TestCase):
                         old_data = tomllib.loads(before[name].decode())
                         new_data = tomllib.loads((root / name).read_text())
                         if name == "Cargo.lock":
-                            next(p for p in new_data["package"] if p["name"] == "re-agent")["version"] = old
+                            next(p for p in new_data["package"] if p["name"] == "wukong")["version"] = old
                         else:
                             new_data["package"]["version"] = old
                     self.assertEqual(new_data, old_data, name)
@@ -86,13 +86,13 @@ class ReleaseTests(unittest.TestCase):
             binary = root / "fixture.exe"
             binary.write_bytes(b"not executed")
             revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-            image = dict(repository="hlmark0/re-agent-workbench", digest="sha256:" + "a" * 64,
+            image = dict(repository="hlmark0/wukong", digest="sha256:" + "a" * 64,
                          image_id="sha256:" + "b" * 64, source_revision=revision, platform="linux/amd64", size_bytes=10)
             metadata = root / "image.json"
             metadata.write_text(json.dumps(image))
             output = root / "dist"
             manifest = package(binary, metadata, output, "v" + version())
-            self.assertEqual(manifest["files"]["re-agent.exe"], sha256(binary))
+            self.assertEqual(manifest["files"]["wukong.exe"], sha256(binary))
             with zipfile.ZipFile(next(output.glob("*.zip"))) as archive:
                 self.assertEqual(set(archive.namelist()), set(manifest["files"]) | {"release.json"})
                 self.assertEqual(json.loads(archive.read("release.json")), manifest)
@@ -117,7 +117,7 @@ class ReleaseTests(unittest.TestCase):
                 version(tag, root=Path("nonexistent-repository"))
 
     def test_image_identity_and_platform(self):
-        data = dict(repository="hlmark0/re-agent-workbench", digest="sha256:" + "a" * 64,
+        data = dict(repository="hlmark0/wukong", digest="sha256:" + "a" * 64,
                     image_id="sha256:" + "b" * 64, source_revision="abc", platform="linux/amd64", size_bytes=10)
         validate_image(data, "abc")
         for field, value in [("source_revision", "other"), ("platform", "linux/arm64"),

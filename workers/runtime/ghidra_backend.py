@@ -45,11 +45,11 @@ def query(root, params):
     actual_hash = digest(target)
     if params.get("target_sha256") != actual_hash:
         raise ValueError("Ghidra target SHA256 does not match uploaded target")
-    headless = Path(os.environ.get("RE_AGENT_GHIDRA_HEADLESS", "/opt/ghidra/support/analyzeHeadless")).resolve()
-    scripts = Path(os.environ.get("RE_AGENT_GHIDRA_SCRIPT_DIR", "/opt/re-agent/ghidra")).resolve()
-    script = scripts / "ReAgentBridge.java"
+    headless = Path(os.environ.get("WUKONG_GHIDRA_HEADLESS", "/opt/ghidra/support/analyzeHeadless")).resolve()
+    scripts = Path(os.environ.get("WUKONG_GHIDRA_SCRIPT_DIR", "/opt/wukong/ghidra")).resolve()
+    script = scripts / "WukongBridge.java"
     if not headless.is_file() or not script.is_file():
-        raise ValueError("Ghidra worker unavailable: install Ghidra and ReAgentBridge.java or set RE_AGENT_GHIDRA_HEADLESS / RE_AGENT_GHIDRA_SCRIPT_DIR")
+        raise ValueError("Ghidra worker unavailable: install Ghidra and WukongBridge.java or set WUKONG_GHIDRA_HEADLESS / WUKONG_GHIDRA_SCRIPT_DIR")
     properties = headless.parent.parent / "Ghidra/application.properties"
     properties_text = properties.read_text(encoding="utf-8")
     version = next((line.split("=", 1)[1].strip() for line in properties_text.splitlines() if line.startswith("application.version=")), "unknown")
@@ -118,7 +118,7 @@ def query(root, params):
         else:
             argv += ["-import", str(snapshot), "-overwrite"]
         argv += ["-analysisTimeoutPerFile", str(analysis_timeout), "-max-cpu", str(max_cpu), "-scriptPath", str(scripts),
-                 "-postScript", "ReAgentBridge.java", str(request), str(response)]
+                 "-postScript", "WukongBridge.java", str(request), str(response)]
         with analysis_claim(project, argv):
             execution = run_process(argv, work, safe_env(), timeout, 4 * 1048576, work / "output")
         atomic_json(work / "execution.json", execution)

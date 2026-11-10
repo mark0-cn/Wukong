@@ -251,7 +251,7 @@ pub fn preamble(
         agent.scope
     ));
     text.push_str(&format!(
-        "\nTask contract (requirements; check deliverables before agent_finish):\n{}\n",
+        "\nTask contract (requirements; check deliverables befoWukong_finish):\n{}\n",
         serde_json::to_string(&agent.contract)?
     ));
     let state = json!({"shared_context":store.read(|tx| crate::context::snapshot(tx,agent))?,"budget":run.budget});
