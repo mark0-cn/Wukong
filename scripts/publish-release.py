@@ -42,7 +42,12 @@ def releases(repository):
 
 
 def release_by_tag(repository, tag):
-    return json.loads(run(["gh", "api", f"repos/{repository}/releases/tags/{tag}"]))
+    # The tag endpoint can return 404 for drafts. Resolve the visible release ID
+    # from the authenticated list, then use the endpoint that supports drafts.
+    matching = [r for page in releases(repository) for r in page if r["tag_name"] == tag]
+    if len(matching) != 1:
+        raise ValueError("Expected exactly one visible release for " + tag)
+    return json.loads(run(["gh", "api", f"repos/{repository}/releases/{matching[0]['id']}"]))
 
 
 def verify_assets(directory, release, require_immutable=False):
