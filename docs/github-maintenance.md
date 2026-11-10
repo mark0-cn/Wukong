@@ -84,3 +84,4 @@ CI 与 Release 在各任务结束后运行 `summary` job，包括前面任务失
 API 暂不可用时展示缺失提示，不把未知耗时写成 0，也不把缺失验收报告当成通过。
 摘要 job 在运行被强制取消或 GitHub 调度异常时仍可能无法执行，原始 job 日志为准。
 工具链检查有独立摘要及 30 天报告，Release 的在线包与验收报告保留 14 天。
+<!-- Temporary validation of documentation-only CI selection. -->
