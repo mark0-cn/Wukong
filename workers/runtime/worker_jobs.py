@@ -195,7 +195,6 @@ class JobManager:
             if not isinstance(source, str) or not source.strip() or len(source) > 262144 or "\0" in source:
                 raise ValueError("source must be a nonempty string <=256KiB without NUL bytes")
             import py_compile
-            import uuid
             script_rel = "files/py_run_" + uuid.uuid4().hex + ".py"
             script = confined(self.root, script_rel)
             script.parent.mkdir(parents=True, exist_ok=True)

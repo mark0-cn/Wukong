@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow AFL/QEMU campaigns to start without an optional request ID, while preserving distinct campaign directories and stable identities for explicitly identified requests."
+zh_CN = "修复未传可选请求 ID 时 AFL/QEMU 活动无法启动的问题，同时保留独立活动目录及显式请求 ID 对应的稳定身份。"
