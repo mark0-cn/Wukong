@@ -68,6 +68,162 @@ fn fixture() -> Manifest {
     }
 }
 
+fn enrollment_fixture(
+    signer: &Signer,
+    payload: &VerifiedManifest,
+) -> wukong_worker_package::Enrollment {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let mut blob = b"\0\0\0\x0bssh-ed25519\0\0\0\x20".to_vec();
+    blob.extend(hex::decode(signer.public_key().to_hex()).unwrap());
+    wukong_worker_package::Enrollment {
+        schema: 1,
+        generation: 1,
+        installation_id: "e".repeat(32),
+        environment_id: "windows-vm".into(),
+        controller_public_key: signer.public_key().to_hex(),
+        payload_manifest_sha256: payload.sha256().into(),
+        management_peer: "192.0.2.1".parse().unwrap(),
+        ssh_port: 22,
+        ssh_public_key: wukong_worker_package::SshPublicKey {
+            algorithm: "ssh-ed25519".into(),
+            key: STANDARD.encode(blob),
+        },
+    }
+}
+
+#[test]
+fn public_enrollment_pins_authority_payload_and_ssh_key_without_trusting_delivered_keys()
+-> anyhow::Result<()> {
+    use wukong_worker_package::VerifiedEnrollment;
+    let (signer, _) = Signer::generate()?;
+    let (bytes, signature) = signer.sign(&fixture())?;
+    let payload = VerifiedManifest::verify(&bytes, &signature, &signer.public_key())?;
+    let enrollment = enrollment_fixture(&signer, &payload);
+    let (data, signature) = enrollment.sign(&signer)?;
+    let verified = VerifiedEnrollment::verify(&data, &signature, &signer.public_key())?;
+    verified.bind_payload(&payload)?;
+    assert!(verified.authorize_after(&verified).is_err());
+    let mut next = enrollment.clone();
+    next.generation = 2;
+    let (data, signature) = next.sign(&signer)?;
+    let next = VerifiedEnrollment::verify(&data, &signature, &signer.public_key())?;
+    next.authorize_after(&verified)?;
+    assert!(
+        verified
+            .enrollment()
+            .ssh_public_key
+            .authorized_key()?
+            .starts_with("ssh-ed25519 ")
+    );
+    assert!(
+        verified
+            .enrollment()
+            .ssh_public_key
+            .fingerprint()?
+            .starts_with("SHA256:")
+    );
+    let (stranger, _) = Signer::generate()?;
+    assert!(VerifiedEnrollment::verify(&data, &signature, &stranger.public_key()).is_err());
+    let mut changed = data.clone();
+    changed[20] ^= 1;
+    assert!(VerifiedEnrollment::verify(&changed, &signature, &signer.public_key()).is_err());
+    let mut other = enrollment.clone();
+    other.payload_manifest_sha256 = "f".repeat(64);
+    let (data, signature) = other.sign(&signer)?;
+    assert!(
+        VerifiedEnrollment::verify(&data, &signature, &signer.public_key())?
+            .bind_payload(&payload)
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn enrollment_signatures_are_separate_from_package_signatures_and_reject_unsafe_fields()
+-> anyhow::Result<()> {
+    use wukong_worker_package::VerifiedEnrollment;
+    let (signer, _) = Signer::generate()?;
+    let (bytes, signature) = signer.sign(&fixture())?;
+    let payload = VerifiedManifest::verify(&bytes, &signature, &signer.public_key())?;
+    let original = enrollment_fixture(&signer, &payload);
+    assert!(
+        VerifiedEnrollment::verify(
+            &original.canonical_bytes()?,
+            &signature,
+            &signer.public_key()
+        )
+        .is_err()
+    );
+    for bad in ["../environment", "windows vm", "", "\n"] {
+        let mut candidate = original.clone();
+        candidate.environment_id = bad.into();
+        assert!(candidate.sign(&signer).is_err());
+    }
+    for bad in [
+        "0.0.0.0",
+        "127.0.0.1",
+        "224.0.0.1",
+        "255.255.255.255",
+        "::",
+        "::1",
+        "ff02::1",
+        "::ffff:127.0.0.1",
+        "::ffff:192.0.2.1",
+    ] {
+        let mut candidate = original.clone();
+        candidate.management_peer = bad.parse()?;
+        assert!(candidate.sign(&signer).is_err());
+    }
+    let mut candidate = original.clone();
+    candidate.ssh_port = 0;
+    assert!(candidate.sign(&signer).is_err());
+    candidate = original.clone();
+    candidate.ssh_public_key.algorithm = "restrict,command=untrusted ssh-ed25519".into();
+    assert!(candidate.sign(&signer).is_err());
+    candidate = original.clone();
+    candidate.ssh_public_key.key.push('\n');
+    assert!(candidate.sign(&signer).is_err());
+    candidate = original;
+    candidate.controller_public_key = "a".repeat(64);
+    assert!(candidate.sign(&signer).is_err());
+    Ok(())
+}
+
+#[test]
+fn enrollment_publication_rejects_noncanonical_envelopes_and_existing_outputs() -> anyhow::Result<()>
+{
+    use wukong_worker_package::{VerifiedEnrollment, write_enrollment};
+    let (signer, private) = Signer::generate()?;
+    let (bytes, signature) = signer.sign(&fixture())?;
+    let payload = VerifiedManifest::verify(&bytes, &signature, &signer.public_key())?;
+    let enrollment = enrollment_fixture(&signer, &payload);
+    let (bytes, mut signature) = enrollment.sign(&signer)?;
+    let original = String::from_utf8(bytes)?;
+    let key = ring::signature::Ed25519KeyPair::from_pkcs8(private.as_ref())
+        .map_err(|_| anyhow::anyhow!("invalid fixture key"))?;
+    for changed in [
+        format!(" {original}"),
+        original.replace("\"schema\":1", "\"schema\":1,\"schema\":1"),
+    ] {
+        let message = [
+            b"Wukong/Windows-worker-enrollment/v1\0".as_slice(),
+            changed.as_bytes(),
+        ]
+        .concat();
+        signature.signature = hex::encode(key.sign(&message).as_ref());
+        assert!(
+            VerifiedEnrollment::verify(changed.as_bytes(), &signature, &signer.public_key())
+                .is_err()
+        );
+    }
+    let temporary = tempfile::tempdir()?;
+    let output = temporary.path().join("enrollment");
+    write_enrollment(&output, &enrollment, &signer, &payload)?;
+    assert_eq!(fs::read_dir(&output)?.count(), 2);
+    assert!(write_enrollment(&output, &enrollment, &signer, &payload).is_err());
+    Ok(())
+}
+
 #[test]
 fn controller_keys_are_stable_private_and_fail_closed_on_tampering() -> anyhow::Result<()> {
     use wukong_worker_package::load_controller_signer;
@@ -238,6 +394,40 @@ fn native_controller_seals_with_persistent_private_keys() -> anyhow::Result<()> 
         .output()?;
     assert!(!forbidden.status.success());
     assert!(!package.join("private-key").exists());
+    let signer = wukong_worker_package::load_controller_signer(&keys)?;
+    let payload = wukong_worker_package::verify_package(
+        &package,
+        &public,
+        &Compatibility {
+            runtime_protocol: 2,
+            controller_version: "1.0.0",
+        },
+    )?;
+    let enrollment = enrollment_fixture(&signer, &payload);
+    let enrollment_draft = temporary.path().join("enrollment-draft.json");
+    fs::write(&enrollment_draft, enrollment.canonical_bytes()?)?;
+    let output = temporary.path().join("public-enrollment");
+    let result = Command::new(&binary)
+        .arg("enroll")
+        .arg(&package)
+        .arg(&enrollment_draft)
+        .arg(&keys)
+        .arg(&output)
+        .arg("1.0.0")
+        .creation_flags(0x08000000)
+        .output()?;
+    anyhow::ensure!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let signature = serde_json::from_slice(&fs::read(output.join("enrollment.sig"))?)?;
+    wukong_worker_package::VerifiedEnrollment::verify(
+        &fs::read(output.join("enrollment.json"))?,
+        &signature,
+        &public,
+    )?
+    .bind_payload(&payload)?;
     Ok(())
 }
 

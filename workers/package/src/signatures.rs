@@ -20,6 +20,23 @@ impl PublicKey {
     pub fn fingerprint(&self) -> String {
         hex::encode(Sha256::digest(self.0))
     }
+    pub(crate) fn verify_bytes(&self, bytes: &[u8], signature: &SignatureRecord) -> Result<()> {
+        ensure!(
+            signature.schema == 1
+                && signature.algorithm == "ed25519"
+                && signature.key_sha256 == self.fingerprint(),
+            "worker signer is not trusted"
+        );
+        ensure!(
+            signature.signature.len() == 128,
+            "invalid worker signature length"
+        );
+        let decoded =
+            hex::decode(&signature.signature).context("invalid worker signature encoding")?;
+        UnparsedPublicKey::new(&ED25519, self.0)
+            .verify(bytes, &decoded)
+            .map_err(|_| anyhow::anyhow!("worker signature verification failed"))
+    }
 }
 
 /// The private key is never serializable or included in package metadata.
@@ -46,14 +63,17 @@ impl Signer {
                 .expect("Ed25519 public key length"),
         )
     }
-    pub fn sign(&self, manifest: &Manifest) -> Result<(Vec<u8>, SignatureRecord)> {
-        let bytes = manifest.canonical_bytes()?;
-        let signature = SignatureRecord {
+    pub(crate) fn sign_bytes(&self, bytes: &[u8]) -> SignatureRecord {
+        SignatureRecord {
             schema: 1,
             algorithm: "ed25519".into(),
             key_sha256: self.public_key().fingerprint(),
-            signature: hex::encode(self.0.sign(&bytes).as_ref()),
-        };
+            signature: hex::encode(self.0.sign(bytes).as_ref()),
+        }
+    }
+    pub fn sign(&self, manifest: &Manifest) -> Result<(Vec<u8>, SignatureRecord)> {
+        let bytes = manifest.canonical_bytes()?;
+        let signature = self.sign_bytes(&bytes);
         Ok((bytes, signature))
     }
 }
@@ -82,21 +102,7 @@ impl VerifiedManifest {
             bytes.len() <= MAX_MANIFEST_BYTES,
             "worker manifest exceeds 4 MiB"
         );
-        ensure!(
-            signature.schema == 1
-                && signature.algorithm == "ed25519"
-                && signature.key_sha256 == trusted.fingerprint(),
-            "worker package signer is not trusted"
-        );
-        ensure!(
-            signature.signature.len() == 128,
-            "invalid worker package signature length"
-        );
-        let decoded = hex::decode(&signature.signature)
-            .context("invalid worker package signature encoding")?;
-        UnparsedPublicKey::new(&ED25519, trusted.0)
-            .verify(bytes, &decoded)
-            .map_err(|_| anyhow::anyhow!("worker package signature verification failed"))?;
+        trusted.verify_bytes(bytes, signature)?;
         let manifest: Manifest =
             serde_json::from_slice(bytes).context("invalid signed worker manifest")?;
         ensure!(

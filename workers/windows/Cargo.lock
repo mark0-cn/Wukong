@@ -479,6 +479,7 @@ name = "wukong-worker-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "hex",
  "libc",
  "ring",

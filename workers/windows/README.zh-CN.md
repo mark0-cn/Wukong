@@ -40,6 +40,8 @@ python -m scripts.worker.assemble --cache target/windows-offline-cache --output 
 
 密钥命令仅输出公钥及指纹，供独立登记。私钥存储在控制端且位于包外，按[工具包约定](../package/README.zh-CN.md)保护；示例采用本地开发目录。`wukong-package.exe` 是控制端实用程序，不进入 VM 载荷。签名输出绑定完整文件与兼容性，但在声称生产安装支持前，仍须完成依赖与自检、原生安装器/服务/broker、桌面交付与登记，以及真实离线 VM 验收。
 
+准备好公开登记草稿后，`wukong-package enroll PACKAGE DRAFT ABSOLUTE_KEYS NEW_ABSOLUTE_OUTPUT CONTROLLER_VERSION` 使用控制端受保护的签名身份校验包文件，检查签名登记记录与载荷的绑定关系，并仅在载荷之外生成公开登记记录。[登记约定](../package/README.zh-CN.md)说明各字段及首次信任边界。该命令不会创建 VM 账号、安装服务或自动登记 SSH。
+
 原生构建入口还使用控制端 MSVC 工具链及静态 CRT 编译已知 x64/x86 探针与匹配 PDB。它们通过哈希绑定原生构建元数据，并复制到签名包中，客户机无须编译器。原生程序使用独立登记的公钥完成签名和目录校验后，操作员或安装器可运行随包 Python 入口：
 
 ```powershell

@@ -40,6 +40,8 @@ python -m scripts.worker.assemble --cache target/windows-offline-cache --output 
 
 The key command prints only the public key/fingerprint for independent enrollment. Private key storage stays on the controller outside the package, protected as described in the [package contract](../package/README.md); the example uses a local development directory. `wukong-package.exe` is a controller utility and is excluded from the VM payload. The signed output binds complete files and compatibility, but still requires dependency/self-tests, the native installer/service/broker, desktop delivery/enrollment and real offline VM acceptance before production installation support can be claimed.
 
+For a prepared public enrollment draft, `wukong-package enroll PACKAGE DRAFT ABSOLUTE_KEYS NEW_ABSOLUTE_OUTPUT CONTROLLER_VERSION` verifies the package with the controller's protected signing identity, checks the signed enrollment/payload binding and creates only public enrollment records outside the payload. The [enrollment contract](../package/README.md) describes the fields and initial-trust boundary. This command does not create VM accounts, install services or enroll SSH automatically.
+
 The native builder also compiles known x64/x86 probes and matching PDBs using the controller's MSVC toolchains and static CRT. They are hash-bound to native build metadata and copied into the signed package. The guest needs no compiler. After native signature/tree verification against the independently enrolled key, the operator/installer can run the packaged Python entry:
 
 ```powershell
