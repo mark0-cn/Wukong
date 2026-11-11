@@ -616,3 +616,25 @@ test('background preparation reattaches from either entry and cancellation settl
   await expect(page.getByRole('button', { name: '自检并修复环境' })).toBeEnabled();
   expect(await page.evaluate(() => (window as any).__cancelIds)).toEqual(['same-operation']);
 });
+
+
+test('readable typography survives large displays and the minimum workspace', async ({ page }) => {
+  await page.goto('/');
+  for (const [width, height] of [[2560, 1369], [1100, 700]]) {
+    await page.setViewportSize({ width, height });
+    await expect(page.locator('.composer textarea')).toBeVisible();
+    expect(await page.locator('.composer textarea').evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(16);
+    expect(await page.locator('.markdown').first().evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(16);
+    expect(await page.getByRole('button', { name: '工作区设置', exact: true }).evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(14);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `target/typography-workspace-${width}.png` });
+  }
+  await page.setViewportSize({ width: 2560, height: 1369 });
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.runs = []; state.data.selected = null; state.host.execution = null; state.revision++;
+    (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.welcome')).toBeVisible();
+  await page.screenshot({ path: 'target/typography-welcome-2560.png' });
+});

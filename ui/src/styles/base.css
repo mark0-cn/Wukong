@@ -1,8 +1,8 @@
 :root {
-  font-family:"Segoe UI",Inter,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  font-family:var(--font-ui);
   color:var(--text);
   background: var(--bg);
-  font-size:14px;
+  font-size:16px;
   font-synthesis:none;
   -webkit-font-smoothing:antialiased;
 }
@@ -10,6 +10,8 @@
   box-sizing:border-box;
 }
 body {
+  font-size:var(--text-ui);
+  line-height:1.5;
   margin:0;
   overflow:hidden;
 }
@@ -76,13 +78,13 @@ h1,h2,h3,h4 {
   letter-spacing:-.025em;
 }
 h2 {
-  font-size:24px;
+  font-size:var(--text-display);
 }
 h3 {
-  font-size:15px;
+  font-size:var(--text-heading-sm);
 }
 h4 {
-  font-size:14px;
+  font-size:var(--text-body);
 }
 a {
   color: var(--info);
@@ -90,8 +92,8 @@ a {
   text-underline-offset:3px;
 }
 pre,code {
-  font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
-  font-size: 13px;
+  font-family:var(--font-code);
+  font-size:var(--text-ui);
 }
 pre {
   white-space:pre-wrap;
@@ -113,7 +115,7 @@ pre code {
 }
 .error {
   color:var(--error);
-  font-size:13px;
+  font-size:var(--text-ui);
   overflow-wrap:anywhere;
 }
 .primary {
@@ -168,7 +170,7 @@ pre code {
   transform:rotate(90deg);
 }
 .eyebrow {
-  font-size:12px;
+  font-size:var(--text-ui);
   letter-spacing:.18em;
   color:var(--muted);
   font-weight:600;
