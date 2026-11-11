@@ -60,3 +60,6 @@ progress {
 .tool-running .tool-symbol { color: var(--info); }
 .tool-completed .tool-symbol { color: var(--success); }
 ::selection { background: var(--accent-surface); color: var(--text); }
+
+.maintenance-options { margin-top:14px; border-top:1px solid var(--border); padding-top:12px; }
+.maintenance-options>.header-actions { margin-top:12px; }

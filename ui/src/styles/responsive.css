@@ -92,21 +92,11 @@ summary {
 @container (max-width: 650px) {
   .findings-page {
     flex-direction: column; }
-  .finding-list {
-    flex: 0 0 auto;
-    max-height: 190px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border); }
-  .finding-list>input, .finding-list>select {
-    width: calc(50% - 5px); }
-  .finding-list>select {
-    margin-left: 10px; }
-  .finding-card {
-    padding: 8px 10px; }
-  .finding-card>div {
-    margin-top: 5px; }
-  .finding-detail-scroll {
-    padding: 18px; }
+  .findings-page[data-detail=true] .finding-list,
+  .findings-page[data-detail=false] .finding-detail-scroll { display:none; }
+  .finding-list { flex:1; border:0; }
+  .finding-detail-scroll { padding:16px; }
+  .findings-back { display:inline-flex; margin-bottom:12px; }
   .tool-label {
     flex-direction: column;
     gap: 2px; }
@@ -116,4 +106,19 @@ summary {
     display: none; }
   .metrics {
     grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-height:700px) {
+  .sidebar { padding-top:14px; }
+  .brand { padding-bottom:14px; }
+  .new-task { margin-bottom:12px; padding:8px; }
+  .sidebar-label { margin-bottom:8px; }
+  .search { margin-bottom:8px; }
+  .sidebar-footer { margin-top:8px; padding-top:8px; }
+  .workspace-path { display:none; }
+  .sidebar-help { margin:2px 0; line-height:1.4; }
+}
+@container (max-width:650px) {
+  .tool-inline-summary { max-width:40%; }
+  .composer-target { max-width:40%; }
 }

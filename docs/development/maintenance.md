@@ -19,6 +19,8 @@ worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录
 `ui/src/styles.css` 只按固定顺序导入 `styles/` 中的基础、工作区、聊天、Agent、证据、设置、响应式及维护界面样式；移动规则时保持层叠顺序。
 前端使用现有的 Radix、assistant-ui 和 Lucide 组件。颜色统一定义在 `ui/src/theme.css`，组件样式引用语义变量；不要在组件中重新散布颜色值。
 `ui/src/workspace-layout.css` 只放分栏容器和拖动分隔条；组件的尺寸、间距、边框直接归入 `styles/` 对应文件，响应式规则统一放在 `styles/responsive.css`，不叠加一层旧布局覆盖。分栏使用 `react-resizable-panels`，与 shadcn/ui 的分栏采用同一基础组件，保留键盘调整和宽度记忆。
+桌面视图偏好通过 `useViewPreference` 保存为本机 WebView 数据；任务别名按工作区路径和 run ID 区分，不能写回任务指令或作为目标身份。设置与存储草稿留在设置组件状态中，目录操作仍经过既有 epoch 与维护锁检查。
+
 默认采用中性深灰底色，金色表示主要操作或选中，蓝色表示执行中，绿色表示成功，黄色表示等待/警告，红色表示失败。状态同时保留图标和文字。
 正文使用 14px，辅助信息至少 12px，代码与原始证据使用 13px 等宽字体。调整布局时检查桌面最小窗口下的滚动、长路径和消息草稿保留。
 颜色层级参考 [Radix Colors](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale)，工作区分区参考 [VS Code](https://code.visualstudio.com/docs/editing/getting-started/userinterface)。

@@ -222,3 +222,46 @@ result-failed = Operation failed. Expand to see error details.
 result-uncertain = The outcome is uncertain. Reconcile before continuing.
 result-paused = Analysis paused. Operation state is preserved.
 result-interrupted = The task ended without confirming completion of this operation.
+
+ui-completed-hint = Analysis complete. Review findings or export the report.
+ui-stopped-hint = Task stopped. Saved progress remains available.
+ui-failed-hint = Analysis ended with an error. Review failed operations and agent details.
+ui-model-and-usage = Model and usage
+
+ui-new-messages = { $count } new messages
+ui-recipient = To:
+ui-send-mode = Send mode
+ui-send-information = Add information
+ui-send-task = Assign follow-up
+ui-expand-input = Expand message input
+ui-collapse-input = Collapse message input
+ui-ended-recipient = This agent has ended. Completed agents accept follow-up tasks; failed or stopped tasks require a new analysis.
+ui-append-help = Assign further work while retaining the analysis history.
+
+ui-rename-task = Rename task
+ui-name-local = Names are saved in this device’s interface only. Files and task instructions stay unchanged. Leave empty to use the filename.
+ui-task-name = Task name
+ui-save-name = Save name
+ui-filter-tasks = Filter tasks
+ui-all-tasks = All tasks
+ui-active-tasks = Active
+ui-history-tasks = History and paused
+
+ui-updates = Updates
+ui-tools-environment = Tool environment
+ui-challenge-environment = Challenge environment
+ui-environment-busy = Environment management is unavailable during active work.
+ui-maintenance-options = Maintenance options
+ui-settings-sections = Settings categories
+ui-general-settings = Language and model
+ui-advanced-settings = Advanced configuration
+ui-save-before-storage = Save configuration changes before switching storage locations.
+ui-tools-description = Prepare or repair the tool image for this client version, then start it, run diagnostics and select it for new tasks.
+
+ui-copy-failed = Copy failed. Select and copy the text manually.
+ui-copy-source = Copy source path
+ui-copy-hash = Copy SHA-256
+ui-copy-evidence-id = Copy evidence ID
+ui-select-evidence = Select evidence
+ui-back-findings = Back to findings
+ui-environment-facts = Runtime environment fields
