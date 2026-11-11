@@ -249,7 +249,7 @@ fn spawn_ssh(
             "-f".into(),
             root.join("ssh/sshd_config").into_os_string(),
         ],
-        directory: &root.join("ssh"),
+        directory: root,
         environment: &environment,
         log: &log,
         input: &input,

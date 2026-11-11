@@ -266,23 +266,16 @@ impl AclPolicy {
             .collect(),
         })
     }
-    fn descriptor(&self, directory: bool) -> Result<Local> {
+    fn sddl(&self, directory: bool) -> String {
         let flags = if directory { "OICI" } else { "" };
         let mut sddl = format!("O:{}D:P", self.owner);
         for (sid, mask) in &self.grants {
             sddl.push_str(&format!("(A;{flags};0x{mask:08x};;;{sid})"));
         }
-        let encoded = wide(std::ffi::OsStr::new(&sddl))?;
-        let mut descriptor = null_mut();
-        check(unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                encoded.as_ptr(),
-                1,
-                &mut descriptor,
-                null_mut(),
-            )
-        })?;
-        Ok(Local(descriptor))
+        sddl
+    }
+    fn descriptor(&self, directory: bool) -> Result<Local> {
+        Ok(SecurityDescriptor::from_sddl(&self.sddl(directory))?.0)
     }
     pub fn create_directory(&self, path: &Path) -> Result<()> {
         no_links(path)?;
@@ -409,4 +402,93 @@ pub fn absolute_new_path(path: &Path) -> Result<PathBuf> {
     let parent = path.parent().context("native path has no parent")?;
     let parent = parent.canonicalize()?;
     Ok(parent.join(path.file_name().context("native path has no filename")?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use windows_sys::Win32::{
+        Security::{
+            AccessCheck, CreateRestrictedToken, DuplicateToken, GENERIC_MAPPING,
+            SID_AND_ATTRIBUTES, SecurityImpersonation, TOKEN_DUPLICATE,
+        },
+        Storage::FileSystem::{FILE_GENERIC_WRITE, FILE_READ_DATA},
+    };
+
+    #[test]
+    fn ordinary_read_access_cannot_reach_private_host_key_generation_policy() -> Result<()> {
+        // Use a real Windows restricted token: even an elevated test process
+        // must pass the extra Users-only access check. No accounts, files,
+        // impersonation or machine policy are changed by this fixture.
+        let encoded = wide(OsStr::new("S-1-5-32-545"))?;
+        let mut users = null_mut();
+        check(unsafe { ConvertStringSidToSidW(encoded.as_ptr(), &mut users) })?;
+        let _users = Local(users);
+        let restriction = SID_AND_ATTRIBUTES {
+            Sid: users,
+            Attributes: 0,
+        };
+        let mut original = null_mut();
+        check(unsafe {
+            OpenProcessToken(
+                GetCurrentProcess(),
+                TOKEN_QUERY | TOKEN_DUPLICATE,
+                &mut original,
+            )
+        })?;
+        let original = Handle(original);
+        let mut restricted = null_mut();
+        check(unsafe {
+            CreateRestrictedToken(
+                original.0,
+                0,
+                0,
+                null_mut(),
+                0,
+                null_mut(),
+                1,
+                &restriction,
+                &mut restricted,
+            )
+        })?;
+        let restricted = Handle(restricted);
+        let mut impersonation = null_mut();
+        check(unsafe { DuplicateToken(restricted.0, SecurityImpersonation, &mut impersonation) })?;
+        let impersonation = Handle(impersonation);
+        let mapping = GENERIC_MAPPING {
+            GenericRead: FILE_GENERIC_READ,
+            GenericWrite: FILE_GENERIC_WRITE,
+            GenericExecute: FILE_GENERIC_EXECUTE,
+            GenericAll: FILE_ALL_ACCESS,
+        };
+        for directory in [true, false] {
+            for (policy, expected) in [
+                (AclPolicy::private_vm(), false),
+                (AclPolicy::code_vm(), true),
+            ] {
+                // NTFS fills a missing primary group at object creation.
+                // AccessCheck requires it in the in-memory descriptor too.
+                let descriptor =
+                    SecurityDescriptor::from_sddl(&format!("G:BU{}", policy.sddl(directory)))?;
+                let mut privileges = [0u64; 1024];
+                let mut bytes = std::mem::size_of_val(&privileges) as u32;
+                let (mut granted, mut allowed) = (0, 0);
+                check(unsafe {
+                    AccessCheck(
+                        descriptor.0.0,
+                        impersonation.0,
+                        FILE_READ_DATA,
+                        &mapping,
+                        privileges.as_mut_ptr().cast(),
+                        &mut bytes,
+                        &mut granted,
+                        &mut allowed,
+                    )
+                })?;
+                assert_eq!(allowed != 0, expected);
+            }
+        }
+        Ok(())
+    }
 }

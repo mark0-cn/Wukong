@@ -86,6 +86,18 @@ impl Deployment {
         self.data_policy()?.verify(&root.join("data"), true)?;
         let metadata = root.join("metadata");
         let private = AclPolicy::private_vm();
+        private.verify(&root.join("ssh"), true)?;
+        for name in [
+            "ssh_host_ed25519_key",
+            "ssh_host_ed25519_key.pub",
+            "sshd_config",
+        ] {
+            private.verify(&root.join("ssh").join(name), false)?;
+        }
+        private
+            .clone()
+            .with_account(&self.account(Role::Management)?.sid, false)?
+            .verify(&root.join("bootstrap/authorized_keys"), false)?;
         let authority = Authority::load(&metadata, &private)?;
         let key = authority.key()?;
         ensure!(

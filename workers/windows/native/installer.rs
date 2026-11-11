@@ -393,7 +393,9 @@ pub fn install(plan: Plan) -> Result<Value> {
         &code,
         64 * 1024 * 1024,
     )?;
-    code.create_directory(&root.join("ssh"))?;
+    // ssh-keygen creates its files before we can apply an explicit file ACL.
+    // Keep the entire generation directory private from its first creation.
+    private.create_directory(&root.join("ssh"))?;
     let host_key = root.join("ssh/ssh_host_ed25519_key");
     fixed_command(
         &package.join(&entry.ssh_keygen),
@@ -410,7 +412,7 @@ pub fn install(plan: Plan) -> Result<Value> {
         Duration::from_secs(30),
     )?;
     private.apply(&host_key, false)?;
-    code.apply(&host_key.with_extension("pub"), false)?;
+    private.apply(&host_key.with_extension("pub"), false)?;
     let key_text = String::from_utf8(deployment::read_bytes(
         &host_key.with_extension("pub"),
         1024,
@@ -426,7 +428,7 @@ pub fn install(plan: Plan) -> Result<Value> {
     let mut authorized = private
         .clone()
         .with_account(&management.sid, false)?
-        .create_file(&root.join("ssh/authorized_keys"))?;
+        .create_file(&root.join("bootstrap/authorized_keys"))?;
     writeln!(
         authorized,
         "restrict,from=\"{}\" {}",
@@ -439,7 +441,7 @@ pub fn install(plan: Plan) -> Result<Value> {
         "Port {}\nListenAddress 0.0.0.0\nHostKey {}\nAuthorizedKeysFile {}\nAuthenticationMethods publickey\nPubkeyAuthentication yes\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitEmptyPasswords no\nPermitTTY no\nDisableForwarding yes\nAllowAgentForwarding no\nAllowTcpForwarding no\nX11Forwarding no\nPermitTunnel no\nPermitUserRC no\nPermitUserEnvironment no\nStrictModes yes\nUseDNS no\nLoginGraceTime 30\nMaxAuthTries 3\nMaxSessions 16\nAllowUsers {}@{}\nForceCommand {} relay {}\nLogLevel VERBOSE\n",
         enrollment.ssh_port,
         ssh_path(&host_key)?,
-        ssh_path(&root.join("ssh/authorized_keys"))?,
+        ssh_path(&root.join("bootstrap/authorized_keys"))?,
         management.name,
         enrollment.management_peer,
         ssh_path(&relay)?,
