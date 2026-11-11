@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Diagnose fixed SSH startup access violations on dedicated hosted Windows test machines using sealed syntax-only probes and bounded fault/module inspection, without memory dumps or private key collection."
+zh_CN = "在独立托管 Windows 测试机上，通过签封工具的纯语法探测及有界故障和模块检查诊断固定 SSH 启动访问违例，不采集内存转储或私钥。"

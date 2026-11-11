@@ -98,6 +98,65 @@ def diagnostics(installed):
     return result
 
 
+def debugger_fault_sections(output):
+    # Initial debugger output can contain automatic register displays. Publish
+    # only the explicitly requested sections; missing markers fail closed.
+    output = output.decode('utf-8', errors='replace').replace('\r\n', '\n')
+    if 'WUKONG_FAULT\n' not in output:
+        return dict(fault='', modules='')
+    selected = output.split('WUKONG_FAULT\n', 1)[1]
+    if 'WUKONG_MODULES\n' not in selected:
+        return dict(fault='', modules='')
+    fault, modules = selected.split('WUKONG_MODULES\n', 1)
+    return dict(fault=fault[:4096], modules=modules[:8192])
+
+
+def diagnose_sshd_crash(installed, manifest, digest, work, confirmed):
+    """Trusted syntax-only probes; never run on a developer/self-hosted machine."""
+    require_hosted(confirmed)
+    from scripts._lib.checksums import sha256
+    from scripts.worker.paths import regular
+    package = installed / 'versions' / digest
+    sshd_entry = manifest['entrypoints']['sshd']
+    cdb_entry = str(Path(manifest['entrypoints']['dbgeng_library']).with_name('cdb.exe')).replace('\\', '/')
+    executables = []
+    for entry in [sshd_entry, cdb_entry]:
+        executable = regular(package / entry)
+        if sha256(executable) != manifest['files'][entry]['sha256']:
+            raise RuntimeError('Crash diagnostic executable differs from its sealed inventory')
+        executables.append(executable)
+    sshd, cdb = executables
+    temporary = work / 'ssh-diagnostic-temp'; temporary.mkdir()
+    symbols = work / 'empty-local-symbols'; symbols.mkdir()
+    minimal = {name: os.environ[name] for name in ['SystemRoot', 'ProgramData']}
+    system = Path(minimal['SystemRoot'])
+    runtime = dict(minimal, WINDIR=str(system), PATH=f'{system / "System32"};{system}',
+                   COMSPEC=str(system / 'System32/cmd.exe'), TEMP=str(temporary), TMP=str(temporary))
+    config = installed / 'ssh/sshd_config'
+    observations = []
+    for label, environment, arguments in [
+            ('version_minimal', minimal, ['-V']),
+            ('syntax_minimal', minimal, ['-e', '-ddd', '-t', '-f', config]),
+            ('syntax_runtime_paths', runtime, ['-e', '-ddd', '-t', '-f', config])]:
+        result = subprocess.run(list(map(str, [sshd, *arguments])), cwd=installed, env=environment,
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        observations.append(dict(case=label, exit_code=result.returncode,
+                                 environment_names=sorted(environment),
+                                 stderr=result.stderr[-4096:].decode('utf-8', errors='replace')))
+    # Only the instruction pointer, a stack WITHOUT arguments, and module
+    # identities are requested. Never dump memory, all registers or key bytes.
+    commands = '.echo WUKONG_FAULT\n.lastevent\nr rip\nk\n.echo WUKONG_MODULES\nlm\nq\n'
+    result = subprocess.run(list(map(str, [cdb, '-sins', '-y', symbols, '-noshell', '-nosqm',
+                                '-G', '-xe', 'av', '-c', 'g', sshd, '-e', '-ddd', '-t', '-f', config])),
+                            cwd=installed, env=minimal, input=commands.encode('ascii'),
+                            capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+    return dict(scope='sealed_sshd_syntax_only_owned_hosted_fixture', probes=observations,
+                debugger_exit_code=result.returncode, **debugger_fault_sections(result.stdout),
+                debugger_stderr=result.stderr[-2048:].decode('utf-8', errors='replace'),
+                external_network_blocked=True, memory_dump_created=False)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--confirm-hosted-runner', action='store_true')
@@ -200,6 +259,12 @@ def main():
                       offline_selftests_passed=True, pinned_assets=assets['assets'])
     except Exception as error:
         report.update(passed=False, error=f'{type(error).__name__}: {error}'[:4096])
+        if 'sshd failed: exit code: 0xc0000005' in str(error):
+            try:
+                report['ssh_startup_crash'] = diagnose_sshd_crash(
+                    installed, manifest, sealed['manifest_sha256'], work, args.confirm_hosted_runner)
+            except Exception as diagnostic_error:
+                report['ssh_startup_crash'] = dict(unavailable=type(diagnostic_error).__name__)
     finally:
         if plan_path.exists() and (work / 'hosted-preflight.json').exists():
             if not report['passed']:

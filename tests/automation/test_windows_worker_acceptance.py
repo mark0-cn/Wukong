@@ -13,6 +13,21 @@ spec.loader.exec_module(fixture)
 
 
 class HostedWorkerGuardTests(unittest.TestCase):
+    def test_only_explicit_bounded_fault_sections_enter_the_report(self):
+        private = b'UNREQUESTED-REGISTER-CANARY'
+        sections = fixture.debugger_fault_sections(
+            private + b'\r\nWUKONG_FAULT\r\n' + b'f'*5000 + b'\r\nWUKONG_MODULES\r\n' + b'm'*9000)
+        self.assertEqual(sections, dict(fault='f'*4096, modules='m'*8192))
+        for output in [private, private+b'\nWUKONG_FAULT\nno closing marker']:
+            self.assertEqual(fixture.debugger_fault_sections(output), dict(fault='', modules=''))
+
+    def test_crash_diagnostics_cannot_spawn_on_a_developer_host(self):
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.object(fixture.platform, 'system', return_value='Windows'), \
+                patch.object(fixture.subprocess, 'run', side_effect=AssertionError('host execution')):
+            with self.assertRaisesRegex(RuntimeError, 'dedicated GitHub-hosted'):
+                fixture.diagnose_sshd_crash(None, None, None, None, True)
+
     def test_network_denial_exempts_only_the_enrolled_local_address_and_loopback(self):
         import ipaddress
         for management in ['10.0.0.7','192.0.2.8','172.16.0.2']:
