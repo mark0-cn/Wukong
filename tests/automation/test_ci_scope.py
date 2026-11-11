@@ -4,6 +4,12 @@ from scripts.ci.ci_scope import checks_passed, select_scope, prebuild_clients
 
 
 class ScopeTests(unittest.TestCase):
+    def test_release_fragments_preserve_frontend_scope_but_unknown_note_files_do_not(self):
+        selected = select_scope(["ui/src/components/Updates.tsx", ".changes/release-notes.toml"], "pull_request")
+        self.assertTrue(selected["frontend"])
+        self.assertFalse(selected["rust"])
+        self.assertFalse(selected["linux"])
+        self.assertTrue(select_scope([".changes/executable.py"], "pull_request")["rust"])
     def test_clients_only_for_master_version_increase_or_explicit_prewarm(self):
         self.assertTrue(prebuild_clients("push", "refs/heads/master", False, "0.1.2", "0.1.3"))
         self.assertTrue(prebuild_clients("workflow_dispatch", "refs/heads/master", True, "0.1.2", "0.1.2"))

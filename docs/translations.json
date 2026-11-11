@@ -1,17 +1,21 @@
 {
   "schema_version": 1,
   "pairs": {
+    ".github/pull_request_template.md": {
+      "en": "a4ba959d34aa636f8fe48cb95acb44978660d47b0c202b2258bdf3f1df397e53",
+      "zh-CN": "966058f71a165fe85983985ce485ec1df0469e01bc6b90e28af88dc17eaab1e9"
+    },
     "AGENTS.md": {
-      "en": "c37389254ff24a136c9132a426a62c133d6bb7c82e8d76f2a566d45fd24e1776",
-      "zh-CN": "6974869f7717d6859b1b236c01fdf23c479515d379a171aeeacad407b40b8860"
+      "en": "4ee07be19beb13a9bef4926490934ddcef1f83f343827f63f61c4738340b5996",
+      "zh-CN": "557e3b24444b7934a8b0222e4d2de040c9cb448dc049a942885eb33823744b7c"
     },
     "README.md": {
       "en": "d77b454b37bfab80fdbec80b9927ac81eefba878d25667e3d4773c0b82ba5baa",
       "zh-CN": "c7347269092896acf0a14bf5ec23ed7a4082e233587c83df2d8689af14ee129b"
     },
     "docs/README.md": {
-      "en": "9528fa6c050ac8feb94112b389fd6c80e8e0a5e80be6daffcdbe7cbdee1f5dc3",
-      "zh-CN": "de0a40e7c0023ae1de86fc6ff0d01a8313337ef6228b8f58d01cb1fe6f4ec46d"
+      "en": "5b258ea0bf3bcbc247c65020829271334302fe0dc2e01d9847fa154f354f091f",
+      "zh-CN": "04ef38f29d72fd0ea63c0106c81e86210272b0617def67218e6079dbbcf6d01d"
     },
     "docs/design/architecture.md": {
       "en": "40551f395ada2f520c4d9e8a4e0f8a303a27fbb0bbbe9089f28acee760e8d3bb",
@@ -24,6 +28,10 @@
     "docs/design/implementation-contract.md": {
       "en": "34b958279e68476f2d62f42962102de8794a49a2ac12da61d5b8c84286698c2c",
       "zh-CN": "7b56603d9fd1844beb9eec5f4d28fe0b9f24f41d902b450cb2dc6e39bd61b03f"
+    },
+    "docs/development/commits.md": {
+      "en": "98fa85d02ba9705f01e4dec271bbdad3df6ed6a8aca74a124e195571a2f5346a",
+      "zh-CN": "97efcdc5bb9baea9ad3a412051141eb1546c3c3e70bc52b1f08bbfa6854b01dc"
     },
     "docs/development/desktop-updates.md": {
       "en": "980ec55943e84cbe9e7b608442693fc2d873959e8f3c20c210dac234fbe07a18",
@@ -38,20 +46,20 @@
       "zh-CN": "72fe258e53653c22a828ec69900ac35d934de2e2f876d8229ae871f2846cfc38"
     },
     "docs/development/github-maintenance.md": {
-      "en": "a159563438acf7130043b751620e2ce721b93e924220849d2fcb8f09f0515510",
-      "zh-CN": "40b5f6c9178ce6e0bc9aff6629ecbbafb2745418c7ae89db97ab1f83a382831f"
+      "en": "360c9e28aac7a232a6ae1354e25c3a8ededf4b6ce54f7fc838bb54c015a7b92f",
+      "zh-CN": "eed7520d98258f2950f4c525d6ac39de026fb28011894abe12abf35424484d70"
     },
     "docs/development/localization.md": {
       "en": "ec3b9bdac57653355e8ffe6b125edb5234218b72555fe9e8f42d346295b91e24",
       "zh-CN": "450d185afb276f989664c6d9de2847cc0c7eea579cf10a7690550a7beb592154"
     },
     "docs/development/maintenance.md": {
-      "en": "dda49b3e14d9517a47fbcdedd64e0a05200308567ed04b913f786bb7b27e5ba4",
-      "zh-CN": "7656cf50cc3765e0254a4650e8966891c844d2f2f49f533550789488123e4651"
+      "en": "c56fc6b420789fa3974ada7d77ae88bb4d9fc59c661e516ba27d77d93e9d6123",
+      "zh-CN": "5a2aedab2c73529f3777cf4c14c2b11b08dae97b60b7c4db44a13ed8e103cf35"
     },
     "docs/development/releases.md": {
-      "en": "7e6b4db5aed933ac49ed20c81a53c539dd8620e66ee4d92dc016e6cd60a4e03e",
-      "zh-CN": "a849d7f75054c014dae74868c6a11936243e1e3c2b4616c2d9e49a90722f39a0"
+      "en": "335c8714b0ccae62a1501fe18f4385e11cc555f5b5711012de044953b525e31d",
+      "zh-CN": "2b3bda8780d115c9c80b58afb37da7da04f730d85e4553f2f56b5c903e363f22"
     },
     "docs/history/README.md": {
       "en": "39e11cfe697620bb0a0d43d9ff6ca550f51086d099b11651fa51cf718fb52e7c",

@@ -21,19 +21,24 @@ class DesktopManifestTests(unittest.TestCase):
             report = dict(passed=True, source_revision='b'*40,
                           image=image['repository'] + '@' + image['digest'])
             (root / 'validation-summary.json').write_text(json.dumps(report))
+            content = root / 'content.json'
+            content.write_text(json.dumps(dict(schema=1, tag='v0.2.0', version='0.2.0',
+                source_revision='b'*40, entries=[], changelog='Technical changes')))
             with patch('scripts.release.desktop_manifest.subprocess.check_output', return_value='b'*40), \
                  patch('scripts.release.desktop_manifest.version', return_value='0.2.0'), \
                  patch('scripts.release.desktop_manifest.subprocess.run') as sign:
                 with self.assertRaises(ValueError):
-                    generate(root, root)
+                    generate(root, root, content)
                 for name in ['Wukong_setup.exe', 'Wukong.AppImage']:
                     (root / name).write_bytes(b'installer')
                     (root / (name + '.sig')).write_text('signature')
-                manifest = generate(root, root)
+                manifest = generate(root, root, content)
                 self.assertEqual(set(manifest['platforms']), {'windows-x86_64', 'linux-x86_64'})
                 self.assertEqual(manifest['image'], report['image'])
+                self.assertIn('release_content_sha256', manifest)
+                self.assertEqual((root / 'release-content.json').read_bytes(), content.read_bytes())
                 sign.assert_called_once()
                 report['source_revision'] = 'c'*40
                 (root / 'validation-summary.json').write_text(json.dumps(report))
                 with self.assertRaises(ValueError):
-                    generate(root, root)
+                    generate(root, root, content)

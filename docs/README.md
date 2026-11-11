@@ -25,6 +25,8 @@ English · [简体中文](README.zh-CN.md)
 - [Releases](development/releases.md) and [GitHub maintenance](development/github-maintenance.md): versions, CI, caches and rehearsals.
 - [Automation](../scripts/README.md), [worker tests](../workers/tests/README.md), [evaluations](../evals/README.md): responsibilities and entry points.
 
+- [Commit messages and release descriptions](development/commits.md): conventions, CI checks and bilingual user summaries.
+
 <a id="参考与历史"></a>
 
 ## Reference and history

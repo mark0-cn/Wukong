@@ -131,3 +131,5 @@ node scripts/dev/capture-readme.mjs target/runtime-workspace.json
 ```
 
 这些诊断图片写入 `target/runtime-workspace/`，与 README 示例图片分开。适配器仅提供桌面传输接口；Agent、文本、工具结果、目标和证据 ID 均来自捕获的后端响应。此验收证明 CLI 到桌面的展示链路，不证明真实模型的推理质量，也不覆盖真实 Ghidra 或调试器执行。原生流式验收还会保持 HTTP 响应未结束，直到能从桌面快照读取公开的部分回复，并检查最终消息去重以及内部推理不进入展示。
+
+恢复测试还会暂停一个尚未结束的响应，恢复原生执行日志，并确认最终文本更新的是同一个公开消息 ID。

@@ -2,11 +2,28 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { Updates, type UpdateStatus } from './Updates';
-import { api } from '../bridge';
-vi.mock('../bridge', async () => ({ ...await vi.importActual('../bridge'), api: vi.fn() }));
+import { api, openLink } from '../bridge';
+import { t } from '../i18n';
+vi.mock('../bridge', async () => ({ ...await vi.importActual('../bridge'), api: vi.fn(), openLink: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
 const status: UpdateStatus = { version: '0.2.0', phase: 'idle', message: '', available: '0.2.1', notes: '', downloaded: 0, total: null, prepared: null, recovery: null, needs_setup: false, pending: false };
-beforeEach(() => { vi.mocked(api<'update_action'>).mockReset(); });
+beforeEach(() => { vi.mocked(api<'update_action'>).mockReset(); vi.mocked(openLink).mockClear(); });
+
+test('release notes render bilingual headings and lists while links require confirmation', async () => {
+  const url = 'https://github.com/mark0-cn/Wukong/releases/tag/v1.0.1';
+  vi.mocked(api<'update_action'>).mockResolvedValue({ ...status,
+    notes: `## Features\n\n- Show live tool progress.\n\n## 新功能\n\n- 展示工具实时进度。\n\n[Full release notes](${url})` });
+  render(<Updates epoch={1} onClose={() => {}} onChanged={() => {}} />);
+  await screen.findByText('0.2.0');
+  await userEvent.click(screen.getByText(t('updates-release-notes')));
+  expect(screen.getByRole('heading', { name: 'Features' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: '新功能' })).toBeTruthy();
+  expect(screen.getByText('Show live tool progress.').closest('li')).toBeTruthy();
+  await userEvent.click(screen.getByRole('link', { name: 'Full release notes' }));
+  expect(openLink).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole('button', { name: t('workspace-open-in-browser') }));
+  expect(openLink).toHaveBeenCalledWith(url);
+});
 test('cannot install until preparation succeeds and the user confirms restart', async () => {
   vi.mocked(api<'update_action'>).mockImplementation(async (_name, args) => args?.action === 'prepare' ? { ...status, prepared: '0.2.1', phase: 'ready' } : status);
   render(<Updates epoch={1} onClose={() => {}} onChanged={() => {}} />);
