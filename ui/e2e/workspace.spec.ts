@@ -383,3 +383,88 @@ test.describe('high density desktop', () => {
     await page.screenshot({ path: 'target/ui-polish-hidpi.png' });
   });
 });
+
+test('agent tree shows siblings, selected ancestry and collapsed subtree health', async ({ page }) => {
+  await page.goto('/');
+  const tree = page.getByRole('tree', { name: 'Agent 父子任务树' });
+  await expect(tree.getByRole('treeitem')).toHaveCount(3);
+  await expect(tree.getByRole('treeitem').nth(0)).toHaveAttribute('aria-level', '1');
+  await expect(tree.getByRole('treeitem').nth(1)).toHaveAttribute('aria-level', '2');
+  await expect(tree.getByRole('treeitem').nth(2)).toHaveAttribute('aria-level', '2');
+  await page.locator('.agent-card').filter({ hasText: '输入边界分析' }).click();
+  await expect(page.locator('.agent-breadcrumb')).toHaveText(/主分析 Agent.*输入边界分析/);
+  await expect(page.locator('.agent-inspector')).toContainText('跟踪 parse_record');
+  await page.getByRole('button', { name: '折叠 主分析 Agent', exact: true }).click();
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await expect(tree).toContainText('2 个子任务');
+  await expect(tree).toContainText('2 运行中');
+  await expect(tree).toContainText('包含当前选中的任务');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.agents[2] = { ...state.data.agents[2], status: 'failed', error: 'verification backend disconnected' };
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(tree).toContainText('1 异常');
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await page.getByRole('button', { name: '展开 主分析 Agent', exact: true }).click();
+  await expect(tree.getByRole('treeitem')).toHaveCount(3);
+  await expect(tree.getByText('verification backend disconnected')).toBeVisible();
+  await page.screenshot({ path: 'target/agent-tree-selected.png' });
+});
+
+test('agent tree folding is scoped to the task and keyboard navigation does not select implicitly', async ({ page }) => {
+  await page.goto('/');
+  const tree = page.getByRole('tree');
+  await tree.getByRole('treeitem').first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(tree.getByRole('treeitem').nth(1)).toBeFocused();
+  expect(await tree.locator('[aria-selected="true"]').count()).toBe(0);
+  await page.keyboard.press('ArrowLeft');
+  await expect(tree.getByRole('treeitem').first()).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await page.locator('.run-card').filter({ hasText: 'archive.elf' }).click();
+  await expect(tree).toContainText('归档分析 Agent');
+  await page.locator('.run-card').filter({ hasText: 'parser.elf' }).click();
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await page.reload();
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await page.getByRole('button', { name: '展开 主分析 Agent', exact: true }).click();
+  await expect(tree.getByRole('treeitem')).toHaveCount(3);
+});
+
+test('deep branches can be focused without inventing new parent relationships', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    const original = state.data.agents[1];
+    state.data.agents = Array.from({ length: 7 }, (_, index) => ({ ...original, id: `deep-${index}`, name: `层级 ${index}`, parent_id: index ? `deep-${index - 1}` : null, role: index ? 'analyst' : 'root' }));
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.getByRole('treeitem')).toHaveCount(4);
+  await page.getByRole('button', { name: '聚焦分支：层级 3', exact: true }).last().click();
+  await expect(page.getByRole('treeitem').first()).toContainText('层级 3');
+  await expect(page.getByRole('treeitem')).toHaveCount(4);
+  await page.getByRole('button', { name: '返回上级', exact: true }).click();
+  await expect(page.getByRole('treeitem').first()).toContainText('层级 2');
+  await page.getByRole('button', { name: '完整任务树', exact: true }).click();
+  await expect(page.getByRole('treeitem').first()).toContainText('层级 0');
+});
+
+test('agent hierarchy remains readable in Chinese, English and a narrow collaboration panel', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.agent-card').filter({ hasText: '输入边界分析' }).click();
+  await page.screenshot({ path: 'target/agent-tree-zh-CN.png' });
+  await page.locator('.agents-panel').screenshot({ path: 'target/agent-tree-panel-zh-CN.png' });
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByLabel('界面语言', { exact: true }).selectOption('en-US');
+  await page.getByLabel('Close', { exact: true }).click();
+  await expect(page.locator('.agent-role').filter({ hasText: 'Analysis' }).first()).toBeVisible();
+  await page.screenshot({ path: 'target/agent-tree-en-US.png' });
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.getByRole('separator', { name: 'Resize collaboration panel' }).focus();
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.agents-panel')).toBeVisible();
+  expect(await page.locator('.agent-list').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: 'target/agent-tree-narrow.png' });
+});
