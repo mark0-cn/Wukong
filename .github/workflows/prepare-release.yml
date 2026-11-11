@@ -73,6 +73,19 @@ jobs:
             git diff -- Cargo.toml Cargo.lock tauri.conf.json ui/package.json package-lock.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Preview cumulative release descriptions without changing version PR files
+        run: |
+          npm ci --ignore-scripts
+          python -m scripts.release.release_notes --tag "$RELEASE_TAG" --output target/prepared-release.md
+          {
+            echo '## Proposed release descriptions (preview only)'
+            echo 'This preview uses the master source before the version-only commit. Publication still requires the version PR merge and all release gates.'
+            cat target/prepared-release.md
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Create version branch and pull request
         if: ${{ !inputs.dry_run }}
         env:

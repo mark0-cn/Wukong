@@ -13,9 +13,13 @@
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
     "check:locales": "node scripts/check-locales.mjs",
-    "pretest:e2e": "node scripts/check-locales.mjs"
+    "pretest:e2e": "node scripts/check-locales.mjs",
+    "lint:message": "commitlint",
+    "lint:commits": "python -m scripts.ci.commit_policy"
   },
   "devDependencies": {
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
     "@fluent/syntax": "^0.19.0",
     "@playwright/test": "1.65.0",
     "@tauri-apps/cli": "2.12.4",
@@ -24,6 +28,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.2.1",
+    "git-cliff": "2.14.2",
     "jsdom": "31.0.0",
     "typescript": "7.0.2",
     "vite": "8.3.6",

@@ -21,6 +21,7 @@ This file defines how to maintain the repository. Follow the linked documents fo
 
 - `master` is the main/default GitHub branch and release baseline.
 - Commit each independent feature or fix separately.
+- Use the [commit and release-description rules](docs/development/commits.md); PR titles and new non-merge commits must pass commitlint. Keep PRs English-only; maintain bilingual release fragments alongside user-facing changes.
 - After relevant validation, merge ordinary implementation changes into `master` and push. PRs also target `master`. Version PRs follow the release rules below.
 - Check whether the remote advanced before integration and retain existing commits. Never resolve integration through force-push or shared-history rewriting.
 

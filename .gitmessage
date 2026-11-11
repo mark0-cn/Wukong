@@ -1,0 +1,7 @@
+# type(scope): describe the concrete change (English, <= 100 characters)
+# Types: feat fix perf refactor docs test build ci chore revert release
+# Keep each independent feature/fix in its own commit.
+#
+# For a substantial change, explain its trigger, resulting behavior and reason.
+# Record actual validation and relevant limitations without inventing results.
+# For incompatible changes use ! and explain migration in BREAKING CHANGE:.

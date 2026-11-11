@@ -65,3 +65,7 @@ Workbench inherits a stable toolchain stage; runtime/prompts/version labels come
 ### Closed-PR cache cleanup
 
 `Clean Closed PR Caches` runs daily at 06:41 Beijing time, rechecks current PR state and deletes by cache ID: closed PR `refs/pull/N/merge` caches and corresponding closed Dependabot branch caches. Master/tags/open PRs/unknown ordinary branches remain. Scheduling may be delayed. Manual runs only list candidates unless `apply` is selected. Summaries show count/reclaimed bytes. It runs only on master, never `pull_request_target` or PR code, and needs no personal admin token.
+
+## Commit policy and release previews
+
+The read-only `Commit policy` workflow validates PR titles/new non-merge commits with pinned commitlint and checks release fragments. PRs require English only. It reruns on PR title/body edits without restarting platform CI, and runs real git-cliff/commitlint regression tests before generating PR-only/cumulative previews. See [commit rules](commits.md) for optional local hooks and bilingual release fragments. Require the GitHub Actions `commit-policy` context alongside the existing `summary` context in the master Ruleset. Neither context substitutes for the other; retain existing approval, thread-resolution and strict-update requirements. A workflow file alone cannot enable a server-side merge requirement. No release authorization or tag is implied by this policy check.
