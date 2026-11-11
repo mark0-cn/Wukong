@@ -104,3 +104,17 @@ Frontend virtualization bounds chat DOM size. `npm test`, `npm run build` and `n
 Record data scale, build mode and hardware when evaluating changes. Observe frame time, query waiting, memory and database writes separately. UI throttling must not lose audit, evidence or recovery persistence.
 
 See [documentation maintenance](documentation.md) for pairs, semantic review and CI checks.
+
+<a id="readme-截图"></a>
+
+## README screenshots
+
+Screenshots render the current frontend with fixed illustrative tasks, without a model or worker. Captions identify sample data; screenshots do not establish analysis results or native desktop acceptance. Avoid manually assembled interface mockups that can drift from the implementation.
+
+With root npm dependencies and Playwright Chromium installed, run `npm run dev` in one terminal, serving `http://127.0.0.1:1420`. In another terminal at the repository root, run:
+
+```sh
+node scripts/dev/capture-readme.mjs
+```
+
+The script reuses frontend fixture structures with a bounded native-command adapter and writes `docs/assets/workspace.en-US.png` and `docs/assets/workspace.zh-CN.png`. Viewport, timezone and sample data are fixed; local configuration/credentials are not read. Failures, unhandled errors or horizontal overflow stop generation. Inspect both images for clipping, fonts, tool rows and the collaboration tree, then commit them with their README editions. Install a missing browser with `npx --no-install playwright install chromium`.

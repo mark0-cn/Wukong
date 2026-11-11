@@ -38,8 +38,8 @@
       "zh-CN": "450d185afb276f989664c6d9de2847cc0c7eea579cf10a7690550a7beb592154"
     },
     "docs/development/maintenance.md": {
-      "en": "9117e3771b3320bc1091f49ee9fcd330abf44b9e95112a6c395637cf6d6c09e7",
-      "zh-CN": "6ee97144cf7f9ddc2cd8598cc6cd7f15bde696cb35fa315386ed2478120d4e7c"
+      "en": "5cf376a6797c5da96a93bb340ec26a66378df3064527f0d28b309d28af0d695b",
+      "zh-CN": "4a4d7394008a35521963b466adf247d30efaaa37a3bad7663b83cf3101e075b8"
     },
     "docs/development/releases.md": {
       "en": "7e6b4db5aed933ac49ed20c81a53c539dd8620e66ee4d92dc016e6cd60a4e03e",
@@ -118,8 +118,8 @@
       "zh-CN": "d300b4a1dfa0071331191162a888e60227b1d797fb4fda4c1f80c32fa0ce76b0"
     },
     "scripts/README.md": {
-      "en": "1dc3ab229f35f707315ad91f345ae06282c2185fc98910744dbd897b04a8384f",
-      "zh-CN": "8732656848aa0adbbddf144dc83a2be6441ef7f542654a45d36b6a3d11a2100f"
+      "en": "686d28406cb61fd746b529ca35e795cef87a1c8bd262a074409403d64df21b7f",
+      "zh-CN": "f4ec56be732b3bdd1b83bcbe84545809b07f386bba780583ef115541a10b022c"
     },
     "workers/ghidra/README.md": {
       "en": "d3aae446d46bb68f8c4ea67f9a732a4e7f44f3a9c7b37fae75aa870d88630530",

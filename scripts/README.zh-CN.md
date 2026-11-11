@@ -23,3 +23,5 @@ PowerShell 包装入口会定位仓库；用户提供的路径按调用时的工
 ```sh
 python -m unittest discover -s tests/automation -p 'test_*.py'
 ```
+
+当前界面截图使用 `node scripts/dev/capture-readme.mjs` 生成；依赖和示例数据范围见[截图维护](../docs/development/maintenance.zh-CN.md#readme-screenshots)。
