@@ -11863,6 +11863,24 @@ dependencies = [
  "windows",
  "windows-core 0.62.2",
  "windows-sys 0.61.2",
+ "wukong-worker-package",
+]
+
+[[package]]
+name = "wukong-worker-package"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "hex",
+ "libc",
+ "ring",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]

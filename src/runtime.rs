@@ -18,6 +18,7 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 pub mod protocol;
+pub mod ssh;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -39,6 +40,9 @@ pub struct RuntimeConfig {
     pub docker_container: Option<String>,
     pub docker_executable: String,
     pub ssh_host: Option<String>,
+    pub ssh_executable: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_ssh: Option<ssh::ManagedSsh>,
     pub remote_bridge_path: String,
     pub remote_state_dir: String,
     pub request_timeout_secs: u64,
@@ -54,6 +58,8 @@ impl Default for RuntimeConfig {
             docker_container: None,
             docker_executable: default_docker_executable(),
             ssh_host: None,
+            ssh_executable: "ssh".into(),
+            managed_ssh: None,
             remote_bridge_path: "/opt/wukong/runtime/bridge.py".into(),
             remote_state_dir: "/state".into(),
             request_timeout_secs: 300,
@@ -96,6 +102,10 @@ fn remote_quote(value: &str) -> String {
 
 impl RuntimeClient {
     pub async fn connect(config: RuntimeConfig) -> Result<Self> {
+        anyhow::ensure!(
+            config.managed_ssh.is_none() || config.backend == RuntimeBackend::Ssh,
+            "managed SSH settings cannot be used with another transport"
+        );
         if config.backend == RuntimeBackend::TrustedLocal {
             crate::cleanup::create_owned_directory(&config.state_dir)?;
         }
@@ -157,19 +167,40 @@ impl RuntimeClient {
                 c
             }
             RuntimeBackend::Ssh => {
-                let host = config.ssh_host.as_deref().context("ssh_host is required")?;
-                if host.starts_with('-') || host.contains(['\n', '\r']) {
-                    bail!("invalid ssh host");
+                if let Some(managed) = &config.managed_ssh {
+                    managed.command(
+                        &config.ssh_executable,
+                        config.ssh_host.as_deref().context("ssh_host is required")?,
+                    )?
+                } else {
+                    let host = config.ssh_host.as_deref().context("ssh_host is required")?;
+                    if host.starts_with('-') || host.contains(['\n', '\r']) {
+                        bail!("invalid ssh host");
+                    }
+                    let mut c = Command::new(&config.ssh_executable);
+                    c.args([
+                        "-T",
+                        "-a",
+                        "-x",
+                        "-o",
+                        "BatchMode=yes",
+                        "-o",
+                        "StrictHostKeyChecking=yes",
+                        "-o",
+                        "ClearAllForwardings=yes",
+                        "-o",
+                        "PermitLocalCommand=no",
+                        "--",
+                        host,
+                    ]);
+                    // OpenSSH passes a remote command through a shell; quote each path.
+                    c.arg(format!(
+                        "python3 {} --state {} --stdio",
+                        remote_quote(&config.remote_bridge_path),
+                        remote_quote(&config.remote_state_dir)
+                    ));
+                    c
                 }
-                let mut c = Command::new("ssh");
-                c.args(["-T", "-o", "BatchMode=yes", "--", host]);
-                // OpenSSH passes a remote command through a shell; quote each path.
-                c.arg(format!(
-                    "python3 {} --state {} --stdio",
-                    remote_quote(&config.remote_bridge_path),
-                    remote_quote(&config.remote_state_dir)
-                ));
-                c
             }
         };
         // Never forward model/provider secrets into an analysis worker.
@@ -238,6 +269,12 @@ impl RuntimeClient {
                     serde_json::from_value(reply["identity"].clone())
                         .context("worker handshake did not establish its identity")?;
                 identity.validate()?;
+                if let Some(managed) = &config.managed_ssh {
+                    anyhow::ensure!(
+                        identity.installation_id == managed.installation_id,
+                        "SSH worker installation differs from its enrolled native identity"
+                    );
+                }
                 transport.identity = Some(identity);
                 Ok(transport)
             }

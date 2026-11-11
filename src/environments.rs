@@ -74,6 +74,19 @@ impl EnvironmentConfig {
             self.runtime.request_timeout_secs > 0,
             "environment timeout must be positive"
         );
+        if let Some(ssh) = &self.runtime.managed_ssh {
+            ensure!(
+                self.runtime.backend == RuntimeBackend::Ssh && self.platform == Platform::Windows,
+                "managed SSH requires a Windows SSH environment"
+            );
+            ssh.validate()?;
+            if let Some(expected) = &self.installation_id {
+                ensure!(
+                    *expected == ssh.installation_id,
+                    "managed SSH and environment installation identities differ"
+                );
+            }
+        }
         Ok(())
     }
 }

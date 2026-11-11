@@ -149,6 +149,10 @@ impl AppConfig {
         for environment in self.environments.values_mut() {
             resolve(base, &mut environment.runtime.state_dir);
             resolve(base, &mut environment.runtime.bridge_path);
+            if let Some(ssh) = &mut environment.runtime.managed_ssh {
+                resolve(base, &mut ssh.identity_file);
+                resolve(base, &mut ssh.known_hosts_file);
+            }
         }
         resolve(base, &mut self.analysis.ghidra_cache_dir);
         if let Some(p) = &mut self.skills_dir {

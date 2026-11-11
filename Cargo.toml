@@ -45,6 +45,7 @@ toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+wukong-worker-package = { path = "workers/package" }
 
 tempfile = "3"
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
