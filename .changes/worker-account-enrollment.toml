@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Explicitly enroll native worker accounts in the localized builtin Users group and permit signed recovery of an early interrupted management-account creation. Full offline VM installation and production isolation acceptance remain pending."
+zh_CN = "将原生 worker 专用账户显式登记到本地化的内置 Users 组，并允许通过签名证据恢复早期中断的管理账户创建。完整离线 VM 安装及生产隔离验收仍待完成。"

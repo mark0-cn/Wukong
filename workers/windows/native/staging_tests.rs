@@ -4,7 +4,7 @@ use wukong_worker_package::{
     Component, EntryPoints, FileEntry, Manifest, PayloadKind, Signer, seal_package,
 };
 
-fn inert_package(root: &Path, signer: &Signer) -> Result<()> {
+pub(crate) fn inert_package(root: &Path, signer: &Signer) -> Result<()> {
     fs::create_dir(root)?;
     let entry = |kind| FileEntry {
         sha256: hex::encode(Sha256::digest(b"fixture")),

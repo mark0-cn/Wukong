@@ -13,6 +13,8 @@ pub mod pipe_transport;
 #[cfg(windows)]
 pub mod processes;
 #[cfg(windows)]
+pub mod recovery;
+#[cfg(windows)]
 pub mod security;
 #[cfg(windows)]
 pub mod service;

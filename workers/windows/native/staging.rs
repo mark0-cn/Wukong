@@ -12,7 +12,7 @@ use wukong_worker_package::{Compatibility, PublicKey, VerifiedManifest, verify_p
 
 #[cfg(test)]
 #[path = "staging_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 pub fn stage_payload(
     source: &Path,

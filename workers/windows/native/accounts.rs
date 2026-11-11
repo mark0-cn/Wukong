@@ -13,8 +13,9 @@ use std::{
 };
 use windows_sys::Win32::{
     NetworkManagement::NetManagement::{
-        NetApiBufferFree, NetUserAdd, NetUserGetInfo, UF_DONT_EXPIRE_PASSWD, UF_NORMAL_ACCOUNT,
-        UF_PASSWD_CANT_CHANGE, USER_INFO_1, USER_INFO_4, USER_PRIV_USER,
+        LOCALGROUP_MEMBERS_INFO_0, NetApiBufferFree, NetLocalGroupAddMembers, NetUserAdd,
+        NetUserGetInfo, UF_DONT_EXPIRE_PASSWD, UF_NORMAL_ACCOUNT, UF_PASSWD_CANT_CHANGE, UF_SCRIPT,
+        USER_INFO_1, USER_INFO_4, USER_PRIV_USER,
     },
     Security::{
         Authentication::Identity::*,
@@ -195,7 +196,8 @@ fn lookup(name: &str) -> Result<String> {
     let user = unsafe { &*buffer.0.cast::<USER_INFO_4>() };
     ensure!(
         user.usri4_priv == USER_PRIV_USER,
-        "installation account must remain nonadministrative"
+        "installation account must remain an ordinary user (reported privilege {})",
+        user.usri4_priv
     );
     security::sid_text(user.usri4_user_sid)
 }
@@ -218,7 +220,7 @@ pub fn create(installation: &str, role: Role) -> Result<Account> {
         usri1_password: password.as_mut_ptr(),
         usri1_priv: USER_PRIV_USER,
         usri1_comment: comment.as_mut_ptr(),
-        usri1_flags: UF_NORMAL_ACCOUNT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE,
+        usri1_flags: UF_NORMAL_ACCOUNT | UF_SCRIPT | UF_DONT_EXPIRE_PASSWD | UF_PASSWD_CANT_CHANGE,
         ..Default::default()
     };
     let mut parameter = 0;
@@ -234,11 +236,21 @@ pub fn create(installation: &str, role: Role) -> Result<Account> {
         result == 0,
         "cannot create installation-owned account: {result} (field {parameter}); no existing account will be modified"
     );
+    add_to_builtin_users(&name)?;
     let account = Account {
         role,
         name: name.clone(),
         sid: lookup(&name)?,
     };
+    configure_rights(&account, installation, Some(&mut password))?;
+    Ok(account)
+}
+fn configure_rights(
+    account: &Account,
+    installation: &str,
+    password: Option<&mut [u16]>,
+) -> Result<()> {
+    let role = account.role;
     // Deny interactive/RDP logon for every identity. Only broker-owned accounts
     // receive batch logon; SSH management never receives a worker logon path.
     let policy =
@@ -272,14 +284,152 @@ pub fn create(installation: &str, role: Role) -> Result<Account> {
         status(unsafe { LsaAddAccountRights(policy.0, sid.0, &lsa_string(&mut encoded)?, 1) })?;
     }
     if role != Role::Management {
+        let password = password
+            .ok_or_else(|| anyhow::anyhow!("worker account creation requires an owned password"))?;
         let mut secret_name = account.secret_name(installation)?;
         status(unsafe {
             LsaStorePrivateData(
                 policy.0,
                 &lsa_string(&mut secret_name)?,
-                &lsa_string(&mut password)?,
+                &lsa_string(password)?,
             )
         })?;
     }
+    Ok(())
+}
+
+fn add_to_builtin_users(name: &str) -> Result<()> {
+    use windows_sys::Win32::Security::{Authorization::ConvertStringSidToSidW, LookupAccountSidW};
+    let text = security::wide(OsStr::new("S-1-5-32-545"))?;
+    let mut sid = null_mut();
+    security::check(unsafe { ConvertStringSidToSidW(text.as_ptr(), &mut sid) })?;
+    struct Sid(windows_sys::Win32::Security::PSID);
+    impl Drop for Sid {
+        fn drop(&mut self) {
+            unsafe {
+                windows_sys::Win32::Foundation::LocalFree(self.0);
+            }
+        }
+    }
+    let sid = Sid(sid);
+    let (mut name_length, mut domain_length, mut use_kind) = (0, 0, 0);
+    unsafe {
+        LookupAccountSidW(
+            null(),
+            sid.0,
+            null_mut(),
+            &mut name_length,
+            null_mut(),
+            &mut domain_length,
+            &mut use_kind,
+        );
+    }
+    ensure!(
+        name_length > 0 && name_length <= 256 && domain_length <= 256,
+        "invalid builtin Users alias"
+    );
+    let mut group = vec![0u16; name_length as usize];
+    let mut domain = vec![0u16; domain_length as usize];
+    security::check(unsafe {
+        LookupAccountSidW(
+            null(),
+            sid.0,
+            group.as_mut_ptr(),
+            &mut name_length,
+            domain.as_mut_ptr(),
+            &mut domain_length,
+            &mut use_kind,
+        )
+    })?;
+    let account = security::wide(OsStr::new(name))?;
+    let mut record = null_mut();
+    let status = unsafe { NetUserGetInfo(null(), account.as_ptr(), 4, &mut record) };
+    ensure!(
+        status == 0 && !record.is_null(),
+        "cannot resolve created account SID for group membership: {status}"
+    );
+    struct Buffer(*mut u8);
+    impl Drop for Buffer {
+        fn drop(&mut self) {
+            unsafe {
+                NetApiBufferFree(self.0.cast());
+            }
+        }
+    }
+    let record = Buffer(record);
+    let sid = unsafe { (*record.0.cast::<USER_INFO_4>()).usri4_user_sid };
+    security::validate_account_sid(&security::sid_text(sid)?)?;
+    let member = LOCALGROUP_MEMBERS_INFO_0 { lgrmi0_sid: sid };
+    let result = unsafe {
+        NetLocalGroupAddMembers(
+            null(),
+            group.as_ptr(),
+            0,
+            (&member as *const LOCALGROUP_MEMBERS_INFO_0).cast(),
+            1,
+        )
+    };
+    ensure!(
+        result == 0 || result == 1378,
+        "cannot add owned account to the localized builtin Users group: {result}"
+    );
+    Ok(())
+}
+
+/// Only the explicit, signed early-transaction recovery path may call this.
+/// The protected intent and exact ownership comment establish the failed create;
+/// this never adopts an arbitrary existing name or resets its password.
+pub(crate) fn recover_management(installation: &str) -> Result<Account> {
+    service_name(installation)?;
+    let name = format!("{}{}", Role::Management.prefix(), &installation[..16]);
+    let encoded = security::wide(OsStr::new(&name))?;
+    let mut pointer = null_mut();
+    let result = unsafe { NetUserGetInfo(null(), encoded.as_ptr(), 4, &mut pointer) };
+    ensure!(
+        result == 0,
+        "missing interrupted management account: {result}"
+    );
+    struct Buffer(*mut u8);
+    impl Drop for Buffer {
+        fn drop(&mut self) {
+            unsafe {
+                NetApiBufferFree(self.0.cast());
+            }
+        }
+    }
+    let buffer = Buffer(pointer);
+    ensure!(!buffer.0.is_null(), "missing interrupted account details");
+    let info = unsafe { &*buffer.0.cast::<USER_INFO_4>() };
+    ensure!(
+        info.usri4_priv <= USER_PRIV_USER && info.usri4_flags & UF_NORMAL_ACCOUNT != 0,
+        "interrupted account has unexpected privilege {}",
+        info.usri4_priv
+    );
+    ensure!(
+        !info.usri4_comment.is_null(),
+        "interrupted account lacks ownership evidence"
+    );
+    let mut length = 0;
+    while length < 256 && unsafe { *info.usri4_comment.add(length) } != 0 {
+        length += 1;
+    }
+    ensure!(length < 256, "unbounded interrupted account comment");
+    let comment =
+        String::from_utf16(unsafe { std::slice::from_raw_parts(info.usri4_comment, length) })?;
+    ensure!(
+        comment == format!("Wukong owned {installation} Management"),
+        "existing management account is not owned by this interrupted transaction"
+    );
+    let sid = security::sid_text(info.usri4_user_sid)?;
+    security::validate_account_sid(&sid)?;
+    drop(buffer);
+    add_to_builtin_users(&name)?;
+    let account = Account {
+        role: Role::Management,
+        name,
+        sid,
+    };
+    account.validate(installation)?;
+    configure_rights(&account, installation, None)?;
     Ok(account)
 }

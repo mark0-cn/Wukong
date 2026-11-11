@@ -288,21 +288,26 @@ pub fn install(plan: Plan) -> Result<Value> {
         public.create_directory(&base)?;
     }
     let root = base.join(&enrollment.installation_id);
-    ensure!(
-        !root.exists(),
-        "installation already exists or has an interrupted transaction; explicit repair is required"
-    );
-    private.create_directory(&root)?;
     let metadata = root.join("metadata");
-    private.create_directory(&metadata)?;
-    deployment::write_new_json(
-        &metadata.join("installation-intent.json"),
-        &json!({"schema":1,"installation_id":enrollment.installation_id,"manifest_sha256":plan.manifest.sha256(),"generation":enrollment.generation,"roles":["management","worker","debugger","target"]}),
-        &private,
-    )?;
+    let recovering = root.exists();
+    if recovering {
+        crate::recovery::early_account_phase(&root, &plan)?;
+    } else {
+        private.create_directory(&root)?;
+        private.create_directory(&metadata)?;
+        deployment::write_new_json(
+            &metadata.join("installation-intent.json"),
+            &json!({"schema":1,"installation_id":enrollment.installation_id,"manifest_sha256":plan.manifest.sha256(),"generation":enrollment.generation,"roles":["management","worker","debugger","target"]}),
+            &private,
+        )?;
+    }
     let mut accounts = Vec::new();
     for role in [Role::Management, Role::Worker, Role::Debugger, Role::Target] {
-        let account = accounts::create(&enrollment.installation_id, role)?;
+        let account = if recovering && role == Role::Management {
+            accounts::recover_management(&enrollment.installation_id)?
+        } else {
+            accounts::create(&enrollment.installation_id, role)?
+        };
         deployment::write_new_json(
             &metadata.join(format!("account-{role:?}.json")),
             &account,
