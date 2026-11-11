@@ -1,17 +1,21 @@
 {
   "schema_version": 1,
   "pairs": {
+    ".github/pull_request_template.md": {
+      "en": "a4ba959d34aa636f8fe48cb95acb44978660d47b0c202b2258bdf3f1df397e53",
+      "zh-CN": "966058f71a165fe85983985ce485ec1df0469e01bc6b90e28af88dc17eaab1e9"
+    },
     "AGENTS.md": {
-      "en": "c37389254ff24a136c9132a426a62c133d6bb7c82e8d76f2a566d45fd24e1776",
-      "zh-CN": "6974869f7717d6859b1b236c01fdf23c479515d379a171aeeacad407b40b8860"
+      "en": "4ee07be19beb13a9bef4926490934ddcef1f83f343827f63f61c4738340b5996",
+      "zh-CN": "557e3b24444b7934a8b0222e4d2de040c9cb448dc049a942885eb33823744b7c"
     },
     "README.md": {
       "en": "d77b454b37bfab80fdbec80b9927ac81eefba878d25667e3d4773c0b82ba5baa",
       "zh-CN": "c7347269092896acf0a14bf5ec23ed7a4082e233587c83df2d8689af14ee129b"
     },
     "docs/README.md": {
-      "en": "9528fa6c050ac8feb94112b389fd6c80e8e0a5e80be6daffcdbe7cbdee1f5dc3",
-      "zh-CN": "de0a40e7c0023ae1de86fc6ff0d01a8313337ef6228b8f58d01cb1fe6f4ec46d"
+      "en": "5b258ea0bf3bcbc247c65020829271334302fe0dc2e01d9847fa154f354f091f",
+      "zh-CN": "04ef38f29d72fd0ea63c0106c81e86210272b0617def67218e6079dbbcf6d01d"
     },
     "docs/design/architecture.md": {
       "en": "370e0d9ceba075c5fbf899c8cc77b3489302f2f6a46bf9cbe20e81cda5659d81",
@@ -20,6 +24,10 @@
     "docs/design/implementation-contract.md": {
       "en": "34b958279e68476f2d62f42962102de8794a49a2ac12da61d5b8c84286698c2c",
       "zh-CN": "7b56603d9fd1844beb9eec5f4d28fe0b9f24f41d902b450cb2dc6e39bd61b03f"
+    },
+    "docs/development/commits.md": {
+      "en": "f375e0eeef55be436f33dd996c50c43ca6ca18a791b3f5e63a033f317122704f",
+      "zh-CN": "e8137904b41834a71f22eccd8898b937744754c52727117ef4772290bde4bc4e"
     },
     "docs/development/desktop-updates.md": {
       "en": "7172d61929d273c620f685bb8992fbea0dffc57b6e4e4491b60fe13a9061f754",

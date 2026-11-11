@@ -1,0 +1,6 @@
+#!/bin/sh
+# CI checks all non-merge commits; Git creates its own merge message.
+if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+  exit 0
+fi
+exec node node_modules/@commitlint/cli/lib/cli.js --edit "$1"
