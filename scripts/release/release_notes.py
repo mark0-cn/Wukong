@@ -77,7 +77,18 @@ def bullets(content, locale):
 
 
 def update_summary(content):
-    return "Wukong " + content["version"] + "\n\n" + bullets(content, "en") + "\n\n简体中文\n\n" + bullets(content, "zh_CN")
+    # Keep signed client metadata comfortably below the client's 1 MiB limit.
+    order = {kind: index for index, (kind, _, _) in enumerate(GROUPS)}
+    selected = sorted(content["entries"], key=lambda entry: order[entry["kind"]])
+    while True:
+        subset = dict(content, entries=selected)
+        summary = "Wukong " + content["version"] + "\n\n" + bullets(subset, "en") + "\n\n简体中文\n\n" + bullets(subset, "zh_CN")
+        omitted = len(content["entries"]) - len(selected)
+        if omitted:
+            summary += f"\n\n{omitted} more changes / 另有 {omitted} 项变化：[Full release notes / 完整发布说明](https://github.com/mark0-cn/Wukong/releases/tag/{content['tag']})"
+        if len(summary.encode("utf-8")) <= 32 * 1024:
+            return summary
+        selected.pop()
 
 
 def render(content, *, directory=None):

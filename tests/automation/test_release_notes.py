@@ -81,6 +81,16 @@ class FrozenNotesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "acceptance"):
             render(self.content, directory=self.root)
 
+    def test_updater_summary_is_bounded_without_truncating_full_release_notes(self):
+        self.content["entries"] = [dict(path=f".changes/change-{index}.toml", kind="feature",
+                                        en="Describe concrete behavior. " * 60, zh_CN="完整的中文变化说明。" * 100) for index in range(50)]
+        summary = update_summary(self.content)
+        self.assertLessEqual(len(summary.encode("utf-8")), 32 * 1024)
+        self.assertIn("Full release notes", summary)
+        self.assertIn("完整发布说明", summary)
+        self.assertEqual(len(self.content["entries"]), 50)
+        self.assertNotIn("more changes", render(self.content))
+
 
 @unittest.skipUnless((ROOT / "node_modules/git-cliff/lib/cli/cli.js").is_file(), "npm ci required; preview CI exercises real git-cliff")
 class RealGitCliffTests(unittest.TestCase):
