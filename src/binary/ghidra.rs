@@ -125,6 +125,7 @@ impl GhidraBackend {
         let analysis_key = sha256_bytes(&serde_json::to_vec(&analysis_binding)?);
         let binding = serde_json::json!({"analysis":analysis_binding,"query":query});
         let key = sha256_bytes(&serde_json::to_vec(&binding)?);
+        crate::cleanup::create_owned_directory(&self.config.cache_dir)?;
         let root = self.config.cache_dir.join("results").join(&key);
         fs::create_dir_all(&root)?;
         let root = fs::canonicalize(root)?;

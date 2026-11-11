@@ -99,3 +99,5 @@ Uninstalling does not delete analysis data or Docker resources by default. The L
 
 CI checks Windows install/uninstall, Linux AppImage and real WebView startup, signature integrity and Linux Docker integration.
 Real Windows Docker Desktop first installation and cross-version upgrades still require desktop-machine acceptance. Hosted-runner installer checks and language UI browser tests do not replace that acceptance.
+
+The cleanup CLI can preview application-managed local data without opening a model, worker or database. Run `wukong cleanup plan --data --output cleanup-review.json`, inspect the paths/counts/bytes and retained items, then explicitly apply it with `wukong cleanup execute --review cleanup-review.json --yes --report cleanup-report.json`. Save these files outside the directories being cleaned. Execution takes the maintenance lock and rebuilds the inventory; changed contents require a fresh review. Unrecognized files and link/reparse paths remain. A configured directory is not permission to delete all its contents.

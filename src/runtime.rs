@@ -93,6 +93,9 @@ fn remote_quote(value: &str) -> String {
 
 impl RuntimeClient {
     pub async fn connect(config: RuntimeConfig) -> Result<Self> {
+        if config.backend == RuntimeBackend::TrustedLocal {
+            crate::cleanup::create_owned_directory(&config.state_dir)?;
+        }
         if config.backend == RuntimeBackend::Disabled {
             bail!(
                 "Execution worker is disabled. Configure Docker/SSH, or explicitly select trusted_local for trusted fixtures."
