@@ -222,3 +222,8 @@ result-failed = Operation failed. Expand to see error details.
 result-uncertain = The outcome is uncertain. Reconcile before continuing.
 result-paused = Analysis paused. Operation state is preserved.
 result-interrupted = The task ended without confirming completion of this operation.
+
+ui-completed-hint = Analysis complete. Review findings or export the report.
+ui-stopped-hint = Task stopped. Saved progress remains available.
+ui-failed-hint = Analysis ended with an error. Review failed operations and agent details.
+ui-model-and-usage = Model and usage
