@@ -39,9 +39,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Install Linux desktop build dependencies
         if: inputs.target == 'linux-desktop'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libwayland-dev libxkbcommon-dev
+        timeout-minutes: 12
+        run: python -m scripts.ci.install_apt libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libwayland-dev libxkbcommon-dev
       - name: Build embedded desktop release
         if: inputs.target != 'linux'
         shell: bash
@@ -50,14 +49,16 @@ jobs:
           npm run build
           cargo build --locked --release --features custom-protocol
           ./target/release/wukong --version
+      - name: Install Linux acceptance build dependencies
+        if: inputs.target == 'linux'
+        timeout-minutes: 12
+        run: python -m scripts.ci.install_apt libwayland-dev libxkbcommon-dev
       - name: Build Linux acceptance CLI
         if: inputs.target == 'linux'
         env:
           CARGO_PROFILE_DEV_DEBUG: '1'
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev
           cargo build --locked --no-default-features
           ./target/debug/wukong --version
       - name: Stage verified client

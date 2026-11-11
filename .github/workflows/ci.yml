@@ -146,10 +146,11 @@ jobs:
         with:
           shared-key: linux-desktop-checks-v1
           save-if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
+      - name: Install Linux runtime dependencies
+        timeout-minutes: 12
+        run: python -m scripts.ci.install_apt gdb patchelf gcc-multilib musl-tools libwayland-dev libxkbcommon-dev
       - name: Python runtime and release tests
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gdb patchelf gcc-multilib musl-tools libwayland-dev libxkbcommon-dev
           python -m pip install -r workers/runtime/requirements.txt pyelftools
           python -m compileall -q workers/runtime scripts
           python -m unittest discover -s tests/automation -p 'test_*.py' -v
@@ -161,15 +162,19 @@ jobs:
           python -m evals.analysis.evaluate --build-dir "$RUNNER_TEMP/analysis-fixtures"
           sh fixtures/build.sh "$RUNNER_TEMP/vulnerability-fixtures"
           python -m evals.vulnerability.evaluate --build-dir "$RUNNER_TEMP/vulnerability-fixtures" --repetitions 1
+      - name: Install Linux desktop test dependencies
+        if: needs.changes.outputs.rust == 'true'
+        timeout-minutes: 12
+        run: python -m scripts.ci.install_apt libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb
       - name: Linux desktop feature tests
         if: needs.changes.outputs.rust == 'true'
         run: |
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb
           cargo test --locked --all-targets
           cargo build --locked
           python tests/acceptance/check_cleanup.py --binary target/debug/wukong
       - name: Linux bilingual interface tests
         if: needs.changes.outputs.frontend == 'true'
+        timeout-minutes: 15
         run: |
           npm ci
           npm test
