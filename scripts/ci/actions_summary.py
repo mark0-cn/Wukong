@@ -44,7 +44,7 @@ def duration(name, jobs):
     return f"{minutes}m {seconds}s"
 
 
-def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
+def checks_succeeded(kind, needs, event):
     failed = any(v["result"] in {"failure", "cancelled"} for v in needs.values())
     if kind == "release":
         passed = all(needs.get(n, {}).get("result") == "success" for n in
@@ -52,12 +52,17 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         metadata = needs.get("metadata", {}).get("outputs", {})
         for target in ("windows", "linux"):
             result = needs.get(target + "-client", {}).get("result")
-            passed = passed and (result == "success" or (result == "skipped" and bool(metadata.get(target + "_run"))))
-        if context.get("event") == "push":
+            passed = passed and (result == "success" or (result == "skipped" and bool(metadata.get(target + "_run") or metadata.get(target + "_installer_id"))))
+        if event == "push":
             passed = passed and needs.get("publish", {}).get("result") == "success"
     else:
         passed = checks_passed(needs) if "changes" in needs else all(needs.get(n, {}).get("result") == "success" for n in ("windows", "linux"))
-    state = "通过 / Passed" if passed and not failed else "未完成或失败 / Incomplete or failed"
+    return bool(passed and not failed)
+
+
+def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
+    passed = checks_succeeded(kind, needs, context.get("event"))
+    state = "通过 / Passed" if passed else "未完成或失败 / Incomplete or failed"
     run_url = context["run_url"]
     lines = [f"## {kind.upper()} — {state}", "", f"- Ref: {cell(context['ref'])}",
              f"- Commit: `{cell(context['sha'])}`", f"- [本次运行与日志]({run_url})", "",
@@ -87,9 +92,12 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         image = read(directory / "validation/image.json")
         metadata = needs.get("metadata", {}).get("outputs", {})
         lines += ["### 检查与构建复用", ""]
-        for key, label in (("ci_run", "完整 master CI"), ("windows_run", "Windows 客户端"), ("linux_run", "Linux 验收客户端")):
+        for key, label in (("ci_run", "完整 master CI"), ("windows_run", "Windows 客户端"), ("linux_run", "Linux 验收 CLI"), ("linux_desktop_run", "Linux 桌面客户端")):
             source = metadata.get(key)
             lines.append(f"- {label}: " + (f"[复用同一提交的运行 #{cell(source)}](https://github.com/{context['repository']}/actions/runs/{source})" if source else "本次执行"))
+        for target in ("windows", "linux"):
+            artifact_id = metadata.get(target + "_installer_id")
+            lines.append(f"- {target} 安装器: " + (f"复用已验收 artifact #{cell(artifact_id)}" if artifact_id else "本次打包与验收"))
         lines.append("")
         digest = needs.get("image", {}).get("outputs", {}).get("digest")
         image_ref = manifest.get("image") if manifest else None
@@ -158,6 +166,8 @@ def main():
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
             stream.write(output)
     print(output)
+    if not checks_succeeded(args.kind, json.loads(os.environ["NEEDS_JSON"]), context["event"]):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

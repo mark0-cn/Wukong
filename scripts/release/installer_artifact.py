@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 from scripts._lib.versioning import ROOT, version
+from scripts.release.installer_identity import record, verify
 
 
 def stage(target, output):
@@ -42,6 +43,8 @@ def stage(target, output):
     output.mkdir(parents=True, exist_ok=True)
     for file in [source, signature]:
         shutil.copy2(file, output / file.name)
+    record(target, output)
+    verify(target, output)
 
 
 if __name__ == '__main__':

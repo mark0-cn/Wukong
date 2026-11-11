@@ -210,9 +210,16 @@ jobs:
     with:
       target: linux
 
+  linux-desktop-client:
+    needs: changes
+    if: needs.changes.outputs.release_clients == 'true'
+    uses: ./.github/workflows/build-client.yml
+    with:
+      target: linux-desktop
+
   summary:
     if: always()
-    needs: [changes, windows, linux, windows-client, linux-client]
+    needs: [changes, windows, linux, windows-client, linux-client, linux-desktop-client]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

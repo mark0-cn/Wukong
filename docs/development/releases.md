@@ -64,7 +64,7 @@ Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。�
 1. 打开 **Actions → Prepare Version PR → Run workflow**，分支选择 `master`，填写完整的新 tag，例如 `v0.2.0`。正常准备版本时不要勾选 `dry_run`。
 2. 工作流同步 `Cargo.toml`、`Cargo.lock` 中 wukong 的版本、`tauri.conf.json`、`ui/package.json`、`package-lock.json` 中 ui 的版本；检查格式、版本递增和一致性，运行发布脚本测试，然后创建 `codex/release-v0.2.0` 分支及目标为 `master` 的 PR。
 3. App 创建 PR 后，原生 CI 自动启动并显示在 PR 页面。Windows、Linux、summary 通过后，由维护者确认合并；**合并版本 PR 即批准发布**。
-4. 合并提交在 `master` 上执行全量 CI，并行预构建 Windows Release 客户端和 Linux 验收客户端。全部成功后 **Tag Merged Release** 自动校验并推送 tag，指向经过检查的合并提交；即使随后 `master` 前进，也不会误标到新提交。
+4. 合并提交在 `master` 上执行全量 CI，并行预构建 Windows Release 客户端、Linux 验收 CLI 和 Ubuntu 22.04 Linux 桌面 Release 客户端。全部成功后 **Tag Merged Release** 自动校验并推送 tag，指向经过检查的合并提交；即使随后 `master` 前进，也不会误标到新提交。
 5. tag 自动触发 **Build and Publish**，完成构建、验收并发布 Docker Hub 镜像和 GitHub Release。无需本地操作或手动推送 tag。
 
 `Prepare Version PR` 使用标准 GitHub 托管 runner 和发布 App，不需要个人 PAT；内置 `GITHUB_TOKEN` 仅承担只读工作。
@@ -94,13 +94,13 @@ tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `mas
 1. 校验版本与来源；查询同仓库、同 SHA 的成功 master push CI，核对当前尝试的 changes/windows/linux/summary 后复用结果。无合格记录或 API 查询失败时执行完整 CI。
 2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
 3. 新 runner 按 digest 拉取候选，运行网络隔离、固定目标转发、LaunchSpec、归档测试，以及 host CLI 的 doctor、题目导入/构建/提取/启动/连接、GDB 附加、更新回滚。
-4. Windows 使用已校验客户端生成 NSIS EXE，Linux 构建 AppImage；签名并执行原生安装/启动检查。汇总两个平台文件，生成签名 `latest.json`、`release.json`、SHA256SUMS 与验收报告，再用 Rust 验证全部安装文件签名与哈希。
+4. Windows/Linux 均使用已校验桌面客户端直接打包 NSIS EXE/AppImage，不重复编译；Linux 验收 CLI 单独复用；签名并执行原生安装/启动检查。汇总两个平台文件，生成签名 `latest.json`、`release.json`、SHA256SUMS 与验收报告，再用 Rust 验证全部安装文件签名与哈希。
 5. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
 6. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
 
 固定版本不会覆盖已发布镜像。GitHub 与 Docker Hub 没有跨服务原子事务，失败时可能留有候选或草稿/固定镜像标签；修复后使用 Actions **Re-run failed jobs**，复用原始 artifacts 和候选 digest。已经发布的附件若与重试产物不同，流程拒绝覆盖，应发布新版本。
 
-完整重跑也可复用上一尝试中成功上传、尚未过期的客户端；其他同 SHA 的可信运行也可提供产物。仅接受当前所查询尝试中成功的构建 job，PR 产物不进入发布链。元数据不符、文件损坏会直接失败，不执行可疑客户端。产物过期、被删除或构建配方变化时需要重建；缓存只加速编译，不能替代这些校验。
+同 SHA 的其他可信运行可提供成功上传、尚未过期的客户端及原生安装器。上一尝试的产物只有在 GitHub 仍保留时才可复用；完整 Re-run all jobs 可能删除旧产物，不能保证复用。优先 Re-run failed jobs；验证跨运行复用时，在同一提交新建一次手动演练，保留成功的来源运行，不要重跑或删除它。仅接受当前所查询尝试中成功的构建 job，PR 产物不进入发布链。元数据不符、文件损坏会直接失败，不执行可疑客户端。安装器复用固定来源运行及 artifact ID，要求对应安装/启动冒烟 job 成功；下载后核对提交、版本、打包配方、公钥配置及安装文件/签名的哈希和大小。旧格式安装器不会复用。复用安装器不重复执行安装测试，但最终 Rust 更新签名验证仍必须通过。产物过期、被删除时需要重建；发现身份或配方不匹配直接失败；缓存只加速编译，不能替代这些校验。
 
 客户端和报告保留 14 天。客户端以低压缩级别上传；原生安装文件不再重复压缩。摘要只下载 `release-report` 小型元数据与验收报告，不下载完整安装包。运行名区分 CI、版本打 tag、正式发布与手动演练，摘要链接到实际复用的运行。
 
@@ -117,7 +117,7 @@ Docker Hub 如支持也可将精确版本标签设为不可变，但 `latest`、
 
 Actions → Build and Publish → Run workflow，选择默认分支。手动演练会推送公开候选镜像并生成 `online-release` artifact，**不创建 GitHub Release、不更新版本标签或 latest**。正式发布由 tag push 触发。
 
-首次预热或验证客户端复用时，先运行 **CI**，选择 `master` 并勾选 `build_release_clients`；成功后在同一提交上运行发布演练。正常版本合并自动预构建，不需每次手工预热。普通 master push 不额外编译 Release 客户端。
+首次预热或验证客户端复用时，先运行 **CI**，选择 `master` 并勾选 `build_release_clients`；成功后在同一提交上运行发布演练。正常版本合并自动预构建，不需每次手工预热。普通 master push 不额外编译 Release 客户端。Linux 桌面预构建和 AppImage 打包均使用 Ubuntu 22.04；预构建在 master 保存独立的 linux-desktop 编译缓存，tag 复用同 SHA 的二进制，缺失时按相同配方构建。
 
 Actions → Tag Merged Release → Run workflow，选择 `master`，填写一个已成功的 master push CI run ID，只读检查该提交是否符合自动打 tag 条件。手动入口永远不创建 tag，也不签发 App token；只有成功 CI 的 `workflow_run` 事件可以进入自动打 tag 步骤。
 
@@ -147,3 +147,11 @@ Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改�
 更新签名不替代 Windows Authenticode；当前安装文件没有系统代码签名。
 
 更新的检查、准备、切换和确认规则见[桌面更新设计](desktop-updates.md)。手动演练签署候选产物，但不修改正式 Release 或应用稳定更新入口。
+
+## 已验收产物的发布恢复
+
+如果 tag 发布已完成构建、原生安装器检查、容器验收及 package，但 publish 被跳过或发布操作临时失败，可以在 master 手动执行 **Recover Accepted Publication**，填写原始 tag 发布 run ID。执行此入口表示批准发布该已有版本。
+入口只接受同仓库 tag push 的已结束运行，逐项要求验收 job 成功，固定该尝试上传的 online-release artifact ID，并核对 tag 未移动、提交仍属于 master。下载原始安装文件、签名和验收清单后，使用原提交的发布逻辑校验并发布原始字节和镜像 digest。
+此入口不编译、不重新签名、不移动或新建 tag，不需要更新签名私钥。已发布且内容不同的附件或固定镜像仍拒绝覆盖。产物过期或缺失时不能使用此入口。
+
+完整重跑导致来源 artifact ID 返回 404 时，客户端和安装器会正常回退构建；这不是跳过校验或复用错误。Docker 候选镜像存于 registry，不随 Actions 产物删除，因此仍可按候选 digest 复用。

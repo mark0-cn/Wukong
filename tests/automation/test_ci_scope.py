@@ -18,12 +18,13 @@ class ScopeTests(unittest.TestCase):
 
     def test_required_prebuild_failure_blocks_ci(self):
         needs = {"changes": {"result": "success", "outputs": dict(rust="true", frontend="true", linux="true", release_clients="true")},
-                 **{name: {"result": "success"} for name in ("windows", "linux", "windows-client", "linux-client")}}
+                 **{name: {"result": "success"} for name in ("windows", "linux", "windows-client", "linux-client", "linux-desktop-client")}}
         self.assertTrue(checks_passed(needs))
         needs["linux-client"]["result"] = "skipped"
         self.assertFalse(checks_passed(needs))
         needs["changes"]["outputs"]["release_clients"] = "false"
         needs["windows-client"]["result"] = "skipped"
+        needs["linux-desktop-client"]["result"] = "skipped"
         self.assertTrue(checks_passed(needs))
 
     def test_master_manual_and_release_always_run_full_checks(self):

@@ -41,7 +41,7 @@ def checks_passed(needs):
         if outputs.get("release_clients") not in ("true", "false"):
             return False
         expected = "success" if outputs["release_clients"] == "true" else "skipped"
-        return all(needs.get(name, {}).get("result") == expected for name in ("windows-client", "linux-client"))
+        return all(needs.get(name, {}).get("result") == expected for name in ("windows-client", "linux-client", "linux-desktop-client"))
     return True
 
 
