@@ -90,14 +90,17 @@ impl Registry {
 pub fn register_configuration(config: &AppConfig, path: Option<&Path>) -> Result<()> {
     let home = crate::desktop::paths::home()?;
     let _lock = crate::updates::maintenance::lock(&home.join("updates"), false)?;
-    register_configuration_locked(config, path)
+    register_configuration_at_locked(&home, config, path)
 }
-pub(crate) fn register_configuration_locked(config: &AppConfig, path: Option<&Path>) -> Result<()> {
-    let home = crate::desktop::paths::home()?;
-    let mut registry = Registry::read(&home)?;
+pub(crate) fn register_configuration_at_locked(
+    home: &Path,
+    config: &AppConfig,
+    path: Option<&Path>,
+) -> Result<()> {
+    let mut registry = Registry::read(home)?;
     registry.include_config(config, path)?;
     // Serialize writers independently of the shared analysis/maintenance lock.
-    save(&home, registry)
+    save(home, registry)
 }
 fn save(home: &Path, additions: Registry) -> Result<()> {
     std::fs::create_dir_all(home)?;

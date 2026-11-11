@@ -11,7 +11,7 @@ mod tests;
 mod uninstall;
 use anyhow::{Context, Result, ensure};
 pub use containers::Resource;
-pub(crate) use locations::register_configuration_locked;
+pub(crate) use locations::register_configuration_at_locked;
 pub use locations::{
     Location, LocationKind, Registry, create_owned_directory, register_cache,
     register_configuration,

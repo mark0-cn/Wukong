@@ -91,8 +91,14 @@ impl ConfigDocument {
         Ok(())
     }
     pub fn save(&mut self, state_override: Option<&Path>) -> Result<(AppConfig, Store)> {
-        let _maintenance =
-            crate::updates::maintenance::lock(&crate::updates::recovery::root()?, true)?;
+        self.save_in(&super::paths::home()?, state_override)
+    }
+    fn save_in(
+        &mut self,
+        home: &Path,
+        state_override: Option<&Path>,
+    ) -> Result<(AppConfig, Store)> {
+        let _maintenance = crate::updates::maintenance::lock(&home.join("updates"), true)?;
         let form: AppConfig = toml::from_str(&self.source)
             .context(UiMessage::new("system-invalid-toml-configuration"))?;
         form.validate()?;
@@ -120,9 +126,9 @@ impl ConfigDocument {
         let store = Store::open(&resolved.state_dir)?;
         // Keep both the previous and new locations discoverable after a switch.
         if let Ok(previous) = AppConfig::load(Some(&self.path)) {
-            crate::cleanup::register_configuration_locked(&previous, Some(&self.path))?;
+            crate::cleanup::register_configuration_at_locked(home, &previous, Some(&self.path))?;
         }
-        crate::cleanup::register_configuration_locked(&resolved, Some(&self.path))?;
+        crate::cleanup::register_configuration_at_locked(home, &resolved, Some(&self.path))?;
         temporary
             .persist(&self.path)
             .map_err(|error| error.error)
@@ -150,14 +156,15 @@ mod tests {
             path: vec!["model".into(), "model".into()],
             value: Value::String("after".into()),
         }])?;
-        let (config, _) = document.save(None)?;
+        let home = dir.path().join("profile");
+        let (config, _) = document.save_in(&home, None)?;
         assert_eq!(
             config.state_dir,
             std::fs::canonicalize(dir.path())?.join("state")
         );
         assert!(document.source.starts_with("# keep"));
         std::fs::write(&path, "# external\n")?;
-        assert!(document.save(None).is_err());
+        assert!(document.save_in(&home, None).is_err());
         assert_eq!(std::fs::read_to_string(path)?, "# external\n");
         Ok(())
     }
