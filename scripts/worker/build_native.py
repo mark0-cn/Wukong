@@ -29,7 +29,7 @@ def build(output, check_only=False):
     subprocess.run([cargo, "build", "--locked", "--release", "--target", "x86_64-pc-windows-msvc",
                     "--target-dir", str(output)], cwd=source, env=environment, check=True)
     files = {}
-    for name in ["wukong-dbgeng.exe"]:
+    for name in ["wukong-dbgeng.exe", "wukong-worker.exe"]:
         binary = output / "x86_64-pc-windows-msvc/release" / name
         files[name] = {"sha256": sha256(binary), "size": binary.stat().st_size,
                        "imported_libraries": require_static_crt(binary)}

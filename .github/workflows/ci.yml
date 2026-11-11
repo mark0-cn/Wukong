@@ -141,6 +141,15 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m scripts.worker.build_native
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo fmt --manifest-path workers/package/Cargo.toml -- --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo clippy --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks -- -D warnings
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:WUKONG_WORKER_CLI = Join-Path $PWD 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-worker.exe'
+          cargo test --locked --manifest-path workers/package/Cargo.toml --test contract --target-dir target/worker-package-checks -- --ignored
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
   linux:
     needs: changes
@@ -185,6 +194,12 @@ jobs:
         run: |
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb
           cargo test --locked --all-targets
+      - name: Offline worker package format
+        if: needs.changes.outputs.rust == 'true'
+        run: |
+          cargo fmt --manifest-path workers/package/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks -- -D warnings
+          cargo test --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks
       - name: Linux bilingual interface tests
         if: needs.changes.outputs.frontend == 'true'
         run: |

@@ -9,12 +9,14 @@ Docker/VM/SSH worker. `trusted_local` explicitly runs trusted fixtures on the ho
 and is only suitable for development tests. The Python bridge manages processes;
 the container or VM supplies isolation.
 
-Install the bridge dependencies in the Python environment used by the worker
+For Linux workers and trusted development fixtures, install bridge dependencies in the Python environment used by the worker
 (or `environments.<id>.runtime.python` for trusted local tests):
 
 ```sh
 python -m pip install -r workers/runtime/requirements.txt
 ```
+
+Managed Windows VMs require the complete offline package, including Python and all dependencies; do not fetch packages or run online pip installation in the VM. The [package contract](../package/README.md) and [Windows components](../windows/README.md) describe the current implementation and remaining installer/production acceptance work.
 
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
