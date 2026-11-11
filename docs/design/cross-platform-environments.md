@@ -32,9 +32,15 @@ The worker exposes `file.upload.begin`, `file.upload.status`, `file.upload.write
 
 Large downloads verify each bounded chunk and the complete hash before streaming evidence ingestion. `file_get` returns metadata and an evidence ID, not inline file bytes. Model-facing output remains bounded. Actual free disk space is checked at upload preparation; an IO failure can still occur if other processes consume space. Reconnection does not replay unknown debugger mutations.
 
+## Structured debugger adapters
+
+`debug_start` selects `auto`, `gdb_mi` or `dbgeng`; `mode = "dump"` requires a separate staged dump and forbids launch arguments. The staged target remains the run's original image. `debug_inspect` exposes bounded registers, stack, memory, modules, threads, disassembly, exception and execution state. `debug_control` provides typed breakpoints and run/continue/interrupt/step/next/finish. Execution waits for a stop; deadlines request interruption and invalidate the session if a stopped state cannot be established. Dump sessions reject execution control. Raw `debug_command` remains GDB/MI-only.
+
+The native Windows helper loads the configured, hash-checked DbgEng library and accepts only structured operations. The adapter hashes target, dump, helper and engine and retains bounded JSONL transcripts. Local symbol paths exclude servers and environment-provided symbol paths. Real x64/x86 trusted fixture acceptance is separate from production isolation. Until the managed broker exists, Windows execution requires explicit trusted-fixture mode and is not advertised as production-ready.
+
 ## Windows offline delivery contract
 
-The Windows backend and installer are subsequent implementation work; registration does not establish their availability. The delivery contract requires a complete offline package assembled on the internet-connected controller from pinned, verified official payloads. The VM installer must include every required runtime, dependency and SSH/debugger installation payload and must never fetch missing components. Installation, repair, upgrade and rollback must work without VM internet access; the SSH management connection remains available. Symbols are prepared by the controller and staged into a local-only symbol cache.
+The Windows managed isolation broker and installer are subsequent implementation work; registration does not establish their availability. The delivery contract requires a complete offline package assembled on the internet-connected controller from pinned, verified official payloads. The VM installer must include every required runtime, dependency and SSH/debugger installation payload and must never fetch missing components. Installation, repair, upgrade and rollback must work without VM internet access; the SSH management connection remains available. Symbols are prepared by the controller and staged into a local-only symbol cache.
 
 The target backend is DbgEng with structured inspection/control, owned sessions and independent replay. The VM supplies the external isolation boundary; target permissions and metadata protections remain separate controls. Kernel debugging, VM creation, automatic snapshot management and GUI interaction are outside the first release. Real Windows VM acceptance is required before claiming Windows execution or offline installation support.
 

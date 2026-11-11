@@ -66,10 +66,20 @@ class GdbMiTests(unittest.TestCase):
         session.token = 0
         session.isolated = False
         session.lock = threading.Lock()
+        session.stop_condition = threading.Condition()
+        session.stop_sequence = 0
         session.records = queue.Queue(maxsize=8)
         session.events = collections.deque(maxlen=256)
         session.process = SimpleNamespace(stdout=io.StringIO(output), stdin=io.StringIO(), poll=lambda: None)
         return session
+
+    def test_dump_raw_commands_cannot_launch_or_modify_targets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.session(directory, "")
+            session.mode = "dump"
+            for command in ["-exec-run", "-data-write-memory-bytes 0x1 ff", '-data-evaluate-expression "function()"']:
+                with self.subTest(command=command), self.assertRaisesRegex(ValueError,"read-only"):
+                    session.command(command,1)
 
     def test_nested_payloads_escaping_and_async_events(self):
         records = r'''*stopped,reason="breakpoint-hit",frame={func="main",line="12"}

@@ -75,6 +75,8 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
                 | "job_artifacts"
                 | "debug_start"
                 | "debug_command"
+                | "debug_inspect"
+                | "debug_control"
                 | "debug_close"
                 | "debug_profile"
                 | "debug_snapshot"
@@ -641,7 +643,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::DebugStartArgs>(
             "debug_start",
             "tool-debug-start",
-            "Start an owned GDB/MI session on the staged target.",
+            "Start an owned debugger session on the staged target, or inspect a separately staged dump. Engine selection never falls back to another platform.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,
@@ -655,6 +657,24 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+        ),
+        spec::<args::DebugInspectArgs>(
+            "debug_inspect",
+            "tool-debug-inspect",
+            "Inspect bounded registers, stack, memory, modules, threads, instructions, exception or execution state in your owned debugger session; full engine transcripts remain evidence.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_job_start,
+            Visibility::Child,
+        ),
+        spec::<args::DebugControlArgs>(
+            "debug_control",
+            "tool-debug-control",
+            "Control your owned live debugger using typed breakpoint and execution actions. Dump sessions reject execution control; stable request IDs prevent blind replay.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_job_start,
+            Visibility::Child,
         ),
         spec::<args::DebugCloseArgs>(
             "debug_close",

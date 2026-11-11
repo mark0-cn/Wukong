@@ -2,6 +2,7 @@
 import base64
 import os
 import shutil
+import sys
 import threading
 from worker_common import WorkerError, atomic_json, bounded_int, load_json
 import worker_debugger
@@ -9,7 +10,7 @@ from worker_debugger import DebugSession
 from worker_interactive import InteractSession
 
 class SessionManager:
-    methods = frozenset(['interact.start', 'interact.close', 'interact.write', 'interact.profile', 'debug.start', 'debug.close', 'debug.command', 'debug.events', 'debug.profile', 'debug.snapshot'])
+    methods = frozenset(['interact.start', 'interact.close', 'interact.write', 'interact.profile', 'debug.start', 'debug.close', 'debug.command', 'debug.inspect', 'debug.control', 'debug.events', 'debug.profile', 'debug.snapshot'])
 
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated
@@ -72,6 +73,19 @@ class SessionManager:
                 raise ValueError("interactive write exceeds 1 MiB")
             return session.write(data, bounded_int(params.get("read_timeout_secs"), 10, 1, 300))
         if method == "debug.start":
+            engine = params.get("engine", "auto")
+            if engine == "auto":
+                engine = "dbgeng" if sys.platform == "win32" else "gdb_mi"
+            if engine == "dbgeng":
+                from worker_dbgeng import DebugSession as DbgEngSession
+                session = DbgEngSession(self.root, params, trusted=self.trusted)
+                with self.lock:
+                    self.debug[session.id] = session
+                return {"session_id":session.id, "state":"running", "engine":"dbgeng", "mode":session.mode,
+                        "ownership":"single_agent_serialized", "daemon_pid":os.getpid(),
+                        "target_sha256":session.target_sha256, "dump_sha256":session.dump_sha256}
+            if engine != "gdb_mi":
+                raise ValueError("requested debugger engine is unavailable")
             if not self.trusted and not self.isolated:
                 raise ValueError("production debugger requires a root Linux worker with isolated inferiors")
             if not shutil.which("gdb"):
@@ -82,12 +96,18 @@ class SessionManager:
             with self.lock:
                 self.debug[session.id] = session
             return {"session_id": session.id, "state": "running", "ownership": "single_worker_serialized", "daemon_pid": os.getpid()}
-        if method in {"debug.command", "debug.close", "debug.events", "debug.profile", "debug.snapshot"}:
+        if method in {"debug.command", "debug.inspect", "debug.control", "debug.close", "debug.events", "debug.profile", "debug.snapshot"}:
             with self.lock:
                 session = self.debug.get(params["session_id"])
             if not session:
                 raise WorkerError("session_lost", "debug session not owned by this daemon; it is absent or lost")
+            if method == "debug.inspect":
+                return session.inspect(params, bounded_int(params.get("timeout_secs"), 30, 1, 60))
+            if method == "debug.control":
+                return session.control(params, bounded_int(params.get("timeout_secs"), 30, 1, 60))
             if method == "debug.snapshot":
+                if session.engine == "dbgeng":
+                    return session.snapshot()
                 from worker_crash import debugger_snapshot
                 return debugger_snapshot(session)
             if method == "debug.profile":

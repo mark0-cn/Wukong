@@ -19,7 +19,7 @@ FIXTURE = r'''
 #include <stdlib.h>
 #include <string.h>
 int main(int argc, char **argv) {
-    if (argc < 2) return 2;
+    if (argc < 2) { volatile unsigned counter = 0; for (;;) counter++; }
     FILE *file = fopen(argv[1], "rb");
     if (!file) return 3;
     unsigned char input[128] = {0};
@@ -39,6 +39,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", required=True)
     parser.add_argument("--fuzz", action="store_true")
+    parser.add_argument("--static-fixture", action="store_true", help="Use a static fixture for debugger-adapter acceptance; does not cover dynamic loader identity")
     args = parser.parse_args()
     state = Path(args.state).resolve()
     client = Client(state)
@@ -51,16 +52,18 @@ def main():
         source_path = Path(build) / "fixture.c"
         target_path = Path(build) / "fixture"
         source_path.write_text(FIXTURE)
-        subprocess.run(["gcc", "-g", "-O0", "-o", str(target_path), str(source_path)], check=True)
+        subprocess.run(["gcc", "-g", "-O0", *(["-static"] if args.static_fixture else []), "-o", str(target_path), str(source_path)], check=True)
         client.put("fixture", target_path.read_bytes(), executable=True)
     crash = client.put("crash.bin", b"BAD-padding-to-minimize")
     seed = client.put("seeds/seed", b"BAA")
     started = client.call("debug.start", target="files/fixture", args=[str(state / seed["path"])])
     session_id = started["session_id"]
-    breakpoint = client.call("debug.command", session_id=session_id, command="-break-insert main")
+    breakpoint = client.call("debug.control", session_id=session_id, action="breakpoint_add", symbol="main", request_id="typed-main-breakpoint")
     assert breakpoint["class"] == "done", breakpoint
-    run = client.call("debug.command", session_id=session_id, command="-exec-run")
+    assert client.call("debug.control", session_id=session_id, action="breakpoint_add", symbol="main", request_id="typed-main-breakpoint") == breakpoint
+    run = client.call("debug.control", session_id=session_id, action="run", timeout_secs=5, request_id="typed-run")
     assert run["class"] == "running", run
+    assert run["state"]["execution_state"] == "stopped" and run["state"]["interruption"] is None, run
     for _ in range(100):
         events = client.call("debug.events", session_id=session_id)
         if any(record.get("type") == "notify" and record.get("message") == "stopped" for record in events["events"]):
@@ -72,11 +75,32 @@ def main():
     assert stack["class"] == "done" and 'func="main"' in stack["record"], stack
     memory = client.call("debug.command", session_id=session_id, command="-data-read-memory-bytes main 16")
     assert memory["class"] == "done" and "contents=" in memory["record"], memory
+    typed_stack = client.call("debug.inspect",session_id=session_id,kind="stack",limit=8)
+    frame = typed_stack["data"]["stack"][0]
+    assert frame["func"] == "main", typed_stack
+    pc = int(frame["addr"],16)
+    typed_memory = client.call("debug.inspect",session_id=session_id,kind="memory",address=pc,length=16)
+    assert len(base64.b64decode(typed_memory["data"]["data_base64"])) == 16, typed_memory
+    registers = client.call("debug.inspect",session_id=session_id,kind="registers",limit=64)
+    assert registers["data"]["registers"], registers
+    threads = client.call("debug.inspect",session_id=session_id,kind="threads",limit=8)
+    assert threads["data"]["threads"], threads
+    modules = client.call("debug.inspect",session_id=session_id,kind="modules",limit=64)
+    assert modules["data"]["process"]["pid"], modules
+    disassembly = client.call("debug.inspect",session_id=session_id,kind="disassembly",address=pc,length=32,limit=4)
+    assert 1 <= len(disassembly["data"]["asm_insns"]) <= 4, disassembly
     # Relay restart must preserve debugger ownership as well as running jobs.
     client.close()
     client = Client(state)
     assert client.call("debug.command", session_id=session_id, command="-stack-list-frames")["class"] == "done"
     client.call("debug.close", session_id=session_id)
+    bounded_session = client.call("debug.start",target="files/fixture")["session_id"]
+    try:
+        bounded = client.call("debug.control",session_id=bounded_session,action="run",timeout_secs=1,request_id="typed-deadline")
+        assert bounded["state"] == {"execution_state":"stopped","interruption":"deadline"}, bounded
+        assert client.call("debug.inspect",session_id=bounded_session,kind="stack",limit=8)["data"]["stack"]
+    finally:
+        client.call("debug.close",session_id=bounded_session)
     replay = client.finish(client.call("crash.replay", target="files/fixture", input=crash["path"], timeout_secs=3))
     assert replay["result"]["passed"] and replay["result"]["observed_stage"] == "crash", replay
     verified = client.finish(client.call("poc.verify", target="files/fixture", input=crash["path"], trials=3, timeout_secs=3,
@@ -86,7 +110,9 @@ def main():
     assert minimized["result"]["minimized_size"] == 3, minimized
     data = client.call("file.get", path=minimized["result"]["artifact"]["path"])
     assert base64.b64decode(data["data_base64"]) == b"BAD", data
-    results = {"doctor": doctor, "gdb": {"breakpoint": breakpoint, "stack": stack, "memory": memory}, "replay": replay,
+    results = {"fixture_linkage":"static" if args.static_fixture else "dynamic", "doctor": doctor, "gdb": {"breakpoint": breakpoint, "stack": stack, "memory": memory,
+               "typed_stack":typed_stack,"typed_memory":typed_memory,"registers":registers,
+               "threads":threads,"modules":modules,"disassembly":disassembly,"bounded":bounded}, "replay": replay,
                "verification": verified, "minimization": minimized}
     if args.fuzz:
         # Docker Desktop can pipe core notifications to an external handler.

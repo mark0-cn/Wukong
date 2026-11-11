@@ -46,7 +46,8 @@ impl SessionsService {
         args: Value,
     ) -> Result<Value> {
         match name {
-            "debug_command" | "debug_close" | "debug_profile" | "debug_snapshot" => {
+            "debug_command" | "debug_inspect" | "debug_control" | "debug_close"
+            | "debug_profile" | "debug_snapshot" => {
                 let session_id = text(&args, "session_id")?.to_owned();
                 let mut session: SessionRecord = require_session(
                     &self.store,
@@ -80,6 +81,10 @@ impl SessionsService {
                             "debug.profile"
                         } else if name == "debug_snapshot" {
                             "debug.snapshot"
+                        } else if name == "debug_inspect" {
+                            "debug.inspect"
+                        } else if name == "debug_control" {
+                            "debug.control"
                         } else {
                             "debug.command"
                         },
@@ -127,6 +132,14 @@ impl SessionsService {
             }
             "debug_start" => {
                 self.files.known_file(agent, text(&args, "target")?, true)?;
+                let dump_mode = args["mode"].as_str() == Some("dump");
+                ensure!(
+                    dump_mode == args["dump"].is_string(),
+                    "dump mode requires a dump artifact; launch mode cannot supply a dump"
+                );
+                if dump_mode {
+                    self.files.known_file(agent, text(&args, "dump")?, false)?;
+                }
                 let raw = self
                     .gateway
                     .worker_call(agent, call_id, "debug.start", args)

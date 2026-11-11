@@ -61,8 +61,8 @@ impl ExecutionService {
                     .import_job_artifacts(agent, call_id, text(&args, "job_id")?)
                     .await
             }
-            "debug_command" | "debug_close" | "debug_start" | "interactive_start"
-            | "interactive_send" | "interactive_close" => {
+            "debug_command" | "debug_inspect" | "debug_control" | "debug_close" | "debug_start"
+            | "interactive_start" | "interactive_send" | "interactive_close" => {
                 self.sessions.session_tool(agent, call_id, name, args).await
             }
             "exec_command" => {

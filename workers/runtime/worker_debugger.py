@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 import uuid
-from worker_common import atomic_json, confined, safe_env
+from worker_common import atomic_json, confined, safe_env, sha256_file
 from worker_processes import detached_options, terminate_tree
 
 try:  # GDB/MI parsing is optional: the bridge must serve jobs without it.
@@ -24,23 +24,37 @@ def load_launch_environment(root,params):
 
 class DebugSession:
     """One lock and one result-token queue own each GDB/MI process."""
+    engine = "gdb_mi"
     def __init__(self, root, params, isolated=False):
         self.id = uuid.uuid4().hex
         self.directory = root / "debug" / self.id
         self.directory.mkdir(parents=True)
         self.lock = threading.RLock()
+        self.stop_condition = threading.Condition()
+        self.stop_sequence = 0
+        self.last_stop = None
         self.records = queue.Queue(maxsize=2048)
         self.events = collections.deque(maxlen=256)
         self.token = 0
         self.dead = False
         self.transcript_bytes = 0
         target = confined(root, params["target"], True)
+        self.mode = params.get("mode", "launch")
+        if self.mode not in {"launch", "dump"}:
+            raise ValueError("invalid debugger mode")
+        self.target_sha256 = sha256_file(target)
+        dump = confined(root, params["dump"], True) if self.mode == "dump" else None
+        self.dump_sha256 = sha256_file(dump) if dump else None
+        self.execution_state = "stopped" if dump else "loaded"
         self.isolated = isolated
         self.experiment = None
         args = list(params.get("args", []))
         self.stdin_path = confined(root, params["_stdin"], True) if params.get("_stdin") else None
         launch = None
-        if params.get("launch_spec"):
+        if dump:
+            if args or params.get("launch_spec") or params.get("input"):
+                raise ValueError("dump inspection cannot launch a process or supply input")
+        elif params.get("launch_spec"):
             from worker_launch import resolve
             launch=resolve(root,params,isolated,self.stdin_path or (confined(root,params["input"],True) if params.get("input") else None))
             if launch["input_mode"]=="pty": raise ValueError("PTY debugging needs an external terminal; use interactive PTY or a debug container")
@@ -58,7 +72,8 @@ class DebugSession:
             if self.stdin_path:
                 self.stdin_path = isolation.stage_file(self.stdin_path, self.experiment, "stdin.bin")
             isolation.seal(self.experiment)
-        self.process = subprocess.Popen(["gdb", "--quiet", "--nx", "--nh", "-iex", "set auto-load off", "--interpreter=mi2", "--args", str(target)] + args,
+        launch_args = ["--exec", str(target), "--core", str(dump)] if dump else ["--args", str(target)] + args
+        self.process = subprocess.Popen(["gdb", "--quiet", "--nx", "--nh", "-iex", "set auto-load off", "--interpreter=mi2"] + launch_args,
                                         cwd=self.directory, env=safe_env(params.get("env")), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1, **detached_options())
         threading.Thread(target=self.read_records, daemon=True).start()
@@ -108,6 +123,14 @@ class DebugSession:
                     terminate_tree(self.process)
                     break
                 record = {**parsed, "record": line}
+                if parsed.get("message") == "running":
+                    self.execution_state = "running"
+                elif parsed.get("message") == "stopped":
+                    with self.stop_condition:
+                        self.execution_state = "exited" if (parsed.get("payload") or {}).get("reason", "").startswith("exited") else "stopped"
+                        self.last_stop = parsed.get("payload")
+                        self.stop_sequence += 1
+                        self.stop_condition.notify_all()
                 if parsed["type"] == "result" and parsed.get("token") is not None:
                     try:
                         self.records.put_nowait(record)
@@ -122,6 +145,12 @@ class DebugSession:
     def command(self, command, timeout, internal=False):
         if not re.fullmatch(r"-[a-z][a-z0-9-]*(?: [^\r\n\0]*)?", command) or len(command) > 32768:
             raise ValueError("one GDB/MI command is required; raw CLI and multiline commands are rejected")
+        if getattr(self, "mode", "launch") == "dump" and not internal:
+            readonly = {"stack-list-frames", "stack-list-arguments", "stack-list-locals", "stack-list-variables",
+                        "stack-info-frame", "thread-info", "data-read-memory-bytes", "data-list-register-names",
+                        "data-list-register-values", "data-disassemble", "symbol-info-functions", "symbol-info-variables"}
+            if command.split(" ", 1)[0][1:] not in readonly:
+                raise ValueError("dump sessions permit read-only GDB/MI inspection")
         if self.isolated and not internal:
             allowed = {"break-insert", "break-delete", "break-enable", "break-disable", "break-condition", "break-after", "break-list", "exec-run", "exec-continue", "exec-next", "exec-next-instruction", "exec-step", "exec-step-instruction", "exec-finish", "exec-until", "exec-interrupt", "stack-list-frames", "stack-list-arguments", "stack-list-locals", "stack-list-variables", "stack-info-frame", "stack-select-frame", "thread-info", "thread-select", "data-evaluate-expression", "data-read-memory-bytes", "data-write-memory-bytes", "data-list-register-names", "data-list-register-values", "data-disassemble", "symbol-info-functions", "symbol-info-variables"}
             if command.split(" ", 1)[0][1:] not in allowed:
@@ -162,6 +191,14 @@ class DebugSession:
             if len(candidates) != 1: raise ValueError("runtime profile requires exactly one live inferior")
             return {"session_id":self.id, "launch_identity":self.launch_identity, "process":process_profile(candidates[0]["pid"]),
                     "transcript":"debug/" + self.id + "/transcript.mi"}
+
+    def inspect(self, params, timeout):
+        from worker_debug_operations import gdb_inspect
+        return gdb_inspect(self, params, timeout)
+
+    def control(self, params, timeout):
+        from worker_debug_operations import gdb_control
+        return gdb_control(self, params, timeout)
 
     def close(self):
         with self.lock:

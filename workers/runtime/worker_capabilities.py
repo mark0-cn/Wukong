@@ -17,6 +17,8 @@ def _python_module(name):
 
 
 def doctor(root, trusted, isolated):
+    from worker_dbgeng import doctor as dbgeng_doctor
+    dbgeng = dbgeng_doctor(root, trusted)
     tools = {}
     for name in ["gdb", "afl-fuzz", "afl-qemu-trace", "afl-qemu-bridge", "afl-tmin", "gcc",
                  "one_gadget", "patchelf", "ropper", "pwninit", "pwndbg", "tmux", "strace", "ltrace", "seccomp-tools", "socat", "gdbserver", "eu-unstrip"]:
@@ -55,9 +57,10 @@ def doctor(root, trusted, isolated):
             "worker_root": str(root), "isolation": "trusted_local" if trusted else "external_worker",
             "core_pattern": core_pattern, "external_core_handler": bool(core_pattern and core_pattern.startswith("|")),
             "metadata_protected_from_targets": isolated, "unique_experiment_uids": isolated,
-            "tools": tools, "python_toolchain": python_toolchain,
+            "tools": tools, "python_toolchain": python_toolchain, "dbgeng":dbgeng,
             "capabilities": {"process_jobs": True, "persistent_jobs": True, "resumable_file_transfer": True,
-            "debug_gdb_mi": tools["gdb"]["available"] and python_toolchain["pygdbmi"], "fuzz_qemu": linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
+            "debug_gdb_mi": tools["gdb"]["available"] and python_toolchain["pygdbmi"],
+            "debug_dbgeng": dbgeng["available"] and trusted, "fuzz_qemu": linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
             "crash_replay": True, "input_minimize": tools["gdb"]["available"] and python_toolchain["pygdbmi"] and linux,
             "input_minimize_signal_only": True, "runtime_profile": True,
             "runtime_prepare": python_toolchain["pyelftools"], "mitigation_profile": True,

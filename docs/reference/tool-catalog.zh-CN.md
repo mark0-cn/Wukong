@@ -24,7 +24,9 @@
 | `cyclic_offset` | analyst / verifier | 否 | 在同 run 的 cyclic pattern 中找唯一偏移。必须提供原始 alphabet/n 及内存顺序恰好 n 字节；拒绝不一致生成参数，不猜字节序或隐式截断寄存器。 |
 | `debug_close` | analyst / verifier | 是 | 关闭自己的调试会话，或清理同 run 中 owner 已终止的会话。 |
 | `debug_command` | analyst / verifier | 是 | 在所属会话执行恰好一条 GDB/MI 命令；稳定请求 ID 防止盲目重放。 |
-| `debug_start` | analyst / verifier | 是 | 对暂存目标启动自己拥有的 GDB/MI 会话。 |
+| `debug_control` | analyst / verifier | 是 | 使用类型化的断点和执行动作控制自己拥有的实时调试器。Dump 会话拒绝执行控制；稳定请求 ID 防止盲目重放。 |
+| `debug_inspect` | analyst / verifier | 否 | 在自己拥有的调试会话中，有界检查寄存器、栈、内存、模块、线程、指令、异常或执行状态；完整引擎记录保留为证据。 |
+| `debug_start` | analyst / verifier | 是 | 对暂存目标启动自己拥有的调试会话，或检查单独暂存的 Dump。引擎选择不会回退到其他平台。 |
 | `differential_test` | analyst / verifier | 是 | 在隔离后台 job 中，以有界 stdin 向量比较暂存目标/参考实现。原始输出、哈希、差异保留产物；超时/截断是 inconclusive，不是匹配。 |
 | `emulate_run` | analyst / verifier | 否 | 从起始地址用 Unicorn 有界模拟暂存目标：映射 ELF 段和栈，运行到 count 条指令或 PC 到 until 地址，返回寄存器及所需内存 data_base64。目标不原生执行；可用于 VM/手工代码（解释器循环、x87/FPU）而无需自写 Unicorn harness。init_regs 设置前提寄存器，memory 注入字节；watchdog 限制失控循环，未知指令错误包含地址。 |
 | `environment_doctor` | 全部 | 否 | 探测已登记环境的实际平台和工具；子任务只能探测分配给自己的环境。 |

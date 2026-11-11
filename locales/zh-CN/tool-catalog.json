@@ -64,8 +64,16 @@
     "text": "在所属会话执行恰好一条 GDB/MI 命令；稳定请求 ID 防止盲目重放。"
   },
   "debug_start": {
-    "source": "Start an owned GDB/MI session on the staged target.",
-    "text": "对暂存目标启动自己拥有的 GDB/MI 会话。"
+    "source": "Start an owned debugger session on the staged target, or inspect a separately staged dump. Engine selection never falls back to another platform.",
+    "text": "对暂存目标启动自己拥有的调试会话，或检查单独暂存的 Dump。引擎选择不会回退到其他平台。"
+  },
+  "debug_inspect": {
+    "source": "Inspect bounded registers, stack, memory, modules, threads, instructions, exception or execution state in your owned debugger session; full engine transcripts remain evidence.",
+    "text": "在自己拥有的调试会话中，有界检查寄存器、栈、内存、模块、线程、指令、异常或执行状态；完整引擎记录保留为证据。"
+  },
+  "debug_control": {
+    "source": "Control your owned live debugger using typed breakpoint and execution actions. Dump sessions reject execution control; stable request IDs prevent blind replay.",
+    "text": "使用类型化的断点和执行动作控制自己拥有的实时调试器。Dump 会话拒绝执行控制；稳定请求 ID 防止盲目重放。"
   },
   "differential_test": {
     "source": "Compare the staged target and reference on bounded stdin vectors in an isolated background job. Preserve raw outputs, hashes and mismatches as artifacts. Timeout or truncated output is inconclusive, never a match.",

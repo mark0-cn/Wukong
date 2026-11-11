@@ -117,6 +117,13 @@ pub(in crate::tools) struct FuzzStatusArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::tools) struct DebugStartArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<DebugMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<DebugEngine>,
+    /// Staged dump artifact; required in dump mode, separate from the target image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dump: Option<String>,
     /// Input artifact for argv_file LaunchSpecs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<String>,
@@ -136,6 +143,71 @@ pub(in crate::tools) struct DebugCommandArgs {
     pub session_id: String,
     #[schemars(length(min = 1))]
     pub command: String,
+    #[schemars(range(min = 1, max = 60))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+choices!(DebugMode { Launch, Dump });
+choices!(DebugEngine {
+    Auto,
+    GdbMi,
+    Dbgeng
+});
+choices!(DebugInspectKind {
+    Registers,
+    Stack,
+    Memory,
+    Modules,
+    Threads,
+    Disassembly,
+    Exception,
+    State
+});
+choices!(DebugAction {
+    Run,
+    Continue,
+    Interrupt,
+    Step,
+    Next,
+    Finish,
+    BreakpointAdd,
+    BreakpointRemove,
+    BreakpointEnable,
+    BreakpointDisable
+});
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::tools) struct DebugInspectArgs {
+    pub session_id: String,
+    pub kind: DebugInspectKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u64>,
+    #[schemars(range(min = 1, max = 65536))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<u64>,
+    #[schemars(range(min = 1, max = 256))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    #[schemars(range(min = 1, max = 60))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::tools) struct DebugControlArgs {
+    pub session_id: String,
+    pub action: DebugAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u64>,
+    #[schemars(length(min = 1, max = 512))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    #[schemars(length(min = 1, max = 32))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoint_id: Option<String>,
     #[schemars(range(min = 1, max = 60))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,

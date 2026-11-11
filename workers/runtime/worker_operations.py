@@ -12,7 +12,7 @@ class OperationLedger:
         (root / "operations").mkdir(exist_ok=True)
 
     def invoke(self, method, params, execute, reconcile):
-        effects = {"runtime.prepare", "job.start", "fuzz.start", "debug.start", "debug.command", "debug.close",
+        effects = {"runtime.prepare", "job.start", "fuzz.start", "debug.start", "debug.command", "debug.control", "debug.close",
                    "file.put", "crash.replay", "input.minimize", "poc.verify", "job.cancel", "fuzz.stop",
                    "interact.start", "interact.write", "interact.close", "exec.run",
                    "file.upload.begin", "file.upload.write", "file.upload.commit"}

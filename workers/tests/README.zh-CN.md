@@ -29,3 +29,13 @@ python3 /opt/wukong/tests/run.py ghidra --state /state/ghidra-acceptance
 ```
 
 测试状态目录应为本轮独占目录；真实后端要求见 [worker 说明](../runtime/README.zh-CN.md)。
+
+`integration --static-fixture` 使用静态链接夹具验证调试器和重放适配器，不验证动态加载器及库身份。Docker 运行需要可执行的 `/tmp`、ptrace 和文档要求的隔离能力。
+
+Windows 上已有 MSVC 和 Debugging Tools 时，先运行 `cargo build --locked --bin wukong-dbgeng`，然后运行：
+
+```powershell
+python workers/tests/run.py windows-debugger --state target/dbgeng-acceptance --helper target/debug/wukong-dbgeng.exe --engine-dir '<Debugging Tools x64 directory>'
+```
+
+此入口编译可信 x64/x86 夹具，检查 Dump 寄存器、栈、内存、模块、线程、反汇编，以及实时断点、单步、执行至返回、请求去重、超时中断后的继续检查。哈希与原始记录保留在指定目录。它不安装工具，也不证明生产隔离或 VM 离线安装；这些需要独立 VM 验收。
