@@ -11,6 +11,8 @@ pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(UiMessage)) ->
     let mut probe = config.clone();
     probe.workbench.root = root.clone();
     let workbench = Workbench::open(&probe)?;
+    progress(UiMessage::new("system-checking-docker-host"));
+    workbench.docker.preflight(image)?;
     let result = (|| {
         progress(UiMessage::new(
             "system-pulling-the-tool-image-docker-will-reuse-downloaded",
@@ -26,22 +28,34 @@ pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(UiMessage)) ->
         Ok(())
     })();
     // Only resources bearing this newly created probe's workspace identity.
-    for (kind, name) in [
-        ("container", workbench.name("tools")),
-        ("volume", workbench.name("state")),
-        ("network", workbench.name("offline")),
-    ] {
-        if let Some(value) = workbench.docker.inspect(kind, &name)? {
-            workbench.owned(&value, &name)?;
-            let args = if kind == "container" {
-                vec![kind, "rm", "-f", &name]
-            } else {
-                vec![kind, "rm", &name]
-            };
-            workbench.docker.run(&args)?;
+    let cleanup = (|| -> Result<()> {
+        for (kind, name) in [
+            ("container", workbench.name("tools")),
+            ("volume", workbench.name("state")),
+            ("network", workbench.name("offline")),
+        ] {
+            if let Some(value) = workbench.docker.inspect(kind, &name)? {
+                workbench.owned(&value, &name)?;
+                let args = if kind == "container" {
+                    vec![kind, "rm", "-f", &name]
+                } else {
+                    vec![kind, "rm", &name]
+                };
+                workbench.docker.run(&args)?;
+            }
         }
+        Ok(())
+    })();
+    // A cleanup failure must not replace the original pull/doctor diagnosis.
+    match result {
+        Err(error) => {
+            if let Err(cleanup_error) = cleanup {
+                tracing::warn!(error = %cleanup_error, "candidate cleanup failed; preserving original diagnosis");
+            }
+            Err(error)
+        }
+        Ok(()) => cleanup,
     }
-    result
 }
 
 pub fn bind(path: &Path, workbench: &Workbench) -> Result<()> {

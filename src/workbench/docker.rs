@@ -19,7 +19,10 @@ impl Docker {
         &self.executable
     }
     pub fn command(&self) -> Command {
+        #[cfg(not(windows))]
         let mut command = Command::new(&self.executable);
+        #[cfg(windows)]
+        let mut command = super::docker_preflight::configure_command(&self.executable);
         command.stdin(Stdio::null());
         #[cfg(windows)]
         {
@@ -72,6 +75,11 @@ impl Docker {
     }
     /// Long build/pull/save operations stream to disk instead of buffering logs.
     pub fn logged(&self, args: &[&str], log: &Path) -> Result<()> {
+        if args.first() == Some(&"pull")
+            && let Some(image) = args.get(1)
+        {
+            self.check_credentials(image)?;
+        }
         fs::create_dir_all(log.parent().context("log needs parent")?)?;
         let file = fs::File::create(log)?;
         let status = self
@@ -80,11 +88,9 @@ impl Docker {
             .stdout(Stdio::from(file.try_clone()?))
             .stderr(Stdio::from(file))
             .status()?;
-        ensure!(
-            status.success(),
-            "Docker operation exited {status}; inspect {}",
-            log.display()
-        );
+        if !status.success() {
+            return Err(logged_failure(log, &status.to_string()).into());
+        }
         Ok(())
     }
     pub fn copy_to(&self, source: &Path, container: &str, destination: &str) -> Result<()> {
@@ -102,6 +108,52 @@ impl Docker {
             &portable_path(destination).to_string_lossy(),
         ])?;
         Ok(())
+    }
+}
+
+fn logged_failure(log: &Path, status: &str) -> crate::i18n::Message {
+    use std::io::{Read, Seek, SeekFrom};
+    let tail = (|| -> std::io::Result<String> {
+        let mut file = fs::File::open(log)?;
+        let size = file.metadata()?.len();
+        file.seek(SeekFrom::Start(size.saturating_sub(4096)))?;
+        let mut bytes = Vec::new();
+        file.take(4096).read_to_end(&mut bytes)?;
+        let text = String::from_utf8_lossy(&bytes);
+        Ok(text
+            .lines()
+            .rev()
+            .take(30)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n"))
+    })()
+    .unwrap_or_default();
+    crate::i18n::Message::new("system-docker-command-failed")
+        .arg("status", status)
+        .arg("log", portable_path(log).to_string_lossy().into_owned())
+        .detail(tail)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn failed_command_includes_bounded_tail_and_preserves_the_full_log() {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("pull.log");
+        let content = format!(
+            "{}\nerror getting credentials: helper missing\n",
+            "download layer\n".repeat(1000)
+        );
+        std::fs::write(&log, &content).unwrap();
+        let message = super::logged_failure(&log, "exit code: 1");
+        let detail = message.detail.unwrap();
+        assert!(detail.contains("error getting credentials: helper missing"));
+        assert!(detail.len() <= 4096 && detail.lines().count() <= 30);
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), content);
+        assert!(message.args.contains_key("log"));
     }
 }
 

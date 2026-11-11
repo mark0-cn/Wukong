@@ -3,6 +3,7 @@ mod bundle;
 pub mod challenge;
 pub mod cli;
 mod docker;
+mod docker_preflight;
 mod environment;
 mod services;
 
