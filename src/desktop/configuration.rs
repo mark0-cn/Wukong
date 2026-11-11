@@ -75,12 +75,7 @@ impl ConfigDocument {
                 let text =
                     toml::to_string(&std::collections::BTreeMap::from([("value", &edit.value)]))?;
                 let parsed = text.parse::<DocumentMut>()?;
-                item[key] = Item::Value(
-                    parsed["value"]
-                        .as_value()
-                        .context("invalid field value")?
-                        .clone(),
-                );
+                item[key] = parsed.get("value").context("invalid field value")?.clone();
             }
         }
         let source = document.to_string();
@@ -143,6 +138,75 @@ impl ConfigDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn structured_native_environment_edits_preserve_other_configuration() -> Result<()> {
+        use base64::Engine;
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# keep the controller settings\nstate_dir='state'\n[model]\nmodel='unchanged'\n",
+        )?;
+        let mut blob = vec![0, 0, 0, 11];
+        blob.extend_from_slice(b"ssh-ed25519");
+        blob.extend_from_slice(&[0, 0, 0, 32]);
+        blob.extend_from_slice(&[7; 32]);
+        let environment = serde_json::json!({"name":"Windows VM","platform":"windows",
+            "installation_id":"a".repeat(32),"runtime":{"backend":"ssh","ssh_host":"192.0.2.1",
+            "managed_ssh":{"installation_id":"a".repeat(32),"user":format!("wkgm{}","a".repeat(16)),
+            "port":22,"identity_file":root.path().join("private-key"),"known_hosts_file":root.path().join("host-pin"),
+            "host_key":{"algorithm":"ssh-ed25519","key":base64::engine::general_purpose::STANDARD.encode(blob)}}}});
+        let mut document = ConfigDocument::open(path)?;
+        document.patch(&[
+            ConfigEdit {
+                path: vec!["environments".into(), "windows".into()],
+                value: environment,
+            },
+            ConfigEdit {
+                path: vec!["default_environment".into()],
+                value: "windows".into(),
+            },
+        ])?;
+        let (config, _) = document.save_in(&root.path().join("profile"), None)?;
+        assert_eq!(config.model.model, "unchanged");
+        assert!(
+            document
+                .source
+                .starts_with("# keep the controller settings")
+        );
+        assert_eq!(
+            config.environments["windows"]
+                .runtime
+                .managed_ssh
+                .as_ref()
+                .unwrap()
+                .user,
+            format!("wkgm{}", "a".repeat(16))
+        );
+        assert!(
+            !root.path().join("private-key").exists(),
+            "configuration registration must remain lazy"
+        );
+        let saved = document.source.clone();
+        assert!(
+            document
+                .patch(&[
+                    ConfigEdit {
+                        path: vec!["model".into(), "model".into()],
+                        value: "must-not-be-applied".into(),
+                    },
+                    ConfigEdit {
+                        path: vec!["environments".into(), "invalid".into()],
+                        value: serde_json::json!({"name":"Invalid", "platform":17}),
+                    },
+                ])
+                .is_err()
+        );
+        assert_eq!(document.source, saved);
+        assert_eq!(document.form.model.model, "unchanged");
+        assert_eq!(std::fs::read_to_string(&document.path)?, saved);
+        Ok(())
+    }
     #[test]
     fn named_environment_fields_preserve_the_configuration_document() -> Result<()> {
         let root = tempfile::tempdir()?;

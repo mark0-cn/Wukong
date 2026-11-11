@@ -91,6 +91,8 @@ External processes recover separately from model state. Reconcile debugger/fuzz/
 
 ## Desktop reads and persistence boundaries
 
+`desktop/configuration` applies scalar or nested-table settings edits to a temporary document, then parses the complete result before replacing the draft. Invalid edits leave the draft unchanged. Saving preserves unrelated comments, checks external file changes and validates the resolved configuration; registering an environment does not connect to it or create its SSH credentials.
+
 `queries` supplies GUI-independent `WorkspaceQueries`, `AssessmentQueries`, `ReportQueries` for summaries, incremental cursors, conversation/report snapshots. SQL lives in `store/workspace`/`store/report_queries`. CLI/GUI share query models; chat parsing/layout caches remain GUI adapters.
 
 `desktop/workspace` reads light run/Agent summaries through `store/desktop_queries` in one snapshot. Response signatures combine epoch, `entity_revisions`, event sequence, query scope and operator mail; unchanged data is not resent, while independent CLI changes remain observable. Active history defaults to latest 500, expandable to 10,000; only calls referenced by that window load. `useWorkspace` rejects stale responses and reloads after task/storage changes.

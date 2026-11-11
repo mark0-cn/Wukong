@@ -91,6 +91,8 @@ Python worker 的入口、传输、操作账本、任务管理、独立监督、
 
 ## 桌面读取与持久化边界
 
+`desktop/configuration` 先在临时文档中应用标量或嵌套表设置修改，再完整解析结果，成功后才替换草稿。无效修改不会改变草稿。保存时保留无关注释、检查外部文件变更并验证解析后的配置；登记环境不会连接该环境或创建 SSH 凭据。
+
 `queries` 提供 `WorkspaceQueries`、`AssessmentQueries` 和 `ReportQueries`，返回不依赖 GUI 的摘要、增量游标、会话快照和报告快照。SQL 实现位于 `store/workspace` 与 `store/report_queries`；CLI 与 GUI 共用查询模型，聊天解析和布局缓存只保留在 GUI 适配层。
 
 `desktop/workspace` 通过 `store/desktop_queries` 在同一快照读取轻量任务/Agent 摘要。响应修订签名结合 epoch、`entity_revisions`、事件序号、查询范围和操作员消息；未变化时不重复发送工作区数据，也能观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。前端 `useWorkspace` 丢弃旧请求结果，切换任务或存储目录后重新读取。
