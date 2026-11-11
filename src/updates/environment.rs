@@ -7,6 +7,7 @@ use std::path::Path;
 pub fn prepare(
     config: &AppConfig,
     image: &str,
+    cancel: tokio_util::sync::CancellationToken,
     progress: impl Fn(UiMessage),
     pull: impl Fn(crate::workbench::pull_progress::PullProgress),
 ) -> Result<()> {
@@ -15,7 +16,8 @@ pub fn prepare(
         .join(uuid::Uuid::new_v4().to_string());
     let mut probe = config.clone();
     probe.workbench.root = root.clone();
-    let workbench = Workbench::open(&probe)?;
+    let mut workbench = Workbench::open(&probe)?;
+    workbench.docker.cancellation = Some(cancel.clone());
     progress(UiMessage::new("system-checking-docker-host"));
     workbench.docker.preflight(image)?;
     let result = (|| {
@@ -43,6 +45,7 @@ pub fn prepare(
         );
         Ok(())
     })();
+    workbench.docker.cancellation = None;
     // Only resources bearing this newly created probe's workspace identity.
     let cleanup = (|| -> Result<()> {
         for (kind, name) in [
@@ -65,7 +68,10 @@ pub fn prepare(
     // A cleanup failure must not replace the original pull/doctor diagnosis.
     match result {
         Err(error) => {
-            if let Err(cleanup_error) = cleanup {
+            if error.is::<crate::workbench::cancellation::Cancelled>() {
+                cleanup
+                    .context("cancelled preparation could not clean up its candidate resources")?;
+            } else if let Err(cleanup_error) = cleanup {
                 tracing::warn!(error = %cleanup_error, "candidate cleanup failed; preserving original diagnosis");
             }
             Err(error)

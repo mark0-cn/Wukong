@@ -134,3 +134,12 @@ updates-health-unchecked-help = Configuration alone does not confirm availabilit
 updates-technical-details = Technical details
 updates-health-quick = Quick health check
 updates-health-full = Full tool self-check
+
+system-operation-not-cancellable = This operation has ended or entered a non-cancellable stage. Refresh its status.
+system-preparation-cancelled = Preparation cancelled. Downloaded image layers can be reused on retry.
+updates-background = Continue in background
+updates-cancelling = Cancelling and cleaning up…
+updates-cancel-preparation = Cancel preparation
+updates-critical-phase = This stage cannot be cancelled. Installation or environment activation must finish; closing this panel keeps the operation running.
+
+system-tool-image-needs-repair = The local tool image is missing. Use Validate and repair environment to prepare it again.

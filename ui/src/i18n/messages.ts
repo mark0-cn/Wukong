@@ -262,7 +262,9 @@ export interface Messages {
   'system-managing-tool-environment': undefined;
   'system-no-newer-version-is-available-to-install': undefined;
   'system-no-recovery-program-is-available-yet': undefined;
+  'system-operation-not-cancellable': undefined;
   'system-pause-requested-saving-work-in-progress': undefined;
+  'system-preparation-cancelled': undefined;
   'system-preparing-update': undefined;
   'system-pulling-the-tool-image-docker-will-reuse-downloaded': undefined;
   'system-reading-the-tool-environment-for-the-current-version': undefined;
@@ -294,6 +296,7 @@ export interface Messages {
   'system-tool-action-completed': undefined;
   'system-tool-container-stopped': undefined;
   'system-tool-environment-prepared-validation-passed': undefined;
+  'system-tool-image-needs-repair': undefined;
   'system-update-completed-client-and-tool-environment-checks-passed': undefined;
   'system-validating-and-copying-the-update-cache': undefined;
   'system-workspace-configuration-changed-refresh-and-retry': undefined;
@@ -441,7 +444,10 @@ export interface Messages {
   'updates-add-to-application-menu-and-restart': undefined;
   'updates-attachment-directory-or-file': undefined;
   'updates-available-version': undefined;
+  'updates-background': undefined;
   'updates-build-challenge-image': undefined;
+  'updates-cancel-preparation': undefined;
+  'updates-cancelling': undefined;
   'updates-challenge-name': undefined;
   'updates-check-for-updates': undefined;
   'updates-check-for-updates-or-prepare-the-current': undefined;
@@ -455,6 +461,7 @@ export interface Messages {
   'updates-confirm': undefined;
   'updates-connect-to-challenge-port-for-service-i': undefined;
   'updates-copy-error': undefined;
+  'updates-critical-phase': undefined;
   'updates-current-client': undefined;
   'updates-diagnostic-output': undefined;
   'updates-docker-installation-guide': undefined;

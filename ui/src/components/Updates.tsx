@@ -15,7 +15,7 @@ export type { UpdateStatus } from '../commands';
 export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates' }: { epoch: number; onClose: () => void; onChanged: () => void; controller?: UpdateController; mode?: 'updates' | 'tools' }) {
   useLocale();
   const local = useUpdateController(epoch, onChanged, !controller);
-  const { status, working: busy, operationError, refreshError, run: execute } = controller ?? local;
+  const { status, working: busy, operationError, refreshError, run: execute, cancel } = controller ?? local;
   const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [confirm, setConfirm] = useState<'install' | 'recover' | 'clean_cache' | 'clean_images'>();
   const run = async (action: UpdateAction) => { setError(''); setConfirm(undefined); await execute(action); };
@@ -23,7 +23,7 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
   const failureTitle = failure && typeof failure === 'object' ? message({ ...failure, detail: undefined }) : errorText(failure);
   const detail = failure && typeof failure === 'object' ? failure.detail : '';
   const linux = navigator.userAgent.includes('Linux');
-  return <Modal className="updates-modal" title={mode === 'tools' ? t('ui-tools-environment') : status?.needs_setup ? t('updates-welcome-to-wukong-set-up-environment') : t('ui-updates')} description={status?.needs_setup ? t('updates-setup-description') : t('updates-the-client-and-tools-update-as-a')} wide onClose={() => { if (!busy) onClose(); }}>
+  return <Modal className="updates-modal" title={mode === 'tools' ? t('ui-tools-environment') : status?.needs_setup ? t('updates-welcome-to-wukong-set-up-environment') : t('ui-updates')} description={status?.needs_setup ? t('updates-setup-description') : t('updates-the-client-and-tools-update-as-a')} wide onClose={onClose}>
     <div className="updates-panel">
     {refreshError && <p className="notice" role="status">{t('updates-refresh-failed')} {errorText(refreshError)}</p>}
     <div className="update-summary">
@@ -34,8 +34,9 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
     {status && !status.needs_setup && <EnvironmentHealth health={status?.health} />}
     {status?.needs_setup && <SetupProgress step={status.environment_step} busy={busy} failed={Boolean(failure)} />}
     <ImagePullProgress value={status?.image_progress} version={status?.image_version} busy={status?.phase === 'pulling'} />
-    {!failure && <p className="update-status" role="status">{busy && status?.message ? message(status.message) : status?.needs_setup ? t('updates-setup-ready-to-start') : (status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>}
+    {!failure && <p className="update-status" role="status">{busy && status?.message ? message(status.message) : status?.needs_setup && status.phase !== 'cancelled' ? t('updates-setup-ready-to-start') : (status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>}
     {status?.phase === 'downloading' && status.total && <div><progress aria-label={t('updates-client-download-progress')} max={status.total} value={status.downloaded} /><p className="muted">{(status.downloaded / 1048576).toFixed(1)} / {(status.total / 1048576).toFixed(1)} MiB</p></div>}
+    {busy && <div className="background-controls"><button onClick={onClose}>{t('updates-background')}</button><button disabled={!status?.cancellable || status.cancelling} onClick={() => void cancel()}>{status?.cancelling ? t('updates-cancelling') : t('updates-cancel-preparation')}</button>{!status?.cancellable && <p className="muted">{t('updates-critical-phase')}</p>}</div>}
     {busy && <p className="muted">{t('updates-keep-the-application-open-while-processing-image')}</p>}
     {failure && <section className="update-error">
       <p className="error-banner" role="alert">{failureTitle}</p>

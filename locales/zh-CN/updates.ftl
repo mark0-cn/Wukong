@@ -134,3 +134,12 @@ updates-health-unchecked-help = 配置存在不代表环境可用，请运行轻
 updates-technical-details = 技术详情
 updates-health-quick = 轻量健康检查
 updates-health-full = 完整工具自检
+
+system-operation-not-cancellable = 该任务已结束或已进入不可取消的阶段，请刷新状态。
+system-preparation-cancelled = 准备已取消；已下载的镜像层可在重试时复用。
+updates-background = 收起到后台
+updates-cancelling = 正在取消并清理…
+updates-cancel-preparation = 取消准备
+updates-critical-phase = 当前阶段不支持取消。安装或环境切换必须完成；收起面板不会停止操作。
+
+system-tool-image-needs-repair = 本地工具镜像不存在，请使用“自检并修复环境”重新准备。

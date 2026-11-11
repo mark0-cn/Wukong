@@ -8,11 +8,13 @@ use std::{
 
 pub struct Docker {
     executable: String,
+    pub cancellation: Option<tokio_util::sync::CancellationToken>,
 }
 impl Docker {
     pub fn new(executable: &str) -> Self {
         Self {
             executable: executable.into(),
+            cancellation: None,
         }
     }
     pub fn executable(&self) -> &str {
@@ -44,6 +46,7 @@ impl Docker {
             self.command().args(args),
             std::time::Duration::from_secs(seconds),
             16 * 1024 * 1024,
+            self.cancellation.as_ref(),
         )?;
         ensure!(
             output.status.success(),
@@ -65,6 +68,7 @@ impl Docker {
             self.command().args([kind, "inspect", name]),
             std::time::Duration::from_secs(30),
             16 * 1024 * 1024,
+            self.cancellation.as_ref(),
         )?;
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
@@ -117,8 +121,16 @@ impl Docker {
             .stderr(Stdio::from(file))
             .spawn()?;
         let result = match report {
-            Some(report) => super::pull_progress::monitor(&mut child, log, report),
-            None => child.wait(),
+            Some(report) => {
+                super::pull_progress::monitor(&mut child, log, report, self.cancellation.as_ref())
+            }
+            None if self.cancellation.is_some() => super::pull_progress::monitor(
+                &mut child,
+                log,
+                &mut |_| {},
+                self.cancellation.as_ref(),
+            ),
+            None => child.wait().map_err(anyhow::Error::from),
         };
         if result.is_err() {
             let _ = child.kill();

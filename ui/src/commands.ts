@@ -9,6 +9,7 @@ export interface EnvironmentHealth {
 }
 export interface UpdateStatus {
   health?: EnvironmentHealth;
+  cancellable?: boolean; cancelling?: boolean;
 
   operation_id?: string | null; revision?: number; busy?: boolean; action?: UpdateAction | null;
   version: string; phase: string; message: string | LocalizedMessage; available: string | null; notes: string;
@@ -53,6 +54,7 @@ export interface Commands {
   tool_details: Command<Item, ToolRecord>;
   shutdown_workspace: Command<undefined, void>;
   update_action: Command<Epoch & { action: UpdateAction }, UpdateStatus>;
+  update_cancel: Command<{ operationId: string }, UpdateStatus>;
   update_storage: Command<Epoch, { data_dir: string; cache_dir: string }>;
   update_cache_directory: Command<Epoch & { destination: string }, string>;
   update_data_directory: Command<Epoch & { destination: string }, void>;

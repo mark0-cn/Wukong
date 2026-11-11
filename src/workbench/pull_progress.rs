@@ -91,7 +91,8 @@ pub(super) fn monitor(
     child: &mut Child,
     log: &Path,
     report: &mut dyn FnMut(PullProgress),
-) -> std::io::Result<ExitStatus> {
+    cancel: Option<&tokio_util::sync::CancellationToken>,
+) -> anyhow::Result<ExitStatus> {
     let started = Instant::now();
     let mut file = File::open(log)?;
     let mut parser = Parser::default();
@@ -100,6 +101,7 @@ pub(super) fn monitor(
     let mut revision = 0;
     report(parser.progress.clone());
     loop {
+        super::cancellation::check(cancel)?;
         let exit = child.try_wait()?;
         // Drain incrementally. No raw-output buffers or unbounded lines in the DTO.
         let mut drained = false;
@@ -189,7 +191,7 @@ mod tests {
         };
         let mut child = command.stdout(Stdio::from(file)).spawn().unwrap();
         let mut last = PullProgress::default();
-        let status = monitor(&mut child, &log, &mut |value| last = value).unwrap();
+        let status = monitor(&mut child, &log, &mut |value| last = value, None).unwrap();
         assert!(!status.success());
         assert!(!last.finished);
         assert_eq!(last.layers[0].state, "downloaded");
