@@ -5,7 +5,7 @@ export type UpdateAction = 'status' | 'check' | 'prepare' | 'setup' | 'install' 
 export interface UpdateStatus {
   version: string; phase: string; message: string | LocalizedMessage; available: string | null; notes: string;
   downloaded: number; total: number | null; prepared: string | null; recovery: string | null;
-  needs_setup: boolean; pending: boolean;
+  needs_setup: boolean; pending: boolean; environment_step?: string | null;
 }
 export type WorkbenchRequest =
   | { action: 'status' | 'up' | 'down' | 'doctor' | 'list' }

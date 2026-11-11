@@ -27,6 +27,7 @@ pub struct Status {
     pub prepared: Option<String>,
     pub recovery: Option<PathBuf>,
     pub needs_setup: bool,
+    pub environment_step: Option<String>,
     pub pending: bool,
 }
 pub struct Controller {
@@ -93,6 +94,9 @@ impl Controller {
         let mut state = self.status.lock().unwrap();
         state.phase = phase.into();
         state.message = message;
+        if matches!(phase, "docker" | "pulling" | "validating" | "activating") {
+            state.environment_step = Some(phase.into());
+        }
     }
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
@@ -407,6 +411,7 @@ impl Controller {
             UiMessage::new("system-recover-or-confirm-the-pending-update-first")
         );
         let setup = matches!(action, Action::Setup);
+        self.status.lock().unwrap().environment_step = None;
         self.phase(
             "checking",
             if setup {
@@ -436,11 +441,21 @@ impl Controller {
         let probe_config = config.clone();
         tokio::task::spawn_blocking(move || {
             environment::prepare(&probe_config, &image, |message| {
-                controller.phase("environment", message)
+                let phase = match message.code.as_str() {
+                    "system-checking-docker-host" => "docker",
+                    "system-pulling-the-tool-image-docker-will-reuse-downloaded" => "pulling",
+                    "system-checking-the-candidate-tool-environment" => "validating",
+                    _ => "environment",
+                };
+                controller.phase(phase, message)
             })
         })
         .await??;
         if setup {
+            self.phase(
+                "activating",
+                UiMessage::new("system-activating-tool-environment"),
+            );
             let image = manifest.image;
             tokio::task::spawn_blocking(move || {
                 let _lock = maintenance::lock(&recovery::root()?, true)?;

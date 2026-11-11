@@ -58,3 +58,31 @@ updates-enter-a-new-directory-that-does-not = Enter a new directory that does no
 updates-export-offline-migration-package = Export offline migration package
 updates-processing-please-wait-for-completion = Processing. Please wait for completion.
 updates-operation-result = Operation result
+
+system-checking-docker-host = Checking Docker and credential helper availability…
+system-docker-unavailable = Cannot connect to Docker. Start Docker Desktop (or the Docker service), then retry. If Docker was just installed, fully exit and reopen Wukong.
+system-docker-linux-required = Docker must run Linux containers. Switch Docker Desktop to Linux containers, then retry.
+system-docker-config-unreadable = Cannot read Docker login configuration. Check config.json in DOCKER_CONFIG or your user .docker directory; its contents are not included in this error.
+system-docker-credential-missing = Docker cannot find { $helper }. Fully exit and reopen Wukong after installing Docker Desktop. If it still fails, repair Docker Desktop or add the directory containing this helper to PATH. Your login configuration has not been changed.
+system-docker-command-failed = Docker failed ({ $status }). The end of its output is available below. Full log: { $log }
+
+system-activating-tool-environment = Activating the verified tool environment…
+
+updates-setup-description = Prepare the tools for this client before your first analysis. Your tasks and challenge environments are kept separately.
+updates-setup-required = Not prepared
+updates-setup-working = In progress
+updates-setup-failed = Needs attention
+updates-environment-ready = Prepared
+updates-setup-ready-to-start = Select Prepare tool environment to check Docker, download the matching image and run validation.
+updates-diagnostic-output = View diagnostic output (log tail)
+updates-copy-error = Copy error
+updates-retry-setup = Retry preparation
+updates-setup-progress = Environment preparation steps
+updates-step-docker = Check Docker
+updates-step-docker-help = Install and start Docker with Linux container support. We check the connection and required credential helper.
+updates-step-image = Download tool image
+updates-step-image-help = Use the image matched to this client. Allow at least 25 GiB in Docker storage; downloaded layers can be reused on retry.
+updates-step-validation = Validate and activate
+updates-step-validation-help = Test the tools before activation. Once ready, configure your model provider in Workspace settings to start analysis.
+updates-step-done = Complete
+updates-step-pending = Pending

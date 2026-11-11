@@ -58,3 +58,31 @@ updates-enter-a-new-directory-that-does-not = 填写一个尚不存在的新目�
 updates-export-offline-migration-package = 导出离线迁移包
 updates-processing-please-wait-for-completion = 正在处理，请等待操作完成。
 updates-operation-result = 操作结果
+
+system-checking-docker-host = 正在检查 Docker 和凭据助手…
+system-docker-unavailable = 无法连接 Docker。请启动 Docker Desktop（或 Docker 服务）后重试。如果刚安装 Docker，请完全退出并重新打开 Wukong。
+system-docker-linux-required = 工具环境需要 Linux 容器。请将 Docker Desktop 切换到 Linux 容器模式后重试。
+system-docker-config-unreadable = 无法读取 Docker 登录配置。请检查 DOCKER_CONFIG 或用户 .docker 目录中的 config.json；此错误不会显示配置内容。
+system-docker-credential-missing = Docker 找不到 { $helper }。安装 Docker Desktop 后请完全退出并重新打开 Wukong；若仍失败，请修复 Docker Desktop，或将该助手所在目录加入 PATH。程序没有修改你的登录配置。
+system-docker-command-failed = Docker 执行失败（{ $status }）。下方可查看末尾输出。完整日志：{ $log }
+
+system-activating-tool-environment = 正在启用已验证的工具环境…
+
+updates-setup-description = 首次分析前，准备与当前客户端匹配的工具环境。任务数据和题目环境分别保留。
+updates-setup-required = 待准备
+updates-setup-working = 进行中
+updates-setup-failed = 需要处理
+updates-environment-ready = 已准备
+updates-setup-ready-to-start = 点击“准备工具环境”，依次检查 Docker、下载配套镜像并完成自检。
+updates-diagnostic-output = 查看诊断输出（日志末尾）
+updates-copy-error = 复制错误
+updates-retry-setup = 重试准备
+updates-setup-progress = 环境准备步骤
+updates-step-docker = 检查 Docker
+updates-step-docker-help = 安装并启动 Docker，确保能够运行 Linux 容器。程序会检查连接及所需的凭据助手。
+updates-step-image = 下载工具镜像
+updates-step-image-help = 使用与当前客户端匹配的镜像。请为 Docker 至少预留 25 GiB，重试时会复用已下载的镜像层。
+updates-step-validation = 自检并启用
+updates-step-validation-help = 工具通过检查后再启用。就绪后，在“工作区设置”中配置模型服务，即可开始分析。
+updates-step-done = 已完成
+updates-step-pending = 待执行
