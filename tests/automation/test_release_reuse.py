@@ -36,12 +36,12 @@ class ReuseTests(unittest.TestCase):
             if "/artifacts?" in path:
                 return dict(artifacts=[self.artifact])
             return dict(workflow_runs=[self.run])
-        self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="1", windows_run="1", linux_run=""))
+        self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="1", windows_run="1", linux_run="", linux_desktop_run=""))
         self.assertTrue(any("/attempts/2/jobs" in path for path in paths))
         self.run["conclusion"] = "failure"
-        self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="", windows_run="1", linux_run=""))
+        self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="", windows_run="1", linux_run="", linux_desktop_run=""))
         self.run["run_attempt"] = 1
-        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="", linux_run=""))
+        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="", linux_run="", linux_desktop_run=""))
 
     def test_whole_run_retry_reads_only_previous_completed_attempt(self):
         previous = dict(self.run, run_attempt=1, path=".github/workflows/release.yml", event="workflow_dispatch")
@@ -56,4 +56,13 @@ class ReuseTests(unittest.TestCase):
             if "/attempts/2" in path:
                 self.fail("Must not consume jobs from running attempt")
             return dict(workflow_runs=[current])
-        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="1", linux_run=""))
+        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="1", linux_run="", linux_desktop_run=""))
+
+    def test_acceptance_cli_cannot_replace_desktop_client(self):
+        jobs = [dict(self.jobs[-1], name="linux-client / build")]
+        artifacts = [dict(self.artifact, name="linux-acceptance-client-v1")]
+        self.assertTrue(successful_artifact("linux", jobs, artifacts))
+        self.assertFalse(successful_artifact("linux-desktop", jobs, artifacts))
+        jobs[0]["name"] = "linux-desktop-client / build"
+        artifacts[0]["name"] = "linux-desktop-client-v1"
+        self.assertTrue(successful_artifact("linux-desktop", jobs, artifacts))

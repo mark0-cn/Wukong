@@ -87,7 +87,7 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         image = read(directory / "validation/image.json")
         metadata = needs.get("metadata", {}).get("outputs", {})
         lines += ["### 检查与构建复用", ""]
-        for key, label in (("ci_run", "完整 master CI"), ("windows_run", "Windows 客户端"), ("linux_run", "Linux 验收客户端")):
+        for key, label in (("ci_run", "完整 master CI"), ("windows_run", "Windows 客户端"), ("linux_run", "Linux 验收 CLI"), ("linux_desktop_run", "Linux 桌面客户端")):
             source = metadata.get(key)
             lines.append(f"- {label}: " + (f"[复用同一提交的运行 #{cell(source)}](https://github.com/{context['repository']}/actions/runs/{source})" if source else "本次执行"))
         lines.append("")
