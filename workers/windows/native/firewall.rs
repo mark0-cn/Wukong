@@ -23,21 +23,11 @@ impl Drop for Com {
 }
 
 fn application_path(path: &Path) -> Result<String> {
-    crate::security::no_links(path)?;
-    ensure!(path.is_file(), "SSH firewall executable is missing");
-    let canonical = path.canonicalize()?;
-    ensure!(
-        matches!(canonical.components().next(), Some(std::path::Component::Prefix(prefix))
-            if matches!(prefix.kind(), std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_))),
-        "SSH firewall executable must use a local drive"
-    );
-    let text = canonical
+    let path = crate::security::local_file_path(path)?;
+    Ok(path
         .to_str()
-        .context("invalid SSH firewall application path")?;
-    Ok(text
-        .strip_prefix(r"\\?\")
-        .unwrap_or(text)
-        .replace('/', "\\"))
+        .context("invalid SSH firewall application path")?
+        .to_owned())
 }
 
 fn configure(installation: &str, sshd: &Path, port: u16, peer: IpAddr) -> Result<INetFwRule> {

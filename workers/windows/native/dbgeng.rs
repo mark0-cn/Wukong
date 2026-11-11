@@ -129,7 +129,7 @@ pub struct Engine {
 
 impl Engine {
     fn new(directory: &Path, symbol_directory: &Path) -> Result<Self> {
-        let directory = local_path(directory)?;
+        let directory = local_path(directory).context("resolve local DbgEng directory")?;
         let engine_path = directory.join("dbgeng.dll");
         let encoded = wide(&engine_path.to_string_lossy())?;
         // The helper process owns this module for its entire lifetime. Do not unload
@@ -140,7 +140,8 @@ impl Engine {
                 None,
                 LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
             )
-        }?;
+        }
+        .context("load packaged DbgEng library")?;
         let entry = unsafe { GetProcAddress(library, s!("DebugCreate")) }
             .context("DbgEng does not export DebugCreate")?;
         type Create = unsafe extern "system" fn(
@@ -151,40 +152,53 @@ impl Engine {
         let create: Create = unsafe { std::mem::transmute(entry) };
         let mut raw = std::ptr::null_mut();
         unsafe {
-            create(&IDebugClient5::IID, &mut raw).ok()?;
+            create(&IDebugClient5::IID, &mut raw)
+                .ok()
+                .context("initialize DbgEng client")?;
         }
         ensure!(!raw.is_null(), "DbgEng returned an empty client");
         let client = unsafe { IDebugClient5::from_raw(raw) };
-        let control: IDebugControl4 = client.cast()?;
-        let symbols: IDebugSymbols3 = client.cast()?;
+        let control: IDebugControl4 = client.cast().context("query DbgEng control interface")?;
+        let symbols: IDebugSymbols3 = client.cast().context("query DbgEng symbol interface")?;
         let output = Arc::new(Mutex::new(OutputLog::default()));
         let callback: IDebugOutputCallbacksWide = Output {
             log: output.clone(),
         }
         .into();
-        let symbols_path = local_path(symbol_directory)?;
+        let symbols_path =
+            local_path(symbol_directory).context("resolve local DbgEng symbol directory")?;
         let encoded_symbols = wide(&symbols_path.to_string_lossy())?;
         unsafe {
-            client.SetOutputCallbacksWide(&callback)?;
-            control.AddEngineOptions(
-                DEBUG_ENGOPT_DISALLOW_NETWORK_PATHS
-                    | DEBUG_ENGOPT_DISALLOW_SHELL_COMMANDS
-                    | DEBUG_ENGOPT_DISABLESQM
-                    | DEBUG_ENGOPT_INITIAL_BREAK,
-            )?;
-            symbols.SetSymbolPathWide(PCWSTR(encoded_symbols.as_ptr()))?;
+            client
+                .SetOutputCallbacksWide(&callback)
+                .context("set DbgEng output callback")?;
+            control
+                .AddEngineOptions(
+                    DEBUG_ENGOPT_DISALLOW_NETWORK_PATHS
+                        | DEBUG_ENGOPT_DISALLOW_SHELL_COMMANDS
+                        | DEBUG_ENGOPT_DISABLESQM
+                        | DEBUG_ENGOPT_INITIAL_BREAK,
+                )
+                .context("set local-only DbgEng engine options")?;
+            symbols
+                .SetSymbolPathWide(PCWSTR(encoded_symbols.as_ptr()))
+                .context("set local-only DbgEng symbol path")?;
             // Exact local symbols only; ignore image-embedded search paths and
             // disable SymSrv auto-detection. SYMOPT_SECURE is the kernel-only
             // restricted debugger mode and prevents live user-mode attachment.
-            symbols.SetSymbolOptions(
-                0x200 | 0x80000 | 0x400 | 0x4 | 0x1000 | 0x20000 | 0x200000 | 0x2000000,
-            )?;
-            symbols.SetSourcePathWide(PCWSTR(wide("")?.as_ptr()))?;
+            symbols
+                .SetSymbolOptions(
+                    0x200 | 0x80000 | 0x400 | 0x4 | 0x1000 | 0x20000 | 0x200000 | 0x2000000,
+                )
+                .context("set local-only DbgEng symbol options")?;
+            symbols
+                .SetSourcePathWide(PCWSTR(wide("")?.as_ptr()))
+                .context("clear DbgEng source search path")?;
         }
         Ok(Self {
-            registers: client.cast()?,
-            memory: client.cast()?,
-            systems: client.cast()?,
+            registers: client.cast().context("query DbgEng register interface")?,
+            memory: client.cast().context("query DbgEng memory interface")?,
+            systems: client.cast().context("query DbgEng system interface")?,
             client,
             control,
             symbols,

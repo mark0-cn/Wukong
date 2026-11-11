@@ -404,6 +404,27 @@ pub fn absolute_new_path(path: &Path) -> Result<PathBuf> {
     Ok(parent.join(path.file_name().context("native path has no filename")?))
 }
 
+/// Normal Win32 spelling for SCM/firewall identities, after checking the actual
+/// local file. Do not emit mixed separators or a verbatim prefix to these APIs.
+pub(crate) fn local_file_path(path: &Path) -> Result<PathBuf> {
+    no_links(path)?;
+    ensure!(path.is_file(), "native installation file is missing");
+    let canonical = path.canonicalize()?;
+    ensure!(
+        matches!(canonical.components().next(), Some(std::path::Component::Prefix(prefix))
+            if matches!(prefix.kind(), std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_))),
+        "native installation file must use a local drive"
+    );
+    let text = canonical
+        .to_str()
+        .context("native installation path must be Unicode")?;
+    Ok(PathBuf::from(
+        text.strip_prefix(r"\\?\")
+            .unwrap_or(text)
+            .replace('/', "\\"),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

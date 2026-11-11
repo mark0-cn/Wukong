@@ -62,7 +62,8 @@ def architecture_test(root, manifest, state, architecture):
     runtime = Runtime(directory, trusted=True)
     doctor = runtime.dispatch("doctor", {})
     if not doctor["capabilities"]["debug_dbgeng"]:
-        raise ValueError("Offline DbgEng dependencies are unavailable")
+        reason = str(doctor.get("dbgeng", {}).get("reason", "debugger capability was denied"))[:512]
+        raise ValueError(f"Offline DbgEng dependencies are unavailable: {reason}")
     symbols = directory / "files/symbols"
     symbols.mkdir(exist_ok=True)
     shutil.copyfile(pdb, symbols / pdb.name)

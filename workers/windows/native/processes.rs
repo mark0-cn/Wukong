@@ -377,9 +377,10 @@ impl Spawn<'_> {
             self.executable.is_file() && self.directory.is_dir(),
             "invalid native executable or working directory"
         );
-        let app = security::wide(self.executable.as_os_str())?;
+        let executable = security::local_file_path(self.executable)?;
+        let app = security::wide(executable.as_os_str())?;
         let directory = security::wide(self.directory.as_os_str())?;
-        let mut argv = vec![self.executable.as_os_str().to_owned()];
+        let mut argv = vec![executable.into_os_string()];
         argv.extend_from_slice(self.arguments);
         let mut command = command_line(&argv)?;
         let environment = environment(self.environment)?;

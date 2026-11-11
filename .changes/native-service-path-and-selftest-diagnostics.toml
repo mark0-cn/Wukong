@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Use consistent local executable paths for native service ownership and fixed child launches, and retain bounded DbgEng loader failures when offline readiness checks fail under the ordinary worker account."
+zh_CN = "为原生服务归属及固定子进程启动使用一致的本地程序路径，并在普通 worker 账户的离线就绪检查失败时保留有界的 DbgEng 加载错误。"

@@ -190,13 +190,15 @@ fn register_service(
         &deployment.installation_id,
     )?))?;
     let command = processes::command_line(&[
-        deployment
-            .package(root)
-            .join(&manifest.manifest().entrypoints.worker)
-            .into_os_string(),
+        security::local_file_path(
+            &deployment
+                .package(root)
+                .join(&manifest.manifest().entrypoints.worker),
+        )?
+        .into_os_string(),
         "service".into(),
         deployment.installation_id.clone().into(),
-        root.join("metadata/deployment.json").into_os_string(),
+        security::local_file_path(&root.join("metadata/deployment.json"))?.into_os_string(),
     ])?;
     let handle = unsafe {
         CreateServiceW(

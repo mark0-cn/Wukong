@@ -58,11 +58,15 @@ def doctor(root, trusted=False):
         probe = subprocess.run([str(helper),str(directory),str(symbols)],
             input=b'{"id":1,"operation":"doctor"}\n{"id":2,"operation":"close"}\n',
             env=safe_env(), capture_output=True, timeout=10, **detached_options())
-        if probe.returncode != 0 or len(probe.stdout) > MAX_FRAME:
-            raise ValueError("native helper probe failed")
+        if probe.returncode != 0:
+            diagnostic = probe.stderr[-384:].decode("utf-8", errors="replace")
+            raise ValueError(f"native helper probe failed (exit {probe.returncode}): {diagnostic}")
+        if len(probe.stdout) > MAX_FRAME:
+            raise ValueError("native helper probe output exceeds its bound")
         response = json.loads(probe.stdout.splitlines()[0])
         if "error" in response or response.get("result",{}).get("engine") != "dbgeng":
-            raise ValueError("native helper returned an invalid engine probe")
+            detail = str(response.get("error", "unexpected engine identity"))[-384:]
+            raise ValueError(f"native helper returned an invalid engine probe: {detail}")
         return {"available":True,"trusted_fixture_only":trusted,
                 "production_ready":False,"engine_sha256":configuration["engine_sha256"],
                 "helper_sha256":configuration["helper_sha256"],"probe":response["result"]}
