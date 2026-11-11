@@ -1,6 +1,20 @@
 //! Installed applications keep writable state outside their executable directory.
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// A single executable in a freedesktop Exec field, shared by install/uninstall.
+pub(crate) fn desktop_exec(path: &Path) -> Result<String> {
+    let text = path.to_str().context("desktop path must be UTF-8")?;
+    anyhow::ensure!(!text.contains(['\n', '\r']), "invalid desktop path");
+    Ok(format!(
+        "\"{}\"",
+        text.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('`', "\\`")
+            .replace('$', "\\$")
+            .replace('%', "%%")
+    ))
+}
 
 pub fn home() -> Result<PathBuf> {
     #[cfg(windows)]
