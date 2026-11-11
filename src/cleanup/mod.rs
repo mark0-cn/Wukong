@@ -90,6 +90,9 @@ impl Cleanup {
             bytes: 0,
             fingerprint: String::new(),
         };
+        if !selection.any() && self.home.join("updates/cleanup-in-progress.json").exists() {
+            plan.errors.push("previous cleanup awaits finalization; select a cleanup scope and retry the uninstall".into());
+        }
         if (selection.tools || selection.challenges)
             && let Err(error) = containers::inventory(&self.home, &mut plan)
         {

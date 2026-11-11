@@ -56,6 +56,10 @@ fn deferred_uninstall_blocks_new_work_and_requires_the_matching_review_to_finish
         ..Default::default()
     })?;
     assert!(cleanup.execute_deferred(&plan, true)?.complete);
+    assert!(
+        !cleanup.plan(Selection::default())?.errors.is_empty(),
+        "program-only uninstall bypassed interrupted cleanup"
+    );
     assert!(crate::updates::maintenance::lock(&cleanup.home.join("updates"), false).is_err());
     assert!(crate::updates::maintenance::lock(&cleanup.home.join("updates"), true).is_err());
     assert!(crate::updates::storage::cache_lock_at(&cleanup.home.join("updates"), false).is_err());

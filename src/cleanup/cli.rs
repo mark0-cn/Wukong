@@ -82,22 +82,39 @@ pub fn run(command: Command) -> Result<()> {
         } => {
             ensure!(yes, "execution requires explicit --yes");
             let reviewed = read_plan(&review)?;
-            if !reviewed.selection.any() {
-                return Ok(());
-            }
             if let Some(output) = &report {
                 check_output(&reviewed, output)?;
             }
-            let result = cleanup
-                .execute_deferred(&reviewed, defer_finalize)
-                .unwrap_or_else(|error| Report {
-                    complete: false,
+            let result = if !reviewed.selection.any() {
+                let mut errors = reviewed.errors.clone();
+                if cleanup
+                    .home
+                    .join("updates/cleanup-in-progress.json")
+                    .exists()
+                    && errors.is_empty()
+                {
+                    errors.push("previous cleanup awaits finalization; select a cleanup scope and retry the uninstall".into());
+                }
+                Report {
+                    complete: errors.is_empty(),
                     removed_files: 0,
                     removed_resources: 0,
                     removed_bytes: 0,
                     retained: vec![],
-                    errors: vec![error.to_string()],
-                });
+                    errors,
+                }
+            } else {
+                cleanup
+                    .execute_deferred(&reviewed, defer_finalize)
+                    .unwrap_or_else(|error| Report {
+                        complete: false,
+                        removed_files: 0,
+                        removed_resources: 0,
+                        removed_bytes: 0,
+                        retained: vec![],
+                        errors: vec![error.to_string()],
+                    })
+            };
             if let Some(report) = report {
                 crate::workbench::write_json(&report, &result)?;
             }
