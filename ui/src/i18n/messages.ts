@@ -492,6 +492,7 @@ export interface Messages {
   'updates-processing-please-wait-for-completion': undefined;
   'updates-pwn-workbench': undefined;
   'updates-recovery-when-the-app-will-not-start': undefined;
+  'updates-refresh-failed': undefined;
   'updates-release-notes': undefined;
   'updates-restore-previous-version': undefined;
   'updates-retry-setup': undefined;

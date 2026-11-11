@@ -106,3 +106,5 @@ updates-layer-ready = Ready
 
 system-docker-command-timeout = Docker did not respond within { $seconds } seconds. Check the Docker service and retry.
 system-docker-output-limit = Docker output exceeded the control-command limit. Open diagnostics to investigate.
+
+updates-refresh-failed = Progress connection interrupted; retrying automatically. The operation may still be running.

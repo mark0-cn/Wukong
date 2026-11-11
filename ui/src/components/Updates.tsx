@@ -1,41 +1,30 @@
 import { t, message, useLocale } from '../i18n';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { api, errorText, errorValue } from '../bridge';
+import { errorText, errorValue } from '../bridge';
 import { displayPath } from '../displayPath';
 import { CopyButton } from './CopyButton';
 import { SetupProgress } from './SetupProgress';
 import { ImagePullProgress } from './ImagePullProgress';
+import { useUpdateController, type UpdateController } from '../hooks/useUpdateController';
 import { Modal } from './Modal';
 
 import type { UpdateAction, UpdateStatus } from '../commands';
 export type { UpdateStatus } from '../commands';
-export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose: () => void; onChanged: () => void }) {
+export function Updates({ epoch, onClose, onChanged, controller }: { epoch: number; onClose: () => void; onChanged: () => void; controller?: UpdateController }) {
   useLocale();
-  const [status, setStatus] = useState<UpdateStatus>();
-  const [working, setWorking] = useState(false);
+  const local = useUpdateController(epoch, onChanged, !controller);
+  const { status, working: busy, operationError, refreshError, run: execute } = controller ?? local;
   const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [confirm, setConfirm] = useState<'install' | 'recover' | 'clean_cache' | 'clean_images'>();
-  useEffect(() => {
-    let alive = true;
-    const refresh = () => { void api('update_action', { action: 'status', epoch }).then(value => { if (alive) setStatus(value); }).catch(e => { if (alive) setError(errorValue(e)); }); };
-    refresh(); const timer = window.setInterval(refresh, 1000);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, [epoch]);
-  const run = async (action: UpdateAction) => {
-    setWorking(true); setError(''); setConfirm(undefined);
-    setStatus(previous => previous && { ...previous, phase: 'starting', message: '' });
-    try { setStatus(await api('update_action', { action, epoch })); onChanged(); }
-    catch (e) { setError(errorValue(e)); }
-    finally { setWorking(false); }
-  };
-  const busy = working || ['starting', 'checking', 'downloading', 'environment', 'docker', 'pulling', 'validating', 'activating', 'installing', 'storage'].includes(status?.phase ?? '');
-  const failure = error || (status?.phase === 'error' ? status.message : '');
+  const run = async (action: UpdateAction) => { setError(''); setConfirm(undefined); await execute(action); };
+  const failure = error || operationError || (status?.phase === 'error' ? status.message : '');
   const failureTitle = failure && typeof failure === 'object' ? message({ ...failure, detail: undefined }) : errorText(failure);
   const detail = failure && typeof failure === 'object' ? failure.detail : '';
   const linux = navigator.userAgent.includes('Linux');
   return <Modal className="updates-modal" title={status?.needs_setup ? t('updates-welcome-to-wukong-set-up-environment') : t('ui-updates')} description={status?.needs_setup ? t('updates-setup-description') : t('updates-the-client-and-tools-update-as-a')} wide onClose={() => { if (!busy) onClose(); }}>
     <div className="updates-panel">
+    {refreshError && <p className="notice" role="status">{t('updates-refresh-failed')} {errorText(refreshError)}</p>}
     <div className="update-summary">
       <div><span className="muted">{t('updates-current-client')}</span><strong>{status?.version ?? t('updates-loading')}</strong></div>
       {!status?.needs_setup && <div><span className="muted">{t('updates-available-version')}</span><strong>{status?.available ?? t('updates-no-update-found-yet')}</strong></div>}

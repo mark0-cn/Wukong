@@ -3,6 +3,7 @@ import type { Preferences, PreferenceSnapshot, LocalizedMessage } from './i18n';
 
 export type UpdateAction = 'status' | 'check' | 'prepare' | 'setup' | 'install' | 'recover' | 'integrate' | 'clean_cache' | 'clean_images';
 export interface UpdateStatus {
+  operation_id?: string | null; revision?: number; busy?: boolean; action?: UpdateAction | null;
   version: string; phase: string; message: string | LocalizedMessage; available: string | null; notes: string;
   downloaded: number; total: number | null; prepared: string | null; recovery: string | null;
   needs_setup: boolean; pending: boolean; environment_step?: string | null;
