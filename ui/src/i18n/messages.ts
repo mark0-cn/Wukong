@@ -99,6 +99,7 @@ export interface Messages {
   'language-match-task': undefined;
   'language-output': undefined;
   'language-ui': undefined;
+  'progress-preview-truncated': undefined;
   'report-accounting': undefined;
   'report-accounting-body': { agents: string | number; calls: string | number; cost: string | number; evidence: string | number; tokens: string | number };
   'report-attempts': undefined;
@@ -142,6 +143,7 @@ export interface Messages {
   'report-unconfirmed': undefined;
   'report-verified-impact': undefined;
   'result-completed': undefined;
+  'result-decompiled': { chars: string | number; name: string | number };
   'result-failed': undefined;
   'result-findings': { count: string | number };
   'result-functions': { count: string | number };

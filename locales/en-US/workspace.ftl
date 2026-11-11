@@ -284,3 +284,6 @@ tree-incomplete-parent = Invalid parent relationship; this branch is shown separ
 tree-selection-details = Selected task details
 tree-parent-path = Parent-child task path
 tree-waiting = Waiting
+
+result-decompiled = Decompiled { $name } · { $chars } characters
+progress-preview-truncated = Preview truncated; expand the operation for its recorded result.

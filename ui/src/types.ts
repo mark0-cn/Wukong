@@ -18,6 +18,7 @@ export interface Agent {
 export interface ToolDisplay {
   call_id: string; title: string; target: string; purpose: string; state: string;
   summary: string | LocalizedMessage; duration_ms: number | null; evidence_id: string | null;
+  preview?: { language: string; text: string; truncated: boolean; evidence_id: string };
 }
 export interface ChatMessage {
   id: string; role: 'assistant' | 'user'; agent_id: string | null; author: string | LocalizedMessage;

@@ -7,7 +7,7 @@ import * as Collapsible from '@radix-ui/react-collapsible';
 import { ArrowDown, ArrowUp, Bot, ChevronRight, Code2, User, Maximize2, Minimize2 } from 'lucide-react';
 import { api, errorText, errorValue } from '../bridge';
 import type { Agent, ChatMessage, Host, ToolDisplay, ToolRecord, Workspace } from '../types';
-import { Markdown } from './Markdown';
+import { CodeBlock, Markdown } from './Markdown';
 import { labels, StateIcon, Status, terminal } from './Status';
 
 const TranscriptContext = createContext<{ epoch: number; run: string; onAgent: (id: string) => void }>({ epoch: 0, run: '', onAgent: () => {} });
@@ -40,6 +40,8 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
     </Collapsible.Trigger>
     {(open || display.state !== 'completed') && display.purpose && <p className="tool-purpose">{display.purpose}</p>}
     {(open || display.state !== 'completed') && display.summary && <p className="tool-summary">{formatMessage(display.summary)}</p>}
+    {display.preview && <div className="tool-code-preview"><CodeBlock text={display.preview.text} language={display.preview.language} />
+      <p className="muted">{t('workspace-evidence')}<code>{display.preview.evidence_id}</code>{display.preview.truncated && <> · {t('progress-preview-truncated')}</>}</p></div>}
     <Collapsible.Content className="tool-details">
       {loading && <p className="muted">{t('workspace-loading-operation-details')}</p>}
       {error && <p className="error" role="alert">{errorText(error)}</p>}

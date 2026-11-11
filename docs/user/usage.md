@@ -345,3 +345,5 @@ Register supplied libc/loader with `file_put`; `runtime_profile` reads target/li
 ### Mitigation evidence layers
 
 `mitigation_profile` separates static declarations, worker support and owned-process runtime observations; `mitigation_analysis` interprets their experimental constraints. Debugger/interactive sessions are supported, not arbitrary PIDs. Optional `address` queries only its mapping permissions. CET ELF notes do not prove runtime enablement; SHSTK is per-thread, and missing fields remain unknown. Seccomp mode 2 does not imply a syscall allowlist. Reobserve after environment/mapping changes.
+
+Tool rows derive filenames, module-relative addresses and decompiled function names from recorded data. Available decompiler results show a C preview linked to the original evidence ID, capped at 12 lines/1600 characters with explicit truncation. Raw parameters/results still expand on demand; previews do not establish independent verification.

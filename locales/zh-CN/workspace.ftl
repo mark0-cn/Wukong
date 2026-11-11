@@ -278,3 +278,6 @@ tree-incomplete-parent = 父级关系异常，单独展示此分支。
 tree-selection-details = 选中任务详情
 tree-parent-path = 父子任务路径
 tree-waiting = 等待协作
+
+result-decompiled = 已反编译 { $name } · { $chars } 字符
+progress-preview-truncated = 预览已截断；展开操作查看记录的结果。
