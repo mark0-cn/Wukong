@@ -69,6 +69,179 @@ fn fixture() -> Manifest {
 }
 
 #[test]
+fn controller_keys_are_stable_private_and_fail_closed_on_tampering() -> anyhow::Result<()> {
+    use wukong_worker_package::load_controller_signer;
+    let temporary = tempfile::tempdir()?;
+    let keys = temporary.path().join("controller");
+    let signer = load_controller_signer(&keys)?;
+    let repeated = load_controller_signer(&keys)?;
+    assert_eq!(signer.public_key().to_hex(), repeated.public_key().to_hex());
+    let stored = keys.join("signing-key.bin");
+    #[cfg(windows)]
+    assert!(
+        Signer::from_pkcs8(&fs::read(&stored)?).is_err(),
+        "key must be DPAPI protected on disk"
+    );
+    let (bytes, signature) = signer.sign(&fixture())?;
+    VerifiedManifest::verify(&bytes, &signature, &repeated.public_key())?;
+    fs::write(stored, b"damaged private key fixture")?;
+    assert!(load_controller_signer(&keys).is_err());
+    assert!(load_controller_signer(std::path::Path::new("relative-controller-keys")).is_err());
+    let inherited = temporary.path().join("unsafe-existing");
+    fs::create_dir(&inherited)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&inherited, fs::Permissions::from_mode(0o755))?;
+    }
+    assert!(load_controller_signer(&inherited).is_err());
+    assert!(!inherited.join("signing-key.bin").exists());
+    #[cfg(windows)]
+    {
+        use std::{os::windows::process::CommandExt, process::Command};
+        let excessive = temporary.path().join("excessive-file-access");
+        load_controller_signer(&excessive)?;
+        let result = Command::new("icacls.exe")
+            .arg(excessive.join("signing-key.bin"))
+            .args(["/grant", "*S-1-5-32-545:(R)"])
+            .creation_flags(0x08000000)
+            .output()?;
+        anyhow::ensure!(
+            result.status.success(),
+            "could not prepare task-owned ACL fixture"
+        );
+        assert!(load_controller_signer(&excessive).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn concurrent_key_creation_keeps_one_identity() -> anyhow::Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let keys = temporary.path().join("controller");
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+    let threads: Vec<_> = (0..4)
+        .map(|_| {
+            let keys = keys.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || -> anyhow::Result<_> {
+                barrier.wait();
+                Ok(wukong_worker_package::load_controller_signer(&keys)?
+                    .public_key()
+                    .to_hex())
+            })
+        })
+        .collect();
+    let identities: std::collections::BTreeSet<_> = threads
+        .into_iter()
+        .map(|thread| thread.join().expect("key publication thread panicked"))
+        .collect::<anyhow::Result<_>>()?;
+    assert_eq!(identities.len(), 1);
+    assert_eq!(fs::read_dir(keys)?.count(), 1);
+    Ok(())
+}
+
+#[test]
+fn controller_sealing_checks_payloads_before_signing_and_never_overwrites() -> anyhow::Result<()> {
+    use wukong_worker_package::{load_controller_signer, seal_package};
+    let temporary = tempfile::tempdir()?;
+    let root = temporary.path().join("package");
+    fs::create_dir(&root)?;
+    let signer = load_controller_signer(&temporary.path().join("controller"))?;
+    let manifest = fixture();
+    for name in manifest.files.keys() {
+        let path = root.join(name);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(path, b"fixture")?;
+    }
+    let expected = Compatibility {
+        runtime_protocol: 2,
+        controller_version: "1.0.0",
+    };
+    fs::write(root.join("worker.exe"), b"changed")?;
+    assert!(seal_package(&root, &manifest, &signer, &expected).is_err());
+    assert!(!root.join("manifest.json").exists());
+    fs::write(root.join("worker.exe"), b"fixture")?;
+    fs::write(root.join("unlisted-file"), b"fixture")?;
+    assert!(seal_package(&root, &manifest, &signer, &expected).is_err());
+    fs::remove_file(root.join("unlisted-file"))?;
+    let sealed = seal_package(&root, &manifest, &signer, &expected)?;
+    assert_eq!(
+        sealed.signer_fingerprint(),
+        signer.public_key().fingerprint()
+    );
+    let original = fs::read(root.join("manifest.sig"))?;
+    assert!(seal_package(&root, &manifest, &signer, &expected).is_err());
+    assert_eq!(original, fs::read(root.join("manifest.sig"))?);
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires WUKONG_PACKAGE_CLI pointing to the self-built controller package utility"]
+fn native_controller_seals_with_persistent_private_keys() -> anyhow::Result<()> {
+    use std::{os::windows::process::CommandExt, process::Command};
+    let binary = std::env::var_os("WUKONG_PACKAGE_CLI")
+        .ok_or_else(|| anyhow::anyhow!("set WUKONG_PACKAGE_CLI"))?;
+    let temporary = tempfile::tempdir()?;
+    let keys = temporary.path().join("controller");
+    let package = temporary.path().join("payload");
+    let draft = temporary.path().join("draft.json");
+    let manifest = fixture();
+    for name in manifest.files.keys() {
+        let path = package.join(name);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(path, b"fixture")?;
+    }
+    fs::write(&draft, serde_json::to_vec(&manifest)?)?;
+    let public = Command::new(&binary)
+        .arg("key")
+        .arg(&keys)
+        .creation_flags(0x08000000)
+        .output()?;
+    anyhow::ensure!(
+        public.status.success(),
+        "{}",
+        String::from_utf8_lossy(&public.stderr)
+    );
+    let public: serde_json::Value = serde_json::from_slice(&public.stdout)?;
+    let sealed = Command::new(&binary)
+        .arg("seal")
+        .arg(&package)
+        .arg(&draft)
+        .arg(&keys)
+        .arg("1.0.0")
+        .creation_flags(0x08000000)
+        .output()?;
+    anyhow::ensure!(
+        sealed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sealed.stderr)
+    );
+    let public =
+        wukong_worker_package::PublicKey::from_hex(public["public_key"].as_str().unwrap())?;
+    wukong_worker_package::verify_package(
+        &package,
+        &public,
+        &Compatibility {
+            runtime_protocol: 2,
+            controller_version: "1.0.0",
+        },
+    )?;
+    let forbidden = Command::new(&binary)
+        .arg("seal")
+        .arg(&package)
+        .arg(&draft)
+        .arg(package.join("private-key"))
+        .arg("1.0.0")
+        .creation_flags(0x08000000)
+        .output()?;
+    assert!(!forbidden.status.success());
+    assert!(!package.join("private-key").exists());
+    Ok(())
+}
+
+#[test]
 fn ed25519_pins_an_independent_key_and_rejects_tampering() -> anyhow::Result<()> {
     let (signer, _private) = Signer::generate()?;
     let (bytes, signature) = signer.sign(&fixture())?;

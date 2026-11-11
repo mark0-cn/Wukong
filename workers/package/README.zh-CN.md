@@ -2,7 +2,11 @@
 
 [English](README.md) · 简体中文
 
-该独立 Rust 库定义供控制器组装和原生程序校验的 Windows worker 签名包格式。格式使用规范 UTF-8 JSON 清单，文件键排序并以一个 LF 结尾，另附 Ed25519 分离签名。校验必须使用独立固定的公钥；随包交付的 `manifest.pub` 不能自行建立对该包的信任。签名接口将 PKCS#8 字节返回控制器调用方，不会将私钥序列化到清单或签名中。受保护的控制器密钥存储和完整工具包组装器属于后续实现。
+该独立 Rust 库定义供控制器组装和原生程序校验的 Windows worker 签名包格式。格式使用规范 UTF-8 JSON 清单，文件键排序并以一个 LF 结尾，另附 Ed25519 分离签名。校验必须使用独立固定的公钥；随包交付的 `manifest.pub` 不能自行建立对该包的信任。底层签名接口将 PKCS#8 字节返回控制器调用方，不会将私钥序列化到清单或签名中。
+
+`load_controller_signer` 通过排他的原子发布创建稳定控制端身份。Windows 使用当前用户 DPAPI 保护私钥字节，并为目录和文件设置仅用户/SYSTEM 可访问的受保护 ACL。Unix 要求目录及文件属于调用用户，权限分别为 0700/0600。已有不安全权限、链接或损坏密钥直接拒绝，不替换原内容。临时 DPAPI 输出和解密后的文件缓冲区使用后清零；签名对象不能序列化或打印。这保护静态存储密钥不被其他普通用户读取，不防御已失陷的控制端账户或管理员。密钥备份、轮换和桌面登记仍是后续工作；切勿将该目录复制到 VM 载荷或迁移、导出包中。
+
+`seal_package` 先检查兼容性与完整载荷目录，再签名、以不覆盖现有文件的方式写入元数据，最后校验生成的签名目录。控制端工具为 `wukong-package.exe`；worker 运行时不提供签名 RPC，组装器也不会打包该控制端可执行文件。[原生组件指南](../windows/README.zh-CN.md)说明控制端组装步骤。签名工具载荷本身不提供原生服务安装或生产隔离。
 
 清单绑定工具包及源码版本、运行时协议、最低控制器版本、工具链锁文件及哈希、原生/Python/调试器/SSH 入口、每个文件的 SHA256/大小/类型与许可声明。Python、Debugging Tools、OpenSSH 和 worker Python 依赖都必须提供原始安装载荷及许可文件。组件声明和有效签名不证明厂商依赖完整或工具可运行；组装器必须检查固定的官方载荷清单，实际离线 VM 安装与自检仍然必需。
 
@@ -16,4 +20,4 @@ cargo clippy --locked --manifest-path workers/package/Cargo.toml --all-targets -
 cargo test --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks
 ```
 
-Windows CI 还构建静态链接的原生校验程序，将 `WUKONG_WORKER_CLI` 指向该自行构建的二进制，显式运行默认忽略的 CLI 集成测试。测试验证无执行能力的签名样例，并拒绝不同的固定公钥与被篡改字节；不会执行样例载荷。原生命令为 `wukong-worker verify-package DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION`。成功仅涵盖签名、兼容性和文件完整性，不代表安装或生产隔离。参见[原生组件](../windows/README.zh-CN.md)和[环境约定](../../docs/design/cross-platform-environments.zh-CN.md)。
+Windows CI 构建静态链接的原生校验程序和控制端工具包实用程序，将 `WUKONG_WORKER_CLI` 与 `WUKONG_PACKAGE_CLI` 指向这两个自行构建的二进制，显式运行默认忽略的 CLI 集成测试。测试封装及校验无执行能力的样例，检查持久化受保护密钥，拒绝载荷内密钥目录，以及不同的固定公钥或被篡改字节；不会执行样例载荷。原生校验命令为 `wukong-worker verify-package DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION`。成功仅涵盖签名、兼容性和文件完整性，不代表安装或生产隔离。参见[原生组件](../windows/README.zh-CN.md)和[环境约定](../../docs/design/cross-platform-environments.zh-CN.md)。

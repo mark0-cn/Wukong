@@ -10,6 +10,7 @@ from scripts._lib.checksums import sha256
 from scripts._lib.repository import ROOT
 from scripts._lib.versioning import write_json
 from scripts.worker.pe import require_static_crt
+from scripts.worker.source_identity import identity
 
 
 def build(output, check_only=False):
@@ -23,17 +24,20 @@ def build(output, check_only=False):
         raise ValueError("The standalone worker lockfile is missing")
     if check_only:
         return {"platform": "windows-amd64", "source": str(source), "output": str(output)}
+    source_identity = identity()
     environment = os.environ.copy()
     environment.pop("RUSTFLAGS", None)
     environment["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(["-C", "target-feature=+crt-static"])
     subprocess.run([cargo, "build", "--locked", "--release", "--target", "x86_64-pc-windows-msvc",
                     "--target-dir", str(output)], cwd=source, env=environment, check=True)
     files = {}
-    for name in ["wukong-dbgeng.exe", "wukong-worker.exe"]:
+    for name in ["wukong-dbgeng.exe", "wukong-worker.exe", "wukong-package.exe"]:
         binary = output / "x86_64-pc-windows-msvc/release" / name
         files[name] = {"sha256": sha256(binary), "size": binary.stat().st_size,
                        "imported_libraries": require_static_crt(binary)}
-    metadata = {"schema": 1, "platform": "windows-amd64", "static_crt_checked": True, "files": files}
+    if source_identity != identity():
+        raise ValueError("Worker source changed during native build")
+    metadata = {"schema": 1, "platform": "windows-amd64", "static_crt_checked": True, "files": files, **source_identity}
     write_json(output / "native-build.json", metadata)
     return metadata
 

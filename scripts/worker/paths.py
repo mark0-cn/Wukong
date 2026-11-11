@@ -20,6 +20,8 @@ def member(value):
 
 def no_links(path):
     """Reject links/reparse points before resolving; missing leaves are permitted."""
+    if ".." in Path(path).parts:
+        raise ValueError("Relative aliases are forbidden in offline staging roots")
     path = Path(os.path.abspath(path))
     for current in reversed((path, *path.parents)):
         try:

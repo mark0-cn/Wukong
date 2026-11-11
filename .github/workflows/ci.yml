@@ -148,6 +148,7 @@ jobs:
           cargo test --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $env:WUKONG_WORKER_CLI = Join-Path $PWD 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-worker.exe'
+          $env:WUKONG_PACKAGE_CLI = Join-Path $PWD 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-package.exe'
           cargo test --locked --manifest-path workers/package/Cargo.toml --test contract --target-dir target/worker-package-checks -- --ignored
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 

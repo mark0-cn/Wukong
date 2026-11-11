@@ -28,6 +28,16 @@ python -m scripts.worker.layout --cache target/windows-offline-cache --output ta
 
 只有 `--download` 允许网络访问。已有缓存条目不匹配时直接失败，不替换原文件。展开要求 Windows 控制端和全新输出目录，没有联网或下载路径。它以只读方式查询 MSI 表，仅解压回调批准的 CAB 成员，将完整调试器载荷清单与已固定的微软引导程序内部元数据核对，并保留全部原始 MSI/CAB/ZIP/wheel 及许可证。不会运行 MSI 安装、自定义操作或修改已安装工具。解压使用微软 [MSI 数据库](https://learn.microsoft.com/en-us/windows/win32/api/msiquery/nf-msiquery-msiviewfetch)及 [cabinet 回调](https://learn.microsoft.com/en-us/windows/win32/setupapi/spfilenotify-fileincabinet) API。
 
-输出包含已预展开 wheel 的私有嵌入式 Python、Python worker 源码、OpenSSH 和完整 SDK 调试器文件树。Python 忽略用户和注册表路径，仅加载随包库及 worker 目录；VM 无须 pip。归档路径拒绝链接、目录穿越、别名与覆盖写入。缓存和暂存目录应仅供控制端访问：这些检查本身不提供并发写入隔离。失败输出保留用于诊断，不能复用。这是**未签名的控制端展开目录**，尚非可安装工具包：仍须补齐原生二进制及声明、受保护的签名密钥存储、签名封装、依赖与自检，以及安装器和服务生命周期。普通控制端展开检查与可信样例不代表干净 Windows VM 的依赖覆盖。
+输出包含已预展开 wheel 的私有嵌入式 Python、Python worker 源码、OpenSSH 和完整 SDK 调试器文件树。Python 忽略用户和注册表路径，仅加载随包库及 worker 目录；VM 无须 pip。归档路径拒绝链接、目录穿越、别名与覆盖写入。缓存和暂存目录应仅供控制端访问：这些检查本身不提供并发写入隔离。失败输出保留用于诊断，不能复用。该命令生成**未签名的控制端展开目录**。普通控制端展开检查与可信样例不代表干净 Windows VM 的依赖覆盖。
+
+组装并签名新的完整载荷前，先提交 worker 改动，再从该干净提交重新构建。组装器要求源码提交与目录哈希匹配，并核对已锁定的原生构建元数据、实际二进制哈希和静态 CRT 导入。包内包含原生二进制及其依赖许可文本、Rust 标准库版权声明和全部原始第三方载荷。不会下载缺失文件。
+
+```powershell
+$keys = Join-Path $PWD 'target/controller-signing'
+./target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-package.exe key $keys
+python -m scripts.worker.assemble --cache target/windows-offline-cache --output target/windows-worker-package --keys $keys
+```
+
+密钥命令仅输出公钥及指纹，供独立登记。私钥存储在控制端且位于包外，按[工具包约定](../package/README.zh-CN.md)保护；示例采用本地开发目录。`wukong-package.exe` 是控制端实用程序，不进入 VM 载荷。签名输出绑定完整文件与兼容性，但在声称生产安装支持前，仍须完成依赖与自检、原生安装器/服务/broker、桌面交付与登记，以及真实离线 VM 验收。
 
 调试组件为结构化 DbgEng 辅助程序。真实 x64/x86 可信样例验收独立于生产 broker 隔离与离线 VM 安装验收。样例套件还检查重放：使用不同的生产者/验证者 ID，每种架构运行三次新进程与工作目录试验，校验输入及目标的精确哈希，并观测 `0xc0000005` 异常。这证明可信样例重放路径，不代表生产元数据保护或利用影响。托管服务、安装器和更新生命周期仍在实现中；该构建入口不代表这些能力已经可用。参见[跨平台环境约定](../../docs/design/cross-platform-environments.zh-CN.md)和[运行时指南](../runtime/README.zh-CN.md)。

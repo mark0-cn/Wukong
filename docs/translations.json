@@ -142,8 +142,8 @@
       "zh-CN": "70055ee918963c9690157f1d8820122f3e3a8cc8683375b1a34cdb2ae28cd4b4"
     },
     "workers/package/README.md": {
-      "en": "6cf4c6d05fd9181ba638d884e3e9d57eab5eeb8cdb36942d83a89fbd46512790",
-      "zh-CN": "a0e7d30ad9841e7f417ce6aedeb2486fbbb120976ce2078bec0461f3c74744b9"
+      "en": "508c3c5e9aa15fe77f1defe554c6b28331b83f112efd36d96a784168c6918369",
+      "zh-CN": "6e2a2437f69dc5467c1d5405f07b7b74df21359de6ca95965e3be705316aa516"
     },
     "workers/runtime/README.md": {
       "en": "58caf4f955328db40b208131450f3743b93a3dbc232c57e4596a2536d7b78417",
@@ -154,8 +154,8 @@
       "zh-CN": "340d0443f6f171a65fca9a55cdcb8dc75ee8582eec51f40c691e5b19d1ea53ff"
     },
     "workers/windows/README.md": {
-      "en": "e776acff9eba83f9190f2ee01297e1f295834c83002c2155a4d7debf3803a847",
-      "zh-CN": "82a4a181a0710e27b60edbe71a61e65a38c917155a905aa9e34d45f83f536a08"
+      "en": "5c256f39c2637de5c410465978a85cd18a35b8d308feeacd354eca3f08c5165c",
+      "zh-CN": "2fc29e4c5f986761099240f013bb539cab716e4368dfb8a6dc89e6822f827f44"
     }
   }
 }
