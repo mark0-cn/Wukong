@@ -210,6 +210,7 @@ transcript-conclusion = **Task conclusion**
 transcript-stopped = This Agent branch stopped. Existing evidence and results were preserved.
 transcript-paused-reason = Analysis paused: { $reason }
 transcript-resumed = Analysis resumed. Continuing unfinished work.
+transcript-started = Analysis started. Progress and evidence will appear here.
 transcript-you = You
 transcript-recipient = You → { $name }
 result-matches = Returned { $count } matches

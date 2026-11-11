@@ -394,6 +394,7 @@ export interface Messages {
   'transcript-paused-reason': { reason: string | number };
   'transcript-recipient': { name: string | number };
   'transcript-resumed': undefined;
+  'transcript-started': undefined;
   'transcript-stopped': undefined;
   'transcript-workspace': undefined;
   'transcript-you': undefined;

@@ -204,6 +204,7 @@ transcript-conclusion = **任务结论**
 transcript-stopped = 此 Agent 分支已停止，已有证据和分析结果已保留。
 transcript-paused-reason = 分析已暂停：{ $reason }
 transcript-resumed = 已恢复分析，继续处理未完成的工作。
+transcript-started = 分析已开始，进度与证据将显示在这里。
 transcript-you = 你
 transcript-recipient = 你 → { $name }
 result-matches = 返回 { $count } 项匹配

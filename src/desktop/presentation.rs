@@ -230,6 +230,7 @@ pub fn transcript(
                     None => UiMessage::new("system-analysis-paused-progress-is-saved").into(),
                 }),
                 "run.resumed" => Some(UiMessage::new("transcript-resumed").into()),
+                "run.started" => Some(UiMessage::new("transcript-started").into()),
                 _ => None,
             };
             let Some(content) = content else {

@@ -16,6 +16,13 @@ impl Store {
     }
 }
 impl StateSession<'_> {
+    pub(crate) fn has_event(&self, run: &str, kind: &str) -> Result<bool> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE run_id=?1 AND kind=?2)",
+            params![run, kind],
+            |row| row.get(0),
+        )?)
+    }
     pub(crate) fn get<T: DeserializeOwned>(&self, kind: &str, id: &str) -> Result<Option<T>> {
         Store::tx_get(self.connection, kind, id)
     }
