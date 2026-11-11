@@ -56,7 +56,7 @@ def main():
             docker("run","--rm","--network","none","--mount",f"type=volume,source={destination},target=/snapshot,readonly","--entrypoint","python3",args.image,"-c","from pathlib import Path; import json; p=Path('/snapshot'); assert (p/'files/input').read_bytes()==b'payload'; s=json.loads((p/'debug/id/session.json').read_text()); assert s['state']=='lost' and 'gdb_pid' not in s; assert not (p/'endpoint.json').exists()")
         print("PASS: volume round trip preserves data and discards process/auth authority")
         flags=["--cap-drop","ALL"]
-        for cap in ["CHOWN","SETUID","SETGID","SYS_PTRACE","DAC_OVERRIDE"]:flags.extend(["--cap-add",cap])
+        for cap in ["CHOWN","SETUID","SETGID","KILL","SYS_PTRACE","DAC_OVERRIDE"]:flags.extend(["--cap-add",cap])
         output=docker("run","--rm","--network","none","--read-only","--tmpfs","/tmp:rw,size=1g,exec",*flags,"--security-opt","no-new-privileges","--security-opt","seccomp=unconfined","--entrypoint","python3",args.image,"/opt/wukong/tests/run.py","unit","-p","test_workbench*.py","-v")
         print("PASS: shared launch runtime and archive functional tests")
     finally:

@@ -35,9 +35,9 @@ $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 & $docker build -f workers/Dockerfile -t wukong-worker:0.1 .
 & $docker volume create wukong-worker-state
 & $docker run -d --name wukong-worker --network none --cap-drop ALL `
-  --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
+  --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
   --security-opt no-new-privileges --security-opt seccomp=unconfined `
-  --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g `
+  --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g,exec `
   --mount type=volume,source=wukong-worker-state,target=/state wukong-worker:0.1
 ```
 
@@ -102,7 +102,7 @@ Production Linux metadata is owned by the trusted daemon; target/fuzz processes
 drop supplementary groups and run under separate allocated UIDs. Each experiment
 has read-only staged files and its own writable directory. GDB keeps its trusted
 owner and launches the inferior with the experiment UID. CHOWN/SETUID/SETGID are
-needed for this separation; SYS_PTRACE and DAC_OVERRIDE are needed by the trusted
+needed for this separation; KILL lets the trusted supervisor cancel process groups owned by experiment UIDs. SYS_PTRACE and DAC_OVERRIDE are needed by the trusted
 debugger to read/write inferior memory through procfs. These capabilities are not
 retained by target processes. The read-only container filesystem, private state
 volume, disabled network and VM/container boundary remain separate controls.

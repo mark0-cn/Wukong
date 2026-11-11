@@ -119,6 +119,8 @@ impl Workbench {
                 "--cap-add",
                 "SETGID",
                 "--cap-add",
+                "KILL",
+                "--cap-add",
                 "SYS_PTRACE",
                 "--cap-add",
                 "DAC_OVERRIDE",

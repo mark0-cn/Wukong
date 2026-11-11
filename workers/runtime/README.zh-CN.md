@@ -29,9 +29,9 @@ $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 & $docker build -f workers/Dockerfile -t wukong-worker:0.1 .
 & $docker volume create wukong-worker-state
 & $docker run -d --name wukong-worker --network none --cap-drop ALL `
-  --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
+  --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
   --security-opt no-new-privileges --security-opt seccomp=unconfined `
-  --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g `
+  --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g,exec `
   --mount type=volume,source=wukong-worker-state,target=/state wukong-worker:0.1
 ```
 
@@ -76,7 +76,7 @@ remote_state_dir = "/state/wukong"
 
 子进程环境移除模型凭据；job 环境覆盖只允许 AFL/QEMU/sanitizer 设置。不互信用户不能共享状态目录。
 
-生产 Linux 元数据归可信 daemon 所有；目标/fuzz 清除附加组并使用独立 UID。每次实验有只读暂存文件及独立可写目录。GDB 保持可信身份，以实验 UID 启动 inferior。CHOWN/SETUID/SETGID 用于隔离，SYS_PTRACE/DAC_OVERRIDE 用于可信调试器经 procfs 读取/修改 inferior；目标进程不保留这些 capabilities。只读容器根、私有卷、禁网及 VM/容器边界分别生效。`trusted_local` 明确标记较弱的可信夹具边界。
+生产 Linux 元数据归可信 daemon 所有；目标/fuzz 清除附加组并使用独立 UID。每次实验有只读暂存文件及独立可写目录。GDB 保持可信身份，以实验 UID 启动 inferior。CHOWN/SETUID/SETGID 用于隔离；KILL 允许可信 supervisor 取消实验 UID 持有的进程组；SYS_PTRACE/DAC_OVERRIDE 用于可信调试器经 procfs 读取/修改 inferior；目标进程不保留这些 capabilities。只读容器根、私有卷、禁网及 VM/容器边界分别生效。`trusted_local` 明确标记较弱的可信夹具边界。
 
 <a id="protocol"></a>
 

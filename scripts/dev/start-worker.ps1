@@ -31,7 +31,7 @@ if ($LASTEXITCODE -eq 0) { throw "Container $Container already exists; inspect i
 $workerVolume = "$Container-state"
 & $dockerExe volume create $workerVolume | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Worker volume creation failed.' }
-& $dockerExe run --detach --name $Container --network none --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE --security-opt no-new-privileges --security-opt seccomp=unconfined --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs '/tmp:rw,size=1g,exec' --env HOME=/state/home --env XDG_CACHE_HOME=/state/cache --mount "type=volume,source=$workerVolume,target=/state" $Image
+& $dockerExe run --detach --name $Container --network none --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE --security-opt no-new-privileges --security-opt seccomp=unconfined --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs '/tmp:rw,size=1g,exec' --env HOME=/state/home --env XDG_CACHE_HOME=/state/cache --mount "type=volume,source=$workerVolume,target=/state" $Image
 if ($LASTEXITCODE -ne 0) { throw 'Worker container creation failed.' }
 # A fresh volume copies the image's /state ownership (worker:worker, see the
 # Dockerfile); the bridge daemon runs as root and must chmod the state root
@@ -39,4 +39,4 @@ if ($LASTEXITCODE -ne 0) { throw 'Worker container creation failed.' }
 # CAP_FOWNER). Do the one-time correction here.
 & $dockerExe exec $Container chown 0:0 /state 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Worker state ownership fix failed.' }
-Write-Output "Worker ready: $Container. Set runtime.backend='docker' and runtime.docker_container='$Container'."
+Write-Output "Worker ready: $Container. Register environments.<id>.runtime.backend='docker' and environments.<id>.runtime.docker_container='$Container', then select default_environment='<id>'."
