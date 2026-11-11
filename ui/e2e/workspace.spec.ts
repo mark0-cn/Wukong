@@ -57,6 +57,27 @@ async function mockDesktop(page: Page) {
 }
 test.beforeEach(async ({ page }) => { await mockDesktop(page); });
 
+test('updater release notes render bilingual lists and confirm external links', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    native.invoke = async (command: string, args: any) => {
+      const result = await invoke(command, args);
+      return command === 'update_action' ? { ...result,
+        notes: '## Features\n\n- Show live tool progress.\n\n## 新功能\n\n- 展示工具实时进度。\n\n[Full release notes](https://github.com/mark0-cn/Wukong/releases/tag/v1.0.1)' } : result;
+    };
+  });
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  await page.getByText('版本说明', { exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Features', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '新功能', exact: true })).toBeVisible();
+  await expect(page.locator('.updates-panel li').filter({ hasText: '展示工具实时进度。' })).toBeVisible();
+  await page.screenshot({ path: 'target/updater-release-notes.png' });
+  await page.getByRole('link', { name: 'Full release notes' }).click();
+  await expect(page.locator('.link-target')).toContainText('https://github.com/mark0-cn/Wukong/releases/tag/v1.0.1');
+  expect(await page.evaluate(() => (window as any).__desktopTest.requests.some((request: any) => request.command === 'open_link'))).toBe(false);
+});
+
 test('public text, evidence code and background jobs update the existing conversation', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('发送给 Agent 的消息').fill('keep my analysis draft');

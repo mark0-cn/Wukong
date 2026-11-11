@@ -126,3 +126,5 @@ master、tag、仍打开的 PR 及未知普通分支均保留。定时任务可�
 ## 提交规范与发布预览
 
 只读 `Commit policy` 流程使用固定版本 commitlint 验证 PR 标题与新增非合并提交，并检查发布片段。PR 只需英文。PR 标题或正文编辑时重跑该流程，不重启平台 CI；生成仅本 PR 和累计预览前，会运行真实 git-cliff/commitlint 回归测试。可选本地 hook 和双语发布片段见[提交规范](commits.zh-CN.md)。master Ruleset 中应同时要求 GitHub Actions 的 `commit-policy` 和已有 `summary` 状态；二者不能互相替代，保留已有审批、讨论解决和严格更新要求。仅有 workflow 文件无法启用服务端合并限制。规范检查不代表发布授权，也不会创建 tag。
+
+发布片段保留 PR 原有的相关检查范围；`.changes/` 中的未知文件仍需完整检查。
