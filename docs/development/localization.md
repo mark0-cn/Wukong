@@ -1,44 +1,56 @@
-# 多语言维护
+<a id="多语言维护"></a>
 
-## 资源与边界
+# Localization maintenance
 
-Wukong 的界面支持 `zh-CN` 和 `en-US`。`locales/<locale>/*.ftl` 是前端和 Rust 共用的 Fluent 资源；Vite 与 `build.rs` 将其嵌入客户端。运行时不请求翻译服务，也不下载语言包。
+English · [简体中文](localization.zh-CN.md)
 
-- `common`：应用标题、语言设置和原生对话框。
-- `workspace`、`settings`、`updates`：桌面界面。
-- `tools`：catalog 及历史工具别名对应的显示消息。
-- `errors`：控制端产生的状态、通知和可预期错误。
-- `cli`、`report`：命令行帮助和可读导出。
+<a id="资源与边界"></a>
 
-工具名称、JSON 字段、状态枚举、路径、地址、payload、内容哈希和原始证据不翻译。工具返回的原始文本、已有模型正文和第三方错误也保持原样；应用生成的错误使用 `{code,args,detail}`，`detail` 保留原始诊断。不根据错误正文或中文子串推测错误类型。
+## Resources and boundaries
 
-React 通过语言订阅更新组件；语言不进入组件 key，也不触发 workspace config save、epoch 变化或任务重启。不要在模块初始化时缓存翻译结果；状态标签和设置分组应在渲染时求值。完整句子使用 Fluent 参数，避免把语序拆成多个翻译片段。
+Wukong supports `zh-CN` and `en-US`. Frontend/Rust share Fluent resources in `locales/<locale>/*.ftl`, embedded by Vite/`build.rs`. Runtime neither calls translation services nor downloads language packs.
 
-## 偏好与任务输出
+- `common`: app title, language settings, native dialogs.
+- `workspace`, `settings`, `updates`: desktop UI.
+- `tools`: display messages for catalog tools/legacy aliases.
+- `errors`: controller status, notices, expected errors.
+- `cli`, `report`: command help and readable exports.
 
-`preferences.json` 保存在固定用户数据入口（见[在线安装](../user/online-install.md)），与模型配置、任务数据库、可切换缓存目录独立。原生命令用同目录临时文件原子替换；前端只有保存成功才应用新偏好。
+Tool names, JSON fields, status enums, paths, addresses, payloads, hashes and raw evidence remain unchanged. Original tool text, existing model prose and third-party errors remain original. App errors use `{code,args,detail}`, with raw diagnostics in `detail`. Business error types must not be inferred from translated text/Chinese substrings. Docker diagnostic text matching supplies advisory troubleshooting categories only; it does not replace typed errors or prove the root cause.
 
-界面默认跟随系统。`zh`、简体中文及新加坡中文映射到 `zh-CN`，其他语言回退 `en-US`。语言设置修改不会清空消息、设置或任务草稿。
+React subscribes to language changes; language is not a component key and does not save workspace configuration, change epochs or restart tasks. Do not cache translations during module initialization; resolve status/settings labels at render time. Use Fluent arguments for complete sentences rather than splitting grammar across fragments.
 
-新任务输出可选中文、英文或自动。自动模式是有界默认规则：初始任务含汉字时选中文，含 ASCII 字母时选英文，其他输入使用当前界面语言（CLI 使用系统语言）。它不调用额外模型，不承诺准确识别混合语言；需要确定结果时显式选择语言。应用将具体值存入任务配置的 `output_language`。恢复读取原快照，已有任务不跟随界面或新任务偏好改变。缺失该字段的历史任务保留原来的“跟随用户语言，未指定时中文”提示策略。
+<a id="偏好与任务输出"></a>
 
-`agents::preamble` 在稳定的角色、工具与 Skill 前缀之后注入统一输出策略。用户在任务中明确要求的输出语言优先。Skill 方法正文保持一份，不因界面语言复制方法或权限定义。提示词测试验证策略注入及恢复不变量，不代表真实模型必然遵循；当前测试不产生付费模型请求。
+## Preferences and task output
 
-## CLI、报告和安装器
+`preferences.json` lives at the fixed user-data entry ([installation](../user/online-install.md)), independently of model configuration, task database and movable cache. Native commands atomically replace a same-directory temporary file; frontend applies preferences only after successful save.
 
-- `--locale auto|en-US|zh-CN` 控制 CLI 帮助、应用错误包装和可读报告，默认读取 `WUKONG_LOCALE`，命令行优先。
-- `--output-language en-US|zh-CN`（或 `WUKONG_OUTPUT_LANGUAGE`）控制新任务输出；配置中的 `output_language` 也可设置。恢复任务忽略新的默认值。
-- 命令及参数名保持稳定；Clap 的原始解析诊断和技术元数据可能仍为英文。结构化 JSON 和规范工具/Skill 目录不按显示语言改写。
-- 桌面导出使用导出时的界面语言；CLI 使用 `--locale`。报告标题、状态与表头翻译，已有正文和证据不重写。导出测试比较两种语言的快照、重放数据和原始字节。
-- Windows NSIS 提供 English/SimpChinese 选择；安装器语言和应用偏好相互独立。Linux AppImage 的应用内准备/恢复提示跟随界面，桌面入口提供中文 `Comment`。两种语言共用安装文件、版本、签名、更新清单和工具镜像。
+UI follows the system by default. `zh`, Simplified Chinese and Singapore Chinese map to `zh-CN`; others fall back to `en-US`. Changing language retains message/settings/task drafts.
 
-## 新增或修改翻译
+New-task output can be Chinese, English or automatic. Automatic is a bounded default rule: Chinese characters in the initial task select Chinese, otherwise ASCII letters select English, otherwise current UI language (system language for CLI). It makes no extra model request and cannot reliably classify mixed language; choose explicitly when needed. A concrete `output_language` is saved in task configuration. Resume reads the snapshot; old tasks do not follow changed preferences. Legacy tasks missing the field retain the old policy: follow the user's language, default Chinese if unspecified.
 
-1. 在两个目录的对应资源中添加稳定、可读的消息 ID；变量名和数量保持一致。不要把用户内容用作消息 ID。
-2. 执行 `node scripts/check-locales.mjs --write` 更新前端 `Messages` 类型。
-3. 界面使用 `t`，原生边界使用 `i18n::Message`。只有界面渲染时求值，完整原始数据继续保存在原位置。
-4. 执行 `npm run check:locales`、`npm test`、`npm run build` 和相关 Rust 测试。交互改动执行 `npm run test:e2e`。
+`agents::preamble` injects one output policy after stable role/tool/Skill prefixes. Explicit task language requests win. Skill method bodies remain single-source, without language-specific methods/permissions. Prompt tests check injection/recovery invariants, not actual model obedience; current tests make no paid requests.
 
-资源检查在 npm 的测试、类型检查和构建之前自动运行，拒绝语法错误、重复 ID、键或变量不一致、过期的生成类型。工具目录测试核对每个工具的双语标题。CI 在 Windows/Linux 运行桌面特性和双语浏览器回归。
+<a id="cli报告和安装器"></a>
 
-浏览器测试使用模拟的 Tauri 命令边界，不能代替真实 WebView、NSIS 交互选择、Windows Docker Desktop 或跨版本升级验收。安装器相关验证按[桌面更新设计](desktop-updates.md)在隔离环境执行。
+## CLI, reports and installers
+
+- `--locale auto|en-US|zh-CN` controls help, app error wrappers and readable reports, defaulting from `WUKONG_LOCALE`; explicit CLI wins.
+- `--output-language en-US|zh-CN` or `WUKONG_OUTPUT_LANGUAGE` controls new tasks; configuration `output_language` is also supported. Resume ignores new defaults.
+- Commands/argument names stay stable. Raw Clap diagnostics/technical metadata may remain English. Structured JSON and canonical tool/Skill protocol descriptions are not rewritten by display language. Human catalogs support explicit Chinese export; see maintenance.
+- Desktop exports use current UI language; CLI uses `--locale`. Headings/status/columns translate, existing content/evidence do not. Tests compare snapshots, replay data and raw bytes across languages.
+- NSIS offers English/SimpChinese independently of app preference. AppImage preparation/recovery uses UI language; desktop entries include Chinese `Comment`. Both languages share installers, version, signatures, manifests and tool images.
+
+<a id="新增或修改翻译"></a>
+
+## Adding or changing translations
+
+1. Add stable readable message IDs to both resource directories with matching argument names/counts. Never use user content as an ID.
+2. Run `node scripts/check-locales.mjs --write` to regenerate frontend `Messages` types.
+3. Use `t` in UI and `i18n::Message` at native boundaries; evaluate for display only and retain complete originals in their original storage.
+4. Run `npm run check:locales`, `npm test`, `npm run build` and relevant Rust tests; interaction changes also run `npm run test:e2e`.
+
+Resource checks run before npm tests/typecheck/build, rejecting syntax errors, duplicate IDs, mismatched keys/arguments and stale generated types. Tool-catalog tests check bilingual titles. CI exercises desktop features and bilingual browser regressions on Windows/Linux.
+
+Browser tests simulate Tauri commands, not real WebView, NSIS language selection, Windows Docker Desktop or cross-version upgrades. Installer validation follows [desktop updates](desktop-updates.md) in isolation. Human documentation follows the separate [English/Chinese documentation policy](documentation.md).

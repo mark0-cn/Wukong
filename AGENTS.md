@@ -1,96 +1,121 @@
-# 项目协作约定
+<a id="项目协作约定"></a>
 
-本文件约定如何维护本仓库。具体实现与验收细节按下列文档入口查阅；工具版本以锁文件为准。
+# Repository collaboration rules
 
-## 任务范围与工作区
+English · [简体中文](AGENTS.zh-CN.md)
 
-- 咨询、评审任务先提供结论与建议；实施任务在已授权范围内完成修改、验证、提交和集成。
-- 开始修改前检查当前分支、工作区状态和远端 `master`。保留用户及其他任务的改动，不覆盖或回滚无关内容。
-- 只暂存本次任务涉及的文件，提交前检查 diff；不混入临时日志、构建产物、题目附件或本机配置。
-- 遇到与当前任务相关的冲突，先理解双方改动再解决；无法判断用户意图时说明具体冲突。
+This file defines how to maintain the repository. Follow the linked documents for implementation and acceptance details; lockfiles determine tool versions.
 
-## 分支、提交与集成
+<a id="任务范围与工作区"></a>
 
-- `master` 是主分支、GitHub 默认分支及正式发布的基准分支。
-- 每完成一个独立功能或修复就单独 commit。
-- 普通实施改动完成相关验证后，合并到 `master` 并推送；PR 的目标分支也使用 `master`。版本 PR 按下方发布规则处理。
-- 集成前确认远端是否前进，保留已有提交；不通过强推或重写共享分支历史解决集成问题。
+## Scope and workspace
 
-## 文档入口与模块边界
+- For consultation/review, provide findings and recommendations first. For implementation, complete authorized changes, validation, commits and integration.
+- Before editing, inspect the branch, worktree and remote `master`. Preserve user/other-task changes; do not overwrite or roll back unrelated work.
+- Stage only task-related files and review the diff before committing. Exclude temporary logs, build outputs, challenge attachments and machine-local configuration.
+- Understand both sides before resolving relevant conflicts. Explain the specific conflict when user intent cannot be determined.
 
-| 任务 | 优先阅读 |
+<a id="分支提交与集成"></a>
+
+## Branches, commits and integration
+
+- `master` is the main/default GitHub branch and release baseline.
+- Commit each independent feature or fix separately.
+- After relevant validation, merge ordinary implementation changes into `master` and push. PRs also target `master`. Version PRs follow the release rules below.
+- Check whether the remote advanced before integration and retain existing commits. Never resolve integration through force-push or shared-history rewriting.
+
+<a id="文档入口与模块边界"></a>
+
+## Documentation and module boundaries
+
+| Task | Read first |
 | --- | --- |
-| 架构、模块职责与状态管理 | [架构](docs/design/architecture.md)、[维护约定](docs/development/maintenance.md) |
-| Agent、Skill、任务协议与证据 | [实现契约](docs/design/implementation-contract.md)、[报告格式](docs/reference/report-format.md) |
-| 工具注册与调用 | [工具目录](docs/reference/tool-catalog.md)、[维护约定中的工具文档生成](docs/development/maintenance.md#工具文档) |
-| worker、调试与隔离执行 | [worker 说明](workers/runtime/README.md) |
-| Pwn 环境、题目容器与启动配置 | [Pwn 工作环境](docs/user/pwn-workbench.md) |
-| 安装、CI、版本及发布 | [在线安装](docs/user/online-install.md)、[发布流程](docs/development/releases.md)、[GitHub 维护](docs/development/github-maintenance.md) |
+| Architecture, responsibilities, state | [Architecture](docs/design/architecture.md), [maintenance](docs/development/maintenance.md) |
+| Agents, Skills, task protocol, evidence | [Implementation contract](docs/design/implementation-contract.md), [report format](docs/reference/report-format.md) |
+| Tool registration and invocation | [Tool catalog](docs/reference/tool-catalog.md), [catalog generation](docs/development/maintenance.md#tool-documentation) |
+| Workers, debugging, isolation | [Worker guide](workers/runtime/README.md) |
+| Pwn environments, containers, launch configuration | [Pwn workbench](docs/user/pwn-workbench.md) |
+| Installation, CI, versions, release | [Online installation](docs/user/online-install.md), [releases](docs/development/releases.md), [GitHub maintenance](docs/development/github-maintenance.md) |
 
-- 按模块职责放置实现；新增功能不要把业务逻辑重新集中到装配入口或桥接入口。
-- 文档与实现不一致时，核对代码、测试及需求，修正受影响文档；历史验证记录不能代替当前验证。
-- 本文件保留稳定规则和入口，不记录当前版本号、临时机器路径、CI run ID 或历史测试数量。
+- Place implementation by module responsibility; do not concentrate business logic in assembly/bridge entry points.
+- Reconcile documentation with code, tests and requirements. Historical validation is not evidence of current validation.
+- Keep stable rules/entry points here, not current versions, temporary machine paths, CI run IDs or historical test counts.
+- English is the primary human documentation: canonical paths use `.md`; complete Simplified Chinese counterparts use sibling `.zh-CN.md` files. Both link to each other and use same-language document links where available.
+- Update both languages in the same commit when behavior, commands, limits or validation claims change. Check semantic equivalence, not just heading/file counts; preserve technical identifiers and evidence. See [documentation maintenance](docs/development/documentation.md).
+- Runtime prompts, generated reports, raw evidence and legal/source identifiers are not translated copies of human guides. Regenerate catalogs through their generators. Keep historical dates and validation limits explicit.
 
-## 产品内的 Agent、Skill 与工具
+<a id="产品内的-agentskill-与工具"></a>
 
-以下角色约束针对 wukong 产品运行时，不是要求维护仓库的编码助手自动创建子 agent。
+## Product Agents, Skills and tools
 
-- `root` 负责产品内的编排与汇总；分析和执行交给相应工作角色，独立验证使用独立的 `verifier`。
-- 角色决定权限和完成协议；Skill 补充方法、输入与产物要求，不能扩大角色权限或绕过完成门槛。
-- 新增或修改能力时，核对 `src/prompts.rs`、`src/agents.rs`、`prompts/` 中受影响的注册、装配、提示词及示例，并验证选择和权限行为。
-- 工具定义、schema、角色可见性和工具清单以 `src/tools/catalog.rs` 等统一注册入口为准；修改工具后按维护文档生成清单并验证一致性。
-- 不能只在提示词中宣称工具或能力已存在；后端、权限检查和实际可用的调用路径必须对应。
-- 保持类型化协议和现有模块边界；通用调度、会话及重试行为优先复用现有 Rig 接入，业务规则留在业务层。
+These role constraints apply to the Wukong runtime; they do not instruct repository coding assistants to create subagents automatically.
 
-## 状态、证据与完成条件
+- `root` orchestrates/summarizes; appropriate workers analyze/execute; an independent `verifier` verifies.
+- Roles determine permissions/completion protocol. Skills add methods, inputs and artifacts, never permissions or completion-gate bypasses.
+- For capability changes, check affected registrations, assembly, prompts and examples in `src/prompts.rs`, `src/agents.rs` and `prompts/`; validate selection/permission behavior.
+- Unified registries such as `src/tools/catalog.rs` own definitions, schemas, role visibility and catalogs. Regenerate and check documentation after tool changes.
+- Do not claim capabilities only in prompts: backend, permission checks and callable paths must exist.
+- Preserve typed protocols/module boundaries. Reuse Rig for generic scheduling, sessions and retries; keep business rules in the business layer.
 
-- 保持任务、消息、会话和工具效果的持久化语义，防止恢复或重试重复执行已完成的副作用。
-- 不确定是否已执行的操作先与 worker 对账；普通消息不能隐式重开终态任务或绕过依赖门槛。
-- 保留会话与调试器的所有权、串行修改和关闭规则；任务完成时核对其活动子任务与所拥有的资源。
-- 证据绑定目标、模块、配置及内容身份；给模型的结果有界，完整原始产物保留哈希和可追溯引用。
-- 静态怀疑或崩溃不能直接升级为利用成功；影响结论按实现契约要求独立验证，并关联原始证据。
-- 产物 schema 合格只证明结构完整，不证明语义正确；交付结论必须区分已验证事实、推断和缺口。
+<a id="状态证据与完成条件"></a>
 
-## 环境、题目与凭据
+## State, evidence and completion
 
-- 宿主机管理并列的工具容器和题目容器；保持每题的数据及网络边界，不向工具容器挂载 Docker socket。
-- 原始题目附件按哈希保留，修改与准备使用副本；区分原始文件和实际执行文件的身份。
-- binary、libc、loader、工作目录等执行条件保持一致并通过统一启动配置传递；最终题目结论回到对应题目环境验证。
-- 未知目标通过配置的隔离后端运行；`trusted_local` 仅用于可信开发夹具，不能作为运行未知题目的默认退路。
-- 模型密钥留在控制端，不进入容器、镜像、发布包、题目迁移包或日志；本机路径不作为项目必需配置硬编码。
-- 清理限定到本任务创建或用户明确授权的资源；确认名称、标签或路径归属，避免无范围的 Docker prune 和目录删除。
+- Preserve durable task/message/session/effect semantics so recovery/retry cannot repeat completed side effects.
+- Reconcile uncertain effects with the worker first. Ordinary messages never implicitly reopen terminal work or bypass dependencies.
+- Preserve session/debugger ownership, serialized mutation and closing rules. Check active children/owned resources before completion.
+- Bind evidence to target, module, configuration and content identity. Bound model-facing results while retaining full hashed, traceable artifacts.
+- Static suspicion or a crash is not exploitation success. Independently verify impact according to the implementation contract and link original evidence.
+- Schema validity proves structure, not semantics. Distinguish verified facts, inferences and gaps.
 
-## 按改动选择验证
+<a id="环境题目与凭据"></a>
 
-以下是检查入口，按实际影响选择；CI 的具体检查与依赖安装以工作流为准。
+## Environments, challenges and credentials
 
-| 改动 | 验证入口 |
+- The host manages sibling tool/challenge containers. Preserve per-challenge data/network boundaries; never mount the Docker socket in tools.
+- Preserve original attachments by hash; modify/prepare copies. Distinguish original-file and executed-file identity.
+- Keep binary, libc, loader, working directory and other execution conditions consistent through unified launch configuration. Verify final conclusions in the corresponding challenge environment.
+- Run unknown targets in configured isolation. `trusted_local` is only for trusted development fixtures, never a fallback for unknown challenges.
+- Keep model credentials on the controller, out of containers, images, releases, migration bundles and logs. Do not hardcode machine paths as project requirements.
+- Clean only task-owned or explicitly authorized resources. Verify names, labels or paths; avoid unscoped Docker prune or directory deletion.
+
+<a id="按改动选择验证"></a>
+
+## Select validation by change
+
+Use these entry points according to impact; workflows define precise checks/dependency installation.
+
+| Change | Validation |
 | --- | --- |
-| Rust 逻辑、协议或状态 | `cargo fmt --all -- --check`；相关测试；需要完整检查时运行 `cargo clippy --locked --all-targets -- -D warnings` 和 `cargo test --locked --all-targets` |
-| 前端 | `npm ci`、`npm test`、`npm run build`；交互变化补充相应界面验证 |
-| Python worker | 安装 worker requirements，运行相关测试；完整测试入口为 `python workers/tests/run.py unit -p 'test_*.py'`，分析夹具见 CI |
-| 发布脚本或安装器 | `python -m scripts.release.cli check`、`python -m unittest discover -s tests/automation -p 'test_*.py'`；安装器改动运行 `tests/automation/test-online-package.ps1` 和 `tests/automation/test-installer.ps1` |
-| Actions、Docker 或工具链 | 工作流语法检查、下载校验及 Bake 配置检查；按影响补充实际构建、容器验收或手动发布演练 |
-| 纯文档 | 检查内容、链接目标及 `git diff --check`；不为纯文档编辑新增行为测试 |
+| Rust logic, protocol, state | `cargo fmt --all -- --check`; relevant tests; when full checks are needed, `cargo clippy --locked --all-targets -- -D warnings` and `cargo test --locked --all-targets` |
+| Frontend | `npm ci`, `npm test`, `npm run build`; interaction changes also need UI verification |
+| Python worker | Install worker requirements; relevant tests; full entry `python workers/tests/run.py unit -p 'test_*.py'`; analysis fixtures follow CI |
+| Release scripts/installers | `python -m scripts.release.cli check`, `python -m unittest discover -s tests/automation -p 'test_*.py'`; installer changes run `tests/automation/test-online-package.ps1` and `tests/automation/test-installer.ps1` |
+| Actions, Docker, toolchain | Workflow syntax, download checksums, Bake configuration; real builds/container acceptance/manual release rehearsal as affected |
+| Documentation only | Content, language parity, link targets and `git diff --check`; no new behavior tests for prose-only edits |
 
-- `--no-default-features` 的通过不能代替桌面特性验证；mock、适配器测试不能代替真实 Docker、GDB、Ghidra 验收。
-- Linux 容器验收不能宣称覆盖真实 Windows Docker Desktop 桌面安装。明确记录平台依赖、跳过项及未覆盖部分。
-- 修复缺陷时优先验证具体失败场景及相关不变量；检查通过后，只有新改动、失败或未解决问题才扩大或重复验证。
+- `--no-default-features` does not replace desktop-feature validation; mocks/adapters do not replace real Docker/GDB/Ghidra acceptance.
+- Linux container acceptance does not cover real Windows Docker Desktop installation. Record dependencies, skips and uncovered areas.
+- For defects, prioritize the failing scenario/invariants. After checks pass, broaden/repeat only for new changes, failures or unresolved concerns.
 
-## CI、版本与发布
+<a id="ci版本与发布"></a>
 
-- 优先使用 GitHub 标准托管 runner，只维护在线发行包；具体工作流按发布文档执行。
-- 版本通过版本准备流程同步，版本 PR 保持纯版本变更；tag 使用 `vMAJOR.MINOR.PATCH`，与项目版本一致，指向已合入 `master` 的提交。
-- **合并版本 PR 会自动触发正式发布，必须已有明确的发布授权。** 普通开发改动的合并授权不自动包含版本发布；会话中已有的明确授权无需重复索取。
-- 配置或验证发布流水线不等于要求立即发布版本；未要求发布时使用手动演练。
-- 不移动、删除重建已发布的 tag，不覆盖固定版本镜像或不可变 Release 附件；发布失败按文档重试，不绕过校验。
-- CI 与产物复用必须匹配提交和可信来源，并保留完整性校验；缓存命中不能代替验证，也不能混用 PR 产物与正式发布产物。
-- 优先复用合格结果或重跑失败任务，避免反复触发相同提交的重型 CI、镜像构建和整套发布演练。
+## CI, versions and releases
 
-## 交付
+- Prefer standard GitHub-hosted runners and online-only distributions; follow release documentation.
+- Synchronize versions through version preparation. Keep version PRs version-only. Tags are `vMAJOR.MINOR.PATCH`, match project versions and point to commits merged into `master`.
+- **Merging a version PR triggers official publication and requires explicit release authorization.** Ordinary merge authorization does not imply release authorization; existing explicit session authorization need not be requested again.
+- Pipeline configuration/validation does not request a release. Use manual rehearsals when publication is not requested.
+- Never move or recreate published tags, overwrite fixed-version images or immutable Release attachments. Retry as documented without bypassing checks.
+- Reused CI/artifacts must match commit/trusted origin and retain integrity checks. Cache hits are not validation; do not mix PR and production artifacts.
+- Reuse qualified results or rerun failed jobs; avoid repeated heavy CI/image builds/full rehearsals for the same commit.
 
-- 说明改动内容、主分支提交、实际执行的验证及相关 CI 链接，并区分成功、失败、正常跳过和仍在运行。
-- 对本任务触发且作为验收依据的 CI 跟进结果；不能把工作流已启动或仍在运行表述为验证通过。
-- 说明未覆盖部分及实质限制；区分代码已合入、演练成功和正式版本已发布。
-- 行为、配置、工具或发布流程发生变化时，同步更新对应文档，避免只更新本文件。
-- 桌面安装与更新遵循[更新设计](docs/development/desktop-updates.md)；原生安装器安装/卸载测试只在隔离 runner 或专用测试环境执行，不覆盖用户现有安装。
+<a id="交付"></a>
+
+## Delivery
+
+- Report changes, main-branch commit, checks actually run and CI links. Distinguish success, failure, expected skips and running jobs.
+- Follow task-triggered acceptance CI to its outcome; started/running is not passed.
+- State uncovered areas/material limits; distinguish merged code, successful rehearsal and published release.
+- Update relevant behavior/configuration/tool/release documentation, not just this file.
+- Follow [desktop updates](docs/development/desktop-updates.md). Native installer install/uninstall tests run only on isolated runners or dedicated test environments, never over the user's installation.

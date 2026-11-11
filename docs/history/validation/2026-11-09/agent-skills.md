@@ -1,4 +1,8 @@
+<a id="agent--skill-能力改动--2026-11-09"></a>
+
 # Agent / Skill capability changes — 2026-11-09
+
+English · [简体中文](agent-skills.zh-CN.md)
 
 Implemented role-enforced tool visibility, custom skill discovery/metadata, bounded method selection, immutable general verification records, structured method deliverables, reusable differential testing, secondary-target Ghidra queries, paginated instruction/basic-block evidence, and paired experiment scoring.
 
@@ -15,4 +19,4 @@ Validation on Windows:
 
 The native build used the installed VS vcvars64 environment, CARGO_PROFILE_DEV_DEBUG=0 and CARGO_PROFILE_TEST_DEBUG=0, and a workspace-local target/native-tmp TEMP/TMP directory to avoid local MSVC debug-record/temp-link failures. These are validation-environment settings, not repository build requirements.
 
-Limitations: no Docker/Ghidra JDK was available for live Java bridge execution. `workers/runtime/ghidra_test.py` now includes instruction pagination, module identity and basic-block assertions for a configured worker. No paid-model ablation experiment was run; paired scoring and its validation are implemented, but there is no measured claim of model-quality improvement. Differential testing currently handles bounded stdin vectors; stateful/argv protocols require a separate harness.
+Limitations: no Docker/Ghidra JDK was available for live Java bridge execution. `workers/runtime/ghidra_test.py` now includes instruction pagination, module identity and basic-block assertions for a configured worker. No paid-model ablation experiment was run; paired scoring and its validation are implemented, but there is no measured claim of model-quality improvement. Differential testing handled bounded stdin vectors; stateful/argv protocols require a separate harness. Paths and counts retain their historical date and do not establish current validation.

@@ -1,5 +1,7 @@
 # Ghidra worker
 
+English · [简体中文](README.zh-CN.md)
+
 Install Ghidra and its required JDK, then set `WUKONG_GHIDRA_HEADLESS` to the absolute path of `support/analyzeHeadless` (Linux/macOS) or `support/analyzeHeadless.bat` (Windows). The controller launches it directly with arguments; no shell command templates are accepted. Ghidra 12.2 requires a Java 25 JDK: it does not auto-detect other versions, and `JAVA_HOME` must point to a supported JDK or headless startup fails with an unsupported-JDK warning and a no-TTY prompt error. The Docker worker image installs Temurin 25 LTS with a pinned checksum; local installs must set `JAVA_HOME` in the environment that starts the controller.
 
 `GhidraBackend` imports a SHA256-verified local snapshot, runs automatic analysis, and executes `WukongBridge.java`. The Java bridge uses Ghidra's function manager, reference manager, and native decompiler. Missing dependencies, failed imports, analysis/decompile timeouts, unknown addresses and malformed results return explicit errors. These operations do not execute the target program.

@@ -1,86 +1,101 @@
-# 安装与应用内更新
+<a id="安装与应用内更新"></a>
 
-[English](../en/user/online-install.md) · [语言设置](languages.md)
+# Installation and in-app updates
 
-Wukong 提供 Windows x64 安装 EXE 和 Linux x64 AppImage。安装文件包含客户端，工具镜像在首次运行时联网下载；不包含模型密钥或题目数据。
+English · [简体中文](online-install.zh-CN.md)
+
+[Language settings](languages.md)
+
+Wukong provides a Windows x64 installer EXE and a Linux x64 AppImage. Installation files contain the client; the tool image downloads online on first use. They contain no model credentials or challenge data.
 
 ## Windows
 
-1. 从正式 GitHub Release 下载 `Wukong_<版本>_x64-setup.exe`（以附件实际文件名为准）。
-2. 双击后选择 English 或 SimpChinese，安装到当前用户目录并打开 Wukong。客户端使用 WebView2，安装器可在线准备缺失的运行时。应用语言默认跟随系统，可在设置中独立修改。
-3. 首次启动打开环境向导。安装并启动 Docker Desktop，选择 Linux containers。
-4. 点击“准备工具环境”，等待镜像下载、自检完成，然后在设置中配置模型。
+1. Download `Wukong_<version>_x64-setup.exe` from an official [GitHub Release](https://github.com/mark0-cn/Wukong/releases); use the actual attachment filename.
+2. Choose English or SimpChinese, install for the current user and open Wukong. The client uses WebView2; the installer can prepare a missing runtime online. Application language follows the system initially and can be changed independently.
+3. First launch opens environment setup. Install and start Docker Desktop in Linux containers mode.
+4. Select **Prepare tool environment**, wait for the image download and self-test, then configure the model in settings.
 
-当前 EXE 未做 Authenticode 签名。应用内更新使用独立的签名校验机制。
+The EXE currently has no Authenticode signature. In-app updates use separate signature verification.
 
 ## Linux
 
-支持 x86_64 桌面环境，正式构建基线为 Ubuntu 22.04。下载 `.AppImage` 后赋予执行权限并运行：
+Supports x86_64 desktops; official builds use Ubuntu 22.04. Make the downloaded AppImage executable and run it:
 
 ```sh
 chmod +x Wukong_*.AppImage
 ./Wukong_*.AppImage
 ```
 
-系统需要支持 AppImage 运行；缺少 FUSE 时可安装发行版对应的 FUSE 兼容库，或使用 `APPIMAGE_EXTRACT_AND_RUN=1 ./Wukong_*.AppImage`。
-准备工具环境后，在“更新 → 维护选项”点击“安装到应用菜单并重启”可复制到用户应用目录并添加桌面入口。它是用户级安装，不使用 sudo。
-安装 Docker Engine，确认当前用户能访问 Docker，再点击“准备工具环境”。不会自动安装 Docker、调整用户组或修改系统服务。
+The system must support AppImage execution. If FUSE is missing, install the distribution's compatible FUSE library or use `APPIMAGE_EXTRACT_AND_RUN=1 ./Wukong_*.AppImage`.
+After tool setup, **Updates → Maintenance options → Add to application menu and restart** copies the app to the user application directory and creates a desktop entry. This is a user-level installation without sudo.
+Install Docker Engine and confirm the current user can access Docker before preparing tools. Wukong does not install Docker, change groups or modify system services automatically.
 
-## 首次准备与错误处理
+<a id="首次准备与错误处理"></a>
 
-首次准备按“检查 Docker → 下载工具镜像 → 自检并启用”显示进度；客户端版本和工具环境状态分开显示。首次准备页只保留准备/重试与 Docker 安装说明，目录配置在“工作区设置 → 存储位置”，清理和恢复在“更新 → 维护选项”（待恢复时也会显示）。
+## First setup and diagnostics
 
-失败时显示一次错误，可复制错误，并展开 Docker 日志末尾输出；完整日志位置包含在 Docker 长操作的错误中。如果提示找不到 `docker-credential-desktop`，先完全退出并重新打开 Wukong；仍失败则检查 Docker Desktop 安装及凭据助手所在目录的 PATH。Wukong 会在可确认的安装目录中查找 CLI 和同级助手，不删除登录配置或禁用凭据存储。此错误与数据目录的 Windows 扩展路径前缀无关。
+Setup shows **Check Docker → Download tool image → Validate and activate**; client version and tool readiness are separate. The first-run page presents prepare/retry and Docker installation help. Storage belongs in **Workspace settings → Storage locations**; cleanup and recovery belong in **Updates → Maintenance options**, also shown when recovery is pending.
 
-拉取时可查看已就绪/已发现镜像层数、耗时和每层状态。层大小不同，层数不代表下载字节百分比；拉取完成后还需通过环境自检。镜像按签名清单中的 digest 拉取，因此 Docker Desktop 本地标签可能显示 `<none>`，这不影响版本固定；客户端会显示对应的工具镜像版本。
+Failures appear once, with a copy control and expandable Docker log tail. Errors from long Docker operations include the complete log path. If `docker-credential-desktop` is missing, fully exit and reopen Wukong; if it still fails, check the Docker Desktop installation and helper directory in PATH. Wukong searches confirmed installation directories for the CLI and sibling helpers, without deleting login configuration or disabling credential storage. This error is unrelated to Windows extended data-path prefixes.
 
-## 环境与数据
+During pulls, view ready/discovered layer counts, elapsed time and per-layer states. Layers differ in size: counts are not download-byte percentages. Environment validation follows the pull. Images use the signed manifest's digest, so Docker Desktop may show a local `<none>` tag; content remains pinned and the client displays the corresponding tool image version.
 
-- 工具镜像 `hlmark0/wukong` 公开，可以匿名拉取；遇到 Docker Hub 限流可自行登录自己的账号。
-- 每个版本清单绑定固定镜像 digest，不因 Docker `latest` 变化而改变运行环境。
-- 为 Docker 镜像及临时层至少预留 25 GiB。客户端会检查下载目录空间；Docker Desktop 虚拟磁盘容量仍需在其设置中检查。
-- 默认任务与证据位于下列用户数据根目录中的 `.wukong`，更新缓存位于 `updates`；Windows 界面显示常规驱动器/UNC 路径，底层路径身份保留。
-- 新桌面安装的数据位于 Windows `%LOCALAPPDATA%/WukongData` 或 Linux `$XDG_DATA_HOME/Wukong`，Linux 默认 `~/.local/share/Wukong`。
-- 显式 `--config` 和已有便携配置继续优先；配置、数据库与题目文件不随安装器替换。
-- 未准备好工具环境时，可以查看历史和编辑配置；需要 worker 的任务不能运行。
+<a id="环境与数据"></a>
 
-## 更新
+## Environment and data
 
-在“工作区设置 → 存储位置”中可以修改：
+- Public image `hlmark0/wukong` supports anonymous pulls; you can sign in to your own Docker Hub account if rate-limited.
+- Each release manifest binds a fixed image digest; changes to `latest` do not change the running environment.
+- Reserve at least 25 GiB for Docker images and temporary layers. Wukong checks the download disk; check Docker Desktop virtual disk capacity separately in its settings.
+- Tasks/evidence default to `.wukong` under the user data root below; update cache defaults to `updates`. Windows UI shows conventional drive/UNC paths while preserving native path identity internally.
+- New desktop installations use Windows `%LOCALAPPDATA%/WukongData` or Linux `$XDG_DATA_HOME/Wukong`, defaulting to `~/.local/share/Wukong`.
+- Explicit `--config` and existing portable configuration retain priority. Installers do not replace configuration, task databases or challenge files.
+- `preferences.json` in the fixed user data root stores language preferences independently of workspace configuration.
+- History and settings remain available before tool setup; tasks requiring a worker cannot run until it is ready.
 
-- **任务与证据目录**：切换到已有或新的工作区。不会自动搬移原有分析数据，选择原目录即可切回。
-- **更新缓存目录**：可选择其他磁盘上的空目录。已有签名清单、安装文件和恢复所需文件会经校验后复制；全部成功后才切换位置，原文件保留。
+<a id="更新"></a>
 
-默认位置仍在上述用户数据目录中。配置入口、维护锁和恢复助手保持固定位置，避免切换缓存后找不到恢复记录。
-Docker 镜像及卷的物理磁盘位置由 Docker Desktop / Docker Engine 设置管理，不属于客户端下载缓存。
-正在分析、下载或等待更新恢复时不能修改相关目录；使用命令行 `--state` 指定目录时需重新启动后再从界面切换。
+## Updates
 
-应用启动后检查正式版本；检查失败不影响已经可用的环境。打开“更新”：
+In **Workspace settings → Storage locations**, change:
 
-1. 点击“检查更新”，查看版本说明。
-2. 结束当前分析、调试及文件操作，点击“下载并验证更新”。当前实现保守地要求桌面空闲后开始准备；下载不会替换现用环境。
-3. 下载新版安装文件、上一版恢复安装文件及配套镜像，验证签名，并在独立容器中自检。
-4. 点击“安装并重启”，确认退出。CLI 中仍有分析运行时，切换会被拒绝。
-5. 新客户端启动后验证配套环境，通过后确认更新；否则保留恢复记录并阻止新任务启动。
+- **Tasks and evidence directory**: switch to an existing or new workspace. Existing analysis data is not moved automatically; select the original directory to return.
+- **Update cache directory**: select an empty directory, including on another disk. Existing signed manifests, installers and recovery files are verified and copied. The location changes only after all steps succeed; originals remain.
 
-题目容器和题目镜像不会跟随工具镜像升级。当前只接受兼容的数据格式，不执行不兼容数据库迁移。
-网络失败后可重试：已验证的安装文件和 Docker 镜像层可复用；客户端下载中断的临时文件会重新下载。
+Defaults remain under the user data root above. Configuration discovery, maintenance locks and recovery helpers keep fixed locations so relocated caches do not hide recovery records.
+Docker Desktop/Engine manages physical image and volume storage; this is separate from client download cache.
+Related directories cannot change during analysis, downloads or pending recovery. A CLI `--state` override requires restarting without that override before switching through the UI.
 
-## 修复、恢复与清理
+The app checks official releases at startup; failure does not disable a working environment. Open **Updates**:
 
-“工具环境 → 自检并修复环境”使用当前客户端版本的正式签名清单，重新准备工具环境，不升级客户端。
+1. Select **Check for updates** and read release notes.
+2. Finish analysis, debugging and file operations before **Download and verify update**. Preparation currently requires an idle desktop; downloads do not replace the active environment.
+3. Download the new installer, previous recovery installer and matching image; verify signatures and self-test in a separate container.
+4. Save drafts and select **Install and restart**, confirming exit. Active CLI analysis also prevents switching.
+5. The new client validates its matching environment and confirms the update. Failure preserves recovery records and blocks new analysis.
 
-更新前会保存独立恢复程序：
+Challenge containers and images do not upgrade with tool images. Only compatible data formats are accepted; incompatible database migration is not performed.
+Retry network failures: verified installers and Docker layers can be reused; interrupted temporary client downloads restart.
 
-- Windows：`%LOCALAPPDATA%/WukongData/updates/Wukong-Recovery.exe`
-- Linux：`~/.local/share/Wukong/updates/Wukong-Recovery.AppImage`（遵循 XDG_DATA_HOME）
+<a id="修复恢复与清理"></a>
 
-在“更新 → 维护选项”中点击“恢复上一版本”，或在无法打开应用时先关闭 Wukong，再运行该文件。恢复需要 Docker 可用，但不需要重新联网下载安装文件。恢复失败会保留记录供重试；镜像回滚不撤销题目数据变化。
+## Repair, recovery and cleanup
 
-可以分别清理旧客户端下载缓存和无容器引用的旧工具镜像。当前版本、上一恢复版本、待安装版本均受保护，不执行全局 Docker prune。
-卸载客户端不默认删除分析数据或 Docker 资源；Linux 用户级桌面入口位于用户数据目录的 `applications/io.wukong.desktop.desktop`。
+**Tool environment → Validate and repair environment** uses the current client's official signed manifest to prepare its tools again, without upgrading the client.
 
-## 验证边界
+An independent recovery program is saved before updating:
 
-CI 验证 Windows 安装/卸载、Linux AppImage 与真实 WebView 启动、签名完整性及 Linux Docker 集成。
-Windows Docker Desktop 的真实首次安装与跨版本升级仍需桌面实机验收；托管 runner 的安装器检查不代替这项验收。
+- Windows: `%LOCALAPPDATA%/WukongData/updates/Wukong-Recovery.exe`
+- Linux: `~/.local/share/Wukong/updates/Wukong-Recovery.AppImage` (honoring `XDG_DATA_HOME`)
+
+Use **Updates → Maintenance options → Restore previous version**. If the app cannot open, close Wukong and run that file. Recovery requires Docker but no new installer download. Failure preserves records for retry; image rollback does not undo challenge data changes.
+
+Clean old client caches and unreferenced old tool images separately. Current, previous recovery and pending versions are protected; no global Docker prune is performed.
+Uninstalling does not delete analysis data or Docker resources by default. The Linux user desktop entry is `applications/io.wukong.desktop.desktop` under the user data directory.
+
+<a id="验证边界"></a>
+
+## Validation boundary
+
+CI checks Windows install/uninstall, Linux AppImage and real WebView startup, signature integrity and Linux Docker integration.
+Real Windows Docker Desktop first installation and cross-version upgrades still require desktop-machine acceptance. Hosted-runner installer checks and language UI browser tests do not replace that acceptance.

@@ -1,4 +1,8 @@
+<a id="pwn-知识来源"></a>
+
 # Pwn knowledge provenance
+
+English · [简体中文](pwn-knowledge.zh-CN.md)
 
 Reviewed 2026-11-10. These sources inform conditional methods, not unconditional exploit recipes. Pin the target's actual runtime identity; upstream versions do not account for every vendor backport.
 
@@ -16,6 +20,8 @@ Reviewed 2026-11-10. These sources inform conditional methods, not unconditional
 - OpenSSF hardening: https://best.openssf.org/Compiler-Hardening-Guides/Compiler-Options-Hardening-Guide-for-C-and-C%2B%2B
 
 No third-party exploit source has been copied into the runtime. Evidence of static capability, observed runtime enablement, a primitive, and demonstrated effect remain distinct.
+
+<a id="从-wp-提炼的方法"></a>
 
 ## Writeup-derived additions
 
@@ -37,6 +43,8 @@ are documented in [the Pwn regression suite](../../fixtures/pwn/README.md).
 | [Fu11shoot, DiceCTF 2026 / Garden](https://fu11shoot.com/es/writeups/dice-ctf-2026/garden/) | GC roots, overlapping compaction and off-heap object headers create invariants beyond ordinary opcode bounds | `interpreter` |
 | [STAR Labs, Summer Pwnables 2025 / lz1](https://starlabs.sg/blog/2025/09-summer-pwnables-lz1-solution/) | Valid compressed inputs and decoded length/distance semantics reach bugs that invalid-header fuzzing misses | `formats`, `hunter`, `fuzz` |
 | [Minh Ton, Advent of Pwn 2025 / Day 5](https://minh-ton.dev/posts/advent_of_pwn_day_5/) | io_uring is conditional on kernel/ring/opcode policy, not a universal substitute for denied syscalls | `seccomp_io` |
+
+<a id="交叉核对与限制"></a>
 
 ## Cross-checks and deliberate limits
 

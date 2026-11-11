@@ -1,4 +1,8 @@
+<a id="执行-worker"></a>
+
 # Execution worker
+
+English · [简体中文](README.zh-CN.md)
 
 The Rust controller never runs an analysed target by default. Choose a persistent
 Docker/VM/SSH worker. `trusted_local` explicitly runs trusted fixtures on the host
@@ -21,6 +25,7 @@ and the original `record`. Original MI transcripts remain available as evidence.
 From the repository root (PowerShell):
 
 ```powershell
+python -m scripts.toolchain.fetch_worker_deps
 $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 & $docker build -f workers/Dockerfile -t wukong-worker:0.1 .
@@ -41,8 +46,8 @@ The Dockerfile pins the AFL++ base image by digest and installs GDB, GCC, Python
 AFL++ with QEMU instrumentation, the Python analysis toolchain (pwntools,
 z3-solver, angr, ropper), Temurin JDK 25 LTS (checked SHA256; required by
 Ghidra 12.2), and the official Ghidra 12.2 release with a checked SHA256. Use
-`--build-arg INSTALL_GHIDRA=0` to omit Ghidra. For reproducible builds set `AFL_IMAGE`
-to an upstream image digest after reviewing `docker image inspect` output.
+`--build-arg INSTALL_GHIDRA=0` to omit Ghidra. To pin the base image, set `AFL_IMAGE`
+to an upstream image digest after reviewing `docker image inspect` output. Full reproducibility remains limited by incompletely pinned transitive dependencies.
 
 The `runtime` section of the application configuration is:
 
@@ -56,6 +61,8 @@ remote_bridge_path = "/opt/wukong/runtime/bridge.py"
 remote_state_dir = "/state"
 request_timeout_secs = 120
 ```
+
+<a id="ssh-或-vm"></a>
 
 ## SSH or a VM
 
@@ -88,6 +95,8 @@ debugger to read/write inferior memory through procfs. These capabilities are no
 retained by target processes. The read-only container filesystem, private state
 volume, disabled network and VM/container boundary remain separate controls.
 `trusted_local` explicitly reports a weaker, trusted-fixture boundary.
+
+<a id="协议"></a>
 
 ## Protocol
 
@@ -161,6 +170,8 @@ lock. A lost lock owner requires process reconciliation before a stale lock is
 removed. Configure controller request timeout above the query timeout for longer
 imports; the transport supports up to 300 seconds.
 
+<a id="验收检查"></a>
+
 ## Acceptance checks
 
 Portable trusted fixture process tests:
@@ -201,9 +212,9 @@ three bytes, and real AFL++ QEMU (17,059 executions in eight seconds, one saved
 SIGABRT crash). The Ghidra acceptance test passed headless import, auto-analysis,
 functions/decompile/xrefs queries, cache identity and hash-mismatch rejection on
 Ghidra 12.2 with Temurin JDK 25. Raw records are in `docs/history/validation/2026-11-06/runtime-linux.json`
-and `docs/history/validation/2026-11-06/ghidra-linux.json`.
+and `docs/history/validation/2026-11-06/ghidra-linux.json`. These are historical records, not acceptance of the current commit.
 
-Docker Desktop's current host core pattern invokes an external handler. AFL++
+That historical Docker Desktop host's core pattern invokes an external handler. AFL++
 rejects that setting by default. The acceptance fixture explicitly sets
 `AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1` to test QEMU execution/statistics without
 changing host-global settings; its output records this override. It does not prove
@@ -216,6 +227,8 @@ References: [GDB/MI](https://sourceware.org/gdb/current/onlinedocs/gdb.html/GDB_
 [Ghidra 12.2 release and checksum](https://github.com/NationalSecurityAgency/ghidra/releases/tag/Ghidra_12.2_build).
 
 
+<a id="ghidra-项目归属"></a>
+
 ## Ghidra project ownership
 
 The controller uses the standard-library file lock; Python Ghidra workers use
@@ -224,6 +237,8 @@ an analyzer may own it. The lock covers analyzer execution, cancellation/reaping
 and cache publication. An `analysis.active.json` claim survives an owner crash
 or uncertain execution failure. Inspect and reconcile the analyzer before
 clearing that claim; absence of a lock owner alone does not prove its child exited.
+
+<a id="模块边界"></a>
 
 ## Module boundaries
 

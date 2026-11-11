@@ -1,108 +1,67 @@
-# GitHub 维护功能
+<a id="github-维护功能"></a>
+
+# GitHub maintenance
+
+English · [简体中文](github-maintenance.zh-CN.md)
 
 ## Dependabot
 
-默认分支的 `.github/dependabot.yml` 管理 Cargo、npm workspace、
-`workers/runtime/requirements.txt` 和固定到 commit 的 GitHub Actions。
-每周一北京时间 09:10–09:40 分批检查，版本更新最多同时打开 7 个 PR。
-rig 系列依赖一起更新，其余兼容更新按生态分组；安全更新另行分组。
-漏洞提醒和自动安全更新在仓库设置中启用，PR 仍需通过 CI 并人工合并。
+Default-branch `.github/dependabot.yml` manages Cargo, the npm workspace, `workers/runtime/requirements.txt` and commit-pinned GitHub Actions. Checks are staggered Mondays 09:10–09:40 Beijing time, with at most seven simultaneous version-update PRs. Rig dependencies update together; other compatible updates group by ecosystem, with separate security groups. Repository settings enable alerts/automatic security updates. PRs still require CI and maintainer merge.
 
-Python Dockerfile 中内联的依赖、apt/gem、AFL 基础镜像和自定义工具锁文件
-不属于这份 Dependabot 配置的覆盖范围。Rust 编译器也不单独自动升级：
-`rust-toolchain.toml` 与 `Cargo.toml` 的 `rust-version` 必须一起修改。
-Tauri 的 Rust crates 与 npm 包升级需要检查双方兼容性。
+Inline Dockerfile Python dependencies, apt/gem, AFL base images and custom tool locks are outside this configuration. Rust compiler updates must change `rust-toolchain.toml` and Cargo `rust-version` together. Check compatibility between Tauri Rust/npm packages.
 
-Dependabot 的 PR 使用普通 CI，不提供 Docker Hub 或模型密钥。
-配置文件不能约束其他 PR 合并方式，也不能替代私有仓库套餐所限制的 Rulesets。
+Dependabot uses ordinary CI without Docker Hub/model secrets. Its configuration does not govern other PR merge methods or replace plan-restricted private-repository Rulesets.
 
-## 工具链更新检查
+<a id="工具链更新检查"></a>
 
-Actions → **Toolchain updates** → Run workflow 可手动运行；每周一北京时间
-10:23 自动检查默认分支，GitHub 的定时任务可能延迟。使用标准 Ubuntu runner，
-只读权限，不使用 Docker Hub 或模型密钥，不下载大型安装包。
+## Toolchain update checks
 
-检查 pwndbg、pwninit、Ghidra、Temurin JDK 25 和 GEF 的最新稳定版本。
-报告包含版本差异、上游链接和 SHA256 来源，上传 `toolchain-update-report`
-artifact（30 天），包含 `report.md`、`report.json` 和 `candidates.json`。
-发现新版本是正常结果；API/资产格式错误或同版本 SHA256 改变会令检查失败。
-缺少上游 SHA256 的资产标为 `checksum_review_required`，不生成候选条目。
-GEF 使用固定源码 commit，校验 Git blob 身份并计算 SHA256，标为需要源码审查；
-这不等于上游独立签名或发布者校验文件。
+Run **Actions → Toolchain updates → Run workflow**, or wait for Mondays 10:23 Beijing time (GitHub schedules can be delayed). Standard Ubuntu runners use read-only permissions, no Docker Hub/model secrets and no large installer downloads.
 
-本阶段只生成升级提案，不自动改锁文件、开 PR、合并或发布。
-准备升级时审查 `candidates.json` 和上游变更，更新锁文件及 Dockerfile 中重复的
-SHA256/路径设置，执行下载校验，再构建镜像并完整验收。Temurin 保持 JDK 25；
-apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
+Checks cover stable pwndbg, pwninit, Ghidra, Temurin JDK 25 and GEF. The 30-day `toolchain-update-report` artifact contains `report.md`, `report.json`, `candidates.json`, including differences, upstream links and SHA256 sources. New versions are normal; API/asset format errors or changed same-version SHA256 fail. Assets without upstream SHA256 are `checksum_review_required` and omitted from candidates. GEF pins source commit, verifies Git blob identity and computes SHA256, requiring source review; this is not an independent publisher signature/checksum.
 
-## 不可变 Release
+Checks propose upgrades only: no automatic lockfile edits, PRs, merges or releases. Review candidates/upstream changes, update locks and duplicated Dockerfile SHA256/paths, verify downloads, rebuild and run full acceptance. Temurin stays on JDK 25; maintain apt/gem/inline pip/AFL separately.
 
-仓库 Settings → General → Releases 的 **Enable release immutability** 已启用。
-只作用于之后发布的 Release。发布后附件及关联 tag 锁定，升级需要新版本；
-标题、说明和 latest 标记仍可调整。不要删除正式版本后尝试复用其 tag。
+<a id="不可变-release"></a>
 
-发布器先核对草稿的全部远端附件名称、大小和 SHA256，再发布；发布后校验
-`immutable=true` 才推进 latest。若管理员关闭此设置，正式发布检查会失败，
-不会悄悄把可变 Release 当作不可变版本。普通工作流无需管理员权限。
+## Immutable Releases
 
-## Actions 运行摘要
+Repository **Settings → General → Releases → Enable release immutability** is enabled for subsequent releases. Publication locks attachments/associated tags; upgrades require new versions. Titles, notes and latest markers may still change. Never delete official releases to reuse tags.
 
-### CI 调度与缓存
+The publisher verifies every draft attachment name/size/SHA256 before publication and checks `immutable=true` before advancing latest. If an administrator disables immutability, publication checks fail rather than silently accept mutable releases. Ordinary workflows need no admin permissions.
 
-普通 CI 只在 `master` push 和面向 `master` 的 PR 触发，避免同一开发分支的 push/PR 重复执行。
-未开 PR 的分支可手动启动 CI；版本准备工作流使用发布 App 创建 PR，由原生 PR 事件启动完整 CI。
-PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
+<a id="actions-运行摘要"></a>
 
-PR 使用 `scripts/ci/ci_scope.py` 选择检查：仅 README/docs Markdown 改动执行轻量检查；
-`ui/` 增加前端检查；`workers/runtime/`、`workers/tests/`、`fixtures/`、`evals/` 增加 Linux 测试。
-Rust、公共脚本、锁文件、工作流、未知路径或版本准备 PR 都执行全量检查。
-重命名同时检查旧路径和新路径；计算范围失败直接阻止 CI 通过。
-Windows 版本一致性、发布脚本和安装器测试始终运行。`master`、手动运行和发布调用始终全量。
+## Actions summaries
 
-`summary` 是最终检查门禁：要求范围计算及 Windows 检查成功，Linux 的结果必须与选择范围一致；选中的版本客户端预构建也必须成功。
-以后配置 required checks 时应包含 `summary`，不要仅依赖可能按规则跳过的 `linux`。
-正常范围跳过会明确记录，失败/取消/异常跳过不能通过最终门禁。
+<a id="ci-调度与缓存"></a>
 
-Rust 使用固定工具链和参数派生缓存键，主分支负责写入，PR 只恢复。
-CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。首次或工具链/参数变化仍需重新编译。
-`windows-client-v1` 和 `linux-client-v1` 在 master 版本预构建或显式预热时写入，tag 只恢复。
-这使不同版本 tag 都能读取 master 缓存，避免把大量编译缓存只保存在无法跨 tag 复用的作用域。
-摘要显示精确缓存命中状态及恢复、保存、fmt、Clippy、test 的独立耗时。
-非精确命中可能是回退缓存或无缓存，实际恢复键见 Rust cache 日志。
-Clippy 与测试保持在同一 Windows job 复用编译目录，不为并行而重复下载和编译依赖。
-Windows CI 通过 `CARGO_PROFILE_DEV_DEBUG=1`、`CARGO_PROFILE_TEST_DEBUG=1` 使用有限调试信息，
-保留调试断言与溢出检查；本地开发及正式 Release 配置不变。CI 故障可用的类型/变量调试信息会减少。
-这两个环境变量属于 Rust 缓存键的输入，切换配置后的首次运行不能复用原配置的完整缓存。
+### CI scheduling and caches
 
-优化验收分别记录首次运行、同配置缓存命中运行及仅 Python 改动 PR 的耗时，
-同时比较总等待时间和 runner 用量；不把无缓存构建和缓存命中构建直接当作同条件性能对比。
+Ordinary CI triggers on `master` pushes and PRs targeting `master`, avoiding duplicate branch push/PR runs. Unopened branches can run manually. Version preparation uses the release App to create PRs, triggering native PR CI. New PR revisions cancel old runs; master runs finish to save caches, while GitHub concurrency coalesces pending work.
 
-CI 与 Release 在各任务结束后运行 `summary` job，包括前面任务失败的情况。
-运行首页可查看 commit、ref、任务结果、耗时和产物链接；Release 额外显示版本、
-镜像 digest、镜像解包大小、在线包大小与实际容器验收结果。
-手动演练明确注明未正式发布，tag 发布只有 publish 成功才显示正式版本链接。
+`scripts/ci/ci_scope.py` selects PR checks: README/docs-only Markdown and the paired translation review record get lightweight checks; the changes job always validates documentation pairs, links and review fingerprints; `ui/` adds frontend; runtime/tests/fixtures/evals add Linux tests. Rust, common scripts, locks, workflows, unknown paths and version PRs get full checks. Renames inspect both paths; scope-computation failure blocks CI. Windows version/release-script/installer checks always run. Master/manual/release calls are always full.
 
-结论来自 GitHub `needs` 的任务状态；耗时及 artifact 链接通过只读 Actions API 获取。
-API 暂不可用时展示缺失提示，不把未知耗时写成 0，也不把缺失验收报告当成通过。
-摘要 job 在运行被强制取消或 GitHub 调度异常时仍可能无法执行，原始 job 日志为准。
-工具链检查有独立摘要及 30 天报告，Release 的在线包与验收报告保留 14 天。
+`summary` is the final gate: scope/Windows must succeed; Linux status must match selected scope; selected release-client prebuilds must also succeed. Require `summary`, not only conditionally skipped `linux`. Expected skips are explicit; failures, cancellations or unexpected skips cannot pass.
 
-### Docker 与附件缓存
+Rust cache keys include toolchain/options. Master writes; PRs restore. `windows-checks-v2` is separate from Release compilation. Cold/toolchain/option changes rebuild. `windows-client-v1`/`linux-client-v1` are written by master version prebuilds or explicit warmups; tags restore, avoiding caches trapped in tag scope. Summaries report exact hits and restore/save/fmt/Clippy/test durations. Non-exact hits can mean fallback or miss; see logs for the restored key. Clippy/tests share a Windows build directory rather than duplicate dependencies for parallelism. Windows CI sets `CARGO_PROFILE_DEV_DEBUG=1`, `CARGO_PROFILE_TEST_DEBUG=1`, retaining debug assertions/overflow checks with less type/variable debugging information. Local/release profiles stay unchanged. These settings participate in keys, so the first changed-profile run cannot reuse the full old cache.
 
-`Cache Worker Dependencies` 在 master 的锁文件、下载器或该工作流变更时预热，也可手动运行。
-缓存键包含工具锁文件哈希；发布恢复 master 附件缓存，逐个 SHA256 校验后使用。
-默认最多并行下载 3 个附件，可用 `--jobs 1` 串行下载；临时文件校验成功才替换正式文件。
-网络错误或损坏内容不能作为有效缓存输入。缓存被淘汰时自动重新下载。
+Compare cold, same-configuration cache-hit and Python-only PR timings separately, including total waiting and runner use. Do not present cold-vs-warm as equal-condition speed comparisons.
 
-workbench 继承独立的稳定 toolchain stage，runtime、prompts、版本标签在工具安装之后加入。
-各工具只挂载自己的附件，某个附件变化不会仅因共享目录变化就使所有附件层失效。
-Docker Hub `buildcache` 保存完整中间层。pip cache mount 用于同一 builder 内复用；
-标准临时 runner 之间的持久化依靠 registry 层缓存和附件缓存，不假定 cache mount 自动跨机器保留。
+CI/Release summary jobs run after dependencies, including failure. Run pages show commit/ref, status, duration and artifact links; Release adds version, digest, unpacked image/package size and actual container acceptance. Manual rehearsals explicitly say unpublished; tag runs link official releases only after publish succeeds.
 
-### 关闭 PR 后的缓存回收
+Statuses come from `needs`; durations/artifacts use read-only Actions API. If unavailable, show missing information, not zero duration or assumed acceptance. Forced cancellation/GitHub scheduling issues may prevent summary execution; raw logs remain authoritative. Toolchain reports retain 30 days; Release packages/acceptance reports retain 14.
 
-`Clean Closed PR Caches` 每天北京时间 06:41 运行，读取最新 PR 状态后按缓存 ID 删除：
-已关闭 PR 的 `refs/pull/N/merge` 缓存，以及对应已关闭 Dependabot PR 的机器人分支缓存。
-master、tag、仍打开的 PR 及未知普通分支均保留。定时任务可能延迟。
-手动运行默认只列出候选；勾选 `apply` 才删除。摘要显示数量和回收字节数。
-只在 master 上执行，不使用 `pull_request_target` 或运行 PR 代码，不需要个人管理员 Token。
+<a id="docker-与附件缓存"></a>
+
+### Docker and dependency caches
+
+`Cache Worker Dependencies` warms master on lock/downloader/workflow changes and supports manual runs. Keys include tool-lock hash. Release restores master attachments and verifies every SHA256. Downloads default to at most three parallel assets; `--jobs 1` is serial. Verified temporary files replace final files; network errors/corruption cannot be cache inputs. Eviction causes redownload.
+
+Workbench inherits a stable toolchain stage; runtime/prompts/version labels come after tool installation. Tools mount only their own assets, avoiding invalidating all layers when a shared directory changes. Docker Hub `buildcache` stores complete intermediate layers. Pip cache mounts help within one builder; cross-runner persistence comes from registry layers/attachment caches, not assumed shared cache mounts.
+
+<a id="关闭-pr-后的缓存回收"></a>
+
+### Closed-PR cache cleanup
+
+`Clean Closed PR Caches` runs daily at 06:41 Beijing time, rechecks current PR state and deletes by cache ID: closed PR `refs/pull/N/merge` caches and corresponding closed Dependabot branch caches. Master/tags/open PRs/unknown ordinary branches remain. Scheduling may be delayed. Manual runs only list candidates unless `apply` is selected. Summaries show count/reclaimed bytes. It runs only on master, never `pull_request_target` or PR code, and needs no personal admin token.
