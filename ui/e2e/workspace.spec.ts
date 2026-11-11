@@ -482,3 +482,76 @@ test('keyboard activation of a disclosure does not select its agent', async ({ p
   await expect(page.getByRole('treeitem')).toHaveCount(3);
   await expect(page.getByRole('treeitem').first()).toHaveAttribute('aria-selected', 'false');
 });
+
+
+for (const locale of ['zh-CN', 'en-US']) {
+  test(`first setup separates steps and errors at a small window (${locale})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 700 });
+    await page.goto('/');
+    if (locale === 'en-US') {
+      await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+      await page.getByLabel('界面语言').selectOption('en-US');
+      await page.getByLabel('Close', { exact: true }).click();
+    }
+    await page.evaluate(() => {
+      const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+      const state = { version: '0.2.0', needs_setup: true, phase: 'idle', environment_step: null,
+        message: { code: 'system-current-version-is-up-to-date', args: {} }, available: null,
+        notes: '', downloaded: 0, total: null, prepared: null, recovery: null, pending: false };
+      Object.assign(window, { __setupTest: state });
+      native.invoke = async (command: string, args: any) => {
+        if (command !== 'update_action') return invoke(command, args);
+        if (args.action === 'setup') {
+          Object.assign(state, { phase: 'error', environment_step: 'docker', message: {
+            code: 'system-docker-credential-missing', args: { helper: 'docker-credential-desktop' },
+            detail: 'error getting credentials - exec: docker-credential-desktop: executable file not found in %PATH%' } });
+        }
+        return { ...state };
+      };
+    });
+    await page.getByRole('button', { name: locale === 'zh-CN' ? '更新' : 'Updates', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.locator('.setup-steps li')).toHaveCount(3);
+    await expect(dialog.locator('.maintenance-options')).toHaveCount(0);
+    await expect(dialog.locator('.header-actions .primary')).toBeInViewport();
+    await expect(dialog.locator('.modal-heading')).toBeInViewport();
+    expect(await dialog.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
+    await page.screenshot({ path: `target/setup-ready-${locale}.png` });
+    await dialog.locator('.header-actions .primary').click();
+    await expect(dialog.getByRole('alert')).toHaveCount(1);
+    await expect(dialog.getByRole('alert')).toContainText('docker-credential-desktop');
+    await expect(dialog.locator('.update-status')).toHaveCount(0);
+    await expect(dialog.locator('.setup-steps li').first()).toHaveAttribute('data-state', 'failed');
+    await dialog.locator('.update-error summary').click();
+    await expect(dialog.locator('.workbench-result')).toContainText('error getting credentials');
+    await dialog.locator('.header-actions .primary').scrollIntoViewIfNeeded();
+    await expect(dialog.locator('.header-actions .primary')).toBeInViewport();
+    await expect(dialog.locator('.modal-heading')).toBeInViewport();
+    expect(await dialog.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
+    await page.screenshot({ path: `target/setup-error-${locale}.png` });
+  });
+}
+
+test('Windows storage paths display cleanly but unchanged paths retain native identity', async ({ page }) => {
+  await page.goto('/');
+  const original = String.raw`\\?\C:\Users\tester\AppData\Local\WukongData\.wukong`;
+  await page.evaluate(original => {
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    const state = (window as any).__desktopTest;
+    state.host = { ...state.host, execution: null, state_dir: original };
+    native.invoke = async (command: string, args: any) => {
+      if (command === 'update_storage') return { data_dir: original, cache_dir: String.raw`\\?\UNC\server\cache` };
+      if (command === 'update_data_directory') { state.requests.push({ command, args }); return; }
+      return invoke(command, args);
+    };
+    (window as any).__emitDesktop('workspace-changed', null);
+  }, original);
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByRole('button', { name: '存储位置', exact: true }).click();
+  await expect(page.getByLabel('任务与证据目录')).toHaveValue(original.slice(4));
+  await expect(page.getByLabel('更新缓存目录')).toHaveValue(String.raw`\\server\cache`);
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: '应用数据目录' }).click();
+  const requests = await page.evaluate(() => (window as any).__desktopTest.requests);
+  expect(requests.find((r: any) => r.command === 'update_data_directory')?.args.destination).toBe(original);
+});

@@ -22,15 +22,22 @@ chmod +x Wukong_*.AppImage
 ./Wukong_*.AppImage
 ```
 
-If FUSE is unavailable, install the distribution's compatibility library or launch with `APPIMAGE_EXTRACT_AND_RUN=1 ./Wukong_*.AppImage`. Choose **Add to application menu and restart** for a per-user installation. This does not require sudo.
+If FUSE is unavailable, install the distribution's compatibility library or launch with `APPIMAGE_EXTRACT_AND_RUN=1 ./Wukong_*.AppImage`. After preparing tools, choose **Updates → Maintenance options → Add to application menu and restart** for a per-user installation. This does not require sudo.
 
 Install Docker Engine and confirm your user can access it before preparing tools. Wukong does not install Docker, change group membership or configure system services automatically.
+
+## First setup and diagnostics
+
+First setup shows **Check Docker → Download tool image → Validate and activate**, with separate client version and tool readiness. It presents preparation/retry and Docker installation help. Storage belongs in **Workspace settings → Storage locations**; cleanup and recovery belong in **Updates → Maintenance options** (also shown when recovery is pending).
+
+A failure appears once and can be copied. For failed Docker operations, expand the diagnostic output to see the log tail; the error also provides the full log location. If `docker-credential-desktop` is missing, fully exit and reopen Wukong after Docker Desktop installation. If it still fails, check the installation and the helper directory in PATH. Wukong looks for the CLI and sibling helpers in confirmed installation directories; it does not delete login configuration or disable credential storage. This error is unrelated to Windows extended data-path prefixes.
 
 ## Tools, configuration and storage
 
 - The public `hlmark0/wukong` image supports anonymous pulls. You may sign in to Docker Hub if rate-limited.
 - Each release binds an immutable image digest. Changes to `latest` do not silently change your environment.
 - Reserve at least 25 GiB for Docker images and temporary layers. Wukong checks the download disk; Docker Desktop virtual disk capacity is managed separately.
+- Tasks and evidence default to `.wukong` under the user data root below; the update cache defaults to `updates`. Windows paths use readable drive/UNC notation in the UI while native path identity is retained.
 - Default writable storage is `%LOCALAPPDATA%/WukongData` on Windows and `$XDG_DATA_HOME/Wukong` on Linux, falling back to `~/.local/share/Wukong`.
 - Explicit `--config` and existing portable configuration remain supported. Installer replacement does not overwrite task databases or challenge files.
 - `preferences.json` in the fixed user data root stores language choices independently of workspace configuration.
