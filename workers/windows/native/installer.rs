@@ -433,19 +433,23 @@ pub fn install(plan: Plan) -> Result<Value> {
         Duration::from_secs(30),
     )?;
     deployment::write_new_json(&metadata.join("deployment.json"), &deployment, &private)?;
-    deployment.verify(&root)?;
+    deployment
+        .verify(&root)
+        .context("verify installed worker state before activation")?;
     crate::firewall::add(
         &deployment.installation_id,
         &package.join(&entry.sshd),
         enrollment.ssh_port,
         enrollment.management_peer,
-    )?;
+    )
+    .context("configure owned inbound SSH firewall")?;
     deployment::write_new_json(
         &metadata.join("firewall-created.json"),
         &json!({"name":pipe_transport::service_name(&deployment.installation_id)?}),
         &private,
     )?;
-    register_service(&root, &deployment, &plan.manifest)?;
+    register_service(&root, &deployment, &plan.manifest)
+        .context("register and start owned worker service")?;
     let result = json!({"schema":1,"installed":true,"installation_id":deployment.installation_id,"environment_id":enrollment.environment_id,"generation":enrollment.generation,"manifest_sha256":plan.manifest.sha256(),"ssh_user":management.name,"ssh_port":enrollment.ssh_port,"host_key":host_public,"host_fingerprint":fingerprint,"production_isolation_verified":false});
     deployment::write_new_json(&root.join("connection.json"), &result, &code)?;
     Ok(result)
