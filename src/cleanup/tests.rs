@@ -19,6 +19,10 @@ fn canonical_verbatim_drive_paths_are_supported() -> Result<()> {
     let root = fs::canonicalize(temp.path())?.join("owned");
     create_owned_directory(&root)?;
     assert!(locations::owns_directory(&root));
+    assert_eq!(
+        files::absolute(&root)?,
+        files::absolute(&crate::workbench::portable_path(&root))?
+    );
     Ok(())
 }
 #[test]

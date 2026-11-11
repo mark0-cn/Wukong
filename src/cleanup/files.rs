@@ -3,6 +3,8 @@ use super::*;
 use std::{collections::BTreeSet, fs, time::UNIX_EPOCH};
 pub(super) fn absolute(path: &Path) -> Result<PathBuf> {
     let path = std::path::absolute(path)?;
+    #[cfg(windows)]
+    let path = crate::workbench::portable_path(&path);
     let mut clean = PathBuf::new();
     for component in path.components() {
         match component {
@@ -14,6 +16,28 @@ pub(super) fn absolute(path: &Path) -> Result<PathBuf> {
         }
     }
     ensure!(clean.parent().is_some(), "refusing a filesystem root");
+    // Resolve existing, link-free ancestors so Win32 drive/verbatim/8.3/case
+    // aliases cannot inventory (or lock) the same physical directory twice.
+    // Keep reparse paths lexical: cleanup must retain them rather than adopt
+    // their targets. Normal application startup can still use configured links.
+    if safe(&clean).is_ok() {
+        let mut ancestor = clean.as_path();
+        let mut suffix = vec![];
+        while !ancestor.try_exists()? {
+            suffix.push(
+                ancestor
+                    .file_name()
+                    .context("path has no existing ancestor")?
+                    .to_owned(),
+            );
+            ancestor = ancestor.parent().context("path has no parent")?;
+        }
+        let mut resolved = crate::workbench::portable_path(&fs::canonicalize(ancestor)?);
+        for part in suffix.into_iter().rev() {
+            resolved.push(part);
+        }
+        clean = resolved;
+    }
     Ok(clean)
 }
 fn reparse(metadata: &fs::Metadata) -> bool {
@@ -52,7 +76,7 @@ fn identity(path: &Path, record: bool) -> Result<FileEntry> {
     let metadata = fs::symlink_metadata(path)?;
     ensure!(metadata.is_file(), "not a regular file");
     Ok(FileEntry {
-        path: path.to_owned(),
+        path: crate::workbench::portable_path(&fs::canonicalize(path)?),
         bytes: metadata.len(),
         modified: metadata
             .modified()
@@ -337,7 +361,7 @@ pub(super) fn profiles(plan: &mut Plan) -> Result<()> {
     }
     for base in bases {
         // Framework data only, never the shared WebView2 installation.
-        add(&base.join("io.wukong.desktop"), false, plan)?;
+        add(&absolute(&base.join("io.wukong.desktop"))?, false, plan)?;
     }
     Ok(())
 }
