@@ -135,7 +135,9 @@ impl Cleanup {
         );
         ensure!(reviewed.selection.any(), "no cleanup scope selected");
         files::safe(&self.home.join("updates/maintenance.lock"))?;
-        let lock = crate::updates::maintenance::lock(&self.home.join("updates"), true)?;
+        files::safe(&self.home.join("updates/cache.lock"))?;
+        let cache = crate::updates::storage::cache_lock_at(&self.home.join("updates"), true)?;
+        let lock = crate::updates::maintenance::cleanup_lock(&self.home.join("updates"))?;
         ensure!(
             !self.home.join("updates/pending.json").exists(),
             "finish or recover the pending update before uninstalling"
@@ -191,6 +193,7 @@ impl Cleanup {
             }
         }
         drop(lock);
+        drop(cache);
         // Only empty directories are removed; unknown/new content is never swept.
         for directory in current.directories.iter().rev() {
             let _ = std::fs::remove_dir(directory);
@@ -210,15 +213,20 @@ impl Cleanup {
         if !marker.exists() {
             return Ok(());
         }
-        let lock = crate::updates::maintenance::lock(&self.home.join("updates"), true)?;
+        let cache = crate::updates::storage::cache_lock_at(&self.home.join("updates"), true)?;
+        let lock = crate::updates::maintenance::cleanup_lock(&self.home.join("updates"))?;
         let identity: String = crate::workbench::read_json(&marker)?;
         ensure!(
             identity == fingerprint,
             "cleanup finalization belongs to another operation"
         );
+        // Retire lock paths while admission is still closed. Removing an unlocked
+        // lock file after admitting another process would split lock ownership.
+        std::fs::remove_file(self.home.join("updates/cache.lock"))?;
+        std::fs::remove_file(self.home.join("updates/maintenance.lock"))?;
         std::fs::remove_file(marker)?;
         drop(lock);
-        let _ = std::fs::remove_file(self.home.join("updates/maintenance.lock"));
+        drop(cache);
         let _ = std::fs::remove_dir(self.home.join("updates"));
         let _ = std::fs::remove_dir(&self.home);
         Ok(())

@@ -6,6 +6,12 @@ use std::{
 };
 
 pub fn lock(root: &Path, exclusive: bool) -> Result<File> {
+    acquire(root, exclusive, false)
+}
+pub(crate) fn cleanup_lock(root: &Path) -> Result<File> {
+    acquire(root, true, true)
+}
+fn acquire(root: &Path, exclusive: bool, cleanup: bool) -> Result<File> {
     std::fs::create_dir_all(root)
         .with_context(|| format!("create maintenance directory {}", root.display()))?;
     let file = OpenOptions::new()
@@ -21,11 +27,11 @@ pub fn lock(root: &Path, exclusive: bool) -> Result<File> {
     } else {
         file.try_lock_shared()
             .context("application maintenance is in progress")?;
-        ensure!(
-            !root.join("cleanup-in-progress.json").exists(),
-            "uninstall cleanup is in progress; finish or retry the uninstaller"
-        );
     }
+    ensure!(
+        cleanup || !root.join("cleanup-in-progress.json").exists(),
+        "uninstall cleanup is in progress; finish or retry the uninstaller"
+    );
     Ok(file)
 }
 pub fn assessment_guard() -> Result<File> {
