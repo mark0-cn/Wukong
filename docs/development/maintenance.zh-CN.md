@@ -109,3 +109,17 @@ cargo test --offline --lib workspace_history_performance_baseline -- --ignored -
 评估后续改动时记录数据规模、构建模式和硬件环境，并分别观察界面帧耗时、查询等待、内存和数据库写入量。审计记录、证据与恢复边界的持久化不可因 UI 降频而丢失。
 
 文档配对、人工语义核对和 CI 检查见[文档维护](documentation.zh-CN.md)。
+
+<a id="readme-screenshots"></a>
+
+## README 截图
+
+截图使用当前前端及固定的示例任务，不运行模型或 worker。图注明确注明示例数据，不能作为分析结果或原生桌面验收。不要使用可能过时的手工界面拼图。
+
+安装根目录 npm 依赖及 Playwright Chromium 后，在一个终端运行 `npm run dev`，保持本地服务位于 `http://127.0.0.1:1420`；另一个终端在仓库根目录执行：
+
+```sh
+node scripts/dev/capture-readme.mjs
+```
+
+脚本复用前端夹具结构，提供限定的原生命令适配器，生成 `docs/assets/workspace.en-US.png` 与 `docs/assets/workspace.zh-CN.png`。固定视口、时区和示例数据，不读取本机配置或凭据；失败、未处理错误或横向溢出会中止生成。逐张检查裁切、字体、工具行和协作树，再与对应 README 一起提交。首次缺少浏览器时运行 `npx --no-install playwright install chromium`。

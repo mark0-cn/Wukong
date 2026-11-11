@@ -7,74 +7,135 @@
 <p align="center">English · <a href="README.zh-CN.md">简体中文</a></p>
 
 <p align="center">
-  <strong>A multi-agent workspace for binary reverse engineering and analysis</strong><br>
-  Behavior analysis · Format and algorithm recovery · Dynamic debugging · Independent verification
+  <strong>A multi-agent workspace for binary reverse engineering and Pwn analysis</strong><br>
+  Understand behavior · Recover formats and algorithms · Debug · Verify with evidence
 </p>
 
 <p align="center">
-  <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-1.97.1%2B-DEA584?logo=rust" alt="Rust 1.97.1+"></a>
-  <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rig-0.46.0-7EE0C3" alt="Rig 0.46.0"></a>
-  <a href="tauri.conf.json"><img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri" alt="Tauri 2"></a>
+  <a href="https://github.com/mark0-cn/Wukong/actions/workflows/ci.yml"><img src="https://github.com/mark0-cn/Wukong/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
+  <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/Rust-1.97.1-DEA584?logo=rust" alt="Pinned Rust toolchain: 1.97.1"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue" alt="License: Apache-2.0"></a>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/mark0-cn/Wukong/releases">Releases</a> ·
   <a href="docs/user/usage.md">User guide</a> ·
-  <a href="#documentation">Documentation</a> ·
-  <a href="https://github.com/mark0-cn/Wukong/issues">Report an issue</a>
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="https://github.com/mark0-cn/Wukong/issues">Issues</a>
 </p>
 
-Wukong (悟空) combines a Rust/Rig analysis core with a Tauri/React desktop workspace and a complete CLI. Describe your objective; a root Agent breaks it into tasks, and analysis and verification Agents investigate together, delivering traceable conclusions, original evidence and reports.
+Describe a binary-analysis objective in the desktop workspace or CLI. Wukong's lead Agent coordinates scoped analysis tasks and independent review, keeping conversations, tool operations and original evidence available for inspection. The core uses Rust/Rig; the desktop uses Tauri/React.
+
+<a id="workspace-preview"></a>
+<a id="工作区预览"></a>
+
+## Workspace preview
+
+![Wukong showing analysis progress, tool operations and a parent-child Agent tree](docs/assets/workspace.en-US.png)
+
+*Current interface with illustrative analysis data. The preview shows task history, analysis progress and the collaboration tree; findings and evidence have their own view.*
 
 <a id="目录"></a>
+<a id="contents"></a>
 
-## Contents
+[Capabilities](#what-you-can-do) · [Quick start](#quick-start) · [Support](#platforms-and-requirements) · [Pwn environments](#pwn-workbench) · [CLI](#command-line) · [Source builds](#build-from-source)
 
-- [Features](#features)
-- [Quick start](#quick-start)
-- [Usage](#usage)
-- [Execution environment](#execution-environment)
-- [Documentation](#documentation)
-- [Repository layout](#repository-layout)
-- [Contributing](#contributing)
-- [Acknowledgments](#acknowledgments)
-- [License](#license)
-
+<a id="features"></a>
 <a id="项目特性"></a>
 
-## Features
+## What you can do
 
-| Capability | Description |
+| Workflow | Available capabilities |
 | --- | --- |
-| Binary analysis | Read ELF, PE and Mach-O profiles and strings directly; query functions, decompilation and cross-references through Ghidra |
-| Agent collaboration | Root orchestration, analyst investigation and independent verifier review; shared notes, checklists and evidence |
-| Dynamic analysis | Isolated workers provide GDB/MI, persistent processes, interactive sessions, AFL++ QEMU, angr, crash replay and input minimization |
-| Desktop and CLI | Inspect conversations, tasks, findings and evidence; start, intervene, resume and export from the CLI |
-| Languages | English and Chinese UI, CLI help and readable reports; independent output preferences for new tasks; see [language settings](docs/user/languages.md) |
-| Persistence and budgets | SQLite state, checkpoints and Rig conversation logs; pause/resume, concurrency, token and cost limits |
-| Evidence delivery | JSON, Markdown and HTML reports, sample snapshots, original evidence and SHA256 manifests with bundle integrity checks |
+| Understand a binary | ELF/PE/Mach-O profiles and strings; Ghidra functions, decompilation, instructions and cross-references |
+| Recover behavior | Input formats, data layouts, algorithms and state machines; evidence-backed differential checks |
+| Investigate Pwn challenges | GDB/MI, interactive processes, AFL++ QEMU, angr, crash replay and minimization; on-demand heap, ROP, format-string and other methods |
+| Coordinate and review | Scoped analyst tasks, a parent-child collaboration tree, independent verifier review, shared notes and coverage |
+| Resume and deliver | Pause/resume, token/cost budgets, English/Chinese UI and task output; JSON/Markdown/HTML reports with original evidence and SHA256 manifests |
 
-> Dynamic analysis currently targets **Linux x86_64 ELF**. PE and Mach-O support static profiling; Windows DbgEng and macOS LLDB dynamic backends are not implemented.
+A static hypothesis, reproduced crash, root-cause conclusion and verified impact are recorded as separate stages. Impact claims require independent verification and linked evidence. See the [tool catalog](docs/reference/tool-catalog.md) and [Skill coverage](docs/reference/skill-coverage.md).
 
 <a id="快速开始"></a>
+<a id="usage"></a>
+<a id="使用方式"></a>
+<a id="desktop-workspace"></a>
+<a id="桌面工作区"></a>
 
 ## Quick start
 
-Download the Windows `-setup.exe` or Linux `.AppImage` from [GitHub Releases](https://github.com/mark0-cn/Wukong/releases). Prepare Docker tools in the first-run wizard; manage subsequent client and image upgrades in **Updates**. See [online installation](docs/user/online-install.md). The steps below build from source.
+1. **Get the client.** Use a Windows x64 `-setup.exe` or Linux x64 `.AppImage` when one is listed in [Releases](https://github.com/mark0-cn/Wukong/releases). If no installer is published, follow [Build from source](#build-from-source). See [installation and updates](docs/user/online-install.md) for platform steps.
+2. **Prepare tools.** Install/start Docker with Linux-container support, open Wukong and choose **Prepare tool environment**. The published client downloads its version's digest-pinned image from public `hlmark0/wukong`, then runs self-tests. Reserve at least **25 GiB** for Docker images and temporary layers.
+3. **Configure a model and analyze.** In **Workspace settings**, choose a provider/model and the credential environment variable name. Set that variable in the launch environment. Select **New analysis**, choose a binary and describe your objective, for example: “Recover the record format and verify the length checks with evidence.”
 
+Published installers include the client; Docker tools download on first use. Source-built versions without a matching official Release use the [manual tool setup](docs/development/getting-started.md#prepare-docker-tools). [Language settings](docs/user/languages.md) independently control the UI and new-task output. Manage subsequent client/tool upgrades through **Updates**.
+
+<a id="支持平台与运行要求"></a>
+
+## Platforms and requirements
+
+| Area | Current scope |
+| --- | --- |
+| Desktop distributions | Windows x64 NSIS EXE; Linux x64 AppImage, built on Ubuntu 22.04 |
+| Static target analysis | ELF, PE and Mach-O |
+| Dynamic analysis | Linux x86_64 ELF in Linux amd64 tools; the image also supports running i386 user-space programs |
+| Model services | `openai`, `openai_responses`, `anthropic`, `ollama`; credential-free local Ollama is supported |
+| Everyday installation | Client, Docker and a configured model service; host Rust/Node.js/Python/GDB are not required for the published Docker-based setup |
+
+macOS has no official desktop installer in this pipeline. Native Windows DbgEng/macOS LLDB, automatic ARM/kernel-Pwn reconstruction and arbitrary Compose topologies are outside current support. Unknown targets run through isolation; `trusted_local` is for trusted development fixtures. Details: [runtime and platform limits](docs/user/pwn-workbench.md#validation-scope-and-limits).
+
+<a id="execution-environment"></a>
+<a id="配置执行环境"></a>
+<a id="pwn-工作环境"></a>
+
+## Pwn workbench
+
+The host manages tool and challenge containers side by side. Tools keep their own libraries; each challenge retains its runtime files and dedicated network.
+
+```mermaid
+flowchart LR
+  H[Wukong on the host] --> T[Tool container]
+  H --> C[Challenge container]
+  T -->|Dedicated network: challenge:port| C
+```
+
+Import attachments, build the supplied challenge Dockerfile, prepare binary/libc/loader copies and start the service through the challenge environment. Tools connect to `challenge:port`; their `localhost` refers to themselves. Model credentials stay on the host, and tools receive no Docker socket. Final verification uses the corresponding original challenge environment.
+
+See [Pwn workbench](docs/user/pwn-workbench.md) for Docker challenges, remote relays, debugging, environment checks and migration. The [standalone worker guide](workers/runtime/README.md) covers advanced Docker/SSH/VM deployment.
+
+<a id="命令行"></a>
+
+## Command line
+
+Use the configuration for your prepared workspace when running execution tools:
+
+```sh
+# Read a file without executing it or calling a model
+wukong inspect ./sample.elf --strings
+
+# Analyze with the generated workbench configuration
+wukong --config .wukong/workbench/wukong.toml analyze ./sample.elf --task "Recover the input format with evidence"
+
+# Export to a new directory and check its integrity
+wukong report RUN_ID --output ./reports/analysis-01
+wukong verify-bundle ./reports/analysis-01
+```
+
+Replace `RUN_ID` and the configuration path with your actual values. See [task management](docs/user/usage.md#task-management-and-recovery) for messaging, pause/resume and branch control, or run `wukong --help`.
+
+<a id="1-prerequisites"></a>
 <a id="1-准备环境"></a>
-
-### 1. Prerequisites
-
-- **Rust 1.97.1+**.
-- **Node.js satisfying the locked dependencies**, with npm. For the CI Node 22 line, use **22.22.2 or later**; Node 24 requires **24.15.0 or later**.
-- [Tauri 2 system prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
-- A model service, model name and credentials; dynamic analysis also requires an [execution worker](#execution-environment).
-
+<a id="2-clone-and-build"></a>
 <a id="2-获取源码并构建"></a>
+<a id="3-configure-a-model"></a>
+<a id="3-配置模型"></a>
+<a id="4-check-and-analyze"></a>
+<a id="4-检查环境并开始分析"></a>
+<a id="从源码构建"></a>
 
-### 2. Clone and build
+## Build from source
+
+Install the pinned Rust toolchain, compatible Node.js/npm and Tauri system prerequisites, then:
 
 ```sh
 git clone https://github.com/mark0-cn/Wukong.git
@@ -83,223 +144,39 @@ npm ci
 npm run desktop:build
 ```
 
-The desktop build generates frontend assets, then compiles Rust. Executable locations:
-
-| Platform | Path |
-| --- | --- |
-| Windows | `target/release/wukong.exe` |
-| Linux / macOS | `target/release/wukong` |
-
-Installer output is in `target/release/bundle/`. Commands below use `wukong`: add its directory to `PATH` or use the full path, such as `.\target\release\wukong.exe` in PowerShell.
-
-<details>
-<summary>Build only the CLI</summary>
-
-If you do not need the desktop, skip Node.js and the frontend build:
-
-```sh
-cargo build --release --no-default-features
-```
-
-This build supports CLI commands but not `gui`.
-
-</details>
-
-<a id="3-配置模型"></a>
-
-### 3. Configure a model
-
-```sh
-wukong init
-```
-
-Edit `[model]` in the generated `wukong.toml`, retaining other configuration. `init` never overwrites an existing file. See the [configuration example](wukong.example.toml) for all fields.
-
-```toml
-[model]
-provider = "openai_responses"
-model = "your-model-name"
-api_key_env = "OPENAI_API_KEY"
-# Set the API URL for a compatible service:
-# base_url = "https://your-provider.example/v1"
-```
-
-Set the credential in the corresponding environment variable:
-
-```powershell
-# Windows PowerShell
-$env:OPENAI_API_KEY = "your-provider-key"
-```
-
-```sh
-# Linux / macOS
-export OPENAI_API_KEY="your-provider-key"
-```
-
-Supported providers are `openai` (Chat Completions), `openai_responses`, `anthropic` and `ollama`. Credentials are read from environment variables, not stored in configuration or checkpoints; local Ollama supports credential-free configuration. See [configuration and models](docs/user/usage.md#configuration-and-models) for role models and discovery rules.
-
-<a id="4-检查环境并开始分析"></a>
-
-### 4. Check and analyze
-
-```sh
-wukong doctor
-wukong inspect ./sample.exe --strings
-wukong gui
-```
-
-`doctor` checks configuration and installed capabilities. `inspect` reads a binary without executing it or calling a model. Select **New analysis**, choose a sample and describe your task.
-
-<a id="使用方式"></a>
-
-## Usage
-
-<a id="桌面工作区"></a>
-
-### Desktop workspace
-
-Double-click `wukong.exe` or run `wukong gui`; no separate browser is needed.
-
-- Search task history, select or drop a target, and edit the analysis request.
-- Inspect Agent conversations, tool operations, collaboration, findings and evidence.
-- Send information or assign follow-up work to the selected Agent.
-- Pause, adjust budgets and resume; stop branches; export reports and evidence bundles.
-- Edit models, budgets and backends in **Workspace settings**, or use the TOML editor for the complete configuration.
-
-See the [desktop guide](docs/user/usage.md#desktop-workspace) for operation and Windows deployment details.
-
-<a id="命令行"></a>
-
-### Command line
-
-```sh
-# Start analysis and export to a new directory
-wukong analyze ./sample.elf --task "Recover the input format and key algorithms with reviewable evidence" --output ./reports/analysis-01
-
-# Inspect tasks and recent events
-wukong runs
-wukong status RUN_ID --events 30
-
-# Pause and resume
-wukong pause RUN_ID
-wukong resume RUN_ID --max-tokens 1000000
-
-# Export and verify a report bundle
-wukong report RUN_ID --output ./reports/analysis-02
-wukong verify-bundle ./reports/analysis-02
-```
-
-Replace `RUN_ID` with the task ID. Use `wukong --help` or `wukong <command> --help` for options. See [task management and recovery](docs/user/usage.md#task-management-and-recovery) for messaging, stopping branches and resuming.
-
-<a id="配置执行环境"></a>
-
-## Execution environment
-
-Execution tools are disabled by default. Enable a Docker or SSH worker for debugging, fuzzing, crash replay and independent verification. With Windows Docker Desktop, run from the repository root:
-
-```powershell
-.\scripts\dev\start-worker.ps1
-```
-
-The script builds a worker image and creates an isolated container and persistent volume. Update `[runtime]` in `wukong.toml`:
-
-```toml
-[runtime]
-backend = "docker"
-docker_container = "wukong-worker"
-remote_bridge_path = "/opt/wukong/runtime/bridge.py"
-remote_state_dir = "/state"
-```
-
-Run `wukong doctor` to confirm actual capabilities. Model credentials stay on the control host. `trusted_local` executes processes directly on the host and is only for trusted test samples.
-
-- [Execution worker](workers/runtime/README.md): Docker, SSH/VM deployment, protocol and acceptance.
-- [Ghidra backend](workers/ghidra/README.md): local Ghidra/JDK configuration, queries and caching.
+Follow [source setup](docs/development/getting-started.md) for exact prerequisites, CLI-only builds, model credentials and Docker tool preparation. **Download the locked worker attachments before building tool images.** An unpublished client version cannot use online setup until its matching signed release manifest exists.
 
 <a id="文档"></a>
+<a id="repository-layout"></a>
+<a id="项目结构"></a>
 
 ## Documentation
 
-See the full [documentation index](docs/README.md).
-
-| Document | Contents |
+| Guide | Start here for |
 | --- | --- |
-| [User guide](docs/user/usage.md) | Desktop, models, recovery, budgets and Agent collaboration |
-| [Configuration example](wukong.example.toml) | Models, roles, budgets, workers and tools |
-| [Tool catalog](docs/reference/tool-catalog.md) | Registry-generated tools and descriptions |
-| [Architecture](docs/design/architecture.md) | Modules, execution loop, state and coordination |
-| [Original design](docs/history/strix-rig-binary-agent-plan.md) / [implementation contract](docs/design/implementation-contract.md) | Requirements baseline and acceptance rules |
-| [Report format](docs/reference/report-format.md) | Bundle structure, evidence, integrity and reproduction |
-| [Maintenance](docs/development/maintenance.md) | Development checks, generated documentation and benchmarks |
-| [Fixtures](fixtures/README.md) / [validation records](docs/history/validation/2026-11-06/README.md) | Behavior regressions, independent review and recorded evidence |
+| [User guide](docs/user/usage.md) | Desktop navigation, model configuration, budgets and recovery |
+| [Installation and updates](docs/user/online-install.md) | Installers, first setup, storage, repair and rollback |
+| [Pwn workbench](docs/user/pwn-workbench.md) | Tools, challenge services, runtime files and migration |
+| [Source setup](docs/development/getting-started.md) | Build dependencies, model setup and source tool images |
+| [Configuration example](wukong.example.toml) | All model, budget, worker and tool fields |
+| [Architecture](docs/design/architecture.md) / [maintenance](docs/development/maintenance.md) | Repository responsibilities and development checks |
 
-<a id="项目结构"></a>
-
-## Repository layout
-
-```text
-Wukong/
-├── src/                    # Rust analysis core, CLI and desktop host
-├── ui/                     # React + TypeScript desktop UI
-├── prompts/                # Roles, capabilities, methods and examples
-├── workers/                # Python execution worker and Ghidra bridge
-├── templates/              # Report templates
-├── tests/                  # Rust, automation and real-environment acceptance
-├── fixtures/               # Trusted samples, tasks and human ground truth
-├── evals/                  # Behavior evaluation, scorers and evaluation tests
-├── scripts/                # CI, release, toolchain and development scripts
-├── packaging/              # Online-package installation and recovery scripts
-├── docs/                   # User, architecture and acceptance documentation
-└── wukong.example.toml     # Configuration example
-```
+The [full documentation index](docs/README.md) also links tool/Skill references, evidence formats, release workflows, evaluation fixtures and historical records. English guides have complete Chinese counterparts with reciprocal links.
 
 <a id="参与贡献"></a>
 
 ## Contributing
 
-Use [Issues](https://github.com/mark0-cn/Wukong/issues) for bugs or feature discussions, or submit a [Pull Request](https://github.com/mark0-cn/Wukong/pulls). Include reproduction steps, OS, build method and relevant logs.
-
-Desktop development:
-
-```sh
-npm ci
-npm run desktop:dev
-```
-
-Run checks relevant to your change. Build frontend assets before Rust checks using default desktop features:
-
-```sh
-npm run build
-npm run check
-npm test
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
-```
-
-See [maintenance](docs/development/maintenance.md) for worker tests, dependencies and benchmarks. Distinguish sample behavior regression from Agent analysis quality; independent review must reference actual evidence. Browser tests use a simulated native boundary; real container and installer acceptance are separate.
+Read [AGENTS](AGENTS.md) and [maintenance](docs/development/maintenance.md). Report reproducible bugs through [Issues](https://github.com/mark0-cn/Wukong/issues) or submit a [Pull Request](https://github.com/mark0-cn/Wukong/pulls) targeting `master`. Update both documentation languages together and validate changes according to their impact.
 
 <a id="致谢"></a>
 
 ## Acknowledgments
 
-- [Strix](https://github.com/usestrix/strix): module responsibilities and coordination semantics, baseline commit `06015506625a78b981ae0b34be40239fc1b389be`.
-- [Rig](https://github.com/0xPlaygrounds/rig): model connections, ECS execution, conversation logs and asynchronous child Agents; pinned to `0.46.0`.
+[Strix](https://github.com/usestrix/strix) informed module responsibilities and coordination semantics (baseline `06015506625a78b981ae0b34be40239fc1b389be`). [Rig](https://github.com/0xPlaygrounds/rig) provides model connections, execution, conversation logging and asynchronous subagents. External engines retain their upstream licenses and notices.
 
 <a id="许可证"></a>
 
 ## License
 
-Licensed under [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for provenance and third-party notices. External analysis engines retain their upstream licenses.
-
-<a id="pwn-工作环境"></a>
-
-## Pwn workbench
-
-GitHub Releases provide Windows and Linux online installers. First setup downloads the digest-pinned tool image from public Docker Hub repository `hlmark0/wukong`. See [installation and updates](docs/user/online-install.md) and [CI/tag releases](docs/development/releases.md).
-
-See [GitHub maintenance](docs/development/github-maintenance.md) for dependency updates, upstream tool checks, immutable releases and run summaries.
-
-The host manages sibling tool and challenge containers, with a dedicated network per challenge. Use `env up/doctor`, `challenge import/prepare/build/up` and offline migration commands, or the desktop tool/challenge environment entries. Tools connect through `challenge:port`; their `localhost` refers to themselves. Debugging may require extracted runtime files or a dedicated debug container. Final verification uses the original challenge environment. See [Pwn workbench](docs/user/pwn-workbench.md).
-
-Language changes share the same installation, update manifest, version and image digest; they do not change evidence, credentials or challenge data.
+[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for provenance and third-party notices.

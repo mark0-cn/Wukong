@@ -21,3 +21,5 @@ PowerShell wrappers locate the repository; user paths resolve against the invoca
 ```sh
 python -m unittest discover -s tests/automation -p 'test_*.py'
 ```
+
+Generate current UI previews with `node scripts/dev/capture-readme.mjs`; prerequisites and sample-data boundaries are in [screenshot maintenance](../docs/development/maintenance.md#readme-screenshots).
