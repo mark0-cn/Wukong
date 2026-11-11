@@ -54,7 +54,9 @@ impl Workbench {
             .truncate(false)
             .write(true)
             .open(root.join("operation.lock"))?;
-        operation.lock()?;
+        operation
+            .try_lock()
+            .context("another workbench operation is active")?;
         let identity = root.join("workspace.json");
         if !identity.exists() {
             write_json(

@@ -49,7 +49,7 @@ test('Docker failure appears once, diagnostic details can be read, and preparati
   await userEvent.click(screen.getByText('查看诊断输出（日志末尾）'));
   expect(screen.getByText('error getting credentials: helper missing')).toBeTruthy();
   await userEvent.click(screen.getByRole('button', { name: '重试准备' }));
-  await screen.findByText('已配置');
+  await screen.findByRole('button', { name: '检查更新' });
   expect(screen.queryByRole('alert')).toBeNull();
 });
 

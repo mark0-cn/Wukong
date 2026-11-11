@@ -385,7 +385,11 @@ impl Controller {
             };
             let worker_service = service.clone();
             tokio::task::spawn_blocking(move || worker_service.workbench(epoch, request)).await??;
-            self.edit().health = Default::default();
+            let configured = self.status().health.configured;
+            self.edit().health = super::update_health::Health {
+                configured,
+                ..Default::default()
+            };
             self.phase("idle", UiMessage::new("system-tool-action-completed"));
             return Ok(());
         }
@@ -644,7 +648,12 @@ impl Controller {
             })
             .await??;
             service.reload_after_maintenance()?;
-            self.edit().needs_setup = false;
+            {
+                let mut state = self.edit();
+                state.needs_setup = false;
+                // activate() has just checked the live container, tools, and saved binding.
+                state.health = super::update_health::Health::verified_now();
+            }
             self.phase(
                 "idle",
                 UiMessage::new("system-tool-environment-prepared-validation-passed"),

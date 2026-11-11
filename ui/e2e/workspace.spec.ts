@@ -566,6 +566,7 @@ test('image layer progress updates while pulling and keeps self-check separate',
     Object.assign(window, { __pullTest: progress });
     native.invoke = async (command: string, args: any) => command === 'update_action' ? {
       version: '0.2.0', needs_setup: true, phase: progress.finished ? 'validating' : 'pulling', environment_step: progress.finished ? 'validating' : 'pulling',
+      operation_id: 'pull-progress', revision: progress.finished ? 101 : 100, busy: true, cancellable: true, action: 'setup',
       image_version: '0.2.0', image_progress: progress,
       message: { code: progress.finished ? 'system-checking-the-candidate-tool-environment' : 'system-pulling-the-tool-image-docker-will-reuse-downloaded', args: {} },
       available: null, notes: '', downloaded: 0, total: null, prepared: null, recovery: null, pending: false,
