@@ -284,7 +284,9 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      always() && needs.metadata.result == 'success' && needs.package.result == 'success' &&
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [metadata, package]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
