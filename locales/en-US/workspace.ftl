@@ -257,3 +257,11 @@ ui-general-settings = Language and model
 ui-advanced-settings = Advanced configuration
 ui-save-before-storage = Save configuration changes before switching storage locations.
 ui-tools-description = Prepare or repair the tool image for this client version, then start it, run diagnostics and select it for new tasks.
+
+ui-copy-failed = Copy failed. Select and copy the text manually.
+ui-copy-source = Copy source path
+ui-copy-hash = Copy SHA-256
+ui-copy-evidence-id = Copy evidence ID
+ui-select-evidence = Select evidence
+ui-back-findings = Back to findings
+ui-environment-facts = Runtime environment fields

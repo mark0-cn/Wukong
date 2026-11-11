@@ -164,7 +164,7 @@ test('retains per-agent drafts and targets message delivery after navigation', a
 test('loads scoped evidence pages and preserves settings drafts', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /发现与证据/ }).click();
-  await page.getByRole('button', { name: 'reproduction.txt', exact: true }).click();
+
   await expect(page.getByText('first evidence page: controlled reproduction')).toBeVisible();
   await page.getByLabel('下一页证据').click();
   await expect(page.getByText('second evidence page: end of output')).toBeVisible();
@@ -224,13 +224,16 @@ test('keyboard resizing persists and minimum desktop size keeps controls reachab
   await expect(page.getByLabel('发送消息', { exact: true })).toBeInViewport();
   await expect(page.getByRole('button', { name: '更新', exact: true })).toBeInViewport();
   await page.getByRole('button', { name: '发现与证据', exact: false }).click();
-  await page.getByRole('button', { name: 'reproduction.txt', exact: true }).click();
+  await page.locator('.finding-card').first().click();
+
   await expect(page.getByText('first evidence page: controlled reproduction')).toBeVisible();
   await page.getByLabel('下一页证据').scrollIntoViewIfNeeded();
   await expect(page.getByLabel('下一页证据')).toBeInViewport();
   await page.getByLabel('下一页证据').click();
   await expect(page.getByText('second evidence page: end of output')).toBeVisible();
   await page.screenshot({ path: join(tmpdir(), 'wukong-workspace-narrow.png'), fullPage: true });
+  await page.getByRole('button', { name: '返回发现列表', exact: true }).click();
+  await expect(page.locator('.finding-card').first()).toBeVisible();
 });
 
 test('task names, filters and panel choices survive reload without changing tasks', async ({ page }) => {

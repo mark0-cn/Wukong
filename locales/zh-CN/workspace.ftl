@@ -251,3 +251,11 @@ ui-general-settings = 语言与模型
 ui-advanced-settings = 高级配置
 ui-save-before-storage = 请先保存配置草稿，再切换存储位置。
 ui-tools-description = 准备或修复当前版本配套的工具镜像；启动后可运行自检并将其用于新任务。
+
+ui-copy-failed = 复制失败，请手动选择文本复制。
+ui-copy-source = 复制来源路径
+ui-copy-hash = 复制 SHA-256
+ui-copy-evidence-id = 复制证据 ID
+ui-select-evidence = 选择证据
+ui-back-findings = 返回发现列表
+ui-environment-facts = 运行环境字段
