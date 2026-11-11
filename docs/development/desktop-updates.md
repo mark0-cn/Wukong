@@ -36,7 +36,7 @@ Docker 下载按阶段展示；客户端按字节显示进度。客户端临时�
 
 ## 发布与验证
 
-`build-installer.yml` 生成并签名 NSIS/AppImage，Windows 复用已验证二进制，Linux 独立编译桌面版。
+`build-installer.yml` 生成并签名 NSIS/AppImage，Windows 和 Linux 均复用已验证的桌面 Release 二进制；Linux 桌面构建与打包使用 Ubuntu 22.04，验收 CLI 是独立产物。
 原生安装/卸载只在隔离 runner 中执行；Linux 用 Xvfb 启动真实 WebView。
 `desktop_manifest` 汇总镜像验收和安装文件，`wukong verify-update --directory dist` 校验整个发行集。
 正式 Release 发布完成后才推进稳定入口；手动演练不改变用户更新通道。

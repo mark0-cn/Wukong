@@ -8,6 +8,12 @@ on:
       client_run:
         type: string
         default: ''
+      installer_run:
+        type: string
+        default: ''
+      installer_artifact_id:
+        type: string
+        default: ''
     secrets:
       TAURI_SIGNING_PRIVATE_KEY:
         required: true
@@ -30,31 +36,27 @@ jobs:
           [[ "$TARGET" == windows || "$TARGET" == linux ]]
           git merge-base --is-ancestor HEAD origin/master
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: inputs.installer_artifact_id == ''
         with:
           node-version: '22'
           cache: npm
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-        if: inputs.target == 'linux'
-        with:
-          shared-key: linux-desktop-release-v1
-          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Install Linux desktop build dependencies
-        if: inputs.target == 'linux'
+        if: inputs.target == 'linux' && inputs.installer_artifact_id == ''
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libwayland-dev libxkbcommon-dev xvfb
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.target == 'windows'
+        if: inputs.installer_artifact_id == ''
         with:
-          name: windows-client-v1
+          name: ${{ inputs.target == 'windows' && 'windows-client-v1' || 'linux-desktop-client-v1' }}
           path: client
           run-id: ${{ inputs.client_run || github.run_id }}
           github-token: ${{ github.token }}
       - name: Bundle verified Windows client without recompilation
-        if: inputs.target == 'windows'
+        if: inputs.target == 'windows' && inputs.installer_artifact_id == ''
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -68,20 +70,42 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npx --no-install tauri bundle --ci --features custom-protocol --config '{"bundle":{"createUpdaterArtifacts":true}}'
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Build signed Linux AppImage
-        if: inputs.target == 'linux'
+      - name: Bundle verified Linux desktop client without recompilation
+        if: inputs.target == 'linux' && inputs.installer_artifact_id == ''
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
-        run: python -m scripts.release.build_installer --platform linux --signed
+        run: |
+          python -m scripts.release.client_artifact verify --target linux-desktop --directory client
+          mkdir -p target/release
+          cp client/wukong target/release/wukong
+          chmod +x target/release/wukong
+          npm ci
+          npx --no-install tauri bundle --ci --features custom-protocol --config '{"bundle":{"createUpdaterArtifacts":true}}'
       - name: Stage and smoke-test native installer
+        if: inputs.installer_artifact_id == ''
         shell: bash
         env:
           TARGET: ${{ inputs.target }}
         run: python -m scripts.release.installer_artifact --target "$TARGET" --output installer-artifact
+      - name: Download previously validated installer
+        if: inputs.installer_artifact_id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ inputs.installer_artifact_id }}
+          run-id: ${{ inputs.installer_run }}
+          path: installer-artifact
+          merge-multiple: true
+          github-token: ${{ github.token }}
+      - name: Verify reusable installer identity and bytes
+        if: inputs.installer_artifact_id != ''
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
+        run: python -m scripts.release.installer_identity --target "$TARGET" --directory installer-artifact
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ${{ inputs.target }}-installer
+          name: ${{ inputs.target }}-installer-v1
           path: installer-artifact/
           overwrite: true
           retention-days: 14

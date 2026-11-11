@@ -9,6 +9,7 @@ from scripts._lib.versioning import ROOT, version
 from scripts._lib.checksums import sha256 as digest
 
 TARGETS = {
+    "linux-desktop": ("linux-desktop-client-v1", "target/release/wukong", "release/custom-protocol/linux-amd64/ubuntu-22.04"),
     "windows": ("windows-client-v1", "target/release/wukong.exe", "release/custom-protocol/windows-amd64"),
     "linux": ("linux-acceptance-client-v1", "target/debug/wukong", "dev/debug=1/no-default-features/linux-amd64"),
 }
