@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "pairs": {
+    "AGENTS.md": {
+      "en": "c37389254ff24a136c9132a426a62c133d6bb7c82e8d76f2a566d45fd24e1776",
+      "zh-CN": "6974869f7717d6859b1b236c01fdf23c479515d379a171aeeacad407b40b8860"
+    },
+    "README.md": {
+      "en": "7a7f1d43b111738721f6ee216f41d22915c7754a140ce2fe93ab3aa7375e4f37",
+      "zh-CN": "ebd0ed83218c444f2090016a957633caa222c8e11cdc4e486bea733c5bf5cd87"
+    },
+    "docs/README.md": {
+      "en": "6bf715d6e7af8487162326108fb1ed69b7b2998afdcedb94b28ee6a31adf8a1f",
+      "zh-CN": "6f2de64b6c866df6eb3f6e70e631466d1d41eb6757adc69fa935a0b7cda4c8dc"
+    },
+    "docs/design/architecture.md": {
+      "en": "71a4b620b659de7614ad83483d10308c58ef1656c8ce1e609c69e7bf253eed42",
+      "zh-CN": "015e4e6e28855bd2aad619128b920b0d60bcad9fc92056142ae4924cfc1563a8"
+    },
+    "docs/design/implementation-contract.md": {
+      "en": "34b958279e68476f2d62f42962102de8794a49a2ac12da61d5b8c84286698c2c",
+      "zh-CN": "7b56603d9fd1844beb9eec5f4d28fe0b9f24f41d902b450cb2dc6e39bd61b03f"
+    },
+    "docs/development/desktop-updates.md": {
+      "en": "7172d61929d273c620f685bb8992fbea0dffc57b6e4e4491b60fe13a9061f754",
+      "zh-CN": "11a936b868d2b62f6ea719a092148e057a93dbf8d01ab8cc1946a63734aea2b1"
+    },
+    "docs/development/documentation.md": {
+      "en": "1c5a885e9fb60e19bc18e1b0d22367c2fc46d3d9a033e93670bb74873371c2a9",
+      "zh-CN": "2049a12c1f96e354f7f064a5fbbf79822af5e20f868da9da31308e9b4d0c90b6"
+    },
+    "docs/development/github-maintenance.md": {
+      "en": "a159563438acf7130043b751620e2ce721b93e924220849d2fcb8f09f0515510",
+      "zh-CN": "40b5f6c9178ce6e0bc9aff6629ecbbafb2745418c7ae89db97ab1f83a382831f"
+    },
+    "docs/development/localization.md": {
+      "en": "ec3b9bdac57653355e8ffe6b125edb5234218b72555fe9e8f42d346295b91e24",
+      "zh-CN": "450d185afb276f989664c6d9de2847cc0c7eea579cf10a7690550a7beb592154"
+    },
+    "docs/development/maintenance.md": {
+      "en": "9117e3771b3320bc1091f49ee9fcd330abf44b9e95112a6c395637cf6d6c09e7",
+      "zh-CN": "6ee97144cf7f9ddc2cd8598cc6cd7f15bde696cb35fa315386ed2478120d4e7c"
+    },
+    "docs/development/releases.md": {
+      "en": "7e6b4db5aed933ac49ed20c81a53c539dd8620e66ee4d92dc016e6cd60a4e03e",
+      "zh-CN": "a849d7f75054c014dae74868c6a11936243e1e3c2b4616c2d9e49a90722f39a0"
+    },
+    "docs/history/README.md": {
+      "en": "39e11cfe697620bb0a0d43d9ff6ca550f51086d099b11651fa51cf718fb52e7c",
+      "zh-CN": "0b52c023e20952c6717a02d9a6be91ec48c10b2d9dd008315dba9ff6db21299f"
+    },
+    "docs/history/strix-rig-binary-agent-plan.md": {
+      "en": "b3d166404ed5e52e355af323130d274bb45fee100feeec2a54cff55b30cb2791",
+      "zh-CN": "5d2fd5930984603fef8744060f0c32b1540faed55849b11b5b5df704e6e64de7"
+    },
+    "docs/history/validation/2026-11-06/README.md": {
+      "en": "0b294654b71307615a712a09a875455faec19c7296d2161f1e420addbd6cee8c",
+      "zh-CN": "bf630e12b9aa77527ca661f5ce142855d3b0d9efded864042458861a9edd0858"
+    },
+    "docs/history/validation/2026-11-09/agent-skills.md": {
+      "en": "f779acf4567947ae4d61b13e77c585cbbaf5d13e15337773661797e9a0ba6502",
+      "zh-CN": "ec336fceccf444883a143ffdbd299f726b012b30981115a6d114e21dd04d5d72"
+    },
+    "docs/reference/pwn-knowledge.md": {
+      "en": "41f72d7e5ffa59a65df7e10a76610f05ddf195bf2f5f3c43f3c3c1f469a2a1ad",
+      "zh-CN": "5ee3ede0ee23e57641b92de1a5315c8082e602e2f5037dc58a10f89de1aed524"
+    },
+    "docs/reference/pwn-tools.md": {
+      "en": "bdd223cb2ab8a36c54f80e892536473c9bea29780e014b1025c51e2837727799",
+      "zh-CN": "b911263c1fdd3314d409f6b34623a181f6104eb85a5fec36eb12c60616958c19"
+    },
+    "docs/reference/report-format.md": {
+      "en": "76b2dce2c7789dce211253e43e4497f8acb1c730f720f36865e4419ad3192b30",
+      "zh-CN": "95a9b659fc6eb763eca6ccdb92bea685302ea98da2e1986eb9dcacded4a97b54"
+    },
+    "docs/reference/skill-coverage.md": {
+      "en": "9f60c64d872e0fe01f0b10ddd33dfb0e589d69fc445834ed513ddf64a4514609",
+      "zh-CN": "39c142f85e35eba625ee588a9fd5dd18d0f327e51e4c1a5ca724422b4987bf20"
+    },
+    "docs/reference/tool-catalog.md": {
+      "en": "bea0cdf0269dad34154e13800cb0e6192cd78d6b5a884514077e8fd28c0a8d6c",
+      "zh-CN": "fc06d85c0d2098eccc9ef8eb48c66cadc3e06573d2cfe22fedea71ce577ae18e"
+    },
+    "docs/user/languages.md": {
+      "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
+      "zh-CN": "7065aba25b92383295d5a7c7d21cb0b7ea70885614959fb196e65d4b266beb29"
+    },
+    "docs/user/online-install.md": {
+      "en": "1449b4a1141c19a112ccc432f9c8f6ea8f4cf7f6d16d17fdc7a3e73de866e128",
+      "zh-CN": "61a3c1f67c3aeb66987409faed19789015ceaa834e0d68f1376001346f630a2c"
+    },
+    "docs/user/pwn-workbench.md": {
+      "en": "99055bdaff3fce9a8b3b9126317841771e25648c865b0bd4903d25691dc91ab7",
+      "zh-CN": "1f599c0ca9d5a7619dabdc144afe2fea530d85858aa9017c9edc8fbbc6f6bfc7"
+    },
+    "docs/user/usage.md": {
+      "en": "58b87f490a76cdfb071a76224fe7f0f805fee6b8c85a6ff47b3299db64294e84",
+      "zh-CN": "15bdeebe611e24d8ba9f14c2b3c480a3e72851e3348693fa16020aae431fae0f"
+    },
+    "evals/README.md": {
+      "en": "8fb115c1b503627b087374bb0a3b254a140e6094baa6df91452a763a761b78ed",
+      "zh-CN": "cd6478c941d136fa1be7523cfcef17345a99b19505b56fb5f690439ad77c7b16"
+    },
+    "evals/analysis/experiments.md": {
+      "en": "d932c9f9b604a097955e15258ea7b52419cf3fc4207a81129048765aadc7c1b2",
+      "zh-CN": "5e193ef85471907b521a2e082abfecb0f237390c4b8b44ee5eecd87293fe12e4"
+    },
+    "fixtures/README.md": {
+      "en": "8d135be6290e47bee3cc61eb9019bac54e915b9e3943231e5e1abbbde691d345",
+      "zh-CN": "6a219f4e4ae0cdde86100ebad9351d86d371000b4dde04abd07c5c7ff6a7c71d"
+    },
+    "fixtures/pwn/README.md": {
+      "en": "9767748a978b448ef55360e1274d1087c41ea82c45007a4342506626ad2fc6e5",
+      "zh-CN": "3ab9a7dc57c9bf0a2c4a9dacbd0dcbcf97542e31741f9887e6e144697acf715b"
+    },
+    "icons/README.md": {
+      "en": "dd35ffe940bef2cfbfebe9621e6341a153bf770c0421494c35d31c01af10c523",
+      "zh-CN": "d300b4a1dfa0071331191162a888e60227b1d797fb4fda4c1f80c32fa0ce76b0"
+    },
+    "scripts/README.md": {
+      "en": "1dc3ab229f35f707315ad91f345ae06282c2185fc98910744dbd897b04a8384f",
+      "zh-CN": "8732656848aa0adbbddf144dc83a2be6441ef7f542654a45d36b6a3d11a2100f"
+    },
+    "workers/ghidra/README.md": {
+      "en": "d3aae446d46bb68f8c4ea67f9a732a4e7f44f3a9c7b37fae75aa870d88630530",
+      "zh-CN": "70055ee918963c9690157f1d8820122f3e3a8cc8683375b1a34cdb2ae28cd4b4"
+    },
+    "workers/runtime/README.md": {
+      "en": "4ca64d52bc94160243474f0e1d1a3ba5770906e9696de6825b54b3e95b502812",
+      "zh-CN": "6f75bc3f9e1e1e10a353214e0346585e907bac0a00c6b9d1b698001884db92dd"
+    },
+    "workers/tests/README.md": {
+      "en": "0a17ffdae8f26d8007ce9c8ca323e3c74e7fd72eb5adf0156c5e991d36e35ca5",
+      "zh-CN": "5a94c54a80033a1c28e8cb7a950052e9c989426549f5dd34c57803b2c4367cb3"
+    }
+  }
+}

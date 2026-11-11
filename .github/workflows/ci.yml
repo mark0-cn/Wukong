@@ -44,6 +44,8 @@ jobs:
         env:
           BUILD_RELEASE_CLIENTS: ${{ inputs.build_release_clients || false }}
         run: python -m scripts.ci.ci_scope
+      - name: Documentation pairs, links and review records
+        run: python -m scripts.ci.check_docs
 
   windows:
     needs: changes
