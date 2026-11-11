@@ -99,6 +99,7 @@ export interface Messages {
   'language-match-task': undefined;
   'language-output': undefined;
   'language-ui': undefined;
+  'progress-invocation-state': undefined;
   'progress-job-attempts': { count: string | number };
   'progress-job-background': undefined;
   'progress-job-identity': { id: string | number };

@@ -57,6 +57,55 @@ async function mockDesktop(page: Page) {
 }
 test.beforeEach(async ({ page }) => { await mockDesktop(page); });
 
+test('public text, evidence code and background jobs update the existing conversation', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('发送给 Agent 的消息').fill('keep my analysis draft');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    const code = 'uint16_t size = input_length + 8;\nif (size <= sizeof(buffer))\n    memcpy(buffer, input, input_length);';
+    const decompile = { ...state.data.active_tools[0], call_id: 'decompile-real-shape', title: 'tool-function-decompile', state: 'completed', duration_ms: 980,
+      summary: { code: 'result-decompiled', args: { name: 'parse_record', chars: code.length } },
+      preview: { language: 'c', text: code, truncated: true, evidence_id: 'original-ghidra-output' } };
+    const replay = { ...decompile, call_id: 'replay-job-origin', title: 'tool-crash-replay', state: 'running', duration_ms: null,
+      preview: undefined, summary: { code: 'progress-job-background', args: {} }, job: { id: 'worker-replay', state: 'running', stale: false,
+        started_at: new Date(Date.now()-1000).toISOString(), finished_at: null, observed_at: new Date().toISOString(), attempts: null, successes: null } };
+    const operation = (display: any, toolName: string) => ({ type: 'tool-call', toolCallId: display.call_id, toolName, args: { display }, result: { display }, isError: false });
+    state.data.transcript = [
+      { id: 'lead-text', role: 'assistant', author: '主分析 Agent', agent_id: 'root', created_at: '2026-11-11T03:10:00Z', content: [{ type: 'text', text: '先还原解析逻辑，再独立重放边界输入。' }] },
+      { id: 'analyst-code', role: 'assistant', author: '输入边界分析', agent_id: 'analyst', created_at: '2026-11-11T03:11:00Z', content: [operation(decompile, 'function_decompile')] },
+      { id: 'reply-stable', role: 'assistant', author: '独立验证', agent_id: 'verifier', state: 'streaming', created_at: '2026-11-11T03:12:00Z', content: [{ type: 'text', text: '正在独立重放' }, operation(replay, 'crash_replay')] },
+    ];
+    state.data.active_tools = [replay];
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.work-status')).toContainText('重放');
+  await expect(page.locator('.tool-code-preview')).toContainText('memcpy(buffer, input, input_length);');
+  await expect(page.locator('.tool-code-preview')).toContainText('original-ghidra-output');
+  await expect(page.getByText('正在输出…', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('发送给 Agent 的消息')).toHaveValue('keep my analysis draft');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    const message = state.data.transcript.find((row: any) => row.id === 'reply-stable');
+    message.state = 'complete'; message.content[0].text = '独立重放完成：两次输入中一次符合预期，验证未通过。';
+    const display = message.content[1].args.display;
+    display.state = 'failed'; display.duration_ms = 4200; display.summary = { code: 'result-failed', args: {} };
+    Object.assign(display.job, { state: 'completed', attempts: 2, successes: 1, finished_at: new Date().toISOString() });
+    state.data.active_tools = []; state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.getByText('正在输出…', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('独立重放完成：两次输入中一次符合预期，验证未通过。', { exact: true })).toHaveCount(1);
+  await expect(page.locator('.tool-failed')).toContainText('2 次尝试');
+  await expect(page.locator('.tool-failed')).toContainText('1 次试验成功');
+  await expect(page.locator('.tool-failed')).toContainText('4.2s');
+  await expect(page.getByLabel('发送给 Agent 的消息')).toHaveValue('keep my analysis draft');
+  expect(await page.evaluate(() => (window as any).__desktopTest.requests.filter((row: any) => row.command === 'tool_details').length)).toBe(0);
+  await page.screenshot({ path: 'target/live-analysis-progress.png' });
+  await page.locator('.tool-failed .tool-trigger').click();
+  await expect(page.locator('.tool-failed .tool-details')).toContainText('请求状态');
+  await expect(page.locator('.tool-failed .tool-details')).toContainText('已完成');
+  await expect(page.locator('.tool-failed .tool-details')).toContainText('worker-replay');
+});
+
 test('language changes preserve active work, drafts and configuration identity', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('发送给 Agent 的消息').fill('keep this exact payload: 原始字节');

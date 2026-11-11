@@ -19,10 +19,9 @@ export function ToolDuration({ display }: { display: ToolDisplay }) {
 export function JobFacts({ display }: { display: ToolDisplay }) {
   useLocale();
   const job = display.job;
-  if (!job) return null;
+  if (!job || !job.stale && job.attempts == null && job.successes == null) return null;
   return <p className="tool-summary muted">
-    {job.stale ? t('progress-job-stale') : t('progress-job-identity', { id: job.id })}
-    {job.attempts != null && <> · {t('progress-job-attempts', { count: job.attempts })}</>}
-    {job.successes != null && <> · {t('progress-job-successes', { count: job.successes })}</>}
+    {[job.stale && t('progress-job-stale'), job.attempts != null && t('progress-job-attempts', { count: job.attempts }),
+      job.successes != null && t('progress-job-successes', { count: job.successes })].filter(Boolean).join(' · ')}
   </p>;
 }

@@ -154,6 +154,20 @@ mod tests {
                 .active_tools
                 .is_empty()
         );
+        job.target_sha256 = run.target_sha256.clone();
+        job.status.state = JobState::Completed;
+        for (result, expected) in [
+            (json!({"exit_code":1}), "failed"),
+            (json!({"exit_code":139,"passed":true}), "completed"),
+        ] {
+            job.status.result = Some(serde_json::from_value(result)?);
+            store.save_record(&job)?;
+            let data = serde_json::to_value(read(&store, 1, &request)?.data)?;
+            assert_eq!(
+                data["transcript"][0]["content"][0]["args"]["display"]["state"],
+                expected
+            );
+        }
         Ok(())
     }
     #[test]

@@ -226,6 +226,7 @@ result-stopped = The worker job was cancelled. Saved evidence remains available.
 progress-job-background = The request returned; the worker job is still running. Completion follows the recorded worker status.
 progress-job-stale = This job belongs to an earlier agent generation. Reconcile its outcome before reusing it.
 progress-job-identity = Worker job: { $id }
+progress-invocation-state = Request state
 progress-job-attempts = { $count } attempts
 progress-job-successes = { $count } successful trials
 progress-text-streaming = Writing…

@@ -220,6 +220,7 @@ result-stopped = 后台任务已取消，已保存的证据仍然可用。
 progress-job-background = 请求已返回，后台任务仍在执行；完成状态以 worker 的记录为准。
 progress-job-stale = 此任务属于 Agent 的旧一代执行，复用结果前需要核对其状态。
 progress-job-identity = 后台任务：{ $id }
+progress-invocation-state = 请求状态
 progress-job-attempts = { $count } 次尝试
 progress-job-successes = { $count } 次试验成功
 progress-text-streaming = 正在输出…

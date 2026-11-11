@@ -48,6 +48,8 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
       {loading && <p className="muted">{t('workspace-loading-operation-details')}</p>}
       {error && <p className="error" role="alert">{errorText(error)}</p>}
       {record && <><div className="detail-caption"><Code2 size={13} />{t('workspace-raw-operation-details')}</div>
+        <p className="muted">{t('progress-invocation-state')}: {labels[record.state] ?? record.state}
+          {display.job && <> · {t('progress-job-identity', { id: display.job.id })} <code>{display.job.state}</code></>}</p>
         <pre>{JSON.stringify(record.arguments, null, 2)}</pre>
         {record.result != null && <><div className="detail-caption">{t('workspace-raw-result')}</div><pre>{typeof record.result === 'string' ? record.result : JSON.stringify(record.result, null, 2)}</pre></>}
         {record.evidence_id && <p className="muted">{t('workspace-evidence')}<code>{record.evidence_id}</code></p>}</>}

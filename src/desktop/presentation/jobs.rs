@@ -16,7 +16,10 @@ pub fn with_job(
     jobs: &[JobRecord],
 ) -> ToolDisplay {
     let Some(job) = jobs.iter().find(|job| {
-        job.call_id == call.id && job.agent_id == call.agent_id && job.run_id == call.run_id
+        job.call_id == call.id
+            && job.agent_id == call.agent_id
+            && job.run_id == call.run_id
+            && job.tool_name == call.name
     }) else {
         return display;
     };
@@ -26,7 +29,10 @@ pub fn with_job(
         JobState::Queued => "queued",
         JobState::Running => "running",
         JobState::Completed
-            if job.status.result.as_ref().and_then(|result| result.passed) == Some(false) =>
+            if job.status.result.as_ref().is_some_and(|result| {
+                result.passed == Some(false)
+                    || result.passed.is_none() && result.exit_code.is_some_and(|code| code != 0)
+            }) =>
         {
             "failed"
         }
