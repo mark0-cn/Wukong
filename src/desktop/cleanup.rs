@@ -1,6 +1,6 @@
 //! Isolated review window: no Store, model, worker startup or workspace commands.
 use crate::cleanup::{Cleanup, Plan, Selection};
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 use std::{path::PathBuf, sync::Mutex};
 use tauri::State;
@@ -93,12 +93,12 @@ pub fn choose(output: PathBuf, initial_data: bool) -> Result<()> {
         "review output must be outside application data"
     );
     // A separate browser profile keeps the application profile quiescent for removal.
-    let profile = tempfile::tempdir()?;
+    let profile = tempfile::Builder::new()
+        .prefix("wukong-review-")
+        .tempdir()?;
     let browser = profile.path().to_owned();
-    let exit = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(64));
-    let result = exit.clone();
     tauri::async_runtime::set(tokio::runtime::Handle::current());
-    tauri::Builder::default()
+    let exit = tauri::Builder::default()
         .manage(Session {
             cleanup,
             output,
@@ -134,14 +134,48 @@ pub fn choose(output: PathBuf, initial_data: bool) -> Result<()> {
             Ok(())
         })
         .build(tauri::generate_context!())?
-        .run(move |app, event| {
-            if let tauri::RunEvent::ExitRequested { code, .. } = event {
-                result.store(code.unwrap_or(64), std::sync::atomic::Ordering::SeqCst);
-                if code.is_none() {
-                    app.exit(64);
-                }
+        .run_return(|app, event| {
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = event
+            {
+                api.prevent_exit();
+                app.exit(64);
             }
         });
-    drop(profile);
-    std::process::exit(exit.load(std::sync::atomic::Ordering::SeqCst));
+    release_profile(profile)?;
+    std::process::exit(exit);
+}
+fn release_profile(profile: tempfile::TempDir) -> Result<()> {
+    let root = std::fs::canonicalize(profile.path())?;
+    let parent = std::fs::canonicalize(std::env::temp_dir())?;
+    ensure!(
+        root.parent() == Some(parent.as_path())
+            && root
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("wukong-review-")),
+        "unexpected review profile location"
+    );
+    if profile.close().is_ok() {
+        return Ok(());
+    }
+    // WebView2 can release its cache shortly after the last view closes. Retry
+    // only this typed, newly allocated profile; never kill browser processes.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if !root.try_exists()? {
+            return Ok(());
+        }
+        ensure!(
+            std::fs::canonicalize(&root)? == root,
+            "review profile location changed"
+        );
+        match std::fs::remove_dir_all(&root) {
+            Ok(()) => return Ok(()),
+            Err(error) if std::time::Instant::now() >= deadline => {
+                return Err(error).context("temporary review profile could not be removed");
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
 }
