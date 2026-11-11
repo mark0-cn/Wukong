@@ -15,6 +15,13 @@ pub enum Diagnosis {
     Unknown,
 }
 pub fn classify(message: &Message) -> Diagnosis {
+    match message.code.as_str() {
+        "system-docker-unavailable" | "system-docker-linux-required" => return Diagnosis::Daemon,
+        "system-docker-config-unreadable" | "system-docker-credential-missing" => {
+            return Diagnosis::Credentials;
+        }
+        _ => {}
+    }
     let text = format!(
         "{} {}",
         message.code,
@@ -150,6 +157,14 @@ mod tests {
     use super::*;
     #[test]
     fn common_failures_have_distinct_actions_and_unknown_is_preserved() {
+        assert_eq!(
+            classify(&Message::new("system-docker-unavailable")),
+            Diagnosis::Daemon
+        );
+        assert_eq!(
+            classify(&Message::new("system-docker-config-unreadable")),
+            Diagnosis::Credentials
+        );
         for (text, expected) in [
             (
                 "docker-credential-desktop executable file not found",
