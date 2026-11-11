@@ -7,6 +7,8 @@ import unittest
 from unittest.mock import patch
 
 from scripts.worker.assemble import BINARIES, file_index, native_build
+from scripts._lib.checksums import sha256
+from scripts._lib.repository import ROOT
 from tests.automation.test_worker_pe import fixture
 
 
@@ -22,9 +24,19 @@ class AssemblyChecks(unittest.TestCase):
                 payload = fixture("KERNEL32.dll")
                 (binaries / name).write_bytes(payload)
                 files[name] = dict(sha256=hashlib.sha256(payload).hexdigest(), size=len(payload), imported_libraries=["kernel32.dll"])
-            original = dict(schema=1, platform="windows-amd64", static_crt_checked=True, files=files, **source)
+            probes = {}
+            for architecture in ["x64", "x86"]:
+                binary = f"selftest/{architecture}/wukong-probe.exe"
+                pdb = f"selftest/{architecture}/wukong-probe.pdb"
+                (root / binary).parent.mkdir(parents=True)
+                (root / binary).write_bytes(fixture("KERNEL32.dll", architecture=architecture))
+                (root / pdb).write_bytes(b"fixture pdb")
+                probes[architecture] = dict(binary=binary, pdb=pdb, binary_sha256=sha256(root / binary), pdb_sha256=sha256(root / pdb),
+                    imported_libraries=["kernel32.dll"], source_sha256=sha256(ROOT / "workers/windows/fixtures/probe.c"))
+            original = dict(schema=1, platform="windows-amd64", static_crt_checked=True, files=files,
+                            selftests=dict(schema=1, architectures=probes), **source)
             metadata = root / "native-build.json"
-            for change in [{}, dict(source_dirty=True), dict(source_revision="c" * 40), dict(source_tree_sha256="d" * 64)]:
+            for change in [{}, dict(source_dirty=True), dict(source_revision="c" * 40), dict(source_tree_sha256="d" * 64), dict(selftests={})]:
                 value = copy.deepcopy(original)
                 value.update(change)
                 metadata.write_text(json.dumps(value))

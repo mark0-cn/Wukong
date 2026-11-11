@@ -4,7 +4,7 @@ import re
 import struct
 
 
-def imported_libraries(path):
+def imported_libraries(path, architecture="x64"):
     with Path(path).open("rb") as stream:
         data = stream.read(64 * 1024 * 1024 + 1)
     if len(data) > 64 * 1024 * 1024:
@@ -25,9 +25,13 @@ def imported_libraries(path):
     optional_size, = unpack("<H", pe + 20)
     optional = pe + 24
     magic, = unpack("<H", optional)
-    if machine != 0x8664 or magic != 0x20b or not 1 <= sections <= 96 or optional_size < 128:
-        raise ValueError("Expected a Windows x64 PE32+ image")
-    directories, = unpack("<I", optional + 108)
+    expected = {"x64": (0x8664, 0x20b, 112), "x86": (0x14c, 0x10b, 96)}.get(architecture)
+    if expected is None:
+        raise ValueError("Unsupported Windows PE architecture")
+    if (machine, magic) != expected[:2] or not 1 <= sections <= 96 or optional_size < expected[2] + 16:
+        raise ValueError("Expected a Windows " + architecture + " PE image")
+    directory_base = optional + expected[2]
+    directories, = unpack("<I", directory_base - 4)
     headers_size, = unpack("<I", optional + 60)
     table = optional + optional_size
 
@@ -61,7 +65,7 @@ def imported_libraries(path):
     for index, descriptor_size in [(1, 20), (13, 32)]:
         if directories <= index:
             continue
-        directory = optional + 112 + index * 8
+        directory = directory_base + index * 8
         if directory + 8 > optional + optional_size:
             raise ValueError("PE directory exceeds optional header")
         rva, size = unpack("<II", directory)
@@ -83,8 +87,8 @@ def imported_libraries(path):
     return sorted(imports)
 
 
-def require_static_crt(path):
-    imports = imported_libraries(path)
+def require_static_crt(path, architecture="x64"):
+    imports = imported_libraries(path, architecture)
     forbidden = [name for name in imports if name.startswith(("vcruntime", "msvcp", "msvcr", "ucrtbase", "api-ms-win-crt-"))]
     if forbidden:
         raise ValueError("Offline bootstrap binary requires an external C runtime: " + ", ".join(forbidden))

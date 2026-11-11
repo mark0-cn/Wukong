@@ -38,6 +38,18 @@ def native_build(directory):
         if (path.stat().st_size != expected["size"] or sha256(path) != expected["sha256"]
                 or require_static_crt(path) != expected["imported_libraries"]):
             raise ValueError("Native build binary no longer matches metadata: " + name)
+    probes = metadata.get("selftests", {})
+    if probes.get("schema") != 1 or set(probes.get("architectures", {})) != {"x64", "x86"}:
+        raise ValueError("Native build is missing offline self-test fixtures")
+    for architecture, probe in probes["architectures"].items():
+        if (probe.get("binary") != f"selftest/{architecture}/wukong-probe.exe"
+                or probe.get("pdb") != f"selftest/{architecture}/wukong-probe.pdb"
+                or probe.get("source_sha256") != sha256(ROOT / "workers/windows/fixtures/probe.c")):
+            raise ValueError("Self-test fixture does not match the pinned source")
+        if (sha256(regular(directory / probe["binary"])) != probe["binary_sha256"]
+                or sha256(regular(directory / probe["pdb"])) != probe["pdb_sha256"]
+                or require_static_crt(directory / probe["binary"], architecture) != probe["imported_libraries"]):
+            raise ValueError("Offline self-test fixture was changed")
     return binaries, metadata
 
 
@@ -77,6 +89,11 @@ def assemble(cache, output, native, keys):
     target.mkdir()
     for name in ["wukong-worker.exe", "wukong-dbgeng.exe"]:
         shutil.copyfile(binaries / name, target / name)
+    for probe in native_metadata["selftests"]["architectures"].values():
+        for key in ["binary", "pdb"]:
+            target = output / "runtime" / probe[key]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(native / probe[key], target)
     shutil.copyfile(native / "native-build.json", output / "native-build.json")
     notices = collect(output / "licenses/native")
     lock = load_lock()
