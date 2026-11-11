@@ -687,6 +687,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn public_partial_survives_native_pause_and_inflight_request_recovery() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (_dir, mut runner, run) =
+            fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+        runner.config.execution.stream = true;
+        let (release, cancelled) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            assert_eq!(request(&mut socket).await["stream"], true);
+            let partial=json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":"Inspecting the fixture"},"done":false}).to_string()+"\n";
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{partial}",partial.len()+1024).as_bytes()).await.unwrap();
+            cancelled.await.unwrap();
+            drop(socket);
+            let (mut socket, _) = listener.accept().await.unwrap();
+            assert_eq!(request(&mut socket).await["stream"], true);
+            let mut final_reply = reply("finish_scan", json!({"summary":"resumed completion"}));
+            final_reply["message"]["content"] = json!("Inspecting the fixture is complete.");
+            let body = final_reply.to_string() + "\n";
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+        });
+        let cancel = CancellationToken::new();
+        let interrupt = async {
+            let reply = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Some(reply) = runner
+                        .store
+                        .records::<PublicReply>(&run.id)
+                        .unwrap()
+                        .into_iter()
+                        .next()
+                    {
+                        break reply;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("in-flight text missing");
+            cancel.cancel();
+            reply.id
+        };
+        let (paused, reply_id) = tokio::join!(runner.drive(&run.id, cancel.clone()), interrupt);
+        assert_eq!(paused.unwrap().status, Status::BudgetPaused);
+        let snapshot = || {
+            crate::desktop::workspace::read(
+                &runner.store,
+                1,
+                &crate::desktop::workspace::WorkspaceRequest {
+                    run: Some(run.id.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .data
+            .unwrap()
+        };
+        assert_eq!(
+            snapshot()
+                .transcript
+                .iter()
+                .find(|message| message.id == reply_id)
+                .unwrap()
+                .state,
+            Some(ReplyState::Interrupted)
+        );
+        release.send(()).unwrap();
+        assert_eq!(
+            drive_bounded(&runner, &run.id).await.status,
+            Status::Completed
+        );
+        let replies = runner.store.records::<PublicReply>(&run.id).unwrap();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].id, reply_id);
+        assert_eq!(replies[0].state, ReplyState::Complete);
+        assert_eq!(replies[0].text, "Inspecting the fixture is complete.");
+        assert_eq!(
+            snapshot()
+                .transcript
+                .iter()
+                .filter(|message| message.id == reply_id)
+                .count(),
+            1
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn native_provider_reasoning_replays_through_the_real_kernel() {
         let anthropic = [
             json!({"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"inspect the input parser","signature":"provider-signed-thinking"},{"type":"tool_use","id":"toolu_1","name":"view_agent_graph","input":{}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":3}}),

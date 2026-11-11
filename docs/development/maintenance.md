@@ -126,3 +126,5 @@ node scripts/dev/capture-readme.mjs target/runtime-workspace.json
 ```
 
 These diagnostic images go to `target/runtime-workspace/`, keeping the README's illustrative images separate. The adapter supplies desktop transport only: agents, text, tool outcomes, targets and evidence IDs come from the captured backend response. This acceptance establishes the CLI-to-desktop presentation path, not live-model reasoning quality or real Ghidra/debugger execution. Native streaming acceptance additionally holds an HTTP response open until a public partial reply can be read from the desktop snapshot; it checks final-message deduplication and excludes private reasoning.
+
+The recovery test also pauses an in-flight response, restores the native journal and checks that the same public message ID receives the final text.
