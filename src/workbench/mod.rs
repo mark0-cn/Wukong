@@ -47,6 +47,12 @@ pub struct Workbench {
 }
 impl Workbench {
     pub fn open(config: &AppConfig) -> Result<Self> {
+        ensure!(
+            !crate::desktop::paths::home()?
+                .join("updates/cleanup-in-progress.json")
+                .exists(),
+            "uninstall cleanup is in progress"
+        );
         fs::create_dir_all(&config.workbench.root)?;
         let root = portable_path(&fs::canonicalize(&config.workbench.root)?);
         let operation = fs::OpenOptions::new()

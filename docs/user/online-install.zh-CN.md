@@ -101,3 +101,9 @@ CI 验证 Windows 安装/卸载、Linux AppImage 与真实 WebView 启动、签�
 Windows Docker Desktop 的真实首次安装与跨版本升级仍需桌面实机验收；托管 runner 的安装器检查及语言界面浏览器测试不代替这项验收。
 
 清理 CLI 可以预览应用管理的本机数据，不打开模型、worker 或数据库。运行 `wukong cleanup plan --data --output cleanup-review.json`，核对路径、文件数量、大小和保留项，再显式执行 `wukong cleanup execute --review cleanup-review.json --yes --report cleanup-report.json`。这些文件应保存在待清理目录之外。执行时获取维护锁并重新生成清单；内容变化后需要重新预览。未知文件、符号链接和重解析路径会保留；配置指向一个目录不代表允许删除该目录中的所有内容。
+
+Windows 卸载会打开范围预览，本机数据与设置、Docker 工具环境、Docker 题目环境分别选择，Docker 选项默认不勾选。原生数据复选框仅设置初始数据选项，详细预览中的最终选择为准。预览展示实际目录、本机文件大小、归属 Docker 资源及保留原因；取消后程序仍安装。静默卸载默认仅移除程序；显式自动化参数为 `/WUKONG_DELETE_DATA`、`/WUKONG_DELETE_TOOLS` 和 `/WUKONG_DELETE_CHALLENGES`。`/UPDATE` 和被动升级路径忽略清理请求。Linux 的 `wukong cleanup uninstall` 打开相同预览，从已安装的 AppImage 启动时移除受管理的桌面集成；外部下载的便携 AppImage 保留供手动移除。
+
+数据清理包含受管理的任务、对话/检查点/证据文件、生成产物、设置与偏好、框架浏览器数据、本地 worker/Ghidra 缓存与日志、已验证的更新/恢复文件及已记录的自定义目录。未知同级文件、外部原始附件、导出文件、外部自定义 Skill 源文件、进程环境变量 API Key、Docker 凭据、共用运行时和远程环境仍保留。无法确认归属的旧版外部缓存目录也会保留。保留的 Docker 环境会留下最小工作区/目录/启动记录及导入的题目副本；被保留容器引用的镜像、卷和网络也不会删除。本机文件大小合计不包含 Docker 磁盘占用。
+
+CLI 的 `cleanup plan` 还可添加 `--tools` 和 `--challenges`。清理仅支持本地 `unix://`/`npipe://` Docker socket；预览与执行之间不要切换 Docker context。请先完成或取消活动任务，并确认或恢复待完成的更新。已有本地 worker 通过认证后请求关闭；仍有活动 job 时会拒绝。清理获取维护锁和工作区锁、重新核对身份，先删所选容器，再删未共用的卷/网络/镜像，最后移除配置与归属记录。失败会生成未完成报告，原生卸载会保留程序；部分已选文件或资源可能已经删除。修复报告中的原因后重试。原生清理中断时阻止新任务，直到重试卸载器。不会全局 prune，也不删除共用工具。

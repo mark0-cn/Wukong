@@ -21,6 +21,10 @@ pub fn lock(root: &Path, exclusive: bool) -> Result<File> {
     } else {
         file.try_lock_shared()
             .context("application maintenance is in progress")?;
+        ensure!(
+            !root.join("cleanup-in-progress.json").exists(),
+            "uninstall cleanup is in progress; finish or retry the uninstaller"
+        );
     }
     Ok(file)
 }

@@ -36,7 +36,7 @@ impl Docker {
     pub fn run(&self, args: &[&str]) -> Result<String> {
         let seconds = if matches!(
             args.first(),
-            Some(&"info" | &"inspect" | &"version" | &"ps")
+            Some(&"info" | &"inspect" | &"version" | &"ps" | &"context")
         ) {
             30
         } else {

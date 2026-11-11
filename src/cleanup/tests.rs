@@ -12,6 +12,95 @@ fn fixture() -> Result<(tempfile::TempDir, Cleanup)> {
     let cleanup = Cleanup::at(home)?;
     Ok((temp, cleanup))
 }
+#[cfg(windows)]
+#[test]
+fn canonical_verbatim_drive_paths_are_supported() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = fs::canonicalize(temp.path())?.join("owned");
+    create_owned_directory(&root)?;
+    assert!(locations::owns_directory(&root));
+    Ok(())
+}
+#[test]
+fn deferred_uninstall_blocks_new_work_and_requires_the_matching_review_to_finish() -> Result<()> {
+    let (_temp, cleanup) = fixture()?;
+    let plan = cleanup.plan(Selection {
+        data: true,
+        ..Default::default()
+    })?;
+    assert!(cleanup.execute_deferred(&plan, true)?.complete);
+    assert!(crate::updates::maintenance::lock(&cleanup.home.join("updates"), false).is_err());
+    assert!(cleanup.finish("unrelated-review").is_err());
+    cleanup.finish(&plan.fingerprint)?;
+    assert!(crate::updates::maintenance::lock(&cleanup.home.join("updates"), false).is_ok());
+    Ok(())
+}
+#[test]
+fn pending_updates_and_active_workbench_operations_preserve_settings() -> Result<()> {
+    let (_temp, cleanup) = fixture()?;
+    crate::workbench::write_json(
+        &cleanup.home.join("updates/pending.json"),
+        &serde_json::json!({}),
+    )?;
+    let plan = cleanup.plan(Selection {
+        data: true,
+        ..Default::default()
+    })?;
+    assert!(cleanup.execute(&plan).is_err());
+    assert!(cleanup.home.join("preferences.json").is_file());
+    fs::remove_file(cleanup.home.join("updates/pending.json"))?;
+    let root = cleanup.home.join(".wukong/workbench");
+    crate::workbench::write_json(
+        &root.join("workspace.json"),
+        &serde_json::json!({"schema_version":1,"id":"test-workspace"}),
+    )?;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(root.join("operation.lock"))?;
+    file.lock()?;
+    let plan = cleanup.plan(Selection {
+        data: true,
+        ..Default::default()
+    })?;
+    assert!(cleanup.execute(&plan).is_err());
+    drop(file);
+    let report = cleanup.execute(&plan)?;
+    assert!(report.complete);
+    assert!(
+        root.join("workspace.json").is_file(),
+        "lost ownership of retained Docker resources"
+    );
+    Ok(())
+}
+#[cfg(windows)]
+#[test]
+fn locked_owned_files_report_partial_failure_and_keep_configuration() -> Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_temp, cleanup) = fixture()?;
+    let path = cleanup.home.join(".wukong/artifacts/locked");
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(&path, b"locked")?;
+    let _handle = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&path)?;
+    let report = cleanup.execute(&cleanup.plan(Selection {
+        data: true,
+        ..Default::default()
+    })?)?;
+    assert!(!report.complete);
+    assert!(!report.errors.is_empty());
+    assert!(cleanup.home.join("wukong.toml").is_file());
+    assert!(
+        !cleanup
+            .home
+            .join("updates/cleanup-in-progress.json")
+            .exists()
+    );
+    Ok(())
+}
 #[test]
 fn plans_are_read_only_and_unknown_files_survive_data_removal() -> Result<()> {
     let (temp, cleanup) = fixture()?;

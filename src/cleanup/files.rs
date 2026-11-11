@@ -31,6 +31,10 @@ pub(super) fn safe(path: &Path) -> Result<()> {
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component);
+        // A verbatim drive prefix alone (\\?\C:) is not a queryable Win32 path.
+        if matches!(component, std::path::Component::Prefix(_)) {
+            continue;
+        }
         match fs::symlink_metadata(&current) {
             Ok(metadata) => ensure!(
                 !reparse(&metadata),
@@ -98,6 +102,16 @@ fn add(path: &Path, record: bool, plan: &mut Plan) -> Result<()> {
 pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
     safe(home)?;
     let registry = locations::inventory(home)?;
+    let keep_environments = !plan.selection.tools
+        || !plan.selection.challenges
+        || plan.retained.iter().any(|item| {
+            matches!(
+                item.reason.as_str(),
+                "referenced by a retained container"
+                    | "unverified or shared image ownership"
+                    | "Docker scope not selected"
+            )
+        });
     let mut recognized: BTreeSet<_> = registry
         .locations
         .iter()
@@ -158,6 +172,7 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
                 "startup.lock",
                 "operations",
                 "bridge.log",
+                "daemon.log",
             ],
             LocationKind::Ghidra => &["scripts", "projects", "results"],
             LocationKind::Workbench => &[
@@ -167,7 +182,6 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
                 "wukong.toml",
                 "doctor.json",
                 "import-record.json",
-                "operation.lock",
                 "logs",
                 "challenges",
             ],
@@ -218,6 +232,26 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
         plan.directories.push(path.clone());
         for name in names {
             let child = path.join(name);
+            if (location.kind == LocationKind::Cache && *name == "probes" && keep_environments)
+                || (location.kind == LocationKind::Workbench
+                    && keep_environments
+                    && matches!(
+                        *name,
+                        "workspace.json"
+                            | "environment.json"
+                            | "previous-environment.json"
+                            | "challenges"
+                    ))
+            {
+                if child.exists() {
+                    plan.retained.push(Retained {
+                        path: child.display().to_string(),
+                        reason: "ownership/launch records for retained Docker environments".into(),
+                    });
+                }
+                recognized.insert(child);
+                continue;
+            }
             let record = matches!(
                 *name,
                 "state.sqlite3"
@@ -256,6 +290,16 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
         "managed-locations.json",
         "locations.lock",
     ] {
+        if name == "managed-locations.json"
+            && keep_environments
+            && !containers::workspaces(home)?.is_empty()
+        {
+            plan.retained.push(Retained {
+                path: home.join(name).display().to_string(),
+                reason: "location records for retained Docker environments".into(),
+            });
+            continue;
+        }
         add(&home.join(name), true, plan)?;
     }
     plan.directories.push(home.to_owned());
@@ -265,6 +309,37 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
 fn registry_child(path: &Path, home: &Path) -> bool {
     path == home.join("updates/maintenance.lock")
         || path == home.join("updates/cleanup-in-progress.json")
+}
+pub(super) fn profiles(plan: &mut Plan) -> Result<()> {
+    if Cleanup::current()?.home != plan.home {
+        return Ok(());
+    }
+    let mut bases = vec![];
+    #[cfg(windows)]
+    for name in ["LOCALAPPDATA", "APPDATA"] {
+        if let Some(path) = std::env::var_os(name) {
+            bases.push(PathBuf::from(path));
+        }
+    }
+    #[cfg(not(windows))]
+    for (name, fallback) in [
+        ("XDG_DATA_HOME", ".local/share"),
+        ("XDG_CACHE_HOME", ".cache"),
+        ("XDG_CONFIG_HOME", ".config"),
+    ] {
+        if let Some(path) = std::env::var_os(name)
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(fallback)))
+        {
+            bases.push(path);
+        }
+    }
+    for base in bases {
+        // Framework data only, never the shared WebView2 installation.
+        add(&base.join("io.wukong.desktop"), false, plan)?;
+    }
+    Ok(())
 }
 pub(super) fn record_order(file: &FileEntry) -> u8 {
     if !file.record {

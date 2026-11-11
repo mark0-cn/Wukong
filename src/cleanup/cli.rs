@@ -2,10 +2,23 @@ use super::*;
 use clap::Subcommand;
 #[derive(Subcommand)]
 pub enum Command {
+    /// Open the shared uninstall scope review. Exit 32..39 confirms scope; 64 cancels.
+    Choose {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        initial_data: bool,
+    },
+    /// Open the installed platform uninstaller (Linux also removes managed integration).
+    Uninstall,
     /// Preview exact application-owned paths. No resources are deleted.
     Plan {
         #[arg(long)]
         data: bool,
+        #[arg(long)]
+        tools: bool,
+        #[arg(long)]
+        challenges: bool,
         #[arg(long)]
         output: Option<PathBuf>,
     },
@@ -17,17 +30,45 @@ pub enum Command {
         yes: bool,
         #[arg(long)]
         report: Option<PathBuf>,
+        #[arg(long)]
+        defer_finalize: bool,
+    },
+    /// Finalize a successfully deferred native uninstall.
+    Finish {
+        #[arg(long)]
+        review: PathBuf,
     },
 }
 pub fn run(command: Command) -> Result<()> {
     let cleanup = Cleanup::current()?;
     match command {
-        Command::Plan { data, output } => {
+        Command::Choose {
+            output,
+            initial_data,
+        } => {
+            #[cfg(feature = "desktop")]
+            crate::desktop::cleanup::choose(output, initial_data)?;
+            #[cfg(not(feature = "desktop"))]
+            {
+                let _ = (output, initial_data);
+                anyhow::bail!("this build does not include the desktop review");
+            }
+        }
+        Command::Uninstall => super::uninstall::run()?,
+        Command::Finish { review } => cleanup.finish(&read_plan(&review)?.fingerprint)?,
+        Command::Plan {
+            data,
+            tools,
+            challenges,
+            output,
+        } => {
             let plan = cleanup.plan(Selection {
                 data,
-                ..Default::default()
+                tools,
+                challenges,
             })?;
             if let Some(output) = output {
+                check_output(&plan, &output)?;
                 crate::workbench::write_json(&output, &plan)?;
             } else {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
@@ -37,9 +78,26 @@ pub fn run(command: Command) -> Result<()> {
             review,
             yes,
             report,
+            defer_finalize,
         } => {
             ensure!(yes, "execution requires explicit --yes");
-            let result = cleanup.execute(&read_plan(&review)?)?;
+            let reviewed = read_plan(&review)?;
+            if !reviewed.selection.any() {
+                return Ok(());
+            }
+            if let Some(output) = &report {
+                check_output(&reviewed, output)?;
+            }
+            let result = cleanup
+                .execute_deferred(&reviewed, defer_finalize)
+                .unwrap_or_else(|error| Report {
+                    complete: false,
+                    removed_files: 0,
+                    removed_resources: 0,
+                    removed_bytes: 0,
+                    retained: vec![],
+                    errors: vec![error.to_string()],
+                });
             if let Some(report) = report {
                 crate::workbench::write_json(&report, &result)?;
             }
