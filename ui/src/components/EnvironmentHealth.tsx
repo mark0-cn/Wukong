@@ -1,7 +1,8 @@
 import { t, message, currentLocale } from '../i18n';
 import type { EnvironmentHealth as Health } from '../commands';
 
-export function EnvironmentHealth({ health }: { health?: Health }) {
+export function EnvironmentHealth({ health: observation, epoch }: { health?: Health; epoch?: number }) {
+  const health = epoch !== undefined && observation?.checked_at && observation.epoch !== epoch ? undefined : observation;
   const label = (value: boolean | null | undefined) => value === true ? t('updates-health-pass') : value === false ? t('updates-health-fail') : t('updates-health-unknown');
   return <section className="environment-health" aria-label={t('updates-health-title')}>
     <h3>{t('updates-health-title')}</h3>

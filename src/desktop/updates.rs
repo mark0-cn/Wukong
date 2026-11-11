@@ -397,7 +397,7 @@ impl Controller {
         if matches!(action, Action::Health | Action::Doctor) {
             self.phase("health", UiMessage::new("system-checking-tool-health"));
             let snapshot = tokio::task::spawn_blocking(move || {
-                super::update_health::check(&config, matches!(action, Action::Doctor))
+                super::update_health::check(&config, matches!(action, Action::Doctor), epoch)
             })
             .await??;
             self.edit().diagnosis = snapshot
@@ -652,7 +652,7 @@ impl Controller {
                 let mut state = self.edit();
                 state.needs_setup = false;
                 // activate() has just checked the live container, tools, and saved binding.
-                state.health = super::update_health::Health::verified_now();
+                state.health = super::update_health::Health::verified_now(service.status().epoch);
             }
             self.phase(
                 "idle",
