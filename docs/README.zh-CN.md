@@ -18,6 +18,7 @@
 ## 设计与开发
 
 - [架构](design/architecture.zh-CN.md)和[实现契约](design/implementation-contract.zh-CN.md)：模块、运行语义、验收不变量。
+- [源码上手](development/getting-started.zh-CN.md)：构建客户端、模型配置与 Docker 工具准备。
 - [维护约定](development/maintenance.zh-CN.md)：边界、生成目录及检查。
 - [文档维护](development/documentation.zh-CN.md)和[多语言维护](development/localization.zh-CN.md)：配对文档与产品翻译。
 - [桌面更新](development/desktop-updates.zh-CN.md)：安装信任、进度、存储及恢复。
