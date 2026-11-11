@@ -33,12 +33,13 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
     <Collapsible.Trigger className="tool-trigger">
       <span className="tool-symbol"><StateIcon state={display.state} /></span>
       <span className="tool-label"><strong>{text(display.title)}</strong>{display.target && <span className="tool-target" title={display.target}>{display.target}</span>}</span>
+      {display.state === 'completed' && !open && display.summary && <span className="tool-inline-summary" title={formatMessage(display.summary)}>{formatMessage(display.summary)}</span>}
       <span className="tool-state">{labels[display.state] ?? display.state}</span>
       {display.duration_ms != null && <span className="tool-duration">{(display.duration_ms / 1000).toFixed(1)}s</span>}
       <ChevronRight size={13} className={open ? 'rotate' : ''} />
     </Collapsible.Trigger>
     {(open || display.state !== 'completed') && display.purpose && <p className="tool-purpose">{display.purpose}</p>}
-    {display.summary && <p className={`tool-summary ${display.state === 'completed' && !open ? 'tool-summary-compact' : ''}`}>{formatMessage(display.summary)}</p>}
+    {(open || display.state !== 'completed') && display.summary && <p className="tool-summary">{formatMessage(display.summary)}</p>}
     <Collapsible.Content className="tool-details">
       {loading && <p className="muted">{t('workspace-loading-operation-details')}</p>}
       {error && <p className="error" role="alert">{errorText(error)}</p>}
@@ -200,7 +201,7 @@ export function Composer({ target, draft, onDraft, send, busy }: {
     <textarea ref={input} aria-label={t('workspace-message-to-agent')} placeholder={target ? t('workspace-add-information-or-adjust-s-work', { v0: target.name }) : t('workspace-select-a-task-to-message-an-agent')}
       value={draft.text} disabled={!target} rows={2} onChange={event => onDraft({ ...draft, text: event.target.value })}
       onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} />
-    <div className="composer-controls"><div className="composer-target"><Bot size={13} /><span title={target?.name}>{t('ui-recipient')}{target?.name ?? t('workspace-select-a-task-first')}</span></div>
+    <div className="composer-controls"><div className="composer-target"><Bot size={13} /><span title={target?.name}>{t('ui-recipient')}{' '}{target?.name ?? t('workspace-select-a-task-first')}</span></div>
       <select className="send-mode" aria-label={t('ui-send-mode')} value={draft.followUp ? 'follow_up' : 'information'} onChange={event => { setError(''); onDraft({ ...draft, followUp: event.target.value === 'follow_up' }); }}>
         <option value="information">{t('ui-send-information')}</option><option value="follow_up">{t('ui-send-task')}</option>
       </select>
