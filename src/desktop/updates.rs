@@ -20,6 +20,10 @@ pub struct Status {
     pub operation_id: Option<String>,
     pub revision: u64,
     pub busy: bool,
+    pub cancellable: bool,
+    pub cancelling: bool,
+    #[serde(skip)]
+    cancel: tokio_util::sync::CancellationToken,
     pub action: Option<Action>,
     pub version: String,
     pub phase: String,
@@ -140,8 +144,39 @@ impl Controller {
         state.operation_id = Some(uuid::Uuid::new_v4().to_string());
         state.action = action;
         state.busy = true;
+        state.cancellable = matches!(action, Some(Action::Setup | Action::Prepare));
+        state.cancelling = false;
+        state.cancel = tokio_util::sync::CancellationToken::new();
         state.phase = "starting".into();
         state.message = UiMessage::default();
+    }
+    pub fn cancel(&self, operation_id: &str) -> Result<Status> {
+        let mut state = self.edit();
+        ensure!(
+            state.operation_id.as_deref() == Some(operation_id) && state.busy && state.cancellable,
+            UiMessage::new("system-operation-not-cancellable")
+        );
+        state.cancel.cancel();
+        state.cancelling = true;
+        drop(state);
+        Ok(self.status())
+    }
+    fn seal_preparation(&self) -> Result<()> {
+        let mut state = self.edit();
+        crate::workbench::cancellation::check(Some(&state.cancel))?;
+        state.cancellable = false;
+        Ok(())
+    }
+    async fn cancellable<T>(
+        &self,
+        future: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        let token = self.status().cancel;
+        tokio::select! {
+            biased;
+            _ = token.cancelled() => Err(crate::workbench::cancellation::Cancelled.into()),
+            result = future => result,
+        }
     }
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
@@ -201,7 +236,7 @@ impl Controller {
         }
     }
     async fn remember(&self, version: Option<&str>) -> Result<Manifest> {
-        let (manifest, bytes, signature) = manifest::fetch(version).await?;
+        let (manifest, bytes, signature) = self.cancellable(manifest::fetch(version)).await?;
         let directory = recovery::cache(&manifest.version)?;
         std::fs::create_dir_all(&directory)?;
         // Cache only authenticated metadata. Interrupted writes fail closed on reload.
@@ -228,11 +263,17 @@ impl Controller {
             .connect_timeout(std::time::Duration::from_secs(30))
             .timeout(std::time::Duration::from_secs(1800))
             .build()?;
-        let mut response = client.get(&artifact.url).send().await?.error_for_status()?;
+        let mut response = self
+            .cancellable(async { Ok(client.get(&artifact.url).send().await?) })
+            .await?
+            .error_for_status()?;
         let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
         let mut downloaded = 0;
         use std::io::Write;
-        while let Some(chunk) = response.chunk().await? {
+        while let Some(chunk) = self
+            .cancellable(async { Ok(response.chunk().await?) })
+            .await?
+        {
             downloaded += chunk.len() as u64;
             ensure!(downloaded <= artifact.size, "download exceeds signed size");
             file.write_all(&chunk)?;
@@ -261,7 +302,19 @@ impl Controller {
         let _cache = crate::updates::storage::cache_lock(false)?;
         self.begin(Some(action));
         let result = self.perform(action, epoch, service, app).await;
-        self.edit().busy = false;
+        {
+            let mut state = self.edit();
+            state.busy = false;
+            state.cancellable = false;
+            state.cancelling = false;
+        }
+        if result
+            .as_ref()
+            .is_err_and(|e| e.is::<crate::workbench::cancellation::Cancelled>())
+        {
+            self.phase("cancelled", UiMessage::new("system-preparation-cancelled"));
+            return Ok(self.status());
+        }
         if let Err(error) = &result {
             self.phase("error", UiMessage::from_error_ref(error));
         }
@@ -521,10 +574,12 @@ impl Controller {
         let controller = self.clone();
         let image = manifest.image.clone();
         let probe_config = config.clone();
+        let cancel = self.status().cancel;
         tokio::task::spawn_blocking(move || {
             environment::prepare(
                 &probe_config,
                 &image,
+                cancel,
                 |message| {
                     let phase = match message.code.as_str() {
                         "system-checking-docker-host" => "docker",
@@ -540,6 +595,7 @@ impl Controller {
             )
         })
         .await??;
+        self.seal_preparation()?;
         if setup {
             self.phase(
                 "activating",
@@ -571,6 +627,25 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cancellation_is_bound_to_operation_and_sealed_before_activation() {
+        let controller = Controller::default();
+        controller.begin(Some(Action::Setup));
+        let old = controller.status().operation_id.unwrap();
+        controller.begin(Some(Action::Setup));
+        assert!(controller.cancel(&old).is_err());
+        let current = controller.status().operation_id.unwrap();
+        controller.cancel(&current).unwrap();
+        assert!(controller.seal_preparation().is_err());
+        controller.begin(Some(Action::Setup));
+        controller.seal_preparation().unwrap();
+        assert!(
+            controller
+                .cancel(&controller.status().operation_id.unwrap())
+                .is_err()
+        );
+        assert!(!controller.status().cancel.is_cancelled());
+    }
     #[test]
     fn snapshots_are_read_only_and_new_operations_keep_monotonic_revisions() {
         let controller = Controller::default();

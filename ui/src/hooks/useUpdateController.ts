@@ -53,7 +53,16 @@ export function useUpdateController(epoch: number | undefined, onChanged: () => 
       return false;
     } finally { if (alive.current) setPending(false); }
   }, [epoch, accept]);
+  const cancel = useCallback(async () => {
+    const operationId = accepted.current?.operation_id;
+    if (!operationId || !accepted.current?.cancellable) return;
+    const request = ++sequence.current;
+    try {
+      const value = await api('update_cancel', { operationId });
+      if (alive.current) accept(value, request);
+    } catch (error) { if (alive.current) setRefreshError(errorValue(error)); }
+  }, [accept]);
   const working = pending || (status?.busy ?? ['starting', 'checking', 'downloading', 'environment', 'docker', 'pulling', 'validating', 'activating', 'installing', 'storage'].includes(status?.phase ?? ''));
-  return { status, working, operationError, refreshError, run };
+  return { status, working, operationError, refreshError, run, cancel };
 }
 export type UpdateController = ReturnType<typeof useUpdateController>;

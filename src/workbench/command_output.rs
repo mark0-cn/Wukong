@@ -7,7 +7,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) fn capture(command: &mut Command, timeout: Duration, limit: u64) -> Result<Output> {
+pub(super) fn capture(
+    command: &mut Command,
+    timeout: Duration,
+    limit: u64,
+    cancel: Option<&tokio_util::sync::CancellationToken>,
+) -> Result<Output> {
+    super::cancellation::check(cancel)?;
     let mut stdout = tempfile::tempfile()?;
     let mut stderr = tempfile::tempfile()?;
     let mut child = command
@@ -18,6 +24,7 @@ pub(super) fn capture(command: &mut Command, timeout: Duration, limit: u64) -> R
     let started = Instant::now();
     let result = (|| {
         loop {
+            super::cancellation::check(cancel)?;
             ensure!(
                 stdout
                     .metadata()?
@@ -77,12 +84,36 @@ mod tests {
         command
     }
     #[test]
+    fn cancellation_interrupts_a_running_control_command() {
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = token.clone();
+        let trigger = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(80));
+            cancel.cancel();
+        });
+        let started = Instant::now();
+        let result = capture(
+            &mut shell("for /L %i in (1,0,2) do @rem wait", "while :; do :; done"),
+            Duration::from_secs(30),
+            4096,
+            Some(&token),
+        );
+        trigger.join().unwrap();
+        assert!(
+            result
+                .unwrap_err()
+                .is::<super::super::cancellation::Cancelled>()
+        );
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+    #[test]
     fn hung_control_command_has_a_deadline() {
         let started = Instant::now();
         let error = capture(
             &mut shell("for /L %i in (1,0,2) do @rem wait", "while :; do :; done"),
             Duration::from_millis(80),
             4096,
+            None,
         )
         .unwrap_err();
         assert_eq!(
@@ -100,6 +131,7 @@ mod tests {
             ),
             Duration::from_secs(3),
             512,
+            None,
         )
         .unwrap_err();
         assert_eq!(
@@ -116,6 +148,7 @@ mod tests {
             ),
             Duration::from_secs(3),
             4096,
+            None,
         )
         .unwrap();
         assert_eq!(result.status.code(), Some(7));

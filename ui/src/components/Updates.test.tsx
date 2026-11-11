@@ -69,3 +69,23 @@ test('tools repair uses the shared update operation rather than a raw workbench 
   await userEvent.click(screen.getByRole('button', { name: '自检并修复环境' }));
   expect(vi.mocked(api<'update_action'>).mock.calls.some(([name, args]) => name === 'update_action' && args?.action === 'setup')).toBe(true);
 });
+
+test('a running preparation can be hidden and cancellation targets its operation id', async () => {
+  const running = { ...status, busy: true, operation_id: 'prepare-123', cancellable: true, phase: 'pulling' };
+  vi.mocked(api<'update_action'>).mockResolvedValue(running);
+  const close = vi.fn();
+  render(<Updates epoch={1} onClose={close} onChanged={() => {}} />);
+  await screen.findByText('0.2.0');
+  await userEvent.click(screen.getByRole('button', { name: '收起到后台' }));
+  expect(close).toHaveBeenCalledOnce();
+  await userEvent.click(screen.getByRole('button', { name: '取消准备' }));
+  expect(api).toHaveBeenCalledWith('update_cancel', { operationId: 'prepare-123' });
+});
+
+test('activation explains why cancellation is unavailable', async () => {
+  vi.mocked(api<'update_action'>).mockResolvedValue({ ...status, busy: true, phase: 'activating', cancellable: false });
+  render(<Updates epoch={1} onClose={() => {}} onChanged={() => {}} />);
+  await screen.findByText('0.2.0');
+  expect((screen.getByRole('button', { name: '取消准备' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/当前阶段不支持取消/)).toBeTruthy();
+});

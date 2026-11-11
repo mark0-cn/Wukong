@@ -583,3 +583,35 @@ test('image layer progress updates while pulling and keeps self-check separate',
   await expect(page.locator('.setup-steps li').nth(2)).toHaveAttribute('data-state', 'active');
   await expect(page.getByRole('progressbar')).toHaveCount(0);
 });
+
+
+test('background preparation reattaches from either entry and cancellation settles without restarting', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    const state = { version: '0.2.0', needs_setup: true, phase: 'pulling', environment_step: 'pulling',
+      operation_id: 'same-operation', revision: 100, busy: true, cancellable: true, cancelling: false,
+      message: { code: 'system-pulling-the-tool-image-docker-will-reuse-downloaded', args: {} },
+      available: null, notes: '', downloaded: 0, total: null, prepared: null, recovery: null, pending: false };
+    Object.assign(window, { __backgroundState: state, __cancelIds: [] });
+    native.invoke = async (command: string, args: any) => {
+      if (command === 'update_action') return { ...state };
+      if (command === 'update_cancel') {
+        (window as any).__cancelIds.push(args.operationId);
+        Object.assign(state, { revision: 101, busy: false, cancellable: false, phase: 'cancelled', message: { code: 'system-preparation-cancelled', args: {} } });
+        return { ...state };
+      }
+      return invoke(command, args);
+    };
+  });
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  await page.getByRole('button', { name: '收起到后台', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.sidebar-operation')).toContainText('正在拉取');
+  await page.getByRole('button', { name: '工具环境', exact: true }).click();
+  await expect(page.getByRole('button', { name: '自检并修复环境' })).toBeDisabled();
+  await page.getByRole('button', { name: '取消准备', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('准备已取消');
+  await expect(page.getByRole('button', { name: '自检并修复环境' })).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).__cancelIds)).toEqual(['same-operation']);
+});
