@@ -45,9 +45,8 @@ jobs:
           python-version: '3.12'
       - name: Install Linux desktop build dependencies
         if: inputs.target == 'linux' && inputs.installer_artifact_id == ''
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libwayland-dev libxkbcommon-dev xvfb
+        timeout-minutes: 12
+        run: python -m scripts.ci.install_apt libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libwayland-dev libxkbcommon-dev xvfb
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: inputs.installer_artifact_id == ''
         with:
