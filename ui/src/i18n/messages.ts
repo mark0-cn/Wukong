@@ -474,6 +474,7 @@ export interface Messages {
   'updates-install-and-start-docker-with-support-for': undefined;
   'updates-installation-closes-and-restarts-the-client-save': undefined;
   'updates-keep-the-application-open-while-processing-image': undefined;
+  'updates-last-layer-change': { seconds: string | number };
   'updates-layer-downloaded': undefined;
   'updates-layer-downloading': undefined;
   'updates-layer-extracting': undefined;
@@ -484,6 +485,7 @@ export interface Messages {
   'updates-loading': undefined;
   'updates-main-executable-relative-path-if-there-are': undefined;
   'updates-migration-package-directory': undefined;
+  'updates-no-recent-layer-change': undefined;
   'updates-no-update-found-yet': undefined;
   'updates-once-ready-configure-your-model-provider-in': undefined;
   'updates-operation-result': undefined;

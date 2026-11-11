@@ -18,3 +18,10 @@ test('local image reuse does not pretend it downloaded or passed environment val
   expect(screen.queryByRole('progressbar')).toBeNull();
   expect(screen.queryByText('已就绪')).toBeNull();
 });
+
+test('quiet progress is advisory rather than a fabricated failure', () => {
+  render(<ImagePullProgress version="0.2.0" busy value={{ layers: [], elapsed_ms: 190000, quiet_ms: 130000, finished: false, cached: false, truncated: false }} />);
+  expect(screen.getByText('距镜像层进度变化：130 秒')).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toContain('不表示操作已经失败');
+  expect(screen.queryByRole('alert')).toBeNull();
+});

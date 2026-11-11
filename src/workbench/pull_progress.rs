@@ -18,6 +18,7 @@ pub struct LayerProgress {
 pub struct PullProgress {
     pub layers: Vec<LayerProgress>,
     pub elapsed_ms: u64,
+    pub quiet_ms: u64,
     pub finished: bool,
     pub cached: bool,
     pub truncated: bool,
@@ -28,6 +29,7 @@ struct Parser {
     progress: PullProgress,
     pending: Vec<u8>,
     oversized: bool,
+    revision: u64,
 }
 impl Parser {
     fn feed(&mut self, bytes: &[u8]) {
@@ -69,12 +71,16 @@ impl Parser {
             return;
         };
         if let Some(layer) = self.progress.layers.iter_mut().find(|layer| layer.id == id) {
+            if layer.state != state {
+                self.revision += 1;
+            }
             layer.state = state;
         } else if self.progress.layers.len() < 256 {
             self.progress.layers.push(LayerProgress {
                 id: id.into(),
                 state,
             });
+            self.revision += 1;
         } else {
             self.progress.truncated = true;
         }
@@ -90,6 +96,8 @@ pub(super) fn monitor(
     let mut file = File::open(log)?;
     let mut parser = Parser::default();
     let mut chunk = [0; 16384];
+    let mut last_change = started;
+    let mut revision = 0;
     report(parser.progress.clone());
     loop {
         let exit = child.try_wait()?;
@@ -104,6 +112,11 @@ pub(super) fn monitor(
             parser.feed(&chunk[..count]);
         }
         parser.progress.elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        if revision != parser.revision {
+            revision = parser.revision;
+            last_change = Instant::now();
+        }
+        parser.progress.quiet_ms = last_change.elapsed().as_millis().min(u64::MAX as u128) as u64;
         if let Some(status) = exit
             && drained
         {
@@ -129,6 +142,12 @@ mod tests {
         assert_eq!(parser.progress.layers[0].state, "downloaded");
         assert_eq!(parser.progress.layers[1].state, "ready");
         assert!(!parser.progress.finished);
+        let revision = parser.revision;
+        parser.feed(b"abcdef123456: Download complete\n");
+        assert_eq!(
+            parser.revision, revision,
+            "duplicate output is not new progress"
+        );
         parser.feed(b"abcdef123456: Pull complete\n");
         assert_eq!(parser.progress.layers[0].state, "ready");
     }
