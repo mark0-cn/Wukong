@@ -125,7 +125,13 @@ fn add(path: &Path, record: bool, plan: &mut Plan) -> Result<()> {
 }
 pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
     safe(home)?;
-    let registry = locations::inventory(home)?;
+    let mut registry = locations::inventory(home)?;
+    for (path, _) in containers::workspaces(home)? {
+        registry.locations.insert(Location {
+            kind: LocationKind::Workbench,
+            path,
+        });
+    }
     let keep_environments = !plan.selection.tools
         || !plan.selection.challenges
         || plan.retained.iter().any(|item| {
@@ -261,16 +267,41 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
                 recognized.insert(child);
                 continue;
             }
-            if (location.kind == LocationKind::Cache && *name == "probes" && keep_environments)
-                || (location.kind == LocationKind::Workbench
-                    && keep_environments
-                    && matches!(
-                        *name,
-                        "workspace.json"
-                            | "environment.json"
-                            | "previous-environment.json"
-                            | "challenges"
-                    ))
+            if location.kind == LocationKind::Cache && *name == "probes" && child.is_dir() {
+                // Probe workspaces use the same selective inventory as ordinary
+                // workbenches: retain their identity, not all their old logs.
+                safe(&child)?;
+                plan.directories.push(child.clone());
+                for entry in fs::read_dir(&child)? {
+                    let probe = entry?.path();
+                    if probe.join("workspace.json").is_file() {
+                        continue;
+                    }
+                    if probe
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| uuid::Uuid::parse_str(name).is_ok())
+                    {
+                        add(&probe, false, plan)?;
+                    } else {
+                        plan.retained.push(Retained {
+                            path: probe.display().to_string(),
+                            reason: "unrecognized probe content; retained".into(),
+                        });
+                    }
+                }
+                recognized.insert(child);
+                continue;
+            }
+            if location.kind == LocationKind::Workbench
+                && keep_environments
+                && matches!(
+                    *name,
+                    "workspace.json"
+                        | "environment.json"
+                        | "previous-environment.json"
+                        | "challenges"
+                )
             {
                 if child.exists() {
                     plan.retained.push(Retained {
