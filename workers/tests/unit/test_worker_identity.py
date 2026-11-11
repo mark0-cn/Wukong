@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import threading
 
 from worker_common import WorkerError
-from worker_identity import ExclusiveLease, installation_identity
+from worker_identity import ExclusiveLease, installation_identity, native_package_identity
 
 
 class WorkerFenceTests(unittest.TestCase):
@@ -27,6 +27,14 @@ class WorkerFenceTests(unittest.TestCase):
         self.assertEqual(installation_identity(self.root),installation_identity(self.root))
         (self.root/'installation.json').write_text('{"installation_id":"invalid"}')
         with self.assertRaises(ValueError): installation_identity(self.root)
+
+    def test_native_binding_uses_whole_signed_package_and_rejects_cross_installation(self):
+        installation='a'*32
+        binding={'schema':1,'protocol':2,'installation_id':installation,'package_sha256':'b'*64}
+        self.assertEqual(native_package_identity(binding,installation),'b'*64)
+        for changed in [dict(binding,installation_id='c'*32),dict(binding,protocol=1),
+                        dict(binding,package_sha256='B'*64),dict(binding,unexpected=True)]:
+            with self.assertRaises(ValueError): native_package_identity(changed,installation)
 
     def test_unisolated_worker_does_not_advertise_native_execution(self):
         from worker_capabilities import doctor

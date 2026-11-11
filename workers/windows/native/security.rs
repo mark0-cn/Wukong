@@ -13,7 +13,7 @@ use windows_sys::Win32::{
         ACCESS_ALLOWED_ACE, ACE_HEADER, ACL,
         Authorization::{
             ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-            GetNamedSecurityInfoW, SE_FILE_OBJECT,
+            ConvertStringSidToSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
         },
         DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorControl, GetTokenInformation,
         OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
@@ -45,6 +45,46 @@ impl Drop for Local {
             }
         }
     }
+}
+
+pub(crate) struct SecurityDescriptor(Local);
+impl SecurityDescriptor {
+    pub(crate) fn from_sddl(sddl: &str) -> Result<Self> {
+        ensure!(
+            sddl.len() <= 4096,
+            "native security descriptor is too large"
+        );
+        let encoded = wide(std::ffi::OsStr::new(sddl))?;
+        let mut descriptor = null_mut();
+        check(unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                encoded.as_ptr(),
+                1,
+                &mut descriptor,
+                null_mut(),
+            )
+        })?;
+        Ok(Self(Local(descriptor)))
+    }
+    pub(crate) fn attributes(&self) -> SECURITY_ATTRIBUTES {
+        SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: self.0.0,
+            bInheritHandle: 0,
+        }
+    }
+}
+pub(crate) fn validate_account_sid(sid: &str) -> Result<()> {
+    ensure!(
+        sid.starts_with("S-1-5-21-") && sid.len() < 128,
+        "management identity must be a local account SID"
+    );
+    let encoded = wide(std::ffi::OsStr::new(sid))?;
+    let mut decoded = null_mut();
+    check(unsafe { ConvertStringSidToSidW(encoded.as_ptr(), &mut decoded) })?;
+    let _memory = Local(decoded);
+    ensure!(sid_text(decoded)? == sid, "noncanonical native account SID");
+    Ok(())
 }
 
 pub fn check(value: i32) -> Result<()> {
@@ -130,6 +170,46 @@ pub fn require_system() -> Result<()> {
     );
     Ok(())
 }
+pub(crate) fn require_plain_account_token(token: &Handle) -> Result<()> {
+    use windows_sys::Win32::Security::{SID_AND_ATTRIBUTES, TOKEN_GROUPS, TokenGroups};
+    let user = token_user_sid(token)?;
+    validate_account_sid(&user)?;
+    let mut size = 0;
+    unsafe {
+        GetTokenInformation(token.0, TokenGroups, null_mut(), 0, &mut size);
+    }
+    ensure!(
+        size > 0 && size < 65536,
+        "invalid worker account group list"
+    );
+    let mut buffer = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenGroups,
+            buffer.as_mut_ptr().cast(),
+            size,
+            &mut size,
+        )
+    })?;
+    let groups = unsafe { &*buffer.as_ptr().cast::<TOKEN_GROUPS>() };
+    ensure!(
+        std::mem::offset_of!(TOKEN_GROUPS, Groups)
+            + groups.GroupCount as usize * size_of::<SID_AND_ATTRIBUTES>()
+            <= size as usize,
+        "truncated worker account groups"
+    );
+    for group in
+        unsafe { std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize) }
+    {
+        let sid = sid_text(group.Sid)?;
+        ensure!(
+            !sid.starts_with("S-1-5-32-") || sid == "S-1-5-32-545",
+            "worker account belongs to a privileged or unexpected builtin group"
+        );
+    }
+    Ok(())
+}
 
 /// Every granted principal is explicit. Native VM metadata uses System/admins;
 /// inert development tests can use an owner-only policy inside task temp roots.
@@ -161,6 +241,18 @@ impl AclPolicy {
             FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
         );
         result
+    }
+    pub fn with_account(mut self, sid: &str, writable: bool) -> Result<Self> {
+        validate_account_sid(sid)?;
+        self.grants.insert(
+            sid.into(),
+            if writable {
+                FILE_ALL_ACCESS
+            } else {
+                FILE_GENERIC_READ | FILE_GENERIC_EXECUTE
+            },
+        );
+        Ok(self)
     }
     pub fn current_user() -> Result<Self> {
         let owner = current_user_sid()?;
@@ -234,6 +326,22 @@ impl AclPolicy {
             std::io::Error::last_os_error()
         );
         Ok(unsafe { fs::File::from_raw_handle(handle) })
+    }
+    /// Installer/service-private objects only, never target-writable trees.
+    pub fn apply(&self, path: &Path, directory: bool) -> Result<()> {
+        no_links(path)?;
+        let descriptor = self.descriptor(directory)?;
+        let encoded = wide(path.canonicalize()?.as_os_str())?;
+        check(unsafe {
+            windows_sys::Win32::Security::SetFileSecurityW(
+                encoded.as_ptr(),
+                OWNER_SECURITY_INFORMATION
+                    | DACL_SECURITY_INFORMATION
+                    | windows_sys::Win32::Security::PROTECTED_DACL_SECURITY_INFORMATION,
+                descriptor.0,
+            )
+        })?;
+        self.verify(path, directory)
     }
     pub fn verify(&self, path: &Path, directory: bool) -> Result<()> {
         no_links(path)?;

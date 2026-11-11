@@ -149,6 +149,9 @@ fn native_permissions_reject_extra_writers_and_relative_roots() -> Result<()> {
         "cannot prepare task-owned ACL fixture"
     );
     assert!(policy.verify(&path, false).is_err());
+    policy.apply(&path, false)?;
+    policy.verify(&path, false)?;
+    assert_eq!(fs::read(&path)?, b"owned fixture");
     assert!(crate::security::no_links(Path::new("relative-root")).is_err());
     Ok(())
 }

@@ -7,6 +7,60 @@ use wukong_worker_package::{Compatibility, PublicKey, verify_package};
 fn main() -> Result<()> {
     ensure!(cfg!(windows), "native Windows worker requires Windows");
     let args: Vec<_> = std::env::args_os().collect();
+    #[cfg(windows)]
+    if args.len() == 1 {
+        let result = wukong_windows_worker::setup_ui::review();
+        if let Err(error) = &result {
+            wukong_windows_worker::setup_ui::failure(error);
+        }
+        return result;
+    }
+    #[cfg(windows)]
+    if args.len() == 5 && args[1] == "install-elevated" {
+        return wukong_windows_worker::setup_ui::elevated(
+            Path::new(&args[2]),
+            &PublicKey::from_hex(args[3].to_str().context("invalid controller key")?)?,
+            args[4]
+                .to_str()
+                .context("invalid reviewed enrollment hash")?,
+        );
+    }
+    #[cfg(windows)]
+    if args.len() == 6 && args[1] == "verify-enrollment" {
+        let key = PublicKey::from_hex(args[4].to_str().context("invalid controller key")?)?;
+        let controller = args[5].to_str().context("invalid controller version")?;
+        let package = verify_package(
+            Path::new(&args[2]),
+            &key,
+            &Compatibility {
+                runtime_protocol: 2,
+                controller_version: controller,
+            },
+        )?;
+        let enrollment =
+            wukong_windows_worker::deployment::read_enrollment(Path::new(&args[3]), &key)?;
+        enrollment.bind_payload(&package)?;
+        println!(
+            "{}",
+            json!({"verified":true,"scope":"public_enrollment_and_payload","installation_id":enrollment.enrollment().installation_id,"generation":enrollment.enrollment().generation,"manifest_sha256":package.sha256()})
+        );
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if args.len() == 4 && args[1] == "service" {
+        return wukong_windows_worker::service::dispatch(
+            args[2].to_str().context("invalid installation ID")?,
+            Path::new(&args[3]),
+        );
+    }
+    #[cfg(windows)]
+    if args.len() == 3 && args[1] == "relay" {
+        let installation = args[2].to_str().context("invalid installation ID")?;
+        return tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(wukong_windows_worker::service::relay(installation));
+    }
     ensure!(
         args.len() == 5 && args[1] == "verify-package",
         "usage: wukong-worker verify-package <unpacked-directory> <pinned-public-key-hex> <controller-version>"

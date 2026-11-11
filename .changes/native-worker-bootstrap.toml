@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add a native offline Windows VM bootstrap and service path with signed enrollment, separate local identities, owned process Jobs and a fixed authenticated SSH relay. Real VM installation, lifecycle and production target-isolation acceptance remain pending."
+zh_CN = "新增原生离线 Windows VM 引导程序与服务路径，包含签名登记、独立本地身份、有归属的进程 Job 及固定认证 SSH 中继。真实 VM 安装、生命周期及生产目标隔离验收仍待完成。"

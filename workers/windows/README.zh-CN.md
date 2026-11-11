@@ -18,7 +18,7 @@ cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
 
 原生库可将已验证载荷暂存到新建目录，显式设置受保护的 Windows ACL，对复制的每个文件计算哈希、排他创建文件，并再次校验完整目标目录。VM 策略区分 System/管理员元数据与可读的可执行内容。源介质和暂存父目录必须防止其他进程并发写入；仅检查链接不足以安全收集目标可写目录中的文件。失败暂存仍由调用方持有，用于事务恢复。该模块不激活版本，也不创建服务或账号。其 Windows CI 测试仅使用无执行能力的签名文件及仅当前用户可访问的临时目录，验证权限，并拒绝额外写入者、源文件变更、相对根目录及覆盖写入，不在开发宿主安装任何软件。
 
-`wukong-worker.exe` 当前提供 `verify-package DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION`，使用共享[离线包约定](../package/README.zh-CN.md)。该只读命令校验独立信任、兼容性与文件精确内容，不安装或激活 worker。其可执行文件与 `wukong-dbgeng.exe` 一起接受静态 CRT 检查。
+`wukong-worker.exe verify-package DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION` 使用共享[离线包约定](../package/README.zh-CN.md)。该只读命令校验独立信任、兼容性与文件精确内容。`verify-enrollment PACKAGE ENROLLMENT_DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION` 还会校验公开登记签名及其载荷绑定。两个校验命令均不安装或激活 worker。该程序与 `wukong-dbgeng.exe` 一起接受静态 CRT 检查。
 
 `toolchain.lock.json` 以大小与 SHA256 固定官方 Python、OpenSSH、Python wheel 和完整 Debugging Tools MSI/CAB 清单。锁文件中的 OpenSSH 版本为上游**预览版**。在控制端准备缓存：
 
@@ -52,4 +52,18 @@ python -m scripts.worker.assemble --cache target/windows-offline-cache --output 
 
 原生调用方须先建立工具包信任，并防止其他进程写入版本目录。该入口不是 worker RPC，也不替代签名校验。它在执行前检查随包探针哈希，无须网络即可测试 OpenSSH 密钥生成，并使用随包运行时检查 x64/x86 dump/live 调试及每种架构三次重放。固定 SSH 探针会额外接收所需的 Windows `ProgramData` 路径，不改变目标作业的环境变量过滤。临时测试 SSH 密钥会删除，日志及结果保存在签名目录之外。成功报告明确仅涵盖离线依赖和可信样例，不代表生产目标隔离或服务/SSH 安装。运行后应再次校验签名目录。
 
-调试组件为结构化 DbgEng 辅助程序。真实 x64/x86 可信样例验收独立于生产 broker 隔离与离线 VM 安装验收。样例套件还检查重放：使用不同的生产者/验证者 ID，每种架构运行三次新进程与工作目录试验，校验输入及目标的精确哈希，并观测 `0xc0000005` 异常。这证明可信样例重放路径，不代表生产元数据保护或利用影响。托管服务、安装器和更新生命周期仍在实现中；该构建入口不代表这些能力已经可用。参见[跨平台环境约定](../../docs/design/cross-platform-environments.zh-CN.md)和[运行时指南](../runtime/README.zh-CN.md)。
+调试组件为结构化 DbgEng 辅助程序。真实 x64/x86 可信样例验收独立于生产 broker 隔离与离线 VM 安装验收。样例套件还检查重放：使用不同的生产者/验证者 ID，每种架构运行三次新进程与工作目录试验，校验输入及目标的精确哈希，并观测 `0xc0000005` 异常。这证明可信样例重放路径，不代表生产元数据保护或利用影响。参见[跨平台环境约定](../../docs/design/cross-platform-environments.zh-CN.md)和[运行时指南](../runtime/README.zh-CN.md)。
+
+原生 VM 引导程序与 SCM 服务已有可调用的实现路径。从已签名完整载荷和匹配的签名登记生成新的公开安装介质：
+
+```powershell
+python -m scripts.worker.bundle --package ABSOLUTE_PACKAGE --enrollment ABSOLUTE_PUBLIC_ENROLLMENT --output NEW_ABSOLUTE_MEDIA --public-key PINNED_CONTROLLER_PUBLIC_KEY_HEX --controller-version CONTROLLER_VERSION --verifier ABSOLUTE_NATIVE_WORKER_EXE
+```
+
+介质包含 `WukongWorkerSetup.exe`、`setup.json`、`payload/` 和两个公开登记记录，不包含控制端私钥。应传入独立 Windows 测试 VM，绝不能安装到开发宿主上。安装界面展示版本、安装身份、允许的控制端地址、SSH 端口及签名指纹。首次由所有者建立信任时，必须通过独立通道与控制端比对指纹。提权后再次核对用户刚确认的精确登记与完整载荷，随后才创建系统资源。当前原生引导界面为英文。生成介质不代表安装验收完成。
+
+安装创建独立的管理、元数据 worker、调试器和目标账户，在 Windows ProgramData 已知目录下记录归属，并将生成的 worker 密码存入 LSA。所有账户禁止交互式/RDP 登录，仅 broker 持有的账户取得批处理登录权限。服务验证活动版本签名、目录及自身程序后，以普通账户、独立桌面和移除所有枚举特权的令牌启动 Python。显式进程属性确保子进程在执行前进入不允许脱离的 Job，且只继承输入/日志句柄。worker 代次退出时，服务先终止其所有后代进程再停止。首次就绪前必须通过固定依赖自检，并保存仅 System/管理员可写、绑定清单的凭据；其验证范围仍为可信样例。
+
+随包 SSH 使用独立主机密钥、仅公钥认证、登记的控制端地址和忽略请求命令的固定原生中继。转发、TTY 及用户启动钩子均被禁用。原生防火墙规则限定来源、端口和程序。管道 ACL 不授予客户端创建服务端实例的权限；每帧检查实际 Windows 调用者 SID，中继发送数据前将服务端 PID 与 SCM 比对。回环端点令牌留在受保护 worker 状态中。原生身份绑定覆盖完整签名清单。遇到现有安装、服务或账户名时拒绝采用或覆盖；中断记录保留供显式修复。
+
+当前开发检查覆盖真实本地管道身份及拒绝路径、无执行能力的受保护暂存，以及真实后代进程的原生 Job 归属和统一终止。不会在宿主创建账户、服务或防火墙规则。干净离线 VM 安装、SSH 连通、生命周期恢复/更新/回滚，以及目标隔离 broker 仍须完成实现或验收。生产目标执行保持禁用；该引导程序不证明 Windows 生产支持已经完成。
