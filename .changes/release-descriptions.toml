@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Release pages show reviewed highlights, direct Windows/Linux installer links, upgrade guidance and expandable technical details. The in-app updater shares the same bilingual highlights."
+zh_CN = "发布页展示经评审的版本亮点、Windows/Linux 安装程序直达链接、升级指引与可展开的技术详情。应用内更新说明复用同一份双语亮点。"

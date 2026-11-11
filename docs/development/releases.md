@@ -148,3 +148,19 @@ If a tag run completed builds, native installer checks, container acceptance and
 It accepts only completed same-repository tag-push runs, requires each acceptance job success, pins that attempt's online-release artifact ID and checks unmoved tag/master ancestry. Download original installers/signatures/acceptance manifests; use the original commit's publisher to validate/publish identical bytes/digest. It neither compiles, resigns nor moves/creates tags, and needs no signing private key. Different existing attachments/fixed images remain protected. Missing/expired artifacts cannot use this path.
 
 When full reruns make source artifact IDs return 404, clients/installers fall back to rebuilding; this is not skipped verification or invalid reuse. Registry candidate images survive Actions artifact deletion and can still be reused by digest.
+
+## Release descriptions
+
+Release descriptions are generated from committed sources, not mutable PR bodies. PRs require English only; user-facing changes add reviewed bilingual `.changes/<slug>.toml` fragments as described in the [commit guide](commits.md). New fragments since the previous reachable stable tag provide highlights; pinned `git-cliff` from the npm lockfile supplies the technical changelog, preserving nonconventional historical messages and excluding merge/version-preparation noise. Breaking changes remain visible even when their type would otherwise be skipped. No AI translation or semantic validation is implied.
+
+The package job checks out full history, runs `npm ci`, and freezes the exact source/version/range, fragments and changelog in `release-content.json` before generating/signing `latest.json`. The signed catalog contains the bilingual highlights and a SHA256 binding to that snapshot. Both the updater and GitHub Release reuse the same descriptions. The publisher needs no git-cliff installation or fresh GitHub PR lookup: retries and accepted-publication recovery render the frozen snapshot. Existing published releases are not rewritten.
+
+The page leads with highlights and verified Windows/Linux installer links and sizes, followed by upgrade guidance and validation limits. Chinese content and raw technical details are expandable. Links, sizes and SHA256 values come from accepted installers; source/image identity, acceptance status and signed catalog descriptions must agree before publication. Previews never claim acceptance or provide unverified download links. `release-content.json` is an additional checksum-covered Release asset; neither the version-only PR's five-file rule nor fixed-version image/immutable-asset protections change.
+
+Local preview after `npm ci`:
+
+```sh
+python -m scripts.release.release_notes --output target/release-preview.md
+```
+
+This reads committed Git trees only. Commit fragments first; unstaged/staged edits are intentionally excluded. The matching JSON snapshot is written beside the Markdown. Preview generation publishes no tags, images or releases.
