@@ -32,8 +32,12 @@ pub fn run() -> Result<()> {
             let report = cleanup.execute(&plan)?;
             crate::workbench::write_json(&temp.path().join("report.json"), &report)?;
             if !report.complete {
-                let saved=temp.keep();
-                anyhow::bail!("cleanup incomplete: {}; report: {}",report.errors.join("; "),saved.join("report.json").display());
+                let saved = temp.keep();
+                anyhow::bail!(
+                    "cleanup incomplete: {}; report: {}",
+                    report.errors.join("; "),
+                    saved.join("report.json").display()
+                );
             }
         }
         let installed = cleanup.home.join("application/Wukong.AppImage");
