@@ -5,6 +5,7 @@ pub mod cli;
 mod docker;
 mod docker_preflight;
 mod environment;
+pub mod pull_progress;
 mod services;
 
 use crate::config::AppConfig;

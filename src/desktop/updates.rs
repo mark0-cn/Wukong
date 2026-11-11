@@ -28,6 +28,8 @@ pub struct Status {
     pub recovery: Option<PathBuf>,
     pub needs_setup: bool,
     pub environment_step: Option<String>,
+    pub image_progress: Option<crate::workbench::pull_progress::PullProgress>,
+    pub image_version: Option<String>,
     pub pending: bool,
 }
 pub struct Controller {
@@ -411,7 +413,12 @@ impl Controller {
             UiMessage::new("system-recover-or-confirm-the-pending-update-first")
         );
         let setup = matches!(action, Action::Setup);
-        self.status.lock().unwrap().environment_step = None;
+        {
+            let mut status = self.status.lock().unwrap();
+            status.environment_step = None;
+            status.image_progress = None;
+            status.image_version = None;
+        }
         self.phase(
             "checking",
             if setup {
@@ -436,19 +443,27 @@ impl Controller {
             let previous = self.remember(Some(env!("CARGO_PKG_VERSION"))).await?;
             self.download(&previous).await?;
         }
+        self.status.lock().unwrap().image_version = Some(manifest.version.clone());
         let controller = self.clone();
         let image = manifest.image.clone();
         let probe_config = config.clone();
         tokio::task::spawn_blocking(move || {
-            environment::prepare(&probe_config, &image, |message| {
-                let phase = match message.code.as_str() {
-                    "system-checking-docker-host" => "docker",
-                    "system-pulling-the-tool-image-docker-will-reuse-downloaded" => "pulling",
-                    "system-checking-the-candidate-tool-environment" => "validating",
-                    _ => "environment",
-                };
-                controller.phase(phase, message)
-            })
+            environment::prepare(
+                &probe_config,
+                &image,
+                |message| {
+                    let phase = match message.code.as_str() {
+                        "system-checking-docker-host" => "docker",
+                        "system-pulling-the-tool-image-docker-will-reuse-downloaded" => "pulling",
+                        "system-checking-the-candidate-tool-environment" => "validating",
+                        _ => "environment",
+                    };
+                    controller.phase(phase, message)
+                },
+                |value| {
+                    controller.status.lock().unwrap().image_progress = Some(value);
+                },
+            )
         })
         .await??;
         if setup {

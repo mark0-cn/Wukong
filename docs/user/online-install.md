@@ -32,6 +32,8 @@ chmod +x Wukong_*.AppImage
 
 失败时显示一次错误，可复制错误，并展开 Docker 日志末尾输出；完整日志位置包含在 Docker 长操作的错误中。如果提示找不到 `docker-credential-desktop`，先完全退出并重新打开 Wukong；仍失败则检查 Docker Desktop 安装及凭据助手所在目录的 PATH。Wukong 会在可确认的安装目录中查找 CLI 和同级助手，不删除登录配置或禁用凭据存储。此错误与数据目录的 Windows 扩展路径前缀无关。
 
+拉取时可查看已就绪/已发现镜像层数、耗时和每层状态。层大小不同，层数不代表下载字节百分比；拉取完成后还需通过环境自检。镜像按签名清单中的 digest 拉取，因此 Docker Desktop 本地标签可能显示 `<none>`，这不影响版本固定；客户端会显示对应的工具镜像版本。
+
 ## 环境与数据
 
 - 工具镜像 `hlmark0/wukong` 公开，可以匿名拉取；遇到 Docker Hub 限流可自行登录自己的账号。

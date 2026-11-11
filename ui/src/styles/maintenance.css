@@ -73,3 +73,10 @@ progress {
 
 .maintenance-options { margin-top:14px; border-top:1px solid var(--border); padding-top:12px; }
 .maintenance-options>.header-actions { margin-top:12px; }
+
+.image-pull-progress { display:grid; gap:12px; padding:16px; background:var(--field); border:1px solid var(--border); border-radius:8px; min-width:0; }
+.image-pull-progress p { margin:0; font-size:12px; line-height:1.7; }
+.pull-summary { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 16px; }
+.pull-layers { list-style:none; padding:0; margin:12px 0 0; max-height:180px; overflow:auto; }
+.pull-layers li { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 16px; padding:6px 0; border-bottom:1px solid var(--border); }
+.pull-layers code { overflow-wrap:anywhere; }

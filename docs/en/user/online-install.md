@@ -32,6 +32,8 @@ First setup shows **Check Docker → Download tool image → Validate and activa
 
 A failure appears once and can be copied. For failed Docker operations, expand the diagnostic output to see the log tail; the error also provides the full log location. If `docker-credential-desktop` is missing, fully exit and reopen Wukong after Docker Desktop installation. If it still fails, check the installation and the helper directory in PATH. Wukong looks for the CLI and sibling helpers in confirmed installation directories; it does not delete login configuration or disable credential storage. This error is unrelated to Windows extended data-path prefixes.
 
+During pulls, view ready/discovered layer counts, elapsed time and per-layer states. Layer sizes differ, so these counts are not byte percentages; environment validation follows the pull. Images are pulled by the signed manifest’s digest, so Docker Desktop may show a local `<none>` tag. The content remains pinned, and the client displays the corresponding tool image version.
+
 ## Tools, configuration and storage
 
 - The public `hlmark0/wukong` image supports anonymous pulls. You may sign in to Docker Hub if rate-limited.

@@ -5,6 +5,7 @@ import { api, errorText, errorValue } from '../bridge';
 import { displayPath } from '../displayPath';
 import { CopyButton } from './CopyButton';
 import { SetupProgress } from './SetupProgress';
+import { ImagePullProgress } from './ImagePullProgress';
 import { Modal } from './Modal';
 
 import type { UpdateAction, UpdateStatus } from '../commands';
@@ -41,6 +42,7 @@ export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose:
       <div><span className="muted">{t('ui-tools-environment')}</span><strong>{!status ? t('updates-loading') : status.needs_setup ? busy ? t('updates-setup-working') : failure ? t('updates-setup-failed') : t('updates-setup-required') : t('updates-environment-ready')}</strong></div>
     </div>
     {status?.needs_setup && <SetupProgress step={status.environment_step} busy={busy} failed={Boolean(failure)} />}
+    <ImagePullProgress value={status?.image_progress} version={status?.image_version} busy={status?.phase === 'pulling'} />
     {!failure && <p className="update-status" role="status">{busy && status?.message ? message(status.message) : status?.needs_setup ? t('updates-setup-ready-to-start') : (status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>}
     {status?.phase === 'downloading' && status.total && <div><progress aria-label={t('updates-client-download-progress')} max={status.total} value={status.downloaded} /><p className="muted">{(status.downloaded / 1048576).toFixed(1)} / {(status.total / 1048576).toFixed(1)} MiB</p></div>}
     {busy && <p className="muted">{t('updates-keep-the-application-open-while-processing-image')}</p>}
