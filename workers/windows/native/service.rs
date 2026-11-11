@@ -3,6 +3,7 @@
 use crate::{
     accounts::Role,
     deployment::{self, Deployment},
+    lease_proxy::{Identity, LeaseProxy},
     pipe_transport,
     processes::{OwnedProcess, Spawn},
     security::{self, AclPolicy},
@@ -359,6 +360,7 @@ async fn serve_client(
     server: NamedPipeServer,
     sid: String,
     endpoint: Endpoint,
+    leases: Arc<LeaseProxy>,
     _permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<()> {
     let mut stream = BufReader::new(server);
@@ -372,7 +374,12 @@ async fn serve_client(
             return Ok(());
         };
         pipe_transport::authenticate_client(stream.get_ref(), &sid)?;
-        let reply = endpoint.call(&frame).await?;
+        let reply = leases
+            .call(&frame, |bytes| {
+                let endpoint = &endpoint;
+                async move { endpoint.call(&bytes).await }
+            })
+            .await?;
         pipe_transport::write_frame(stream.get_mut(), &reply).await?;
     }
 }
@@ -395,7 +402,7 @@ async fn run(context: &ContextState) -> Result<()> {
     offline_selftest(&root, &package, &deployment, &manifest).await?;
     let worker = spawn_worker(&root, &package, &deployment, &manifest)?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
-    let endpoint = loop {
+    let (endpoint, identity) = loop {
         ensure!(
             !worker.exited(),
             "ordinary-account Python worker exited before readiness"
@@ -415,7 +422,12 @@ async fn run(context: &ContextState) -> Result<()> {
             if reply["result"]["daemon_pid"] == worker.pid()
                 && reply["result"]["identity"]["package_sha256"] == manifest.sha256()
             {
-                break endpoint;
+                let identity = Identity::from_readiness(
+                    reply["result"]["identity"].clone(),
+                    &deployment.installation_id,
+                    manifest.sha256(),
+                )?;
+                break (endpoint, identity);
             }
         }
         ensure!(
@@ -424,6 +436,7 @@ async fn run(context: &ContextState) -> Result<()> {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
+    let leases = Arc::new(LeaseProxy::open(identity, &root.join("metadata"))?);
     let sid = deployment.account(Role::Management)?.sid.clone();
     let mut listener = pipe_transport::server(&context.installation, &sid, true)?;
     let ssh = spawn_ssh(&root, &package, &manifest)?;
@@ -442,7 +455,7 @@ async fn run(context: &ContextState) -> Result<()> {
                 let permit=semaphore.clone().acquire_owned().await?;
                 let next=pipe_transport::server(&context.installation,&sid,false)?;
                 let accepted=std::mem::replace(&mut listener,next);
-                tasks.spawn(serve_client(accepted,sid.clone(),endpoint.clone(),permit));
+                tasks.spawn(serve_client(accepted,sid.clone(),endpoint.clone(),leases.clone(),permit));
             },
             _=tokio::time::sleep(Duration::from_millis(250))=>{
                 if STOP.load(Ordering::Acquire) {break;}

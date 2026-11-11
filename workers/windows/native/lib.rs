@@ -11,6 +11,8 @@ pub mod firewall;
 #[cfg(windows)]
 pub mod installer;
 #[cfg(windows)]
+mod lease_proxy;
+#[cfg(windows)]
 pub mod pipe_transport;
 #[cfg(windows)]
 pub mod processes;
