@@ -218,7 +218,7 @@ fn resource(
 }
 pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
     let workspaces = workspaces(home)?;
-    if workspaces.is_empty() {
+    if workspaces.is_empty() && !plan.selection.tools {
         return Ok(());
     }
     let docker = docker(home)?;
