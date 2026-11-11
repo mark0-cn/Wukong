@@ -1,8 +1,15 @@
 import type { Budget, ConfigDocument, ConfigEdit, Envelope, EvidenceView, FindingDetails, Json, ToolRecord } from './types';
 import type { Preferences, PreferenceSnapshot, LocalizedMessage } from './i18n';
 
-export type UpdateAction = 'status' | 'check' | 'prepare' | 'setup' | 'install' | 'recover' | 'integrate' | 'clean_cache' | 'clean_images';
+export type UpdateAction = 'status' | 'health' | 'doctor' | 'start_tools' | 'stop_tools' | 'select_tools' | 'check' | 'prepare' | 'setup' | 'install' | 'recover' | 'integrate' | 'clean_cache' | 'clean_images';
+export interface EnvironmentHealth {
+  configured: boolean; docker: boolean | null; running: boolean | null; tools: boolean | null;
+  checked_at: string | null; tools_checked_at: string | null; image: string | null;
+  checks: Record<string, boolean>; error: LocalizedMessage | null;
+}
 export interface UpdateStatus {
+  health?: EnvironmentHealth;
+
   operation_id?: string | null; revision?: number; busy?: boolean; action?: UpdateAction | null;
   version: string; phase: string; message: string | LocalizedMessage; available: string | null; notes: string;
   downloaded: number; total: number | null; prepared: string | null; recovery: string | null;

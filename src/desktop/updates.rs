@@ -35,6 +35,7 @@ pub struct Status {
     pub image_progress: Option<crate::workbench::pull_progress::PullProgress>,
     pub image_version: Option<String>,
     pub pending: bool,
+    pub health: super::update_health::Health,
 }
 pub struct Controller {
     status: Mutex<Status>,
@@ -44,6 +45,11 @@ pub struct Controller {
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     Status,
+    Health,
+    Doctor,
+    StartTools,
+    StopTools,
+    SelectTools,
     Check,
     Prepare,
     Setup,
@@ -145,6 +151,7 @@ impl Controller {
         let mut state = self.edit();
         state.needs_setup = !config.workbench.root.join("environment.json").is_file()
             || config.runtime.backend == crate::runtime::RuntimeBackend::Disabled;
+        state.health.configured = config.workbench.root.join("environment.json").is_file();
         state.pending = recovery::pending().map_or(true, |p| p.is_some());
         state.recovery = recovery::root()
             .ok()
@@ -286,7 +293,34 @@ impl Controller {
             };
             return Ok(());
         }
+        if matches!(
+            action,
+            Action::StartTools | Action::StopTools | Action::SelectTools
+        ) {
+            self.phase("tools", UiMessage::new("system-managing-tool-environment"));
+            let request = match action {
+                Action::StartTools => crate::workbench::DesktopRequest::Up,
+                Action::StopTools => crate::workbench::DesktopRequest::Down,
+                _ => crate::workbench::DesktopRequest::Select { id: None },
+            };
+            let worker_service = service.clone();
+            tokio::task::spawn_blocking(move || worker_service.workbench(epoch, request)).await??;
+            self.edit().health = Default::default();
+            self.phase("idle", UiMessage::new("system-tool-action-completed"));
+            return Ok(());
+        }
         let (config, config_path, _operation) = service.maintenance_context(epoch)?;
+        if matches!(action, Action::Health | Action::Doctor) {
+            self.phase("health", UiMessage::new("system-checking-tool-health"));
+            let snapshot = tokio::task::spawn_blocking(move || {
+                super::update_health::check(&config, matches!(action, Action::Doctor))
+            })
+            .await??;
+            self.edit().health = snapshot;
+            self.phase("idle", UiMessage::new("system-health-check-completed"));
+            return Ok(());
+        }
+
         if matches!(action, Action::Integrate) {
             let path = recovery::integrate_linux()?;
             std::process::Command::new(path).spawn()?;
