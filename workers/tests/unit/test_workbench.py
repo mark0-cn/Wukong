@@ -17,7 +17,7 @@ class LaunchTests(unittest.TestCase):
         self.base=self.root/"files/challenge"; (self.base/"original").mkdir(parents=True)
         (self.base/"prepared").mkdir()
         source=self.base/"original/probe.c"
-        source.write_text('#include <stdio.h>\n#include <stdlib.h>\nint main(){char b[64]; FILE *f=fopen("marker.txt","r"); if(!f)return 3; fclose(f); if(!fgets(b,sizeof b,stdin))return 4; printf("%s:%s",getenv("CHECK_VALUE"),b); return 0;}\n')
+        source.write_text('#include <stdio.h>\n#include <stdlib.h>\nint main(int argc,char **argv){char b[64]; FILE *f=fopen("marker.txt","r"); if(!f)return 3; fclose(f); FILE *input=argc>1?fopen(argv[1],"r"):stdin; if(!input||!fgets(b,sizeof b,input))return 4; printf("%s:%s",getenv("CHECK_VALUE"),b); return 0;}\n')
         subprocess.run(["gcc","-g","-o",str(self.base/"original/probe"),str(source)],check=True)
         (self.base/"original/marker.txt").write_text("present")
         shutil.copyfile("/lib/x86_64-linux-gnu/libc.so.6",self.base/"original/libc.so.6")
@@ -45,10 +45,28 @@ class LaunchTests(unittest.TestCase):
             self.assertIn("expected:hello",result["captured"])
         finally: session.close()
         from worker_job_supervisor import replay
-        trials=self.root/"trial"; trials.mkdir()
+        # Match the real supervisor's public artifact namespace. Root-level
+        # scratch paths deliberately remain private to the worker.
+        trials=self.root/"jobs/replay"; trials.mkdir(parents=True)
         result=replay(self.root,trials,{**self.params,"isolated":self.isolated,"input_mode":"stdin","timeout_secs":5,"output_limit":4096,"kind":"replay"},b"hello\n",0)
         self.assertEqual(result["exit_code"],0)
         self.assertIn("expected:hello",result["stdout"])
+        self.assertTrue(result["launch_identity"])
+    def test_argv_file_interaction_and_replay_use_staged_input(self):
+        from worker_interactive import InteractSession
+        from worker_job_supervisor import replay
+        spec=json.loads((self.base/"launch.json").read_text())
+        spec.update(input_mode="argv_file",args=["@@"])
+        (self.base/"launch.json").write_text(json.dumps(spec))
+        payload=self.root/"files/input.bin";payload.write_bytes(b"from-file\n")
+        session=InteractSession(self.root,{**self.params,"argv":["unused"],"input":"files/input.bin"},self.isolated)
+        try:
+            self.assertIn("expected:from-file",session.write(b"",5)["captured"])
+        finally: session.close()
+        trials=self.root/"jobs/argv-replay";trials.mkdir(parents=True)
+        result=replay(self.root,trials,{**self.params,"isolated":self.isolated,"input_mode":"argv","timeout_secs":5,"output_limit":4096,"kind":"replay"},b"from-replay\n",0)
+        self.assertEqual(result["exit_code"],0)
+        self.assertIn("expected:from-replay",result["stdout"])
         self.assertTrue(result["launch_identity"])
     def test_debugger_uses_declared_libc(self):
         from worker_debugger import DebugSession
