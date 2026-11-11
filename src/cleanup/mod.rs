@@ -1,10 +1,14 @@
 //! Reviewable, host-owned cleanup shared by CLI, desktop and native uninstallers.
+mod admission;
 pub mod cli;
+mod containers;
 mod files;
 mod locations;
 #[cfg(test)]
 mod tests;
+mod uninstall;
 use anyhow::{Context, Result, ensure};
+pub use containers::Resource;
 pub(crate) use locations::register_configuration_locked;
 pub use locations::{
     Location, LocationKind, Registry, create_owned_directory, register_cache,
@@ -44,6 +48,7 @@ pub struct Plan {
     pub selection: Selection,
     pub home: PathBuf,
     pub files: Vec<FileEntry>,
+    pub resources: Vec<Resource>,
     pub directories: Vec<PathBuf>,
     pub retained: Vec<Retained>,
     pub errors: Vec<String>,
@@ -54,6 +59,7 @@ pub struct Plan {
 pub struct Report {
     pub complete: bool,
     pub removed_files: usize,
+    pub removed_resources: usize,
     pub removed_bytes: u64,
     pub retained: Vec<Retained>,
     pub errors: Vec<String>,
@@ -77,18 +83,21 @@ impl Cleanup {
             selection,
             home: self.home.clone(),
             files: vec![],
+            resources: vec![],
             directories: vec![],
             retained: vec![],
             errors: vec![],
             bytes: 0,
             fingerprint: String::new(),
         };
-        if selection.tools || selection.challenges {
-            plan.errors
-                .push("Docker cleanup is not available in this build".into());
+        if (selection.tools || selection.challenges)
+            && let Err(error) = containers::inventory(&self.home, &mut plan)
+        {
+            plan.errors.push(error.to_string());
         }
         if selection.data {
             files::inventory(&self.home, &mut plan)?;
+            files::profiles(&mut plan)?;
         }
         let mut files = std::collections::BTreeMap::<PathBuf, FileEntry>::new();
         for file in plan.files {
@@ -110,12 +119,16 @@ impl Cleanup {
             &plan.selection,
             &plan.home,
             &plan.files,
+            &plan.resources,
             &plan.directories,
         ))?));
         Ok(plan)
     }
     /// Rebuild the inventory under the existing cross-process maintenance lock.
     pub fn execute(&self, reviewed: &Plan) -> Result<Report> {
+        self.execute_deferred(reviewed, false)
+    }
+    pub fn execute_deferred(&self, reviewed: &Plan, defer: bool) -> Result<Report> {
         ensure!(
             reviewed.schema_version == 1 && reviewed.home == self.home,
             "cleanup review belongs to another installation"
@@ -123,6 +136,22 @@ impl Cleanup {
         ensure!(reviewed.selection.any(), "no cleanup scope selected");
         files::safe(&self.home.join("updates/maintenance.lock"))?;
         let lock = crate::updates::maintenance::lock(&self.home.join("updates"), true)?;
+        ensure!(
+            !self.home.join("updates/pending.json").exists(),
+            "finish or recover the pending update before uninstalling"
+        );
+        let mut workbench_locks = vec![];
+        for (root, _) in containers::workspaces(&self.home)? {
+            files::safe(&root.join("operation.lock"))?;
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(root.join("operation.lock"))?;
+            file.try_lock()
+                .context("another workbench operation is active")?;
+            workbench_locks.push((root, file));
+        }
         let current = self.plan(reviewed.selection)?;
         ensure!(
             current.errors.is_empty(),
@@ -133,28 +162,76 @@ impl Cleanup {
             current.fingerprint == reviewed.fingerprint,
             "cleanup contents changed; review a fresh plan"
         );
+        if reviewed.selection.data {
+            admission::stop_workers(&self.home)?;
+        }
+        crate::workbench::write_json(
+            &self.home.join("updates/cleanup-in-progress.json"),
+            &reviewed.fingerprint,
+        )?;
         let mut report = Report {
             complete: false,
             removed_files: 0,
+            removed_resources: 0,
             removed_bytes: 0,
             retained: current.retained,
             errors: vec![],
         };
-        files::remove(&current.files, &mut report);
-        drop(lock);
-        if reviewed.selection.data && report.errors.is_empty() {
-            let path = self.home.join("updates/maintenance.lock");
-            if files::safe(&path).is_ok() {
-                let _ = std::fs::remove_file(path);
+        containers::remove(&current.resources, &mut report);
+        if report.errors.is_empty() {
+            files::remove(&current.files, &mut report);
+        }
+        for (root, file) in workbench_locks {
+            drop(file);
+            if reviewed.selection.data
+                && !root.join("workspace.json").exists()
+                && files::safe(&root.join("operation.lock")).is_ok()
+            {
+                let _ = std::fs::remove_file(root.join("operation.lock"));
             }
         }
+        drop(lock);
         // Only empty directories are removed; unknown/new content is never swept.
         for directory in current.directories.iter().rev() {
             let _ = std::fs::remove_dir(directory);
         }
         report.complete = report.errors.is_empty();
+        if (!defer || !report.complete)
+            && let Err(error) = self.finish(&reviewed.fingerprint)
+        {
+            report.errors.push(format!("cleanup finalization: {error}"));
+            report.complete = false;
+        }
         Ok(report)
     }
+    pub fn finish(&self, fingerprint: &str) -> Result<()> {
+        let marker = self.home.join("updates/cleanup-in-progress.json");
+        files::safe(&marker)?;
+        if !marker.exists() {
+            return Ok(());
+        }
+        let lock = crate::updates::maintenance::lock(&self.home.join("updates"), true)?;
+        let identity: String = crate::workbench::read_json(&marker)?;
+        ensure!(
+            identity == fingerprint,
+            "cleanup finalization belongs to another operation"
+        );
+        std::fs::remove_file(marker)?;
+        drop(lock);
+        let _ = std::fs::remove_file(self.home.join("updates/maintenance.lock"));
+        let _ = std::fs::remove_dir(self.home.join("updates"));
+        let _ = std::fs::remove_dir(&self.home);
+        Ok(())
+    }
+}
+pub fn check_output(plan: &Plan, output: &Path) -> Result<()> {
+    let output = files::absolute(output)?;
+    files::safe(&output)?;
+    ensure!(
+        !plan.directories.iter().any(|root| output.starts_with(root)),
+        "review/report output must be outside selected cleanup directories"
+    );
+    Ok(())
 }
 pub fn read_plan(path: &Path) -> Result<Plan> {
     ensure!(

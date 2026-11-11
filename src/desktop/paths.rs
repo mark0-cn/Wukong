@@ -33,6 +33,10 @@ mod tests {
 
 pub fn default_config() -> Result<PathBuf> {
     let home = home()?;
+    anyhow::ensure!(
+        !home.join("updates/cleanup-in-progress.json").exists(),
+        "uninstall cleanup is in progress; finish or retry the uninstaller"
+    );
     std::fs::create_dir_all(&home)?;
     let path = home.join("wukong.toml");
     if !path.exists() {

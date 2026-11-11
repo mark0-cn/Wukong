@@ -2,7 +2,7 @@
   "bundle": {
     "targets": ["nsis"],
     "windows": {
-      "nsis": { "installMode": "currentUser", "displayLanguageSelector": true, "languages": ["SimpChinese", "English"] },
+      "nsis": { "installMode": "currentUser", "displayLanguageSelector": true, "languages": ["SimpChinese", "English"], "installerHooks": "packaging/windows/uninstall-hooks.nsh" },
       "webviewInstallMode": { "type": "downloadBootstrapper" }
     }
   }

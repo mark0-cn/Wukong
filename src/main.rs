@@ -25,6 +25,9 @@ async fn main() -> std::process::ExitCode {
     let desktop = matches!(
         cli.command,
         None | Some(wukong::interface::Command::Gui { .. })
+            | Some(wukong::interface::Command::Cleanup {
+                command: wukong::cleanup::cli::Command::Choose { .. }
+            })
     );
     #[cfg(windows)]
     if desktop {
