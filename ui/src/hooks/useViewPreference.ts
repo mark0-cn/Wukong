@@ -3,7 +3,7 @@ import { useSyncExternalStore, type SetStateAction } from 'react';
 const memory = new Map<string, string>();
 const event = 'wukong-view-preferences';
 function read(key: string) {
-  try { return localStorage.getItem(key) ?? memory.get(key) ?? null; }
+  try { return memory.get(key) ?? localStorage.getItem(key); }
   catch { return memory.get(key) ?? null; }
 }
 function subscribe(notify: () => void) {
@@ -22,8 +22,8 @@ export function useViewPreference<T>(name: string, fallback: T, valid: (value: u
   const set = (action: SetStateAction<T>) => {
     const next = typeof action === 'function' ? (action as (previous: T) => T)(parse(read(key))) : action;
     const source = JSON.stringify(next);
-    memory.set(key, source);
-    try { localStorage.setItem(key, source); } catch { /* Current window remains usable. */ }
+    try { localStorage.setItem(key, source); memory.delete(key); }
+    catch { memory.set(key, source); }
     window.dispatchEvent(new Event(event));
   };
   return [parse(raw), set] as const;

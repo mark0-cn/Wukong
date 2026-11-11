@@ -291,3 +291,95 @@ test('settings categories retain drafts and separate tool and challenge actions'
   await expect(page.getByLabel('题目名称', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '启动环境', exact: true })).toHaveCount(0);
 });
+
+test('large tool groups keep failed operations visible before expansion', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    const original = state.data.transcript.find((item: any) => item.id === 'retry');
+    const failed = original.content.find((part: any) => part.type === 'tool-call');
+    state.data.transcript = [{ ...original, content: [failed, ...Array.from({ length: 6 }, (_, index) => {
+      const display = { ...failed.args.display, call_id: `batch-${index}`, state: 'completed', title: 'tool-binary-inspect', summary: 'completed check' };
+      return { ...failed, toolCallId: display.call_id, args: { display }, result: { display }, isError: false };
+    })] }];
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.tool-step')).toHaveCount(1);
+  await expect(page.getByText('调试后端暂不可用：连接已关闭。已保留当前证据。')).toBeVisible();
+  await page.getByRole('button', { name: /展开全部/ }).click();
+  await expect(page.locator('.tool-step')).toHaveCount(7);
+});
+
+test('new messages preserve reading position and count arrivals', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.transcript = Array.from({ length: 40 }, (_, index) => ({ ...state.data.transcript[0], id: `history-${index}`, content: [{ type: 'text', text: `Progress ${index}` }] }));
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.getByText('Progress 39', { exact: true })).toBeVisible();
+  await page.locator('.transcript').evaluate(element => { element.scrollTop = 0; });
+  await expect(page.locator('.jump-latest')).toBeVisible();
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.transcript.push({ ...state.data.transcript[0], id: 'arrival', content: [{ type: 'text', text: 'New observation' }] });
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.jump-latest')).toHaveText(/1/);
+  expect(await page.locator('.transcript').evaluate(element => element.scrollTop)).toBeLessThan(50);
+  await page.locator('.jump-latest').click();
+  await expect(page.getByText('New observation', { exact: true })).toBeVisible();
+});
+
+test('bilingual layouts keep long names and maintenance controls inside the viewport', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.runs[0].target_path = '/long/path/' + 'parser_long_name_'.repeat(12) + '.elf';
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  for (const locale of ['zh-CN', 'en-US']) {
+    await page.locator('.sidebar-footer button').last().click();
+    await page.locator('select').filter({ has: page.locator('option[value="en-US"]') }).first().selectOption(locale);
+    await page.locator('.modal-heading button').click();
+    for (const width of [1440, 1024, 860]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 600 });
+      await expect(page.locator('.send-button')).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: `target/ui-polish-${locale}-${width}.png` });
+    }
+    await page.locator('.sidebar-footer button').last().click();
+    await page.locator('.settings-sections button').nth(1).click();
+    await expect(page.locator('.modal-footer .primary')).toBeInViewport();
+    await page.screenshot({ path: `target/ui-polish-settings-${locale}.png` });
+    await page.locator('.settings-sections button').first().click();
+    await page.locator('.modal-heading button').click();
+  }
+});
+
+test('storage edits survive closing settings without applying directory changes', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => { const state = (window as any).__desktopTest; state.host = { ...state.host, execution: null }; (window as any).__emitDesktop('workspace-changed', null); });
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByRole('button', { name: '存储位置', exact: true }).click();
+  await page.getByLabel('更新缓存目录', { exact: true }).fill('/new/cache/draft');
+  await page.getByLabel('关闭', { exact: true }).click();
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await expect(page.getByLabel('更新缓存目录', { exact: true })).toHaveValue('/new/cache/draft');
+  await page.getByRole('button', { name: '语言与模型', exact: true }).click();
+  await page.getByRole('button', { name: '存储位置', exact: true }).click();
+  await expect(page.getByLabel('更新缓存目录', { exact: true })).toHaveValue('/new/cache/draft');
+  expect(await page.evaluate(() => (window as any).__desktopTest.requests.some((r: any) => r.command === 'update_cache_directory'))).toBe(false);
+});
+
+test.describe('high density desktop', () => {
+  test.use({ deviceScaleFactor: 1.5, viewport: { width: 860, height: 600 } });
+  test('keeps the minimum logical window usable at 150 percent pixel density', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.send-button')).toBeInViewport();
+    await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+    await expect(page.locator('.modal-heading button')).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: 'target/ui-polish-hidpi.png' });
+  });
+});

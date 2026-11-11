@@ -36,8 +36,8 @@
   margin-bottom:11px;
 }
 .agent-all.selected {
-  border-color: var(--accent-border);
-  background: var(--accent-surface);
+  border-color: var(--border-strong);
+  background: var(--hover);
   color: var(--text);
 }
 .agent-list {
@@ -78,8 +78,8 @@
   padding: 10px 8px;
 }
 .agent-card.selected {
-  border-color: var(--accent-border);
-  background: var(--accent-surface);
+  border-color: var(--border-strong);
+  background: var(--hover);
   color: var(--text);
 }
 .agent-card-name {
