@@ -139,6 +139,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cargo clippy --locked --manifest-path workers/windows/Cargo.toml --all-targets --target-dir target/windows-worker-native -- -D warnings
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path workers/windows/Cargo.toml --lib --target-dir target/windows-worker-native
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m scripts.worker.build_native
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cargo fmt --manifest-path workers/package/Cargo.toml -- --check

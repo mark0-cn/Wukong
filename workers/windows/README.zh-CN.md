@@ -16,6 +16,8 @@ cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
 
 实现依据 [Rust CRT 链接约定](https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes)与微软 [PE 格式](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)。Windows CI 对独立 crate 进行格式与代码检查、构建引导程序并验证导入；自动化测试还拒绝动态 CRT、非法库名与格式错误的普通或延迟导入表。
 
+原生库可将已验证载荷暂存到新建目录，显式设置受保护的 Windows ACL，对复制的每个文件计算哈希、排他创建文件，并再次校验完整目标目录。VM 策略区分 System/管理员元数据与可读的可执行内容。源介质和暂存父目录必须防止其他进程并发写入；仅检查链接不足以安全收集目标可写目录中的文件。失败暂存仍由调用方持有，用于事务恢复。该模块不激活版本，也不创建服务或账号。其 Windows CI 测试仅使用无执行能力的签名文件及仅当前用户可访问的临时目录，验证权限，并拒绝额外写入者、源文件变更、相对根目录及覆盖写入，不在开发宿主安装任何软件。
+
 `wukong-worker.exe` 当前提供 `verify-package DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION`，使用共享[离线包约定](../package/README.zh-CN.md)。该只读命令校验独立信任、兼容性与文件精确内容，不安装或激活 worker。其可执行文件与 `wukong-dbgeng.exe` 一起接受静态 CRT 检查。
 
 `toolchain.lock.json` 以大小与 SHA256 固定官方 Python、OpenSSH、Python wheel 和完整 Debugging Tools MSI/CAB 清单。锁文件中的 OpenSSH 版本为上游**预览版**。在控制端准备缓存：

@@ -1,0 +1,304 @@
+use anyhow::{Context, Result, ensure};
+use std::{
+    ffi::c_void,
+    fs,
+    mem::size_of,
+    os::windows::{ffi::OsStrExt, fs::MetadataExt, io::FromRawHandle},
+    path::{Path, PathBuf},
+    ptr::{addr_of, null_mut},
+};
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, LocalFree},
+    Security::{
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL,
+        Authorization::{
+            ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+            GetNamedSecurityInfoW, SE_FILE_OBJECT,
+        },
+        DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorControl, GetTokenInformation,
+        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
+        SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    },
+    Storage::FileSystem::{
+        CREATE_NEW, CreateDirectoryW, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_NORMAL,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ,
+    },
+    System::Threading::{GetCurrentProcess, OpenProcessToken},
+};
+
+pub(crate) struct Handle(pub(crate) HANDLE);
+impl Drop for Handle {
+    fn drop(&mut self) {
+        if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
+            unsafe {
+                CloseHandle(self.0);
+            }
+        }
+    }
+}
+struct Local(*mut c_void);
+impl Drop for Local {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                LocalFree(self.0);
+            }
+        }
+    }
+}
+
+pub fn check(value: i32) -> Result<()> {
+    if value == 0 {
+        Err(std::io::Error::last_os_error().into())
+    } else {
+        Ok(())
+    }
+}
+pub fn wide(value: &std::ffi::OsStr) -> Result<Vec<u16>> {
+    let mut result: Vec<_> = value.encode_wide().collect();
+    ensure!(
+        !result.contains(&0),
+        "embedded NUL in native path or argument"
+    );
+    result.push(0);
+    Ok(result)
+}
+/// Existing-link checks for controller/service-private trees. This does not
+/// replace handle-based collection from a concurrently target-writable tree.
+pub fn no_links(path: &Path) -> Result<()> {
+    ensure!(
+        path.is_absolute()
+            && !path.components().any(|c| matches!(
+                c,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )),
+        "native path must be absolute without relative aliases"
+    );
+    for current in path.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) => ensure!(
+                !metadata.file_type().is_symlink() && metadata.file_attributes() & 0x400 == 0,
+                "native reparse/link paths are forbidden"
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+pub(crate) fn sid_text(sid: PSID) -> Result<String> {
+    ensure!(!sid.is_null(), "native identity has no SID");
+    let mut text = null_mut();
+    check(unsafe { ConvertSidToStringSidW(sid, &mut text) })?;
+    let _memory = Local(text.cast());
+    let mut length = 0;
+    while length < 256 && unsafe { *text.add(length) } != 0 {
+        length += 1;
+    }
+    ensure!(length < 256, "unbounded native SID");
+    Ok(String::from_utf16(unsafe {
+        std::slice::from_raw_parts(text, length)
+    })?)
+}
+pub fn current_user_sid() -> Result<String> {
+    let mut token = null_mut();
+    check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
+    token_user_sid(&Handle(token))
+}
+pub(crate) fn token_user_sid(token: &Handle) -> Result<String> {
+    let mut size = 0;
+    unsafe {
+        GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut size);
+    }
+    ensure!(size > 0 && size < 64 * 1024, "invalid native token size");
+    let mut buffer = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            size,
+            &mut size,
+        )
+    })?;
+    sid_text(unsafe { (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid })
+}
+pub fn require_system() -> Result<()> {
+    ensure!(
+        current_user_sid()? == "S-1-5-18",
+        "worker service requires LocalSystem; no unprivileged fallback"
+    );
+    Ok(())
+}
+
+/// Every granted principal is explicit. Native VM metadata uses System/admins;
+/// inert development tests can use an owner-only policy inside task temp roots.
+#[derive(Clone)]
+pub struct AclPolicy {
+    owner: String,
+    grants: std::collections::BTreeMap<String, u32>,
+}
+impl AclPolicy {
+    pub fn private_vm() -> Self {
+        Self {
+            owner: "S-1-5-32-544".into(),
+            grants: [
+                ("S-1-5-18".into(), FILE_ALL_ACCESS),
+                ("S-1-5-32-544".into(), FILE_ALL_ACCESS),
+            ]
+            .into_iter()
+            .collect(),
+        }
+    }
+    pub fn code_vm() -> Self {
+        let mut result = Self::private_vm();
+        result.grants.insert(
+            "S-1-5-32-545".into(),
+            FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+        );
+        result.grants.insert(
+            "S-1-15-2-1".into(),
+            FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+        );
+        result
+    }
+    pub fn current_user() -> Result<Self> {
+        let owner = current_user_sid()?;
+        Ok(Self {
+            owner: owner.clone(),
+            grants: [
+                (owner, FILE_ALL_ACCESS),
+                ("S-1-5-18".into(), FILE_ALL_ACCESS),
+            ]
+            .into_iter()
+            .collect(),
+        })
+    }
+    fn descriptor(&self, directory: bool) -> Result<Local> {
+        let flags = if directory { "OICI" } else { "" };
+        let mut sddl = format!("O:{}D:P", self.owner);
+        for (sid, mask) in &self.grants {
+            sddl.push_str(&format!("(A;{flags};0x{mask:08x};;;{sid})"));
+        }
+        let encoded = wide(std::ffi::OsStr::new(&sddl))?;
+        let mut descriptor = null_mut();
+        check(unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                encoded.as_ptr(),
+                1,
+                &mut descriptor,
+                null_mut(),
+            )
+        })?;
+        Ok(Local(descriptor))
+    }
+    pub fn create_directory(&self, path: &Path) -> Result<()> {
+        no_links(path)?;
+        ensure!(
+            path.parent().is_some_and(Path::is_dir),
+            "native directory parent must exist"
+        );
+        let descriptor = self.descriptor(true)?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor.0,
+            bInheritHandle: 0,
+        };
+        let encoded = wide(absolute_new_path(path)?.as_os_str())?;
+        check(unsafe { CreateDirectoryW(encoded.as_ptr(), &attributes) })?;
+        self.verify(path, true)
+    }
+    pub fn create_file(&self, path: &Path) -> Result<fs::File> {
+        no_links(path)?;
+        let descriptor = self.descriptor(false)?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor.0,
+            bInheritHandle: 0,
+        };
+        let encoded = wide(absolute_new_path(path)?.as_os_str())?;
+        let handle = unsafe {
+            CreateFileW(
+                encoded.as_ptr(),
+                GENERIC_WRITE,
+                0,
+                &attributes,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            )
+        };
+        ensure!(
+            handle != INVALID_HANDLE_VALUE,
+            "native secure file creation failed: {}",
+            std::io::Error::last_os_error()
+        );
+        Ok(unsafe { fs::File::from_raw_handle(handle) })
+    }
+    pub fn verify(&self, path: &Path, directory: bool) -> Result<()> {
+        no_links(path)?;
+        let metadata = fs::symlink_metadata(path)?;
+        ensure!(
+            metadata.is_dir() == directory && (directory || metadata.is_file()),
+            "invalid native protected entry type"
+        );
+        let encoded = wide(path.canonicalize()?.as_os_str())?;
+        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+        let mut owner: PSID = null_mut();
+        let mut acl: *mut ACL = null_mut();
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                encoded.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                null_mut(),
+                &mut acl,
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        ensure!(status == 0, "cannot inspect native permissions: {status}");
+        let _memory = Local(descriptor);
+        let owner = sid_text(owner)?;
+        ensure!(owner == self.owner, "unexpected native owner");
+        ensure!(!acl.is_null(), "native private object has a null ACL");
+        let (mut control, mut revision) = (0, 0);
+        check(unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) })?;
+        ensure!(
+            control & SE_DACL_PROTECTED != 0
+                && unsafe { (*acl).AceCount as usize } == self.grants.len(),
+            "native ACL is unprotected or has unexpected principals"
+        );
+        let mut actual = std::collections::BTreeMap::new();
+        for index in 0..unsafe { (*acl).AceCount } {
+            let mut ace = null_mut();
+            check(unsafe { GetAce(acl, index as u32, &mut ace) })?;
+            let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+            ensure!(
+                header.AceType == 0
+                    && header.AceSize as usize >= size_of::<ACCESS_ALLOWED_ACE>()
+                    && header.AceFlags & 0x18 == 0,
+                "invalid native ACL entry"
+            );
+            let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+            let sid = sid_text(addr_of!(allowed.SidStart).cast_mut().cast())?;
+            ensure!(
+                actual.insert(sid, allowed.Mask).is_none(),
+                "duplicate native ACL principal"
+            );
+        }
+        ensure!(
+            actual == self.grants,
+            "native ACL permissions differ from policy"
+        );
+        Ok(())
+    }
+}
+
+pub fn absolute_new_path(path: &Path) -> Result<PathBuf> {
+    no_links(path)?;
+    let parent = path.parent().context("native path has no parent")?;
+    let parent = parent.canonicalize()?;
+    Ok(parent.join(path.file_name().context("native path has no filename")?))
+}
