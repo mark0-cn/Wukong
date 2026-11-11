@@ -23,14 +23,21 @@ chmod +x Wukong_*.AppImage
 ```
 
 系统需要支持 AppImage 运行；缺少 FUSE 时可安装发行版对应的 FUSE 兼容库，或使用 `APPIMAGE_EXTRACT_AND_RUN=1 ./Wukong_*.AppImage`。
-应用内点击“安装到应用菜单并重启”可复制到用户应用目录并添加桌面入口。它是用户级安装，不使用 sudo。
+准备工具环境后，在“更新 → 维护选项”点击“安装到应用菜单并重启”可复制到用户应用目录并添加桌面入口。它是用户级安装，不使用 sudo。
 安装 Docker Engine，确认当前用户能访问 Docker，再点击“准备工具环境”。不会自动安装 Docker、调整用户组或修改系统服务。
+
+## 首次准备与错误处理
+
+首次准备按“检查 Docker → 下载工具镜像 → 自检并启用”显示进度；客户端版本和工具环境状态分开显示。首次准备页只保留准备/重试与 Docker 安装说明，目录配置在“工作区设置 → 存储位置”，清理和恢复在“更新 → 维护选项”（待恢复时也会显示）。
+
+失败时显示一次错误，可复制错误，并展开 Docker 日志末尾输出；完整日志位置包含在 Docker 长操作的错误中。如果提示找不到 `docker-credential-desktop`，先完全退出并重新打开 Wukong；仍失败则检查 Docker Desktop 安装及凭据助手所在目录的 PATH。Wukong 会在可确认的安装目录中查找 CLI 和同级助手，不删除登录配置或禁用凭据存储。此错误与数据目录的 Windows 扩展路径前缀无关。
 
 ## 环境与数据
 
 - 工具镜像 `hlmark0/wukong` 公开，可以匿名拉取；遇到 Docker Hub 限流可自行登录自己的账号。
 - 每个版本清单绑定固定镜像 digest，不因 Docker `latest` 变化而改变运行环境。
 - 为 Docker 镜像及临时层至少预留 25 GiB。客户端会检查下载目录空间；Docker Desktop 虚拟磁盘容量仍需在其设置中检查。
+- 默认任务与证据位于下列用户数据根目录中的 `.wukong`，更新缓存位于 `updates`；Windows 界面显示常规驱动器/UNC 路径，底层路径身份保留。
 - 新桌面安装的数据位于 Windows `%LOCALAPPDATA%/WukongData` 或 Linux `$XDG_DATA_HOME/Wukong`，Linux 默认 `~/.local/share/Wukong`。
 - 显式 `--config` 和已有便携配置继续优先；配置、数据库与题目文件不随安装器替换。
 - 未准备好工具环境时，可以查看历史和编辑配置；需要 worker 的任务不能运行。

@@ -37,18 +37,28 @@
   font-size: 12px;
 }
 /* Desktop lifecycle controls share the workbench's spacing and color tokens. */
-.update-summary {
-  display: flex;
-  gap: 3rem;
-  margin: 1rem 0;
-}
-.update-summary h3 {
-  margin: .35rem 0;
-}
-.setup-steps {
-  padding-left: 1.5rem;
-  line-height: 1.9;
-}
+.updates-modal { padding:0; overflow:hidden; }
+.updates-modal>.modal-heading { flex-shrink:0; padding:22px; margin:0; border-bottom:1px solid var(--border); }
+.updates-modal>.updates-panel { padding:20px 22px; overflow:auto; min-height:0; }
+.updates-panel { display:grid; gap:20px; min-width:0; }
+.update-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+.update-summary>div { display:grid; gap:8px; padding:14px 16px; border:1px solid var(--border); border-radius:8px; background:var(--field); }
+.update-summary strong { font-size:16px; }
+.setup-steps { list-style:none; display:grid; gap:0; padding:0; margin:0; }
+.setup-steps li { display:grid; grid-template-columns:32px minmax(0,1fr); gap:14px; padding:16px 4px; border-bottom:1px solid var(--border); }
+.setup-steps li:last-child { border-bottom:0; }
+.setup-step-icon { display:flex; align-items:center; justify-content:center; width:32px; height:32px; border:1px solid var(--border-strong); border-radius:50%; color:var(--muted); font-size:13px; }
+.setup-step-title { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 16px; }
+.setup-step-title>span { color:var(--muted); font-size:12px; }
+.setup-steps p { margin:6px 0 0; color:var(--muted); line-height:1.7; font-size:13px; }
+.setup-steps [data-state=active] .setup-step-icon { color:var(--info); border-color:var(--info); }
+.setup-steps [data-state=done] .setup-step-icon { color:var(--success); border-color:var(--success); }
+.setup-steps [data-state=failed] .setup-step-icon { color:var(--error); border-color:var(--error); }
+.update-status { margin:0; line-height:1.7; overflow-wrap:anywhere; }
+.update-error { display:grid; gap:12px; min-width:0; }
+.update-error .error-banner { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.update-error .workbench-result { margin-bottom:0; padding:12px; background:var(--field); border:1px solid var(--border); border-radius:6px; }
+.updates-panel .maintenance-options { margin-top:0; }
 progress {
   width: 100%;
   accent-color: var(--accent);
