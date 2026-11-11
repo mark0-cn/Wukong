@@ -2,6 +2,7 @@ import { t, message, useLocale } from '../i18n';
 import { useEffect, useState } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { api, errorText, errorValue } from '../bridge';
+import { displayPath } from '../displayPath';
 import { Modal } from './Modal';
 
 import type { UpdateAction, UpdateStatus } from '../commands';
@@ -50,7 +51,7 @@ export function Updates({ epoch, onClose, onChanged }: { epoch: number; onClose:
         <button disabled={status?.pending} onClick={() => setConfirm('clean_images')}>{t('updates-clean-old-tool-images')}</button>
       </div></details>
     </fieldset>
-    {status?.recovery && <details><summary>{t('updates-recovery-when-the-app-will-not-start')}</summary><p>{t('updates-close-wukong-and-run-this-independent-recovery')}</p><code className="path">{status.recovery}</code></details>}
+    {status?.recovery && <details><summary>{t('updates-recovery-when-the-app-will-not-start')}</summary><p>{t('updates-close-wukong-and-run-this-independent-recovery')}</p><code className="path">{displayPath(status.recovery)}</code></details>}
     {confirm && <div className="notice"><p>{confirm === 'install' ? t('updates-installation-closes-and-restarts-the-client-save') : confirm === 'recover' ? t('updates-the-client-will-exit-and-open-the') : confirm === 'clean_images' ? t('updates-clean-only-old-tool-images-recorded-by') : t('updates-clean-old-client-downloads-the-current-version')}</p><div className="header-actions"><button onClick={() => setConfirm(undefined)}>{t('workspace-cancel')}</button><button className="primary" onClick={() => void run(confirm)}>{t('updates-confirm')}</button></div></div>}
   </Modal>;
 }
