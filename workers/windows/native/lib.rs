@@ -7,6 +7,8 @@ mod authority;
 #[cfg(windows)]
 pub mod deployment;
 #[cfg(windows)]
+mod environment;
+#[cfg(windows)]
 pub mod firewall;
 #[cfg(windows)]
 pub mod installer;

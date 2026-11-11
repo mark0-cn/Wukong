@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Use a fixed Windows runtime environment for offline SSH installation tools and the System daemon, and keep elevated temporary files in a verified private directory separate from ordinary worker data."
+zh_CN = "为离线 SSH 安装工具及 System daemon 使用固定的 Windows 运行环境，并将提权临时文件保存在经过验证的私有目录，与普通 worker 数据分离。"

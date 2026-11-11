@@ -4,7 +4,7 @@ use crate::{
     accounts::{self, Role},
     authority::{Authority, SignedEnrollment},
     deployment::{self, Deployment},
-    pipe_transport, processes,
+    environment, pipe_transport, processes,
     security::{self, AclPolicy},
     staging,
 };
@@ -26,7 +26,6 @@ use windows_sys::Win32::{
         Services::*,
         Threading::{GetCurrentProcess, OpenProcessToken},
     },
-    UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath},
 };
 use wukong_worker_package::{
     Compatibility, PublicKey, SshPublicKey, VerifiedEnrollment, VerifiedManifest, verify_package,
@@ -102,33 +101,6 @@ pub fn elevated() -> Result<bool> {
     })?;
     Ok(elevation.TokenIsElevated != 0)
 }
-fn program_data() -> Result<PathBuf> {
-    let mut path = null_mut();
-    let result = unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, 0, null_mut(), &mut path) };
-    ensure!(
-        result >= 0 && !path.is_null(),
-        "cannot resolve Windows ProgramData"
-    );
-    struct Memory(*mut u16);
-    impl Drop for Memory {
-        fn drop(&mut self) {
-            unsafe {
-                windows::Win32::System::Com::CoTaskMemFree(Some(self.0.cast()));
-            }
-        }
-    }
-    let path = Memory(path);
-    let mut length = 0;
-    while length < 32768 && unsafe { *path.0.add(length) } != 0 {
-        length += 1;
-    }
-    ensure!(length < 32768, "invalid Windows ProgramData path");
-    let result = PathBuf::from(String::from_utf16(unsafe {
-        std::slice::from_raw_parts(path.0, length)
-    })?);
-    security::no_links(&result)?;
-    Ok(result)
-}
 fn copy_new(source: &Path, target: &Path, policy: &AclPolicy, maximum: u64) -> Result<()> {
     let bytes = deployment::read_bytes(source, maximum)?;
     let mut output = policy.create_file(target)?;
@@ -169,11 +141,7 @@ fn fixed_command(
     command
         .args(arguments)
         .env_clear()
-        .env(
-            "SystemRoot",
-            std::env::var_os("SystemRoot").context("missing Windows root")?,
-        )
-        .env("ProgramData", program_data()?)
+        .envs(environment::system(root)?)
         .current_dir(root)
         .stdin(std::process::Stdio::null())
         .stdout(log.try_clone()?)
@@ -291,7 +259,7 @@ pub fn install(plan: Plan) -> Result<Value> {
         "offline worker installation requires VM administrator elevation"
     );
     let enrollment = plan.enrollment.enrollment();
-    let base = program_data()?.join("WukongWorkers");
+    let base = environment::program_data()?.join("WukongWorkers");
     let private = AclPolicy::private_vm();
     let public = AclPolicy::code_vm();
     if base.exists() {
@@ -396,6 +364,7 @@ pub fn install(plan: Plan) -> Result<Value> {
     // ssh-keygen creates its files before we can apply an explicit file ACL.
     // Keep the entire generation directory private from its first creation.
     private.create_directory(&root.join("ssh"))?;
+    private.create_directory(&metadata.join("system-tmp"))?;
     let host_key = root.join("ssh/ssh_host_ed25519_key");
     fixed_command(
         &package.join(&entry.ssh_keygen),

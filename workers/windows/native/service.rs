@@ -228,12 +228,7 @@ fn spawn_ssh(
     package: &Path,
     manifest: &wukong_worker_package::VerifiedManifest,
 ) -> Result<OwnedProcess> {
-    let mut environment = deployment::worker_environment(root, package)?;
-    environment.remove("WUKONG_NATIVE_BINDING_FILE");
-    environment.insert(
-        "PROGRAMDATA".into(),
-        std::env::var_os("ProgramData").context("Windows ProgramData is missing")?,
-    );
+    let environment = crate::environment::system(root)?;
     let path = root.join("metadata/sshd-native.log");
     security::no_links(&path)?;
     let log = fs::OpenOptions::new()

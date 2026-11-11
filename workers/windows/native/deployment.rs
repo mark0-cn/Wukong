@@ -86,6 +86,7 @@ impl Deployment {
         self.data_policy()?.verify(&root.join("data"), true)?;
         let metadata = root.join("metadata");
         let private = AclPolicy::private_vm();
+        private.verify(&metadata.join("system-tmp"), true)?;
         private.verify(&root.join("ssh"), true)?;
         for name in [
             "ssh_host_ed25519_key",
