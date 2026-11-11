@@ -1,4 +1,5 @@
 import { t, useLocale, currentLocale } from '../i18n';
+import { displayPath } from '../displayPath';
 import { useState } from 'react';
 import brandIcon from '../../../icons/icon.svg';
 import { ChevronRight, Container, Download, Plus, Search, Settings2 } from 'lucide-react';
@@ -25,6 +26,6 @@ export function Sidebar({ names, runs, selected, host, onSelect, onNew, onSettin
       {names[run.id] && <span className="task-filename">{fileName(run.target_path)}</span>}<p>{run.task}</p><div className="run-meta"><Status value={run.status} /><time>{new Date(run.created_at).toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' })}</time></div>
     </button></div>)}</nav>
     {!visible.length && <p className="sidebar-empty">{runs.length ? t('workspace-no-matching-tasks') : t('workspace-create-a-task-to-analyze-a-local')}</p>}
-    <div className="sidebar-footer"><button onClick={onUpdates} disabled={!host}><Download size={16} />{t('ui-updates')}</button><button onClick={onTools} disabled={!host || busy}><Container size={16} />{t('ui-tools-environment')}</button><button onClick={onWorkbench} disabled={!host || busy}><Container size={16} />{t('ui-challenge-environment')}</button><button onClick={onSettings} disabled={!host}><Settings2 size={16} />{t('settings-workspace-settings')}</button>{busy && <p className="sidebar-help">{t('ui-environment-busy')}</p>}<div className="workspace-path" title={host?.state_dir}>{host?.state_dir ?? t('workspace-connecting-to-local-engine')}</div></div>
+    <div className="sidebar-footer"><button onClick={onUpdates} disabled={!host}><Download size={16} />{t('ui-updates')}</button><button onClick={onTools} disabled={!host || busy}><Container size={16} />{t('ui-tools-environment')}</button><button onClick={onWorkbench} disabled={!host || busy}><Container size={16} />{t('ui-challenge-environment')}</button><button onClick={onSettings} disabled={!host}><Settings2 size={16} />{t('settings-workspace-settings')}</button>{busy && <p className="sidebar-help">{t('ui-environment-busy')}</p>}<div className="workspace-path" title={host && displayPath(host.state_dir)}>{host ? displayPath(host.state_dir) : t('workspace-connecting-to-local-engine')}</div></div>
   </aside>;
 }
