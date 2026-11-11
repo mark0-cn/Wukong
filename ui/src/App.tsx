@@ -104,7 +104,7 @@ export default function App() {
       </>}
       <div className="workspace-content">{data && host && selectedRun ? <>
         <WorkspaceSplit id="agent-inspection" label={t('workspace-resize-collaboration-panel')} visible={agentsVisible && !focused}
-          side={<Agents agents={data.agents} selected={workspace.agent} onSelect={selectAgent} canStop={!pending && !closing} onClose={() => setShowAgents(false)} onStop={agent => setConfirmation({ kind: 'stop', agent, run: selectedRun.id, epoch: host.epoch })} />}>
+          side={<Agents key={`${host.state_dir}:${selectedRun.id}`} scopeKey={`${host.state_dir}:${selectedRun.id}`} agents={data.agents} selected={workspace.agent} onSelect={selectAgent} canStop={!pending && !closing} onClose={() => setShowAgents(false)} onStop={agent => setConfirmation({ kind: 'stop', agent, run: selectedRun.id, epoch: host.epoch })} />}>
         <div className="primary-panel">{tab === 'conversation' ? <Conversation key={`${host.epoch}:${data.selected}:${workspace.agent ?? 'all'}`} data={data} host={host} agent={selectedAgent} onAgent={selectAgent} loadEarlier={workspace.loadEarlier} limit={workspace.historyLimit}
           composer={<Composer key={draftKey} target={recipient} draft={draft} busy={pending || closing} onDraft={value => setDrafts(previous => ({ ...previous, [draftKey]: value }))}
             send={async (draft, agent) => {
