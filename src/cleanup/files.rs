@@ -134,6 +134,7 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
                 "referenced by a retained container"
                     | "unverified or shared image ownership"
                     | "Docker scope not selected"
+                    | "unrecognized workspace resource name; retained"
             )
         });
     let mut recognized: BTreeSet<_> = registry
