@@ -89,9 +89,9 @@ Windows CI 通过 `CARGO_PROFILE_DEV_DEBUG=1`、`CARGO_PROFILE_TEST_DEBUG=1` 使
 优化验收分别记录首次运行、同配置缓存命中运行及仅 Python 改动 PR 的耗时，
 同时比较总等待时间和 runner 用量；不把无缓存构建和缓存命中构建直接当作同条件性能对比。
 
-CI、客户端构建及安装器构建的 Ubuntu 依赖步骤共用 `python -m scripts.ci.install_apt <packages>`。该入口拒绝在开发机或自托管机器上运行，仅支持一次性的 GitHub 标准托管 Ubuntu 22.04/24.04 x64 runner。任务专用 APT 配置选择官方 HTTPS archive/security 仓库，使用已安装的 Ubuntu archive keyring 和独立索引，保留签名校验。它绕过 runner 的 Azure 镜像选择器，不改写原有源文件、DNS 或凭据；Playwright 的依赖安装也使用这份配置。网络传输超时 15 秒、重试两次；索引更新与安装进程分别限时 120/480 秒，另留 15 秒强制结束剩余进程。依赖步骤外层限时 12 分钟，Linux 前端步骤限时 15 分钟。索引下载失败会严格报错，不接受陈旧索引。依赖安装与测试分开展示，网络故障不会显示为测试执行卡住。参数见 Ubuntu 的 [APT 配置](https://manpages.ubuntu.com/manpages/jammy/man5/apt.conf.5.html)及 [apt-get](https://manpages.ubuntu.com/manpages/jammy/man8/apt-get.8.html) 手册。这些设置限制失败等待时间，不能保证 Ubuntu 或 runner 网络始终可用。产品运行环境和 Docker 镜像的 APT 配置不受影响。
+CI、客户端构建及安装器构建的 Ubuntu 依赖步骤共用 `python -m scripts.ci.install_apt <packages>`。该入口拒绝在开发机或自托管机器上运行，仅支持一次性的 GitHub 标准托管 Ubuntu 22.04/24.04 x64 runner。任务专用 APT 配置选择经过签名的 Ubuntu archive/security 仓库，使用已安装的 Ubuntu archive keyring 和独立索引，保留签名校验。APT 内置的 `mirror+file` 传输依次尝试 kernel.org、MIT 的 HTTPS Ubuntu 镜像及 Canonical archive/security 地址，在索引和软件包下载时按文件回退。独立镜像域名覆盖此次 Ubuntu 域名的 DNS 故障。它绕过 runner 的 Azure 镜像选择器，不改写原有源文件、DNS 或凭据；Playwright 的依赖安装也使用这份配置。网络传输超时 15 秒、重试两次；索引更新与安装进程分别限时 120/480 秒，另留 15 秒强制结束剩余进程。依赖步骤外层限时 12 分钟，Linux 前端步骤限时 15 分钟。索引下载失败会严格报错，不接受陈旧索引。依赖安装与测试分开展示，网络故障不会显示为测试执行卡住。参数见 Ubuntu 的 [APT 配置](https://manpages.ubuntu.com/manpages/jammy/man5/apt.conf.5.html)、[apt-get](https://manpages.ubuntu.com/manpages/jammy/man8/apt-get.8.html) 及[镜像传输](https://manpages.ubuntu.com/manpages/jammy/man1/apt-transport-mirror.1.html)手册。这些设置限制失败等待时间，不能保证 Ubuntu 或 runner 网络始终可用。产品运行环境和 Docker 镜像的 APT 配置不受影响。
 
-`Ubuntu dependency acceptance` 在 PR 修改其安装入口或验收文件时运行，也可手动执行。轻量的 Ubuntu 22.04/24.04 矩阵实际安装经过签名校验的软件包，检查间接 APT 调用继承的配置，并确认不可连接的回环仓库返回 APT 错误 100；同时检查原有源文件没有变化。该验收不构建或发布安装器，也不替代平台 CI、Docker 验收和原生卸载测试。
+`Ubuntu dependency acceptance` 在 PR 修改其安装入口或验收文件时运行，也可手动执行。轻量的 Ubuntu 22.04/24.04 矩阵实际安装经过签名校验的软件包，检查间接 APT 调用继承的配置，确认首选镜像不可连接时 APT 能自动回退，并检查仅有不可连接的回环仓库时返回 APT 错误 100；同时检查原有源文件没有变化。该验收不构建或发布安装器，也不替代平台 CI、Docker 验收和原生卸载测试。
 
 CI 与 Release 在各任务结束后运行 `summary` job，包括前面任务失败的情况。
 运行首页可查看 commit、ref、任务结果、耗时和产物链接；Release 额外显示版本、

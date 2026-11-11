@@ -13,6 +13,7 @@ import tempfile
 
 
 SOURCES = "/etc/apt/wukong-ci.sources"
+MIRRORS = "/etc/apt/wukong-ci.mirrors"
 EMPTY_SOURCES = "/etc/apt/wukong-ci-empty"
 CONFIG = "/etc/apt/apt.conf.d/99wukong-ci"
 LISTS = "/var/lib/apt/wukong-ci-lists"
@@ -40,19 +41,21 @@ def sources(codename):
     if codename not in ("jammy", "noble"):
         raise ValueError("Unsupported Ubuntu suite")
     return f"""Types: deb
-URIs: https://archive.ubuntu.com/ubuntu
-Suites: {codename} {codename}-updates {codename}-backports
-Components: main restricted universe multiverse
-Architectures: amd64
-Signed-By: {KEYRING}
-
-Types: deb
-URIs: https://security.ubuntu.com/ubuntu
-Suites: {codename}-security
+URIs: mirror+file:{MIRRORS}
+Suites: {codename} {codename}-updates {codename}-backports {codename}-security
 Components: main restricted universe multiverse
 Architectures: amd64
 Signed-By: {KEYRING}
 """
+
+
+def mirrors():
+    # APT itself fails over per file, including package downloads by later callers.
+    # Independent mirror domains avoid the observed *.ubuntu.com DNS outage.
+    return ("https://mirrors.edge.kernel.org/ubuntu/\tpriority:1\n"
+            "https://mirrors.mit.edu/ubuntu/\tpriority:2\n"
+            "https://archive.ubuntu.com/ubuntu/\tpriority:3\n"
+            "https://security.ubuntu.com/ubuntu/\tpriority:3 suite:jammy-security suite:noble-security\n")
 
 
 def configuration():
@@ -87,11 +90,12 @@ def install(packages):
     with tempfile.TemporaryDirectory(prefix="wukong-ci-apt-") as directory:
         temporary = Path(directory)
         (temporary / "sources").write_text(sources(codename), encoding="utf-8")
+        (temporary / "mirrors").write_text(mirrors(), encoding="utf-8")
         (temporary / "config").write_text(configuration(), encoding="utf-8")
         subprocess.run(["sudo", "-n", "install", "-d", "-m", "755", EMPTY_SOURCES, LISTS], check=True)
-        for name, destination in (("sources", SOURCES), ("config", CONFIG)):
+        for name, destination in (("sources", SOURCES), ("mirrors", MIRRORS), ("config", CONFIG)):
             subprocess.run(["sudo", "-n", "install", "-m", "644", str(temporary / name), destination], check=True)
-    print(f"Ubuntu {codename}: official HTTPS archive/security sources, archive-keyring verification enabled.", flush=True)
+    print(f"Ubuntu {codename}: HTTPS archive mirrors with APT failover; Ubuntu archive-keyring verification enabled.", flush=True)
     apt(["update"], UPDATE_SECONDS)
     apt(["install", "-y", *packages], INSTALL_SECONDS)
 

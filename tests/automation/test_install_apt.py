@@ -29,10 +29,9 @@ class InstallAptTests(unittest.TestCase):
     def test_official_sources_keep_signatures_and_reject_untrusted_suite(self):
         for suite in ("jammy", "noble"):
             source = apt.sources(suite)
-            self.assertIn("https://archive.ubuntu.com/ubuntu", source)
-            self.assertIn("https://security.ubuntu.com/ubuntu", source)
-            self.assertEqual(source.count("Signed-By: " + apt.KEYRING), 2)
-            self.assertIn(f"Suites: {suite}-security", source)
+            self.assertIn("mirror+file:" + apt.MIRRORS, source)
+            self.assertEqual(source.count("Signed-By: " + apt.KEYRING), 1)
+            self.assertIn(f"{suite}-security", source)
             self.assertNotIn("trusted", source)
         with self.assertRaises(ValueError):
             apt.sources("noble\nTrusted: yes")
@@ -41,6 +40,10 @@ class InstallAptTests(unittest.TestCase):
         self.assertIn('Acquire::https::Timeout "15";', config)
         self.assertIn('Acquire::Retries "2";', config)
         self.assertNotIn("AllowUnauthenticated", config)
+        mirrorlist = apt.mirrors().splitlines()
+        self.assertTrue(all(line.startswith("https://") for line in mirrorlist))
+        self.assertIn("mirrors.edge.kernel.org/ubuntu/\tpriority:1", mirrorlist[0])
+        self.assertIn("mirrors.mit.edu/ubuntu/\tpriority:2", mirrorlist[1])
 
     def test_bad_index_update_or_timeout_prevents_install_and_fails(self):
         for code, expected in ((100, "exited 100"), (124, "timed out"), (137, "timed out")):
@@ -73,6 +76,7 @@ class InstallAptTests(unittest.TestCase):
                 patch.object(apt.subprocess, "run", side_effect=run):
             apt.install(["gdb", "libwebkit2gtk-4.1-dev"])
         self.assertEqual(config_files[apt.SOURCES], apt.sources("jammy"))
+        self.assertEqual(config_files[apt.MIRRORS], apt.mirrors())
         self.assertEqual(config_files[apt.CONFIG], apt.configuration())
         install = commands[-1]
         self.assertIn("480s", install)
