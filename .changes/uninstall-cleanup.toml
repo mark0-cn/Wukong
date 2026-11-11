@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Review optional local data, Docker tool and Docker challenge cleanup before uninstalling Wukong. Preview owned locations and file sizes, preserve unknown files, external originals and shared resources, track custom directories, and report incomplete cleanup. Windows installers and the Linux uninstall command share the same cleanup service; all cleanup choices default to retention."
+zh_CN = "卸载 Wukong 前可分别选择清理本机数据、Docker 工具环境和 Docker 题目环境。预览归属目录与文件大小，保留未知文件、外部原始附件及共用资源，追踪自定义目录并报告未完成的清理。Windows 安装器与 Linux 卸载命令共用同一清理服务，所有清理选项默认保留。"
