@@ -78,6 +78,12 @@ never runs natively. Use `init_regs` for register preconditions and
   `heap bins`, `tcache bins` for allocator debugging. The debug_start
   session itself stays plain GDB/MI.
 
+Prefer `debug_inspect` / `debug_control` for structured debugger operations.
+Isolated raw `debug_command` accepts policy-checked MI arguments and simple
+noncalling register/symbol/pointer expressions. Calls, casts/parentheses,
+assignments, increments and octal/hex string escapes are rejected; a permitted
+operation name does not authorize arbitrary interpreter-bearing arguments.
+
 ## job_start — persistent background jobs
 
 For long-running or multi-step work, write a script with file_put and run it

@@ -145,16 +145,9 @@ class DebugSession:
     def command(self, command, timeout, internal=False):
         if not re.fullmatch(r"-[a-z][a-z0-9-]*(?: [^\r\n\0]*)?", command) or len(command) > 32768:
             raise ValueError("one GDB/MI command is required; raw CLI and multiline commands are rejected")
-        if getattr(self, "mode", "launch") == "dump" and not internal:
-            readonly = {"stack-list-frames", "stack-list-arguments", "stack-list-locals", "stack-list-variables",
-                        "stack-info-frame", "thread-info", "data-read-memory-bytes", "data-list-register-names",
-                        "data-list-register-values", "data-disassemble", "symbol-info-functions", "symbol-info-variables"}
-            if command.split(" ", 1)[0][1:] not in readonly:
-                raise ValueError("dump sessions permit read-only GDB/MI inspection")
-        if self.isolated and not internal:
-            allowed = {"break-insert", "break-delete", "break-enable", "break-disable", "break-condition", "break-after", "break-list", "exec-run", "exec-continue", "exec-next", "exec-next-instruction", "exec-step", "exec-step-instruction", "exec-finish", "exec-until", "exec-interrupt", "stack-list-frames", "stack-list-arguments", "stack-list-locals", "stack-list-variables", "stack-info-frame", "stack-select-frame", "thread-info", "thread-select", "data-evaluate-expression", "data-read-memory-bytes", "data-write-memory-bytes", "data-list-register-names", "data-list-register-values", "data-disassemble", "symbol-info-functions", "symbol-info-variables"}
-            if command.split(" ", 1)[0][1:] not in allowed:
-                raise ValueError("GDB/MI operation is not permitted by isolated debugger policy")
+        if not internal and (self.isolated or getattr(self, "mode", "launch") == "dump"):
+            from worker_gdb_policy import permitted_command
+            command = permitted_command(command, dump=getattr(self, "mode", "launch") == "dump")
         with self.lock:
             if self.dead or self.process.poll() is not None:
                 raise ValueError("debug session is closed or lost")

@@ -23,7 +23,7 @@
 | `crash_snapshot` | analyst / verifier | 否 | linux: core_snapshot | 从自己拥有且已停止的调试会话获取寄存器、PC/SP、故障地址、指令、栈和模块身份，或检查同 run 的 core。强签名要求实际模块哈希；未知身份保持未解决。 |
 | `cyclic_offset` | analyst / verifier | 否 | cyclic_offset | 在同 run 的 cyclic pattern 中找唯一偏移。必须提供原始 alphabet/n 及内存顺序恰好 n 字节；拒绝不一致生成参数，不猜字节序或隐式截断寄存器。 |
 | `debug_close` | analyst / verifier | 是 | worker transport | 关闭自己的调试会话，或清理同 run 中 owner 已终止的会话。 |
-| `debug_command` | analyst / verifier | 是 | linux: debug_gdb_mi | 在所属会话执行恰好一条 GDB/MI 命令；稳定请求 ID 防止盲目重放。 |
+| `debug_command` | analyst / verifier | 是 | linux: debug_gdb_mi | 在所属会话执行一条通过策略校验的 GDB/MI 命令。隔离会话接受不含函数调用的简单表达式；优先使用结构化检查/控制。稳定请求 ID 防止盲目重放。 |
 | `debug_control` | analyst / verifier | 是 | debug_gdb_mi / debug_dbgeng | 使用类型化的断点和执行动作控制自己拥有的实时调试器。Dump 会话拒绝执行控制；稳定请求 ID 防止盲目重放。 |
 | `debug_inspect` | analyst / verifier | 否 | debug_gdb_mi / debug_dbgeng | 在自己拥有的调试会话中，有界检查寄存器、栈、内存、模块、线程、指令、异常或执行状态；完整引擎记录保留为证据。 |
 | `debug_start` | analyst / verifier | 是 | debug_gdb_mi / debug_dbgeng | 对暂存目标启动自己拥有的调试会话，或检查单独暂存的 Dump。引擎选择不会回退到其他平台。 |

@@ -76,6 +76,8 @@ remote_state_dir = "/state/wukong"
 
 子进程环境移除模型凭据；job 环境覆盖只允许 AFL/QEMU/sanitizer 设置。不互信用户不能共享状态目录。
 
+隔离 GDB 会话的原始 MI 命令须先通过按操作定义的参数语法校验，才会进入具有较高权限的调试器。表达式支持简单寄存器/符号、解引用、常量下标及算术/位运算/比较运算符。函数调用（包括调试器侧便利函数）、括号/类型转换、赋值和自增自减均被拒绝。MI 字符串使用受支持的 JSON 转义并重新序列化；八进制/十六进制转义及未校验选项被拒绝。转储检查除了只读操作白名单，也执行同样的参数检查。结构化请求优先使用 `debug.inspect` / `debug.control`；这项策略不代表 GDB 本身是安全沙箱。
+
 生产 Linux 元数据归可信 daemon 所有；目标/fuzz 清除附加组并使用独立 UID。每次实验有只读暂存文件及独立可写目录。GDB 保持可信身份，以实验 UID 启动 inferior。CHOWN/SETUID/SETGID 用于隔离；KILL 允许可信 supervisor 取消实验 UID 持有的进程组；SYS_PTRACE/DAC_OVERRIDE 用于可信调试器经 procfs 读取/修改 inferior；目标进程不保留这些 capabilities。只读容器根、私有卷、禁网及 VM/容器边界分别生效。`trusted_local` 明确标记较弱的可信夹具边界。
 
 <a id="protocol"></a>

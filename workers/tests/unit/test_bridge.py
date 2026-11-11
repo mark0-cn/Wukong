@@ -81,6 +81,20 @@ class GdbMiTests(unittest.TestCase):
                 with self.subTest(command=command), self.assertRaisesRegex(ValueError,"read-only"):
                     session.command(command,1)
 
+    def test_unsafe_isolated_and_dump_arguments_never_reach_gdb_stdin(self):
+        expression = json.dumps('$_shell("id")')
+        for mode, command in [('launch', '-data-evaluate-expression '+expression),
+                              ('launch', '-break-condition 1 '+expression),
+                              ('dump', '-data-read-memory-bytes '+expression+' 16')]:
+            with self.subTest(mode=mode,command=command), tempfile.TemporaryDirectory() as directory:
+                session = self.session(directory, '')
+                session.isolated = mode == 'launch'
+                session.mode = mode
+                with self.assertRaises(ValueError):
+                    session.command(command,1)
+                self.assertEqual(session.process.stdin.getvalue(),'')
+                self.assertEqual(session.token,0)
+
     def test_nested_payloads_escaping_and_async_events(self):
         records = r'''*stopped,reason="breakpoint-hit",frame={func="main",line="12"}
 1^done,bkpt={number="1",fullname="a\"b.c"},stack=[frame={level="0",func="main"}]

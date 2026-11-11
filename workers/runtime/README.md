@@ -98,6 +98,8 @@ Model credentials are removed from child environments. Job environment overrides
 are restricted to AFL/QEMU and sanitizer settings. State directories must not be
 shared between mutually untrusted users.
 
+In isolated GDB sessions, raw MI commands pass an operation-specific argument grammar before reaching the privileged debugger. Expressions support simple registers/symbols, dereferences, constant indexes and arithmetic/bitwise/comparison operators. Function calls (including host convenience functions), parentheses/casts, assignments and increments are rejected. MI strings use supported JSON escapes and are reserialized; octal/hex escapes and unchecked options are rejected. Dump inspection applies the same argument checks in addition to its read-only operation allowlist. Prefer typed `debug.inspect` / `debug.control` for structured requests; this policy does not make GDB itself a security sandbox.
+
 Production Linux metadata is owned by the trusted daemon; target/fuzz processes
 drop supplementary groups and run under separate allocated UIDs. Each experiment
 has read-only staged files and its own writable directory. GDB keeps its trusted

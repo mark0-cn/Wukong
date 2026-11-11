@@ -609,7 +609,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::DebugCommandArgs>(
             "debug_command",
             "tool-debug-command",
-            "Execute exactly one GDB/MI command in your owned session; stable request IDs prevent blind replay.",
+            "Execute one policy-checked GDB/MI command in your owned session. Isolated sessions accept simple noncalling expressions; prefer typed inspection/control. Stable request IDs prevent blind replay.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,

@@ -35,6 +35,33 @@ int main(int argc, char **argv) {
 from support.client import Client
 
 
+def debugger_metadata_proof(client, state, session_id):
+    marker = state / "debugger-metadata-write.txt"
+    expression = '$_shell("id -u > '+str(marker)+'")'
+    encoded = json.dumps(expression)
+    commands = [f'-data-evaluate-expression {encoded}',
+                '-data-evaluate-expression '+encoded.replace('$_',r'\044\137'),
+                '-data-evaluate-expression '+encoded.replace('$_',r'\x24\x5f'),
+                '-data-evaluate-expression '+encoded.replace('$_',r'\u0024\u005f'),
+                f'-data-read-memory-bytes {encoded} 8',
+                f'-data-write-memory-bytes {encoded} ff',
+                f'-break-condition 1 {encoded}', f'-break-insert {encoded}',
+                f'-exec-until {encoded}',
+                f'-data-disassemble -s {encoded} -e 0x400100 -- 0']
+    rejected = []
+    for command in commands:
+        try:
+            client.call('debug.command',session_id=session_id,command=command)
+        except AssertionError as failure:
+            reply = failure.args[0]
+            assert isinstance(reply,dict) and 'GDB/MI' in reply.get('error',{}).get('message',''),reply
+            rejected.append({'command':command,'error':reply['error']})
+        else:
+            raise AssertionError('unsafe debugger expression reached the interpreter: '+command)
+        assert not marker.exists(), 'debugger wrote trusted metadata with an untrusted expression'
+    return {'host_calls_rejected':len(rejected),'protected_metadata_unchanged':True,'requests':rejected}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", required=True)
@@ -58,6 +85,7 @@ def main():
     seed = client.put("seeds/seed", b"BAA")
     started = client.call("debug.start", target="files/fixture", args=[str(state / seed["path"])])
     session_id = started["session_id"]
+    debugger_policy = debugger_metadata_proof(client,state,session_id)
     breakpoint = client.call("debug.control", session_id=session_id, action="breakpoint_add", symbol="main", request_id="typed-main-breakpoint")
     assert breakpoint["class"] == "done", breakpoint
     assert client.call("debug.control", session_id=session_id, action="breakpoint_add", symbol="main", request_id="typed-main-breakpoint") == breakpoint
@@ -75,6 +103,8 @@ def main():
     assert stack["class"] == "done" and 'func="main"' in stack["record"], stack
     memory = client.call("debug.command", session_id=session_id, command="-data-read-memory-bytes main 16")
     assert memory["class"] == "done" and "contents=" in memory["record"], memory
+    raw_pc = client.call("debug.command",session_id=session_id,command='-data-evaluate-expression "$pc"')
+    assert raw_pc['class']=='done',raw_pc
     typed_stack = client.call("debug.inspect",session_id=session_id,kind="stack",limit=8)
     frame = typed_stack["data"]["stack"][0]
     assert frame["func"] == "main", typed_stack
@@ -113,7 +143,7 @@ def main():
     results = {"fixture_linkage":"static" if args.static_fixture else "dynamic", "doctor": doctor, "gdb": {"breakpoint": breakpoint, "stack": stack, "memory": memory,
                "typed_stack":typed_stack,"typed_memory":typed_memory,"registers":registers,
                "threads":threads,"modules":modules,"disassembly":disassembly,"bounded":bounded}, "replay": replay,
-               "verification": verified, "minimization": minimized}
+               "verification": verified, "minimization": minimized,"debugger_policy":debugger_policy,"raw_pc":raw_pc}
     if args.fuzz:
         # Docker Desktop can pipe core notifications to an external handler.
         # This fixture check proves QEMU execution/statistics, not complete crash

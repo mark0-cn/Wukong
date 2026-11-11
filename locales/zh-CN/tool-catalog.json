@@ -60,8 +60,8 @@
     "text": "关闭自己的调试会话，或清理同 run 中 owner 已终止的会话。"
   },
   "debug_command": {
-    "source": "Execute exactly one GDB/MI command in your owned session; stable request IDs prevent blind replay.",
-    "text": "在所属会话执行恰好一条 GDB/MI 命令；稳定请求 ID 防止盲目重放。"
+    "source": "Execute one policy-checked GDB/MI command in your owned session. Isolated sessions accept simple noncalling expressions; prefer typed inspection/control. Stable request IDs prevent blind replay.",
+    "text": "在所属会话执行一条通过策略校验的 GDB/MI 命令。隔离会话接受不含函数调用的简单表达式；优先使用结构化检查/控制。稳定请求 ID 防止盲目重放。"
   },
   "debug_start": {
     "source": "Start an owned debugger session on the staged target, or inspect a separately staged dump. Engine selection never falls back to another platform.",
