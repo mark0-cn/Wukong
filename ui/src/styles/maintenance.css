@@ -92,3 +92,10 @@ progress {
 .sidebar-footer .sidebar-operation { border:1px solid var(--border); padding:10px; align-items:flex-start; }
 .sidebar-operation span { white-space:normal; overflow-wrap:anywhere; font-size:12px; }
 .sidebar-operation svg { flex-shrink:0; }
+
+.updates-footer { flex-shrink:0; padding:16px 22px; border-top:1px solid var(--border); display:grid; gap:12px; max-height:42dvh; overflow:auto; }
+.updates-running .updates-panel { gap:14px; }
+.updates-running .update-summary>div { padding:10px 12px; gap:4px; }
+.setup-steps-compact li { padding:8px 4px; }
+.setup-steps-compact details { margin-top:4px; font-size:12px; color:var(--muted); }
+.setup-steps-compact [data-state=active] { padding-block:14px; }

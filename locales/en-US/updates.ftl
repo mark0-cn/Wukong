@@ -143,3 +143,5 @@ updates-cancel-preparation = Cancel preparation
 updates-critical-phase = This stage cannot be cancelled. Installation or environment activation must finish; closing this panel keeps the operation running.
 
 system-tool-image-needs-repair = The local tool image is missing. Use Validate and repair environment to prepare it again.
+
+updates-step-details = Step details
