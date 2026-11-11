@@ -34,9 +34,25 @@ fn deferred_uninstall_blocks_new_work_and_requires_the_matching_review_to_finish
     })?;
     assert!(cleanup.execute_deferred(&plan, true)?.complete);
     assert!(crate::updates::maintenance::lock(&cleanup.home.join("updates"), false).is_err());
+    assert!(crate::updates::maintenance::lock(&cleanup.home.join("updates"), true).is_err());
+    assert!(crate::updates::storage::cache_lock_at(&cleanup.home.join("updates"), false).is_err());
     assert!(cleanup.finish("unrelated-review").is_err());
     cleanup.finish(&plan.fingerprint)?;
     assert!(crate::updates::maintenance::lock(&cleanup.home.join("updates"), false).is_ok());
+    Ok(())
+}
+#[test]
+fn an_active_cache_download_blocks_cleanup_before_removal() -> Result<()> {
+    let (_temp, cleanup) = fixture()?;
+    let plan = cleanup.plan(Selection {
+        data: true,
+        ..Default::default()
+    })?;
+    let cache = crate::updates::storage::cache_lock_at(&cleanup.home.join("updates"), false)?;
+    assert!(cleanup.execute(&plan).is_err());
+    assert!(cleanup.home.join("wukong.toml").is_file());
+    drop(cache);
+    assert!(cleanup.execute(&plan)?.complete);
     Ok(())
 }
 #[test]

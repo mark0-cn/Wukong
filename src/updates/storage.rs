@@ -28,7 +28,10 @@ pub fn cache_root() -> Result<PathBuf> {
 }
 pub fn cache_lock(exclusive: bool) -> Result<fs::File> {
     let root = recovery::root()?;
-    fs::create_dir_all(&root)?;
+    cache_lock_at(&root, exclusive)
+}
+pub(crate) fn cache_lock_at(root: &Path, exclusive: bool) -> Result<fs::File> {
+    fs::create_dir_all(root)?;
     let file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -42,6 +45,10 @@ pub fn cache_lock(exclusive: bool) -> Result<fs::File> {
     } else {
         file.try_lock_shared()
             .context(UiMessage::new("system-the-cache-location-is-changing"))?;
+        ensure!(
+            !root.join("cleanup-in-progress.json").exists(),
+            "uninstall cleanup is in progress"
+        );
     }
     Ok(file)
 }

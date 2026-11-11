@@ -257,6 +257,10 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
         plan.directories.push(path.clone());
         for name in names {
             let child = path.join(name);
+            if child == home.join("updates/cache.lock") {
+                recognized.insert(child);
+                continue;
+            }
             if (location.kind == LocationKind::Cache && *name == "probes" && keep_environments)
                 || (location.kind == LocationKind::Workbench
                     && keep_environments
