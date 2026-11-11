@@ -92,3 +92,5 @@ Docker 的 info、inspect、version、ps 控制查询最多等待 30 秒，其�
 Docker 清理复用有界 Workbench Docker 客户端，核对本地 socket、工作区标签和稳定身份，删除前重查保留容器的引用；不强制删除镜像，也不 prune。保留 Docker 范围/共用资源时，留下最小环境记录与导入副本。待完成更新、活动维护锁/工作区锁、本地 worker 拒绝关闭都会阻止删除。部分文件失败时保留其余元数据；原生卸载中止并报告。`tests/acceptance/check_cleanup.py` 拒绝在可丢弃的 GitHub 托管 runner 之外运行破坏性原生/Docker 验收。`cleanup-acceptance.yml` 构建未签名的测试 NSIS 包；普通 Linux CI 验证运行中的夹具容器/共用资源保留。这些不能证明 Windows Docker Desktop 跨版本验收通过。
 
 自动化中的图形界面启动诊断可使用 `--json` 保留 stderr 并关闭启动错误对话框；不会绕过原生预览或选项检查。原生验收通过 Windows UI Automation 验证实际嵌入窗口，随后核对保存的范围和退出状态。
+
+预览启动器持有临时 profile，等待独立窗口进程退出后再删除缓存，让 WebView2 在原生卸载器收到确认范围前释放进程持有的文件句柄。profile 删除仅限启动器在系统临时目录中新建的目录。

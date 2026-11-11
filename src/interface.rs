@@ -153,7 +153,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     };
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
     if let Command::Cleanup { command } = command {
-        return crate::cleanup::cli::run(command);
+        return crate::cleanup::cli::run(command, cli.json);
     }
     if matches!(command, Command::RecoverUpdate) {
         return crate::updates::recovery::recover();

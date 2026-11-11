@@ -2,6 +2,15 @@ use super::*;
 use clap::Subcommand;
 #[derive(Subcommand)]
 pub enum Command {
+    #[command(hide = true)]
+    ReviewWindow {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        initial_data: bool,
+        #[arg(long)]
+        profile: PathBuf,
+    },
     /// Open the shared uninstall scope review. Exit 32..39 confirms scope; 64 cancels.
     Choose {
         #[arg(long)]
@@ -39,15 +48,30 @@ pub enum Command {
         review: PathBuf,
     },
 }
-pub fn run(command: Command) -> Result<()> {
+pub fn run(command: Command, diagnostics: bool) -> Result<()> {
+    #[cfg(not(feature = "desktop"))]
+    let _ = diagnostics;
     let cleanup = Cleanup::current()?;
     match command {
+        Command::ReviewWindow {
+            output,
+            initial_data,
+            profile,
+        } => {
+            #[cfg(feature = "desktop")]
+            crate::desktop::cleanup::window(output, initial_data, profile)?;
+            #[cfg(not(feature = "desktop"))]
+            {
+                let _ = (output, initial_data, profile);
+                anyhow::bail!("this build does not include the desktop review");
+            }
+        }
         Command::Choose {
             output,
             initial_data,
         } => {
             #[cfg(feature = "desktop")]
-            crate::desktop::cleanup::choose(output, initial_data)?;
+            super::review::choose(output, initial_data, diagnostics)?;
             #[cfg(not(feature = "desktop"))]
             {
                 let _ = (output, initial_data);

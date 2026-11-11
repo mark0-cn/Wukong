@@ -3,11 +3,14 @@ $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Disposable GitHub runner required' }
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
-$condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $TargetProcess)
 $deadline = [DateTime]::UtcNow.AddSeconds(25)
 $names = @()
 while ([DateTime]::UtcNow -lt $deadline) {
-    $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition)
+    $processes = @($TargetProcess) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $TargetProcess" | Select-Object -ExpandProperty ProcessId)
+    $windows = @($processes | ForEach-Object {
+        $ownedCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$_)
+        [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $ownedCondition)
+    })
     foreach ($window in $windows) {
         $elements = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
         $names = @($elements | ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -First 40)

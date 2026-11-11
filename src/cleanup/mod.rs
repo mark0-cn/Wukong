@@ -4,6 +4,8 @@ pub mod cli;
 mod containers;
 mod files;
 mod locations;
+#[cfg(feature = "desktop")]
+pub(crate) mod review;
 #[cfg(test)]
 mod tests;
 mod uninstall;
