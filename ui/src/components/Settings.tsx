@@ -7,8 +7,8 @@ import { Modal } from './Modal';
 import { StorageLocations, type StorageDraft } from './StorageLocations';
 import { LanguageSettings } from './LanguageSettings';
 
-type Field = { path: string; label: string; kind?: 'number' | 'checkbox' | 'provider' | 'backend'; help?: string };
-const groups = (): { title: string; fields: Field[] }[] => [
+type Field = { path: string; label: string; kind?: 'number' | 'checkbox' | 'provider' | 'backend' | 'environment'; help?: string; options?: string[] };
+const groups = (form: Record<string, Json>): { title: string; fields: Field[] }[] => [
   { title: t('settings-model'), fields: [
     { path: 'model.provider', label: t('settings-provider'), kind: 'provider' }, { path: 'model.model', label: t('settings-main-model') },
     { path: 'model.role_model', label: t('settings-collaborator-model'), help: t('settings-leave-blank-to-use-the-main-model') },
@@ -27,15 +27,24 @@ const groups = (): { title: string; fields: Field[] }[] => [
   ] },
   { title: t('settings-local-environment'), fields: [
     { path: 'analysis.ghidra_executable', label: t('settings-ghidra-executable') },
-    { path: 'runtime.backend', label: t('settings-dynamic-analysis-backend'), kind: 'backend' },
-    { path: 'runtime.docker_container', label: t('settings-docker-container') },
-    { path: 'runtime.ssh_host', label: t('settings-ssh-host') },
-    { path: 'runtime.python', label: t('settings-python-executable') },
-    { path: 'runtime.bridge_path', label: t('settings-runtime-bridge-path') },
+    { path: 'default_environment', label: t('settings-default-analysis-environment'), kind: 'environment' },
+    ...(Object.values(environmentMap(form)).some(environment => environment.platform === 'linux') ? [{ path: 'workbench.docker_executable', label: t('settings-docker-executable') }] : []),
     { path: 'execution.stream', label: t('settings-stream-model-responses'), kind: 'checkbox' },
     { path: 'execution.summarize_tool_outputs', label: t('settings-summarize-large-tool-outputs-in-model-context'), kind: 'checkbox' },
   ] },
+  ...Object.entries(environmentMap(form)).map(([id, value]) => ({ title: `${String(value.name ?? id)} · ${id}`, fields: [
+    { path: `environments.${id}.name`, label: t('settings-environment-name') },
+    { path: `environments.${id}.runtime.backend`, label: t('settings-dynamic-analysis-backend'), kind: 'backend' as const, options: [...(value.platform === 'windows' ? ['ssh'] : ['docker', 'ssh']), ...(atPath(form, `environments.${id}.runtime.backend`) === 'trusted_local' ? ['trusted_local'] : [])] },
+    ...(value.platform !== 'windows' ? [{ path: `environments.${id}.runtime.docker_container`, label: t('settings-docker-container') }] : []),
+    { path: `environments.${id}.runtime.ssh_host`, label: t('settings-ssh-host') },
+    { path: `environments.${id}.runtime.remote_bridge_path`, label: t('settings-runtime-bridge-path') },
+  ] })),
 ];
+function environmentMap(form: Record<string, Json>): Record<string, Record<string, Json>> {
+  const environments = form.environments;
+  if (!environments || typeof environments !== 'object' || Array.isArray(environments)) return {};
+  return Object.fromEntries(Object.entries(environments).filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value))) as Record<string, Record<string, Json>>;
+}
 function atPath(form: Record<string, Json>, path: string): Json | undefined {
   let value: Json | undefined = form;
   for (const key of path.split('.')) value = value && typeof value === 'object' && !Array.isArray(value) ? value[key] : undefined;
@@ -119,12 +128,13 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     {error && <p className="error" role="alert">{errorText(error)}</p>}
     <div className="settings-scroll" hidden={section === 'storage'}>{!document ? <p className="muted">{busy ? t('settings-loading-configuration') : t('settings-could-not-load-configuration-please-reload')}</p> : raw && section === 'advanced' ?
       <textarea className="toml-editor" aria-label={t('settings-toml-configuration-source')} spellCheck={false} value={document.source} disabled={busy}
-        onChange={event => setDocument({ ...document, source: event.target.value })} /> : groups().map((group, index) => ({ ...group, fields: group.fields.filter((field, fieldIndex) => index === 0 ? section === 'general' ? fieldIndex < 5 : section === 'advanced' && fieldIndex >= 5 : index === 1 ? section === 'budget' : section === 'advanced') })).filter(group => group.fields.length).map(group => <section key={group.fields[0].path} className="settings-group"><h3>{group.title}</h3>
+        onChange={event => setDocument({ ...document, source: event.target.value })} /> : groups(document.form).map((group, index) => ({ ...group, fields: group.fields.filter((field, fieldIndex) => index === 0 ? section === 'general' ? fieldIndex < 5 : section === 'advanced' && fieldIndex >= 5 : index === 1 ? section === 'budget' : section === 'advanced') })).filter(group => group.fields.length).map(group => <section key={group.fields[0].path} className="settings-group"><h3>{group.title}</h3>
         <div className="settings-grid">{group.fields.map(field => {
           const value = Object.hasOwn(edits, field.path) ? edits[field.path] : atPath(document.form, field.path);
           const change = (value: Json) => setEdits(previous => ({ ...previous, [field.path]: value }));
           return <label key={field.path} className={`field ${field.kind === 'checkbox' ? 'field-checkbox' : ''}`}><span>{field.label}</span>
-            {field.kind === 'provider' || field.kind === 'backend' ? <select value={String(value ?? '')} disabled={busy} onChange={event => change(event.target.value)}>{(field.kind === 'provider' ? ['openai', 'openai_responses', 'anthropic', 'ollama'] : ['disabled', 'docker', 'ssh', 'trusted_local']).map(option => <option key={option} value={option}>{option}</option>)}</select> :
+            {field.kind === 'environment' ? <select value={String(value ?? '')} disabled={busy} onChange={event => change(event.target.value || null)}><option value="" disabled={Object.keys(environmentMap(document.form)).length > 0}>{t('settings-controller-only')}</option>{Object.entries(environmentMap(document.form)).map(([id, environment]) => <option key={id} value={id}>{String(environment.name ?? id)}</option>)}</select> :
+              field.kind === 'provider' || field.kind === 'backend' ? <select value={String(value ?? '')} disabled={busy} onChange={event => change(event.target.value)}>{(field.kind === 'provider' ? ['openai', 'openai_responses', 'anthropic', 'ollama'] : field.options ?? ['docker', 'ssh']).map(option => <option key={option} value={option}>{option}</option>)}</select> :
               field.kind === 'checkbox' ? <input type="checkbox" checked={Boolean(value)} disabled={busy} onChange={event => change(event.target.checked)} /> :
                 <input type={field.kind === 'number' ? 'number' : 'text'} min={field.kind === 'number' ? 1 : undefined} value={value == null ? '' : String(value)} disabled={busy}
                   onChange={event => change(field.kind === 'number' ? event.target.value === '' ? '' : Number(event.target.value) : event.target.value || null)} />}

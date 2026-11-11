@@ -6,7 +6,7 @@
 
 Rust 控制端默认不运行待分析目标。请选择持久化 Docker/VM/SSH worker。`trusted_local` 显式在宿主运行可信夹具，仅用于开发测试。Python bridge 管理进程，容器或 VM 提供隔离。
 
-在 worker 使用的 Python 环境（可信本地测试为 `runtime.python`）安装依赖：
+在 worker 使用的 Python 环境（可信本地测试为 `environments.<id>.runtime.python`）安装依赖：
 
 ```sh
 python -m pip install -r workers/runtime/requirements.txt
@@ -35,17 +35,21 @@ $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 
 Dockerfile 按 digest 固定 AFL++ 基础镜像，安装 GDB、GCC、Python、带 QEMU 插桩的 AFL++、pwntools/z3-solver/angr/ropper、校验 SHA256 的 Temurin JDK 25 LTS（Ghidra 12.2 所需）及校验 SHA256 的官方 Ghidra 12.2。`--build-arg INSTALL_GHIDRA=0` 可省略 Ghidra。审查 `docker image inspect` 后将 `AFL_IMAGE` 设为上游 digest 以固定基础镜像；完整可重复性仍受未完全锁定的传递依赖限制。
 
-应用配置：
+在应用配置中登记命名环境：
 
 ```toml
-[runtime]
+default_environment = "linux"
+[environments.linux]
+name = "Linux analysis"
+platform = "linux"
+[environments.linux.runtime]
 backend = "docker"
 docker_container = "wukong-worker"
 # 可选：Windows Docker Desktop 自动探测，否则使用 "docker"。
 # docker_executable = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 remote_bridge_path = "/opt/wukong/runtime/bridge.py"
 remote_state_dir = "/state"
-request_timeout_secs = 120
+request_timeout_secs = 300
 ```
 
 <a id="ssh-or-a-vm"></a>
@@ -55,7 +59,11 @@ request_timeout_secs = 120
 在隔离 Linux guest 安装 Python 3.12+、GDB、带 `afl-qemu-trace` 或 `afl-qemu-bridge` 的 AFL++。将整个目录复制到 `/opt/wukong/runtime`，配置专用管理账号。生产模式需要 root daemon，为每个 job/session 分配不同非特权 UID 并保护监督元数据。SSH 传输不自动添加 sudo；使用配置好的隔离 guest 账号。密钥 SSH 应预先可用，传输使用 `BatchMode=yes`。
 
 ```toml
-[runtime]
+default_environment = "linux"
+[environments.linux]
+name = "Linux VM"
+platform = "linux"
+[environments.linux.runtime]
 backend = "ssh"
 ssh_host = "root@analysis-vm"
 remote_bridge_path = "/opt/wukong/runtime/bridge.py"

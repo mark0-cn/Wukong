@@ -252,7 +252,29 @@ mod tests {
         let target = dir.path().join("sample");
         fs::write(&target, b"fixture")?;
         let coordinator = Coordinator::new(store.clone());
-        let run = coordinator.create_run(&target, "fixture", Budget::default(), json!({}))?;
+        let config = AppConfig {
+            default_environment: Some("fixture".into()),
+            environments: std::collections::BTreeMap::from([(
+                "fixture".into(),
+                crate::environments::EnvironmentConfig {
+                    name: "Trusted fixture".into(),
+                    platform: crate::environments::Platform::current(),
+                    installation_id: None,
+                    runtime: crate::runtime::RuntimeConfig {
+                        backend: RuntimeBackend::TrustedLocal,
+                        state_dir: dir.path().join("worker"),
+                        ..Default::default()
+                    },
+                },
+            )]),
+            ..Default::default()
+        };
+        let run = coordinator.create_run(
+            &target,
+            "fixture",
+            Budget::default(),
+            serde_json::to_value(&config)?,
+        )?;
         let owner = coordinator
             .create_child(
                 &run.root_id,
@@ -262,10 +284,10 @@ mod tests {
             )?
             .agent
             .metadata;
-        let mut config = AppConfig::default();
-        config.runtime.backend = RuntimeBackend::TrustedLocal;
-        config.runtime.state_dir = dir.path().join("worker");
-        let tools = ToolService::new(config, store.clone()).await?;
+        let tools = ToolService::new(config, store.clone())
+            .await?
+            .bound_to(&owner)
+            .await?;
         let started = tools
             .execute(
                 &owner.id,

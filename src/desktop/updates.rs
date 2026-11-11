@@ -209,9 +209,8 @@ impl Controller {
 
     pub fn initialization(&self, config: &AppConfig) {
         let mut state = self.edit();
-        state.needs_setup = !config.workbench.root.join("environment.json").is_file()
-            || config.runtime.backend == crate::runtime::RuntimeBackend::Disabled;
-        state.health.configured = config.workbench.root.join("environment.json").is_file();
+        state.needs_setup = config.environments.is_empty();
+        state.health.configured = !config.environments.is_empty();
         state.pending = recovery::pending().map_or(true, |p| p.is_some());
         state.recovery = recovery::root()
             .ok()
@@ -438,7 +437,7 @@ impl Controller {
                 .flatten()
                 .map(|v| recovery::cached(v).map(|m| m.image))
                 .collect::<Result<_>>()?;
-            let docker = crate::workbench::Docker::new(&config.runtime.docker_executable);
+            let docker = crate::workbench::Docker::new(&config.workbench.docker_executable);
             let directory = crate::updates::storage::cache_root()?.join("releases");
             if directory.exists() {
                 for entry in std::fs::read_dir(&directory)? {
@@ -509,7 +508,11 @@ impl Controller {
             return Ok(());
         }
         let workbench = Workbench::open(&config)?;
-        if let Some(container) = &config.runtime.docker_container {
+        if let Some(container) = config
+            .environments
+            .get("workbench")
+            .and_then(|environment| environment.runtime.docker_container.as_ref())
+        {
             ensure!(
                 container == &workbench.name("tools"),
                 UiMessage::new("system-switch-to-the-tool-environment-before-installing-or")

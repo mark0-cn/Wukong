@@ -174,12 +174,16 @@ export interface Messages {
   'settings-comments-and-relative-paths-are-preserved': undefined;
   'settings-concurrent-agents': undefined;
   'settings-configuration-loaded': undefined;
+  'settings-controller-only': undefined;
   'settings-could-not-load-configuration-please-reload': undefined;
   'settings-data-directory-changed-the-original-data-remains': undefined;
+  'settings-default-analysis-environment': undefined;
   'settings-discard-settings-draft-and-reload': undefined;
   'settings-docker-container': undefined;
+  'settings-docker-executable': undefined;
   'settings-dynamic-analysis-backend': undefined;
   'settings-enter-the-variable-name-the-key-is': undefined;
+  'settings-environment-name': undefined;
   'settings-form': undefined;
   'settings-ghidra-executable': undefined;
   'settings-installers-and-image-validation-logs-can-be': undefined;
@@ -315,6 +319,7 @@ export interface Messages {
   'tool-agent-finish': undefined;
   'tool-analysis-verify': undefined;
   'tool-angr-solve': undefined;
+  'tool-artifact-stage': undefined;
   'tool-binary-inspect': undefined;
   'tool-binary-strings': undefined;
   'tool-context-read': undefined;
@@ -328,9 +333,13 @@ export interface Messages {
   'tool-cyclic-offset': undefined;
   'tool-debug-close': undefined;
   'tool-debug-command': undefined;
+  'tool-debug-control': undefined;
+  'tool-debug-inspect': undefined;
   'tool-debug-start': undefined;
   'tool-differential-test': undefined;
   'tool-emulate-run': undefined;
+  'tool-environment-doctor': undefined;
+  'tool-environment-list': undefined;
   'tool-evidence-read': undefined;
   'tool-exec-command': undefined;
   'tool-file-get': undefined;
@@ -504,6 +513,7 @@ export interface Messages {
   'updates-health-unchecked-help': undefined;
   'updates-health-unconfigured': undefined;
   'updates-health-unknown': undefined;
+  'updates-health-worker': undefined;
   'updates-help-credentials': undefined;
   'updates-help-daemon': undefined;
   'updates-help-disk': undefined;

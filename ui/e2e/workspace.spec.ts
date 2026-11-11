@@ -341,6 +341,34 @@ test('settings categories retain drafts and separate tool and challenge actions'
   await expect(page.getByRole('button', { name: '启动环境', exact: true })).toHaveCount(0);
 });
 
+test('named Windows environment settings save only scoped configuration paths', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.host.execution = null;
+    (window as any).__emitDesktop('workspace-changed', null);
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    native.invoke = (command: string, args: unknown) => command === 'config_read' ? Promise.resolve({
+      path: '/tmp/wukong.toml', source: '# named environments\n', original: '# named environments\n',
+      form: { model: { provider: 'openai', model: 'fixture' }, budget: state.host.budget,
+        default_environment: 'windows', environments: { windows: { name: 'Windows VM', platform: 'windows',
+          runtime: { backend: 'ssh', ssh_host: 'windows-fixture', remote_bridge_path: 'worker-relay' } } } },
+    }) : invoke(command, args);
+  });
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByRole('button', { name: '高级配置', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: '默认分析环境', exact: true })).toHaveValue('windows');
+  await expect(page.getByLabel('环境名称', { exact: true })).toHaveValue('Windows VM');
+  await expect(page.getByLabel('Docker 可执行文件', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Docker 容器', { exact: true })).toHaveCount(0);
+  await page.getByLabel('SSH 主机', { exact: true }).fill('updated-windows-fixture');
+  await page.screenshot({ path: 'target/windows-named-config-settings.png' });
+  await page.getByRole('button', { name: '保存并应用', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const edits = await page.evaluate(() => (window as any).__desktopTest.requests.findLast((request: any) => request.command === 'config_save').args.edits);
+  expect(edits).toEqual([{ path: ['environments', 'windows', 'runtime', 'ssh_host'], value: 'updated-windows-fixture' }]);
+});
+
 test('large tool groups keep failed operations visible before expansion', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(() => {

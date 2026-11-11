@@ -15,3 +15,9 @@ test('a workspace configuration change invalidates a previously successful obser
   expect(screen.queryByText('通过')).toBeNull();
   expect(screen.getAllByText('未检查')).toHaveLength(4);
 });
+
+test('Windows VM health presents its worker connection without a Docker prerequisite', () => {
+  render(<EnvironmentHealth health={{ platform: 'windows', configured: true, docker: null, running: true, tools: true, checked_at: '2026-11-11T00:00:00Z', tools_checked_at: null, image: null, checks: {}, error: null }} />);
+  expect(screen.queryByText('Docker 连接')).toBeNull();
+  expect(screen.getByText('Worker 连接')).toBeTruthy();
+});

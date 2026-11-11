@@ -6,13 +6,13 @@
 
 [语言设置](languages.zh-CN.md)
 
-Wukong 提供 Windows x64 安装 EXE 和 Linux x64 AppImage。安装文件包含客户端，工具镜像在首次运行时联网下载；不包含模型密钥或题目数据。
+Wukong 提供 Windows x64 安装 EXE 和 Linux x64 AppImage。安装文件包含客户端，Linux 工具环境联网下载镜像；不包含模型凭据或题目数据。命名 Windows VM 环境采用独立的[离线交付契约](../design/cross-platform-environments.zh-CN.md#windows-离线交付契约)，仅配置 Windows 环境时不要求 Docker。
 
 ## Windows
 
 1. 从正式 GitHub Release 下载 `Wukong_<版本>_x64-setup.exe`（以附件实际文件名为准）。
 2. 双击后选择 English 或 SimpChinese，安装到当前用户目录并打开 Wukong。客户端使用 WebView2，安装器可在线准备缺失的运行时。应用语言默认跟随系统，可在设置中独立修改。
-3. 首次启动打开环境向导。安装并启动 Docker Desktop，选择 Linux containers。
+3. 尚未登记环境时，首次启动打开 Linux 工具环境向导。使用 Linux 工具环境时，安装并启动 Docker Desktop，选择 Linux containers；已有命名环境配置时跳过此首次设置。
 4. 点击“准备工具环境”，等待镜像下载、自检完成，然后在设置中配置模型。
 
 当前 EXE 未做 Authenticode 签名。应用内更新使用独立的签名校验机制。

@@ -45,7 +45,7 @@ impl ConfigDocument {
         let mut document = self.source.parse::<DocumentMut>()?;
         for edit in edits {
             ensure!(
-                !edit.path.is_empty() && edit.path.len() <= 3,
+                !edit.path.is_empty() && edit.path.len() <= 5,
                 "invalid configuration field path"
             );
             let mut item = document.as_item_mut();
@@ -130,6 +130,32 @@ impl ConfigDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn named_environment_fields_preserve_the_configuration_document() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("config.toml");
+        std::fs::write(&path, "# controller settings\nstate_dir='state'\n")?;
+        let mut document = ConfigDocument::open(path)?;
+        let edit = |path: &[&str], value: &str| ConfigEdit {
+            path: path.iter().map(|value| (*value).into()).collect(),
+            value: Value::String(value.into()),
+        };
+        document.patch(&[
+            edit(&["default_environment"], "windows"),
+            edit(&["environments", "windows", "name"], "Windows VM"),
+            edit(&["environments", "windows", "platform"], "windows"),
+            edit(&["environments", "windows", "runtime", "backend"], "ssh"),
+            edit(
+                &["environments", "windows", "runtime", "ssh_host"],
+                "windows-fixture",
+            ),
+        ])?;
+        let (config, _) = document.save(None)?;
+        assert_eq!(config.default_environment.as_deref(), Some("windows"));
+        assert!(document.source.starts_with("# controller settings"));
+        assert!(!document.source.contains("\n[runtime]"));
+        Ok(())
+    }
     #[test]
     fn editing_preserves_comments_relative_paths_and_external_changes() -> Result<()> {
         let dir = tempfile::tempdir()?;

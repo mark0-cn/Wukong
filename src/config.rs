@@ -1,4 +1,4 @@
-use crate::{domain::Budget, llm::ModelConfig, mcp::McpServerConfig, runtime::RuntimeConfig};
+use crate::{domain::Budget, llm::ModelConfig, mcp::McpServerConfig};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -78,14 +78,13 @@ impl Default for ExecutionConfig {
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
     pub state_dir: PathBuf,
     /// None follows the initial task language; new runs persist a concrete choice.
     pub output_language: Option<crate::i18n::Locale>,
     pub model: ModelConfig,
     pub budget: Budget,
-    pub runtime: RuntimeConfig,
     pub environments: std::collections::BTreeMap<String, crate::environments::EnvironmentConfig>,
     pub default_environment: Option<String>,
     pub workbench: crate::workbench::WorkbenchConfig,
@@ -104,7 +103,6 @@ impl Default for AppConfig {
             output_language: None,
             model: ModelConfig::default(),
             budget: Budget::default(),
-            runtime: RuntimeConfig::default(),
             environments: Default::default(),
             default_environment: None,
             workbench: crate::workbench::WorkbenchConfig::default(),
@@ -148,8 +146,6 @@ impl AppConfig {
         }
         resolve(base, &mut self.workbench.root);
         resolve(base, &mut self.state_dir);
-        resolve(base, &mut self.runtime.state_dir);
-        resolve(base, &mut self.runtime.bridge_path);
         for environment in self.environments.values_mut() {
             resolve(base, &mut environment.runtime.state_dir);
             resolve(base, &mut environment.runtime.bridge_path);
@@ -216,14 +212,14 @@ impl AppConfig {
             self.analysis.timeout_seconds >= self.analysis.analysis_timeout_seconds,
             "analysis.timeout_seconds must cover analysis_timeout_seconds"
         );
-        if self.runtime.backend != crate::runtime::RuntimeBackend::Disabled {
+        for environment in self.environments.values() {
             // Worker-side Ghidra queries run synchronously up to
             // analysis.timeout_seconds; a shorter transport timeout would
             // kill the call (and previously the whole transport) mid-query.
             ensure!(
-                self.runtime.request_timeout_secs >= self.analysis.timeout_seconds,
-                "runtime.request_timeout_secs ({}) must cover analysis.timeout_seconds ({})",
-                self.runtime.request_timeout_secs,
+                environment.runtime.request_timeout_secs >= self.analysis.timeout_seconds,
+                "environment request_timeout_secs ({}) must cover analysis.timeout_seconds ({})",
+                environment.runtime.request_timeout_secs,
                 self.analysis.timeout_seconds
             );
         }
@@ -329,15 +325,35 @@ mod tests {
 
     #[test]
     fn runtime_timeout_must_cover_worker_ghidra_queries() {
-        let mut config = AppConfig::default();
-        config.runtime.backend = RuntimeBackend::TrustedLocal;
-        config.runtime.request_timeout_secs = 120;
+        let mut config = AppConfig {
+            default_environment: Some("linux".into()),
+            ..Default::default()
+        };
+        config.environments.insert(
+            "linux".into(),
+            crate::environments::EnvironmentConfig {
+                name: "Linux".into(),
+                platform: crate::environments::Platform::Linux,
+                installation_id: None,
+                runtime: crate::runtime::RuntimeConfig {
+                    backend: RuntimeBackend::Docker,
+                    request_timeout_secs: 120,
+                    docker_container: Some("fixture".into()),
+                    ..Default::default()
+                },
+            },
+        );
         config.analysis.timeout_seconds = 300;
         let error = config.validate().unwrap_err();
         assert!(error.to_string().contains("must cover"), "{error:#}");
-        // Disabled backends have no transport timeout to contradict.
-        config.runtime.backend = RuntimeBackend::Disabled;
+        config.environments.clear();
+        config.default_environment = None;
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn legacy_single_runtime_configuration_is_rejected_without_migration() {
+        assert!(toml::from_str::<AppConfig>("[runtime]\nbackend='disabled'").is_err());
     }
 
     #[test]

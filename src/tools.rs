@@ -33,6 +33,7 @@ pub struct ToolService {
     mcp: McpRegistry,
     locks: Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>,
     environments: crate::environments::EnvironmentRegistry,
+    default_environment: Option<String>,
 }
 
 mod analysis;
@@ -108,25 +109,15 @@ impl ToolService {
     pub(crate) fn from_dependencies(
         config: AppConfig,
         store: Store,
-        client: Option<RuntimeClient>,
         mcp: McpRegistry,
     ) -> Result<Self> {
         let environments =
             crate::environments::EnvironmentRegistry::new(config.environments.clone())?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
-        let identity = client
-            .as_ref()
-            .map(|client| {
-                stable(
-                    "worker",
-                    &serde_json::to_string(client.identity()).expect("worker identity serializes"),
-                )
-            })
-            .unwrap_or_else(|| "unbound".into());
         let gateway = WorkerGateway {
             store: store.clone(),
-            client,
-            identity,
+            client: None,
+            identity: "unbound".into(),
             output_limit: config.tools.max_output_bytes,
         };
         let execution = ExecutionService::new(store.clone(), gateway.clone(), locks.clone());
@@ -146,9 +137,10 @@ impl ToolService {
             mcp,
             locks,
             environments,
+            default_environment: config.default_environment,
         })
     }
-    async fn bound_to(&self, agent: &AgentMetadata) -> Result<Self> {
+    pub(crate) async fn bound_to(&self, agent: &AgentMetadata) -> Result<Self> {
         let Some(environment_id) = &agent.environment_id else {
             return Ok(self.clone());
         };
@@ -264,8 +256,8 @@ impl ToolService {
         }
     }
     pub async fn doctor(&self) -> Result<Value> {
-        if let Some(runtime) = &self.execution.gateway.client {
-            runtime.doctor().await
+        if let Some(environment) = &self.default_environment {
+            Ok(self.environments.doctor(environment).await?["observation"].clone())
         } else {
             Ok(
                 json!({"enabled":false,"capabilities":{},"reason":"runtime disabled in configuration"}),

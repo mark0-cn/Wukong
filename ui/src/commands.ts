@@ -3,6 +3,7 @@ import type { Preferences, PreferenceSnapshot, LocalizedMessage } from './i18n';
 
 export type UpdateAction = 'status' | 'health' | 'doctor' | 'start_tools' | 'stop_tools' | 'select_tools' | 'check' | 'prepare' | 'setup' | 'install' | 'recover' | 'integrate' | 'clean_cache' | 'clean_images';
 export interface EnvironmentHealth {
+  platform?: 'linux' | 'windows' | null;
   epoch?: number | null;
   configured: boolean; docker: boolean | null; running: boolean | null; tools: boolean | null;
   checked_at: string | null; tools_checked_at: string | null; image: string | null;

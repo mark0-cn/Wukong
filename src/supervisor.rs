@@ -155,13 +155,14 @@ mod tests {
             let bridge = root.join("bridge.py");
             std::fs::write(
                 &bridge,
-                r#"import json,sys,time,pathlib
+                r#"import json,sys,time,pathlib,platform
 root=pathlib.Path(sys.argv[sys.argv.index('--state')+1]);root.mkdir(exist_ok=True)
 for line in sys.stdin:
  r=json.loads(line)
  if r['method']=='job.status':
   (root/'polling').write_text('ready');time.sleep(60)
- print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':{'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {}}),flush=True)
+ result={'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {'os':platform.system().lower()} if r['method']=='doctor' else {}
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
 "#,
             )?;
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -172,9 +173,21 @@ for line in sys.stdin:
             config.model.provider = Provider::Ollama;
             config.model.base_url = Some(format!("http://{}", listener.local_addr()?));
             config.execution.stream = false;
-            config.runtime.backend = RuntimeBackend::TrustedLocal;
-            config.runtime.bridge_path = bridge;
-            config.runtime.state_dir = root.join("worker");
+            config.default_environment = Some("fixture".into());
+            config.environments.insert(
+                "fixture".into(),
+                crate::environments::EnvironmentConfig {
+                    name: "Trusted fixture".into(),
+                    platform: crate::environments::Platform::current(),
+                    installation_id: None,
+                    runtime: crate::runtime::RuntimeConfig {
+                        backend: RuntimeBackend::TrustedLocal,
+                        state_dir: root.join("worker"),
+                        bridge_path: bridge,
+                        ..Default::default()
+                    },
+                },
+            );
             if wall_budget {
                 config.budget.max_wall_seconds = 1;
             }
@@ -186,15 +199,23 @@ for line in sys.stdin:
             let runner = AssessmentRunner::new(config.clone(), store.clone()).await?;
             let target = root.join("sample");
             std::fs::write(&target, b"fixture")?;
-            let run =
-                runner
-                    .coordinator
-                    .create_run(&target, "supervision", config.budget, json!({}))?;
+            let run = runner.coordinator.create_run(
+                &target,
+                "supervision",
+                config.budget.clone(),
+                serde_json::to_value(&config)?,
+            )?;
+            let root_agent: AgentMetadata = store.load(&run.root_id)?;
+            let worker_id = runner
+                .tools
+                .bound_to(&root_agent)
+                .await?
+                .worker_identity()?;
             store.put(
                 "job",
                 "job",
                 &run.id,
-                &json!({"id":"job","worker_resource_id":"job","run_id":run.id,"agent_id":run.root_id,"owner_generation":0,"tool_name":"job_start","call_id":"fixture","worker_request_id":"fixture","parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"worker_id":runner.tools.worker_identity()?,"status":{"job_id":"job","state":"queued"}}),
+                &json!({"id":"job","worker_resource_id":"job","run_id":run.id,"agent_id":run.root_id,"owner_generation":0,"tool_name":"job_start","call_id":"fixture","worker_request_id":"fixture","parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"worker_id":worker_id,"status":{"job_id":"job","state":"queued"}}),
             )?;
             let cancel = CancellationToken::new();
             let child_cancel = cancel.clone();

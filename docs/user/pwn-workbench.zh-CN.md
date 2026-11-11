@@ -36,7 +36,7 @@ wukong --config wukong.toml env up
 wukong --config wukong.toml env doctor
 ```
 
-Docker 不在 PATH 时，在配置的 `[runtime]` 设置 `docker_executable` 为完整路径。生成的配置位于工作环境目录的 `wukong.toml`；使用它打开客户端，或在桌面“工具环境”中选择“使用工具环境”。模型密钥仍通过宿主机凭据存储或环境变量提供。
+Docker 不在 PATH 时，在配置的 `[workbench]` 设置 `docker_executable` 为完整路径。生成的配置位于工作环境目录的 `wukong.toml`，并登记名为 `workbench` 的 Linux 环境；使用它打开客户端，或在桌面“工具环境”中选择“使用工具环境”。模型密钥仍通过宿主机凭据存储或环境变量提供。
 
 `env doctor` 实际编译并运行 32/64 位程序，检查 GDB 断点、pwntools 收发、Python 分析库、Pwndbg/pwninit 和 Ghidra 导入，结果保存在 `doctor.json`。不是只检查可执行文件存在。
 

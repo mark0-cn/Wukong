@@ -30,7 +30,7 @@ pub enum RuntimeBackend {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RuntimeConfig {
     pub backend: RuntimeBackend,
     pub state_dir: PathBuf,
@@ -61,7 +61,7 @@ impl Default for RuntimeConfig {
     }
 }
 
-fn default_docker_executable() -> String {
+pub(crate) fn default_docker_executable() -> String {
     #[cfg(windows)]
     {
         let candidate = PathBuf::from(

@@ -10,6 +10,8 @@ An assessment snapshots its environment configuration. The root uses `default_en
 
 For example, a Linux Ghidra specialist and a Windows debugger specialist can share an original PE artifact without sharing worker filesystem paths. Role permissions remain root/analyst/verifier; selecting an environment never grants permissions or activates an unavailable backend.
 
+The configuration has no top-level `[runtime]` section. Register transports under `environments.<id>.runtime` and select `default_environment`; an empty registry enables controller-only static analysis. Old single-runtime configuration is rejected without conversion. Workbench Docker CLI configuration lives under `[workbench].docker_executable`; generated workbench configuration registers a Linux environment named `workbench` while preserving other registered environments. Desktop initialization and health checks use the selected environment, so a configured Windows VM does not require Docker. `wukong doctor` reports each registered environment independently.
+
 ```toml
 default_environment = "linux"
 

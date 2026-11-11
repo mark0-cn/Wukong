@@ -23,6 +23,7 @@ use std::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorkbenchConfig {
+    pub docker_executable: String,
     pub root: PathBuf,
     pub image: String,
     pub memory: String,
@@ -31,6 +32,7 @@ pub struct WorkbenchConfig {
 impl Default for WorkbenchConfig {
     fn default() -> Self {
         Self {
+            docker_executable: crate::runtime::default_docker_executable(),
             root: ".wukong/workbench".into(),
             image: "wukong:0.1".into(),
             memory: "4g".into(),
@@ -77,7 +79,7 @@ impl Workbench {
         Ok(Self {
             root,
             id,
-            docker: Docker::new(&config.runtime.docker_executable),
+            docker: Docker::new(&config.workbench.docker_executable),
             config: config.clone(),
         })
     }

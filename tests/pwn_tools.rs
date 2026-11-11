@@ -16,6 +16,25 @@ fn value(outcome: &ToolOutcome) -> &Value {
     assert!(!outcome.is_error, "{:?}", outcome.value);
     &outcome.value["result"]
 }
+fn worker_config(path: &std::path::Path) -> AppConfig {
+    AppConfig {
+        default_environment: Some("fixture".into()),
+        environments: std::collections::BTreeMap::from([(
+            "fixture".into(),
+            wukong::environments::EnvironmentConfig {
+                name: "Trusted fixture".into(),
+                platform: wukong::environments::Platform::current(),
+                installation_id: None,
+                runtime: wukong::runtime::RuntimeConfig {
+                    backend: RuntimeBackend::TrustedLocal,
+                    state_dir: path.join("worker"),
+                    ..Default::default()
+                },
+            },
+        )]),
+        ..Default::default()
+    }
+}
 
 #[tokio::test]
 async fn seccomp_artifacts_are_scoped_hashed_and_unavailable_to_root() -> Result<()> {
@@ -24,7 +43,13 @@ async fn seccomp_artifacts_are_scoped_hashed_and_unavailable_to_root() -> Result
     let coordinator = Coordinator::new(store.clone());
     let sample = temp.path().join("sample");
     fs::write(&sample, b"trusted static fixture")?;
-    let run = coordinator.create_run(&sample, "filter analysis", Budget::default(), json!({}))?;
+    let config = worker_config(temp.path());
+    let run = coordinator.create_run(
+        &sample,
+        "filter analysis",
+        Budget::default(),
+        serde_json::to_value(&config)?,
+    )?;
     let analyst = coordinator
         .create_child(
             &run.root_id,
@@ -33,9 +58,6 @@ async fn seccomp_artifacts_are_scoped_hashed_and_unavailable_to_root() -> Result
             }))?,
         )?
         .agent;
-    let mut config = AppConfig::default();
-    config.runtime.backend = RuntimeBackend::TrustedLocal;
-    config.runtime.state_dir = temp.path().join("worker");
     let service = ToolService::new(config, store).await?;
     let raw = [
         6u16.to_le_bytes().as_slice(),
@@ -86,7 +108,13 @@ async fn network_verification_imports_transcripts_and_preserves_identity_limits(
     let coordinator = Coordinator::new(store.clone());
     let sample = temp.path().join("sample");
     fs::write(&sample, b"trusted network fixture identity; not executed")?;
-    let run = coordinator.create_run(&sample, "verify service", Budget::default(), json!({}))?;
+    let config = worker_config(temp.path());
+    let run = coordinator.create_run(
+        &sample,
+        "verify service",
+        Budget::default(),
+        serde_json::to_value(&config)?,
+    )?;
     let mut agents = Vec::new();
     for (name, role) in [("producer", Role::Analyst), ("verifier", Role::Verifier)] {
         agents.push(
@@ -126,9 +154,6 @@ async fn network_verification_imports_transcripts_and_preserves_identity_limits(
             "files":{"target":run.target_sha256},"service":{"mode":"local_service","port":port,"host":null}
         }))?,
     )?;
-    let mut config = AppConfig::default();
-    config.runtime.backend = RuntimeBackend::TrustedLocal;
-    config.runtime.state_dir = worker;
     let service = ToolService::new(config, store).await?;
     let staged = service
         .execute(&producer.id, "net-stage", "stage_target", json!({}))

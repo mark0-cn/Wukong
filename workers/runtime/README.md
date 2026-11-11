@@ -10,7 +10,7 @@ and is only suitable for development tests. The Python bridge manages processes;
 the container or VM supplies isolation.
 
 Install the bridge dependencies in the Python environment used by the worker
-(or `runtime.python` for trusted local tests):
+(or `environments.<id>.runtime.python` for trusted local tests):
 
 ```sh
 python -m pip install -r workers/runtime/requirements.txt
@@ -49,17 +49,21 @@ Ghidra 12.2), and the official Ghidra 12.2 release with a checked SHA256. Use
 `--build-arg INSTALL_GHIDRA=0` to omit Ghidra. To pin the base image, set `AFL_IMAGE`
 to an upstream image digest after reviewing `docker image inspect` output. Full reproducibility remains limited by incompletely pinned transitive dependencies.
 
-The `runtime` section of the application configuration is:
+Register a named environment in the application configuration:
 
 ```toml
-[runtime]
+default_environment = "linux"
+[environments.linux]
+name = "Linux analysis"
+platform = "linux"
+[environments.linux.runtime]
 backend = "docker"
 docker_container = "wukong-worker"
 # Optional: auto-detected on Windows Docker Desktop, otherwise "docker".
 # docker_executable = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 remote_bridge_path = "/opt/wukong/runtime/bridge.py"
 remote_state_dir = "/state"
-request_timeout_secs = 120
+request_timeout_secs = 300
 ```
 
 <a id="ssh-或-vm"></a>
@@ -75,7 +79,11 @@ sudo automatically; use a suitably configured isolated guest account. Key based
 SSH must already work; the transport uses `BatchMode=yes`.
 
 ```toml
-[runtime]
+default_environment = "linux"
+[environments.linux]
+name = "Linux VM"
+platform = "linux"
+[environments.linux.runtime]
 backend = "ssh"
 ssh_host = "root@analysis-vm"
 remote_bridge_path = "/opt/wukong/runtime/bridge.py"

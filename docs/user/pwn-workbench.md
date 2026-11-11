@@ -36,7 +36,7 @@ wukong --config wukong.toml env up
 wukong --config wukong.toml env doctor
 ```
 
-If Docker is absent from PATH, set `[runtime].docker_executable` to its absolute path. Generated configuration is `wukong.toml` in the workbench directory; open the client with it or select **Use tool environment** in the desktop. Model credentials still come from host credential storage/environment variables.
+If Docker is absent from PATH, set `[workbench].docker_executable` to its absolute path. Generated configuration is `wukong.toml` in the workbench directory and registers the named `workbench` Linux environment; open the client with it or select **Use tool environment** in the desktop. Model credentials still come from host credential storage/environment variables.
 
 `env doctor` compiles/runs 32/64-bit programs and checks GDB breakpoints, pwntools I/O, Python libraries, Pwndbg/pwninit and Ghidra import. Results go to `doctor.json`; it does more than check executable presence.
 
