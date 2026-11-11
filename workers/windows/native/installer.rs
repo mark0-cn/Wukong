@@ -2,6 +2,7 @@
 //! controller; this module has no download, MSI custom-action or shell-script path.
 use crate::{
     accounts::{self, Role},
+    authority::{Authority, SignedEnrollment},
     deployment::{self, Deployment},
     pipe_transport, processes,
     security::{self, AclPolicy},
@@ -300,6 +301,13 @@ pub fn install(plan: Plan) -> Result<Value> {
             &json!({"schema":1,"installation_id":enrollment.installation_id,"manifest_sha256":plan.manifest.sha256(),"generation":enrollment.generation,"roles":["management","worker","debugger","target"]}),
             &private,
         )?;
+        let key = PublicKey::from_hex(&plan.setup.controller_public_key)?;
+        let signed = SignedEnrollment::read(&plan.base.join("enrollment"), &key)?;
+        ensure!(
+            signed.enrollment.canonical_bytes()? == enrollment.canonical_bytes()?,
+            "installation enrollment changed after review"
+        );
+        Authority::new(signed, &key)?.persist(&metadata, &private)?;
     }
     let mut accounts = Vec::new();
     for role in [Role::Management, Role::Worker, Role::Debugger, Role::Target] {

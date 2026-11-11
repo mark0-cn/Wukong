@@ -1,29 +1,15 @@
 //! Recover a create interrupted before any payload/service activation. Existing
 //! installations use lifecycle repair, never this narrowly scoped account path.
 use crate::{
+    authority::{Authority, SignedEnrollment},
     deployment::{self, read_bytes},
     installer::Plan,
     security::AclPolicy,
 };
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{fs, path::Path};
-use wukong_worker_package::{
-    Enrollment, PublicKey, SignatureRecord, VerifiedEnrollment, VerifiedManifest,
-};
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Admission {
-    enrollment: Enrollment,
-    signature: SignatureRecord,
-}
-impl Admission {
-    fn verify(&self, key: &PublicKey) -> Result<VerifiedEnrollment> {
-        VerifiedEnrollment::verify(&self.enrollment.canonical_bytes()?, &self.signature, key)
-    }
-}
+use wukong_worker_package::{PublicKey, SignatureRecord, VerifiedEnrollment, VerifiedManifest};
 fn authorize(
     intent: &Value,
     previous: &VerifiedManifest,
@@ -52,7 +38,23 @@ pub(crate) fn early_account_phase(root: &Path, plan: &Plan) -> Result<()> {
     let intent_path = metadata.join("installation-intent.json");
     policy.verify(&intent_path, false)?;
     let intent: Value = serde_json::from_slice(&read_bytes(&intent_path, 16384)?)?;
-    let key = PublicKey::from_hex(&plan.setup.controller_public_key)?;
+    let stored_authority = if metadata.join("authority.json").try_exists()? {
+        Some(Authority::load(&metadata, &policy)?)
+    } else {
+        None
+    };
+    let key = if let Some(authority) = &stored_authority {
+        let key = authority.key()?;
+        ensure!(
+            key.to_hex() == plan.setup.controller_public_key,
+            "incoming setup cannot replace the protected first-owner authority"
+        );
+        key
+    } else {
+        // Interrupted development bootstrap with only the original intent:
+        // the native owner fingerprint review still establishes first trust.
+        PublicKey::from_hex(&plan.setup.controller_public_key)?
+    };
     let proof = plan.base.join("recovery");
     let signature: SignatureRecord =
         serde_json::from_slice(&read_bytes(&proof.join("manifest.sig"), 1024)?)?;
@@ -61,14 +63,20 @@ pub(crate) fn early_account_phase(root: &Path, plan: &Plan) -> Result<()> {
         &signature,
         &key,
     )?;
-    let prior = deployment::read_enrollment(&proof, &key)?;
+    let signed_prior = SignedEnrollment::read(&proof, &key)?;
+    let prior = signed_prior.verify(&key)?;
     authorize(&intent, &previous, &prior, &plan.enrollment)?;
-    let mut admitted = Vec::new();
+    let authority_exists = stored_authority.is_some();
+    let authority = match stored_authority {
+        Some(authority) => authority,
+        None => Authority::new(signed_prior, &key)?,
+    };
+    authority.check_identity(&prior)?;
     for entry in fs::read_dir(&metadata)? {
         let entry = entry?;
         let name = entry.file_name();
         let name = name.to_str().context("invalid recovery metadata name")?;
-        if name == "installation-intent.json" {
+        if name == "installation-intent.json" || name == "authority.json" {
             continue;
         }
         let generation = name
@@ -79,45 +87,31 @@ pub(crate) fn early_account_phase(root: &Path, plan: &Plan) -> Result<()> {
             !generation.is_empty() && generation.bytes().all(|b| b.is_ascii_digit()),
             "invalid recovery admission filename"
         );
-        policy.verify(&entry.path(), false)?;
-        let admission: Admission = serde_json::from_slice(&read_bytes(&entry.path(), 32768)?)?;
-        let admission = admission.verify(&key)?;
-        ensure!(
-            admission.enrollment().generation.to_string() == generation,
-            "recovery admission generation differs from filename"
-        );
-        admission.authorize_after(&prior)?;
-        admitted.push(admission);
-        ensure!(
-            admitted.len() <= 100,
-            "too many pending native recovery admissions"
-        );
     }
-    admitted.sort_by_key(|a| a.enrollment().generation);
-    if let Some(highest) = admitted.last() {
-        if highest.enrollment().generation == plan.enrollment.enrollment().generation {
-            ensure!(
-                highest.enrollment().canonical_bytes()?
-                    == plan.enrollment.enrollment().canonical_bytes()?,
-                "recovery generation was already accepted with different contents"
-            );
-            return Ok(());
-        }
-        plan.enrollment.authorize_after(highest)?;
+    let highest = authority.highest(&metadata, &policy)?;
+    let retry = highest.enrollment().generation == plan.enrollment.enrollment().generation;
+    if retry {
+        ensure!(
+            highest.enrollment().canonical_bytes()?
+                == plan.enrollment.enrollment().canonical_bytes()?,
+            "recovery generation was already accepted with different contents"
+        );
+    } else {
+        plan.enrollment.authorize_after(&highest)?;
     }
-    let signature: SignatureRecord = serde_json::from_slice(&read_bytes(
-        &plan.base.join("enrollment/enrollment.sig"),
-        1024,
-    )?)?;
-    let enrollment: Enrollment = serde_json::from_slice(&read_bytes(
-        &plan.base.join("enrollment/enrollment.json"),
-        16384,
-    )?)?;
-    let admission = Admission {
-        enrollment,
-        signature,
-    };
+    let admission = SignedEnrollment::read(&plan.base.join("enrollment"), &key)?;
     admission.verify(&key)?;
+    ensure!(
+        admission.enrollment.canonical_bytes()?
+            == plan.enrollment.enrollment().canonical_bytes()?,
+        "recovery enrollment changed after review"
+    );
+    if !authority_exists {
+        authority.persist(&metadata, &policy)?;
+    }
+    if retry {
+        return Ok(());
+    }
     deployment::write_new_json(
         &metadata.join(format!(
             "recovery-accepted-{}.json",
@@ -131,7 +125,7 @@ pub(crate) fn early_account_phase(root: &Path, plan: &Plan) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wukong_worker_package::{Compatibility, Signer, SshPublicKey, verify_package};
+    use wukong_worker_package::{Compatibility, Enrollment, Signer, SshPublicKey, verify_package};
     fn enrollment(
         signer: &Signer,
         package: &VerifiedManifest,
@@ -182,6 +176,86 @@ mod tests {
         let mut changed = intent;
         changed["manifest_sha256"] = json!("f".repeat(64));
         assert!(authorize(&changed, &previous, &prior, &next).is_err());
+        Ok(())
+    }
+
+    fn signed(record: &VerifiedEnrollment, signer: &Signer) -> Result<SignedEnrollment> {
+        let (bytes, signature) = record.enrollment().sign(signer)?;
+        Ok(SignedEnrollment {
+            enrollment: serde_json::from_slice(&bytes)?,
+            signature,
+        })
+    }
+
+    #[test]
+    fn protected_authority_pins_the_signer_and_retains_failed_activation_admissions() -> Result<()>
+    {
+        let temporary = tempfile::tempdir()?;
+        let source = temporary.path().join("original");
+        let (signer, _) = Signer::generate()?;
+        crate::staging::tests::inert_package(&source, &signer)?;
+        let package = verify_package(
+            &source,
+            &signer.public_key(),
+            &Compatibility {
+                runtime_protocol: 2,
+                controller_version: "1.0.0",
+            },
+        )?;
+        let first = enrollment(&signer, &package, 2)?;
+        let next = enrollment(&signer, &package, 3)?;
+        let policy = AclPolicy::current_user()?;
+        let metadata = temporary.path().join("protected-metadata");
+        policy.create_directory(&metadata)?;
+        let authority = Authority::new(signed(&first, &signer)?, &signer.public_key())?;
+        authority.persist(&metadata, &policy)?;
+        assert!(
+            authority.persist(&metadata, &policy).is_err(),
+            "first trust must never be overwritten"
+        );
+        let authority = Authority::load(&metadata, &policy)?;
+        assert_eq!(authority.key()?.to_hex(), signer.public_key().to_hex());
+        authority.verify_active(&metadata, &first, &policy)?;
+        let (foreign, _) = Signer::generate()?;
+        let replacement = enrollment(&foreign, &package, 3)?;
+        assert_eq!(
+            replacement.enrollment().payload_manifest_sha256,
+            first.enrollment().payload_manifest_sha256
+        );
+        assert!(
+            authority.check_identity(&replacement).is_err(),
+            "a matching manifest hash does not authorize a new signer"
+        );
+        let stale = enrollment(&signer, &package, 1)?;
+        assert!(authority.check_identity(&stale).is_err());
+        deployment::write_new_json(
+            &metadata.join("recovery-accepted-3.json"),
+            &signed(&next, &signer)?,
+            &policy,
+        )?;
+        // Simulate interruption after acceptance but before activation. Reloading
+        // preserves the newer admission, so the original envelope cannot replay.
+        let authority = Authority::load(&metadata, &policy)?;
+        assert_eq!(
+            authority
+                .highest(&metadata, &policy)?
+                .enrollment()
+                .generation,
+            3
+        );
+        assert!(authority.verify_active(&metadata, &first, &policy).is_err());
+        authority.verify_active(&metadata, &next, &policy)?;
+        deployment::write_new_json(
+            &metadata.join("recovery-accepted-03.json"),
+            &signed(&next, &signer)?,
+            &policy,
+        )?;
+        assert!(authority.highest(&metadata, &policy).is_err());
+        let path = metadata.join("authority.json");
+        let mut corrupted: Value = serde_json::from_slice(&fs::read(&path)?)?;
+        corrupted["first"]["enrollment"]["generation"] = json!(19);
+        fs::write(path, serde_json::to_vec(&corrupted)?)?;
+        assert!(Authority::load(&metadata, &policy).is_err());
         Ok(())
     }
 }

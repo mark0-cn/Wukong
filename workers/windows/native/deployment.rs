@@ -2,6 +2,7 @@
 //! executables, trust roots, process credentials, or worker metadata paths.
 use crate::{
     accounts::{Account, Role},
+    authority::Authority,
     pipe_transport::service_name,
     security::{self, AclPolicy},
 };
@@ -83,7 +84,14 @@ impl Deployment {
         self.code_policy()?.verify(root, true)?;
         AclPolicy::private_vm().verify(&root.join("metadata"), true)?;
         self.data_policy()?.verify(&root.join("data"), true)?;
-        let key = PublicKey::from_hex(&self.controller_public_key)?;
+        let metadata = root.join("metadata");
+        let private = AclPolicy::private_vm();
+        let authority = Authority::load(&metadata, &private)?;
+        let key = authority.key()?;
+        ensure!(
+            key.to_hex() == self.controller_public_key,
+            "deployment key differs from the protected first-owner authority"
+        );
         let package = self.package(root);
         self.code_policy()?.verify(&package, true)?;
         let verified = verify_package(
@@ -99,6 +107,7 @@ impl Deployment {
             "active package differs from protected state"
         );
         let enrollment = read_enrollment(&root.join("metadata"), &key)?;
+        authority.verify_active(&metadata, &enrollment, &private)?;
         ensure!(
             enrollment.enrollment().installation_id == self.installation_id,
             "native enrollment installation changed"

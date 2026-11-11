@@ -3,6 +3,8 @@
 #[cfg(windows)]
 pub mod accounts;
 #[cfg(windows)]
+mod authority;
+#[cfg(windows)]
 pub mod deployment;
 #[cfg(windows)]
 pub mod firewall;
