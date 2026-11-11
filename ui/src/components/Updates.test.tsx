@@ -11,9 +11,9 @@ test('cannot install until preparation succeeds and the user confirms restart', 
   vi.mocked(api<'update_action'>).mockImplementation(async (_name, args) => args?.action === 'prepare' ? { ...status, prepared: '0.2.1', phase: 'ready' } : status);
   render(<Updates epoch={1} onClose={() => {}} onChanged={() => {}} />);
   await screen.findByText('0.2.0');
-  const install = screen.getByRole('button', { name: '安装并重启' }) as HTMLButtonElement;
-  expect(install.disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: '安装并重启' })).toBeNull();
   await userEvent.click(screen.getByRole('button', { name: '下载并验证更新' }));
+  const install = await screen.findByRole('button', { name: '安装并重启' }) as HTMLButtonElement;
   await waitFor(() => expect(install.disabled).toBe(false));
   await userEvent.click(install);
   expect(vi.mocked(api<'update_action'>).mock.calls.some(([, args]) => args?.action === 'install')).toBe(false);

@@ -118,8 +118,8 @@
   border-color:transparent;
 }
 .run-card.selected {
-  background: var(--accent-surface);
-  border-color: var(--accent-border);
+  background: var(--surface);
+  border-color: var(--border-strong);
   color: var(--text);
 }
 .run-title {
@@ -208,8 +208,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 72px;
-  padding: 12px 22px;
+  min-height: 56px;
+  padding: 8px 20px;
   gap: 12px;
 }
 .workspace-title {
@@ -305,8 +305,8 @@
   align-items: center;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  min-height: 52px;
-  padding: 8px 24px;
+  min-height: 36px;
+  padding: 6px 20px;
   gap: 10px;
 }
 .work-status-icon {
@@ -426,7 +426,10 @@
   color:var(--muted);
   white-space:nowrap;
 }
-.status-running,.status-completed,.status-verified {
+.status-running {
+  color: var(--info);
+}
+.status-completed,.status-verified {
   color: var(--success);
 }
 .status-budget_paused,.status-paused,.status-uncertain,.status-waiting {
@@ -481,3 +484,24 @@
   color: var(--error);
   background: var(--error-bg);
 }
+
+.work-status>div:first-of-type { display:flex; align-items:baseline; gap:12px; }
+.work-status strong { flex-shrink:0; }
+.work-status p { margin:0; }
+.work-error>div:first-of-type { align-items:flex-start; flex-direction:column; gap:3px; }
+.work-error p { white-space:normal; }
+.connection-connecting { background:var(--warning); }
+.connection-error { background:var(--error); }
+.usage-menu { position:relative; }
+.usage-menu summary { padding:5px; }
+.usage-menu>div { position:absolute; bottom:32px; right:0; min-width:240px; max-width:70vw; padding:14px; background:var(--surface); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px var(--shadow); z-index:10; overflow-wrap:anywhere; }
+.usage-menu p { margin:6px 0 0; }
+
+.task-filter { margin-bottom:8px; padding:6px 8px; width:100%; font-size:12px; }
+.run-date { color:var(--muted); font-size:12px; padding:8px 9px 5px; }
+.task-filename { display:block; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:3px; }
+.rename-task { opacity:.65; flex-shrink:0; }
+.rename-task:hover,.rename-task:focus-visible { opacity:1; }
+.sidebar-footer button { padding:7px 8px; }
+
+.sidebar-help { font-size:12px; color:var(--muted); line-height:1.5; padding:0 8px; margin:4px 0; }

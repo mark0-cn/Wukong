@@ -38,7 +38,7 @@ button:disabled {
   opacity:.45;
   cursor:default;
 }
-button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible {
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset:3px;
 }
@@ -176,3 +176,5 @@ pre code {
 .path {
   overflow-wrap:anywhere;
 }
+
+button>svg { flex-shrink:0; }

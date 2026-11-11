@@ -18,3 +18,18 @@ it('binds delivery to the displayed generation and keeps text typed while sendin
   finish();
   await waitFor(() => expect((screen.getByLabelText('发送给 Agent 的消息') as HTMLTextAreaElement).value).toBe('newer text'));
 });
+
+it('requires an explicit follow-up for a completed agent', async () => {
+  const send = vi.fn().mockResolvedValue(undefined);
+  const target = { ...agents[1], status: 'completed' as const };
+  function Harness() {
+    const [draft, onDraft] = useState<Draft>({ text: 'continue investigation', followUp: false });
+    return <Composer target={target} draft={draft} onDraft={onDraft} send={send} busy={false} />;
+  }
+  render(<Harness />);
+  fireEvent.click(screen.getByLabelText('发送消息'));
+  expect(send).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('发送方式'), { target: { value: 'follow_up' } });
+  fireEvent.click(screen.getByLabelText('发送消息'));
+  await waitFor(() => expect(send).toHaveBeenCalledWith({ text: 'continue investigation', followUp: true }, target));
+});

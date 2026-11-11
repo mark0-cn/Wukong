@@ -1,21 +1,30 @@
 import { t, useLocale } from '../i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { api, errorText, errorValue } from '../bridge';
 
-export function StorageLocations({ epoch, disabled, onChanged }: { epoch: number; disabled: boolean; onChanged: () => void }) {
+export interface StorageDraft { epoch: number; data: string; cache: string; initialData: string; initialCache: string }
+export function StorageLocations({ epoch, disabled, onChanged, onWorking, draft, onDraft }: {
+  epoch: number; disabled: boolean; onChanged: () => void; onWorking: (value: boolean) => void;
+  draft?: StorageDraft; onDraft: Dispatch<SetStateAction<StorageDraft | undefined>>;
+}) {
   useLocale();
-  const [data, setData] = useState('');
-  const [cache, setCache] = useState('');
+  const current = draft?.epoch === epoch ? draft : undefined;
+  const data = current?.data ?? '', cache = current?.cache ?? '';
+  const setData = (value: string) => onDraft(previous => previous && { ...previous, data: value });
+  const setCache = (value: string) => onDraft(previous => previous && { ...previous, cache: value });
   const [working, setWorking] = useState(false);
+  useEffect(() => { onWorking(working); }, [working, onWorking]);
+  useEffect(() => () => onWorking(false), [onWorking]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   useEffect(() => {
+    if (draft?.epoch === epoch) return;
     let alive = true;
     void api('update_storage', { epoch }).then(value => {
-      if (alive) { setData(value.data_dir ?? ''); setCache(value.cache_dir ?? ''); }
+      if (alive) onDraft({ epoch, data: value.data_dir, cache: value.cache_dir, initialData: value.data_dir, initialCache: value.cache_dir });
     }).catch(e => { if (alive) setError(errorValue(e)); });
     return () => { alive = false; };
-  }, [epoch]);
+  }, [epoch, draft?.epoch, onDraft]);
   const choose = async (set: (path: string) => void) => {
     try { const path = await api('pick_directory'); if (path) set(path); }
     catch (e) { setError(errorValue(e)); }
@@ -26,11 +35,12 @@ export function StorageLocations({ epoch, disabled, onChanged }: { epoch: number
     try {
       await api(kind === 'data' ? 'update_data_directory' : 'update_cache_directory', { epoch, destination: kind === 'data' ? data : cache });
       setMessage(kind === 'data' ? t('settings-data-directory-changed-the-original-data-remains') : t('settings-cache-directory-changed-recovery-files-were-copied'));
+      onDraft(previous => previous && { ...previous, [kind === 'data' ? 'initialData' : 'initialCache']: kind === 'data' ? data : cache });
       onChanged();
     } catch (e) { setError(errorValue(e)); }
     finally { setWorking(false); }
   };
-  return <fieldset disabled={disabled || working} className="workbench-controls"><legend>{t('settings-storage-locations')}</legend>
+  return <fieldset disabled={disabled || working || !current} className="workbench-controls"><legend>{t('settings-storage-locations')}</legend>
     <label>{t('settings-task-and-evidence-directory')}<input value={data} onChange={e => setData(e.target.value)} /></label>
     <p className="muted">{t('settings-select-an-existing-workspace-or-a-new')}</p>
     <div className="header-actions"><button onClick={() => void choose(setData)}>{t('settings-choose-data-directory')}</button><button disabled={!data} onClick={() => void save('data')}>{t('settings-apply-data-directory')}</button></div>
