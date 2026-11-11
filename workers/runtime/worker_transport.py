@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from worker_common import BRIDGE_PATH, MAX_RPC, PROTOCOL, atomic_json, load_json, rpc_error, safe_env
+from worker_common import BRIDGE_PATH, MAX_RPC, PROTOCOL, atomic_json, load_json, rpc_error, safe_env, tail
 from worker_processes import detached_options
 from worker_runtime import Runtime
 
@@ -111,7 +111,11 @@ def ensure_daemon(root, trusted):
             if endpoint:
                 return endpoint
             if process.poll() is not None:
-                raise ValueError(f"worker daemon exited during startup ({process.returncode}); inspect daemon.log")
+                try:
+                    diagnostic = tail(root / "daemon.log", 2048)
+                except OSError:
+                    diagnostic = "local startup log could not be read"
+                raise ValueError(f"worker daemon exited during startup ({process.returncode}); daemon.log tail: {diagnostic}")
             time.sleep(0.05)
         raise ValueError("worker daemon failed to start; inspect daemon.log")
     finally:

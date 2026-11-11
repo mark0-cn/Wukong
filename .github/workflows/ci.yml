@@ -86,6 +86,13 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./tests/automation/test-online-package.ps1
           ./tests/automation/test-installer.ps1
+      - name: Windows Python worker tests
+        if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.linux == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check -r workers/runtime/requirements.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python workers/tests/run.py unit -p 'test_*.py' -v
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Frontend
         if: needs.changes.outputs.frontend == 'true'
         run: |

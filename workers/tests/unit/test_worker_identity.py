@@ -1,15 +1,22 @@
 """Actual file-backed identity and fencing; no target execution or VM required."""
 from pathlib import Path
+import os
 import tempfile
 import unittest
 from types import SimpleNamespace
 import threading
 
 from worker_common import WorkerError
-from worker_identity import ExclusiveLease, installation_identity, native_package_identity
+from worker_identity import ExclusiveLease, installation_identity, native_package_identity, boot_identity
 
 
 class WorkerFenceTests(unittest.TestCase):
+    @unittest.skipUnless(os.name=='nt','Windows boot identity requires Windows')
+    def test_real_windows_boot_identity_is_available_and_stable(self):
+        first=boot_identity()
+        self.assertRegex(first,r'^windows:[0-9]{16,20}$')
+        self.assertEqual(first,boot_identity())
+
     def setUp(self):
         self.temporary=tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

@@ -122,7 +122,7 @@ The controller uses jsonrpsee over bounded stdio frames. RPC errors preserve a
 healthy connection; malformed/oversized frames and timeouts close it. The next
 call reconnects, without automatically replaying the failed request.
 
-Relay-managed daemon startup allows 30 seconds for initialization, including the Windows boot-identity query. Readiness probes have a separate one-second response timeout; a child that exits before readiness reports its exit status and the local `daemon.log` location.
+Relay-managed daemon startup allows 30 seconds for initialization, including the Windows boot-identity query. Readiness probes have a separate one-second response timeout; a child that exits before readiness reports its exit status and at most the final 2048 bytes of the local `daemon.log`.
 
 | Method | Parameters / result |
 | --- | --- |

@@ -66,9 +66,9 @@ class DaemonStartupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             script = root / "failed-daemon.py"
-            script.write_text("raise SystemExit(19)\n", encoding="utf-8")
+            script.write_text("print('fixture-startup-diagnostic',flush=True)\nraise SystemExit(19)\n", encoding="utf-8")
             with patch("worker_transport.BRIDGE_PATH", script):
-                with self.assertRaisesRegex(ValueError, r"exited during startup \(19\)"):
+                with self.assertRaisesRegex(ValueError, r"exited during startup \(19\).*fixture-startup-diagnostic"):
                     ensure_daemon(root, True)
             self.assertFalse((root / "startup.lock").exists())
 
