@@ -99,6 +99,11 @@ export interface Messages {
   'language-match-task': undefined;
   'language-output': undefined;
   'language-ui': undefined;
+  'progress-job-attempts': { count: string | number };
+  'progress-job-background': undefined;
+  'progress-job-identity': { id: string | number };
+  'progress-job-stale': undefined;
+  'progress-job-successes': { count: string | number };
   'progress-preview-truncated': undefined;
   'report-accounting': undefined;
   'report-accounting-body': { agents: string | number; calls: string | number; cost: string | number; evidence: string | number; tokens: string | number };
@@ -151,6 +156,7 @@ export interface Messages {
   'result-matches': { count: string | number };
   'result-paused': undefined;
   'result-results': { count: string | number };
+  'result-stopped': undefined;
   'result-strings': { count: string | number };
   'result-uncertain': undefined;
   'settings-api-endpoint': undefined;

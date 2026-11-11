@@ -211,6 +211,7 @@ pub fn tool_display(
         ),
         evidence_id: call.evidence_id.clone(),
         preview,
+        job: None,
     }
 }
 

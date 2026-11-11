@@ -19,6 +19,19 @@ pub struct ToolDisplay {
     pub evidence_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<CodePreview>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job: Option<JobDisplay>,
+}
+#[derive(Clone, Serialize)]
+pub struct JobDisplay {
+    pub id: String,
+    pub state: JobState,
+    pub stale: bool,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+    pub attempts: Option<u64>,
+    pub successes: Option<u64>,
 }
 #[derive(Clone, Serialize)]
 pub struct CodePreview {
@@ -78,6 +91,8 @@ fn text<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
 }
 mod tools;
 pub use tools::{result_summary, tool_display};
+mod jobs;
+pub use jobs::with_job;
 
 pub fn transcript(
     events: &[Event],
@@ -85,6 +100,7 @@ pub fn transcript(
     agents: &[AgentSummary],
     mail: &[Message],
     target_name: &str,
+    jobs: &[JobRecord],
 ) -> Vec<ChatMessage> {
     let agents: BTreeMap<_, _> = agents
         .iter()
@@ -121,10 +137,15 @@ pub fn transcript(
             let Some(call) = by_call.get(id) else {
                 continue;
             };
-            let display = tool_display(
+            let display = with_job(
+                tool_display(
+                    call,
+                    agents.get(call.agent_id.as_str()).copied(),
+                    target_name,
+                ),
                 call,
                 agents.get(call.agent_id.as_str()).copied(),
-                target_name,
+                jobs,
             );
             message.id = format!("call-{}", call.id);
             message.created_at = call.created_at;
@@ -133,7 +154,7 @@ pub fn transcript(
                 tool_name: call.name.clone(),
                 args: json!({"display":display}),
                 result: call.result.as_ref().map(|_| json!({"display":display})),
-                is_error: matches!(call.state, CallState::Failed | CallState::Uncertain),
+                is_error: matches!(display.state.as_str(), "failed" | "uncertain"),
             });
         } else {
             let content = match event.kind.as_str() {
@@ -246,7 +267,7 @@ mod tests {
                 created_at: now(),
             })
             .collect::<Vec<_>>();
-        let messages = transcript(&events, &[call.clone()], &[], &[], "sample.elf");
+        let messages = transcript(&events, &[call.clone()], &[], &[], "sample.elf", &[]);
         assert_eq!(messages.len(), 1);
         let ChatPart::ToolCall { args, is_error, .. } = &messages[0].content[0] else {
             panic!("tool missing")

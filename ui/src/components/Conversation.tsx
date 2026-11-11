@@ -9,6 +9,7 @@ import { api, errorText, errorValue } from '../bridge';
 import type { Agent, ChatMessage, Host, ToolDisplay, ToolRecord, Workspace } from '../types';
 import { CodeBlock, Markdown } from './Markdown';
 import { labels, StateIcon, Status, terminal } from './Status';
+import { JobFacts, ToolDuration } from './ToolActivity';
 
 const TranscriptContext = createContext<{ epoch: number; run: string; onAgent: (id: string) => void }>({ epoch: 0, run: '', onAgent: () => {} });
 const groupTools = groupPartByType({ 'tool-call': ['group-tools'] });
@@ -35,11 +36,12 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
       <span className="tool-label"><strong>{text(display.title)}</strong>{display.target && <span className="tool-target" title={display.target}>{display.target}</span>}</span>
       {display.state === 'completed' && !open && display.summary && <span className="tool-inline-summary" title={formatMessage(display.summary)}>{formatMessage(display.summary)}</span>}
       <span className="tool-state">{labels[display.state] ?? display.state}</span>
-      {display.duration_ms != null && <span className="tool-duration">{(display.duration_ms / 1000).toFixed(1)}s</span>}
+      <ToolDuration display={display} />
       <ChevronRight size={13} className={open ? 'rotate' : ''} />
     </Collapsible.Trigger>
     {(open || display.state !== 'completed') && display.purpose && <p className="tool-purpose">{display.purpose}</p>}
     {(open || display.state !== 'completed') && display.summary && <p className="tool-summary">{formatMessage(display.summary)}</p>}
+    <JobFacts display={display} />
     {display.preview && <div className="tool-code-preview"><CodeBlock text={display.preview.text} language={display.preview.language} />
       <p className="muted">{t('workspace-evidence')}<code>{display.preview.evidence_id}</code>{display.preview.truncated && <> · {t('progress-preview-truncated')}</>}</p></div>}
     <Collapsible.Content className="tool-details">

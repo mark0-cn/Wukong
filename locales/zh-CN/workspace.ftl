@@ -216,6 +216,12 @@ result-failed = 操作执行失败，可展开查看错误详情。
 result-uncertain = 执行结果尚未确认，需要核对后再继续。
 result-paused = 分析已暂停，保留当前操作状态。
 result-interrupted = 所属任务已结束，本次操作未确认完成。
+result-stopped = 后台任务已取消，已保存的证据仍然可用。
+progress-job-background = 请求已返回，后台任务仍在执行；完成状态以 worker 的记录为准。
+progress-job-stale = 此任务属于 Agent 的旧一代执行，复用结果前需要核对其状态。
+progress-job-identity = 后台任务：{ $id }
+progress-job-attempts = { $count } 次尝试
+progress-job-successes = { $count } 次试验成功
 
 ui-completed-hint = 分析已完成，可查看发现或导出报告。
 ui-stopped-hint = 任务已停止，已保存的进展仍可查看。
