@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { agents, budget, finding, host, tool, workspace } from '../src/test/fixtures';
 
 async function mockDesktop(page: Page) {
@@ -388,6 +389,77 @@ test('named Windows environment settings save only scoped configuration paths', 
   await expect(page.getByRole('dialog')).toHaveCount(0);
   const edits = await page.evaluate(() => (window as any).__desktopTest.requests.findLast((request: any) => request.command === 'config_save').args.edits);
   expect(edits).toEqual([{ path: ['environments', 'windows', 'runtime', 'ssh_host'], value: 'updated-windows-fixture' }]);
+});
+
+for (const locale of ['zh-CN', 'en-US'] as const) test(`Windows connection enrollment keeps public trust review separate from saving (${locale})`, async ({ page }) => {
+  const english = locale === 'en-US';
+  const blob = Buffer.concat([Buffer.from([0, 0, 0, 11]), Buffer.from('ssh-ed25519'), Buffer.from([0, 0, 0, 32]), Buffer.alloc(32, 7)]);
+  const fingerprint = 'SHA256:' + createHash('sha256').update(blob).digest('base64').replace(/=+$/, '');
+  const receipt = { schema: 1, installed: true, installation_id: 'a'.repeat(32), environment_id: 'windows', generation: 1,
+    manifest_sha256: 'b'.repeat(64), ssh_user: 'wkgm' + 'a'.repeat(16), ssh_port: 22,
+    host_key: { algorithm: 'ssh-ed25519', key: blob.toString('base64') }, host_fingerprint: fingerprint, production_isolation_verified: false };
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.host.execution = null; (window as any).__emitDesktop('workspace-changed', null);
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    native.invoke = async (command: string, args: any) => {
+      if (command === 'pick_ssh_identity') { state.requests.push({ command, args }); return '/controller/keys/vm-ed25519'; }
+      if (command === 'windows_connection_preview') {
+        state.requests.push({ command, args });
+        const receipt = JSON.parse(args.input.connection_json);
+        const environment = { name: args.input.name, platform: 'windows', installation_id: receipt.installation_id,
+          runtime: { backend: 'ssh', ssh_host: args.input.host, managed_ssh: { installation_id: receipt.installation_id,
+            user: receipt.ssh_user, port: receipt.ssh_port, identity_file: args.input.identity_file,
+            known_hosts_file: '/controller/ssh-host-fixture.known_hosts', host_key: receipt.host_key } } };
+        return { ...args.document, source: '# retain this comment\ndefault_environment="windows"\n[environments.windows]\nname="Analysis Windows"\nplatform="windows"\n',
+          form: { ...args.document.form, default_environment: 'windows', environments: { windows: environment } } };
+      }
+      return invoke(command, args);
+    };
+  });
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  if (english) await page.getByLabel('界面语言', { exact: true }).selectOption('en-US');
+  await page.getByRole('button', { name: english ? 'Environments' : '分析环境', exact: true }).click();
+  const add = page.getByRole('button', { name: english ? 'Add to settings draft' : '加入设置草稿', exact: true });
+  await expect(add).toBeDisabled();
+  await page.getByLabel(english ? 'Public connection record (connection.json)' : '公开连接记录（connection.json）', { exact: true })
+    .setInputFiles({ name: 'connection.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(receipt)) });
+  await expect(page.getByText(fingerprint, { exact: true })).toBeVisible();
+  await page.getByLabel(english ? 'Environment name' : '环境名称', { exact: true }).fill('Analysis Windows');
+  await page.getByLabel(english ? 'VM address (IP or hostname)' : '虚拟机地址（IP 或主机名）', { exact: true }).fill('192.0.2.1');
+  await page.getByRole('button', { name: english ? 'Choose key file' : '选择密钥文件', exact: true }).click();
+  await expect(page.getByLabel(english ? 'Controller SSH private key file' : '控制端 SSH 私钥文件', { exact: true })).toHaveValue('/controller/keys/vm-ed25519');
+  await expect(add).toBeDisabled();
+  const save = page.getByRole('button', { name: english ? 'Save and apply' : '保存并应用', exact: true });
+  await expect(save).toBeDisabled();
+  await page.getByLabel(english ? 'Close' : '关闭', { exact: true }).click();
+  await page.getByRole('button', { name: english ? 'Workspace settings' : '工作区设置', exact: true }).click();
+  await expect(page.getByLabel(english ? 'VM address (IP or hostname)' : '虚拟机地址（IP 或主机名）', { exact: true })).toHaveValue('192.0.2.1');
+  await expect(page.getByLabel(english ? 'Controller SSH private key file' : '控制端 SSH 私钥文件', { exact: true })).toHaveValue('/controller/keys/vm-ed25519');
+  await expect(page.getByText(fingerprint, { exact: true })).toBeVisible();
+  await expect(save).toBeDisabled();
+  await page.getByLabel(english ? 'Host fingerprint shown in the VM' : '虚拟机界面显示的主机指纹', { exact: true }).fill(fingerprint);
+  await expect(add).toBeEnabled();
+  await page.screenshot({ path: `target/windows-connection-import-${locale}.png` });
+  await page.setViewportSize({ width: 860, height: 600 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await add.click();
+  await expect(page.getByRole('status')).toContainText(english ? 'connection has not been checked' : '连接尚未验证');
+  await expect(page.getByText('Analysis Windows · windows', { exact: false })).toBeVisible();
+  await page.screenshot({ path: `target/windows-connection-draft-${locale}.png` });
+  const before = await page.evaluate(() => (window as any).__desktopTest.requests);
+  expect(before.some((request: any) => request.command === 'config_save')).toBe(false);
+  const preview = before.findLast((request: any) => request.command === 'windows_connection_preview');
+  expect(preview.args.input.identity_file).toBe('/controller/keys/vm-ed25519');
+  expect(preview.args.input.confirmed_fingerprint).toBe(fingerprint);
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const saved = await page.evaluate(() => (window as any).__desktopTest.requests.findLast((request: any) => request.command === 'config_save'));
+  expect(saved.args.document.source).toContain('# retain this comment');
+  expect(saved.args.document.form.environments.windows.runtime.managed_ssh.identity_file).toBe('/controller/keys/vm-ed25519');
+  expect(saved.args.edits).toEqual([]);
 });
 
 test('large tool groups keep failed operations visible before expansion', async ({ page }) => {

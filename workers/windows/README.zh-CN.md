@@ -66,6 +66,8 @@ python -m scripts.worker.bundle --package ABSOLUTE_PACKAGE --enrollment ABSOLUTE
 
 已在独立测试环境取得管理员权限的自动化可以运行 `WukongWorkerSetup.exe install-reviewed ABSOLUTE_SETUP_JSON PINNED_CONTROLLER_PUBLIC_KEY_HEX REVIEWED_ENROLLMENT_SHA256`。参数须提供独立固定的控制端公钥，以及在控制端审阅过的精确规范 `enrollment.json` 的 SHA256。该命令采用相同的校验和安装路径，返回 JSON 凭据，不显示对话框，也不会自行提权。它是操作员入口，不是 worker RPC；不能用于覆盖开发宿主上的安装。
 
+安装成功后，仅将公开的 `connection.json` 复制回控制端。在“工作区设置 → 分析环境 → 登记 Windows 虚拟机”中导入记录、输入虚拟机地址、选择已有控制端私钥，并独立输入安装界面显示的主机指纹。预览校验已安装记录的结构、Ed25519 公钥与指纹、安装账户及已有密钥文件路径，不读取私钥内容、不创建文件，也不连接虚拟机。重复环境 ID 会被拒绝。加入草稿保留其他配置修改及注释。保存时在控制端设置目录创建以内容命名、以 LF 结尾的公开主机固定文件；已有内容不同则拒绝覆盖。清理仅登记该精确公开文件；所选私钥保持为外部文件。未完成的连接在关闭设置后保留，保存前须先加入草稿或重置。首个环境自动成为默认环境。登记独立于连通性及生产隔离检查；桌面介质准备与完整 VM 生命周期验收尚未完成。
+
 创建服务前，固定的主机密钥生成及 SSH 配置检查将诊断保存在仅 System/管理员可访问的 `metadata/install-tool-ssh-keygen.log` 和 `metadata/install-tool-sshd.log`。错误会标明失败的程序；SSH 语法检查输出详细诊断，但不监听连接。托管夹具仅将这两个固定日志各自最后 4 KiB 纳入公开报告，不包含私钥或其他元数据。
 
 提权安装工具与 System SSH daemon 使用固定的七变量 Windows 环境：`SYSTEMROOT`、`WINDIR`、`PROGRAMDATA`、`COMSPEC`、`PATH`、`TEMP` 和 `TMP`。路径从 Windows 位置派生，程序查找仅限 Windows 目录和 System32。其临时目录为受保护的 `metadata/system-tmp`，在启动及激活前验证。普通 worker 继续使用独立的 `data/tmp`；不会将控制端/provider 的整个环境复制给提权子进程。

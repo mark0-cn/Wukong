@@ -81,15 +81,17 @@ The right panel draws connectors from actual parent IDs. Lead, Analysis and Veri
 
 ### Editing settings
 
-**Workspace settings** includes model, API URL, credential environment variable name, budgets, concurrency, execution backend and storage paths. Categories are language/model, task budgets, storage and advanced configuration. The advanced TOML editor includes role models, pricing and MCP.
+**Workspace settings** includes model, API URL, credential environment variable name, budgets, concurrency, analysis environments and storage paths. Categories are language/model, task budgets, environments, storage and advanced configuration. The advanced TOML editor includes role models, pricing and MCP.
 
-- Switching categories or closing retains configuration/storage drafts. Settings cannot close during directory changes; save configuration drafts before switching directories.
+- Switching categories or closing retains configuration, Windows connection and storage drafts. Settings cannot close during directory changes; save configuration and connection drafts before switching directories.
 - Saving validates configuration and preserves original comments/unchanged fields.
 - Externally changed files are not overwritten; reload before editing.
 - Open another TOML, save/apply it for new tasks.
 - Pause active analysis and wait for current operations before applying configuration.
 - Resumed tasks use their saved configuration.
 - A temporary `--state` override takes precedence and is not written to configuration.
+
+**Environments → Register Windows VM** imports the public `connection.json` produced by completed offline setup. Enter the VM address, select the corresponding existing controller SSH private key file, and independently enter the host fingerprint displayed by the VM. Only the key's path is saved. A mismatched fingerprint, malformed receipt or existing environment ID is rejected. **Add to settings draft** preserves other edits; **Save and apply** registers the environment and creates its dedicated public host-pin file. Add or reset an unfinished connection before saving. An empty environment registry makes the first connection the default; later connections can be selected explicitly. Registration performs no SSH connection and does not establish production readiness. Preparing offline media, installing the VM and validating its isolated worker are separate steps; see the [Windows component guide](../../workers/windows/README.md).
 
 API key values are not stored in TOML: enter the environment variable name, not the secret. Windows reads process variables first, then user/system variables when absent, allowing desktop launches to use saved credentials. PowerShell `$env:...` values apply only to that process and its children.
 

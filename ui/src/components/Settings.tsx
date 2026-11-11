@@ -6,6 +6,8 @@ import type { ConfigDocument, ConfigEdit, Host, Json } from '../types';
 import { Modal } from './Modal';
 import { StorageLocations, type StorageDraft } from './StorageLocations';
 import { LanguageSettings } from './LanguageSettings';
+import { WindowsConnection, emptyWindowsConnection, type WindowsConnectionDraft } from './WindowsConnection';
+import type { WindowsConnectionInput } from '../commands';
 
 type Field = { path: string; label: string; kind?: 'number' | 'checkbox' | 'provider' | 'backend' | 'environment'; help?: string; options?: string[] };
 const groups = (form: Record<string, Json>): { title: string; fields: Field[] }[] => [
@@ -37,7 +39,7 @@ const groups = (form: Record<string, Json>): { title: string; fields: Field[] }[
     { path: `environments.${id}.runtime.backend`, label: t('settings-dynamic-analysis-backend'), kind: 'backend' as const, options: [...(value.platform === 'windows' ? ['ssh'] : ['docker', 'ssh']), ...(atPath(form, `environments.${id}.runtime.backend`) === 'trusted_local' ? ['trusted_local'] : [])] },
     ...(value.platform !== 'windows' ? [{ path: `environments.${id}.runtime.docker_container`, label: t('settings-docker-container') }] : []),
     { path: `environments.${id}.runtime.ssh_host`, label: t('settings-ssh-host') },
-    { path: `environments.${id}.runtime.remote_bridge_path`, label: t('settings-runtime-bridge-path') },
+    ...(value.platform !== 'windows' ? [{ path: `environments.${id}.runtime.remote_bridge_path`, label: t('settings-runtime-bridge-path') }] : []),
   ] })),
 ];
 function environmentMap(form: Record<string, Json>): Record<string, Record<string, Json>> {
@@ -57,7 +59,9 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
   const [document, setDocument] = useState<ConfigDocument>();
   const [loadedEpoch, setLoadedEpoch] = useState(host.epoch);
   const [edits, setEdits] = useState<Record<string, Json>>({});
-  const [section, setSection] = useState<'general' | 'budget' | 'storage' | 'advanced'>('general');
+  const [section, setSection] = useState<'general' | 'budget' | 'connections' | 'storage' | 'advanced'>('general');
+  const [connectionDraft, setConnectionDraft] = useState<WindowsConnectionDraft>(emptyWindowsConnection);
+  const connectionDirty = Boolean(connectionDraft.receipt || connectionDraft.name || connectionDraft.host || connectionDraft.identity || connectionDraft.fingerprint);
   const [storageVisited, setStorageVisited] = useState(false);
   const [storageBusy, setStorageBusy] = useState(false);
   const [storageDraft, setStorageDraft] = useState<StorageDraft>();
@@ -66,7 +70,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const dirty = Boolean(document && (document.source !== (document.original ?? '') || Object.keys(edits).length));
-  useEffect(() => { onDirty(dirty || storageDirty); }, [dirty, storageDirty, onDirty]);
+  useEffect(() => { onDirty(dirty || storageDirty || connectionDirty); }, [dirty, storageDirty, connectionDirty, onDirty]);
   useEffect(() => {
     if (!open || document) return;
     let alive = true;
@@ -76,6 +80,14 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     return () => { alive = false; };
   }, [open, document, host.epoch]);
   const patch = (): ConfigEdit[] => Object.entries(edits).map(([path, value]) => ({ path: path.split('.'), value }));
+  const addWindowsConnection = async (input: WindowsConnectionInput) => {
+    if (!document) return;
+    setBusy(true); setError('');
+    try {
+      const value = await api('windows_connection_preview', { document, edits: patch(), input });
+      setDocument(value); setEdits({});
+    } finally { setBusy(false); }
+  };
   const load = async (choose: boolean) => {
     if (dirty && !window.confirm(t('settings-discard-settings-draft-and-reload'))) return;
     setBusy(true); setError('');
@@ -114,19 +126,24 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
   if (!open) return null;
   return <Modal title={t('settings-workspace-settings')} description={t('settings-new-tasks-use-the-current-configuration-resumed')} onClose={() => { if (!storageBusy) onClose(); }} wide>
     <nav className="settings-sections" aria-label={t('ui-settings-sections')}>
-      {(['general', 'budget', 'storage', 'advanced'] as const).map(value => <button key={value} aria-pressed={section === value} disabled={busy || storageBusy} onClick={() => { void selectSection(value); }}>
-        {value === 'general' ? t('ui-general-settings') : value === 'budget' ? t('settings-task-budget') : value === 'storage' ? t('settings-storage-locations') : t('ui-advanced-settings')}
+      {(['general', 'budget', 'connections', 'storage', 'advanced'] as const).map(value => <button key={value} aria-pressed={section === value} disabled={busy || storageBusy} onClick={() => { void selectSection(value); }}>
+        {value === 'general' ? t('ui-general-settings') : value === 'budget' ? t('settings-task-budget') : value === 'connections' ? t('connection-environments') : value === 'storage' ? t('settings-storage-locations') : t('ui-advanced-settings')}
       </button>)}
     </nav>
     <div hidden={section !== 'general'}><LanguageSettings /></div>
-    {storageVisited && <div hidden={section !== 'storage'}><StorageLocations onWorking={setStorageBusy} draft={storageDraft} onDraft={setStorageDraft} epoch={host.epoch} disabled={busy || dirty || Boolean(host.execution) || host.pending_operations > 0} onChanged={() => { setDocument(undefined); setStorageVisited(false); setStorageDraft(undefined); onSaved(); onClose(); }} />{dirty && <p className="muted">{t('ui-save-before-storage')}</p>}</div>}
+    {storageVisited && <div hidden={section !== 'storage'}><StorageLocations onWorking={setStorageBusy} draft={storageDraft} onDraft={setStorageDraft} epoch={host.epoch} disabled={busy || dirty || connectionDirty || Boolean(host.execution) || host.pending_operations > 0} onChanged={() => { setDocument(undefined); setStorageVisited(false); setStorageDraft(undefined); onSaved(); onClose(); }} />{(dirty || connectionDirty) && <p className="muted">{t('ui-save-before-storage')}</p>}</div>}
     <div hidden={section !== 'advanced'}><div className="settings-toolbar"><span title={document?.path ?? host.config_path}><FileCode2 size={14} />{document?.path ?? host.config_path}</span>
       <button disabled={busy} onClick={() => { void load(true); }}><FolderOpen size={14} />{t('settings-open-configuration')}</button>
       <button disabled={busy} onClick={() => { void load(false); }}><RotateCcw size={14} />{t('settings-reload')}</button>
       <button disabled={busy || !document} onClick={() => { void switchMode(); }}>{raw ? t('settings-form') : t('settings-toml-source')}</button></div></div>
     {loadedEpoch !== host.epoch && <p className="error" role="alert">{t('settings-workspace-configuration-changed-reload-settings-your-draft')}</p>}
     {error && <p className="error" role="alert">{errorText(error)}</p>}
-    <div className="settings-scroll" hidden={section === 'storage'}>{!document ? <p className="muted">{busy ? t('settings-loading-configuration') : t('settings-could-not-load-configuration-please-reload')}</p> : raw && section === 'advanced' ?
+    <div className="settings-scroll" hidden={section === 'storage'}>
+      {document && section === 'connections' && <div>
+        <section className="settings-group"><h3>{t('connection-registered')}</h3><ul>{Object.entries(environmentMap(document.form)).map(([id, environment]) => <li key={id}>{String(environment.name ?? id)} · {String(environment.platform)}{document.form.default_environment === id ? ` · ${t('connection-default')}` : ''}</li>)}</ul>{!Object.keys(environmentMap(document.form)).length && <p className="muted">{t('connection-none')}</p>}</section>
+        <WindowsConnection disabled={busy || loadedEpoch !== host.epoch} hasEnvironments={Boolean(Object.keys(environmentMap(document.form)).length)} draft={connectionDraft} onDraft={setConnectionDraft} onAdd={addWindowsConnection} />
+      </div>}
+      {!document ? <p className="muted">{busy ? t('settings-loading-configuration') : t('settings-could-not-load-configuration-please-reload')}</p> : raw && section === 'advanced' ?
       <textarea className="toml-editor" aria-label={t('settings-toml-configuration-source')} spellCheck={false} value={document.source} disabled={busy}
         onChange={event => setDocument({ ...document, source: event.target.value })} /> : groups(document.form).map((group, index) => ({ ...group, fields: group.fields.filter((field, fieldIndex) => index === 0 ? section === 'general' ? fieldIndex < 5 : section === 'advanced' && fieldIndex >= 5 : index === 1 ? section === 'budget' : section === 'advanced') })).filter(group => group.fields.length).map(group => <section key={group.fields[0].path} className="settings-group"><h3>{group.title}</h3>
         <div className="settings-grid">{group.fields.map(field => {
@@ -140,8 +157,9 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
                   onChange={event => change(field.kind === 'number' ? event.target.value === '' ? '' : Number(event.target.value) : event.target.value || null)} />}
             {field.help && <small>{field.help}</small>}</label>;
         })}</div></section>)}</div>
-    <div className="modal-footer"><span className="muted">{dirty || storageDirty ? t('settings-unsaved-changes') : t('settings-configuration-loaded')} {t('settings-comments-and-relative-paths-are-preserved')}</span>
-      <button disabled={storageBusy} onClick={onClose}>{t('workspace-close')}</button>{section !== 'storage' && <button className="primary" disabled={busy || !document || loadedEpoch !== host.epoch || Boolean(host.execution) || host.pending_operations > 0} onClick={() => { void save(); }}><Save size={14} />{busy ? t('settings-processing') : t('settings-save-and-apply')}</button>}</div>
+    <div className="modal-footer"><span className="muted">{dirty || storageDirty || connectionDirty ? t('settings-unsaved-changes') : t('settings-configuration-loaded')} {t('settings-comments-and-relative-paths-are-preserved')}</span>
+      <button disabled={storageBusy} onClick={onClose}>{t('workspace-close')}</button>{section !== 'storage' && <button className="primary" disabled={busy || connectionDirty || !document || loadedEpoch !== host.epoch || Boolean(host.execution) || host.pending_operations > 0} onClick={() => { void save(); }}><Save size={14} />{busy ? t('settings-processing') : t('settings-save-and-apply')}</button>}</div>
+    {connectionDirty && <p className="muted">{t('connection-add-before-save')}</p>}
     {(host.execution || host.pending_operations > 0) && <p className="muted">{t('settings-pause-analysis-and-wait-for-active-operations')}</p>}
   </Modal>;
 }

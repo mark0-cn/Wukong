@@ -35,6 +35,10 @@ type Epoch = { epoch: number };
 type Run = Epoch & { run: string };
 type Item = Run & { id: string };
 type Command<A, R> = { args: A; result: R };
+export interface WindowsConnectionInput {
+  connection_json: string; name: string; host: string; identity_file: string;
+  confirmed_fingerprint: string; make_default: boolean;
+}
 
 /** Native command boundary: result types follow command names, never callers. */
 export interface Commands {
@@ -55,6 +59,8 @@ export interface Commands {
   config_read: Command<Epoch, ConfigDocument>;
   config_open: Command<Epoch, ConfigDocument | null>;
   config_preview: Command<{ document: ConfigDocument; edits: ConfigEdit[] }, ConfigDocument>;
+  windows_connection_preview: Command<{ document: ConfigDocument; edits: ConfigEdit[]; input: WindowsConnectionInput }, ConfigDocument>;
+  pick_ssh_identity: Command<undefined, string | null>;
   config_save: Command<Epoch & { document: ConfigDocument; edits: ConfigEdit[] }, ConfigDocument>;
   finding_details: Command<Item, FindingDetails>;
   evidence_preview: Command<Item & { offset: number }, EvidenceView>;

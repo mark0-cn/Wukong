@@ -59,6 +59,7 @@ impl ManagedSsh {
     }
     fn validate_files(&self) -> Result<()> {
         for path in [&self.identity_file, &self.known_hosts_file] {
+            validate_no_links(path)?;
             let metadata = fs::symlink_metadata(path)
                 .context("enrolled SSH identity or host-pin file is missing")?;
             ensure!(
@@ -87,16 +88,7 @@ impl ManagedSsh {
     pub fn command(&self, executable: &str, host: &str) -> Result<Command> {
         self.validate()?;
         self.validate_files()?;
-        ensure!(
-            host.parse::<std::net::IpAddr>().is_ok()
-                || (!host.is_empty()
-                    && host.len() <= 253
-                    && host
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b".-".contains(&b))
-                    && host.as_bytes()[0].is_ascii_alphanumeric()),
-            "managed SSH requires a literal IP or DNS hostname without user/options"
-        );
+        validate_host(host)?;
         let mut command = Command::new(executable);
         command.args(["-F", "none", "-T", "-a", "-x"]);
         for option in [
@@ -149,6 +141,43 @@ impl ManagedSsh {
         command.arg("--").arg(host).arg("wukong-native-relay-v2");
         Ok(command)
     }
+}
+pub(crate) fn validate_host(host: &str) -> Result<()> {
+    ensure!(
+        host.parse::<std::net::IpAddr>().is_ok()
+            || (!host.is_empty()
+                && host.len() <= 253
+                && host
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b".-".contains(&b))
+                && host.as_bytes()[0].is_ascii_alphanumeric()),
+        "managed SSH requires a literal IP or DNS hostname without user/options"
+    );
+    Ok(())
+}
+pub(crate) fn validate_no_links(path: &Path) -> Result<()> {
+    validate_path(path)?;
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) => {
+                ensure!(
+                    !metadata.file_type().is_symlink(),
+                    "managed SSH paths cannot contain links"
+                );
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::MetadataExt;
+                    ensure!(
+                        metadata.file_attributes() & 0x400 == 0,
+                        "managed SSH paths cannot contain reparse points"
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 fn validate_path(path: &Path) -> Result<()> {
     let text = path.to_str().context("managed SSH path must be Unicode")?;

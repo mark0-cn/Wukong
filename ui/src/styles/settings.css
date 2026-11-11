@@ -146,6 +146,11 @@
 .settings-group {
   margin:0 0 24px;
 }
+.connection-fields { border:0; padding:0; display:grid; gap:12px; min-width:0; }
+.connection-key-picker { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+.connection-json { width:100%; min-height:96px; max-height:240px; resize:vertical; }
+.connection-fingerprint { display:grid; gap:5px; overflow-wrap:anywhere; }
+.connection-default { display:flex; align-items:center; gap:9px; }
 .settings-group h3 {
   color:var(--text);
   font-size:var(--text-ui);

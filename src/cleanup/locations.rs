@@ -122,6 +122,36 @@ fn save(home: &Path, additions: Registry) -> Result<()> {
     registry.locations.extend(additions.locations);
     write_json(&home.join("managed-locations.json"), &registry)
 }
+pub(crate) fn register_host_pins_at_locked(home: &Path, paths: &[PathBuf]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut additions = Registry::default();
+    for path in paths {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .context("invalid public host pin name")?;
+        let digest = name
+            .strip_prefix("ssh-host-")
+            .and_then(|name| name.strip_suffix(".known_hosts"))
+            .context("unrecognized public host pin name")?;
+        ensure!(
+            path.parent() == Some(home)
+                && digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+            "host pin is outside its fixed controller settings location"
+        );
+        files::safe(path)?;
+        additions.locations.insert(Location {
+            kind: LocationKind::Config,
+            path: files::absolute(path)?,
+        });
+    }
+    save(home, additions)
+}
 pub fn register_cache(home: &Path, path: &Path) -> Result<()> {
     let mut registry = Registry::default();
     registry.locations.insert(Location {

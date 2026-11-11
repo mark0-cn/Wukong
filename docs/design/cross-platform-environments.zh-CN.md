@@ -30,7 +30,7 @@ docker_container = "wukong-worker"
 
 已安装的原生 Windows worker 使用 `runtime.managed_ssh`，包含 `installation_id`、`user`、`port`、`identity_file`、`known_hosts_file` 及 `host_key = { algorithm = "ssh-ed25519", key = "BASE64_PUBLIC_KEY" }`。实际主机公钥须经 VM 指纹独立核对后登记；仅扫描主机不能建立信任。管理用户名为 `wkgm` 加安装 ID 的前 16 个十六进制字符。私钥留在控制端。路径相对配置目录解析，解析后须为绝对路径，且不含相对别名或 SSH 展开标记。专用 known-hosts 文件必须精确包含 `wukong-worker-INSTALLATION_ID ssh-ed25519 BASE64_PUBLIC_KEY` 及结尾换行，并与配置公钥一致。
 
-`runtime.ssh_host` 提供 IP 字面值或 DNS 主机名，`runtime.ssh_executable` 选择控制端 OpenSSH 客户端。托管传输忽略用户及系统 SSH 配置，固定 Ed25519 公钥，只使用指定私钥，并禁用 agent/X11/端口转发、代理命令、本地命令与连接共享。发送固定中继标记，不发送 Python/shell 启动命令。原生服务端独立强制使用登记的中继，协议握手还会核对安装 ID。通用 Linux SSH 保留桥接路径引用，同时显式启用严格主机校验并禁用转发。客户端参数校验及真实 OpenSSH `-G` 配置解析测试独立于 SSH 连通和 VM 安装验收；桌面登记向导仍为后续实现工作。
+`runtime.ssh_host` 提供 IP 字面值或 DNS 主机名，`runtime.ssh_executable` 选择控制端 OpenSSH 客户端。托管传输忽略用户及系统 SSH 配置，固定 Ed25519 公钥，只使用指定私钥，并禁用 agent/X11/端口转发、代理命令、本地命令与连接共享。发送固定中继标记，不发送 Python/shell 启动命令。原生服务端独立强制使用登记的中继，协议握手还会核对安装 ID。通用 Linux SSH 保留桥接路径引用，同时显式启用严格主机校验并禁用转发。客户端参数校验及真实 OpenSSH `-G` 配置解析测试独立于 SSH 连通和 VM 安装验收；桌面连接导入会校验公开安装凭据和独立核对的指纹，再保存专用公开主机固定文件，不导入私钥内容，参见 [Windows 组件指南](../../workers/windows/README.zh-CN.md)。登记不进行连接检查；桌面介质准备尚未完成。
 
 协议 2 握手确认安装 ID、操作系统启动身份以及 worker 代码/后端内容哈希。控制器在连接时固定该身份，并在每轮分析首次使用环境时以事务持久化。重连或恢复任务发现身份变化时，在执行前拒绝请求。环境配置可通过可选的 `installation_id` 进一步固定登记的安装实例。daemon 重启使用单独的诊断 ID，不代表操作系统重启，也不证明会话仍然存活。
 
