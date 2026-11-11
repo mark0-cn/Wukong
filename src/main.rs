@@ -27,6 +27,7 @@ async fn main() -> std::process::ExitCode {
         None | Some(wukong::interface::Command::Gui { .. })
             | Some(wukong::interface::Command::Cleanup {
                 command: wukong::cleanup::cli::Command::Choose { .. }
+                    | wukong::cleanup::cli::Command::ReviewWindow { .. }
             })
     );
     let interactive_diagnostics = !cli.json;
