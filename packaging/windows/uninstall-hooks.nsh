@@ -56,9 +56,6 @@ LangString WukongCleanupCancelled 2052 "已取消卸载。"
       ${IfNot} ${Errors}
         StrCpy $WukongCleanupArgs "$WukongCleanupArgs --challenges"
       ${EndIf}
-      ${If} $WukongCleanupArgs == ""
-        Goto wukong_cleanup_done
-      ${EndIf}
       nsExec::ExecToLog '"$WukongCleanupHelper" cleanup plan $WukongCleanupArgs --output "$WukongCleanupReview"'
       Pop $WukongCleanupResult
       ${If} $WukongCleanupResult != 0
@@ -89,7 +86,7 @@ LangString WukongCleanupCancelled 2052 "已取消卸载。"
     nsExec::ExecToLog '"$WukongCleanupHelper" cleanup finish --review "$WukongCleanupReview"'
     Pop $WukongCleanupResult
     ${If} $WukongCleanupResult != 0
-      MessageBox MB_OK|MB_ICONSTOP "$(WukongCleanupFailed) $WukongCleanupReport"
+      MessageBox MB_OK|MB_ICONSTOP "$(WukongCleanupFailed) $WukongCleanupReport" /SD IDOK
       SetErrorLevel 1
     ${Else}
       ${If} $WukongDeleteSettings = 1
