@@ -69,3 +69,13 @@ Advanced method contracts and detailed tool semantics are documented in the cano
 - Reading older progress stops automatic following. The latest-progress button appears away from the bottom and counts newly arriving messages.
 - Findings show verification and missing evidence first. A single evidence artifact opens automatically; multiple artifacts use a list. Source, hash and evidence ID have copy controls. Narrow windows use a findings list/detail/back flow.
 - Settings are grouped into language/model, budget, storage and advanced configuration. Switching categories or closing settings retains drafts. Active directory changes prevent closing; save configuration drafts before switching directories.
+
+## Collaboration task tree
+
+The collaboration panel draws parent-child connectors from recorded parent IDs. Lead, Analysis and Verify labels describe roles; colors describe execution states. Roles do not imply dependencies or execution order.
+
+Click a node to inspect its conversation and details; click its arrow to fold without selecting. Nodes show a name/role row and a status/scope row, with an extra error line when needed. Folded branches summarize all descendants, excluding the parent itself: total, running, waiting/paused, failed and completed. Stopped descendants remain included in the total. Failures remain visible when folded.
+
+The inspector shows the selected node’s parent path, full task, scope, status, usage and available result/error. A folded ancestor indicates that it contains the selected task. Folding preferences are device-local and scoped by workspace path and task ID. Beyond four visible levels, use **Focus branch**, **Up one level** or **Full task tree** to navigate without excessive indentation.
+
+The tree supports Up/Down, Left/Right and Home/End navigation. Enter or Space selects; moving keyboard focus alone does not change the conversation. Missing or cyclic parent links are marked and displayed separately without modifying the underlying records.
