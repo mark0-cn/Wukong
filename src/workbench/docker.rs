@@ -186,6 +186,12 @@ fn logged_failure(log: &Path, status: &str) -> crate::i18n::Message {
         .detail(tail)
 }
 
+pub fn portable_path(path: &Path) -> PathBuf {
+    // Docker Desktop accepts drive paths, not Windows verbatim path prefixes.
+    let value = path.to_string_lossy();
+    PathBuf::from(value.strip_prefix(r"\\?\").unwrap_or(&value))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -230,10 +236,4 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&log).unwrap(), content);
         assert!(message.args.contains_key("log"));
     }
-}
-
-pub fn portable_path(path: &Path) -> PathBuf {
-    // Docker Desktop accepts drive paths, not Windows verbatim path prefixes.
-    let value = path.to_string_lossy();
-    PathBuf::from(value.strip_prefix(r"\\?\").unwrap_or(&value))
 }
