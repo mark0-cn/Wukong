@@ -8,7 +8,7 @@
   color:var(--warning);
 }
 .fatal-error h1 {
-  font-size:24px;
+  font-size:var(--text-display);
 }
 summary {
   cursor:pointer;
@@ -53,7 +53,7 @@ summary {
     gap:0 15px;
   }
   .welcome h2 {
-    font-size:24px;
+    font-size:var(--text-display);
   }
   .workspace-tabs>.agents-toggle {
     gap: 0px;
@@ -63,7 +63,7 @@ summary {
     padding: 10px 16px;
     gap: 8px; }
   .workspace-title h1 {
-    font-size: 18px; }
+    font-size:var(--text-heading-sm); }
   .workspace-title .status {
     display: none; }
   .workspace-tabs {

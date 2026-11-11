@@ -58,3 +58,103 @@ updates-enter-a-new-directory-that-does-not = 填写一个尚不存在的新目�
 updates-export-offline-migration-package = 导出离线迁移包
 updates-processing-please-wait-for-completion = 正在处理，请等待操作完成。
 updates-operation-result = 操作结果
+
+system-checking-docker-host = 正在检查 Docker 和凭据助手…
+system-docker-unavailable = 无法连接 Docker。请启动 Docker Desktop（或 Docker 服务）后重试。如果刚安装 Docker，请完全退出并重新打开 Wukong。
+system-docker-linux-required = 工具环境需要 Linux 容器。请将 Docker Desktop 切换到 Linux 容器模式后重试。
+system-docker-config-unreadable = 无法读取 Docker 登录配置。请检查 DOCKER_CONFIG 或用户 .docker 目录中的 config.json；此错误不会显示配置内容。
+system-docker-credential-missing = Docker 找不到 { $helper }。安装 Docker Desktop 后请完全退出并重新打开 Wukong；若仍失败，请修复 Docker Desktop，或将该助手所在目录加入 PATH。程序没有修改你的登录配置。
+system-docker-command-failed = Docker 执行失败（{ $status }）。下方可查看末尾输出。完整日志：{ $log }
+
+system-activating-tool-environment = 正在启用已验证的工具环境…
+
+updates-setup-description = 首次分析前，准备与当前客户端匹配的工具环境。任务数据和题目环境分别保留。
+updates-setup-required = 待准备
+updates-setup-working = 进行中
+updates-setup-failed = 需要处理
+updates-environment-ready = 已准备
+updates-setup-ready-to-start = 点击“准备工具环境”，依次检查 Docker、下载配套镜像并完成自检。
+updates-diagnostic-output = 查看诊断输出（日志末尾）
+updates-copy-error = 复制错误
+updates-retry-setup = 重试准备
+updates-setup-progress = 环境准备步骤
+updates-step-docker = 检查 Docker
+updates-step-docker-help = 安装并启动 Docker，确保能够运行 Linux 容器。程序会检查连接及所需的凭据助手。
+updates-step-image = 下载工具镜像
+updates-step-image-help = 使用与当前客户端匹配的镜像。请为 Docker 至少预留 25 GiB，重试时会复用已下载的镜像层。
+updates-step-validation = 自检并启用
+updates-step-validation-help = 工具通过检查后再启用。就绪后，在“工作区设置”中配置模型服务，即可开始分析。
+updates-step-done = 已完成
+updates-step-pending = 待执行
+
+updates-image-progress = 工具镜像拉取进度
+updates-image-version = 工具镜像 · v{ $version }
+updates-image-cached = 复用本地镜像，无需下载
+updates-image-pulled = 镜像已拉取，环境自检仍需单独完成
+updates-image-layers = 已就绪 { $ready } 层 / 已发现 { $total } 层
+updates-image-waiting = 正在等待 Docker 返回镜像层信息…
+updates-image-elapsed = 已用时 { $time }
+updates-image-layer-note = 此处统计镜像层，不代表下载字节百分比。每层大小不同，发现新层时总数会增加。
+updates-image-layer-details = 镜像层详情
+updates-image-layer-limit = 最多展示 256 层，其余事件保留在完整日志中。
+updates-layer-waiting = 等待中
+updates-layer-downloading = 下载中
+updates-layer-downloaded = 已下载
+updates-layer-extracting = 解压中
+updates-layer-verifying = 校验中
+updates-layer-ready = 已就绪
+
+system-docker-command-timeout = Docker 在 { $seconds } 秒内没有响应。请检查 Docker 服务后重试。
+system-docker-output-limit = Docker 输出超过控制命令的限制，请查看诊断信息。
+
+updates-refresh-failed = 进度连接暂时中断，正在自动重连。操作可能仍在继续。
+
+updates-last-layer-change = 距镜像层进度变化：{ $seconds } 秒
+updates-no-recent-layer-change = 一段时间内没有新的镜像层进度。Docker 可能仍在传输大文件层，可查看诊断输出；这不表示操作已经失败。
+
+system-tool-container-stopped = 工具容器未运行或不存在。请启动或修复环境，再进行完整自检。
+system-health-tools-failed = 部分工具未通过自检，请查看检查结果或修复环境。
+system-managing-tool-environment = 正在管理工具环境…
+system-tool-action-completed = 工具环境操作已完成，请运行健康检查确认可用性。
+system-checking-tool-health = 正在检查工具环境健康状态…
+system-health-check-completed = 环境健康检查已完成。
+updates-health-title = 环境健康状态
+updates-health-pass = 通过
+updates-health-fail = 不可用 / 未通过
+updates-health-unknown = 未检查
+updates-health-config = 环境配置
+updates-health-configured = 已配置
+updates-health-unconfigured = 未配置
+updates-health-docker = Docker 连接
+updates-health-container = 工具容器运行
+updates-health-tools = 工具自检
+updates-health-time = 最近连接检查：{ $time }
+updates-health-tool-time = 最近工具自检：{ $time }
+updates-health-unchecked-help = 配置存在不代表环境可用，请运行轻量检查或完整自检。
+updates-technical-details = 技术详情
+updates-health-quick = 轻量健康检查
+updates-health-full = 完整工具自检
+
+system-operation-not-cancellable = 该任务已结束或已进入不可取消的阶段，请刷新状态。
+system-preparation-cancelled = 准备已取消；已下载的镜像层可在重试时复用。
+updates-background = 收起到后台
+updates-cancelling = 正在取消并清理…
+updates-cancel-preparation = 取消准备
+updates-critical-phase = 当前阶段不支持取消。安装或环境切换必须完成；收起面板不会停止操作。
+
+system-tool-image-needs-repair = 本地工具镜像不存在，请使用“自检并修复环境”重新准备。
+
+updates-step-details = 查看步骤说明
+
+updates-help-daemon = Docker 服务可能未启动，或当前处于 Windows 容器模式。启动 Docker 并切换到 Linux 容器后重试。
+updates-help-credentials = Docker 凭据助手或登录状态异常。修复 Docker Desktop 安装或刷新其登录状态，再重启 Wukong 后重试；应用不会删除你的登录配置。
+updates-help-network = 连接可能超时或中断。检查 Docker 的代理、DNS 和网络连接后重试；已缓存的镜像层会复用。
+updates-help-rate-limit = 镜像仓库可能触发限流。等待后重试，或在 Docker 中登录有可用配额的账号；不要反复立即重试。
+updates-help-disk = 存储空间不足。检查 Docker 数据盘和更新缓存所在磁盘；缓存目录可在工作区设置中调整，镜像磁盘位置在 Docker 设置中调整。
+updates-help-unknown = 暂时无法归类该错误。查看本机完整日志和技术详情，或导出诊断包以便排查。
+updates-diagnostics-title = 诊断与恢复
+updates-retry-operation = 处理后重试
+updates-open-log-directory = 打开日志目录
+updates-export-diagnostics = 导出脱敏诊断包
+updates-diagnostics-redaction = 导出仅包含平台、阶段、错误类别和检查计数；原始日志、路径、配置及凭据均不导出。完整日志保留在本机。
+updates-diagnostics-saved = 诊断包已保存：

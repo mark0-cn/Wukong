@@ -1,6 +1,7 @@
 import { t, useLocale } from '../i18n';
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { api, errorText, errorValue } from '../bridge';
+import { displayPath } from '../displayPath';
 
 export interface StorageDraft { epoch: number; data: string; cache: string; initialData: string; initialCache: string }
 export function StorageLocations({ epoch, disabled, onChanged, onWorking, draft, onDraft }: {
@@ -41,10 +42,10 @@ export function StorageLocations({ epoch, disabled, onChanged, onWorking, draft,
     finally { setWorking(false); }
   };
   return <fieldset disabled={disabled || working || !current} className="workbench-controls"><legend>{t('settings-storage-locations')}</legend>
-    <label>{t('settings-task-and-evidence-directory')}<input value={data} onChange={e => setData(e.target.value)} /></label>
+    <label>{t('settings-task-and-evidence-directory')}<input value={displayPath(data)} onChange={e => setData(e.target.value)} /></label>
     <p className="muted">{t('settings-select-an-existing-workspace-or-a-new')}</p>
     <div className="header-actions"><button onClick={() => void choose(setData)}>{t('settings-choose-data-directory')}</button><button disabled={!data} onClick={() => void save('data')}>{t('settings-apply-data-directory')}</button></div>
-    <label>{t('settings-update-cache-directory')}<input value={cache} onChange={e => setCache(e.target.value)} /></label>
+    <label>{t('settings-update-cache-directory')}<input value={displayPath(cache)} onChange={e => setCache(e.target.value)} /></label>
     <p className="muted">{t('settings-installers-and-image-validation-logs-can-be')}</p>
     <div className="header-actions"><button onClick={() => void choose(setCache)}>{t('settings-choose-cache-directory')}</button><button disabled={!cache} onClick={() => void save('cache')}>{t('settings-apply-cache-directory')}</button></div>
     {working && <p role="status">{t('settings-validating-and-saving-please-wait')}</p>}{message && <p role="status">{message}</p>}{error && <p role="alert" className="error-banner">{errorText(error)}</p>}
