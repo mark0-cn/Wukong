@@ -99,3 +99,7 @@ progress {
 .setup-steps-compact li { padding:8px 4px; }
 .setup-steps-compact details { margin-top:4px; font-size:12px; color:var(--muted); }
 .setup-steps-compact [data-state=active] { padding-block:14px; }
+
+.update-diagnostics { border-top:1px solid var(--border); padding-top:14px; display:grid; gap:12px; min-width:0; }
+.update-diagnostics p { margin:0; line-height:1.7; overflow-wrap:anywhere; }
+.update-diagnostics .header-actions { flex-wrap:wrap; justify-content:flex-start; }

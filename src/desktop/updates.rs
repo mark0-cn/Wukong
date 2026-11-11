@@ -18,6 +18,10 @@ use tauri_plugin_updater::UpdaterExt;
 #[derive(Clone, Default, Serialize)]
 pub struct Status {
     pub operation_id: Option<String>,
+    pub diagnosis: Option<super::update_diagnostics::Diagnosis>,
+    pub log_available: bool,
+    #[serde(skip)]
+    diagnostic_log: Option<PathBuf>,
     pub revision: u64,
     pub busy: bool,
     pub cancellable: bool,
@@ -149,6 +153,27 @@ impl Controller {
         state.cancel = tokio_util::sync::CancellationToken::new();
         state.phase = "starting".into();
         state.message = UiMessage::default();
+        state.diagnosis = None;
+        state.diagnostic_log = None;
+        state.log_available = false;
+    }
+    pub fn diagnostic_snapshot(&self, operation_id: &str) -> Result<Status> {
+        let state = self.status();
+        ensure!(
+            state.operation_id.as_deref() == Some(operation_id),
+            "diagnostic operation changed; refresh status"
+        );
+        Ok(state)
+    }
+    pub fn log_directory(&self, operation_id: &str) -> Result<PathBuf> {
+        let state = self.diagnostic_snapshot(operation_id)?;
+        super::update_diagnostics::log_directory(
+            state
+                .diagnostic_log
+                .as_deref()
+                .context("no local log for this operation")?,
+            &crate::updates::storage::cache_root()?,
+        )
     }
     pub fn cancel(&self, operation_id: &str) -> Result<Status> {
         let mut state = self.edit();
@@ -316,7 +341,9 @@ impl Controller {
             return Ok(self.status());
         }
         if let Err(error) = &result {
-            self.phase("error", UiMessage::from_error_ref(error));
+            let message = UiMessage::from_error_ref(error);
+            self.edit().diagnosis = Some(super::update_diagnostics::classify(&message));
+            self.phase("error", message);
         }
         result?;
         Ok(self.status())
@@ -369,6 +396,10 @@ impl Controller {
                 super::update_health::check(&config, matches!(action, Action::Doctor))
             })
             .await??;
+            self.edit().diagnosis = snapshot
+                .error
+                .as_ref()
+                .map(super::update_diagnostics::classify);
             self.edit().health = snapshot;
             self.phase("idle", UiMessage::new("system-health-check-completed"));
             return Ok(());
@@ -580,6 +611,11 @@ impl Controller {
                 &probe_config,
                 &image,
                 cancel,
+                |log| {
+                    let mut state = controller.edit();
+                    state.diagnostic_log = Some(log.to_owned());
+                    state.log_available = true;
+                },
                 |message| {
                     let phase = match message.code.as_str() {
                         "system-checking-docker-host" => "docker",
