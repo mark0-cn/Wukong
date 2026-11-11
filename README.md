@@ -55,7 +55,7 @@ Wukong（悟空）使用 Rust 与 Rig 构建分析核心，通过 Tauri + React 
 
 ## 快速开始
 
-普通用户从 [GitHub Releases](https://github.com/mark0-cn/Wukong/releases) 下载 Windows `-setup.exe` 或 Linux `.AppImage`，打开后通过环境向导准备 Docker 工具。后续客户端与镜像更新在“更新与环境”中完成，详见[在线安装](docs/user/online-install.md)。以下为源码构建步骤。
+普通用户从 [GitHub Releases](https://github.com/mark0-cn/Wukong/releases) 下载 Windows `-setup.exe` 或 Linux `.AppImage`，打开后通过环境向导准备 Docker 工具。后续客户端与镜像更新在“更新”中完成，详见[在线安装](docs/user/online-install.md)。以下为源码构建步骤。
 
 ### 1. 准备环境
 
@@ -266,4 +266,4 @@ worker 测试、环境依赖和性能检查见 [维护约定](docs/development/m
 
 依赖更新、上游工具版本检查、不可变 Release 与运行摘要见 [GitHub 维护功能](docs/development/github-maintenance.md)。
 
-工具 Docker 与题目 Docker 由宿主机统一管理，每题独立网络。使用 `env up/doctor`、`challenge import/prepare/build/up` 和离线迁移命令；桌面右上角也有“Pwn 环境”入口。详见 [Pwn 工作环境](docs/user/pwn-workbench.md)。
+工具 Docker 与题目 Docker 由宿主机统一管理，每题独立网络。使用 `env up/doctor`、`challenge import/prepare/build/up` 和离线迁移命令；桌面左下角提供“工具环境”和“题目环境”入口。详见 [Pwn 工作环境](docs/user/pwn-workbench.md)。
