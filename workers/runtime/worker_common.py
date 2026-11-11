@@ -127,10 +127,15 @@ def artifact(root, path):
     return {"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path), "size": path.stat().st_size}
 
 def public_file(root, relative):
+    root = Path(root).resolve()
     path = confined(root, relative, True)
     parts = path.relative_to(root).parts
     if not parts or parts[0] not in {"files", "jobs", "debug", "fuzz", "ghidra", "interact"}:
         raise ValueError("path is private worker metadata")
+    if parts[0] == "files":
+        # Uploaded payload names are data, even when named status.json. Path
+        # confinement has already resolved aliases before selecting this root.
+        return path
     if parts[0] == "ghidra" and (len(parts) < 2 or parts[1] != "results"):
         raise ValueError("path is private Ghidra project metadata")
     if path.name in {"spec.json", "status.json", "heartbeat.json", "cancel", "session.json", "supervisor.log"}:

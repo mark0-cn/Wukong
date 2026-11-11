@@ -10,7 +10,7 @@ import threading
 import time
 import uuid
 
-from worker_common import WorkerError, atomic_json, confined, load_json, safe_env, sha256_file
+from worker_common import WorkerError, atomic_json, load_json, public_file, safe_env, sha256_file
 from worker_debug_operations import inspect_request, control_request
 from worker_processes import attach_windows_job, detached_options, terminate_tree
 
@@ -92,7 +92,7 @@ class DebugSession:
         self.inferior = None
         self.mode = params.get("mode", "launch")
         self.process = None
-        target = confined(self.root, params["target"], True)
+        target = public_file(self.root, params["target"])
         self.target_sha256 = sha256_file(target)
         self.dump_sha256 = None
         if self.mode not in {"launch", "dump"}:
@@ -109,7 +109,7 @@ class DebugSession:
             if self.mode == "dump":
                 if params.get("args") or params.get("launch_spec") or params.get("input"):
                     raise ValueError("dump inspection cannot supply launch parameters")
-                dump = confined(self.root, params["dump"], True)
+                dump = public_file(self.root, params["dump"])
                 self.dump_sha256 = sha256_file(dump)
                 request = {"operation":"open", "mode":"dump", "dump":str(dump), "timeout_secs":timeout}
                 detected = architecture(target)

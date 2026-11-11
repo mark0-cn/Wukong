@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from worker_common import confined, safe_env
+from worker_common import public_file, safe_env
 
 
 from worker_common import sha256_file as digest
@@ -20,7 +20,7 @@ def load(root,params):
     if not spec.get("target"): raise ValueError("service-only challenge has no local target; use a network script")
     files = document.check_files()
     target = member(spec["target"])
-    if params.get("target") and digest(confined(root,params["target"],True))!=digest(target):
+    if params.get("target") and digest(public_file(root,params["target"]))!=digest(target):
         raise ValueError("requested target differs from LaunchSpec")
     if spec.get("loader") and spec["loader"] not in files: raise ValueError("loader identity missing")
     args=spec.get("args",[])
@@ -92,6 +92,7 @@ def resolve(root,params,isolated=False,input_path=None):
             if path.is_file() and path.relative_to(base).as_posix() not in spec["files"]:
                 raise ValueError("unrecorded library in LaunchSpec")
     source_digest=digest(target)
+    derived_runtime = loader is not None
     if loader:
         target=patched_runtime(base,spec)
         loader=None
@@ -100,7 +101,8 @@ def resolve(root,params,isolated=False,input_path=None):
     if isolated:
         import isolation
         experiment=isolation.sandbox(root,isolation.allocate_uid(root))
-        target=isolation.stage_file(target,experiment,"target.bin",True)
+        target=isolation.stage_file(target,experiment,"target.bin",True,
+                                    derived_sha256=executed_digest if derived_runtime else None)
         # Preserve relative data files and the configured working directory.
         original_cwd=cwd
         staged_cwd=isolation.stage_directory(cwd,experiment,"cwd")

@@ -33,8 +33,8 @@ class InteractSession:
         launch=None
         if params.get("launch_spec"):
             from worker_launch import resolve
-            from worker_common import confined
-            launch=resolve(root,params,isolated,confined(root,params["input"],True) if params.get("input") else None)
+            from worker_common import public_file
+            launch=resolve(root,params,isolated,public_file(root,params["input"]) if params.get("input") else None)
             argv,self.experiment=launch["argv"],launch["experiment"]
         elif isolated:
             import isolation

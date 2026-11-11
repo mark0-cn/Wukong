@@ -9,7 +9,7 @@ import subprocess
 import threading
 import time
 import uuid
-from worker_common import atomic_json, confined, safe_env, sha256_file
+from worker_common import atomic_json, public_file, safe_env, sha256_file
 from worker_processes import detached_options, terminate_tree
 
 try:  # GDB/MI parsing is optional: the bridge must serve jobs without it.
@@ -38,25 +38,25 @@ class DebugSession:
         self.token = 0
         self.dead = False
         self.transcript_bytes = 0
-        target = confined(root, params["target"], True)
+        target = public_file(root, params["target"])
         self.mode = params.get("mode", "launch")
         if self.mode not in {"launch", "dump"}:
             raise ValueError("invalid debugger mode")
         self.target_sha256 = sha256_file(target)
-        dump = confined(root, params["dump"], True) if self.mode == "dump" else None
+        dump = public_file(root, params["dump"]) if self.mode == "dump" else None
         self.dump_sha256 = sha256_file(dump) if dump else None
         self.execution_state = "stopped" if dump else "loaded"
         self.isolated = isolated
         self.experiment = None
         args = list(params.get("args", []))
-        self.stdin_path = confined(root, params["_stdin"], True) if params.get("_stdin") else None
+        self.stdin_path = public_file(root, params["_stdin"]) if params.get("_stdin") else None
         launch = None
         if dump:
             if args or params.get("launch_spec") or params.get("input"):
                 raise ValueError("dump inspection cannot launch a process or supply input")
         elif params.get("launch_spec"):
             from worker_launch import resolve
-            launch=resolve(root,params,isolated,self.stdin_path or (confined(root,params["input"],True) if params.get("input") else None))
+            launch=resolve(root,params,isolated,self.stdin_path or (public_file(root,params["input"]) if params.get("input") else None))
             if launch["input_mode"]=="pty": raise ValueError("PTY debugging needs an external terminal; use interactive PTY or a debug container")
             target,args,self.experiment=launch["target"],launch["args"],launch["experiment"]
             self.stdin_path=launch["stdin_path"] if launch["input_mode"]=="stdin_pipe" else None

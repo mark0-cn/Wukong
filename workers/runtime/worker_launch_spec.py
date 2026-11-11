@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from worker_common import confined, sha256_file as digest
+from worker_common import public_file, sha256_file as digest
 
 
 @dataclass(frozen=True)
@@ -10,6 +10,7 @@ class LaunchDocument:
     raw: bytes
     spec: dict
     base: Path
+    state_root: Path
 
     def member(self, name):
         if not isinstance(name, str) or not name or Path(name).is_absolute() or ".." in Path(name).parts:
@@ -17,7 +18,7 @@ class LaunchDocument:
         value = (self.base / name).resolve()
         if not value.is_relative_to(self.base) or not value.exists():
             raise ValueError("launch member escapes or is missing")
-        return value
+        return public_file(self.state_root, value.relative_to(self.state_root).as_posix())
 
     def check_files(self, max_file=None, max_total=None):
         files = self.spec.get("files", {})
@@ -37,7 +38,8 @@ class LaunchDocument:
 
 
 def read_launch(root, path):
-    path = confined(root, path, True)
+    root = Path(root).resolve()
+    path = public_file(root, path)
     if path.stat().st_size > 65536:
         raise ValueError("launch spec exceeds 64 KiB")
     raw = path.read_bytes()
@@ -46,7 +48,7 @@ def read_launch(root, path):
     spec = json.loads(raw)
     if not isinstance(spec, dict) or spec.get("schema_version") != 1:
         raise ValueError("unsupported launch schema")
-    base = confined(root, spec["base"], True)
+    base = public_file(root, spec["base"])
     if not base.is_dir():
         raise ValueError("launch base must be a directory")
-    return LaunchDocument(raw, spec, base)
+    return LaunchDocument(raw, spec, base, root)

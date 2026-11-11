@@ -21,6 +21,9 @@ surgery and stdin-driven PoCs:
   `ls /state` to locate the target — it is either at `$TARGET` (pass
   `target=`) or staged via argv in job_start. If you catch yourself
   searching for a file, you are missing one of those two mechanisms.
+- Only public artifacts can be copied into execution inputs. Worker transport
+  endpoints, job descriptors and other private metadata must use their status
+  APIs; they are never valid input files or directories.
 - stdin delivery is plain shell syntax: `printf '<payload>' | "$TARGET"`,
   a heredoc, or `python3 -c '...'`. There is no separate input plumbing.
 - The call is capped (timeout_secs, default 30; output is bounded). Anything

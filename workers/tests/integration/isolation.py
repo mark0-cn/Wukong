@@ -51,6 +51,19 @@ def main():
     client = Client(root)
     doctor = client.call("doctor")
     assert doctor["metadata_protected_from_targets"] and doctor["unique_experiment_uids"], doctor
+    canary=root/'private-staging-canary.txt'
+    canary.write_text('CONTROLLED-STAGING-CANARY-NOT-A-TOKEN')
+    canary.chmod(0o600)
+    for method,params in [('interact.start',{'argv':['/bin/cat',str(canary)]}),
+                          ('exec.run',{'target':canary.name,'command':'cat "$TARGET"'})]:
+        try:
+            client.call(method,**params)
+        except AssertionError as failure:
+            assert 'private worker metadata' in failure.args[0].get('error',{}).get('message',''),failure
+        else:
+            raise AssertionError('private metadata was published as target input')
+    denied_job=client.finish(client.call('job.start',argv=['/bin/cat',str(canary)],timeout_secs=3))
+    assert denied_job['state']=='failed' and 'private worker metadata' in denied_job.get('error',''),denied_job
     cancellation=cancellation_proof(client,root)
     protected = root / "forged-status.txt"
     second = client.call("job.start", argv=[sys.executable, "-c", "import pathlib,time;pathlib.Path('guard').write_text('original');time.sleep(3)"], request_id="protected-job", timeout_secs=10)
@@ -95,7 +108,7 @@ print(json.dumps({'uid':os.getuid(),'denied':denied,'cap_eff':next(x for x in pa
     uids = [trial["experiment_uid"] for trial in verified["result"]["results"]]
     assert len(set(uids)) == 2 and all(trial["metadata_protected"] for trial in verified["result"]["results"]), verified
     output = root / "isolation-results.json"
-    output.write_text(json.dumps({"doctor": doctor, "cancellation":cancellation, "attacker": first, "protected_job": second, "verification": verified}, indent=2))
+    output.write_text(json.dumps({"doctor": doctor, "private_metadata_staging_denied":True,"cancellation":cancellation, "attacker": first, "protected_job": second, "verification": verified}, indent=2))
     print(json.dumps({"passed": True, "owned_process_group_cancelled":True,"metadata_write_denied": True, "cross_job_write_denied": True, "target_effective_capabilities": 0, "verifier_uids": uids, "results": str(output)}))
     client.call("worker.shutdown")
     client.close()

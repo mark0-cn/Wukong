@@ -73,11 +73,38 @@ def sandbox(root, uid):
         os.chown(work, uid, uid)
     except PermissionError as error:
         raise ValueError("isolated worker requires CAP_CHOWN, SETUID and SETGID to own experiment directories") from error
-    return {"root": str(directory), "readonly": str(readonly), "work": str(work), "uid": uid}
+    return {"root": str(directory), "readonly": str(readonly), "work": str(work), "uid": uid,
+            "state_root": str(Path(root).resolve())}
 
 
-def stage_file(source, experiment, name=None, executable=False):
-    source = Path(source)
+def _public_source(source, experiment, derived_sha256=None):
+    from worker_common import public_file, sha256_file
+    state = Path(experiment["state_root"]).resolve()
+    source = Path(source).resolve()
+    if source != state and state not in source.parents:
+        # Only the launch resolver supplies this hash, after validating public
+        # source artifacts and the immutable prepared-runtime cache. A digest
+        # never authorizes worker metadata or an arbitrary external path.
+        cache = Path('/tmp/wukong-launches')
+        try:
+            member = source.relative_to(cache).parts
+        except ValueError:
+            member = ()
+        if (derived_sha256 is None or len(member) != 2 or member[1] != 'target'
+                or len(member[0]) != 64 or any(c not in '0123456789abcdef' for c in member[0])):
+            raise ValueError("staged input must be a public worker artifact")
+        for path in [cache, source.parent, source]:
+            status = path.lstat()
+            if path.is_symlink() or status.st_uid != os.geteuid() or status.st_mode & 0o022:
+                raise ValueError('unsafe prepared launch input')
+        if not source.is_file() or sha256_file(source) != derived_sha256:
+            raise ValueError('prepared launch input identity changed')
+        return source
+    return public_file(state, source.relative_to(state).as_posix())
+
+
+def stage_file(source, experiment, name=None, executable=False, *, derived_sha256=None):
+    source = _public_source(source, experiment, derived_sha256)
     destination = Path(experiment["readonly"]) / (name or (uuid.uuid4().hex + "-" + source.name))
     shutil.copyfile(source, destination)
     destination.chmod(0o555 if executable else 0o444)
@@ -85,10 +112,10 @@ def stage_file(source, experiment, name=None, executable=False):
 
 
 def stage_directory(source, experiment, name):
-    source = Path(source).resolve()
+    source = _public_source(source, experiment)
     destination = Path(experiment["readonly"]) / name
-    destination.mkdir(mode=0o755)
     count, total = 0, 0
+    approved = []
     for item in sorted(source.rglob("*")):
         if item.is_symlink():
             raise ValueError("symlinks are not accepted in staged input directories")
@@ -98,6 +125,12 @@ def stage_directory(source, experiment, name):
         total += item.stat().st_size
         if count > 1024 or total > 32 * 1048576:
             raise ValueError("staged directory exceeds 1024 files/32 MiB")
+        _public_source(item, experiment)
+        approved.append(item)
+    # Validate the complete tree before copying anything into target-readable
+    # storage. In particular, never turn a job metadata directory into input.
+    destination.mkdir(mode=0o755)
+    for item in approved:
         path = destination / item.relative_to(source)
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(item, path)

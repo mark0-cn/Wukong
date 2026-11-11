@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from worker_capabilities import doctor
-from worker_common import BRIDGE_PATH, MAX_FILE, TERMINAL, artifact, atomic_json, bounded_int, confined, job_dir, load_json, parse_address, safe_env, tail
+from worker_common import BRIDGE_PATH, MAX_FILE, TERMINAL, artifact, atomic_json, bounded_int, confined, job_dir, load_json, parse_address, public_file, safe_env, tail
 from worker_processes import detached_options, process_identity
 
 class JobManager:
@@ -31,7 +31,7 @@ class JobManager:
             spec["trusted_local"] = self.trusted
             binding = network_profile(self.root,spec,self.trusted)
             if binding != spec.get("network_binding"): raise ValueError("network binding must match the admitted service profile")
-            input_path=confined(self.root,spec["input"],True)
+            input_path=public_file(self.root,spec["input"])
             if input_path.stat().st_size > 1048576: raise ValueError("network input exceeds 1 MiB")
             validate_plan(spec["network"],input_path.read_bytes())
         elif spec.get("launch_spec"):
@@ -47,8 +47,8 @@ class JobManager:
         spec["output_limit"] = bounded_int(spec.get("output_limit"), 1048576, 1024, 8 * 1048576)
         spec["runner_token"] = secrets.token_hex(32)
         if kind in {"replay", "verify", "minimize"}:
-            target = confined(self.root, spec["target"], True)
-            input_path = confined(self.root, spec["input"], True)
+            target = public_file(self.root, spec["target"])
+            input_path = public_file(self.root, spec["input"])
             if not target.is_file() or not input_path.is_file() or input_path.stat().st_size > MAX_FILE:
                 raise ValueError("target/input must be files and input must be <=32 MiB")
             spec["timeout_secs"] = min(spec["timeout_secs"], 60)
@@ -166,7 +166,7 @@ class JobManager:
 
     def dispatch(self, method, params):
         if method == "angr.solve":
-            target = confined(self.root, params["target"], True)
+            target = public_file(self.root, params["target"])
             if not target.is_file():
                 raise ValueError("angr target must be a staged file")
             try:
@@ -240,8 +240,8 @@ class JobManager:
             doctor = self.doctor()
             if not doctor["capabilities"]["fuzz_qemu"]:
                 raise ValueError("AFL++ QEMU capability unavailable; inspect doctor before selecting backend")
-            target = confined(self.root, params["target"], True)
-            seeds = confined(self.root, params["seeds"], True)
+            target = public_file(self.root, params["target"])
+            seeds = public_file(self.root, params["seeds"])
             if not seeds.is_dir() or not any(p.is_file() for p in seeds.iterdir()):
                 raise ValueError("nonempty seed directory required")
             key = params.get("request_id") or params.get("call_id")
