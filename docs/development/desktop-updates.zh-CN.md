@@ -90,3 +90,5 @@ Docker 的 info、inspect、version、ps 控制查询最多等待 30 秒，其�
 `desktop/cleanup.rs` 在独立的 webview profile 中只开放偏好、预览、确认和取消，不组装工作区服务。复用现有 React Modal、语言目录和类型化桥接展示同一份清单，界面最多展示 200 个路径/资源/保留项，后端保留完整预览。确认将清单保存到应用数据之外后退出，原生 hook 等 WebView 锁释放后调用无界面执行器。`packaging/windows/uninstall-hooks.nsh` 使用 Tauri 支持的 hook，不复制其 NSIS 模板。升级/被动路径不清理；共享清理关闭原生递归应用数据删除。匹配的 `cleanup finish` 在原生程序移除后解除延迟准入。Linux 只移除受管理的 AppImage/启动器/图标集成，便携副本保留。
 
 Docker 清理复用有界 Workbench Docker 客户端，核对本地 socket、工作区标签和稳定身份，删除前重查保留容器的引用；不强制删除镜像，也不 prune。保留 Docker 范围/共用资源时，留下最小环境记录与导入副本。待完成更新、活动维护锁/工作区锁、本地 worker 拒绝关闭都会阻止删除。部分文件失败时保留其余元数据；原生卸载中止并报告。`tests/acceptance/check_cleanup.py` 拒绝在可丢弃的 GitHub 托管 runner 之外运行破坏性原生/Docker 验收。`cleanup-acceptance.yml` 构建未签名的测试 NSIS 包；普通 Linux CI 验证运行中的夹具容器/共用资源保留。这些不能证明 Windows Docker Desktop 跨版本验收通过。
+
+自动化中的图形界面启动诊断可使用 `--json` 保留 stderr 并关闭启动错误对话框；不会绕过原生预览或选项检查。原生验收通过 CDP 或 Windows UI Automation 验证实际嵌入窗口，随后核对保存的范围和退出状态。

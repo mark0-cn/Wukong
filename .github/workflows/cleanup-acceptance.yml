@@ -5,9 +5,18 @@ on:
     paths:
       - 'src/cleanup/**'
       - 'src/desktop/cleanup.rs'
+      - 'src/desktop/paths.rs'
+      - 'src/main.rs'
+      - 'src/updates/recovery.rs'
       - 'packaging/windows/uninstall-hooks.nsh'
       - 'tauri*.json'
       - 'tests/acceptance/check_cleanup.py'
+      - 'tests/acceptance/check_cleanup_ui.mjs'
+      - 'tests/acceptance/review-window.ps1'
+      - 'ui/src/components/CleanupReview.tsx'
+      - 'ui/src/main.tsx'
+      - 'ui/src/commands.ts'
+      - 'locales/*/cleanup.ftl'
       - '.github/workflows/cleanup-acceptance.yml'
   workflow_dispatch:
 permissions:
@@ -35,6 +44,7 @@ jobs:
           shared-key: uninstall-native-v1
           # GitHub isolates pull-request caches; production never reuses these artifacts.
           save-if: true
+          cache-on-failure: true
       - name: Build unsigned native acceptance package
         shell: pwsh
         run: |

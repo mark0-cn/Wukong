@@ -100,7 +100,7 @@ Docker 镜像及卷的物理磁盘位置由 Docker Desktop / Docker Engine 设�
 CI 验证 Windows 安装/卸载、Linux AppImage 与真实 WebView 启动、签名完整性及 Linux Docker 集成。
 Windows Docker Desktop 的真实首次安装与跨版本升级仍需桌面实机验收；托管 runner 的安装器检查及语言界面浏览器测试不代替这项验收。
 
-清理 CLI 可以预览应用管理的本机数据，不打开模型、worker 或数据库。运行 `wukong cleanup plan --data --output cleanup-review.json`，核对路径、文件数量、大小和保留项，再显式执行 `wukong cleanup execute --review cleanup-review.json --yes --report cleanup-report.json`。这些文件应保存在待清理目录之外。执行时获取维护锁并重新生成清单；内容变化后需要重新预览。未知文件、符号链接和重解析路径会保留；配置指向一个目录不代表允许删除该目录中的所有内容。
+清理 CLI 可以预览应用管理的本机数据，不初始化 Store、模型或 worker；旧版 SQLite 归属检查仅使用不可变只读连接。运行 `wukong cleanup plan --data --output cleanup-review.json`，核对路径、文件数量、大小和保留项，再显式执行 `wukong cleanup execute --review cleanup-review.json --yes --report cleanup-report.json`。这些文件应保存在待清理目录之外。执行时获取维护锁并重新生成清单；内容变化后需要重新预览。未知文件、符号链接和重解析路径会保留；配置指向一个目录不代表允许删除该目录中的所有内容。
 
 Windows 卸载会打开范围预览，本机数据与设置、Docker 工具环境、Docker 题目环境分别选择，Docker 选项默认不勾选。原生数据复选框仅设置初始数据选项，详细预览中的最终选择为准。预览展示实际目录、本机文件大小、归属 Docker 资源及保留原因；取消后程序仍安装。静默卸载默认仅移除程序；显式自动化参数为 `/WUKONG_DELETE_DATA`、`/WUKONG_DELETE_TOOLS` 和 `/WUKONG_DELETE_CHALLENGES`。`/UPDATE` 和被动升级路径忽略清理请求。Linux 的 `wukong cleanup uninstall` 打开相同预览，从已安装的 AppImage 启动时移除受管理的桌面集成；外部下载的便携 AppImage 保留供手动移除。
 

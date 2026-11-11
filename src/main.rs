@@ -29,8 +29,9 @@ async fn main() -> std::process::ExitCode {
                 command: wukong::cleanup::cli::Command::Choose { .. }
             })
     );
+    let interactive_diagnostics = !cli.json;
     #[cfg(windows)]
-    if desktop {
+    if desktop && interactive_diagnostics {
         // Detach only the graphical entry point; CLI stdout remains usable in pipelines.
         #[link(name = "kernel32")]
         unsafe extern "system" {
@@ -55,7 +56,7 @@ async fn main() -> std::process::ExitCode {
         Err(error) => {
             let message = wukong::i18n::Message::from_error(error).render(locale);
             eprintln!("wukong: {message}");
-            if desktop || recovery {
+            if (desktop || recovery) && interactive_diagnostics {
                 rfd::MessageDialog::new()
                     .set_title(locale.text("cli-startup-failed"))
                     .set_description(message)

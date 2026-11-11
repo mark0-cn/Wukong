@@ -1,6 +1,6 @@
 // Disposable Windows runner only: exercise the actual embedded review webview.
 import { chromium } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, access } from 'node:fs/promises';
@@ -28,18 +28,22 @@ for (const base of [process.env.LOCALAPPDATA, process.env['ProgramFiles(x86)'], 
   }
 }
 if (!runtime) throw Error('Installed WebView2 runtime unavailable on disposable runner');
-const child = spawn(resolve(process.argv[2]), ['cleanup', 'choose', '--output', review], {env: {...process.env, LOCALAPPDATA: join(root, 'local'), APPDATA: join(root, 'roaming'), WEBVIEW2_BROWSER_EXECUTABLE_FOLDER: runtime, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`}});
+const child = spawn(resolve(process.argv[2]), ['--json', 'cleanup', 'choose', '--output', review], {env: {...process.env, LOCALAPPDATA: join(root, 'local'), APPDATA: join(root, 'roaming'), WEBVIEW2_BROWSER_EXECUTABLE_FOLDER: runtime, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`}});
 let diagnostics = '';
 for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { diagnostics = (diagnostics + bytes.toString()).slice(-4096); });
 const exited = once(child, 'exit');
 let browser;
 try {
   const deadline = Date.now() + 45000;
-  while (!browser && Date.now() < deadline) {
+  while (!browser && child.exitCode === null && Date.now() < deadline) {
     try { browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {timeout: 1000}); }
     catch { await new Promise(resolve => setTimeout(resolve, 300)); }
   }
-  if (!browser) throw Error(`Native cleanup webview did not open; exit=${child.exitCode}; ${diagnostics}`);
+  if (!browser) {
+    if (child.exitCode !== null) throw Error(`Native review exited ${child.exitCode}: ${diagnostics}`);
+    console.log('CDP unavailable; checking the actual window through Windows UI Automation.');
+    console.log(execFileSync('powershell.exe', ['-NoProfile', '-File', 'tests/acceptance/review-window.ps1', '-TargetProcess', String(child.pid)], {encoding: 'utf8', windowsHide: true, timeout: 35000}));
+  } else {
   const page = browser.contexts()[0].pages()[0];
   await page.getByRole('heading', {name: 'Uninstall Wukong'}).waitFor();
   for (const checkbox of await page.getByRole('checkbox').all()) if (await checkbox.isChecked()) throw Error('Native cleanup option unexpectedly selected');
@@ -47,8 +51,9 @@ try {
   const confirm = page.getByRole('button', {name: 'Continue uninstall'});
   await confirm.waitFor();
   await page.waitForFunction(() => ![...document.querySelectorAll('button')].find(button => button.textContent === 'Continue uninstall')?.disabled);
-  await confirm.click();
-  const [code] = await exited;
+  await confirm.click().catch(error => { if (!/closed/i.test(String(error))) throw error; });
+  }
+  const [code] = await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(Error('Native confirmation did not close the window')), 10000))]);
   if (code !== 33) throw Error(`Native confirmation returned ${code}; expected data-only scope 33`);
   const plan = JSON.parse(await readFile(review, 'utf8'));
   if (!plan.selection.data || plan.selection.tools || plan.selection.challenges) throw Error('Native review scope differs from selected checkboxes');
