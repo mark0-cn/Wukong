@@ -82,3 +82,9 @@ class SummaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_skipped_tag_publication_fails_the_summary_gate(self):
+        self.assertFalse(summary.checks_succeeded("release", self.needs, "push"))
+        self.assertTrue(summary.checks_succeeded("release", self.needs, "workflow_dispatch"))
+        self.needs["publish"]["result"] = "success"
+        self.assertTrue(summary.checks_succeeded("release", self.needs, "push"))
