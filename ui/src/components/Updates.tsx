@@ -7,6 +7,7 @@ import { CopyButton } from './CopyButton';
 import { SetupProgress } from './SetupProgress';
 import { ImagePullProgress } from './ImagePullProgress';
 import { useUpdateController, type UpdateController } from '../hooks/useUpdateController';
+import { EnvironmentHealth } from './EnvironmentHealth';
 import { Modal } from './Modal';
 
 import type { UpdateAction, UpdateStatus } from '../commands';
@@ -28,8 +29,9 @@ export function Updates({ epoch, onClose, onChanged, controller }: { epoch: numb
     <div className="update-summary">
       <div><span className="muted">{t('updates-current-client')}</span><strong>{status?.version ?? t('updates-loading')}</strong></div>
       {!status?.needs_setup && <div><span className="muted">{t('updates-available-version')}</span><strong>{status?.available ?? t('updates-no-update-found-yet')}</strong></div>}
-      <div><span className="muted">{t('ui-tools-environment')}</span><strong>{!status ? t('updates-loading') : status.needs_setup ? busy ? t('updates-setup-working') : failure ? t('updates-setup-failed') : t('updates-setup-required') : t('updates-environment-ready')}</strong></div>
+      <div><span className="muted">{t('ui-tools-environment')}</span><strong>{!status ? t('updates-loading') : status.needs_setup ? busy ? t('updates-setup-working') : failure ? t('updates-setup-failed') : t('updates-setup-required') : t('updates-health-configured')}</strong></div>
     </div>
+    {status && !status.needs_setup && <EnvironmentHealth health={status?.health} />}
     {status?.needs_setup && <SetupProgress step={status.environment_step} busy={busy} failed={Boolean(failure)} />}
     <ImagePullProgress value={status?.image_progress} version={status?.image_version} busy={status?.phase === 'pulling'} />
     {!failure && <p className="update-status" role="status">{busy && status?.message ? message(status.message) : status?.needs_setup ? t('updates-setup-ready-to-start') : (status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>}
@@ -52,6 +54,7 @@ export function Updates({ epoch, onClose, onChanged, controller }: { epoch: numb
         {(!status?.needs_setup && (status?.available || status?.prepared)) && <button onClick={() => void run('check')}>{t('updates-check-for-updates')}</button>}
         <button onClick={() => void openUrl(linux ? 'https://docs.docker.com/engine/install/' : 'https://docs.docker.com/desktop/setup/install/windows-install/').catch(e => setError(errorValue(e)))}>{t('updates-docker-installation-guide')}</button>
       </div>
+      {!status?.needs_setup && <div className="header-actions"><button onClick={() => void run('health')}>{t('updates-health-quick')}</button><button onClick={() => void run('doctor')}>{t('updates-health-full')}</button></div>}
       {(!status?.needs_setup || status?.pending) && <details className="maintenance-options" open={status?.pending || undefined}><summary>{t('ui-maintenance-options')}</summary><div className="header-actions">
         <button disabled={!status?.recovery} onClick={() => setConfirm('recover')}>{t('updates-restore-previous-version')}</button>
         <button disabled={status?.pending} onClick={() => setConfirm('clean_cache')}>{t('updates-clean-old-download-cache')}</button>

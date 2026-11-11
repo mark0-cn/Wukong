@@ -111,3 +111,26 @@ updates-refresh-failed = 进度连接暂时中断，正在自动重连。操作�
 
 updates-last-layer-change = 距镜像层进度变化：{ $seconds } 秒
 updates-no-recent-layer-change = 一段时间内没有新的镜像层进度。Docker 可能仍在传输大文件层，可查看诊断输出；这不表示操作已经失败。
+
+system-tool-container-stopped = 工具容器未运行或不存在。请启动或修复环境，再进行完整自检。
+system-health-tools-failed = 部分工具未通过自检，请查看检查结果或修复环境。
+system-managing-tool-environment = 正在管理工具环境…
+system-tool-action-completed = 工具环境操作已完成，请运行健康检查确认可用性。
+system-checking-tool-health = 正在检查工具环境健康状态…
+system-health-check-completed = 环境健康检查已完成。
+updates-health-title = 环境健康状态
+updates-health-pass = 通过
+updates-health-fail = 不可用 / 未通过
+updates-health-unknown = 未检查
+updates-health-config = 环境配置
+updates-health-configured = 已配置
+updates-health-unconfigured = 未配置
+updates-health-docker = Docker 连接
+updates-health-container = 工具容器运行
+updates-health-tools = 工具自检
+updates-health-time = 最近连接检查：{ $time }
+updates-health-tool-time = 最近工具自检：{ $time }
+updates-health-unchecked-help = 配置存在不代表环境可用，请运行轻量检查或完整自检。
+updates-technical-details = 技术详情
+updates-health-quick = 轻量健康检查
+updates-health-full = 完整工具自检

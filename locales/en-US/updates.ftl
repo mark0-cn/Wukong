@@ -111,3 +111,26 @@ updates-refresh-failed = Progress connection interrupted; retrying automatically
 
 updates-last-layer-change = Last layer progress change: { $seconds } seconds ago
 updates-no-recent-layer-change = No new layer progress for a while. Docker may still be transferring a large layer. Check diagnostic output if needed; this does not mean the operation failed.
+
+system-tool-container-stopped = The tool container is stopped or missing. Start it or repair the environment before running a full self-check.
+system-health-tools-failed = Some tool self-checks failed. Review the checks or repair the environment.
+system-managing-tool-environment = Managing the tool environment…
+system-tool-action-completed = Tool environment operation completed. Run a health check to verify availability.
+system-checking-tool-health = Checking tool environment health…
+system-health-check-completed = Environment health check completed.
+updates-health-title = Environment health
+updates-health-pass = Passed
+updates-health-fail = Unavailable / failed
+updates-health-unknown = Not checked
+updates-health-config = Configuration
+updates-health-configured = Configured
+updates-health-unconfigured = Not configured
+updates-health-docker = Docker connection
+updates-health-container = Tool container running
+updates-health-tools = Tool self-check
+updates-health-time = Last connection check: { $time }
+updates-health-tool-time = Last tool self-check: { $time }
+updates-health-unchecked-help = Configuration alone does not confirm availability. Run a quick check or a full self-check.
+updates-technical-details = Technical details
+updates-health-quick = Quick health check
+updates-health-full = Full tool self-check
