@@ -2,7 +2,7 @@ import { t, useLocale } from '../i18n';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Bot, ChevronDown, ChevronRight, GitBranch, LayoutList, PanelRightClose, ScanSearch, ShieldCheck, CornerUpLeft } from 'lucide-react';
 import type { Agent } from '../types';
-import { compact, labels, Status, terminal } from './Status';
+import { compact, labels, StateIcon, Status, terminal } from './Status';
 import { useViewPreference } from '../hooks/useViewPreference';
 import { agentPath, buildAgentTree, visibleAgentRows, type Descendants, type TreeRow } from './agentTree';
 
@@ -55,6 +55,8 @@ export function Agents({ scopeKey, agents, selected, onSelect, onStop, canStop, 
     if (id) { setActive(id); requestAnimationFrame(() => elements.current.get(id)?.focus()); }
   };
   const keyboard = (event: KeyboardEvent<HTMLDivElement>, row: TreeRow) => {
+    // Let buttons activate themselves; bubbling Space must not select their row.
+    if (event.target !== event.currentTarget && (event.key === 'Enter' || event.key === ' ')) return;
     const index = rows.findIndex(item => item.id === row.id);
     let next: string | undefined;
     if (event.key === 'ArrowDown') next = rows[Math.min(index + 1, rows.length - 1)]?.id;
@@ -94,7 +96,7 @@ export function Agents({ scopeKey, agents, selected, onSelect, onStop, canStop, 
               onClick={() => { if (row.limited) focusBranch(row.id); else toggle(row.id); }}>{closed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button> : <span className="agent-chevron-placeholder" />}
             <button tabIndex={-1} className={`agent-card ${selected === row.id ? 'selected' : ''}`} onClick={() => onSelect(row.id)} title={agent.name}>
               <span className="agent-card-name"><RoleIcon role={agent.role} /><strong>{agent.name}</strong><span className="agent-role">{roleLabel(agent.role)}</span></span>
-              <span className="agent-card-meta"><Status value={agent.status} />{agent.scope && <span className="agent-scope" title={agent.scope}>· {agent.scope}</span>}</span>
+              <span className="agent-card-meta"><span className={`status status-${agent.status}`}><StateIcon state={agent.status} /><span>{agent.status === 'waiting' ? t('tree-waiting') : labels[agent.status] ?? agent.status}</span></span>{agent.scope && <span className="agent-scope" title={agent.scope}>· {agent.scope}</span>}</span>
               {agent.error && <span className="agent-inline-error" title={agent.error}>{agent.error}</span>}
               {closed && count.total > 0 && <span className={`agent-descendants ${count.failed ? 'has-failures' : ''}`}>{countLabel(count)}</span>}
               {closed && selected !== row.id && selectedPath.has(row.id) && <span className="agent-hidden-selection">{t('tree-contains-selection')}</span>}

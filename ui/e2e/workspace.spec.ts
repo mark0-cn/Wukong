@@ -468,3 +468,17 @@ test('agent hierarchy remains readable in Chinese, English and a narrow collabor
   expect(await page.locator('.agent-list').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   await page.screenshot({ path: 'target/agent-tree-narrow.png' });
 });
+
+test('keyboard activation of a disclosure does not select its agent', async ({ page }) => {
+  await page.goto('/');
+  const collapse = page.getByRole('button', { name: '折叠 主分析 Agent', exact: true });
+  await collapse.focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByRole('treeitem')).toHaveCount(1);
+  await expect(page.getByRole('treeitem').first()).toHaveAttribute('aria-selected', 'false');
+  const expand = page.getByRole('button', { name: '展开 主分析 Agent', exact: true });
+  await expand.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('treeitem')).toHaveCount(3);
+  await expect(page.getByRole('treeitem').first()).toHaveAttribute('aria-selected', 'false');
+});
