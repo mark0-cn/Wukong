@@ -23,7 +23,7 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
   const failureTitle = failure && typeof failure === 'object' ? message({ ...failure, detail: undefined }) : errorText(failure);
   const detail = failure && typeof failure === 'object' ? failure.detail : '';
   const linux = navigator.userAgent.includes('Linux');
-  return <Modal className="updates-modal" title={mode === 'tools' ? t('ui-tools-environment') : status?.needs_setup ? t('updates-welcome-to-wukong-set-up-environment') : t('ui-updates')} description={status?.needs_setup ? t('updates-setup-description') : t('updates-the-client-and-tools-update-as-a')} wide onClose={onClose}>
+  return <Modal className={`updates-modal ${busy ? 'updates-running' : ''}`} title={mode === 'tools' ? t('ui-tools-environment') : status?.needs_setup ? t('updates-welcome-to-wukong-set-up-environment') : t('ui-updates')} description={status?.needs_setup ? t('updates-setup-description') : t('updates-the-client-and-tools-update-as-a')} wide onClose={onClose}>
     <div className="updates-panel">
     {refreshError && <p className="notice" role="status">{t('updates-refresh-failed')} {errorText(refreshError)}</p>}
     <div className="update-summary">
@@ -36,7 +36,6 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
     <ImagePullProgress value={status?.image_progress} version={status?.image_version} busy={status?.phase === 'pulling'} />
     {!failure && <p className="update-status" role="status">{busy && status?.message ? message(status.message) : status?.needs_setup && status.phase !== 'cancelled' ? t('updates-setup-ready-to-start') : (status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>}
     {status?.phase === 'downloading' && status.total && <div><progress aria-label={t('updates-client-download-progress')} max={status.total} value={status.downloaded} /><p className="muted">{(status.downloaded / 1048576).toFixed(1)} / {(status.total / 1048576).toFixed(1)} MiB</p></div>}
-    {busy && <div className="background-controls"><button onClick={onClose}>{t('updates-background')}</button><button disabled={!status?.cancellable || status.cancelling} onClick={() => void cancel()}>{status?.cancelling ? t('updates-cancelling') : t('updates-cancel-preparation')}</button>{!status?.cancellable && <p className="muted">{t('updates-critical-phase')}</p>}</div>}
     {busy && <p className="muted">{t('updates-keep-the-application-open-while-processing-image')}</p>}
     {failure && <section className="update-error">
       <p className="error-banner" role="alert">{failureTitle}</p>
@@ -46,6 +45,10 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
     {!status?.needs_setup && status?.notes && <details><summary>{t('updates-release-notes')}</summary><p>{status.notes}</p></details>}
 
     {status?.pending && <p className="error-banner">{t('updates-the-previous-update-is-not-confirmed-new')}</p>}
+    {status?.recovery && <details><summary>{t('updates-recovery-when-the-app-will-not-start')}</summary><p>{t('updates-close-wukong-and-run-this-independent-recovery')}</p><code className="path">{displayPath(status.recovery)}</code></details>}
+    </div>
+    <div className="updates-footer">
+    {busy && <div className="background-controls"><button onClick={onClose}>{t('updates-background')}</button><button disabled={!status?.cancellable || status.cancelling} onClick={() => void cancel()}>{status?.cancelling ? t('updates-cancelling') : t('updates-cancel-preparation')}</button>{!status?.cancellable && <p className="muted">{t('updates-critical-phase')}</p>}</div>}
     <fieldset disabled={busy || !status} className="workbench-controls"><legend className="sr-only">{t('updates-version-and-environment')}</legend>
       <div className="header-actions">
         {mode === 'tools' ? <button className="primary" disabled={status?.pending} onClick={() => void run('setup')}>{t('updates-validate-and-repair-environment')}</button> : status?.needs_setup ? <button className="primary" disabled={status.pending} onClick={() => void run('setup')}>{failure ? t('updates-retry-setup') : t('updates-prepare-tool-environment')}</button>
@@ -64,7 +67,6 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
         {linux && <button onClick={() => void run('integrate')}>{t('updates-add-to-application-menu-and-restart')}</button>}
       </div></details>}
     </fieldset>
-    {status?.recovery && <details><summary>{t('updates-recovery-when-the-app-will-not-start')}</summary><p>{t('updates-close-wukong-and-run-this-independent-recovery')}</p><code className="path">{displayPath(status.recovery)}</code></details>}
     {confirm && <div className="notice"><p>{confirm === 'install' ? t('updates-installation-closes-and-restarts-the-client-save') : confirm === 'recover' ? t('updates-the-client-will-exit-and-open-the') : confirm === 'clean_images' ? t('updates-clean-only-old-tool-images-recorded-by') : t('updates-clean-old-client-downloads-the-current-version')}</p><div className="header-actions"><button onClick={() => setConfirm(undefined)}>{t('workspace-cancel')}</button><button className="primary" onClick={() => void run(confirm)}>{t('updates-confirm')}</button></div></div>}
     </div>
   </Modal>;

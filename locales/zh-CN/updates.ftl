@@ -143,3 +143,5 @@ updates-cancel-preparation = 取消准备
 updates-critical-phase = 当前阶段不支持取消。安装或环境切换必须完成；收起面板不会停止操作。
 
 system-tool-image-needs-repair = 本地工具镜像不存在，请使用“自检并修复环境”重新准备。
+
+updates-step-details = 查看步骤说明

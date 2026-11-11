@@ -537,6 +537,7 @@ export interface Messages {
   'updates-show-status': undefined;
   'updates-start-challenge': undefined;
   'updates-start-environment': undefined;
+  'updates-step-details': undefined;
   'updates-step-docker': undefined;
   'updates-step-docker-help': undefined;
   'updates-step-done': undefined;
