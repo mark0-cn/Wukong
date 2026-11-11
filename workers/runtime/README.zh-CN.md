@@ -14,6 +14,8 @@ python -m pip install -r workers/runtime/requirements.txt
 
 托管 Windows VM 必须使用包含 Python 和全部依赖的完整离线包；不得在 VM 内下载软件包或运行在线 pip 安装。[工具包约定](../package/README.zh-CN.md)和 [Windows 组件](../windows/README.zh-CN.md)说明当前实现及尚未完成的安装器/生产验收工作。
 
+Bridge 启动时会在导入 worker 模块前禁用 Python 字节码写入，新建 daemon 和作业监督器进程也遵循该设置，从而保持已签名部署文件不变；可写状态保存在配置的状态目录。不可变部署中的其他 Python 入口也应使用 `-B` 启动。
+
 Docker 镜像自动安装依赖。GDB/MI 结果含解析后的 `payload`；异步事件是 type、message、payload、原始 `record` 的结构化记录。原始 MI transcript 保留为证据。
 
 ## Docker
