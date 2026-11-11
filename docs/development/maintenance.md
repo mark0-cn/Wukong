@@ -118,3 +118,11 @@ node scripts/dev/capture-readme.mjs
 ```
 
 The script reuses frontend fixture structures with a bounded native-command adapter and writes `docs/assets/workspace.en-US.png` and `docs/assets/workspace.zh-CN.png`. Viewport, timezone and sample data are fixed; local configuration/credentials are not read. Failures, unhandled errors or horizontal overflow stop generation. Inspect both images for clipping, fonts, tool rows and the collaboration tree, then commit them with their README editions. Install a missing browser with `npx --no-install playwright install chromium`.
+
+To inspect the desktop projection of a real CLI execution, set `WUKONG_CAPTURE_WORKSPACE` to `target/runtime-workspace.json` and run `cargo test --locked --test cli_workflow cli_runs_dynamic_agents_real_rig_and_exports_evidence`. The test reuses its local scripted provider, real Rig scheduler, SQLite and static binary inspection; it does not call a paid model or execute the fixture. On Windows, use an MSVC developer shell and an isolated test `LOCALAPPDATA` directory. With the frontend server running, render that captured DTO:
+
+```sh
+node scripts/dev/capture-readme.mjs target/runtime-workspace.json
+```
+
+These diagnostic images go to `target/runtime-workspace/`, keeping the README's illustrative images separate. The adapter supplies desktop transport only: agents, text, tool outcomes, targets and evidence IDs come from the captured backend response. This acceptance establishes the CLI-to-desktop presentation path, not live-model reasoning quality or real Ghidra/debugger execution. Native streaming acceptance additionally holds an HTTP response open until a public partial reply can be read from the desktop snapshot; it checks final-message deduplication and excludes private reasoning.

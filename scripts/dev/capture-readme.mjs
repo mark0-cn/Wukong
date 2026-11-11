@@ -1,19 +1,24 @@
 // Render the current UI with illustrative data; no model, worker or native app is used.
-// Start `npm run dev`, then run `node scripts/dev/capture-readme.mjs`.
+// An optional backend capture JSON argument renders real DTOs into target/runtime-workspace/.
+// Start `npm run dev`, then run `node scripts/dev/capture-readme.mjs [capture.json]`.
 import { chromium } from '@playwright/test';
 import { readFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { stripTypeScriptTypes } from 'node:module';
+import { resolve } from 'node:path';
 
 const root = new URL('../../', import.meta.url);
 const source = await readFile(new URL('ui/src/test/fixtures.ts', root), 'utf8');
 const compiled = stripTypeScriptTypes(source);
 const fixtures = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const { version } = JSON.parse(await readFile(new URL('tauri.conf.json', root), 'utf8'));
-const output = new URL('docs/assets/', root);
+const snapshot = process.argv[2] ? JSON.parse(await readFile(resolve(process.argv[2]), 'utf8')) : null;
+if (snapshot && (!snapshot.envelope?.workspace?.data?.transcript?.length || !snapshot.calls)) throw new Error('Expected a backend workspace capture with transcript and calls.');
+const output = new URL(snapshot ? 'target/runtime-workspace/' : 'docs/assets/', root);
 await mkdir(output, { recursive: true });
 
 function demo(locale) {
+  if (snapshot) return { data: snapshot.envelope.workspace.data, host: snapshot.envelope.host, calls: snapshot.calls, locale, version };
   const english = locale === 'en-US';
   const data = structuredClone(fixtures.workspace);
   const host = structuredClone(fixtures.host);
@@ -51,6 +56,7 @@ function demo(locale) {
     purpose: english ? 'Recover the length calculation and copy boundary.' : '还原长度计算与拷贝边界。',
     summary: english ? 'Recovered length check and copy path' : '已还原长度检查与拷贝路径',
     duration_ms: 1480, evidence_id: 'evidence-decompile',
+    preview: { language: 'c', text: 'uint16_t size = input_length + 8;\nif (size <= sizeof(buffer))\n    memcpy(buffer, input, input_length);', truncated: true, evidence_id: 'evidence-decompile' },
   };
   const text = (value) => ({ type: 'text', text: value });
   const operation = (display, name) => ({
@@ -66,8 +72,8 @@ function demo(locale) {
       created_at: '2026-11-09T03:11:10Z', content: [
         operation(inspect, 'binary_inspect'), operation(decompile, 'function_decompile'),
         text(english
-          ? 'Located `parse_record`. The length check and subsequent copy use different widths.\n\n```c\nuint16_t size = input_length + 8;\nif (size <= sizeof(buffer))\n    memcpy(buffer, input, input_length);\n```\n\nNext: compare a valid record with boundary inputs, keeping the runtime and input channel fixed.'
-          : '已定位到 `parse_record`。长度检查与后续拷贝使用了不同的数值宽度。\n\n```c\nuint16_t size = input_length + 8;\nif (size <= sizeof(buffer))\n    memcpy(buffer, input, input_length);\n```\n\n下一步：固定运行环境和输入通道，对比有效记录与边界输入。'),
+          ? 'Located `parse_record`. The length check and subsequent copy use different widths.\n\nNext: compare a valid record with boundary inputs, keeping the runtime and input channel fixed.'
+          : '已定位到 `parse_record`。长度检查与后续拷贝使用了不同的数值宽度。\n\n下一步：固定运行环境和输入通道，对比有效记录与边界输入。'),
       ] },
     { id: 'demo-review', role: 'assistant', author: names[2], agent_id: 'verifier',
       created_at: '2026-11-09T03:13:00Z', content: [text(english
@@ -96,7 +102,8 @@ try {
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.addInitScript(({ data, host, locale, inspect, decompile, version }) => {
+    const input = demo(locale);
+    await page.addInitScript(({ data, host, locale, inspect, decompile, calls, version }) => {
       const callbacks = new Map();
       let next = 0;
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
@@ -115,6 +122,11 @@ try {
             return { host, workspace: { revision, data: args.request.known_revision === revision ? null : snapshot } };
           }
           if (command === 'tool_details') {
+            if (calls) {
+              const call = calls.find(call => call.id === args.id);
+              if (!call) throw new Error(`Backend capture has no call ${args.id}`);
+              return call;
+            }
             const display = args.id === decompile.call_id ? decompile : inspect;
             return { id: display.call_id, agent_id: 'analyst', name: args.id === decompile.call_id ? 'function_decompile' : 'binary_inspect',
               arguments: { target: display.target }, result: { summary: display.summary }, evidence_id: display.evidence_id, state: 'completed' };
@@ -124,10 +136,10 @@ try {
           throw new Error(`Screenshot adapter does not implement: ${command}`);
         },
       };
-    }, demo(locale));
+    }, input);
     await page.goto('http://127.0.0.1:1420', { waitUntil: 'networkidle' });
-    await page.getByRole('treeitem').nth(2).waitFor();
-    await page.getByText(locale === 'en-US' ? 'Preparing an independent replay' : '正在准备独立重放', { exact: false }).waitFor();
+    await page.getByRole('treeitem').nth(input.data.agents.length - 1).waitFor();
+    await page.locator('.message').first().waitFor();
     await page.evaluate(() => document.fonts.ready);
     await page.locator('details[open]').evaluateAll(elements => elements.forEach(element => { element.open = false; }));
     await page.locator('.transcript').evaluate(element => { element.scrollTop = 0; });
@@ -138,7 +150,7 @@ try {
     if (errors.length) throw new Error(errors.join('\n'));
     await page.mouse.move(1675, 1095);
     await page.screenshot({ path: fileURLToPath(new URL(`workspace.${locale}.png`, output)), animations: 'disabled' });
-    console.log(`Captured docs/assets/workspace.${locale}.png (current UI, illustrative task data).`);
+    console.log(`Captured ${snapshot ? 'target/runtime-workspace' : 'docs/assets'}/workspace.${locale}.png (${snapshot ? snapshot.source : 'current UI, illustrative task data'}).`);
     await context.close();
   }
 } finally {

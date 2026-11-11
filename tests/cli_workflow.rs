@@ -162,7 +162,24 @@ async fn model_server() -> Result<(
                     request["messages"]
                 ),
             };
-            let response=json!({"id":format!("response-{role}-{turn}"),"object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":calls},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}).to_string();
+            let narration = match (role, turn) {
+                ("root", 0) => {
+                    "I will identify the fixture and delegate static inspection. Each result will link to its recorded evidence."
+                }
+                ("root", 1) => {
+                    "Static inspection is running in the analysis agent. I am waiting for its report."
+                }
+                ("analyst", 0) => {
+                    "I am reading the exact target's ELF metadata before selecting further analysis methods."
+                }
+                ("analyst", 1) => {
+                    "The fixture metadata has been recorded. This test establishes static coverage only; it makes no dynamic impact claim."
+                }
+                _ => {
+                    "Static inspection is complete and the original evidence is linked. No independently verified vulnerability is claimed."
+                }
+            };
+            let response=json!({"id":format!("response-{role}-{turn}"),"object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":narration,"tool_calls":calls},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}).to_string();
             stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).as_bytes()).await?;
         }
     });
@@ -320,6 +337,64 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         calls.iter().all(|c| c.state == CallState::Completed),
         "tool errors in workflow"
     );
+    let desktop = wukong::desktop::service::Service::new(
+        config.clone(),
+        store.clone(),
+        Some(run.id.clone()),
+        Some(config_path),
+        None,
+    );
+    let envelope = desktop.read(wukong::desktop::workspace::WorkspaceRequest::default())?;
+    let data = envelope
+        .workspace
+        .data
+        .as_ref()
+        .context("desktop snapshot missing")?;
+    ensure!(
+        data.agents.len() == 2 && data.active_tools.is_empty(),
+        "desktop activity diverged from completed agents"
+    );
+    let replies = store.records::<PublicReply>(&run.id)?;
+    ensure!(
+        replies.len() == 5
+            && replies
+                .iter()
+                .all(|reply| reply.state == ReplyState::Complete),
+        "public text lost across real Rig/CLI execution"
+    );
+    ensure!(
+        replies
+            .iter()
+            .all(|reply| data.transcript.iter().any(|message| message.id == reply.id)),
+        "desktop transcript lost a public reply"
+    );
+    let inspect = data
+        .transcript
+        .iter()
+        .flat_map(|message| &message.content)
+        .find_map(|part| match part {
+            wukong::desktop::presentation::ChatPart::ToolCall {
+                tool_name, args, ..
+            } if tool_name == "binary_inspect" => Some(args),
+            _ => None,
+        })
+        .context("real binary inspection did not reach the desktop")?;
+    ensure!(
+        inspect["display"]["target"] == "sample.elf"
+            && inspect["display"]["evidence_id"].is_string(),
+        "tool target/evidence lost in presentation"
+    );
+    // Optional, disposable capture input. It contains the actual read DTO, not a hand-built UI fixture.
+    if !pause_then_resume && let Some(path) = std::env::var_os("WUKONG_CAPTURE_WORKSPACE") {
+        let capture = serde_json::to_vec_pretty(
+            &json!({"source":"scripted local provider; real CLI/Rig/SQLite/static inspection", "envelope":envelope,"calls":calls}),
+        )?;
+        ensure!(
+            !String::from_utf8_lossy(&capture).contains("not-a-real-secret"),
+            "credential leaked into capture"
+        );
+        fs::write(path, capture)?;
+    }
     let exported = report::export(&store, &run.id, &temp.path().join("bundle"))?;
     let verified = report::verify_bundle(&exported.output_dir)?;
     ensure!(

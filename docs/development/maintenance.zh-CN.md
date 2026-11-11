@@ -123,3 +123,11 @@ node scripts/dev/capture-readme.mjs
 ```
 
 脚本复用前端夹具结构，提供限定的原生命令适配器，生成 `docs/assets/workspace.en-US.png` 与 `docs/assets/workspace.zh-CN.png`。固定视口、时区和示例数据，不读取本机配置或凭据；失败、未处理错误或横向溢出会中止生成。逐张检查裁切、字体、工具行和协作树，再与对应 README 一起提交。首次缺少浏览器时运行 `npx --no-install playwright install chromium`。
+
+要检查真实 CLI 执行到桌面的投影，可将 `WUKONG_CAPTURE_WORKSPACE` 设为 `target/runtime-workspace.json`，运行 `cargo test --locked --test cli_workflow cli_runs_dynamic_agents_real_rig_and_exports_evidence`。测试复用本地脚本化 provider、真实 Rig 调度器、SQLite 和静态二进制检查，不调用付费模型，也不执行夹具。Windows 需使用 MSVC 开发者终端及隔离的测试 `LOCALAPPDATA` 目录。前端服务运行后，可渲染捕获的数据：
+
+```sh
+node scripts/dev/capture-readme.mjs target/runtime-workspace.json
+```
+
+这些诊断图片写入 `target/runtime-workspace/`，与 README 示例图片分开。适配器仅提供桌面传输接口；Agent、文本、工具结果、目标和证据 ID 均来自捕获的后端响应。此验收证明 CLI 到桌面的展示链路，不证明真实模型的推理质量，也不覆盖真实 Ghidra 或调试器执行。原生流式验收还会保持 HTTP 响应未结束，直到能从桌面快照读取公开的部分回复，并检查最终消息去重以及内部推理不进入展示。
