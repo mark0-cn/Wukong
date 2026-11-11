@@ -94,6 +94,67 @@ fn tool_name(kind: &str, name: &str, workspace: &str) -> bool {
     };
     name == format!("wukong-{workspace}-{suffix}")
 }
+fn challenge_ids(root: &Path) -> Result<BTreeSet<String>> {
+    let directory = root.join("challenges");
+    if !directory.is_dir() {
+        return Ok(BTreeSet::new());
+    }
+    files::safe(&directory)?;
+    let mut ids = BTreeSet::new();
+    for entry in std::fs::read_dir(directory)?.take(4097) {
+        let path = entry?.path().join("challenge.toml");
+        if !path.is_file() {
+            continue;
+        }
+        files::safe(&path)?;
+        ensure!(
+            std::fs::metadata(&path)?.len() <= 1024 * 1024,
+            "challenge manifest too large"
+        );
+        let value: toml::Value = toml::from_str(&std::fs::read_to_string(&path)?)?;
+        let id = value
+            .get("id")
+            .and_then(toml::Value::as_str)
+            .context("challenge ID missing")?;
+        crate::workbench::valid_id(id)?;
+        ensure!(
+            value
+                .get("schema_version")
+                .and_then(toml::Value::as_integer)
+                == Some(1)
+                && path
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|s| s.to_str())
+                    == Some(id),
+            "challenge identity changed"
+        );
+        ids.insert(id.to_owned());
+    }
+    ensure!(ids.len() <= 4096, "too many challenge manifests");
+    Ok(ids)
+}
+fn challenge_name(kind: &str, name: &str, workspace: &str, ids: &BTreeSet<String>) -> bool {
+    ids.iter().any(|id| {
+        let prefix = format!("wukong-{workspace}-{id}-");
+        let Some(suffix) = name.strip_prefix(&prefix) else {
+            return false;
+        };
+        match kind {
+            "container" => {
+                matches!(suffix, "tools" | "service" | "debug")
+                    || ["extract-", "pwninit-"].iter().any(|prefix| {
+                        suffix.strip_prefix(prefix).is_some_and(|s| {
+                            s.len() == 8 && s.bytes().all(|c| c.is_ascii_hexdigit())
+                        })
+                    })
+            }
+            "volume" => suffix == "state",
+            "network" => matches!(suffix, "net" | "egress"),
+            _ => false,
+        }
+    })
+}
 fn binding(kind: &str, value: &Value) -> Result<String> {
     // Exclude volatile counters/stats; bind identity, ownership and references.
     let fields = match kind {
@@ -163,7 +224,8 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
     let daemon = docker.run(&["info", "--format", "{{.ID}}"])?;
     ensure!(!daemon.is_empty(), "Docker daemon identity missing");
     let mut images = BTreeMap::new();
-    for (_root, workspace) in workspaces {
+    for (root, workspace) in workspaces {
+        let challenges = challenge_ids(&root)?;
         for kind in ["container", "volume", "network"] {
             let filter = format!("label=wukong.workspace={workspace}");
             let args = if kind == "container" {
@@ -181,7 +243,7 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
                 );
                 let item = resource(&docker, kind, &value, &workspace, &daemon)?;
                 let tool = tool_name(kind, &item.name, &workspace);
-                if !item.name.starts_with(&format!("wukong-{workspace}-")) {
+                if !tool && !challenge_name(kind, &item.name, &workspace, &challenges) {
                     plan.retained.push(Retained {
                         path: item.name,
                         reason: "unrecognized workspace resource name; retained".into(),
@@ -345,5 +407,42 @@ pub(super) fn remove(resources: &[Resource], report: &mut Report) {
                 .errors
                 .push(format!("{} {}: {error}", item.kind, item.name)),
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn inherited_image_labels_do_not_adopt_manual_or_unknown_challenge_containers() {
+        let ids = BTreeSet::from(["sample".to_owned()]);
+        assert!(challenge_name(
+            "container",
+            "wukong-local-sample-service",
+            "local",
+            &ids
+        ));
+        for name in [
+            "wukong-local-foreign",
+            "wukong-local-other-service",
+            "wukong-other-sample-service",
+            "wukong-local-sample-extract-personal",
+        ] {
+            assert!(
+                !challenge_name("container", name, "local", &ids),
+                "adopted {name}"
+            );
+        }
+        assert!(challenge_name(
+            "container",
+            "wukong-local-sample-extract-a12f8760",
+            "local",
+            &ids
+        ));
+        assert!(!challenge_name(
+            "volume",
+            "wukong-local-sample-net",
+            "local",
+            &ids
+        ));
     }
 }

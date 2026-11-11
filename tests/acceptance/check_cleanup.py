@@ -87,6 +87,8 @@ def docker(binary):
         bench = home / '.wukong/workbench'
         bench.mkdir(parents=True)
         (bench / 'workspace.json').write_text(json.dumps({'schema_version': 1, 'id': workspace}))
+        (bench / 'challenges/sample').mkdir(parents=True)
+        (bench / 'challenges/sample/challenge.toml').write_text('schema_version=1\nid="sample"\n')
         env = dict(os.environ, XDG_DATA_HOME=str(root))
         env.pop('DOCKER_CONTEXT', None)
         env.pop('DOCKER_HOST', None)
