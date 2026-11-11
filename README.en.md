@@ -19,7 +19,7 @@ Dynamic analysis currently targets **Linux x86_64 ELF**. PE and Mach-O static pr
 
 ## Get started
 
-Download the Windows x64 `-setup.exe` or Linux x64 `.AppImage` from [GitHub Releases](https://github.com/mark0-cn/Wukong/releases). The client downloads its matching Docker tool image during setup. Updates are managed in **Updates and environment**.
+Download the Windows x64 `-setup.exe` or Linux x64 `.AppImage` from [GitHub Releases](https://github.com/mark0-cn/Wukong/releases). The client downloads its matching Docker tool image during setup. Updates are managed in **Updates**.
 
 Follow [installation and updates](docs/en/user/online-install.md), then [the usage guide](docs/en/user/usage.md). Choose your preferred interface and task language in **Workspace settings**; see [language settings](docs/en/user/languages.md).
 
