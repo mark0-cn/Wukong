@@ -367,9 +367,18 @@ export interface Messages {
   'transcript-stopped': undefined;
   'transcript-workspace': undefined;
   'transcript-you': undefined;
+  'ui-append-help': undefined;
+  'ui-collapse-input': undefined;
   'ui-completed-hint': undefined;
+  'ui-ended-recipient': undefined;
+  'ui-expand-input': undefined;
   'ui-failed-hint': undefined;
   'ui-model-and-usage': undefined;
+  'ui-new-messages': { count: string | number };
+  'ui-recipient': undefined;
+  'ui-send-information': undefined;
+  'ui-send-mode': undefined;
+  'ui-send-task': undefined;
   'ui-stopped-hint': undefined;
   'updates-add-to-application-menu-and-restart': undefined;
   'updates-attachment-directory-or-file': undefined;

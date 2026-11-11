@@ -227,3 +227,13 @@ ui-completed-hint = Analysis complete. Review findings or export the report.
 ui-stopped-hint = Task stopped. Saved progress remains available.
 ui-failed-hint = Analysis ended with an error. Review failed operations and agent details.
 ui-model-and-usage = Model and usage
+
+ui-new-messages = { $count } new messages
+ui-recipient = To: 
+ui-send-mode = Send mode
+ui-send-information = Add information
+ui-send-task = Assign follow-up
+ui-expand-input = Expand message input
+ui-collapse-input = Collapse message input
+ui-ended-recipient = This agent has ended. Completed agents accept follow-up tasks; failed or stopped tasks require a new analysis.
+ui-append-help = Assign further work while retaining the analysis history.

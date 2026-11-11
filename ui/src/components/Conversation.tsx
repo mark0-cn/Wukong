@@ -4,7 +4,7 @@ import { AssistantRuntimeProvider, ThreadPrimitive, MessagePrimitive, useExterna
   useAuiState, groupPartByType, type ThreadMessageLike } from '@assistant-ui/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import * as Collapsible from '@radix-ui/react-collapsible';
-import { ArrowDown, ArrowUp, Bot, ChevronRight, Code2, User } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, ChevronRight, Code2, User, Maximize2, Minimize2 } from 'lucide-react';
 import { api, errorText, errorValue } from '../bridge';
 import type { Agent, ChatMessage, Host, ToolDisplay, ToolRecord, Workspace } from '../types';
 import { Markdown } from './Markdown';
@@ -37,8 +37,8 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
       {display.duration_ms != null && <span className="tool-duration">{(display.duration_ms / 1000).toFixed(1)}s</span>}
       <ChevronRight size={13} className={open ? 'rotate' : ''} />
     </Collapsible.Trigger>
-    {display.purpose && <p className="tool-purpose">{display.purpose}</p>}
-    {display.summary && <p className="tool-summary">{formatMessage(display.summary)}</p>}
+    {(open || display.state !== 'completed') && display.purpose && <p className="tool-purpose">{display.purpose}</p>}
+    {display.summary && <p className={`tool-summary ${display.state === 'completed' && !open ? 'tool-summary-compact' : ''}`}>{formatMessage(display.summary)}</p>}
     <Collapsible.Content className="tool-details">
       {loading && <p className="muted">{t('workspace-loading-operation-details')}</p>}
       {error && <p className="error" role="alert">{errorText(error)}</p>}
@@ -57,15 +57,16 @@ function ToolGroup({ indices }: { indices: readonly number[] }) {
   const working = steps.some(step => ['running', 'queued'].includes(step.state));
   const failures = steps.filter(step => ['failed', 'uncertain', 'interrupted'].includes(step.state)).length;
   const [expanded, setExpanded] = useState(false);
-  const open = expanded || working || indices.length <= 4;
+  const salient = steps.filter(step => step.state !== 'completed');
+  const open = expanded || salient.length > 0 || steps.length <= 3;
   return <Collapsible.Root open={open} onOpenChange={setExpanded} className="tool-group">
-    <Collapsible.Trigger className="tool-group-heading" disabled={working || indices.length <= 4}>
+    <Collapsible.Trigger className="tool-group-heading" disabled={steps.length <= 3}>
       <span><StateIcon state={working ? 'running' : failures ? 'failed' : 'completed'} />
         {working ? t('workspace-running-operations') : t('workspace-operations', { v0: indices.length })}{failures > 0 ? ` · ${t('workspace-need-attention', { v0: failures })}` : ''}</span>
-      {indices.length > 4 && !working && <ChevronRight size={14} className={open ? 'rotate' : ''} />}
+      {steps.length > 3 && <ChevronRight size={14} className={open ? 'rotate' : ''} />}
     </Collapsible.Trigger>
-    <Collapsible.Content>{(expanded ? steps : steps.slice(-4)).map(step => <ToolStep key={step.call_id} display={step} />)}
-      {!expanded && steps.length > 4 && <button className="earlier" onClick={() => setExpanded(true)}>{t('workspace-expand-all-operations', { count: steps.length })}</button>}
+    <Collapsible.Content>{(expanded || steps.length <= 3 ? steps : salient).map(step => <ToolStep key={step.call_id} display={step} />)}
+      {!expanded && steps.length > 3 && <button className="earlier" onClick={() => setExpanded(true)}>{t('workspace-expand-all-operations', { count: steps.length })}</button>}
     </Collapsible.Content>
   </Collapsible.Root>;
 }
@@ -105,10 +106,19 @@ function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier
   const messages = useAuiState(s => s.thread.messages);
   const viewport = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const [showLatest, setShowLatest] = useState(false);
+  const [unread, setUnread] = useState(0);
+  const previousTail = useRef<string | undefined>(undefined);
   const anchor = useRef<{ id: string } | undefined>(undefined);
   const virtual = useVirtualizer({ count: messages.length, getScrollElement: () => viewport.current,
     estimateSize: () => 200, overscan: 6, getItemKey: index => messages[index].id });
   useLayoutEffect(() => {
+    const tail = messages.at(-1)?.id;
+    if (!pinned.current && previousTail.current && tail !== previousTail.current) {
+      const index = messages.findIndex(item => item.id === previousTail.current);
+      if (index >= 0) setUnread(value => value + messages.length - index - 1);
+    }
+    previousTail.current = tail;
     if (pinned.current && messages.length) virtual.scrollToIndex(messages.length - 1, { align: 'end' });
     else if (anchor.current) {
       const index = messages.findIndex(message => message.id === anchor.current!.id);
@@ -119,7 +129,11 @@ function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier
   return <ThreadPrimitive.Viewport ref={viewport} className="transcript" autoScroll={false}
     scrollToBottomOnInitialize={false} scrollToBottomOnRunStart={false} onScroll={() => {
       const element = viewport.current;
-      if (element) pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+      if (element) {
+        pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+        setShowLatest(!pinned.current);
+        if (pinned.current) setUnread(0);
+      }
     }}>
     <div className="transcript-inner">
       {data.has_earlier && <button className="earlier" disabled={limit >= 10_000} onClick={() => {
@@ -136,7 +150,7 @@ function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier
         </div>)}
       </div>
     </div>
-    <button className="jump-latest" aria-label={t('workspace-jump-to-latest-progress')} onClick={() => { pinned.current = true; if (messages.length) virtual.scrollToIndex(messages.length - 1, { align: 'end' }); }}><ArrowDown size={15} />{t('workspace-latest-progress')}</button>
+    {showLatest && <button className="jump-latest" aria-label={t('workspace-jump-to-latest-progress')} onClick={() => { pinned.current = true; setShowLatest(false); setUnread(0); if (messages.length) virtual.scrollToIndex(messages.length - 1, { align: 'end' }); }}><ArrowDown size={15} />{unread ? t('ui-new-messages', { count: unread }) : t('workspace-latest-progress')}</button>}
   </ThreadPrimitive.Viewport>;
 }
 export function Conversation({ data, host, agent, onAgent, loadEarlier, limit, composer }: {
@@ -165,6 +179,13 @@ export function Composer({ target, draft, onDraft, send, busy }: {
   useLocale();
   const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const [sending, setSending] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const input = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    if (!input.current) return;
+    input.current.style.height = 'auto';
+    input.current.style.height = `${expanded ? 180 : Math.min(140, Math.max(52, input.current.scrollHeight))}px`;
+  }, [draft.text, expanded]);
   const submit = async () => {
     if (!target || !draft.text.trim() || sending || busy) return;
     if (terminal(target.status) && !draft.followUp) { setError(t('workspace-this-agent-has-finished-select-schedule-follow')); return; }
@@ -176,12 +197,15 @@ export function Composer({ target, draft, onDraft, send, busy }: {
     finally { setSending(false); }
   };
   return <div className="composer-wrap"><div className="composer">
-    <textarea aria-label={t('workspace-message-to-agent')} placeholder={target ? t('workspace-add-information-or-adjust-s-work', { v0: target.name }) : t('workspace-select-a-task-to-message-an-agent')}
-      value={draft.text} disabled={!target} rows={3} onChange={event => onDraft({ ...draft, text: event.target.value })}
+    <textarea ref={input} aria-label={t('workspace-message-to-agent')} placeholder={target ? t('workspace-add-information-or-adjust-s-work', { v0: target.name }) : t('workspace-select-a-task-to-message-an-agent')}
+      value={draft.text} disabled={!target} rows={2} onChange={event => onDraft({ ...draft, text: event.target.value })}
       onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} />
-    <div className="composer-controls"><div className="composer-target"><Bot size={13} /><span>{target?.name ?? t('workspace-select-a-task-first')}</span></div>
-      <label className="checkbox"><input type="checkbox" checked={draft.followUp} onChange={event => onDraft({ ...draft, followUp: event.target.checked })} />{t('workspace-schedule-follow-up')}</label>
+    <div className="composer-controls"><div className="composer-target"><Bot size={13} /><span title={target?.name}>{t('ui-recipient')}{target?.name ?? t('workspace-select-a-task-first')}</span></div>
+      <select className="send-mode" aria-label={t('ui-send-mode')} value={draft.followUp ? 'follow_up' : 'information'} onChange={event => { setError(''); onDraft({ ...draft, followUp: event.target.value === 'follow_up' }); }}>
+        <option value="information">{t('ui-send-information')}</option><option value="follow_up">{t('ui-send-task')}</option>
+      </select>
+      <button className="icon-button composer-expand" aria-label={expanded ? t('ui-collapse-input') : t('ui-expand-input')} aria-pressed={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
       <button className="send-button" aria-label={t('workspace-send-message')} disabled={!target || !draft.text.trim() || sending || busy} onClick={() => { void submit(); }}>{sending ? <StateIcon state="running" /> : <ArrowUp size={17} />}</button>
     </div>
-  </div>{error ? <p className="error composer-hint" role="alert">{errorText(error)}</p> : <p className="composer-hint">{target && terminal(target.status) ? t('workspace-follow-up-work-will-queue-and-execute') : t('workspace-messages-target-an-agent-generation-delivery-status')}<span>{t('workspace-ctrl-enter-to-send')}</span></p>}</div>;
+  </div>{error ? <p className="error composer-hint" role="alert">{errorText(error)}</p> : <p className="composer-hint">{target && terminal(target.status) ? t('ui-ended-recipient') : draft.followUp ? t('ui-append-help') : ''}<span>{t('workspace-ctrl-enter-to-send')}</span></p>}</div>;
 }
