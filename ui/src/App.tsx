@@ -13,6 +13,8 @@ import { Modal } from './components/Modal';
 import { Workbench } from './components/Workbench';
 import { Updates } from './components/Updates';
 import { WorkspaceStatus, WorkspaceFooter } from './components/WorkspaceStatus';
+import { TaskHeading } from './components/TaskHeading';
+import { useViewPreference, booleanPreference, optionalBooleanPreference, runNamesPreference } from './hooks/useViewPreference';
 import { Settings } from './components/Settings';
 import { Sidebar } from './components/Sidebar';
 import { WorkspaceSplit, useWideWorkspace } from './components/WorkspaceSplit';
@@ -29,9 +31,10 @@ export default function App() {
   const { data, host } = workspace;
   const [tab, setTab] = useState<'conversation' | 'findings' | 'overview'>('conversation');
   const wideWorkspace = useWideWorkspace();
-  const [showAgents, setShowAgents] = useState<boolean | null>(null);
+  const [showAgents, setShowAgents] = useViewPreference<boolean | null>('agents-visible', null, optionalBooleanPreference);
   const agentsVisible = showAgents ?? wideWorkspace;
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useViewPreference('sidebar-visible', true, booleanPreference);
+  const [runNames, setRunNames] = useViewPreference<Record<string, string>>(`run-names:${host?.state_dir ?? ''}`, {}, runNamesPreference);
   const [focused, setFocused] = useState(false);
   const [newTask, setNewTask] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -80,10 +83,10 @@ export default function App() {
     {updates && host && <Updates epoch={host.epoch} onClose={() => setUpdates(false)} onChanged={workspace.reset} />}
     {workbench && host && <Workbench epoch={host.epoch} onClose={() => setWorkbench(false)} onChanged={workspace.refresh} />}
     <WorkspaceSplit id="task-navigation" label={t('workspace-resize-task-list')} leading visible={showSidebar && !focused}
-      side={<Sidebar runs={data?.runs ?? []} selected={data?.selected} host={host} onSelect={id => { workspace.selectRun(id); setTab('conversation'); }}
+      side={<Sidebar names={runNames} runs={data?.runs ?? []} selected={data?.selected} host={host} onSelect={id => { workspace.selectRun(id); setTab('conversation'); }}
         onNew={() => setNewTask(true)} onSettings={() => setSettings(true)} onUpdates={() => setUpdates(true)} onWorkbench={() => setWorkbench(true)} busy={busy || closing} />}>
     <main className="workspace-main">
-      <header className="workspace-header"><button className="icon-button" title={t('workspace-toggle-task-list')} aria-label={t('workspace-toggle-task-list')} aria-pressed={showSidebar && !focused} onClick={() => { if (focused) { setFocused(false); setShowSidebar(true); } else setShowSidebar(value => !value); }}><PanelLeft size={18} /></button><div className="workspace-title"><div><h1 title={selectedRun?.target_path}>{selectedRun ? fileName(selectedRun.target_path) : t('workspace-start-a-new-analysis')}</h1>{selectedRun && <Status value={selectedRun.status} />}</div></div>
+      <header className="workspace-header"><button className="icon-button" title={t('workspace-toggle-task-list')} aria-label={t('workspace-toggle-task-list')} aria-pressed={showSidebar && !focused} onClick={() => { if (focused) { setFocused(false); setShowSidebar(true); } else setShowSidebar(value => !value); }}><PanelLeft size={18} /></button><div className="workspace-title">{selectedRun ? <TaskHeading key={selectedRun.id} run={selectedRun} name={runNames[selectedRun.id]} rename={value => setRunNames(previous => ({ ...previous, [selectedRun.id]: value }))} /> : <h1>{t('workspace-start-a-new-analysis')}</h1>}</div>
         <div className="header-actions"><button className="icon-button focus-toggle" title={focused ? t('workspace-exit-focus-mode') : t('workspace-focus-mode')} aria-label={t('workspace-focus-mode')} aria-pressed={focused} onClick={() => setFocused(value => !value)}><Focus size={17} /></button><button className="icon-button" aria-label={t('workspace-refresh-tasks')} onClick={workspace.refresh}><RefreshCw size={15} className={workspace.loading ? 'spin' : ''} /></button>
           {selectedRun && host && <><button disabled={pending || closing} onClick={() => { void command(() => api('export_report', { epoch: host.epoch, run: selectedRun.id })); }}><Download size={14} /><span>{t('workspace-export')}</span></button>
             {['running', 'waiting', 'queued'].includes(selectedRun.status) ? <button disabled={pending || closing} onClick={() => { void command(() => api('pause_run', { epoch: host.epoch, run: selectedRun.id })); }}><Pause size={14} />{t('workspace-pause')}</button> :
