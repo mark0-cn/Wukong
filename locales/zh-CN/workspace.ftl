@@ -240,3 +240,14 @@ ui-filter-tasks = 筛选任务
 ui-all-tasks = 全部任务
 ui-active-tasks = 进行中
 ui-history-tasks = 历史与暂停
+
+ui-updates = 更新
+ui-tools-environment = 工具环境
+ui-challenge-environment = 题目环境
+ui-environment-busy = 分析或操作进行中，环境管理暂不可用。
+ui-maintenance-options = 维护选项
+ui-settings-sections = 设置分类
+ui-general-settings = 语言与模型
+ui-advanced-settings = 高级配置
+ui-save-before-storage = 请先保存配置草稿，再切换存储位置。
+ui-tools-description = 准备或修复当前版本配套的工具镜像；启动后可运行自检并将其用于新任务。

@@ -246,3 +246,14 @@ ui-filter-tasks = Filter tasks
 ui-all-tasks = All tasks
 ui-active-tasks = Active
 ui-history-tasks = History and paused
+
+ui-updates = Updates
+ui-tools-environment = Tool environment
+ui-challenge-environment = Challenge environment
+ui-environment-busy = Environment management is unavailable during active work.
+ui-maintenance-options = Maintenance options
+ui-settings-sections = Settings categories
+ui-general-settings = Language and model
+ui-advanced-settings = Advanced configuration
+ui-save-before-storage = Save configuration changes before switching storage locations.
+ui-tools-description = Prepare or repair the tool image for this client version, then start it, run diagnostics and select it for new tasks.

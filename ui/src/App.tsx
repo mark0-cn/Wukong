@@ -38,7 +38,7 @@ export default function App() {
   const [focused, setFocused] = useState(false);
   const [newTask, setNewTask] = useState(false);
   const [settings, setSettings] = useState(false);
-  const [workbench, setWorkbench] = useState(false);
+  const [workbench, setWorkbench] = useState<'tools' | 'challenges' | null>(null);
   const [updates, setUpdates] = useState(false);
   useStartupUpdates(host, useCallback(() => setUpdates(true), []));
   const [settingsDirty, setSettingsDirty] = useState(false);
@@ -81,10 +81,10 @@ export default function App() {
   };
   return <div className="app-shell">
     {updates && host && <Updates epoch={host.epoch} onClose={() => setUpdates(false)} onChanged={workspace.reset} />}
-    {workbench && host && <Workbench epoch={host.epoch} onClose={() => setWorkbench(false)} onChanged={workspace.refresh} />}
+    {workbench && host && <Workbench mode={workbench} epoch={host.epoch} onClose={() => setWorkbench(null)} onChanged={workspace.refresh} />}
     <WorkspaceSplit id="task-navigation" label={t('workspace-resize-task-list')} leading visible={showSidebar && !focused}
       side={<Sidebar names={runNames} runs={data?.runs ?? []} selected={data?.selected} host={host} onSelect={id => { workspace.selectRun(id); setTab('conversation'); }}
-        onNew={() => setNewTask(true)} onSettings={() => setSettings(true)} onUpdates={() => setUpdates(true)} onWorkbench={() => setWorkbench(true)} busy={busy || closing} />}>
+        onNew={() => setNewTask(true)} onSettings={() => setSettings(true)} onUpdates={() => setUpdates(true)} onTools={() => setWorkbench('tools')} onWorkbench={() => setWorkbench('challenges')} busy={busy || closing} />}>
     <main className="workspace-main">
       <header className="workspace-header"><button className="icon-button" title={t('workspace-toggle-task-list')} aria-label={t('workspace-toggle-task-list')} aria-pressed={showSidebar && !focused} onClick={() => { if (focused) { setFocused(false); setShowSidebar(true); } else setShowSidebar(value => !value); }}><PanelLeft size={18} /></button><div className="workspace-title">{selectedRun ? <TaskHeading key={selectedRun.id} run={selectedRun} name={runNames[selectedRun.id]} rename={value => setRunNames(previous => ({ ...previous, [selectedRun.id]: value }))} /> : <h1>{t('workspace-start-a-new-analysis')}</h1>}</div>
         <div className="header-actions"><button className="icon-button focus-toggle" title={focused ? t('workspace-exit-focus-mode') : t('workspace-focus-mode')} aria-label={t('workspace-focus-mode')} aria-pressed={focused} onClick={() => setFocused(value => !value)}><Focus size={17} /></button><button className="icon-button" aria-label={t('workspace-refresh-tasks')} onClick={workspace.refresh}><RefreshCw size={15} className={workspace.loading ? 'spin' : ''} /></button>

@@ -173,3 +173,8 @@
   border-color:var(--border-strong);
   color:var(--text);
 }
+
+.settings-sections { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+.settings-sections button { background:transparent; border-color:transparent; }
+.settings-sections button[aria-pressed=true] { background:var(--hover); color:var(--text); border-color:var(--border); }
+[hidden] { display:none !important; }
