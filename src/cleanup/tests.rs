@@ -13,6 +13,24 @@ fn fixture() -> Result<(tempfile::TempDir, Cleanup)> {
     Ok((temp, cleanup))
 }
 #[test]
+fn malformed_configuration_diagnostics_never_echo_file_contents() -> Result<()> {
+    let (_temp, cleanup) = fixture()?;
+    fs::write(
+        cleanup.home.join("wukong.toml"),
+        "state_dir = 'private-sentinel-unclosed",
+    )?;
+    let error = cleanup
+        .plan(Selection {
+            data: true,
+            ..Default::default()
+        })
+        .err()
+        .expect("invalid TOML should block cleanup");
+    assert!(!format!("{error:#}").contains("private-sentinel"));
+    assert!(cleanup.home.join("wukong.toml").is_file());
+    Ok(())
+}
+#[test]
 fn data_cleanup_removes_probe_logs_without_losing_retained_docker_identity() -> Result<()> {
     let (_temp, cleanup) = fixture()?;
     let probe = cleanup

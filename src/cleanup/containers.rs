@@ -50,7 +50,8 @@ fn docker(home: &Path) -> Result<Docker> {
     let path = home.join("wukong.toml");
     let executable = if path.is_file() {
         files::safe(&path)?;
-        let raw: toml::Value = toml::from_str(&std::fs::read_to_string(path)?)?;
+        let raw: toml::Value = toml::from_str(&std::fs::read_to_string(path)?)
+            .map_err(|_| anyhow::anyhow!("cannot inspect Docker configuration"))?;
         raw.get("runtime")
             .and_then(|v| v.get("docker_executable"))
             .and_then(toml::Value::as_str)
@@ -111,7 +112,8 @@ fn challenge_ids(root: &Path) -> Result<BTreeSet<String>> {
             std::fs::metadata(&path)?.len() <= 1024 * 1024,
             "challenge manifest too large"
         );
-        let value: toml::Value = toml::from_str(&std::fs::read_to_string(&path)?)?;
+        let value: toml::Value = toml::from_str(&std::fs::read_to_string(&path)?)
+            .map_err(|_| anyhow::anyhow!("cannot inspect challenge identity"))?;
         let id = value
             .get("id")
             .and_then(toml::Value::as_str)
