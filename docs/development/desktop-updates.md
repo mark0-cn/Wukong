@@ -52,3 +52,5 @@ Windows 子进程保留原 PATH；标准 Docker CLI 不可见时尝试已存在�
 
 本地检查覆盖真实签名篡改拒绝、维护互斥、清单来源、前端按钮流程和布局。
 Linux Docker 验收与原生包冒烟检查分开报告；不能将它们称为 Windows Docker Desktop 的完整跨版本升级实机验收。
+
+Docker 的 info、inspect、version、ps 控制查询最多等待 30 秒，其他有界控制命令最多 600 秒；拉取和构建使用独立的长操作路径。stdout/stderr 写入临时文件并持续检查合计 16 MiB 上限，通过检查后才读入内存；超时或超限回收本次 CLI 进程。

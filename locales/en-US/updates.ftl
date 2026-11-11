@@ -103,3 +103,6 @@ updates-layer-downloaded = Downloaded
 updates-layer-extracting = Extracting
 updates-layer-verifying = Verifying checksum
 updates-layer-ready = Ready
+
+system-docker-command-timeout = Docker did not respond within { $seconds } seconds. Check the Docker service and retry.
+system-docker-output-limit = Docker output exceeded the control-command limit. Open diagnostics to investigate.
