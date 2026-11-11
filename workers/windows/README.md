@@ -54,6 +54,8 @@ The native caller must establish package trust first and protect the version dir
 
 The debugger component is the structured DbgEng helper. Its real x64/x86 trusted-fixture acceptance is separate from production broker isolation and offline VM installation acceptance. The fixture suite also exercises replay with distinct producer/verifier IDs, three fresh process/working-directory trials per architecture, exact input/target hashes and an observed `0xc0000005` exception. This establishes the trusted replay path, without claiming production metadata protection or exploitation impact. See the [cross-platform environment contract](../../docs/design/cross-platform-environments.md) and [runtime guide](../runtime/README.md).
 
+After opening a dump or attachment, the helper checks the engine's actual debuggee class before enabling inspection. Only Windows user-mode sessions and user-mode small/full dumps are accepted. Kernel and other classes are rejected; any failed open invalidates and closes the helper so partially opened state cannot be reused. The fixture suite records the observed user-mode class/qualifier for x64/x86; a real kernel-dump rejection fixture remains outside current acceptance.
+
 The native VM bootstrap and SCM service have callable implementation paths. Prepare fresh public setup media from a sealed payload and matching signed enrollment:
 
 ```powershell

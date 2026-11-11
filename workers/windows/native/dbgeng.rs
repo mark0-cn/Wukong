@@ -253,6 +253,9 @@ impl Engine {
             self.mode == "uninitialized",
             "helper already owns a debugging session"
         );
+        // Any failed open invalidates the helper; no partially opened dump or
+        // attachment may remain available through subsequent inspect requests.
+        self.invalidated = true;
         let timeout = integer(params, "timeout_secs", 30, 60)?.max(1) as u32 * 1000;
         match text(params, "mode")? {
             "dump" => {
@@ -281,6 +284,25 @@ impl Engine {
             _ => bail!("helper accepts dump or worker-owned process attachment"),
         }
         let state = self.wait(timeout)?;
+        let mut debuggee_class = 0;
+        let mut debuggee_qualifier = 0;
+        unsafe {
+            self.control
+                .GetDebuggeeType(&mut debuggee_class, &mut debuggee_qualifier)?;
+        }
+        ensure!(
+            debuggee_class == DEBUG_CLASS_USER_WINDOWS,
+            "only Windows user-mode debugging is supported; kernel and other debuggee classes are rejected"
+        );
+        if self.mode == "dump" {
+            ensure!(
+                matches!(
+                    debuggee_qualifier,
+                    DEBUG_USER_WINDOWS_SMALL_DUMP | DEBUG_USER_WINDOWS_DUMP
+                ),
+                "only Windows user-mode minidumps and full dumps are supported"
+            );
+        }
         unsafe {
             self.control.SetCodeLevel(DEBUG_LEVEL_ASSEMBLY)?;
         }
@@ -290,9 +312,11 @@ impl Engine {
             }
         }
         let architecture = unsafe { self.control.GetEffectiveProcessorType()? };
+        self.invalidated = false;
         Ok(
             json!({"state":state,"architecture":architecture,"engine_path":self.engine_path,
-            "mode":self.mode,"debug_privilege_enabled":self.debug_privilege,"event":self.event()}),
+            "mode":self.mode,"debuggee_class":debuggee_class,"debuggee_qualifier":debuggee_qualifier,
+            "debug_privilege_enabled":self.debug_privilege,"event":self.event()}),
         )
     }
 

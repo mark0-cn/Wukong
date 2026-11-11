@@ -120,6 +120,9 @@ def run_architecture(root, helper, engine_dir, architecture):
     opened = checked(runtime,"debug.start",engine="dbgeng",mode="dump",target=image["path"],dump="files/self.dmp")
     session = opened["session_id"]
     try:
+        event = checked(runtime,"debug.events",session_id=session)["events"][0]["payload"]
+        assert event["debuggee_class"] == 2 and event["debuggee_qualifier"] in {1024,1025},event
+        evidence["dump_debuggee_type"] = event
         registers = checked(runtime,"debug.inspect",session_id=session,kind="registers",limit=64)
         expected = "eip" if architecture == "x86" else "rip"
         pc = next(row["value"] for row in registers["data"]["registers"] if row["name"] == expected)
@@ -147,6 +150,9 @@ def run_architecture(root, helper, engine_dir, architecture):
     live = checked(runtime,"debug.start",engine="dbgeng",target=image["path"])
     session = live["session_id"]
     try:
+        event = checked(runtime,"debug.events",session_id=session)["events"][0]["payload"]
+        assert event["debuggee_class"] == 2 and event["debuggee_qualifier"] == 0,event
+        evidence["live_debuggee_type"] = event
         added = checked(runtime,"debug.control",session_id=session,action="breakpoint_add",
             symbol=target.stem+"!fixture_step",request_id="breakpoint-add")
         assert checked(runtime,"debug.control",session_id=session,action="breakpoint_add",
