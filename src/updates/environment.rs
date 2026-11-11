@@ -4,17 +4,40 @@ use crate::{config::AppConfig, workbench::Workbench};
 use anyhow::{Context, Result, ensure};
 use std::path::Path;
 
-pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(UiMessage)) -> Result<()> {
+pub fn prepare(
+    config: &AppConfig,
+    image: &str,
+    cancel: tokio_util::sync::CancellationToken,
+    diagnostics: impl Fn(&Path),
+    progress: impl Fn(UiMessage),
+    pull: impl Fn(crate::workbench::pull_progress::PullProgress),
+) -> Result<()> {
     let root = super::storage::cache_root()?
         .join("probes")
         .join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(root.join("logs"))?;
+    diagnostics(&root.join("logs/pull.log"));
     let mut probe = config.clone();
     probe.workbench.root = root.clone();
-    let workbench = Workbench::open(&probe)?;
+    let mut workbench = Workbench::open(&probe)?;
+    workbench.docker.cancellation = Some(cancel.clone());
+    progress(UiMessage::new("system-checking-docker-host"));
+    workbench.docker.preflight(image)?;
     let result = (|| {
         progress(UiMessage::new(
             "system-pulling-the-tool-image-docker-will-reuse-downloaded",
         ));
+        if workbench.docker.inspect("image", image)?.is_none() {
+            workbench
+                .docker
+                .pull_observed(image, &root.join("logs/pull.log"), &pull)?;
+        } else {
+            pull(crate::workbench::pull_progress::PullProgress {
+                cached: true,
+                finished: true,
+                ..Default::default()
+            });
+        }
         workbench.up(Some(image))?;
         progress(UiMessage::new(
             "system-checking-the-candidate-tool-environment",
@@ -25,23 +48,39 @@ pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(UiMessage)) ->
         );
         Ok(())
     })();
+    workbench.docker.cancellation = None;
     // Only resources bearing this newly created probe's workspace identity.
-    for (kind, name) in [
-        ("container", workbench.name("tools")),
-        ("volume", workbench.name("state")),
-        ("network", workbench.name("offline")),
-    ] {
-        if let Some(value) = workbench.docker.inspect(kind, &name)? {
-            workbench.owned(&value, &name)?;
-            let args = if kind == "container" {
-                vec![kind, "rm", "-f", &name]
-            } else {
-                vec![kind, "rm", &name]
-            };
-            workbench.docker.run(&args)?;
+    let cleanup = (|| -> Result<()> {
+        for (kind, name) in [
+            ("container", workbench.name("tools")),
+            ("volume", workbench.name("state")),
+            ("network", workbench.name("offline")),
+        ] {
+            if let Some(value) = workbench.docker.inspect(kind, &name)? {
+                workbench.owned(&value, &name)?;
+                let args = if kind == "container" {
+                    vec![kind, "rm", "-f", &name]
+                } else {
+                    vec![kind, "rm", &name]
+                };
+                workbench.docker.run(&args)?;
+            }
         }
+        Ok(())
+    })();
+    // A cleanup failure must not replace the original pull/doctor diagnosis.
+    match result {
+        Err(error) => {
+            if error.is::<crate::workbench::cancellation::Cancelled>() {
+                cleanup
+                    .context("cancelled preparation could not clean up its candidate resources")?;
+            } else if let Err(cleanup_error) = cleanup {
+                tracing::warn!(error = %cleanup_error, "candidate cleanup failed; preserving original diagnosis");
+            }
+            Err(error)
+        }
+        Ok(()) => cleanup,
     }
-    result
 }
 
 pub fn bind(path: &Path, workbench: &Workbench) -> Result<()> {

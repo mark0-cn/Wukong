@@ -11,7 +11,7 @@
 }
 .finding-list>input,.finding-list>select {
   width:100%;
-  font-size:12px;
+  font-size:var(--text-ui);
   margin-bottom:10px;
   padding:8px;
 }
@@ -31,7 +31,7 @@
   color: var(--text);
 }
 .finding-card>strong {
-  font-size:12px;
+  font-size:var(--text-ui);
   font-weight:500;
   line-height:1.65;
   display:block;
@@ -44,10 +44,10 @@
   margin-top:10px;
 }
 .finding-card .status {
-  font-size:12px;
+  font-size:var(--text-ui);
 }
 .finding-list>p {
-  font-size:12px;
+  font-size:var(--text-ui);
   padding:8px;
 }
 .finding-detail-scroll {
@@ -67,7 +67,7 @@
   margin-bottom:14px;
 }
 .finding-inspector h2 {
-  font-size:21px;
+  font-size:var(--text-heading-lg);
   line-height:1.6;
   margin-bottom:16px;
 }
@@ -79,11 +79,11 @@
   color:var(--text);
 }
 .finding-inspector>.subtle {
-  font-size:12px;
+  font-size:var(--text-ui);
   margin-top:9px;
 }
 .finding-inspector>.muted {
-  font-size:12px;
+  font-size:var(--text-ui);
 }
 .verification {
   padding:15px;
@@ -92,7 +92,7 @@
   border-radius:7px;
 }
 .verification>span:nth-child(2) {
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--muted);
   margin-left:13px;
 }
@@ -100,11 +100,11 @@
   margin:12px 0;
 }
 .verification details {
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--muted);
 }
 .verification pre {
-  font-size:12px;
+  font-size:var(--text-ui);
   padding-top:12px;
 }
 .evidence-tabs {
@@ -116,7 +116,7 @@
   margin-bottom:15px;
 }
 .evidence-tabs button {
-  font-size:12px;
+  font-size:var(--text-ui);
   white-space:normal;
   overflow-wrap:anywhere;
   max-width:100%;
@@ -140,11 +140,11 @@
   overflow-wrap:anywhere;
 }
 .evidence-heading strong {
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--text);
 }
 .evidence-heading>span {
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--muted);
 }
 .evidence-paging {
@@ -156,7 +156,7 @@
   border-top:1px solid var(--border-strong);
   border-bottom:1px solid var(--border-strong);
   gap:8px;
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--muted);
 }
 .evidence-paging button {
@@ -171,7 +171,7 @@
   overflow:auto;
   max-height:470px;
   color: var(--text);
-  font-size: 13px;
+  font-size:var(--text-ui);
 }
 .evidence-reader>.error {
   padding:9px 13px;
@@ -179,13 +179,13 @@
 .evidence-hash {
   padding:10px 13px;
   border-top:1px solid var(--border);
-  font-size:12px;
+  font-size:var(--text-ui);
   overflow-wrap:anywhere;
   color:var(--muted);
 }
 .source-calls {
   margin-top:20px;
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--muted);
 }
 .source-calls summary {
@@ -199,7 +199,7 @@
   margin-right:10px;
 }
 .source-calls pre {
-  font-size:12px;
+  font-size:var(--text-ui);
   margin-top:9px;
   color:var(--muted);
 }
@@ -217,7 +217,7 @@
   color:var(--muted);
 }
 .empty-state p {
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--muted);
 }
 
@@ -226,8 +226,8 @@
 .evidence-hash { display:grid; gap:6px; }
 .evidence-hash .copy-control { justify-self:start; }
 .evidence-heading .copy-control { align-self:flex-start; }
-.copy-control { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12px; }
-.copy-control button { font-size:12px; }
+.copy-control { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:var(--text-ui); }
+.copy-control button { font-size:var(--text-ui); }
 
 .environment-facts { margin:10px 0; }
 .environment-facts dl>div { display:grid; grid-template-columns:minmax(90px,1fr) minmax(0,2fr); gap:12px; padding:6px 0; border-bottom:1px solid var(--border); }

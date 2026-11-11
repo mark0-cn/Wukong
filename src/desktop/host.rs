@@ -70,6 +70,38 @@ async fn update_action(
         .map_err(failure)
 }
 #[tauri::command]
+async fn update_cancel(
+    controller: State<'_, Arc<super::updates::Controller>>,
+    operation_id: String,
+) -> Reply<super::updates::Status> {
+    controller.cancel(&operation_id).map_err(failure)
+}
+#[tauri::command]
+async fn update_log_directory(
+    controller: State<'_, Arc<super::updates::Controller>>,
+    app: tauri::AppHandle,
+    operation_id: String,
+) -> Reply<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = controller.log_directory(&operation_id).map_err(failure)?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(failure)
+}
+#[tauri::command]
+async fn update_diagnostics(
+    controller: State<'_, Arc<super::updates::Controller>>,
+    operation_id: String,
+) -> Reply<Option<PathBuf>> {
+    let state = controller
+        .diagnostic_snapshot(&operation_id)
+        .map_err(failure)?;
+    tokio::task::spawn_blocking(move || super::update_diagnostics::export(&state))
+        .await
+        .map_err(failure)?
+        .map_err(failure)
+}
+#[tauri::command]
 async fn update_storage(service: State<'_, Arc<Service>>, epoch: u64) -> Reply<serde_json::Value> {
     service.current_configuration(epoch).map_err(failure)?;
     Ok(
@@ -308,6 +340,9 @@ pub fn run(
             preferences_save,
             workspace_read,
             update_action,
+            update_cancel,
+            update_log_directory,
+            update_diagnostics,
             update_storage,
             update_cache_directory,
             update_data_directory,

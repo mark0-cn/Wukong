@@ -1,9 +1,13 @@
 //! Host-owned workbench lifecycle. Targets never receive the Docker socket.
 mod bundle;
+pub mod cancellation;
 pub mod challenge;
 pub mod cli;
+mod command_output;
 mod docker;
+mod docker_preflight;
 mod environment;
+pub mod pull_progress;
 mod services;
 
 use crate::config::AppConfig;
@@ -50,7 +54,9 @@ impl Workbench {
             .truncate(false)
             .write(true)
             .open(root.join("operation.lock"))?;
-        operation.lock()?;
+        operation
+            .try_lock()
+            .context("another workbench operation is active")?;
         let identity = root.join("workspace.json");
         if !identity.exists() {
             write_json(

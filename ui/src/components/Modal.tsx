@@ -3,12 +3,12 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-export function Modal({ title, description, children, onClose, wide = false }: {
-  title: string; description?: string; children: ReactNode; onClose: () => void; wide?: boolean;
+export function Modal({ title, description, children, onClose, wide = false, className = '' }: {
+  title: string; description?: string; children: ReactNode; onClose: () => void; wide?: boolean; className?: string;
 }) {
   useLocale();
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose(); }}>
-    <Dialog.Portal><Dialog.Overlay className="modal-overlay" /><Dialog.Content className={`modal ${wide ? 'modal-wide' : ''}`}>
+    <Dialog.Portal><Dialog.Overlay className="modal-overlay" /><Dialog.Content className={`modal ${wide ? 'modal-wide' : ''} ${className}`}>
       <div className="modal-heading"><div><Dialog.Title>{title}</Dialog.Title>
         <Dialog.Description className={description ? 'muted' : 'sr-only'}>{description ?? title}</Dialog.Description></div>
         <Dialog.Close className="icon-button" aria-label={t('workspace-close')}><X size={18} /></Dialog.Close></div>

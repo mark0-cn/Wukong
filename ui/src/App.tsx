@@ -22,6 +22,7 @@ import { compact, fileName, StateIcon, Status } from './components/Status';
 import { defaultTask, NewTask, ResumeTask } from './components/TaskDialogs';
 
 import { useDesktopLifecycle } from './hooks/useDesktopLifecycle';
+import { useUpdateController } from './hooks/useUpdateController';
 import { useStartupUpdates } from './hooks/useStartupUpdates';
 
 type Confirmation = { kind: 'close'; busy: boolean } | { kind: 'stop'; agent: Agent; run: string; epoch: number };
@@ -29,6 +30,7 @@ export default function App() {
   useLocale();
   const workspace = useWorkspace();
   const { data, host } = workspace;
+  const updateController = useUpdateController(host?.epoch, workspace.reset);
   const [tab, setTab] = useState<'conversation' | 'findings' | 'overview'>('conversation');
   const wideWorkspace = useWideWorkspace();
   const [showAgents, setShowAgents] = useViewPreference<boolean | null>('agents-visible', null, optionalBooleanPreference);
@@ -56,7 +58,7 @@ export default function App() {
   const recipient = selectedAgent ?? data?.agents.find(agent => agent.id === selectedRun?.root_id);
   const draftKey = `${host?.state_dir}|${data?.selected}|${recipient?.id}`;
   const draft = drafts[draftKey] ?? { text: '', followUp: false };
-  const busy = Boolean(host?.execution || host?.pending_operations || pending);
+  const busy = Boolean(host?.execution || host?.pending_operations || updateController.working || pending);
   const anyDraft = settingsDirty || Object.values(drafts).some(value => value.text.trim()) || Boolean(target.trim() || task !== initialTask.current);
   const { close, closing } = useDesktopLifecycle({ busy, hasDraft: anyDraft,
     onConfirm: busy => setConfirmation({ kind: 'close', busy }),
@@ -80,11 +82,11 @@ export default function App() {
     workspace.selectRun(id); workspace.refresh(); setResume(undefined); setTab('conversation');
   };
   return <div className="app-shell">
-    {updates && host && <Updates epoch={host.epoch} onClose={() => setUpdates(false)} onChanged={workspace.reset} />}
-    {workbench && host && <Workbench mode={workbench} epoch={host.epoch} onClose={() => setWorkbench(null)} onChanged={workspace.refresh} />}
+    {updates && host && <Updates controller={updateController} epoch={host.epoch} onClose={() => setUpdates(false)} onChanged={workspace.reset} />}
+    {workbench && host && <Workbench controller={updateController} mode={workbench} epoch={host.epoch} onClose={() => setWorkbench(null)} onChanged={workspace.refresh} />}
     <WorkspaceSplit id="task-navigation" label={t('workspace-resize-task-list')} leading visible={showSidebar && !focused}
-      side={<Sidebar names={runNames} runs={data?.runs ?? []} selected={data?.selected} host={host} onSelect={id => { workspace.selectRun(id); setTab('conversation'); }}
-        onNew={() => setNewTask(true)} onSettings={() => setSettings(true)} onUpdates={() => setUpdates(true)} onTools={() => setWorkbench('tools')} onWorkbench={() => setWorkbench('challenges')} busy={busy || closing} />}>
+      side={<Sidebar operation={updateController.status?.operation_id && (updateController.working || ['setup', 'prepare'].includes(updateController.status.action ?? '') || updateController.status.phase === 'error') ? { active: updateController.working, text: updateController.status.cancelling ? t('updates-cancelling') : updateController.status.message ? message(updateController.status.message) : t('updates-setup-working') } : undefined} names={runNames} runs={data?.runs ?? []} selected={data?.selected} host={host} onSelect={id => { workspace.selectRun(id); setTab('conversation'); }}
+        onNew={() => setNewTask(true)} onSettings={() => setSettings(true)} onUpdates={() => { setWorkbench(null); setUpdates(true); }} onTools={() => { setUpdates(false); setWorkbench('tools'); }} onWorkbench={() => setWorkbench('challenges')} busy={busy || closing} />}>
     <main className="workspace-main">
       <header className="workspace-header"><button className="icon-button" title={t('workspace-toggle-task-list')} aria-label={t('workspace-toggle-task-list')} aria-pressed={showSidebar && !focused} onClick={() => { if (focused) { setFocused(false); setShowSidebar(true); } else setShowSidebar(value => !value); }}><PanelLeft size={18} /></button><div className="workspace-title">{selectedRun ? <TaskHeading key={selectedRun.id} run={selectedRun} name={runNames[selectedRun.id]} rename={value => setRunNames(previous => ({ ...previous, [selectedRun.id]: value }))} /> : <h1>{t('workspace-start-a-new-analysis')}</h1>}</div>
         <div className="header-actions"><button className="icon-button focus-toggle" title={focused ? t('workspace-exit-focus-mode') : t('workspace-focus-mode')} aria-label={t('workspace-focus-mode')} aria-pressed={focused} onClick={() => setFocused(value => !value)}><Focus size={17} /></button><button className="icon-button" aria-label={t('workspace-refresh-tasks')} onClick={workspace.refresh}><RefreshCw size={15} className={workspace.loading ? 'spin' : ''} /></button>
@@ -104,7 +106,7 @@ export default function App() {
       </>}
       <div className="workspace-content">{data && host && selectedRun ? <>
         <WorkspaceSplit id="agent-inspection" label={t('workspace-resize-collaboration-panel')} visible={agentsVisible && !focused}
-          side={<Agents agents={data.agents} selected={workspace.agent} onSelect={selectAgent} canStop={!pending && !closing} onClose={() => setShowAgents(false)} onStop={agent => setConfirmation({ kind: 'stop', agent, run: selectedRun.id, epoch: host.epoch })} />}>
+          side={<Agents key={`${host.state_dir}:${selectedRun.id}`} scopeKey={`${host.state_dir}:${selectedRun.id}`} agents={data.agents} selected={workspace.agent} onSelect={selectAgent} canStop={!pending && !closing} onClose={() => setShowAgents(false)} onStop={agent => setConfirmation({ kind: 'stop', agent, run: selectedRun.id, epoch: host.epoch })} />}>
         <div className="primary-panel">{tab === 'conversation' ? <Conversation key={`${host.epoch}:${data.selected}:${workspace.agent ?? 'all'}`} data={data} host={host} agent={selectedAgent} onAgent={selectAgent} loadEarlier={workspace.loadEarlier} limit={workspace.historyLimit}
           composer={<Composer key={draftKey} target={recipient} draft={draft} busy={pending || closing} onDraft={value => setDrafts(previous => ({ ...previous, [draftKey]: value }))}
             send={async (draft, agent) => {

@@ -383,3 +383,258 @@ test.describe('high density desktop', () => {
     await page.screenshot({ path: 'target/ui-polish-hidpi.png' });
   });
 });
+
+test('agent tree shows siblings, selected ancestry and collapsed subtree health', async ({ page }) => {
+  await page.goto('/');
+  const tree = page.getByRole('tree', { name: 'Agent 父子任务树' });
+  await expect(tree.getByRole('treeitem')).toHaveCount(3);
+  await expect(tree.getByRole('treeitem').nth(0)).toHaveAttribute('aria-level', '1');
+  await expect(tree.getByRole('treeitem').nth(1)).toHaveAttribute('aria-level', '2');
+  await expect(tree.getByRole('treeitem').nth(2)).toHaveAttribute('aria-level', '2');
+  await page.locator('.agent-card').filter({ hasText: '输入边界分析' }).click();
+  await expect(page.locator('.agent-breadcrumb')).toHaveText(/主分析 Agent.*输入边界分析/);
+  await expect(page.locator('.agent-inspector')).toContainText('跟踪 parse_record');
+  await page.getByRole('button', { name: '折叠 主分析 Agent', exact: true }).click();
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await expect(tree).toContainText('2 个子任务');
+  await expect(tree).toContainText('2 运行中');
+  await expect(tree).toContainText('包含当前选中的任务');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.agents[2] = { ...state.data.agents[2], status: 'failed', error: 'verification backend disconnected' };
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(tree).toContainText('1 异常');
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await page.getByRole('button', { name: '展开 主分析 Agent', exact: true }).click();
+  await expect(tree.getByRole('treeitem')).toHaveCount(3);
+  await expect(tree.getByText('verification backend disconnected')).toBeVisible();
+  await page.screenshot({ path: 'target/agent-tree-selected.png' });
+});
+
+test('agent tree folding is scoped to the task and keyboard navigation does not select implicitly', async ({ page }) => {
+  await page.goto('/');
+  const tree = page.getByRole('tree');
+  await tree.getByRole('treeitem').first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(tree.getByRole('treeitem').nth(1)).toBeFocused();
+  expect(await tree.locator('[aria-selected="true"]').count()).toBe(0);
+  await page.keyboard.press('ArrowLeft');
+  await expect(tree.getByRole('treeitem').first()).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await page.locator('.run-card').filter({ hasText: 'archive.elf' }).click();
+  await expect(tree).toContainText('归档分析 Agent');
+  await page.locator('.run-card').filter({ hasText: 'parser.elf' }).click();
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await page.reload();
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await page.getByRole('button', { name: '展开 主分析 Agent', exact: true }).click();
+  await expect(tree.getByRole('treeitem')).toHaveCount(3);
+});
+
+test('deep branches can be focused without inventing new parent relationships', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    const original = state.data.agents[1];
+    state.data.agents = Array.from({ length: 7 }, (_, index) => ({ ...original, id: `deep-${index}`, name: `层级 ${index}`, parent_id: index ? `deep-${index - 1}` : null, role: index ? 'analyst' : 'root' }));
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.getByRole('treeitem')).toHaveCount(4);
+  await page.getByRole('button', { name: '聚焦分支：层级 3', exact: true }).last().click();
+  await expect(page.getByRole('treeitem').first()).toContainText('层级 3');
+  await expect(page.getByRole('treeitem')).toHaveCount(4);
+  await page.getByRole('button', { name: '返回上级', exact: true }).click();
+  await expect(page.getByRole('treeitem').first()).toContainText('层级 2');
+  await page.getByRole('button', { name: '完整任务树', exact: true }).click();
+  await expect(page.getByRole('treeitem').first()).toContainText('层级 0');
+});
+
+test('agent hierarchy remains readable in Chinese, English and a narrow collaboration panel', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.agent-card').filter({ hasText: '输入边界分析' }).click();
+  await page.screenshot({ path: 'target/agent-tree-zh-CN.png' });
+  await page.locator('.agents-panel').screenshot({ path: 'target/agent-tree-panel-zh-CN.png' });
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByLabel('界面语言', { exact: true }).selectOption('en-US');
+  await page.getByLabel('Close', { exact: true }).click();
+  await expect(page.locator('.agent-role').filter({ hasText: 'Analysis' }).first()).toBeVisible();
+  await page.screenshot({ path: 'target/agent-tree-en-US.png' });
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.getByRole('separator', { name: 'Resize collaboration panel' }).focus();
+  for (let i = 0; i < 8; i++) await page.keyboard.press('ArrowRight');
+  await expect(page.locator('.agents-panel')).toBeVisible();
+  expect(await page.locator('.agent-list').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: 'target/agent-tree-narrow.png' });
+});
+
+test('keyboard activation of a disclosure does not select its agent', async ({ page }) => {
+  await page.goto('/');
+  const collapse = page.getByRole('button', { name: '折叠 主分析 Agent', exact: true });
+  await collapse.focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByRole('treeitem')).toHaveCount(1);
+  await expect(page.getByRole('treeitem').first()).toHaveAttribute('aria-selected', 'false');
+  const expand = page.getByRole('button', { name: '展开 主分析 Agent', exact: true });
+  await expand.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('treeitem')).toHaveCount(3);
+  await expect(page.getByRole('treeitem').first()).toHaveAttribute('aria-selected', 'false');
+});
+
+
+for (const locale of ['zh-CN', 'en-US']) {
+  test(`first setup separates steps and errors at a small window (${locale})`, async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 700 });
+    await page.goto('/');
+    if (locale === 'en-US') {
+      await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+      await page.getByLabel('界面语言').selectOption('en-US');
+      await page.getByLabel('Close', { exact: true }).click();
+    }
+    await page.evaluate(() => {
+      const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+      const state = { version: '0.2.0', needs_setup: true, phase: 'idle', environment_step: null,
+        message: { code: 'system-current-version-is-up-to-date', args: {} }, available: null,
+        notes: '', downloaded: 0, total: null, prepared: null, recovery: null, pending: false };
+      Object.assign(window, { __setupTest: state });
+      native.invoke = async (command: string, args: any) => {
+        if (command !== 'update_action') return invoke(command, args);
+        if (args.action === 'setup') {
+          Object.assign(state, { phase: 'error', environment_step: 'docker', message: {
+            code: 'system-docker-credential-missing', args: { helper: 'docker-credential-desktop' },
+            detail: 'error getting credentials - exec: docker-credential-desktop: executable file not found in %PATH%' } });
+        }
+        return { ...state };
+      };
+    });
+    await page.getByRole('button', { name: locale === 'zh-CN' ? '更新' : 'Updates', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.locator('.setup-steps li')).toHaveCount(3);
+    await expect(dialog.locator('.maintenance-options')).toHaveCount(0);
+    await expect(dialog.locator('.header-actions .primary')).toBeInViewport();
+    await expect(dialog.locator('.modal-heading')).toBeInViewport();
+    expect(await dialog.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
+    await page.screenshot({ path: `target/setup-ready-${locale}.png` });
+    await dialog.locator('.header-actions .primary').click();
+    await expect(dialog.getByRole('alert')).toHaveCount(1);
+    await expect(dialog.getByRole('alert')).toContainText('docker-credential-desktop');
+    await expect(dialog.locator('.update-status')).toHaveCount(0);
+    await expect(dialog.locator('.setup-steps li').first()).toHaveAttribute('data-state', 'failed');
+    await dialog.locator('.update-error summary').click();
+    await expect(dialog.locator('.workbench-result')).toContainText('error getting credentials');
+    await dialog.locator('.header-actions .primary').scrollIntoViewIfNeeded();
+    await expect(dialog.locator('.header-actions .primary')).toBeInViewport();
+    await expect(dialog.locator('.modal-heading')).toBeInViewport();
+    expect(await dialog.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true);
+    await page.screenshot({ path: `target/setup-error-${locale}.png` });
+  });
+}
+
+test('Windows storage paths display cleanly but unchanged paths retain native identity', async ({ page }) => {
+  await page.goto('/');
+  const original = String.raw`\\?\C:\Users\tester\AppData\Local\WukongData\.wukong`;
+  await page.evaluate(original => {
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    const state = (window as any).__desktopTest;
+    state.host = { ...state.host, execution: null, state_dir: original };
+    native.invoke = async (command: string, args: any) => {
+      if (command === 'update_storage') return { data_dir: original, cache_dir: String.raw`\\?\UNC\server\cache` };
+      if (command === 'update_data_directory') { state.requests.push({ command, args }); return; }
+      return invoke(command, args);
+    };
+    (window as any).__emitDesktop('workspace-changed', null);
+  }, original);
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByRole('button', { name: '存储位置', exact: true }).click();
+  await expect(page.getByLabel('任务与证据目录')).toHaveValue(original.slice(4));
+  await expect(page.getByLabel('更新缓存目录')).toHaveValue(String.raw`\\server\cache`);
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: '应用数据目录' }).click();
+  const requests = await page.evaluate(() => (window as any).__desktopTest.requests);
+  expect(requests.find((r: any) => r.command === 'update_data_directory')?.args.destination).toBe(original);
+});
+
+
+test('image layer progress updates while pulling and keeps self-check separate', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.goto('/');
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    const progress = { layers: [{ id: 'abcdef123456', state: 'ready' }, { id: '123456abcdef', state: 'downloaded' }], elapsed_ms: 65000, finished: false, cached: false, truncated: false };
+    Object.assign(window, { __pullTest: progress });
+    native.invoke = async (command: string, args: any) => command === 'update_action' ? {
+      version: '0.2.0', needs_setup: true, phase: progress.finished ? 'validating' : 'pulling', environment_step: progress.finished ? 'validating' : 'pulling',
+      operation_id: 'pull-progress', revision: progress.finished ? 101 : 100, busy: true, cancellable: true, action: 'setup',
+      image_version: '0.2.0', image_progress: progress,
+      message: { code: progress.finished ? 'system-checking-the-candidate-tool-environment' : 'system-pulling-the-tool-image-docker-will-reuse-downloaded', args: {} },
+      available: null, notes: '', downloaded: 0, total: null, prepared: null, recovery: null, pending: false,
+    } : invoke(command, args);
+  });
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  await expect(page.getByText('已就绪 1 层 / 已发现 2 层')).toBeVisible();
+  await page.getByText('镜像层详情', { exact: true }).click();
+  await expect(page.locator('.pull-layers')).toContainText('已下载');
+  await page.locator('.image-pull-progress').scrollIntoViewIfNeeded();
+  await expect(page.locator('.modal-heading')).toBeInViewport();
+  await page.screenshot({ path: 'target/setup-image-progress.png' });
+  await page.evaluate(() => { const p = (window as any).__pullTest; p.finished = true; p.layers[1].state = 'ready'; });
+  await expect(page.getByText('镜像已拉取，环境自检仍需单独完成')).toBeVisible();
+  await expect(page.locator('.setup-steps li').nth(2)).toHaveAttribute('data-state', 'active');
+  await expect(page.getByRole('progressbar')).toHaveCount(0);
+});
+
+
+test('background preparation reattaches from either entry and cancellation settles without restarting', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    const state = { version: '0.2.0', needs_setup: true, phase: 'pulling', environment_step: 'pulling',
+      operation_id: 'same-operation', revision: 100, busy: true, cancellable: true, cancelling: false,
+      message: { code: 'system-pulling-the-tool-image-docker-will-reuse-downloaded', args: {} },
+      available: null, notes: '', downloaded: 0, total: null, prepared: null, recovery: null, pending: false };
+    Object.assign(window, { __backgroundState: state, __cancelIds: [] });
+    native.invoke = async (command: string, args: any) => {
+      if (command === 'update_action') return { ...state };
+      if (command === 'update_cancel') {
+        (window as any).__cancelIds.push(args.operationId);
+        Object.assign(state, { revision: 101, busy: false, cancellable: false, phase: 'cancelled', message: { code: 'system-preparation-cancelled', args: {} } });
+        return { ...state };
+      }
+      return invoke(command, args);
+    };
+  });
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  await page.getByRole('button', { name: '收起到后台', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.sidebar-operation')).toContainText('正在拉取');
+  await page.getByRole('button', { name: '工具环境', exact: true }).click();
+  await expect(page.getByRole('button', { name: '自检并修复环境' })).toBeDisabled();
+  await page.getByRole('button', { name: '取消准备', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('准备已取消');
+  await expect(page.getByRole('button', { name: '自检并修复环境' })).toBeEnabled();
+  expect(await page.evaluate(() => (window as any).__cancelIds)).toEqual(['same-operation']);
+});
+
+
+test('readable typography survives large displays and the minimum workspace', async ({ page }) => {
+  await page.goto('/');
+  for (const [width, height] of [[2560, 1369], [1100, 700]]) {
+    await page.setViewportSize({ width, height });
+    await expect(page.locator('.composer textarea')).toBeVisible();
+    expect(await page.locator('.composer textarea').evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(16);
+    expect(await page.locator('.markdown').first().evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(16);
+    expect(await page.getByRole('button', { name: '工作区设置', exact: true }).evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(14);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: `target/typography-workspace-${width}.png` });
+  }
+  await page.setViewportSize({ width: 2560, height: 1369 });
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.runs = []; state.data.selected = null; state.host.execution = null; state.revision++;
+    (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.welcome')).toBeVisible();
+  await page.screenshot({ path: 'target/typography-welcome-2560.png' });
+});

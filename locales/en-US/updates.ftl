@@ -58,3 +58,103 @@ updates-enter-a-new-directory-that-does-not = Enter a new directory that does no
 updates-export-offline-migration-package = Export offline migration package
 updates-processing-please-wait-for-completion = Processing. Please wait for completion.
 updates-operation-result = Operation result
+
+system-checking-docker-host = Checking Docker and credential helper availability…
+system-docker-unavailable = Cannot connect to Docker. Start Docker Desktop (or the Docker service), then retry. If Docker was just installed, fully exit and reopen Wukong.
+system-docker-linux-required = Docker must run Linux containers. Switch Docker Desktop to Linux containers, then retry.
+system-docker-config-unreadable = Cannot read Docker login configuration. Check config.json in DOCKER_CONFIG or your user .docker directory; its contents are not included in this error.
+system-docker-credential-missing = Docker cannot find { $helper }. Fully exit and reopen Wukong after installing Docker Desktop. If it still fails, repair Docker Desktop or add the directory containing this helper to PATH. Your login configuration has not been changed.
+system-docker-command-failed = Docker failed ({ $status }). The end of its output is available below. Full log: { $log }
+
+system-activating-tool-environment = Activating the verified tool environment…
+
+updates-setup-description = Prepare the tools for this client before your first analysis. Your tasks and challenge environments are kept separately.
+updates-setup-required = Not prepared
+updates-setup-working = In progress
+updates-setup-failed = Needs attention
+updates-environment-ready = Prepared
+updates-setup-ready-to-start = Select Prepare tool environment to check Docker, download the matching image and run validation.
+updates-diagnostic-output = View diagnostic output (log tail)
+updates-copy-error = Copy error
+updates-retry-setup = Retry preparation
+updates-setup-progress = Environment preparation steps
+updates-step-docker = Check Docker
+updates-step-docker-help = Install and start Docker with Linux container support. We check the connection and required credential helper.
+updates-step-image = Download tool image
+updates-step-image-help = Use the image matched to this client. Allow at least 25 GiB in Docker storage; downloaded layers can be reused on retry.
+updates-step-validation = Validate and activate
+updates-step-validation-help = Test the tools before activation. Once ready, configure your model provider in Workspace settings to start analysis.
+updates-step-done = Complete
+updates-step-pending = Pending
+
+updates-image-progress = Tool image pull progress
+updates-image-version = Tool image · v{ $version }
+updates-image-cached = Reusing the local image; no download required
+updates-image-pulled = Image pulled; environment validation is separate
+updates-image-layers = { $ready } ready / { $total } discovered layers
+updates-image-waiting = Waiting for Docker layer events…
+updates-image-elapsed = Elapsed { $time }
+updates-image-layer-note = Counts reflect discovered layers, not downloaded bytes. Each layer has a different size; the total may increase as Docker discovers layers.
+updates-image-layer-details = Layer details
+updates-image-layer-limit = Showing up to 256 layers. See the full log for remaining events.
+updates-layer-waiting = Waiting
+updates-layer-downloading = Downloading
+updates-layer-downloaded = Downloaded
+updates-layer-extracting = Extracting
+updates-layer-verifying = Verifying checksum
+updates-layer-ready = Ready
+
+system-docker-command-timeout = Docker did not respond within { $seconds } seconds. Check the Docker service and retry.
+system-docker-output-limit = Docker output exceeded the control-command limit. Open diagnostics to investigate.
+
+updates-refresh-failed = Progress connection interrupted; retrying automatically. The operation may still be running.
+
+updates-last-layer-change = Last layer progress change: { $seconds } seconds ago
+updates-no-recent-layer-change = No new layer progress for a while. Docker may still be transferring a large layer. Check diagnostic output if needed; this does not mean the operation failed.
+
+system-tool-container-stopped = The tool container is stopped or missing. Start it or repair the environment before running a full self-check.
+system-health-tools-failed = Some tool self-checks failed. Review the checks or repair the environment.
+system-managing-tool-environment = Managing the tool environment…
+system-tool-action-completed = Tool environment operation completed. Run a health check to verify availability.
+system-checking-tool-health = Checking tool environment health…
+system-health-check-completed = Environment health check completed.
+updates-health-title = Environment health
+updates-health-pass = Passed
+updates-health-fail = Unavailable / failed
+updates-health-unknown = Not checked
+updates-health-config = Configuration
+updates-health-configured = Configured
+updates-health-unconfigured = Not configured
+updates-health-docker = Docker connection
+updates-health-container = Tool container running
+updates-health-tools = Tool self-check
+updates-health-time = Last connection check: { $time }
+updates-health-tool-time = Last tool self-check: { $time }
+updates-health-unchecked-help = Configuration alone does not confirm availability. Run a quick check or a full self-check.
+updates-technical-details = Technical details
+updates-health-quick = Quick health check
+updates-health-full = Full tool self-check
+
+system-operation-not-cancellable = This operation has ended or entered a non-cancellable stage. Refresh its status.
+system-preparation-cancelled = Preparation cancelled. Downloaded image layers can be reused on retry.
+updates-background = Continue in background
+updates-cancelling = Cancelling and cleaning up…
+updates-cancel-preparation = Cancel preparation
+updates-critical-phase = This stage cannot be cancelled. Installation or environment activation must finish; closing this panel keeps the operation running.
+
+system-tool-image-needs-repair = The local tool image is missing. Use Validate and repair environment to prepare it again.
+
+updates-step-details = Step details
+
+updates-help-daemon = Docker may be stopped or using Windows containers. Start Docker and switch to Linux containers, then retry.
+updates-help-credentials = The Docker credential helper or login state needs attention. Repair Docker Desktop or refresh its login, restart Wukong, then retry. Wukong does not delete your login configuration.
+updates-help-network = The connection may have timed out or dropped. Check Docker proxy, DNS and connectivity, then retry. Cached image layers will be reused.
+updates-help-rate-limit = The registry may be rate limiting requests. Wait before retrying or sign in through Docker with an account that has available quota. Avoid repeated immediate retries.
+updates-help-disk = Storage is insufficient. Check the Docker data disk and update cache disk. Change cache location in workspace settings and image storage in Docker settings.
+updates-help-unknown = This error could not be classified. Inspect the full local logs and technical details, or export a diagnostic bundle for investigation.
+updates-diagnostics-title = Diagnostics and recovery
+updates-retry-operation = Retry after resolving
+updates-open-log-directory = Open log directory
+updates-export-diagnostics = Export redacted diagnostics
+updates-diagnostics-redaction = Export includes platform, stage, error category and check counts only. Raw logs, paths, configuration and credentials are omitted. Full logs remain on this computer.
+updates-diagnostics-saved = Diagnostics saved:

@@ -24,7 +24,7 @@ export function WorkspaceSplit({ id, label, side, children, visible, leading = f
   const mainId = `${id}-main`, sideId = `${id}-side`;
   const panelIds = visible ? leading ? [sideId, mainId] : [mainId, sideId] : [mainId];
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: `wukong-layout-${id}`, panelIds, storage, onlySaveAfterUserInteractions: true });
-  const aside = <Panel key={sideId} id={sideId} className="split-content" defaultSize={leading ? 224 : 268}
+  const aside = <Panel key={sideId} id={sideId} className="split-content" defaultSize={leading ? 224 : 290}
     minSize={leading ? 180 : 220} maxSize={leading ? 320 : 400} groupResizeBehavior="preserve-pixel-size">{side}</Panel>;
   const separator = <Separator key={`${id}-separator`} className="workspace-separator" aria-label={label} />;
   return <Group className="workspace-split" id={id} orientation="horizontal" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
