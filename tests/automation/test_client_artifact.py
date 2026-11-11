@@ -29,3 +29,8 @@ class ClientTests(unittest.TestCase):
                 (folder / "wukong.exe").write_bytes(b"tamper")
                 with self.assertRaises(ValueError):
                     client.verify("windows", folder, root)
+
+    def test_desktop_and_acceptance_profiles_differ(self):
+        self.assertNotEqual(client.TARGETS["linux"][0], client.TARGETS["linux-desktop"][0])
+        self.assertIn("ubuntu-22.04", client.TARGETS["linux-desktop"][2])
+        self.assertNotEqual(client.identity("linux")["profile"], client.identity("linux-desktop")["profile"])

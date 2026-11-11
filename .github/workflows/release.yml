@@ -24,6 +24,7 @@ jobs:
       ci_run: ${{ steps.reuse.outputs.ci_run }}
       windows_run: ${{ steps.reuse.outputs.windows_run }}
       linux_run: ${{ steps.reuse.outputs.linux_run }}
+      linux_desktop_run: ${{ steps.reuse.outputs.linux_desktop_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,6 +93,13 @@ jobs:
     uses: ./.github/workflows/build-client.yml
     with:
       target: linux
+
+  linux-desktop-client:
+    needs: metadata
+    if: needs.metadata.outputs.linux_desktop_run == ''
+    uses: ./.github/workflows/build-client.yml
+    with:
+      target: linux-desktop
 
   image:
     needs: metadata
@@ -215,10 +223,14 @@ jobs:
     secrets: inherit
 
   linux-installer:
-    needs: metadata
+    if: >-
+      always() && needs.metadata.result == 'success' &&
+      (needs.linux-desktop-client.result == 'success' || needs.metadata.outputs.linux_desktop_run != '')
+    needs: [metadata, linux-desktop-client]
     uses: ./.github/workflows/build-installer.yml
     with:
       target: linux
+      client_run: ${{ needs.metadata.outputs.linux_desktop_run }}
     secrets: inherit
 
   package:
@@ -313,7 +325,7 @@ jobs:
 
   summary:
     if: always()
-    needs: [metadata, checks, windows-client, linux-client, windows-installer, linux-installer, image, acceptance, package, publish]
+    needs: [metadata, checks, windows-client, linux-client, linux-desktop-client, windows-installer, linux-installer, image, acceptance, package, publish]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

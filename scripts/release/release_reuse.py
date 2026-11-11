@@ -37,7 +37,7 @@ def successful_artifact(target, jobs, artifacts):
 def discover(repository, sha, current_run, request=api):
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("Expected exact source SHA")
-    result = dict(ci_run="", windows_run="", linux_run="")
+    result = dict(ci_run="", **{target.replace("-", "_") + "_run": "" for target in TARGETS})
     runs = request(f"repos/{repository}/actions/runs?head_sha={sha}&per_page=100")["workflow_runs"]
     for run in runs:
         if str(run["id"]) == str(current_run):
@@ -59,11 +59,11 @@ def discover(repository, sha, current_run, request=api):
                 result["ci_run"] = str(run["id"])
             except ValueError:
                 pass
-        if not all(result[target + "_run"] for target in TARGETS):
+        if not all(result[target.replace("-", "_") + "_run"] for target in TARGETS):
             artifacts = request(endpoint + "/artifacts?per_page=100")["artifacts"]
             for target in TARGETS:
-                if not result[target + "_run"] and successful_artifact(target, jobs, artifacts):
-                    result[target + "_run"] = str(run["id"])
+                if not result[target.replace("-", "_") + "_run"] and successful_artifact(target, jobs, artifacts):
+                    result[target.replace("-", "_") + "_run"] = str(run["id"])
         if all(result.values()):
             break
     return result
@@ -75,7 +75,7 @@ def main():
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         # API failure must not weaken validation. Full CI and local builds are the fallback.
         print(f"::warning::Reuse discovery unavailable ({type(error).__name__}); running full checks/builds")
-        result = dict(ci_run="", windows_run="", linux_run="")
+        result = dict(ci_run="", **{target.replace("-", "_") + "_run": "" for target in TARGETS})
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
         for key, value in result.items():
             stream.write(f"{key}={value}\n")
