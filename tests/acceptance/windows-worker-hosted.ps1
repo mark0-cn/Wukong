@@ -59,8 +59,11 @@ if($Mode -eq 'Block'){
         $proofFile.Flush($true)
     }finally{$proofFile.Dispose()}
     # Keep the CI agent online. Deny external addresses for every shipped
-    # executable at both media and installed paths; only loopback is excluded.
-    $external=@('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff')
+    # executable at both media and installed paths. Exclude loopback and this
+    # machine's explicitly enrolled management address, never its whole subnet.
+    $external=@($fixture.external_addresses)
+    if($external.Count -lt 3 -or $external.Count -gt 5){throw 'Invalid fixture external address inventory'}
+    foreach($range in $external){if($range -cnotmatch '^[0-9a-fA-F:.]+-[0-9a-fA-F:.]+$'){throw 'Invalid fixture address range'}}
     for($index=0;$index -lt $programs.Count;$index++){
         $workerRule=New-Object -ComObject HNetCfg.FWRule
         $workerRule.Name=$rulePrefix+$index
@@ -74,7 +77,7 @@ if($Mode -eq 'Block'){
         $workerRule.RemoteAddresses=$external -join ','
         $firewall.Rules.Add($workerRule)
     }
-    @{blocked_program_paths=$programs.Count;scope='external_worker_executable_network_not_whole_vm'} | ConvertTo-Json -Compress
+    @{blocked_program_paths=$programs.Count;management_address=$fixture.management_ip;scope='external_worker_executable_network_not_whole_vm'} | ConvertTo-Json -Compress
     exit 0
 }
 if(-not (Test-Path -LiteralPath $marker)){throw 'No cold preflight proof; refusing resource cleanup or restart'}

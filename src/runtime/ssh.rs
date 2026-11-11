@@ -229,11 +229,22 @@ mod tests {
             .read_to_end(&mut bytes)?;
         ensure!(bytes.len() <= 16 * 1024, "acceptance profile exceeds limit");
         let profile: Profile = serde_json::from_slice(&bytes)?;
+        let address: std::net::Ipv4Addr = profile
+            .config
+            .ssh_host
+            .as_deref()
+            .context("missing hosted management address")?
+            .parse()?;
         ensure!(
-            profile.config.ssh_host.as_deref() == Some("127.0.0.1")
+            !address.is_loopback()
+                && !address.is_unspecified()
+                && !address.is_multicast()
                 && profile.config.managed_ssh.is_some(),
-            "hosted acceptance must use its local installed managed worker"
+            "hosted acceptance requires an enrolled local IPv4 worker"
         );
+        // Prove this is an address assigned to the dedicated test machine,
+        // rather than allowing the fixture to connect to another installation.
+        drop(std::net::UdpSocket::bind((address, 0))?);
         let client = RuntimeClient::connect(profile.config).await?;
         ensure!(
             client.identity().package_sha256 == profile.manifest_sha256,

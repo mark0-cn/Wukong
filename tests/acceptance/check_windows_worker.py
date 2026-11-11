@@ -8,6 +8,7 @@ final disconnected Windows 10 VM or production target-isolation acceptance.
 import argparse
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -49,6 +50,34 @@ def save(path, value):
     with path.open('x', encoding='utf-8') as output:
         json.dump(value, output, indent=2)
         output.write('\n')
+
+
+def local_management_ip():
+    for info in socket.getaddrinfo(socket.gethostname(), 0, socket.AF_INET, socket.SOCK_STREAM):
+        address = ipaddress.IPv4Address(info[4][0])
+        if address.is_loopback or address.is_unspecified or address.is_multicast:
+            continue
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as proof:
+            proof.bind((str(address), 0))
+        return str(address)
+    raise RuntimeError('Hosted fixture has no assigned non-loopback IPv4 management address')
+
+
+def external_addresses(management):
+    address = ipaddress.IPv4Address(management)
+    if address.is_loopback or address.is_unspecified or address.is_multicast:
+        raise ValueError('Fixture management must match the enrollment address contract')
+    exclusions = sorted([(int(ipaddress.IPv4Address('127.0.0.0')), int(ipaddress.IPv4Address('127.255.255.255'))),
+                         (int(address), int(address))])
+    result, start = [], 0
+    for low, high in exclusions:
+        if start < low:
+            result.append(f'{ipaddress.IPv4Address(start)}-{ipaddress.IPv4Address(low-1)}')
+        start = high + 1
+    if start <= 0xffffffff:
+        result.append(f'{ipaddress.IPv4Address(start)}-255.255.255.255')
+    result.append('::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff')
+    return result
 
 
 def diagnostics(installed):
@@ -111,11 +140,12 @@ def main():
         run([package / 'runtime/openssh/ssh-keygen.exe', '-q', '-t', 'ed25519', '-N', '', '-f', ssh_private])
         fields = ssh_private.with_suffix('.pub').read_text(encoding='utf-8').split()
         with socket.socket() as candidate:
-            candidate.bind(('127.0.0.1', 0))
+            candidate.bind(('0.0.0.0', 0))
             port = candidate.getsockname()[1]
+        management = local_management_ip()
         draft = dict(schema=1, generation=1, installation_id=installation, environment_id='hosted-windows',
                      controller_public_key=public['public_key'], payload_manifest_sha256=sealed['manifest_sha256'],
-                     management_peer='127.0.0.1', ssh_port=port,
+                     management_peer=management, ssh_port=port,
                      ssh_public_key=dict(algorithm=fields[0], key=fields[1]))
         draft_path = work / 'enrollment-draft.json'
         save(draft_path, draft)
@@ -126,7 +156,8 @@ def main():
         for name in executables:
             programs.extend([media / 'payload' / name, installed / 'versions' / sealed['manifest_sha256'] / name])
         save(plan_path, dict(installation_id=installation, manifest_sha256=sealed['manifest_sha256'],
-                            media=str(media), installed_root=str(installed), programs=sorted(set(map(str, programs)))))
+                            media=str(media), installed_root=str(installed), programs=sorted(set(map(str, programs))),
+                            management_ip=management, external_addresses=external_addresses(management)))
         report['network'] = control('Block')
         reviewed = hashlib.sha256((enrollment / 'enrollment.json').read_bytes()).hexdigest()
         installed_result = json.loads(run([media / 'WukongWorkerSetup.exe', 'install-reviewed', media / 'setup.json',
@@ -141,7 +172,7 @@ def main():
             raise RuntimeError('Installed public host fingerprint differs from its key')
         host_pin = keys / 'host-pin'
         host_pin.write_text(f'wukong-worker-{installation} {host["algorithm"]} {host["key"]}\n', encoding='utf-8', newline='\n')
-        config = dict(backend='ssh', ssh_host='127.0.0.1', ssh_executable=str(package / 'runtime/openssh/ssh.exe'),
+        config = dict(backend='ssh', ssh_host=management, ssh_executable=str(package / 'runtime/openssh/ssh.exe'),
                       request_timeout_secs=30, managed_ssh=dict(installation_id=installation,
                       user=connection['ssh_user'], port=port, identity_file=str(ssh_private),
                       known_hosts_file=str(host_pin), host_key=host))

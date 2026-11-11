@@ -13,6 +13,19 @@ spec.loader.exec_module(fixture)
 
 
 class HostedWorkerGuardTests(unittest.TestCase):
+    def test_network_denial_exempts_only_the_enrolled_local_address_and_loopback(self):
+        import ipaddress
+        for management in ['10.0.0.7','192.0.2.8','172.16.0.2']:
+            ranges=[tuple(map(ipaddress.ip_address, item.split('-'))) for item in fixture.external_addresses(management)]
+            def blocked(text):
+                address=ipaddress.ip_address(text)
+                return any(low.version==address.version and low<=address<=high for low,high in ranges)
+            self.assertFalse(blocked(management))
+            for address in ['127.0.0.1','127.255.255.255','::1']: self.assertFalse(blocked(address))
+            for address in ['10.0.0.8','192.0.2.9','1.1.1.1','126.255.255.255','128.0.0.0','255.255.255.255','::2','2001:db8::1']: self.assertTrue(blocked(address),address)
+        for invalid in ['127.0.0.1','0.0.0.0','224.0.0.1','::1']:
+            with self.assertRaises(ValueError):fixture.external_addresses(invalid)
+
     def test_public_diagnostics_exclude_private_records_and_bound_trusted_logs(self):
         import json
         with tempfile.TemporaryDirectory() as temporary:
