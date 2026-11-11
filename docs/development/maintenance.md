@@ -22,7 +22,7 @@ worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录
 桌面视图偏好通过 `useViewPreference` 保存为本机 WebView 数据；任务别名按工作区路径和 run ID 区分，不能写回任务指令或作为目标身份。设置与存储草稿留在设置组件状态中，目录操作仍经过既有 epoch 与维护锁检查。
 
 默认采用中性深灰底色，金色表示主要操作或选中，蓝色表示执行中，绿色表示成功，黄色表示等待/警告，红色表示失败。状态同时保留图标和文字。
-正文使用 14px，辅助信息至少 12px，代码与原始证据使用 13px 等宽字体。调整布局时检查桌面最小窗口下的滚动、长路径和消息草稿保留。
+字体栈采用桌面系统无衬线字体，代码使用系统等宽字体；统一字号变量定义在 `ui/src/theme.css`。根字号 16px，正文和输入正文 16px，导航、按钮、表单及代码 14px，时间与路径等辅助信息至少 13px；字号以 rem 表示，避免组件重新硬编码小字号。调整布局时检查桌面最小窗口下的滚动、长路径和消息草稿保留。
 颜色层级参考 [Radix Colors](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale)，工作区分区参考 [VS Code](https://code.visualstudio.com/docs/editing/getting-started/userinterface)。
 
 ## 工具文档

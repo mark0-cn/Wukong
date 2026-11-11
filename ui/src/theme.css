@@ -1,6 +1,18 @@
 /* Neutral surfaces follow Radix's background / interaction / border / text roles.
    Gold is reserved for selection and primary actions; status colors carry meaning. */
+/* Font families follow the desktop system-font convention used by Codex.
+   Sizes are rem-based: UI 14px, reading 16px, captions 13px at the default root. */
 :root {
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-code: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --text-caption: .8125rem;
+  --text-ui: .875rem;
+  --text-body: 1rem;
+  --text-heading-sm: 1.125rem;
+  --text-heading: 1.25rem;
+  --text-heading-lg: 1.375rem;
+  --text-display: 1.625rem;
+  --text-hero: 1.875rem;
   color-scheme: dark;
   --bg: #18191c;
   --sidebar: #151619;

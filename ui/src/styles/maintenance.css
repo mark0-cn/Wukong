@@ -34,7 +34,7 @@
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size:var(--text-ui);
 }
 /* Desktop lifecycle controls share the workbench's spacing and color tokens. */
 .updates-modal { padding:0; overflow:hidden; }
@@ -43,14 +43,14 @@
 .updates-panel { display:grid; gap:20px; min-width:0; }
 .update-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
 .update-summary>div { display:grid; gap:8px; padding:14px 16px; border:1px solid var(--border); border-radius:8px; background:var(--field); }
-.update-summary strong { font-size:16px; }
+.update-summary strong { font-size:var(--text-body); }
 .setup-steps { list-style:none; display:grid; gap:0; padding:0; margin:0; }
 .setup-steps li { display:grid; grid-template-columns:32px minmax(0,1fr); gap:14px; padding:16px 4px; border-bottom:1px solid var(--border); }
 .setup-steps li:last-child { border-bottom:0; }
-.setup-step-icon { display:flex; align-items:center; justify-content:center; width:32px; height:32px; border:1px solid var(--border-strong); border-radius:50%; color:var(--muted); font-size:13px; }
+.setup-step-icon { display:flex; align-items:center; justify-content:center; width:32px; height:32px; border:1px solid var(--border-strong); border-radius:50%; color:var(--muted); font-size:var(--text-ui); }
 .setup-step-title { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 16px; }
-.setup-step-title>span { color:var(--muted); font-size:12px; }
-.setup-steps p { margin:6px 0 0; color:var(--muted); line-height:1.7; font-size:13px; }
+.setup-step-title>span { color:var(--muted); font-size:var(--text-ui); }
+.setup-steps p { margin:6px 0 0; color:var(--muted); line-height:1.7; font-size:var(--text-ui); }
 .setup-steps [data-state=active] .setup-step-icon { color:var(--info); border-color:var(--info); }
 .setup-steps [data-state=done] .setup-step-icon { color:var(--success); border-color:var(--success); }
 .setup-steps [data-state=failed] .setup-step-icon { color:var(--error); border-color:var(--error); }
@@ -75,7 +75,7 @@ progress {
 .maintenance-options>.header-actions { margin-top:12px; }
 
 .image-pull-progress { display:grid; gap:12px; padding:16px; background:var(--field); border:1px solid var(--border); border-radius:8px; min-width:0; }
-.image-pull-progress p { margin:0; font-size:12px; line-height:1.7; }
+.image-pull-progress p { margin:0; font-size:var(--text-ui); line-height:1.7; }
 .pull-summary { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 16px; }
 .pull-layers { list-style:none; padding:0; margin:12px 0 0; max-height:180px; overflow:auto; }
 .pull-layers li { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px 16px; padding:6px 0; border-bottom:1px solid var(--border); }
@@ -85,19 +85,19 @@ progress {
 .environment-health h3, .environment-health p { margin:0; }
 .health-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
 .health-grid>div { display:grid; gap:8px; padding:12px; background:var(--field); border:1px solid var(--border); border-radius:6px; }
-.health-grid span { font-size:12px; color:var(--muted); }
+.health-grid span { font-size:var(--text-ui); color:var(--muted); }
 
 .background-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
 .background-controls p { flex-basis:100%; margin:0; }
 .sidebar-footer .sidebar-operation { border:1px solid var(--border); padding:10px; align-items:flex-start; }
-.sidebar-operation span { white-space:normal; overflow-wrap:anywhere; font-size:12px; }
+.sidebar-operation span { white-space:normal; overflow-wrap:anywhere; font-size:var(--text-ui); }
 .sidebar-operation svg { flex-shrink:0; }
 
 .updates-footer { flex-shrink:0; padding:16px 22px; border-top:1px solid var(--border); display:grid; gap:12px; max-height:42dvh; overflow:auto; }
 .updates-running .updates-panel { gap:14px; }
 .updates-running .update-summary>div { padding:10px 12px; gap:4px; }
 .setup-steps-compact li { padding:8px 4px; }
-.setup-steps-compact details { margin-top:4px; font-size:12px; color:var(--muted); }
+.setup-steps-compact details { margin-top:4px; font-size:var(--text-ui); color:var(--muted); }
 .setup-steps-compact [data-state=active] { padding-block:14px; }
 
 .update-diagnostics { border-top:1px solid var(--border); padding-top:14px; display:grid; gap:12px; min-width:0; }

@@ -36,12 +36,12 @@
   margin-bottom:16px;
 }
 .modal-heading h2 {
-  font-size:20px;
+  font-size:var(--text-heading);
   color:var(--text);
   font-weight:500;
 }
 .modal-heading p {
-  font-size:12px;
+  font-size:var(--text-ui);
   line-height:1.8;
   margin:9px 0 0;
   max-width:720px;
@@ -55,23 +55,23 @@
   display:flex;
   flex-direction:column;
   gap:8px;
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--text);
   margin-bottom:19px;
 }
 .field>small {
-  font-size:12px;
+  font-size:var(--text-ui);
   color:var(--muted);
   line-height:1.6;
 }
 .field>input,.field>select {
   width:100%;
-  font-size:12px;
+  font-size:var(--text-ui);
   background:var(--surface);
   border-color:var(--border-strong);
 }
 .field>textarea {
-  font-size:12px;
+  font-size:var(--text-ui);
   background:var(--surface);
   border-color:var(--border-strong);
 }
@@ -86,7 +86,7 @@
 }
 .input-action>input {
   flex:1;
-  font-size:12px;
+  font-size:var(--text-ui);
   background:var(--surface);
   border-color:var(--border-strong);
 }
@@ -107,11 +107,11 @@
 }
 .modal-footer>span {
   margin-right:auto;
-  font-size:12px;
+  font-size:var(--text-ui);
   line-height:1.65;
 }
 .modal-footer button {
-  font-size:12px;
+  font-size:var(--text-ui);
 }
 .settings-toolbar {
   display:flex;
@@ -125,7 +125,7 @@
   display:flex;
   align-items:center;
   gap:7px;
-  font-size:12px;
+  font-size:var(--text-ui);
   overflow:hidden;
   text-overflow:ellipsis;
   margin-right:auto;
@@ -134,7 +134,7 @@
   overflow-wrap:anywhere;
 }
 .settings-toolbar>button {
-  font-size:12px;
+  font-size:var(--text-ui);
   padding:7px 8px;
 }
 .settings-scroll {
@@ -148,7 +148,7 @@
 }
 .settings-group h3 {
   color:var(--text);
-  font-size:13px;
+  font-size:var(--text-ui);
   margin-bottom:16px;
 }
 .settings-grid {
@@ -158,7 +158,7 @@
 }
 .settings-grid>.field {
   margin-bottom:17px;
-  font-size:12px;
+  font-size:var(--text-ui);
 }
 .toml-editor {
   width:100%;
