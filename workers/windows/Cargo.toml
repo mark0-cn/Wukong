@@ -1,0 +1,26 @@
+[package]
+name = "wukong-windows-worker"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "wukong-dbgeng"
+path = "native/dbgeng_main.rs"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+hex = "0.4"
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_System_Diagnostics_Debug_Extensions", "Win32_System_LibraryLoader", "Win32_Security", "Win32_System_Threading"] }
+windows-core = "0.62"
+
+[profile.release]
+lto = "thin"
+strip = true

@@ -140,6 +140,10 @@
     "workers/tests/README.md": {
       "en": "8bbcddf6c547b8293fa24b9ce251a989e70152fdc147fd85430339e5f23189f3",
       "zh-CN": "340d0443f6f171a65fca9a55cdcb8dc75ee8582eec51f40c691e5b19d1ea53ff"
+    },
+    "workers/windows/README.md": {
+      "en": "ea314a7f6e893357d934856088e0ad6ade4925dc03f16d31e4afebca6070a54f",
+      "zh-CN": "76548595c36eb6aa86c7f8891a2df935cfbe6630e1b2e69987ef8a130f34c071"
     }
   }
 }

@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 
 from worker_common import safe_env, sha256_file
 from worker_runtime import Runtime
@@ -23,6 +24,17 @@ FIXTURE = r'''
 volatile LONG fixture_value = 0x12345678;
 __declspec(noinline) LONG fixture_step(LONG value) { return value ^ 0x1020304; }
 int wmain(int argc, wchar_t **argv) {
+    if (argc == 3 && wcscmp(argv[1], L"--replay") == 0) {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+        HANDLE file = CreateFileW(argv[2], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        if (file == INVALID_HANDLE_VALUE) return 4;
+        char input[5] = {0}; DWORD count = 0;
+        BOOL read = ReadFile(file, input, sizeof(input), &count, NULL);
+        CloseHandle(file);
+        if (read && count == 5 && input[0]=='C' && input[1]=='R' && input[2]=='A' && input[3]=='S' && input[4]=='H')
+            RaiseException(EXCEPTION_ACCESS_VIOLATION, EXCEPTION_NONCONTINUABLE, 0, NULL);
+        return 0;
+    }
     if (argc == 3 && wcscmp(argv[1], L"--dump") == 0) {
         HANDLE file = CreateFileW(argv[2], GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
         if (file == INVALID_HANDLE_VALUE) return 2;
@@ -81,6 +93,37 @@ def checked(runtime, method, **params):
     return runtime.dispatch(method, params)
 
 
+def trusted_replay(runtime, image):
+    payload = b"CRASH: self-built trusted fixture"
+    input_file = checked(runtime, "file.put", path="replay-input.bin",
+        data_base64=__import__("base64").b64encode(payload).decode())
+    job = checked(runtime, "poc.verify", target=image["path"], input=input_file["path"],
+        args=["--replay", "@@"], trials=3, timeout_secs=3,
+        call_id="native-fixture-replay", producer_agent_id="fixture-producer", verifier_agent_id="fixture-verifier")
+    deadline = time.monotonic() + 20
+    while job["state"] not in {"completed", "failed", "cancelled", "lost"}:
+        if time.monotonic() >= deadline:
+            checked(runtime, "job.cancel", job_id=job["job_id"])
+            raise AssertionError("trusted native replay did not complete")
+        time.sleep(0.05)
+        job = checked(runtime, "job.status", job_id=job["job_id"])
+    result = job.get("result", {})
+    assert job["state"] == "completed" and result.get("passed") is True, job
+    assert result["attempts"] == result["successes"] == 3, result
+    assert result["producer_agent_id"] != result["verifier_agent_id"], result
+    assert result["target"]["sha256"] == image["sha256"], result
+    assert result["input"]["sha256"] == hashlib.sha256(payload).hexdigest(), result
+    assert result["fresh_working_directory_per_trial"], result
+    directory = runtime.root / "jobs" / job["job_id"]
+    trials = sorted(directory.glob("trial-*"))
+    assert len(trials) == 3 and len({path.resolve() for path in trials}) == 3, trials
+    assert all(sha256_file(path / "input.bin") == hashlib.sha256(payload).hexdigest() for path in trials), trials
+    assert len({row["trial"] for row in result["results"]}) == 3, result
+    assert all(row["crash_signature"] == "exception:0xc0000005" for row in result["results"]), result
+    assert all(row["metadata_protected"] is False for row in result["results"]), result
+    return job
+
+
 def run_architecture(root, helper, engine_dir, architecture):
     target, pdb = build_fixture(root, architecture)
     state = root / ("worker_" + architecture)
@@ -102,6 +145,7 @@ def run_architecture(root, helper, engine_dir, architecture):
     checked(runtime,"file.put",path="self.dmp",data_base64=__import__("base64").b64encode(dump_path.read_bytes()).decode())
     evidence = {"architecture":architecture,"target_sha256":image["sha256"],"dump_sha256":sha256_file(dump_path),
                 "fixture_source_sha256":hashlib.sha256(FIXTURE.encode()).hexdigest(),"doctor":doctor}
+    evidence["trusted_replay"] = trusted_replay(runtime, image)
     opened = checked(runtime,"debug.start",engine="dbgeng",mode="dump",target=image["path"],dump="files/self.dmp")
     session = opened["session_id"]
     try:

@@ -123,6 +123,25 @@ jobs:
           cargo test --locked --all-targets
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
+      - name: Standalone Windows worker bootstrap
+        if: needs.changes.outputs.rust == 'true'
+        run: |
+          $locator = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installation = & $locator -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -or -not $installation) { throw 'MSVC x64 build tools are unavailable' }
+          $setup = Join-Path $installation 'Common7/Tools/VsDevCmd.bat'
+          $command = '"{0}" -no_logo -arch=x64 -host_arch=x64 >nul && set' -f $setup
+          & cmd.exe /d /c $command | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') }
+          }
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo clippy --locked --manifest-path workers/windows/Cargo.toml --all-targets --target-dir target/windows-worker-native -- -D warnings
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m scripts.worker.build_native
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
   linux:
     needs: changes
     if: needs.changes.outputs.linux == 'true'
