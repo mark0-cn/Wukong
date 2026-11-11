@@ -189,6 +189,32 @@ fn logged_failure(log: &Path, status: &str) -> crate::i18n::Message {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn cancellation_of_a_streaming_command_reaps_the_client() {
+        let directory = tempfile::tempdir().unwrap();
+        let log = directory.path().join("pull.log");
+        let token = tokio_util::sync::CancellationToken::new();
+        let cancel = token.clone();
+        let trigger = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            cancel.cancel();
+        });
+        let mut docker = super::Docker::new(if cfg!(windows) { "cmd.exe" } else { "sh" });
+        docker.cancellation = Some(token);
+        let args: &[&str] = if cfg!(windows) {
+            &["/D", "/C", "for /L %i in (1,0,2) do @rem wait"]
+        } else {
+            &["-c", "while :; do :; done"]
+        };
+        let started = std::time::Instant::now();
+        let error = docker
+            .logged_internal(args, &log, Some(&mut |_| {}))
+            .unwrap_err();
+        trigger.join().unwrap();
+        assert!(error.is::<crate::workbench::cancellation::Cancelled>());
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+        std::fs::remove_file(log).unwrap();
+    }
+    #[test]
     fn failed_command_includes_bounded_tail_and_preserves_the_full_log() {
         let temp = tempfile::tempdir().unwrap();
         let log = temp.path().join("pull.log");
