@@ -25,6 +25,10 @@ jobs:
       windows_run: ${{ steps.reuse.outputs.windows_run }}
       linux_run: ${{ steps.reuse.outputs.linux_run }}
       linux_desktop_run: ${{ steps.reuse.outputs.linux_desktop_run }}
+      windows_installer_id: ${{ steps.reuse.outputs.windows_installer_id }}
+      windows_installer_run: ${{ steps.reuse.outputs.windows_installer_run }}
+      linux_installer_id: ${{ steps.reuse.outputs.linux_installer_id }}
+      linux_installer_run: ${{ steps.reuse.outputs.linux_installer_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -82,7 +86,7 @@ jobs:
 
   windows-client:
     needs: metadata
-    if: needs.metadata.outputs.windows_run == ''
+    if: needs.metadata.outputs.windows_run == '' && needs.metadata.outputs.windows_installer_id == ''
     uses: ./.github/workflows/build-client.yml
     with:
       target: windows
@@ -96,7 +100,7 @@ jobs:
 
   linux-desktop-client:
     needs: metadata
-    if: needs.metadata.outputs.linux_desktop_run == ''
+    if: needs.metadata.outputs.linux_desktop_run == '' && needs.metadata.outputs.linux_installer_id == ''
     uses: ./.github/workflows/build-client.yml
     with:
       target: linux-desktop
@@ -214,23 +218,27 @@ jobs:
   windows-installer:
     if: >-
       always() && needs.metadata.result == 'success' &&
-      (needs.windows-client.result == 'success' || needs.metadata.outputs.windows_run != '')
+      (needs.windows-client.result == 'success' || needs.metadata.outputs.windows_run != '' || needs.metadata.outputs.windows_installer_id != '')
     needs: [metadata, windows-client]
     uses: ./.github/workflows/build-installer.yml
     with:
       target: windows
       client_run: ${{ needs.metadata.outputs.windows_run }}
+      installer_artifact_id: ${{ needs.metadata.outputs.windows_installer_id }}
+      installer_run: ${{ needs.metadata.outputs.windows_installer_run }}
     secrets: inherit
 
   linux-installer:
     if: >-
       always() && needs.metadata.result == 'success' &&
-      (needs.linux-desktop-client.result == 'success' || needs.metadata.outputs.linux_desktop_run != '')
+      (needs.linux-desktop-client.result == 'success' || needs.metadata.outputs.linux_desktop_run != '' || needs.metadata.outputs.linux_installer_id != '')
     needs: [metadata, linux-desktop-client]
     uses: ./.github/workflows/build-installer.yml
     with:
       target: linux
       client_run: ${{ needs.metadata.outputs.linux_desktop_run }}
+      installer_artifact_id: ${{ needs.metadata.outputs.linux_installer_id }}
+      installer_run: ${{ needs.metadata.outputs.linux_installer_run }}
     secrets: inherit
 
   package:
@@ -261,7 +269,7 @@ jobs:
           chmod +x client/wukong
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: '*-installer'
+          pattern: '*-installer-v1'
           merge-multiple: true
           path: dist
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -274,6 +282,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         run: |
           npm ci
+          # Internal reuse manifests are not user release assets.
+          rm dist/installer-windows.json dist/installer-linux.json
           python -m scripts.release.desktop_manifest --directory dist --validation validation
           client/wukong verify-update --directory dist
           cp validation/validation-summary.json validation/doctor.json dist/

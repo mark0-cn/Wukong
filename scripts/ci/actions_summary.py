@@ -52,7 +52,7 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         metadata = needs.get("metadata", {}).get("outputs", {})
         for target in ("windows", "linux"):
             result = needs.get(target + "-client", {}).get("result")
-            passed = passed and (result == "success" or (result == "skipped" and bool(metadata.get(target + "_run"))))
+            passed = passed and (result == "success" or (result == "skipped" and bool(metadata.get(target + "_run") or metadata.get(target + "_installer_id"))))
         if context.get("event") == "push":
             passed = passed and needs.get("publish", {}).get("result") == "success"
     else:
@@ -90,6 +90,9 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         for key, label in (("ci_run", "完整 master CI"), ("windows_run", "Windows 客户端"), ("linux_run", "Linux 验收 CLI"), ("linux_desktop_run", "Linux 桌面客户端")):
             source = metadata.get(key)
             lines.append(f"- {label}: " + (f"[复用同一提交的运行 #{cell(source)}](https://github.com/{context['repository']}/actions/runs/{source})" if source else "本次执行"))
+        for target in ("windows", "linux"):
+            artifact_id = metadata.get(target + "_installer_id")
+            lines.append(f"- {target} 安装器: " + (f"复用已验收 artifact #{cell(artifact_id)}" if artifact_id else "本次打包与验收"))
         lines.append("")
         digest = needs.get("image", {}).get("outputs", {}).get("digest")
         image_ref = manifest.get("image") if manifest else None
