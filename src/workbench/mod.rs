@@ -2,6 +2,7 @@
 mod bundle;
 pub mod challenge;
 pub mod cli;
+mod command_output;
 mod docker;
 mod docker_preflight;
 mod environment;

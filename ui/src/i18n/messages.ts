@@ -239,9 +239,11 @@ export interface Messages {
   'system-cleanup-completed-current-recovery-and-container-referenced-images': undefined;
   'system-configuration-saved-new-tasks-use-it-resumed-tasks': undefined;
   'system-docker-command-failed': { log: string | number; status: string | number };
+  'system-docker-command-timeout': { seconds: string | number };
   'system-docker-config-unreadable': undefined;
   'system-docker-credential-missing': { helper: string | number };
   'system-docker-linux-required': undefined;
+  'system-docker-output-limit': undefined;
   'system-docker-unavailable': undefined;
   'system-download-and-environment-checks-completed-ready-to-install': undefined;
   'system-download-and-verify-the-update-first': undefined;

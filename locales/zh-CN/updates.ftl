@@ -103,3 +103,6 @@ updates-layer-downloaded = 已下载
 updates-layer-extracting = 解压中
 updates-layer-verifying = 校验中
 updates-layer-ready = 已就绪
+
+system-docker-command-timeout = Docker 在 { $seconds } 秒内没有响应。请检查 Docker 服务后重试。
+system-docker-output-limit = Docker 输出超过控制命令的限制，请查看诊断信息。

@@ -32,11 +32,19 @@ impl Docker {
         command
     }
     pub fn run(&self, args: &[&str]) -> Result<String> {
-        let output = self
-            .command()
-            .args(args)
-            .output()
-            .with_context(|| format!("start Docker at {}", self.executable))?;
+        let seconds = if matches!(
+            args.first(),
+            Some(&"info" | &"inspect" | &"version" | &"ps")
+        ) {
+            30
+        } else {
+            600
+        };
+        let output = super::command_output::capture(
+            self.command().args(args),
+            std::time::Duration::from_secs(seconds),
+            16 * 1024 * 1024,
+        )?;
         ensure!(
             output.status.success(),
             "Docker {} failed: {}",
@@ -53,7 +61,11 @@ impl Docker {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
     pub fn inspect(&self, kind: &str, name: &str) -> Result<Option<Value>> {
-        let output = self.command().args([kind, "inspect", name]).output()?;
+        let output = super::command_output::capture(
+            self.command().args([kind, "inspect", name]),
+            std::time::Duration::from_secs(30),
+            16 * 1024 * 1024,
+        )?;
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
             if error.to_ascii_lowercase().contains("no such ")
