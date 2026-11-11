@@ -106,3 +106,5 @@ updates-layer-ready = 已就绪
 
 system-docker-command-timeout = Docker 在 { $seconds } 秒内没有响应。请检查 Docker 服务后重试。
 system-docker-output-limit = Docker 输出超过控制命令的限制，请查看诊断信息。
+
+updates-refresh-failed = 进度连接暂时中断，正在自动重连。操作可能仍在继续。

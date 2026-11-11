@@ -17,6 +17,10 @@ use tauri_plugin_updater::UpdaterExt;
 
 #[derive(Clone, Default, Serialize)]
 pub struct Status {
+    pub operation_id: Option<String>,
+    pub revision: u64,
+    pub busy: bool,
+    pub action: Option<Action>,
     pub version: String,
     pub phase: String,
     pub message: UiMessage,
@@ -36,7 +40,7 @@ pub struct Controller {
     status: Mutex<Status>,
     operation: tokio::sync::Mutex<()>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     Status,
@@ -48,6 +52,24 @@ pub enum Action {
     Integrate,
     CleanCache,
     CleanImages,
+}
+
+struct StatusEdit<'a>(std::sync::MutexGuard<'a, Status>);
+impl std::ops::Deref for StatusEdit<'_> {
+    type Target = Status;
+    fn deref(&self) -> &Status {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for StatusEdit<'_> {
+    fn deref_mut(&mut self) -> &mut Status {
+        &mut self.0
+    }
+}
+impl Drop for StatusEdit<'_> {
+    fn drop(&mut self) {
+        self.0.revision += 1;
+    }
 }
 
 impl Default for Controller {
@@ -73,13 +95,17 @@ impl Controller {
             "system-an-update-operation-is-already-running",
         ))?;
         let (_config, _path, _operation) = service.maintenance_context(epoch)?;
+        self.begin(None);
         self.phase(
             "storage",
             UiMessage::new("system-validating-and-copying-the-update-cache"),
         );
         let result =
             tokio::task::spawn_blocking(move || crate::updates::storage::set_cache(&destination))
-                .await?;
+                .await
+                .map_err(anyhow::Error::from)
+                .and_then(|result| result);
+        self.edit().busy = false;
         match &result {
             Ok(_) => self.phase(
                 "idle",
@@ -93,18 +119,30 @@ impl Controller {
         result
     }
     fn phase(&self, phase: &str, message: UiMessage) {
-        let mut state = self.status.lock().unwrap();
+        let mut state = self.edit();
         state.phase = phase.into();
         state.message = message;
         if matches!(phase, "docker" | "pulling" | "validating" | "activating") {
             state.environment_step = Some(phase.into());
         }
     }
+    fn edit(&self) -> StatusEdit<'_> {
+        StatusEdit(self.status.lock().unwrap())
+    }
+    fn begin(&self, action: Option<Action>) {
+        let mut state = self.edit();
+        state.operation_id = Some(uuid::Uuid::new_v4().to_string());
+        state.action = action;
+        state.busy = true;
+        state.phase = "starting".into();
+        state.message = UiMessage::default();
+    }
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
     }
+
     pub fn initialization(&self, config: &AppConfig) {
-        let mut state = self.status.lock().unwrap();
+        let mut state = self.edit();
         state.needs_setup = !config.workbench.root.join("environment.json").is_file()
             || config.runtime.backend == crate::runtime::RuntimeBackend::Disabled;
         state.pending = recovery::pending().map_or(true, |p| p.is_some());
@@ -141,7 +179,7 @@ impl Controller {
                             "system-update-completed-client-and-tool-environment-checks-passed",
                         ),
                     );
-                    self.status.lock().unwrap().pending = false;
+                    self.edit().pending = false;
                 }
             }
             Ok(Ok(false)) => {}
@@ -191,7 +229,7 @@ impl Controller {
             downloaded += chunk.len() as u64;
             ensure!(downloaded <= artifact.size, "download exceeds signed size");
             file.write_all(&chunk)?;
-            let mut state = self.status.lock().unwrap();
+            let mut state = self.edit();
             state.downloaded = downloaded;
             state.total = Some(artifact.size);
         }
@@ -214,7 +252,9 @@ impl Controller {
             "system-an-update-operation-is-already-running",
         ))?;
         let _cache = crate::updates::storage::cache_lock(false)?;
+        self.begin(Some(action));
         let result = self.perform(action, epoch, service, app).await;
+        self.edit().busy = false;
         if let Err(error) = &result {
             self.phase("error", UiMessage::from_error_ref(error));
         }
@@ -235,7 +275,7 @@ impl Controller {
             );
             let manifest = self.remember(None).await?;
             let available = manifest.can_upgrade(env!("CARGO_PKG_VERSION"))?;
-            let mut state = self.status.lock().unwrap();
+            let mut state = self.edit();
             state.available = available.then_some(manifest.version);
             state.notes = manifest.notes;
             state.phase = "idle".into();
@@ -395,7 +435,7 @@ impl Controller {
             update.verify(&bytes)?;
             let helper = recovery::stage(&journal)?;
             {
-                let mut state = self.status.lock().unwrap();
+                let mut state = self.edit();
                 state.pending = true;
                 state.recovery = Some(helper);
             }
@@ -414,7 +454,7 @@ impl Controller {
         );
         let setup = matches!(action, Action::Setup);
         {
-            let mut status = self.status.lock().unwrap();
+            let mut status = self.edit();
             status.environment_step = None;
             status.image_progress = None;
             status.image_version = None;
@@ -443,7 +483,7 @@ impl Controller {
             let previous = self.remember(Some(env!("CARGO_PKG_VERSION"))).await?;
             self.download(&previous).await?;
         }
-        self.status.lock().unwrap().image_version = Some(manifest.version.clone());
+        self.edit().image_version = Some(manifest.version.clone());
         let controller = self.clone();
         let image = manifest.image.clone();
         let probe_config = config.clone();
@@ -461,7 +501,7 @@ impl Controller {
                     controller.phase(phase, message)
                 },
                 |value| {
-                    controller.status.lock().unwrap().image_progress = Some(value);
+                    controller.edit().image_progress = Some(value);
                 },
             )
         })
@@ -478,18 +518,36 @@ impl Controller {
             })
             .await??;
             service.reload_after_maintenance()?;
-            self.status.lock().unwrap().needs_setup = false;
+            self.edit().needs_setup = false;
             self.phase(
                 "idle",
                 UiMessage::new("system-tool-environment-prepared-validation-passed"),
             );
         } else {
-            self.status.lock().unwrap().prepared = Some(manifest.version);
+            self.edit().prepared = Some(manifest.version);
             self.phase(
                 "ready",
                 UiMessage::new("system-download-and-environment-checks-completed-ready-to-install"),
             );
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn snapshots_are_read_only_and_new_operations_keep_monotonic_revisions() {
+        let controller = Controller::default();
+        controller.begin(Some(Action::Setup));
+        let first = controller.status();
+        assert_eq!(controller.status().revision, first.revision);
+        controller.phase("pulling", UiMessage::default());
+        assert!(controller.status().revision > first.revision);
+        controller.begin(Some(Action::Check));
+        let second = controller.status();
+        assert_ne!(first.operation_id, second.operation_id);
+        assert!(second.revision > first.revision);
     }
 }
