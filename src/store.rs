@@ -21,6 +21,7 @@ mod session;
 pub(crate) use session::StateSession;
 mod artifacts;
 mod conversations;
+mod environment_bindings;
 mod leases;
 pub(crate) use leases::LeaseToken;
 

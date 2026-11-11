@@ -1,6 +1,14 @@
 //! Controller-owned resource records. JSON is confined to worker payloads.
 use super::*;
 use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvironmentBinding {
+    pub id: String,
+    pub run_id: String,
+    pub environment_id: String,
+    pub identity: crate::runtime::protocol::WorkerIdentity,
+}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {

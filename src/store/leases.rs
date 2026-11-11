@@ -9,6 +9,11 @@ pub(crate) struct LeaseToken {
     pub owner: String,
     epoch: i64,
 }
+impl LeaseToken {
+    pub(crate) fn epoch(&self) -> i64 {
+        self.epoch
+    }
+}
 
 pub(super) fn check(tx: &Connection, token: &LeaseToken) -> Result<()> {
     let live: bool = tx.query_row(

@@ -7,7 +7,7 @@ import re
 import time
 import uuid
 
-PROTOCOL = 1
+PROTOCOL = 2
 MAX_RPC = 48 * 1024 * 1024
 MAX_FILE = 32 * 1024 * 1024
 TERMINAL = {"completed", "failed", "cancelled", "timed_out", "lost"}

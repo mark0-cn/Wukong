@@ -23,6 +23,7 @@ macro_rules! record {
 record!(AgentSnapshot, "agent");
 record!(JobRecord, "job");
 record!(WorkerFileRecord, "worker_file");
+record!(EnvironmentBinding, "environment_binding");
 record!(ToolCallRecord, "call");
 record!(Finding, "finding");
 record!(Verification, "verification");

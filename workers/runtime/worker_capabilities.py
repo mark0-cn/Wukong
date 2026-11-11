@@ -31,6 +31,7 @@ def doctor(root, trusted, isolated):
                 pass
         tools[name] = {"available": bool(executable), "path": executable, "version": version}
     linux = sys.platform.startswith("linux")
+    execution_ready = trusted or isolated
     core_pattern = None
     if linux:
         try:
@@ -58,16 +59,16 @@ def doctor(root, trusted, isolated):
             "core_pattern": core_pattern, "external_core_handler": bool(core_pattern and core_pattern.startswith("|")),
             "metadata_protected_from_targets": isolated, "unique_experiment_uids": isolated,
             "tools": tools, "python_toolchain": python_toolchain, "dbgeng":dbgeng,
-            "capabilities": {"process_jobs": True, "persistent_jobs": True, "resumable_file_transfer": True,
-            "debug_gdb_mi": tools["gdb"]["available"] and python_toolchain["pygdbmi"],
-            "debug_dbgeng": dbgeng["available"] and trusted, "fuzz_qemu": linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
-            "crash_replay": True, "input_minimize": tools["gdb"]["available"] and python_toolchain["pygdbmi"] and linux,
-            "input_minimize_signal_only": True, "runtime_profile": True,
+            "capabilities": {"process_jobs": execution_ready, "persistent_jobs": execution_ready, "resumable_file_transfer": True,
+            "debug_gdb_mi": execution_ready and linux and tools["gdb"]["available"] and python_toolchain["pygdbmi"],
+            "debug_dbgeng": dbgeng["available"] and trusted, "fuzz_qemu": execution_ready and linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
+            "crash_replay": execution_ready, "input_minimize": execution_ready and tools["gdb"]["available"] and python_toolchain["pygdbmi"] and linux,
+            "input_minimize_signal_only": execution_ready, "runtime_profile": True,
             "runtime_prepare": python_toolchain["pyelftools"], "mitigation_profile": True,
             "seccomp_analyze": True, "libc_identify": python_toolchain["pyelftools"],
             "network_poc_verify": bool(workbench.get("target") and workbench.get("service",{}).get("mode") in {"local_service","remote"}) if workbench else False,
-            "process_mapping_observations": linux, "core_snapshot": python_toolchain["pwntools"],
-            "cyclic_offset": python_toolchain["pwntools"], "poc_verify": True, "shell_exec": True,
-            "py_run": True, "emulation": python_toolchain["unicorn"],
+            "process_mapping_observations": linux, "core_snapshot": linux and python_toolchain["pwntools"],
+            "cyclic_offset": python_toolchain["pwntools"], "poc_verify": execution_ready, "shell_exec": execution_ready,
+            "py_run": execution_ready, "emulation": python_toolchain["unicorn"],
             "symbolic_execution": python_toolchain["angr"],
-            "formats": ["ELF"] if linux else [], "native_target_execution": True}}
+            "formats": ["ELF"] if linux and execution_ready else ["PE"] if trusted and dbgeng["available"] else [], "native_target_execution": execution_ready}}

@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, OnceCell};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -35,6 +35,8 @@ pub struct EnvironmentConfig {
     pub name: String,
     pub platform: Platform,
     pub runtime: RuntimeConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_id: Option<String>,
 }
 
 pub fn validate_id(id: &str) -> Result<()> {
@@ -79,11 +81,21 @@ impl EnvironmentConfig {
 struct Entry {
     config: EnvironmentConfig,
     client: OnceCell<RuntimeClient>,
+    lease_client: OnceCell<RuntimeClient>,
 }
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct LeaseKey {
+    environment: String,
+    run: String,
+    owner: String,
+}
+type LeaseCache = Arc<Mutex<BTreeMap<LeaseKey, crate::runtime::protocol::EnvironmentLease>>>;
 
 #[derive(Clone, Default)]
 pub struct EnvironmentRegistry {
     entries: Arc<BTreeMap<String, Entry>>,
+    leases: LeaseCache,
 }
 
 impl EnvironmentRegistry {
@@ -99,11 +111,13 @@ impl EnvironmentRegistry {
                 Entry {
                     config,
                     client: OnceCell::new(),
+                    lease_client: OnceCell::new(),
                 },
             );
         }
         Ok(Self {
             entries: Arc::new(entries),
+            leases: Default::default(),
         })
     }
 
@@ -131,6 +145,12 @@ impl EnvironmentRegistry {
             .client
             .get_or_try_init(|| async {
                 let client = RuntimeClient::connect(entry.config.runtime.clone()).await?;
+                if let Some(expected) = &entry.config.installation_id {
+                    ensure!(
+                        &client.identity().installation_id == expected,
+                        "worker installation identity does not match this registered environment"
+                    );
+                }
                 let doctor = client.doctor().await?;
                 let observed = doctor["os"]
                     .as_str()
@@ -151,9 +171,91 @@ impl EnvironmentRegistry {
         Ok(json!({"environment_id": id, "observation": observation}))
     }
 
+    async fn lease_client(&self, id: &str) -> Result<&RuntimeClient> {
+        let entry = self.entries.get(id).context("environment not registered")?;
+        let client = entry
+            .lease_client
+            .get_or_try_init(|| async {
+                let mut configuration = entry.config.runtime.clone();
+                configuration.request_timeout_secs = 10;
+                let client = RuntimeClient::connect(configuration).await?;
+                ensure!(
+                    client.identity() == self.client(id).await?.identity(),
+                    "lease channel connected to another worker"
+                );
+                Ok::<_, anyhow::Error>(client)
+            })
+            .await?;
+        Ok(client)
+    }
+
+    pub(crate) async fn bind(
+        &self,
+        id: &str,
+        run: &str,
+        owner: Option<&str>,
+    ) -> Result<RuntimeClient> {
+        let client = self.client(id).await?;
+        let config = self.config(id)?;
+        if config.platform != Platform::Windows
+            || config.runtime.backend == RuntimeBackend::TrustedLocal
+        {
+            return Ok(client);
+        }
+        let owner = owner.context("Windows execution requires a supervised controller lease")?;
+        let lease: crate::runtime::protocol::EnvironmentLease = serde_json::from_value(
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                self.lease_client(id).await?.call(
+                    "environment.lease.acquire",
+                    json!({"run_id":run,"owner_id":owner}),
+                ),
+            )
+            .await??,
+        )?;
+        lease.validate(run, owner, client.identity())?;
+        self.leases.lock().await.insert(
+            LeaseKey {
+                environment: id.into(),
+                run: run.into(),
+                owner: owner.into(),
+            },
+            lease.clone(),
+        );
+        Ok(client.with_lease(lease))
+    }
+
+    pub(crate) async fn renew_leases(&self, run: &str, owner: &str) -> Result<()> {
+        let ids: Vec<_> = self
+            .leases
+            .lock()
+            .await
+            .keys()
+            .filter(|key| key.run == run && key.owner == owner)
+            .map(|key| key.environment.clone())
+            .collect();
+        for id in ids {
+            self.bind(&id, run, Some(owner)).await?;
+        }
+        Ok(())
+    }
+
     pub async fn close(&self) {
+        let leases = std::mem::take(&mut *self.leases.lock().await);
+        for (key, lease) in &leases {
+            if let Ok(client) = self.lease_client(&key.environment).await
+                && let Err(error) = client
+                    .call("environment.lease.release", json!({"lease":lease}))
+                    .await
+            {
+                tracing::warn!(%error,"environment lease retained until owned resources are reconciled");
+            }
+        }
         for entry in self.entries.values() {
             if let Some(client) = entry.client.get() {
+                let _ = client.close().await;
+            }
+            if let Some(client) = entry.lease_client.get() {
                 let _ = client.close().await;
             }
         }

@@ -114,10 +114,19 @@ impl ToolService {
         let environments =
             crate::environments::EnvironmentRegistry::new(config.environments.clone())?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
+        let identity = client
+            .as_ref()
+            .map(|client| {
+                stable(
+                    "worker",
+                    &serde_json::to_string(client.identity()).expect("worker identity serializes"),
+                )
+            })
+            .unwrap_or_else(|| "unbound".into());
         let gateway = WorkerGateway {
             store: store.clone(),
             client,
-            identity: stable("worker", &serde_json::to_string(&config.runtime)?),
+            identity,
             output_limit: config.tools.max_output_bytes,
         };
         let execution = ExecutionService::new(store.clone(), gateway.clone(), locks.clone());
@@ -149,10 +158,29 @@ impl ToolService {
             run.config["environments"][environment_id] == serde_json::to_value(config)?,
             "environment configuration changed since this assessment was created"
         );
+        let client = self.environments.client(environment_id).await?;
+        self.store.bind_environment(&EnvironmentBinding {
+            id: stable(
+                "environment-binding",
+                &format!("{}:{environment_id}", agent.run_id),
+            ),
+            run_id: agent.run_id.clone(),
+            environment_id: environment_id.clone(),
+            identity: client.identity().clone(),
+        })?;
+        let client = self
+            .environments
+            .bind(
+                environment_id,
+                &agent.run_id,
+                self.store.controller_owner().as_deref(),
+            )
+            .await?;
+        let identity = stable("worker", &serde_json::to_string(client.identity())?);
         let gateway = WorkerGateway {
             store: self.store.clone(),
-            client: Some(self.environments.client(environment_id).await?),
-            identity: stable("worker", &serde_json::to_string(&(environment_id, config))?),
+            client: Some(client),
+            identity,
             output_limit: self.limits.max_output_bytes,
         };
         let execution =
@@ -182,6 +210,12 @@ impl ToolService {
                 .jobs
                 .observe(&owner, &format!("job-observation:{}", job.id), &job.id)
                 .await?;
+        }
+        Ok(())
+    }
+    pub(crate) async fn renew_environment_leases(&self, run: &str) -> Result<()> {
+        if let Some(owner) = self.store.controller_owner() {
+            self.environments.renew_leases(run, &owner).await?;
         }
         Ok(())
     }

@@ -50,7 +50,9 @@ marker = pathlib.Path(sys.argv[sys.argv.index("--state") + 1]) / "slow-marker"
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
-    if method == "slow":
+    if method == "ping":
+        result = {'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}
+    elif method == "slow":
         if not marker.exists():
             marker.write_text("slow", encoding="utf-8")
             time.sleep(60)
@@ -255,7 +257,9 @@ starts.write_text(str(count))
 for line in sys.stdin:
     request=json.loads(line)
     method=request['method']
-    if method=='rpc_error':
+    if method=='ping':
+        reply={'jsonrpc':'2.0','id':request['id'],'result':{'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}
+    elif method=='rpc_error':
         reply={'jsonrpc':'2.0','id':request['id'],'error':{'code':-32000,'message':'fixture rejection'}}
     elif method=='malformed':
         (root/'executed').write_text('once')
@@ -328,6 +332,40 @@ async fn bridge_startup_error_includes_captured_stderr() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn reconnected_worker_identity_is_checked_before_resending_any_operation() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let bridge = root.path().join("identity_fixture.py");
+    std::fs::write(
+        &bridge,
+        r#"import json,sys,pathlib
+root=pathlib.Path(sys.argv[sys.argv.index('--state')+1])
+for line in sys.stdin:
+ r=json.loads(line)
+ if r['method']=='disconnect':
+  print('{invalid-json',flush=True);continue
+ if r['method']=='ping':
+  boot=(root/'boot').read_text() if (root/'boot').exists() else 'first'
+  result={'identity':{'protocol':2,'installation_id':'fixture','boot_id':boot,'package_sha256':'0'*64}}
+ else:
+  (root/'effect').write_text('executed');result={}
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
+"#,
+    )?;
+    let client = RuntimeClient::connect(RuntimeConfig {
+        bridge_path: bridge,
+        ..config(root.path())
+    })
+    .await?;
+    assert!(client.call("disconnect", json!({})).await.is_err());
+    std::fs::write(root.path().join("boot"), "second")?;
+    let error = client.call("mutate", json!({})).await.unwrap_err();
+    assert!(format!("{error:#}").contains("identity changed"));
+    assert!(!root.path().join("effect").exists());
+    client.close().await?;
+    Ok(())
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn desktop_runtime_does_not_inherit_invalid_console_stderr() -> Result<()> {
@@ -365,7 +403,7 @@ sys.stderr.write('x' * 131072)
 sys.stderr.flush()
 for line in sys.stdin:
     request = json.loads(line)
-    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True}}), flush=True)
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True,'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}), flush=True)
 "#,
     )?;
     let config = RuntimeConfig {

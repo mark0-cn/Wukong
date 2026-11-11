@@ -13,6 +13,7 @@ use wukong::{
 
 fn environment(root: &std::path::Path) -> EnvironmentConfig {
     EnvironmentConfig {
+        installation_id: None,
         name: "Trusted development fixture".into(),
         platform: Platform::current(),
         runtime: RuntimeConfig {
@@ -282,7 +283,8 @@ async fn colliding_worker_job_ids_cannot_overwrite_or_cross_environment_boundari
 for line in sys.stdin:
     request=json.loads(line)
     method=request['method']
-    if method=='doctor': result={'os':platform.system().lower()}
+    if method=='ping': result={'identity':{'protocol':2,'installation_id':__import__('hashlib').sha256(str(sys.argv).encode()).hexdigest(),'boot_id':'fixture-boot','package_sha256':'0'*64}}
+    elif method=='doctor': result={'os':platform.system().lower()}
     elif method=='job.start': result={'job_id':'same-local-id','state':'running'}
     elif method=='job.status': result={'job_id':'same-local-id','state':'completed','result':{'exit_code':0}}
     elif method=='job.artifacts': result=[]

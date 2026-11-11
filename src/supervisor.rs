@@ -53,6 +53,8 @@ impl RunSupervisor {
         }
         let mut heartbeat = supervisor.heartbeat(runner.clone());
         supervisor.tasks.push(heartbeat.abort_handle());
+        let mut environment_heartbeat = supervisor.environment_heartbeat(runner.clone());
+        supervisor.tasks.push(environment_heartbeat.abort_handle());
         let monitor_runner = runner.clone();
         let monitor_run = run_id.to_owned();
         let monitor_cancel = supervisor.cancel.clone();
@@ -89,7 +91,27 @@ impl RunSupervisor {
                 result.context("controller supervision failed")??;
                 anyhow::bail!("controller supervision ended unexpectedly")
             }
+            result = &mut environment_heartbeat => {
+                supervisor.cancel.cancel();
+                let _ = kernel.await;
+                result.context("environment lease supervision failed")??;
+                anyhow::bail!("environment lease supervision ended unexpectedly")
+            }
         }
+    }
+
+    fn environment_heartbeat(&self, runner: AssessmentRunner) -> JoinHandle<Result<()>> {
+        let run = self.lease.run_id.clone();
+        let cancel = self.cancel.clone();
+        tokio::spawn(async move {
+            let mut timer = tokio::time::interval(Duration::from_secs(15));
+            loop {
+                tokio::select! {
+                    _=cancel.cancelled()=>std::future::pending::<()>().await,
+                    _=timer.tick()=>runner.tools.renew_environment_leases(&run).await?,
+                }
+            }
+        })
     }
 
     fn heartbeat(&self, runner: AssessmentRunner) -> JoinHandle<Result<()>> {
@@ -139,7 +161,7 @@ for line in sys.stdin:
  r=json.loads(line)
  if r['method']=='job.status':
   (root/'polling').write_text('ready');time.sleep(60)
- print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':{}}),flush=True)
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':{'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {}}),flush=True)
 "#,
             )?;
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;

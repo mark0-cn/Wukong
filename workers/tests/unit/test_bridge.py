@@ -255,7 +255,7 @@ class RuntimeTests(unittest.TestCase):
     def test_worker_receives_no_provider_credentials(self):
         result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(','.join(k for k in os.environ if 'API_KEY' in k or 'TOKEN' in k))"]))
         self.assertEqual(result["result"]["stdout"].strip(), "")
-        self.assertEqual(self.client.call("doctor")["protocol"], 1)
+        self.assertEqual(self.client.call("doctor")["protocol"], 2)
 
     def test_job_environment_carries_state_and_job_dirs(self):
         result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(os.environ['WUKONG_STATE_DIR']);print(os.environ['WUKONG_JOB_DIR'])"]))

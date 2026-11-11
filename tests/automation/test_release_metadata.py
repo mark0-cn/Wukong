@@ -15,7 +15,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                              platform="windows-amd64", tool_platform="linux/amd64",
                              image="example/wukong@sha256:" + "b" * 64,
                              image_id="sha256:" + "c" * 64, image_size_bytes=12345,
-                             runtime_protocol=1, data_schema=1)
+                             runtime_protocol=2, data_schema=4)
 
     def assets(self, mutate_sums=lambda text: text):
         manifest = json.dumps(self.manifest).encode()
@@ -60,7 +60,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         original = dict(self.manifest)
         for field, value in (("version", "1.2.4"), ("source_revision", "invalid"), ("schema_version", 1),
                              ("platform", "linux-amd64"), ("tool_platform", "linux/arm64"),
-                             ("runtime_protocol", 2), ("data_schema", 2), ("image", "example/wukong:latest"),
+                             ("runtime_protocol", 1), ("data_schema", 1), ("image", "example/wukong:latest"),
                              ("image_id", None), ("image_size_bytes", -1)):
             self.manifest = {**original, field: value}
             with self.subTest(field=field), patch.object(release_metadata, "download", side_effect=self.assets()):

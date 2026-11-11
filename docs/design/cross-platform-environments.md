@@ -24,6 +24,10 @@ docker_container = "wukong-worker"
 
 Controller job/session references are qualified by worker identity and retain the worker's local resource ID separately. File registration keys include run, worker and path. Background job observations select the owner's bound environment and use the same evidence/notification pipeline as manual queries.
 
+Protocol 2 handshakes establish the installation ID, operating-system boot identity and worker code/backend content hash. The controller pins this identity on connection and persists it transactionally on first use by each assessment/environment. Reconnection or resume rejects a changed identity before execution. An optional `installation_id` in environment configuration also pins the registered installation. A daemon restart has a separate diagnostic ID; it does not imply an OS reboot or establish session survival.
+
+Production Windows environments require an exclusive 120-second run/controller lease with persistent increasing epochs. A separate transport renews used leases every 15 seconds, independently of model/debugger requests and the controller's own database heartbeat. Workers validate identity and fencing before durable receipt lookup; renewal does not change a business request's fingerprint. Expiry alone never proves process death: in-flight requests block takeover, and another run cannot acquire while owned sessions/jobs remain. Close and reconcile resources before release. Explicit trusted fixtures bypass production leasing, not identity checks.
+
 ## Shared and large artifacts
 
 `artifact_stage` accepts a same-run evidence ID and stages a verified immutable copy in the caller's environment. Cross-environment transfer passes through the controller. The original evidence identity is retained. `stage_target` also streams its hash-verified original rather than placing the complete file in one RPC.

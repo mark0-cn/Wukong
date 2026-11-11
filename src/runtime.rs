@@ -80,11 +80,14 @@ struct Transport {
     client: Client,
     poisoned: bool,
     stderr: crate::process_io::StderrCapture,
+    identity: Option<protocol::WorkerIdentity>,
 }
 #[derive(Clone)]
 pub struct RuntimeClient {
     transport: Arc<Mutex<Transport>>,
     config: RuntimeConfig,
+    identity: protocol::WorkerIdentity,
+    lease: Option<protocol::EnvironmentLease>,
 }
 
 fn remote_quote(value: &str) -> String {
@@ -101,9 +104,15 @@ impl RuntimeClient {
         let transport = Self::spawn_transport(&config)
             .await
             .context("start runtime bridge transport")?;
+        let identity = transport
+            .identity
+            .clone()
+            .context("missing worker identity")?;
         Ok(Self {
             transport: Arc::new(Mutex::new(transport)),
             config,
+            identity,
+            lease: None,
         })
     }
 
@@ -218,9 +227,17 @@ impl RuntimeClient {
             client,
             poisoned: false,
             stderr,
+            identity: None,
         };
         match request(&mut transport, "ping", json!({})).await {
-            Ok(_) => Ok(transport),
+            Ok(reply) => {
+                let identity: protocol::WorkerIdentity =
+                    serde_json::from_value(reply["identity"].clone())
+                        .context("worker handshake did not establish its identity")?;
+                identity.validate()?;
+                transport.identity = Some(identity);
+                Ok(transport)
+            }
             Err(RequestFailure::Worker(error)) => {
                 let _ = transport.child.kill().await;
                 transport.stderr.finish().await;
@@ -237,6 +254,15 @@ impl RuntimeClient {
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
     }
+    pub fn identity(&self) -> &protocol::WorkerIdentity {
+        &self.identity
+    }
+    pub(crate) fn with_lease(&self, lease: protocol::EnvironmentLease) -> Self {
+        Self {
+            lease: Some(lease),
+            ..self.clone()
+        }
+    }
     pub async fn doctor(&self) -> Result<Value> {
         self.call("doctor", json!({})).await
     }
@@ -246,12 +272,25 @@ impl RuntimeClient {
     /// live in the shared state directory and survive the stdio client. The
     /// failed request itself is never re-sent, so a timed-out side effect
     /// still follows the durable reconcile path instead of being replayed.
-    pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+    pub async fn call(&self, method: &str, mut params: Value) -> Result<Value> {
+        if method != "ping" && method != "doctor" {
+            params["_binding"] = serde_json::to_value(&self.identity)?;
+            if let Some(lease) = &self.lease {
+                params["_lease"] = serde_json::to_value(lease)?;
+            }
+        }
         let mut transport = self.transport.lock().await;
         if transport.poisoned {
             *transport = Self::spawn_transport(&self.config)
                 .await
                 .context("runtime transport lost and reconnect failed")?;
+        }
+        if transport.identity.as_ref() != Some(&self.identity) {
+            let _ = transport.child.kill().await;
+            transport.poisoned = true;
+            bail!(
+                "worker installation, boot or package identity changed; refusing execution in the previous binding"
+            );
         }
         match request(&mut transport, method, params).await {
             Ok(result) => Ok(result),

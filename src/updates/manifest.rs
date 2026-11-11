@@ -75,7 +75,9 @@ impl Manifest {
             "stable version required"
         );
         ensure!(
-            self.schema == 1 && self.runtime_protocol == 1 && self.data_schema == DATA_SCHEMA,
+            self.schema == 1
+                && self.runtime_protocol == crate::runtime::protocol::PROTOCOL
+                && self.data_schema == DATA_SCHEMA,
             "unsupported release format, runtime protocol or data migration"
         );
         ensure!(
