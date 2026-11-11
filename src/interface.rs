@@ -140,6 +140,12 @@ pub enum Command {
 
 pub async fn run(cli: Cli) -> Result<()> {
     let locale = cli.resolved_locale();
+    // Catalog files are reproducible English by default, independent of the OS.
+    let catalog_locale = if cli.locale == "zh-CN" {
+        crate::i18n::Locale::ZhCn
+    } else {
+        crate::i18n::Locale::EnUs
+    };
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
     if matches!(command, Command::RecoverUpdate) {
         return crate::updates::recovery::recover();
@@ -170,7 +176,10 @@ pub async fn run(cli: Cli) -> Result<()> {
         if cli.json {
             print_json(&crate::agents::skill_catalog(None)?)?;
         } else {
-            print!("{}", crate::agents::skill_coverage_markdown()?);
+            print!(
+                "{}",
+                crate::agents::skill_coverage_markdown_for_locale(catalog_locale)?
+            );
         }
         return Ok(());
     }
@@ -180,7 +189,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                 crate::tools::builtin_tool_definitions(),
             )?)?;
         } else {
-            print!("{}", crate::tools::builtin_catalog_markdown());
+            print!(
+                "{}",
+                crate::tools::builtin_catalog_markdown_for_locale(catalog_locale)?
+            );
         }
         return Ok(());
     }
