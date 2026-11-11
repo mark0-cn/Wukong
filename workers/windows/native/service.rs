@@ -38,6 +38,7 @@ static STATUS: AtomicUsize = AtomicUsize::new(0);
 static STOP: AtomicBool = AtomicBool::new(false);
 static CHECKPOINT: AtomicUsize = AtomicUsize::new(0);
 fn report(state: u32, error: u32) -> Result<()> {
+    let pending = matches!(state, SERVICE_START_PENDING | SERVICE_STOP_PENDING);
     let status = SERVICE_STATUS {
         dwServiceType: SERVICE_WIN32_OWN_PROCESS,
         dwCurrentState: state,
@@ -47,16 +48,12 @@ fn report(state: u32, error: u32) -> Result<()> {
             0
         },
         dwWin32ExitCode: error,
-        dwCheckPoint: if state == SERVICE_START_PENDING {
+        dwCheckPoint: if pending {
             CHECKPOINT.fetch_add(1, Ordering::AcqRel) as u32 + 1
         } else {
             0
         },
-        dwWaitHint: if state == SERVICE_START_PENDING {
-            120000
-        } else {
-            0
-        },
+        dwWaitHint: if pending { 120000 } else { 0 },
         ..Default::default()
     };
     security::check(unsafe {
@@ -333,6 +330,7 @@ async fn offline_selftest(
         process.exit_code()? == Some(0),
         "packaged offline self-test failed; inspect its native log"
     );
+    process.stop(Duration::from_secs(10))?;
     drop(process);
     drop(log);
     let report = deployment::read_bytes(&log_path, 8 * 1024 * 1024)?;
@@ -467,8 +465,11 @@ async fn run(context: &ContextState) -> Result<()> {
     }
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
+    ssh.stop(Duration::from_secs(10))?;
+    report(SERVICE_STOP_PENDING, 0)?;
+    worker.stop(Duration::from_secs(10))?;
     drop(ssh);
-    drop(worker); // Each closes/terminates its entire Job, not just a PID.
+    drop(worker);
     Ok(())
 }
 

@@ -13,6 +13,7 @@ use std::{
     os::windows::{ffi::OsStrExt, io::AsRawHandle},
     path::Path,
     ptr::{null, null_mut},
+    time::{Duration, Instant},
 };
 use windows_sys::Win32::{
     Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, WAIT_OBJECT_0},
@@ -58,6 +59,27 @@ impl Job {
             )
         })?;
         Ok(information.ActiveProcesses)
+    }
+    /// A signaled leader is insufficient: detached descendants can outlive it.
+    /// Keep the owned Job handle until Windows confirms every member exited.
+    pub fn terminate_and_wait(&self, timeout: Duration) -> Result<()> {
+        if self.active_processes()? == 0 {
+            return Ok(());
+        }
+        self.terminate()?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.active_processes()? == 0 {
+                return Ok(());
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "owned native Job did not become quiescent"
+            );
+            std::thread::sleep(
+                Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
     }
 }
 
@@ -315,13 +337,15 @@ impl OwnedProcess {
     pub fn job(&self) -> &Job {
         &self.job
     }
+    pub fn stop(&self, timeout: Duration) -> Result<()> {
+        self.job.terminate_and_wait(timeout)
+    }
 }
 impl Drop for OwnedProcess {
     fn drop(&mut self) {
-        let _ = self.job.terminate();
-        unsafe {
-            WaitForSingleObject(self.process.0, 10000);
-        }
+        // Error/unwind fallback only. Successful lifecycle gates call stop()
+        // explicitly and propagate failure rather than treating Drop as proof.
+        let _ = self.stop(Duration::from_secs(10));
     }
 }
 
@@ -434,7 +458,7 @@ mod tests {
         let Some(mode) = std::env::var_os("WUKONG_NATIVE_JOB_FIXTURE") else {
             return;
         };
-        if mode == "parent" {
+        if mode == "parent" || mode == "parent-exits" {
             let mut command = std::process::Command::new(std::env::current_exe().unwrap());
             command
                 .args([
@@ -444,6 +468,9 @@ mod tests {
                 ])
                 .env("WUKONG_NATIVE_JOB_FIXTURE", "leaf");
             let mut child = command.spawn().unwrap();
+            if mode == "parent-exits" {
+                std::process::exit(0);
+            }
             let _ = child.wait();
         } else {
             std::fs::write(
@@ -498,17 +525,60 @@ mod tests {
         let mut contained = 0;
         security::check(unsafe { IsProcessInJob(leaf.0, fixture.job.0.0, &mut contained) })?;
         assert_eq!(contained, 1);
-        fixture.job().terminate()?;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while fixture.job().active_processes()? > 0 && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+        fixture.stop(Duration::from_secs(10))?;
         assert_eq!(fixture.job().active_processes()?, 0);
         assert_eq!(
             unsafe { WaitForSingleObject(fixture.process.0, 10000) },
             WAIT_OBJECT_0
         );
         assert_eq!(unsafe { WaitForSingleObject(leaf.0, 10000) }, WAIT_OBJECT_0);
+        Ok(())
+    }
+    #[test]
+    fn exited_leader_is_not_quiescent_until_its_owned_descendant_exits() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let log = File::create(temporary.path().join("fixture.log"))?;
+        let input = File::open("NUL")?;
+        let executable = std::env::current_exe()?;
+        let mut values = BTreeMap::new();
+        for key in ["SystemRoot", "PATH", "TEMP", "TMP"] {
+            if let Some(value) = std::env::var_os(key) {
+                values.insert(key.into(), value);
+            }
+        }
+        values.insert("WUKONG_NATIVE_JOB_FIXTURE".into(), "parent-exits".into());
+        let fixture = Spawn {
+            executable: &executable,
+            arguments: &[
+                "--exact".into(),
+                "processes::tests::native_job_fixture_entry".into(),
+                "--nocapture".into(),
+            ],
+            directory: temporary.path(),
+            environment: &values,
+            log: &log,
+            input: &input,
+        }
+        .create(None, None)?;
+        let leaf_path = temporary.path().join("leaf.pid");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while (!leaf_path.exists() || !fixture.exited()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        ensure!(
+            leaf_path.exists() && fixture.exited(),
+            "fixture leader failed to leave a descendant"
+        );
+        assert_eq!(fixture.exit_code()?, Some(0));
+        assert!(fixture.job().active_processes()? > 0);
+        let leaf_pid: u32 = std::fs::read_to_string(leaf_path)?.parse()?;
+        let leaf = Handle(unsafe {
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | 0x00100000, 0, leaf_pid)
+        });
+        ensure!(!leaf.0.is_null(), "fixture descendant cannot be inspected");
+        fixture.stop(Duration::from_secs(10))?;
+        assert_eq!(fixture.job().active_processes()?, 0);
+        assert_eq!(unsafe { WaitForSingleObject(leaf.0, 1000) }, WAIT_OBJECT_0);
         Ok(())
     }
     #[test]
