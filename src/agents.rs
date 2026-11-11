@@ -405,3 +405,8 @@ mod catalog_tests {
 pub fn skill_coverage_markdown() -> Result<String> {
     crate::prompts::coverage::markdown()
 }
+
+/// Human documentation only; protocol metadata remains canonical.
+pub fn skill_coverage_markdown_for_locale(locale: crate::i18n::Locale) -> Result<String> {
+    crate::prompts::coverage::markdown_for_locale(locale)
+}

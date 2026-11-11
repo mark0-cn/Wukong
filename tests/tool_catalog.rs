@@ -11,6 +11,54 @@ fn generated_catalog_matches_the_executable_registry() {
 }
 
 #[test]
+fn chinese_catalogs_match_sources_and_preserve_registry_visibility() -> Result<()> {
+    use wukong::i18n::Locale;
+    let chinese = wukong::tools::builtin_catalog_markdown_for_locale(Locale::ZhCn)?;
+    assert_eq!(
+        chinese,
+        include_str!("../docs/reference/tool-catalog.zh-CN.md")
+    );
+    assert_eq!(
+        wukong::agents::skill_coverage_markdown_for_locale(Locale::ZhCn)?,
+        include_str!("../docs/reference/skill-coverage.zh-CN.md")
+    );
+    for tool in wukong::tools::builtin_tool_definitions() {
+        assert!(chinese.contains(&format!("| `{}` |", tool.name)));
+    }
+    Ok(())
+}
+
+#[test]
+fn catalog_locale_changes_only_markdown_and_never_opens_state() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    for command in ["tool-catalog", "skill-catalog"] {
+        let output = |locale: &str, json: bool| {
+            let mut process = Command::new(env!("CARGO_BIN_EXE_wukong"));
+            process
+                .args(["--locale", locale, "--config"])
+                .arg(directory.path().join("missing.toml"))
+                .arg("--state")
+                .arg(directory.path().join("must-not-exist"));
+            if json {
+                process.arg("--json");
+            }
+            let output = process.arg(command).output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        assert_eq!(output("en-US", true), output("zh-CN", true));
+        assert_eq!(output("auto", false), output("en-US", false));
+        assert_ne!(output("en-US", false), output("zh-CN", false));
+    }
+    assert!(!directory.path().join("must-not-exist").exists());
+    Ok(())
+}
+
+#[test]
 fn generated_skill_coverage_matches_registered_associations() -> Result<()> {
     assert_eq!(
         wukong::agents::skill_coverage_markdown()?,
