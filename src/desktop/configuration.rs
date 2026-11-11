@@ -163,7 +163,7 @@ mod tests {
                 "windows-fixture",
             ),
         ])?;
-        let (config, _) = document.save(None)?;
+        let (config, _) = document.save_in(&root.path().join("profile"), None)?;
         assert_eq!(config.default_environment.as_deref(), Some("windows"));
         assert!(document.source.starts_with("# controller settings"));
         assert!(!document.source.contains("\n[runtime]"));
