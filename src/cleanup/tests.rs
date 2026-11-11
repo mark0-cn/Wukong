@@ -24,8 +24,7 @@ fn malformed_configuration_diagnostics_never_echo_file_contents() -> Result<()> 
             data: true,
             ..Default::default()
         })
-        .err()
-        .expect("invalid TOML should block cleanup");
+        .expect_err("invalid TOML should block cleanup");
     assert!(!format!("{error:#}").contains("private-sentinel"));
     assert!(cleanup.home.join("wukong.toml").is_file());
     Ok(())
