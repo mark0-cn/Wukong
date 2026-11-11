@@ -12,7 +12,7 @@ import { Modal } from './Modal';
 
 import type { UpdateAction, UpdateStatus } from '../commands';
 export type { UpdateStatus } from '../commands';
-export function Updates({ epoch, onClose, onChanged, controller }: { epoch: number; onClose: () => void; onChanged: () => void; controller?: UpdateController }) {
+export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates' }: { epoch: number; onClose: () => void; onChanged: () => void; controller?: UpdateController; mode?: 'updates' | 'tools' }) {
   useLocale();
   const local = useUpdateController(epoch, onChanged, !controller);
   const { status, working: busy, operationError, refreshError, run: execute } = controller ?? local;
@@ -23,7 +23,7 @@ export function Updates({ epoch, onClose, onChanged, controller }: { epoch: numb
   const failureTitle = failure && typeof failure === 'object' ? message({ ...failure, detail: undefined }) : errorText(failure);
   const detail = failure && typeof failure === 'object' ? failure.detail : '';
   const linux = navigator.userAgent.includes('Linux');
-  return <Modal className="updates-modal" title={status?.needs_setup ? t('updates-welcome-to-wukong-set-up-environment') : t('ui-updates')} description={status?.needs_setup ? t('updates-setup-description') : t('updates-the-client-and-tools-update-as-a')} wide onClose={() => { if (!busy) onClose(); }}>
+  return <Modal className="updates-modal" title={mode === 'tools' ? t('ui-tools-environment') : status?.needs_setup ? t('updates-welcome-to-wukong-set-up-environment') : t('ui-updates')} description={status?.needs_setup ? t('updates-setup-description') : t('updates-the-client-and-tools-update-as-a')} wide onClose={() => { if (!busy) onClose(); }}>
     <div className="updates-panel">
     {refreshError && <p className="notice" role="status">{t('updates-refresh-failed')} {errorText(refreshError)}</p>}
     <div className="update-summary">
@@ -47,13 +47,14 @@ export function Updates({ epoch, onClose, onChanged, controller }: { epoch: numb
     {status?.pending && <p className="error-banner">{t('updates-the-previous-update-is-not-confirmed-new')}</p>}
     <fieldset disabled={busy || !status} className="workbench-controls"><legend className="sr-only">{t('updates-version-and-environment')}</legend>
       <div className="header-actions">
-        {status?.needs_setup ? <button className="primary" disabled={status.pending} onClick={() => void run('setup')}>{failure ? t('updates-retry-setup') : t('updates-prepare-tool-environment')}</button>
+        {mode === 'tools' ? <button className="primary" disabled={status?.pending} onClick={() => void run('setup')}>{t('updates-validate-and-repair-environment')}</button> : status?.needs_setup ? <button className="primary" disabled={status.pending} onClick={() => void run('setup')}>{failure ? t('updates-retry-setup') : t('updates-prepare-tool-environment')}</button>
           : status?.prepared ? <button className="primary" disabled={status.pending} onClick={() => setConfirm('install')}>{t('updates-install-and-restart')}</button>
           : status?.available ? <button className="primary" disabled={status.pending} onClick={() => void run('prepare')}>{t('updates-download-and-verify-update')}</button>
           : <button className="primary" onClick={() => void run('check')}>{t('updates-check-for-updates')}</button>}
-        {(!status?.needs_setup && (status?.available || status?.prepared)) && <button onClick={() => void run('check')}>{t('updates-check-for-updates')}</button>}
+        {(mode !== 'tools' && !status?.needs_setup && (status?.available || status?.prepared)) && <button onClick={() => void run('check')}>{t('updates-check-for-updates')}</button>}
         <button onClick={() => void openUrl(linux ? 'https://docs.docker.com/engine/install/' : 'https://docs.docker.com/desktop/setup/install/windows-install/').catch(e => setError(errorValue(e)))}>{t('updates-docker-installation-guide')}</button>
       </div>
+      {mode === 'tools' && <div className="header-actions"><button onClick={() => void run('start_tools')}>{t('updates-start-environment')}</button><button onClick={() => void run('stop_tools')}>{t('updates-stop-environment')}</button><button onClick={() => void run('select_tools')}>{t('updates-use-tool-environment')}</button></div>}
       {!status?.needs_setup && <div className="header-actions"><button onClick={() => void run('health')}>{t('updates-health-quick')}</button><button onClick={() => void run('doctor')}>{t('updates-health-full')}</button></div>}
       {(!status?.needs_setup || status?.pending) && <details className="maintenance-options" open={status?.pending || undefined}><summary>{t('ui-maintenance-options')}</summary><div className="header-actions">
         <button disabled={!status?.recovery} onClick={() => setConfirm('recover')}>{t('updates-restore-previous-version')}</button>
