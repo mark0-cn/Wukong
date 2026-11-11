@@ -19,7 +19,7 @@ class WorkerFenceTests(unittest.TestCase):
             first=boot_identity()
             boot_identity.cache_clear()
             self.assertEqual(first,boot_identity())
-        self.assertRegex(first,r'^windows:[0-9]{16,20}$')
+        self.assertRegex(first,r'^windows:[0-9a-f]{32}:[0-9]{1,10}$')
 
     @unittest.skipUnless(os.name=='nt','Windows boot identity requires Windows')
     def test_native_windows_boot_epoch_matches_a_fresh_minimal_environment_process(self):

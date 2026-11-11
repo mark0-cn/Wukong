@@ -1,67 +1,50 @@
-"""Read the kernel System process creation epoch without PowerShell or WMI.
+"""Bind the loader boot sequence to its OS boot-entry identity.
 
-The System process lives for the kernel boot; its creation timestamp survives
-worker restarts and is not reconstructed from the changing wall clock/uptime.
-Native layouts are bounded and checked; an unsupported query fails closed.
+The shared BootId increments on each boot attempt. The boot-entry GUID alone
+can persist across reboots, so both are required. Neither comes from wall-clock
+arithmetic, process enumeration, an external command or a generated fallback.
 """
 import ctypes
+import struct
+import uuid
 
 
-class _ProcessPrefix(ctypes.Structure):
-    _fields_ = [
-        ("next_offset", ctypes.c_uint32), ("threads", ctypes.c_uint32),
-        ("reserved_before_create", ctypes.c_byte * 24),
-        ("created", ctypes.c_int64), ("reserved_times", ctypes.c_byte * 16),
-        ("name_length", ctypes.c_uint16), ("name_maximum", ctypes.c_uint16),
-        ("name_buffer", ctypes.c_void_p), ("priority", ctypes.c_int32),
-        ("pid", ctypes.c_size_t),
-    ]
+SHARED_PREFIX_BYTES = 0x2C8
 
 
-def _process_boot_identity(data):
-    size = ctypes.sizeof(_ProcessPrefix)
-    offset = 0
-    for _ in range(65536):
-        if offset + size > len(data):
-            raise ValueError("truncated native Windows process inventory")
-        record = _ProcessPrefix.from_buffer_copy(data, offset)
-        if record.next_offset and (record.next_offset < size or offset + record.next_offset > len(data)):
-            raise ValueError("invalid native Windows process record extent")
-        if record.pid == 4:
-            if record.created <= 0:
-                raise ValueError("native Windows System creation epoch is unavailable")
-            return "windows:" + str(record.created)
-        if record.next_offset == 0:
-            break
-        offset += record.next_offset
-    raise ValueError("native Windows System process is absent from the bounded inventory")
+def _decode_boot_identity(environment, shared):
+    if len(environment) not in {24, 32} or len(shared) != SHARED_PREFIX_BYTES:
+        raise ValueError("unsupported native Windows boot information length")
+    major = struct.unpack_from('<I', shared, 0x26C)[0]
+    build = struct.unpack_from('<I', shared, 0x260)[0] & 0x0FFFFFFF
+    architecture = struct.unpack_from('<H', shared, 0x26A)[0]
+    if major != 10 or build < 10240 or architecture not in {0, 9}:
+        raise ValueError("unsupported Windows shared boot information layout")
+    identifier = uuid.UUID(bytes_le=bytes(environment[:16]))
+    firmware = struct.unpack_from('<I', environment, 16)[0]
+    if identifier.int == 0 or firmware not in {1, 2}:
+        raise ValueError("native Windows boot-entry identity is unavailable")
+    sequence = struct.unpack_from('<I', shared, 0x2C4)[0]
+    return 'windows:' + identifier.hex + ':' + str(sequence)
 
 
 def windows_boot_identity():
-    # Runtime dynamic linking follows Microsoft's NtQuerySystemInformation
-    # contract. Fixed-width fields match the SYSTEM_PROCESS_INFORMATION prefix;
-    # no returned pointer (including the image-name pointer) is dereferenced.
+    # Dynamic linking follows Microsoft's native-query contract. The public
+    # read-only KUSER_SHARED_DATA mapping remains fixed in user mode. Read only
+    # its bounded version/architecture/BootId prefix; never follow a pointer.
     try:
-        query = ctypes.WinDLL("ntdll.dll", winmode=0x800).NtQuerySystemInformation
+        query = ctypes.WinDLL('ntdll.dll', winmode=0x800).NtQuerySystemInformation
+        shared = ctypes.string_at(0x7FFE0000, SHARED_PREFIX_BYTES)
     except (OSError, AttributeError) as error:
-        raise ValueError("native Windows boot identity query is unavailable") from error
+        raise ValueError('native Windows boot identity query is unavailable') from error
     query.argtypes = [ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32,
                       ctypes.POINTER(ctypes.c_uint32)]
     query.restype = ctypes.c_int32
-    size = 65536
-    maximum = 16 * 1024 * 1024
-    for _ in range(8):
-        if size > maximum:
-            break
-        buffer = ctypes.create_string_buffer(size)
-        returned = ctypes.c_uint32()
-        status = query(5, buffer, size, ctypes.byref(returned))  # SystemProcessInformation
-        code = status & 0xffffffff
-        if status >= 0:
-            if not ctypes.sizeof(_ProcessPrefix) <= returned.value <= size:
-                raise ValueError("invalid native Windows process inventory length")
-            return _process_boot_identity(buffer.raw[:returned.value])
-        if code not in {0xC0000004, 0xC0000023, 0x80000005}:
-            raise ValueError(f"native Windows boot identity query failed (NTSTATUS 0x{code:08x})")
-        size = max(size * 2, returned.value + 65536)
-    raise ValueError("native Windows process inventory exceeds the boot identity query budget")
+    buffer = ctypes.create_string_buffer(32)
+    returned = ctypes.c_uint32()
+    status = query(90, buffer, 32, ctypes.byref(returned))  # SystemBootEnvironmentInformation
+    if status < 0:
+        raise ValueError(f'native Windows boot environment query failed (NTSTATUS 0x{status & 0xffffffff:08x})')
+    if returned.value not in {24, 32}:
+        raise ValueError('unsupported native Windows boot environment length')
+    return _decode_boot_identity(buffer.raw[:returned.value], shared)

@@ -1,31 +1,37 @@
-"""A boot epoch must come from the System record, never the current daemon."""
-import ctypes
+"""An OS boot identity must change with loader sequence, not wall-clock time."""
+import struct
 import unittest
+import uuid
 
-from worker_windows_identity import _ProcessPrefix, _process_boot_identity
+from worker_windows_identity import SHARED_PREFIX_BYTES, _decode_boot_identity
 
 
-class NativeProcessInventoryTests(unittest.TestCase):
-    def record(self, pid, created, next_offset=0):
-        record=_ProcessPrefix()
-        record.pid=pid
-        record.created=created
-        record.next_offset=next_offset
-        # A forged name pointer must never be followed by the bounded parser.
-        record.name_buffer=1
-        return bytes(record)
+class NativeBootIdentityTests(unittest.TestCase):
+    def records(self, sequence=7, major=10, build=22631, architecture=9):
+        environment=bytearray(32)
+        environment[:16]=uuid.UUID('12345678-1234-5678-9abc-def012345678').bytes_le
+        struct.pack_into('<I',environment,16,2)
+        shared=bytearray(SHARED_PREFIX_BYTES)
+        struct.pack_into('<I',shared,0x260,build)
+        struct.pack_into('<H',shared,0x26A,architecture)
+        struct.pack_into('<I',shared,0x26C,major)
+        struct.pack_into('<I',shared,0x2C4,sequence)
+        return environment,shared
 
-    def test_selects_the_system_epoch_independently_of_daemon_pid_and_name_pointer(self):
-        size=ctypes.sizeof(_ProcessPrefix)
-        data=self.record(12345,999,size)+self.record(4,123456789012345678)
-        self.assertEqual(_process_boot_identity(data),'windows:123456789012345678')
-        self.assertEqual(_ProcessPrefix.created.offset,32)
-        self.assertIn(_ProcessPrefix.pid.offset,{68,80})
+    def test_loader_sequence_distinguishes_reboots_with_the_same_boot_entry(self):
+        environment,shared=self.records()
+        first=_decode_boot_identity(environment,shared)
+        self.assertEqual(first,'windows:12345678123456789abcdef012345678:7')
+        environment,next_boot=self.records(sequence=8)
+        self.assertNotEqual(first,_decode_boot_identity(environment,next_boot))
+        # Changing the shared SystemTime/InterruptTime cannot fabricate a reboot.
+        shared[8:32]=b'\xff'*24
+        self.assertEqual(first,_decode_boot_identity(environment,shared))
 
-    def test_missing_system_zero_epoch_and_invalid_record_extents_fail_closed(self):
-        size=ctypes.sizeof(_ProcessPrefix)
-        for data in [b'',self.record(4,0),self.record(1,123),
-                     self.record(1,123,1),self.record(1,123,size+1),
-                     self.record(4,123,size+1),self.record(4,123)[:-1]]:
-            with self.subTest(data=data[:8]), self.assertRaises(ValueError):
-                _process_boot_identity(data)
+    def test_unsupported_layout_missing_identity_and_short_buffers_fail_closed(self):
+        environment,shared=self.records()
+        cases=[(environment[:-1],shared),(environment,shared[:-1]),(bytearray(32),shared),
+               self.records(major=9),self.records(build=7601),self.records(architecture=12)]
+        for environment,shared in cases:
+            with self.subTest(size=len(shared)),self.assertRaises(ValueError):
+                _decode_boot_identity(environment,shared)
