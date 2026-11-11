@@ -45,7 +45,7 @@ class WorkerFenceTests(unittest.TestCase):
     def test_windows_probe_keeps_portable_analysis_but_excludes_linux_engines(self):
         from unittest.mock import patch
         from worker_capabilities import doctor
-        with patch('worker_capabilities.sys.platform', 'win32'), \
+        with patch('worker_capabilities.sys', SimpleNamespace(platform='win32')), \
                 patch('worker_capabilities.platform.system', return_value='Windows'), \
                 patch('worker_dbgeng.doctor', return_value={'available':True}), \
                 patch('worker_capabilities._python_module', return_value=True):
