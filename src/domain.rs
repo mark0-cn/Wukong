@@ -2,8 +2,10 @@ mod claims;
 pub(crate) use claims::flag_claims;
 mod rules;
 pub use rules::{CompletionFacts, CompletionRules, DependencyRules, MessageRules, TaskGraph};
+mod progress;
 mod resources;
 use chrono::{DateTime, Utc};
+pub use progress::*;
 pub use resources::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -612,5 +614,6 @@ run_scoped!(
     Evidence,
     SharedDocument,
     ToolCallRecord,
-    Thought
+    Thought,
+    PublicReply
 );

@@ -105,6 +105,9 @@ export interface Messages {
   'progress-job-stale': undefined;
   'progress-job-successes': { count: string | number };
   'progress-preview-truncated': undefined;
+  'progress-text-interrupted': undefined;
+  'progress-text-streaming': undefined;
+  'progress-text-truncated': undefined;
   'report-accounting': undefined;
   'report-accounting-body': { agents: string | number; calls: string | number; cost: string | number; evidence: string | number; tokens: string | number };
   'report-attempts': undefined;

@@ -5,6 +5,7 @@ use crate::{
     queries::{AgentSummary, RunSummary},
 };
 use std::collections::BTreeSet;
+mod narration;
 mod tools;
 pub(crate) fn read(
     store: &Store,
@@ -20,7 +21,8 @@ pub(crate) fn read(
         let mail=mail_query.query_map(params![selected,request.agent],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let revision:i64=tx.query_row("SELECT COALESCE(MAX(revision),0) FROM entity_revisions",[],|row|row.get(0))?;
         let latest:i64=tx.query_row("SELECT COALESCE(MAX(seq),0) FROM events WHERE run_id=?1",[&selected],|row|row.get(0))?;
-        let signature=hex::encode(Sha256::digest(serde_json::to_vec(&(epoch,revision,latest,&selected,&request.agent,request.event_limit,&mail))?));
+        let controller_live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM leases WHERE run_id=?1 AND expires_at>?2)",params![selected,chrono::Utc::now().timestamp()],|row|row.get(0))?;
+        let signature=hex::encode(Sha256::digest(serde_json::to_vec(&(epoch,revision,latest,&selected,&request.agent,request.event_limit,&mail,controller_live))?));
         if request.known_revision.as_deref()==Some(&signature) {return Ok(WorkspaceResponse {revision:signature,data:None});}
         let mut data=WorkspaceData {selected:selected.clone(),runs,agents:vec![],findings:vec![],notes:vec![],transcript:vec![],active_tools:vec![],has_earlier:false};
         if let Some(run)=&selected {
@@ -36,7 +38,8 @@ pub(crate) fn read(
             let tools=tools::read(tx,data.runs.iter().find(|item| &item.id==run).expect("selected run exists"),request.agent.as_deref(),&events,&data.agents)?;
             data.active_tools=tools.active;
             let mail=mail.into_iter().map(|raw|Ok(serde_json::from_str::<Message>(&raw)?)).collect::<Result<Vec<_>>>()?;
-            data.transcript=presentation::transcript(&events,&tools.calls,&data.agents,&mail,&target_name,&tools.jobs);
+            let replies=narration::read(tx,run,&events)?;
+            data.transcript=presentation::transcript(&events,&tools.calls,&data.agents,&mail,&presentation::TranscriptState {target_name:&target_name,jobs:&tools.jobs,replies:&replies,controller_live});
         }
         Ok(WorkspaceResponse{revision:signature,data:Some(data)})
     })

@@ -1,5 +1,15 @@
 //! Models systems for the Rig adapter.
 use super::*;
+use crate::domain::{PublicReply, ReplyState};
+use rig_ecs::agent::Partial;
+use std::time::Instant;
+
+#[derive(Component)]
+pub(super) struct ReplyProgress {
+    reply: PublicReply,
+    last_flush: Option<Instant>,
+    last_bytes: usize,
+}
 
 fn public_text<'a>(parts: impl IntoIterator<Item = &'a AssistantContent>) -> String {
     parts
@@ -123,7 +133,14 @@ pub(super) fn prepare_models(
                         application.runner.emit(&run.id,Some(&agent.id),"context.compacted",json!({"checkpoint_evidence_id":evidence.id,"removed_messages":start,"runtime":"rig-memory"}))?;
                     }
                 }
-                commands.entity(effect).insert(BusinessPrepared);
+                commands.entity(effect).insert((
+                    BusinessPrepared,
+                    ReplyProgress {
+                        reply: PublicReply::for_request(&agent),
+                        last_flush: None,
+                        last_bytes: 0,
+                    },
+                ));
                 Ok(())
             })(),
         );
@@ -131,32 +148,57 @@ pub(super) fn prepare_models(
 }
 
 pub(super) fn account_replies(
-    calls: Query<(&ForAgent, &Outcome), (ReadyToSettle, ModelCalls, Without<HostFinal>)>,
+    calls: Query<
+        (&ForAgent, &Outcome, &ReplyProgress),
+        (ReadyToSettle, ModelCalls, Without<HostFinal>),
+    >,
     ids: Query<&AgentId>,
     application: Res<Application>,
     mut fatal: ResMut<Fatal>,
 ) {
-    for (from, outcome) in &calls {
+    for (from, outcome, progress) in &calls {
         if let Some(response) = outcome.completion() {
             failed(
                 &mut fatal,
                 (|| -> Result<()> {
                     let agent_id = ids.get(from.0)?.0.clone();
-                    let agent: AgentMetadata = application.runner.agent(&agent_id)?;
+                    application.runner.publish_reply(
+                        &progress.reply,
+                        &public_text(response.choice.iter()),
+                        ReplyState::Complete,
+                    )?;
                     application
                         .runner
                         .account_usage(&agent_id, response.usage, true)?;
-                    // Only public assistant text is operator-facing progress.
-                    let text = public_text(response.choice.iter());
-                    if !text.trim().is_empty() {
-                        let excerpt: String = text.chars().take(64 * 1024).collect();
-                        application.runner.emit(&agent.run_id, Some(&agent_id), "model.text",
-                            json!({"text":excerpt,"truncated":text.chars().count()>64*1024,"public":true}))?;
-                    }
                     Ok(())
                 })(),
             );
         }
+    }
+}
+
+pub(super) fn publish_partials(
+    mut calls: Query<(&mut ReplyProgress, &Partial)>,
+    application: Res<Application>,
+    mut fatal: ResMut<Fatal>,
+) {
+    for (mut progress, partial) in &mut calls {
+        if partial.text.is_empty()
+            || partial.text.len() == progress.last_bytes
+            || progress
+                .last_flush
+                .is_some_and(|last| last.elapsed() < Duration::from_millis(250))
+        {
+            continue;
+        }
+        failed(
+            &mut fatal,
+            application
+                .runner
+                .publish_reply(&progress.reply, &partial.text, ReplyState::Streaming),
+        );
+        progress.last_flush = Some(Instant::now());
+        progress.last_bytes = partial.text.len();
     }
 }
 

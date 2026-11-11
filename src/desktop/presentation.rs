@@ -49,6 +49,9 @@ pub struct ChatMessage {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub content: Vec<ChatPart>,
     pub delivery: Option<MessageDelivery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<ReplyState>,
+    pub truncated: bool,
 }
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -94,13 +97,20 @@ pub use tools::{result_summary, tool_display};
 mod jobs;
 pub use jobs::with_job;
 
+#[derive(Default)]
+pub struct TranscriptState<'a> {
+    pub target_name: &'a str,
+    pub jobs: &'a [JobRecord],
+    pub replies: &'a [PublicReply],
+    pub controller_live: bool,
+}
+
 pub fn transcript(
     events: &[Event],
     calls: &[ToolCallRecord],
     agents: &[AgentSummary],
     mail: &[Message],
-    target_name: &str,
-    jobs: &[JobRecord],
+    state: &TranscriptState<'_>,
 ) -> Vec<ChatMessage> {
     let agents: BTreeMap<_, _> = agents
         .iter()
@@ -126,6 +136,8 @@ pub fn transcript(
             created_at: event.created_at,
             content: vec![],
             delivery: None,
+            state: None,
+            truncated: false,
         };
         if matches!(event.kind.as_str(), "tool.started" | "tool.finished") {
             let Some(id) = event.data["call_id"].as_str() else {
@@ -141,11 +153,11 @@ pub fn transcript(
                 tool_display(
                     call,
                     agents.get(call.agent_id.as_str()).copied(),
-                    target_name,
+                    state.target_name,
                 ),
                 call,
                 agents.get(call.agent_id.as_str()).copied(),
-                jobs,
+                state.jobs,
             );
             message.id = format!("call-{}", call.id);
             message.created_at = call.created_at;
@@ -155,6 +167,39 @@ pub fn transcript(
                 args: json!({"display":display}),
                 result: call.result.as_ref().map(|_| json!({"display":display})),
                 is_error: matches!(display.state.as_str(), "failed" | "uncertain"),
+            });
+        } else if matches!(event.kind.as_str(), "model.text" | "model.text.started")
+            && event.data["reply_id"].is_string()
+        {
+            let Some(reply) = state.replies.iter().find(|reply| {
+                Some(reply.id.as_str()) == event.data["reply_id"].as_str()
+                    && reply.run_id == event.run_id
+                    && Some(reply.agent_id.as_str()) == event.agent_id.as_deref()
+            }) else {
+                continue;
+            };
+            if !seen.insert(reply.id.clone()) || reply.text.trim().is_empty() {
+                continue;
+            }
+            message.id = reply.id.clone();
+            message.created_at = reply.created_at;
+            message.state = Some(
+                if reply.state == ReplyState::Streaming
+                    && (!state.controller_live
+                        || agents.get(reply.agent_id.as_str()).is_none_or(|agent| {
+                            agent.generation != reply.generation
+                                || agent.status.terminal()
+                                || agent.status == Status::BudgetPaused
+                        }))
+                {
+                    ReplyState::Interrupted
+                } else {
+                    reply.state
+                },
+            );
+            message.truncated = reply.truncated;
+            message.content.push(ChatPart::Text {
+                text: reply.text.clone().into(),
             });
         } else {
             let content = match event.kind.as_str() {
@@ -212,6 +257,8 @@ pub fn transcript(
                 text: mail.content.clone().into(),
             }],
             delivery: Some(mail.envelope.delivery),
+            state: None,
+            truncated: false,
         });
     }
     messages.sort_by(|a, b| {
@@ -267,7 +314,16 @@ mod tests {
                 created_at: now(),
             })
             .collect::<Vec<_>>();
-        let messages = transcript(&events, &[call.clone()], &[], &[], "sample.elf", &[]);
+        let messages = transcript(
+            &events,
+            &[call.clone()],
+            &[],
+            &[],
+            &TranscriptState {
+                target_name: "sample.elf",
+                ..Default::default()
+            },
+        );
         assert_eq!(messages.len(), 1);
         let ChatPart::ToolCall { args, is_error, .. } = &messages[0].content[0] else {
             panic!("tool missing")

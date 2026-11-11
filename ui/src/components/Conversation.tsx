@@ -79,13 +79,16 @@ function Message() {
   useLocale();
   const message = useAuiState(s => s.message);
   const context = useContext(TranscriptContext);
-  const custom = message.metadata.custom as { author?: string; agent?: string; delivery?: string };
+  const custom = message.metadata.custom as { author?: string; agent?: string; delivery?: string; state?: ChatMessage['state']; truncated?: boolean };
   const user = message.role === 'user';
   return <MessagePrimitive.Root className={`message ${user ? 'message-user' : 'message-assistant'}`}>
     <div className="message-heading"><span className={`avatar ${user ? 'avatar-user' : ''}`}>{user ? <User size={15} /> : <Bot size={16} />}</span>
       <button className="author" onClick={() => { if (custom.agent) context.onAgent(custom.agent); }} disabled={!custom.agent}>{custom.author ?? (user ? t('workspace-you') : 'Agent')}</button>
       <time dateTime={message.createdAt.toISOString()}>{message.createdAt.toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' })}</time>
       {custom.delivery && <span className={`delivery delivery-${custom.delivery}`}>{custom.delivery === 'queued' ? t('workspace-awaiting-delivery') : labels[custom.delivery] ?? custom.delivery}</span>}
+      {custom.state === 'streaming' && <span className="delivery" role="status">{t('progress-text-streaming')}</span>}
+      {custom.state === 'interrupted' && <span className="delivery delivery-stale">{t('progress-text-interrupted')}</span>}
+      {custom.truncated && <span className="delivery">{t('progress-text-truncated')}</span>}
     </div>
     <div className="message-content"><MessagePrimitive.GroupedParts groupBy={groupTools} indicator="never">
       {({ part }) => {
@@ -102,9 +105,11 @@ function Message() {
 const messageComponents = { Message };
 export function convertMessage(message: ChatMessage): ThreadMessageLike {
   return { id: message.id, role: message.role, createdAt: new Date(message.created_at),
-    status: message.role === 'assistant' ? { type: 'complete', reason: 'stop' } : undefined,
+    status: message.role === 'assistant' ? message.state === 'streaming' ? { type: 'running' }
+      : message.state === 'interrupted' ? { type: 'incomplete', reason: 'cancelled' }
+      : { type: 'complete', reason: 'stop' } : undefined,
     content: message.content.map(part => part.type === 'text' ? { ...part, text: formatMessage(part.text) } : part) as unknown as ThreadMessageLike['content'],
-    metadata: { custom: { author: formatMessage(message.author), agent: message.agent_id, delivery: message.delivery } } };
+    metadata: { custom: { author: formatMessage(message.author), agent: message.agent_id, delivery: message.delivery, state: message.state, truncated: message.truncated } } };
 }
 function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier: () => void; limit: number }) {
   useLocale();

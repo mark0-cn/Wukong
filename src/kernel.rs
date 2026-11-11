@@ -148,6 +148,12 @@ pub(crate) fn drive(
                 retry_policy.in_set(ReviewSystems::Edit),
             ),
         )
+        // Stream arrivals do not necessarily advance Rig's effect graph, so
+        // Review may be skipped while a response remains in flight.
+        .add_systems(
+            AgentPass,
+            publish_partials.after(Stage::Arrive).before(Stage::Review),
+        )
         .add_observer(record_turn_end)
         .add_systems(PostUpdate, stream_progress)
         .add_systems(Last, (project_conversations, acknowledge_mail));

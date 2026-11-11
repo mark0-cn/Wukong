@@ -25,6 +25,7 @@ export interface ToolDisplay {
 export interface ChatMessage {
   id: string; role: 'assistant' | 'user'; agent_id: string | null; author: string | LocalizedMessage;
   created_at: string; delivery?: string;
+  state?: 'streaming' | 'complete' | 'interrupted'; truncated?: boolean;
   content: ({ type: 'text'; text: string | LocalizedMessage } | { type: 'tool-call'; toolCallId: string;
     toolName: string; args: { display: ToolDisplay }; result?: { display: ToolDisplay }; isError: boolean })[];
 }

@@ -26,6 +26,7 @@ pub mod tools;
 mod bootstrap;
 mod kernel_host;
 mod model_catalog;
+mod progress;
 mod usage;
 
 pub mod queries;

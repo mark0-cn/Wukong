@@ -1,13 +1,21 @@
 import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { ToolStep } from '../components/Conversation';
+import { convertMessage, ToolStep } from '../components/Conversation';
 import { api } from '../bridge';
-import { tool } from './fixtures';
+import { tool, workspace } from './fixtures';
 import { ToolDuration } from '../components/ToolActivity';
 
 vi.mock('../bridge', () => ({ api: vi.fn(), errorText: String, errorValue: String, openLink: vi.fn() }));
 
 describe('evidence-backed tool presentation', () => {
+  it('preserves identity while partial narration changes status', () => {
+    const message = { ...workspace.transcript[0], id: 'reply-stable', state: 'streaming' as const };
+    expect(convertMessage(message).status).toEqual({ type: 'running' });
+    const complete = convertMessage({ ...message, state: 'complete' });
+    expect(complete.id).toBe(message.id);
+    expect(complete.status).toEqual({ type: 'complete', reason: 'stop' });
+    expect(convertMessage({ ...message, state: 'interrupted' }).status).toEqual({ type: 'incomplete', reason: 'cancelled' });
+  });
   it('keeps background time live and freezes it on the recorded completion', () => {
     vi.useFakeTimers();
     try {

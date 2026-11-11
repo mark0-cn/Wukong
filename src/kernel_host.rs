@@ -25,6 +25,17 @@ pub(crate) struct KernelHost {
     coordinator: Coordinator,
 }
 impl KernelHost {
+    pub(crate) fn publish_reply(
+        &self,
+        reply: &PublicReply,
+        text: &str,
+        state: ReplyState,
+    ) -> Result<()> {
+        for notice in crate::progress::publish(&self.store, reply, text, state)? {
+            let _ = self.events.send(notice);
+        }
+        Ok(())
+    }
     pub(crate) fn new(
         store: Store,
         tools: Arc<ToolService>,

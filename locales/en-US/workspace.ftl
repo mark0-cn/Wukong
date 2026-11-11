@@ -228,6 +228,9 @@ progress-job-stale = This job belongs to an earlier agent generation. Reconcile 
 progress-job-identity = Worker job: { $id }
 progress-job-attempts = { $count } attempts
 progress-job-successes = { $count } successful trials
+progress-text-streaming = Writing…
+progress-text-interrupted = Interrupted · partial text saved
+progress-text-truncated = Display limited to 64 Ki characters
 
 ui-completed-hint = Analysis complete. Review findings or export the report.
 ui-stopped-hint = Task stopped. Saved progress remains available.

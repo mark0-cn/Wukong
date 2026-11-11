@@ -156,3 +156,5 @@ agent_finish/finish_scan 接受 result：outcome（success/inconclusive/blocked/
 模型调度前事务放行或记录 blocked、使未启动子任务失败、归档并通知父任务。放行请求收到前驱结果。失败无模型调用地传播。放行事件记录生产者代次/outcome；放行后前驱 follow-up 不撤销消费者，新依赖评估最新结果。这是准入顺序，不是自动实时数据流；所需证据仍须写契约。
 
 wait_for_agents.policy 默认 all_terminal，也支持 all_success/any_success。返回/唤醒含 pending/satisfied/blocked 条件，与 timeout 分离。创建门槛和运行等待均加入父子完成图，事务拒绝循环。等待停驻与工具回执同时提交，丢响应后重放不能让同一轮再次停驻。
+
+桌面对话由已持久化的调用、worker 后台任务和有界公开模型文本投影生成。`progress` 复用现有事务和版本通知保存公开快照；kernel 读取 Rig 的 `Partial.text`，经 `KernelHost` 委托持久化。流式执行与重试仍由 Rig 管理。消息身份由 Agent、代次和已计量轮次组成，不使用 ECS 实体 ID；旧代次、旧轮次不能覆盖新消息。开始与结束事件引用同一消息，中间快照覆盖该记录。租约过期参与桌面版本计算，并将未完成文本标记为中断。公开文本仅用于展示，不能解除完成或证据门槛。

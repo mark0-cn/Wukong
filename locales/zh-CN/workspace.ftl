@@ -222,6 +222,9 @@ progress-job-stale = 此任务属于 Agent 的旧一代执行，复用结果前�
 progress-job-identity = 后台任务：{ $id }
 progress-job-attempts = { $count } 次尝试
 progress-job-successes = { $count } 次试验成功
+progress-text-streaming = 正在输出…
+progress-text-interrupted = 输出中断 · 已保留部分内容
+progress-text-truncated = 展示上限为 64 Ki 字符
 
 ui-completed-hint = 分析已完成，可查看发现或导出报告。
 ui-stopped-hint = 任务已停止，已保存的进展仍可查看。
