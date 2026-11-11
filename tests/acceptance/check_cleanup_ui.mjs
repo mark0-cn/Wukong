@@ -3,7 +3,7 @@ import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, readdir, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join, sep } from 'node:path';
 if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted' || process.platform !== 'win32') throw Error('Disposable Windows GitHub runner required');
@@ -17,7 +17,20 @@ await mkdir(home, {recursive: true});
 const settings = join(home, 'preferences.json');
 await writeFile(settings, JSON.stringify({ui_language: 'en-US', output_language: 'auto'}));
 const review = join(root, 'review.json');
-const child = spawn(resolve(process.argv[2]), ['cleanup', 'choose', '--output', review], {env: {...process.env, LOCALAPPDATA: join(root, 'local'), APPDATA: join(root, 'roaming'), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`}});
+// The test relocates LOCALAPPDATA, which must not relocate the installed shared
+// WebView2 runtime lookup. Use the actual installed runtime as a fixed engine.
+let runtime;
+for (const base of [process.env.LOCALAPPDATA, process.env['ProgramFiles(x86)'], process.env.ProgramFiles].filter(Boolean)) {
+  const directory = join(base, 'Microsoft', 'EdgeWebView', 'Application');
+  for (const version of await readdir(directory).catch(() => [])) {
+    const candidate = join(directory, version);
+    if (await access(join(candidate, 'msedgewebview2.exe')).then(() => true, () => false)) runtime = candidate;
+  }
+}
+if (!runtime) throw Error('Installed WebView2 runtime unavailable on disposable runner');
+const child = spawn(resolve(process.argv[2]), ['cleanup', 'choose', '--output', review], {env: {...process.env, LOCALAPPDATA: join(root, 'local'), APPDATA: join(root, 'roaming'), WEBVIEW2_BROWSER_EXECUTABLE_FOLDER: runtime, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`}});
+let diagnostics = '';
+for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { diagnostics = (diagnostics + bytes.toString()).slice(-4096); });
 const exited = once(child, 'exit');
 let browser;
 try {
@@ -26,7 +39,7 @@ try {
     try { browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, {timeout: 1000}); }
     catch { await new Promise(resolve => setTimeout(resolve, 300)); }
   }
-  if (!browser) throw Error('Native cleanup webview did not open');
+  if (!browser) throw Error(`Native cleanup webview did not open; exit=${child.exitCode}; ${diagnostics}`);
   const page = browser.contexts()[0].pages()[0];
   await page.getByRole('heading', {name: 'Uninstall Wukong'}).waitFor();
   for (const checkbox of await page.getByRole('checkbox').all()) if (await checkbox.isChecked()) throw Error('Native cleanup option unexpectedly selected');
