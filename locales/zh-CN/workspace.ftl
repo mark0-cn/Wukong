@@ -231,3 +231,12 @@ ui-expand-input = 展开输入框
 ui-collapse-input = 收起输入框
 ui-ended-recipient = 此 Agent 已结束。已完成的 Agent 可通过“追加任务”继续；失败或停止的任务需要新建分析。
 ui-append-help = 明确安排后续工作，保留已有分析记录。
+
+ui-rename-task = 重命名任务
+ui-name-local = 名称仅保存在这台设备的界面中，不修改原始文件或任务内容。留空可恢复文件名。
+ui-task-name = 任务名称
+ui-save-name = 保存名称
+ui-filter-tasks = 筛选任务
+ui-all-tasks = 全部任务
+ui-active-tasks = 进行中
+ui-history-tasks = 历史与暂停

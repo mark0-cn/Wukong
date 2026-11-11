@@ -229,7 +229,7 @@ ui-failed-hint = Analysis ended with an error. Review failed operations and agen
 ui-model-and-usage = Model and usage
 
 ui-new-messages = { $count } new messages
-ui-recipient = To: 
+ui-recipient = To:
 ui-send-mode = Send mode
 ui-send-information = Add information
 ui-send-task = Assign follow-up
@@ -237,3 +237,12 @@ ui-expand-input = Expand message input
 ui-collapse-input = Collapse message input
 ui-ended-recipient = This agent has ended. Completed agents accept follow-up tasks; failed or stopped tasks require a new analysis.
 ui-append-help = Assign further work while retaining the analysis history.
+
+ui-rename-task = Rename task
+ui-name-local = Names are saved in this device’s interface only. Files and task instructions stay unchanged. Leave empty to use the filename.
+ui-task-name = Task name
+ui-save-name = Save name
+ui-filter-tasks = Filter tasks
+ui-all-tasks = All tasks
+ui-active-tasks = Active
+ui-history-tasks = History and paused

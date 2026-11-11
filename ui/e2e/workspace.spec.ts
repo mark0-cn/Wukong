@@ -221,3 +221,38 @@ test('keyboard resizing persists and minimum desktop size keeps controls reachab
   await expect(page.getByText('second evidence page: end of output')).toBeVisible();
   await page.screenshot({ path: join(tmpdir(), 'wukong-workspace-narrow.png'), fullPage: true });
 });
+
+test('task names, filters and panel choices survive reload without changing tasks', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('重命名任务', { exact: true }).click();
+  await page.getByLabel('任务名称', { exact: true }).fill('parser 第一轮');
+  await page.getByRole('button', { name: '保存名称', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'parser 第一轮', exact: true })).toBeVisible();
+  await page.getByLabel('筛选任务').selectOption('history');
+  await expect(page.locator('.run-card')).toHaveCount(1);
+  await page.getByLabel('筛选任务').selectOption('all');
+  await page.getByRole('button', { name: '收起协作任务', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'parser 第一轮', exact: true })).toBeVisible();
+  await expect(page.locator('.agents-panel')).toHaveCount(0);
+  const state = await page.evaluate(() => (window as any).__desktopTest);
+  expect(state.data.runs[0].target_path).toBe(workspace.runs[0].target_path);
+  expect(state.data.runs[0].task).toBe(workspace.runs[0].task);
+});
+
+test('latest-progress affordance follows scrolling and connection failure changes its indicator', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByLabel('发送给 Agent 的消息')).toBeVisible();
+  await expect(page.getByLabel('跳到最新进展')).toHaveCount(0);
+  await page.locator('.transcript').evaluate(element => { element.scrollTop = 0; });
+  await expect(page.locator('.jump-latest')).toBeVisible();
+  await page.locator('.jump-latest').click();
+  await expect(page.locator('.jump-latest')).toHaveCount(0);
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__;
+    const invoke = native.invoke;
+    native.invoke = (command: string, args: unknown) => command === 'workspace_read' ? Promise.reject('connection unavailable') : invoke(command, args);
+    (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.connection-error')).toBeVisible();
+});
