@@ -383,6 +383,7 @@ export interface Messages {
   'tree-selection-details': undefined;
   'tree-show-all': undefined;
   'tree-up-level': undefined;
+  'tree-waiting': undefined;
   'tree-waiting-count': { count: string | number };
   'ui-active-tasks': undefined;
   'ui-advanced-settings': undefined;

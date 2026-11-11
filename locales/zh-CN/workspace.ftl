@@ -277,3 +277,4 @@ tree-contains-selection = 包含当前选中的任务
 tree-incomplete-parent = 父级关系异常，单独展示此分支。
 tree-selection-details = 选中任务详情
 tree-parent-path = 父子任务路径
+tree-waiting = 等待协作

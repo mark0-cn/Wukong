@@ -55,7 +55,7 @@
 .tree-continue::before,.tree-branch::before { content:''; position:absolute; top:0; bottom:0; left:0; border-left:1px solid currentColor; }
 .tree-branch::after { content:''; position:absolute; top:20px; left:0; width:10px; border-top:1px solid currentColor; }
 .tree-last::before { bottom:auto; height:20px; }
-.agent-path>.tree-rails>.tree-branch { color:var(--accent-border); }
+.agent-path>.tree-rails>.tree-branch { color:var(--accent); }
 .agent-chevron,.agent-chevron-placeholder { flex:0 0 18px; width:18px; height:36px; }
 .agent-chevron { border:0; background:transparent; padding:0; color:var(--muted); }
 .agent-chevron:hover:not(:disabled) { color:var(--text); background:var(--hover); }
@@ -68,7 +68,9 @@
 .agent-tree-root>.agent-node .agent-card-name strong { font-weight:600; }
 .agent-role { font-size:12px; font-weight:400; color:var(--muted); flex-shrink:0; }
 .agent-card-meta { display:flex; align-items:center; gap:5px; min-width:0; margin-top:3px; line-height:18px; }
-.agent-card-meta .status { flex-shrink:0; }
+.agent-card-meta .status { flex:0 1 auto; min-width:0; }
+.agent-card-meta .status>svg { flex-shrink:0; }
+.agent-card-meta .status>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .agent-scope { font-size:12px; color:var(--muted); white-space:nowrap; text-overflow:ellipsis; overflow:hidden; }
 .agent-inline-error,.agent-descendants,.agent-hidden-selection { display:block; font-size:12px; line-height:1.5; margin-top:4px; color:var(--muted); overflow-wrap:anywhere; }
 .agent-inline-error { color:var(--error); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

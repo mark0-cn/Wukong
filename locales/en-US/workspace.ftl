@@ -283,3 +283,4 @@ tree-contains-selection = Contains the selected task
 tree-incomplete-parent = Invalid parent relationship; this branch is shown separately.
 tree-selection-details = Selected task details
 tree-parent-path = Parent-child task path
+tree-waiting = Waiting
