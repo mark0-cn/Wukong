@@ -28,7 +28,10 @@ pub fn cache_root() -> Result<PathBuf> {
 }
 pub fn cache_lock(exclusive: bool) -> Result<fs::File> {
     let root = recovery::root()?;
-    fs::create_dir_all(&root)?;
+    cache_lock_at(&root, exclusive)
+}
+pub(crate) fn cache_lock_at(root: &Path, exclusive: bool) -> Result<fs::File> {
+    fs::create_dir_all(root)?;
     let file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -42,6 +45,10 @@ pub fn cache_lock(exclusive: bool) -> Result<fs::File> {
     } else {
         file.try_lock_shared()
             .context(UiMessage::new("system-the-cache-location-is-changing"))?;
+        ensure!(
+            !root.join("cleanup-in-progress.json").exists(),
+            "uninstall cleanup is in progress"
+        );
     }
     Ok(file)
 }
@@ -79,11 +86,19 @@ pub fn set_cache(destination: &Path) -> Result<PathBuf> {
         fs::read_dir(&destination)?.next().is_none(),
         UiMessage::new("system-choose-an-empty-directory-existing-files-will-not")
     );
+    crate::cleanup::register_cache(&crate::desktop::paths::home()?, &source)?;
     let staging = tempfile::tempdir_in(&destination)?;
     let releases = source.join("releases");
     if releases.exists() {
         copy_releases(&releases, &staging.path().join("releases"))?;
     }
+    crate::cleanup::create_owned_directory(&destination.join("probes"))?;
+    // The destination was verified empty before Wukong populated it.
+    crate::workbench::write_json(
+        &destination.join(".wukong-owned.json"),
+        &serde_json::json!({"schema_version":1,"application":"io.wukong.desktop"}),
+    )?;
+    crate::cleanup::register_cache(&crate::desktop::paths::home()?, &destination)?;
     let staged = staging.path().join("releases");
     if staged.exists() {
         fs::rename(staged, destination.join("releases"))?;

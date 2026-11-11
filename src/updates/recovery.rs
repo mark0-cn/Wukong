@@ -182,23 +182,11 @@ pub fn integrate_linux() -> Result<PathBuf> {
         .context("missing data home")?
         .join("applications");
     std::fs::create_dir_all(&apps)?;
-    let quote = |path: &Path| -> Result<String> {
-        let text = path.to_str().context("desktop path must be UTF-8")?;
-        ensure!(!text.contains(['\n', '\r']), "invalid desktop path");
-        Ok(format!(
-            "\"{}\"",
-            text.replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('`', "\\`")
-                .replace('$', "\\$")
-                .replace('%', "%%")
-        ))
-    };
     std::fs::write(
         apps.join("io.wukong.desktop.desktop"),
         format!(
             "[Desktop Entry]\nType=Application\nName=Wukong\nComment=Binary analysis and verification workspace\nComment[zh_CN]=二进制分析与验证工作区\nExec={}\nIcon={}\nTerminal=false\nCategories=Development;\n",
-            quote(&destination)?,
+            crate::desktop::paths::desktop_exec(&destination)?,
             icon.display()
         ),
     )?;

@@ -103,7 +103,6 @@ impl Service {
             self.context(epoch)?.state_override.is_none(),
             UiMessage::new("system-the-directory-was-set-with-state-restart-without")
         );
-        let _lock = crate::updates::maintenance::lock(&crate::updates::recovery::root()?, true)?;
         ensure!(
             crate::updates::recovery::pending()?.is_none(),
             UiMessage::new("system-finish-or-recover-the-pending-update-first")

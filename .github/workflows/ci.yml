@@ -195,6 +195,8 @@ jobs:
         run: |
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb
           cargo test --locked --all-targets
+          cargo build --locked
+          python tests/acceptance/check_cleanup.py --binary target/debug/wukong
       - name: Offline worker package format
         if: needs.changes.outputs.rust == 'true'
         run: |

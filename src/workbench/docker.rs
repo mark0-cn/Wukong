@@ -36,7 +36,7 @@ impl Docker {
     pub fn run(&self, args: &[&str]) -> Result<String> {
         let seconds = if matches!(
             args.first(),
-            Some(&"info" | &"inspect" | &"version" | &"ps")
+            Some(&"info" | &"inspect" | &"version" | &"ps" | &"context")
         ) {
             30
         } else {
@@ -189,6 +189,9 @@ fn logged_failure(log: &Path, status: &str) -> crate::i18n::Message {
 pub fn portable_path(path: &Path) -> PathBuf {
     // Docker Desktop accepts drive paths, not Windows verbatim path prefixes.
     let value = path.to_string_lossy();
+    if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{unc}"));
+    }
     PathBuf::from(value.strip_prefix(r"\\?\").unwrap_or(&value))
 }
 
