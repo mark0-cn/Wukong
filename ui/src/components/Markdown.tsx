@@ -1,16 +1,15 @@
 import { t, useLocale } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy } from 'lucide-react';
+import { CopyButton } from './CopyButton';
 import { useState } from 'react';
 import { openLink } from '../bridge';
 import { Modal } from './Modal';
 
 function Code({ text, language }: { text: string; language?: string }) {
   useLocale();
-  const [copied, setCopied] = useState(false);
   return <div className="code-block"><div className="code-heading"><span>{language ?? t('workspace-code')}</span>
-    <button onClick={() => { void navigator.clipboard.writeText(text).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1600); }); }}><Copy size={12} />{copied ? t('workspace-copied') : t('workspace-copy')}</button></div>
+    <CopyButton value={text} /></div>
     <pre><code>{text}</code></pre></div>;
 }
 const HTTP_LINK = /^https?:\/\//i;

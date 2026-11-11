@@ -16,7 +16,7 @@
   background: var(--surface);
   border:1px solid var(--border-strong);
   border-radius:13px;
-  padding:25px;
+  padding:22px;
   box-shadow:0 24px 90px var(--shadow);
   z-index:11;
   overflow:auto;
@@ -33,7 +33,7 @@
   gap:15px;
   justify-content:space-between;
   align-items:flex-start;
-  margin-bottom:23px;
+  margin-bottom:16px;
 }
 .modal-heading h2 {
   font-size:20px;
@@ -100,7 +100,7 @@
   gap:9px;
   align-items:center;
   justify-content:flex-end;
-  padding-top:18px;
+  padding-top:14px;
   margin-top:5px;
   border-top:1px solid var(--border-strong);
   flex-shrink:0;
@@ -173,3 +173,12 @@
   border-color:var(--border-strong);
   color:var(--text);
 }
+
+.settings-sections { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+.settings-sections button { background:transparent; border-color:transparent; }
+.settings-sections button[aria-pressed=true] { background:var(--hover); color:var(--text); border-color:var(--border); }
+[hidden] { display:none !important; }
+
+.modal-footer { flex-wrap:wrap; }
+.modal-footer>span { flex:1 1 180px; }
+.settings-toolbar>span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
