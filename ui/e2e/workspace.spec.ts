@@ -5,7 +5,7 @@ import { agents, budget, finding, host, tool, workspace } from '../src/test/fixt
 
 async function mockDesktop(page: Page) {
   await page.addInitScript(({ data, host, tool, finding }) => {
-    const state = { data, host, preferences: { ui_language: 'zh-CN', output_language: 'auto', system_locale: 'en-US' }, requests: [] as { command: string; args: Record<string, any> }[], revision: 1, sendDelay: 0 };
+    const state = { data, host, preferences: { ui_language: 'zh-CN', output_language: 'auto', system_locale: 'en-US' }, requests: [] as { command: string; args: Record<string, any> }[], revision: 1, sendDelay: 0, preparedUpdate: null as string | null };
     const callbacks = new Map<number, (value: unknown) => void>();
     const listeners = new Map<string, number[]>();
     let next = 0;
@@ -18,7 +18,12 @@ async function mockDesktop(page: Page) {
         state.requests.push({ command, args });
         if (command === 'preferences_read') return JSON.parse(sessionStorage.getItem('test-preferences') ?? 'null') ?? state.preferences;
         if (command === 'preferences_save') { state.preferences = { ...state.preferences, ...args.preferences }; sessionStorage.setItem('test-preferences', JSON.stringify(state.preferences)); return state.preferences; }
-        if (command === 'update_action') return { version: '0.2.0', phase: 'idle', message: '当前工具环境已就绪', available: '0.2.1', notes: '修复工具兼容性', downloaded: 0, total: null, prepared: null, recovery: null, needs_setup: false, pending: false };
+        if (command === 'update_action') {
+          if (args.action === 'prepare') state.preparedUpdate = '/cache/verified-update';
+          return { version: '0.2.0', phase: 'idle', message: '当前工具环境已就绪', available: '0.2.1', notes: '修复工具兼容性', downloaded: 0, total: null, prepared: state.preparedUpdate, recovery: null, needs_setup: false, pending: false };
+        }
+        if (command === 'update_storage') return { data_dir: '/data/workspace', cache_dir: '/data/cache' };
+        if (command === 'workbench_action') return { state: 'ready' };
         if (command === 'plugin:event|listen') { listeners.set(args.event, [...(listeners.get(args.event) ?? []), args.handler]); return args.handler; }
         if (command === 'plugin:event|unlisten') { listeners.set(args.event, (listeners.get(args.event) ?? []).filter(id => id !== args.eventId)); return; }
         if (command === 'workspace_read') {
@@ -28,7 +33,7 @@ async function mockDesktop(page: Page) {
           if (snapshot.selected === 'run-b') { snapshot.agents = [{ ...snapshot.agents[0], id: 'root-b', name: '归档分析 Agent' }]; snapshot.transcript = []; snapshot.active_tools = []; }
           else if (request.agent) snapshot.transcript = snapshot.transcript.filter(message => message.agent_id === request.agent);
           const revision = `${state.revision}:${snapshot.selected}:${request.agent ?? ''}:${request.event_limit}`;
-          return { host: state.host, workspace: { revision, data: revision === request.known_revision ? null : snapshot } };
+          return { host: structuredClone(state.host), workspace: { revision, data: revision === request.known_revision ? null : snapshot } };
         }
         if (command === 'tool_details') return { id: args.id, agent_id: 'root', name: 'binary_info', arguments: { path: 'parser.elf', raw_parameter: 'visible-on-demand' }, result: { architecture: 'x86_64', format: 'elf' }, evidence_id: tool.evidence_id, state: 'completed' };
         if (command === 'send_message') {
@@ -159,7 +164,7 @@ test('retains per-agent drafts and targets message delivery after navigation', a
 test('loads scoped evidence pages and preserves settings drafts', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /发现与证据/ }).click();
-  await page.getByRole('button', { name: 'reproduction.txt', exact: true }).click();
+
   await expect(page.getByText('first evidence page: controlled reproduction')).toBeVisible();
   await page.getByLabel('下一页证据').click();
   await expect(page.getByText('second evidence page: end of output')).toBeVisible();
@@ -173,10 +178,16 @@ test('loads scoped evidence pages and preserves settings drafts', async ({ page 
 
  test('update center presents versions and requires preparation before restart', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: '更新与环境', exact: true }).click();
+  await page.getByRole('button', { name: '更新', exact: true }).click();
   await expect(page.getByText('0.2.0', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '安装并重启', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '安装并重启', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '下载并验证更新', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '下载并验证更新', exact: true }).click();
+  await expect(page.getByRole('button', { name: '安装并重启', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '安装并重启', exact: true }).click();
+  await expect(page.getByRole('button', { name: '确认', exact: true })).toBeVisible();
+  const requests = await page.evaluate(() => (window as any).__desktopTest.requests);
+  expect(requests.some((r: any) => r.command === 'update_action' && r.args.action === 'install')).toBe(false);
   await page.screenshot({ path: join(tmpdir(), 'wukong-update-center.png'), fullPage: true });
 });
 
@@ -211,13 +222,164 @@ test('keyboard resizing persists and minimum desktop size keeps controls reachab
   await page.setViewportSize({ width: 860, height: 600 });
   await expect(page.locator('.agents-panel')).toHaveCount(0);
   await expect(page.getByLabel('发送消息', { exact: true })).toBeInViewport();
-  await expect(page.getByRole('button', { name: '更新与环境', exact: true })).toBeInViewport();
+  await expect(page.getByRole('button', { name: '更新', exact: true })).toBeInViewport();
   await page.getByRole('button', { name: '发现与证据', exact: false }).click();
-  await page.getByRole('button', { name: 'reproduction.txt', exact: true }).click();
+  await page.locator('.finding-card').first().click();
+
   await expect(page.getByText('first evidence page: controlled reproduction')).toBeVisible();
   await page.getByLabel('下一页证据').scrollIntoViewIfNeeded();
   await expect(page.getByLabel('下一页证据')).toBeInViewport();
   await page.getByLabel('下一页证据').click();
   await expect(page.getByText('second evidence page: end of output')).toBeVisible();
   await page.screenshot({ path: join(tmpdir(), 'wukong-workspace-narrow.png'), fullPage: true });
+  await page.getByRole('button', { name: '返回发现列表', exact: true }).click();
+  await expect(page.locator('.finding-card').first()).toBeVisible();
+});
+
+test('task names, filters and panel choices survive reload without changing tasks', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('重命名任务', { exact: true }).click();
+  await page.getByLabel('任务名称', { exact: true }).fill('parser 第一轮');
+  await page.getByRole('button', { name: '保存名称', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'parser 第一轮', exact: true })).toBeVisible();
+  await page.getByLabel('筛选任务').selectOption('history');
+  await expect(page.locator('.run-card')).toHaveCount(1);
+  await page.getByLabel('筛选任务').selectOption('all');
+  await page.getByRole('button', { name: '收起协作任务', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'parser 第一轮', exact: true })).toBeVisible();
+  await expect(page.locator('.agents-panel')).toHaveCount(0);
+  const state = await page.evaluate(() => (window as any).__desktopTest);
+  expect(state.data.runs[0].target_path).toBe(workspace.runs[0].target_path);
+  expect(state.data.runs[0].task).toBe(workspace.runs[0].task);
+});
+
+test('latest-progress affordance follows scrolling and connection failure changes its indicator', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByLabel('发送给 Agent 的消息')).toBeVisible();
+  await expect(page.getByLabel('跳到最新进展')).toHaveCount(0);
+  await page.locator('.transcript').evaluate(element => { element.scrollTop = 0; });
+  await expect(page.locator('.jump-latest')).toBeVisible();
+  await page.locator('.jump-latest').click();
+  await expect(page.locator('.jump-latest')).toHaveCount(0);
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__;
+    const invoke = native.invoke;
+    native.invoke = (command: string, args: unknown) => command === 'workspace_read' ? Promise.reject('connection unavailable') : invoke(command, args);
+    (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.connection-error')).toBeVisible();
+});
+
+test('settings categories retain drafts and separate tool and challenge actions', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByLabel('主模型', { exact: true }).fill('model-draft');
+  await page.getByRole('button', { name: '高级配置', exact: true }).click();
+  await expect(page.getByLabel('主模型', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '存储位置', exact: true }).click();
+  await expect(page.getByRole('button', { name: '应用数据目录', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '语言与模型', exact: true }).click();
+  await expect(page.getByLabel('主模型', { exact: true })).toHaveValue('model-draft');
+  await page.getByLabel('关闭', { exact: true }).click();
+  await page.evaluate(() => { (window as any).__desktopTest.host.execution = null; (window as any).__emitDesktop('workspace-changed', null); });
+  await page.getByRole('button', { name: '工具环境', exact: true }).click();
+  await expect(page.getByRole('button', { name: '启动环境', exact: true })).toBeVisible();
+  await expect(page.getByLabel('题目名称', { exact: true })).toHaveCount(0);
+  await page.getByLabel('关闭', { exact: true }).click();
+  await page.getByRole('button', { name: '题目环境', exact: true }).click();
+  await expect(page.getByLabel('题目名称', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '启动环境', exact: true })).toHaveCount(0);
+});
+
+test('large tool groups keep failed operations visible before expansion', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    const original = state.data.transcript.find((item: any) => item.id === 'retry');
+    const failed = original.content.find((part: any) => part.type === 'tool-call');
+    state.data.transcript = [{ ...original, content: [failed, ...Array.from({ length: 6 }, (_, index) => {
+      const display = { ...failed.args.display, call_id: `batch-${index}`, state: 'completed', title: 'tool-binary-inspect', summary: 'completed check' };
+      return { ...failed, toolCallId: display.call_id, args: { display }, result: { display }, isError: false };
+    })] }];
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.tool-step')).toHaveCount(1);
+  await expect(page.getByText('调试后端暂不可用：连接已关闭。已保留当前证据。')).toBeVisible();
+  await page.getByRole('button', { name: /展开全部/ }).click();
+  await expect(page.locator('.tool-step')).toHaveCount(7);
+});
+
+test('new messages preserve reading position and count arrivals', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.transcript = Array.from({ length: 40 }, (_, index) => ({ ...state.data.transcript[0], id: `history-${index}`, content: [{ type: 'text', text: `Progress ${index}` }] }));
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.getByText('Progress 39', { exact: true })).toBeVisible();
+  await page.locator('.transcript').evaluate(element => { element.scrollTop = 0; });
+  await expect(page.locator('.jump-latest')).toBeVisible();
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.transcript.push({ ...state.data.transcript[0], id: 'arrival', content: [{ type: 'text', text: 'New observation' }] });
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(page.locator('.jump-latest')).toHaveText(/1/);
+  expect(await page.locator('.transcript').evaluate(element => element.scrollTop)).toBeLessThan(50);
+  await page.locator('.jump-latest').click();
+  await expect(page.getByText('New observation', { exact: true })).toBeVisible();
+});
+
+test('bilingual layouts keep long names and maintenance controls inside the viewport', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.runs[0].target_path = '/long/path/' + 'parser_long_name_'.repeat(12) + '.elf';
+    state.revision++; (window as any).__emitDesktop('workspace-changed', null);
+  });
+  for (const locale of ['zh-CN', 'en-US']) {
+    await page.locator('.sidebar-footer button').last().click();
+    await page.locator('select').filter({ has: page.locator('option[value="en-US"]') }).first().selectOption(locale);
+    await page.locator('.modal-heading button').click();
+    for (const width of [1440, 1024, 860]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 600 });
+      await expect(page.locator('.send-button')).toBeInViewport();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: `target/ui-polish-${locale}-${width}.png` });
+    }
+    await page.locator('.sidebar-footer button').last().click();
+    await page.locator('.settings-sections button').nth(1).click();
+    await expect(page.locator('.modal-footer .primary')).toBeInViewport();
+    await page.screenshot({ path: `target/ui-polish-settings-${locale}.png` });
+    await page.locator('.settings-sections button').first().click();
+    await page.locator('.modal-heading button').click();
+  }
+});
+
+test('storage edits survive closing settings without applying directory changes', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => { const state = (window as any).__desktopTest; state.host = { ...state.host, execution: null }; (window as any).__emitDesktop('workspace-changed', null); });
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByRole('button', { name: '存储位置', exact: true }).click();
+  await page.getByLabel('更新缓存目录', { exact: true }).fill('/new/cache/draft');
+  await page.getByLabel('关闭', { exact: true }).click();
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await expect(page.getByLabel('更新缓存目录', { exact: true })).toHaveValue('/new/cache/draft');
+  await page.getByRole('button', { name: '语言与模型', exact: true }).click();
+  await page.getByRole('button', { name: '存储位置', exact: true }).click();
+  await expect(page.getByLabel('更新缓存目录', { exact: true })).toHaveValue('/new/cache/draft');
+  expect(await page.evaluate(() => (window as any).__desktopTest.requests.some((r: any) => r.command === 'update_cache_directory'))).toBe(false);
+});
+
+test.describe('high density desktop', () => {
+  test.use({ deviceScaleFactor: 1.5, viewport: { width: 860, height: 600 } });
+  test('keeps the minimum logical window usable at 150 percent pixel density', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.send-button')).toBeInViewport();
+    await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+    await expect(page.locator('.modal-heading button')).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: 'target/ui-polish-hidpi.png' });
+  });
 });

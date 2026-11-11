@@ -216,3 +216,46 @@ result-failed = 操作执行失败，可展开查看错误详情。
 result-uncertain = 执行结果尚未确认，需要核对后再继续。
 result-paused = 分析已暂停，保留当前操作状态。
 result-interrupted = 所属任务已结束，本次操作未确认完成。
+
+ui-completed-hint = 分析已完成，可查看发现或导出报告。
+ui-stopped-hint = 任务已停止，已保存的进展仍可查看。
+ui-failed-hint = 分析异常结束，请查看失败操作与协作面板中的错误。
+ui-model-and-usage = 模型与用量
+
+ui-new-messages = 有 { $count } 条新消息
+ui-recipient = 发送给：
+ui-send-mode = 发送方式
+ui-send-information = 补充信息
+ui-send-task = 追加任务
+ui-expand-input = 展开输入框
+ui-collapse-input = 收起输入框
+ui-ended-recipient = 此 Agent 已结束。已完成的 Agent 可通过“追加任务”继续；失败或停止的任务需要新建分析。
+ui-append-help = 明确安排后续工作，保留已有分析记录。
+
+ui-rename-task = 重命名任务
+ui-name-local = 名称仅保存在这台设备的界面中，不修改原始文件或任务内容。留空可恢复文件名。
+ui-task-name = 任务名称
+ui-save-name = 保存名称
+ui-filter-tasks = 筛选任务
+ui-all-tasks = 全部任务
+ui-active-tasks = 进行中
+ui-history-tasks = 历史与暂停
+
+ui-updates = 更新
+ui-tools-environment = 工具环境
+ui-challenge-environment = 题目环境
+ui-environment-busy = 分析或操作进行中，环境管理暂不可用。
+ui-maintenance-options = 维护选项
+ui-settings-sections = 设置分类
+ui-general-settings = 语言与模型
+ui-advanced-settings = 高级配置
+ui-save-before-storage = 请先保存配置草稿，再切换存储位置。
+ui-tools-description = 准备或修复当前版本配套的工具镜像；启动后可运行自检并将其用于新任务。
+
+ui-copy-failed = 复制失败，请手动选择文本复制。
+ui-copy-source = 复制来源路径
+ui-copy-hash = 复制 SHA-256
+ui-copy-evidence-id = 复制证据 ID
+ui-select-evidence = 选择证据
+ui-back-findings = 返回发现列表
+ui-environment-facts = 运行环境字段
