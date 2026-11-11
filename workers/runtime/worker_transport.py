@@ -47,10 +47,10 @@ def serve(root, trusted):
         (root / "endpoint.json").chmod(0o600)
         server.serve_forever(poll_interval=0.25)
 
-def relay_call(endpoint, request):
+def relay_call(endpoint, request, timeout=305):
     request = {**request, "auth": endpoint["auth"]}
-    with socket.create_connection(("127.0.0.1", int(endpoint["port"])), timeout=5) as connection:
-        connection.settimeout(305)
+    with socket.create_connection(("127.0.0.1", int(endpoint["port"])), timeout=min(5, timeout)) as connection:
+        connection.settimeout(timeout)
         connection.sendall(json.dumps(request).encode() + b"\n")
         with connection.makefile("rb") as stream:
             line = stream.readline(MAX_RPC + 1)
@@ -64,7 +64,7 @@ def ensure_daemon(root, trusted):
     def existing():
         try:
             endpoint = load_json(endpoint_path)
-            reply = relay_call(endpoint, {"id": 0, "method": "ping"})
+            reply = relay_call(endpoint, {"id": 0, "method": "ping"}, timeout=1)
             if reply.get("result", {}).get("protocol") == PROTOCOL:
                 return endpoint
         except (OSError, ValueError, KeyError, socket.timeout):
@@ -77,7 +77,7 @@ def ensure_daemon(root, trusted):
     # Serialize daemon startup across relays. A stale lock is only removed after
     # its age exceeds startup allowance and a fresh endpoint probe still fails.
     lock = root / "startup.lock"
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
             lock.mkdir()
@@ -86,7 +86,7 @@ def ensure_daemon(root, trusted):
             endpoint = existing()
             if endpoint:
                 return endpoint
-            if time.time() - lock.stat().st_mtime > 20:
+            if time.time() - lock.stat().st_mtime > 45:
                 try:
                     lock.rmdir()
                 except OSError:
@@ -102,11 +102,16 @@ def ensure_daemon(root, trusted):
         if trusted:
             argv.append("--trusted-local")
         with (root / "daemon.log").open("ab") as log:
-            subprocess.Popen(argv, env=safe_env(), stdin=subprocess.DEVNULL, stdout=log, stderr=log, **detached_options())
-        for _ in range(100):
+            process = subprocess.Popen(argv, env=safe_env(), stdin=subprocess.DEVNULL, stdout=log, stderr=log, **detached_options())
+        # A cold Windows boot-identity query alone can take up to 15 seconds.
+        # Keep the startup lock while that bounded initialization is in flight.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
             endpoint = existing()
             if endpoint:
                 return endpoint
+            if process.poll() is not None:
+                raise ValueError(f"worker daemon exited during startup ({process.returncode}); inspect daemon.log")
             time.sleep(0.05)
         raise ValueError("worker daemon failed to start; inspect daemon.log")
     finally:
