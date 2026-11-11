@@ -11,7 +11,7 @@ export interface UpdateStatus {
 }
 export interface ImagePullProgress {
   layers: { id: string; state: 'waiting' | 'downloading' | 'downloaded' | 'extracting' | 'verifying' | 'ready' }[];
-  elapsed_ms: number; finished: boolean; cached: boolean; truncated: boolean;
+  elapsed_ms: number; quiet_ms?: number; finished: boolean; cached: boolean; truncated: boolean;
 }
 export type WorkbenchRequest =
   | { action: 'status' | 'up' | 'down' | 'doctor' | 'list' }

@@ -108,3 +108,6 @@ system-docker-command-timeout = Docker did not respond within { $seconds } secon
 system-docker-output-limit = Docker output exceeded the control-command limit. Open diagnostics to investigate.
 
 updates-refresh-failed = Progress connection interrupted; retrying automatically. The operation may still be running.
+
+updates-last-layer-change = Last layer progress change: { $seconds } seconds ago
+updates-no-recent-layer-change = No new layer progress for a while. Docker may still be transferring a large layer. Check diagnostic output if needed; this does not mean the operation failed.

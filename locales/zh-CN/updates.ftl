@@ -108,3 +108,6 @@ system-docker-command-timeout = Docker 在 { $seconds } 秒内没有响应。请
 system-docker-output-limit = Docker 输出超过控制命令的限制，请查看诊断信息。
 
 updates-refresh-failed = 进度连接暂时中断，正在自动重连。操作可能仍在继续。
+
+updates-last-layer-change = 距镜像层进度变化：{ $seconds } 秒
+updates-no-recent-layer-change = 一段时间内没有新的镜像层进度。Docker 可能仍在传输大文件层，可查看诊断输出；这不表示操作已经失败。
