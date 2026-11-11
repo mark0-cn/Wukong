@@ -299,11 +299,8 @@ fn configuration_paths_are_not_permission_to_delete_shared_directory_contents() 
             .iter()
             .any(|entry| entry.path.starts_with(&shared))
     );
-    assert!(
-        plan.retained
-            .iter()
-            .any(|entry| entry.path == shared.display().to_string())
-    );
+    let normalized = files::absolute(&shared)?.display().to_string();
+    assert!(plan.retained.iter().any(|entry| entry.path == normalized));
     assert!(cleanup.execute(&plan)?.complete);
     assert!(shared.join("projects/source.c").exists());
     assert!(shared.join("Cargo.toml").exists());
