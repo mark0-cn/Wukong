@@ -216,3 +216,8 @@ result-failed = 操作执行失败，可展开查看错误详情。
 result-uncertain = 执行结果尚未确认，需要核对后再继续。
 result-paused = 分析已暂停，保留当前操作状态。
 result-interrupted = 所属任务已结束，本次操作未确认完成。
+
+ui-completed-hint = 分析已完成，可查看发现或导出报告。
+ui-stopped-hint = 任务已停止，已保存的进展仍可查看。
+ui-failed-hint = 分析异常结束，请查看失败操作与协作面板中的错误。
+ui-model-and-usage = 模型与用量

@@ -367,6 +367,10 @@ export interface Messages {
   'transcript-stopped': undefined;
   'transcript-workspace': undefined;
   'transcript-you': undefined;
+  'ui-completed-hint': undefined;
+  'ui-failed-hint': undefined;
+  'ui-model-and-usage': undefined;
+  'ui-stopped-hint': undefined;
   'updates-add-to-application-menu-and-restart': undefined;
   'updates-attachment-directory-or-file': undefined;
   'updates-available-version': undefined;
