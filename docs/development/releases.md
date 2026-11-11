@@ -1,43 +1,46 @@
-# 在线发布与 GitHub Actions
+<a id="在线发布与-github-actions"></a>
 
-仓库：`mark0-cn/Wukong`。公开镜像：`hlmark0/wukong`。发布 Windows x64 NSIS 安装 EXE 和 Linux x64 AppImage；镜像平台为 linux/amd64。
+# Online releases and GitHub Actions
 
-## 仓库配置
+English · [简体中文](releases.zh-CN.md)
 
-Settings → Secrets and variables → Actions：
+Repository: `mark0-cn/Wukong`. Public image: `hlmark0/wukong`. Distributions: Windows x64 NSIS EXE and Linux x64 AppImage; image platform linux/amd64.
 
-| 类型 | 名称 | 值 |
+<a id="仓库配置"></a>
+
+## Repository configuration
+
+**Settings → Secrets and variables → Actions**:
+
+| Type | Name | Value |
 | --- | --- | --- |
 | Variable | DOCKERHUB_USERNAME | hlmark0 |
 | Variable | DOCKERHUB_NAMESPACE | hlmark0 |
-| Secret | DOCKERHUB_TOKEN | Docker Hub 仓库 Read/Write PAT，不需要 Delete |
-| Secret | TAURI_SIGNING_PRIVATE_KEY | Tauri 更新签名私钥内容，仅可信发布工作流使用 |
-| Variable | RELEASE_APP_ID | 专用发布 GitHub App 的 App ID |
-| Secret | RELEASE_APP_PRIVATE_KEY | 该 App 生成的 PEM 私钥全文 |
+| Secret | DOCKERHUB_TOKEN | Docker Hub repository Read/Write PAT; Delete is unnecessary |
+| Secret | TAURI_SIGNING_PRIVATE_KEY | Tauri updater private key, only for trusted release workflows |
+| Variable | RELEASE_APP_ID | Dedicated release GitHub App ID |
+| Secret | RELEASE_APP_PRIVATE_KEY | Full PEM private key generated for that App |
 
-PAT 到期后在 Docker 重新创建并替换 Secret。不要将 PAT 写入源码、包、命令参数或发布说明。公开镜像允许客户端匿名拉取；发布凭据只用于 CI。
+Replace expired Docker PATs in Secrets. Never put PATs in source, packages, command arguments or release notes. Clients pull public images anonymously; publishing credentials are CI-only.
 
-发布 App 只需一次性配置：
+One-time App setup:
 
-1. 在 [GitHub Apps 设置](https://github.com/settings/apps/new) 创建 App，Homepage 填仓库 URL，关闭 Webhook；仅允许安装到自己的账号即可。
-2. Repository permissions 设置 **Contents: Read and write**、**Pull requests: Read and write**；不需要 Administration、Actions write 或 Workflows write。
-3. Install App → Only select repositories → `mark0-cn/Wukong`。
-4. 将 App ID 保存到上述仓库 Variable，Generate a private key 后将 PEM 全文保存到上述 Secret；不要把私钥提交到仓库或聊天。
+1. Create an App in [GitHub Apps settings](https://github.com/settings/apps/new), use the repository URL as Homepage, disable Webhook, and restrict installation to your account.
+2. Repository permissions: **Contents: Read and write**, **Pull requests: Read and write**. Administration, Actions write and Workflows write are unnecessary.
+3. **Install App → Only select repositories → `mark0-cn/Wukong`**.
+4. Save App ID in the variable above and the complete generated PEM in the secret. Never commit/send the private key in chat.
 
-工作流按当前仓库签发短期 installation token，结束后撤销。创建 PR 时请求 Contents/PR 写权限；打 tag 时只请求 Contents 写权限。
-App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发发布工作流；不再额外 dispatch 一套分支 CI。
-这是为避免内置 `GITHUB_TOKEN` 创建 PR 时的工作流批准要求，以及该 token 的 push 事件不触发后续工作流的限制。
-参考 [GitHub 触发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)。
+Workflows issue short-lived repository installation tokens and revoke them afterward. PR creation requests Contents/PR write; tagging requests only Contents write. App-created PRs trigger native `pull_request` CI; App-pushed tags trigger publishing, with no extra branch CI dispatch. This avoids built-in `GITHUB_TOKEN` PR-approval restrictions and its push events not triggering subsequent workflows. See [GitHub trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
-默认使用 GitHub 标准托管 `ubuntu-24.04` / `windows-2025`。镜像构建和验收是不同 job，彼此只传 digest 与小文件，不传镜像 tar。磁盘准备脚本仅允许在 GitHub 托管 Linux VM 上运行，删除该 job 不需要的预装 SDK，打印空间并做预检。若空间不足，可以把可选 Variable `WORKBENCH_LINUX_RUNNER` 设置为已配置的大规格 **GitHub 托管** runner 标签；不会自动开通付费资源。
+Defaults are standard GitHub-hosted `ubuntu-24.04` / `windows-2025`. Image build and acceptance are separate jobs exchanging only digests/small files, not image tars. Disk preparation is restricted to hosted Linux VMs, removes unneeded preinstalled SDKs, prints space and preflights capacity. If necessary, set optional `WORKBENCH_LINUX_RUNNER` to an already-configured larger **GitHub-hosted** runner label; no paid resources are provisioned automatically.
 
-本项目 GitHub 仓库公开，标准托管 runner 的运行时间免费；镜像首次无缓存构建较慢。缓存写入同一公开 Docker Hub 仓库的 `buildcache` 标签。只保留客户端和报告类 Actions artifacts，默认 7–14 天过期。
+The repository is public and uses standard hosted runners. First uncached image builds are slow. Registry cache uses public Docker Hub `buildcache`; Actions retains only clients/reports, normally 7–14 days. Runner billing and storage allowances follow GitHub's current account policy; larger runners and excess storage must be checked separately.
 
-## 本地生成原生安装文件
+<a id="本地生成原生安装文件"></a>
 
-在 Windows x64 或 Linux x64 的源码目录执行 `cargo package-local`。
-入口检查源码已提交、工作区干净和构建工具，再调用 Tauri 生成当前平台的 NSIS EXE 或 AppImage，输出到 `target/local-installers/`。
-不下载工具镜像、不发布版本。首次运行客户端时从对应正式 Release 获取签名环境清单，所以未发布版本的本地构建不能通过在线向导获取该版本环境。
+## Build native installers locally
+
+Run `cargo package-local` in committed, clean Windows x64/Linux x64 source. It checks source/tools and invokes Tauri for the platform's NSIS EXE/AppImage, outputting `target/local-installers/`. It neither downloads tools nor publishes. First client setup requests the matching official Release's signed manifest, so an unpublished local version cannot fetch its environment through online setup.
 
 ```sh
 cargo package-local --check
@@ -45,113 +48,103 @@ cargo package-local --output target/installers/build-1
 cargo package-local --signed
 ```
 
-已有输出目录拒绝覆盖。`--check` 检查源码和工具入口，系统库及安装器工具由实际构建验证。
-`--signed` 需要 `TAURI_SIGNING_PRIVATE_KEY`；普通本地构建无需发布密钥。
-Windows 需要 MSVC、Rust、Node.js/npm、Python；Linux 还需要 Tauri WebKitGTK、GTK、AppIndicator、patchelf 等构建依赖。
-Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检查，不承诺覆盖所有发行版。
-旧 ZIP 包脚本保留用于开发夹具，正式流水线及 `cargo package-local` 不再以 ZIP 为用户安装入口。
+Existing output directories are rejected. `--check` checks source/tool entry points; actual builds verify system/installer dependencies. `--signed` requires `TAURI_SIGNING_PRIVATE_KEY`; ordinary local builds need no release secret. Windows needs MSVC, Rust, Node.js/npm and Python; Linux also needs Tauri WebKitGTK, GTK, AppIndicator, patchelf and related build libraries. Official AppImages build on Ubuntu 22.04 and receive real WebView startup checks, not every-distribution guarantees. Legacy ZIP scripts remain development fixtures; official releases/`cargo package-local` use native installers.
 
-独立 launcher 检查：`cargo fmt --manifest-path xtask/Cargo.toml -- --check`。
+Independent launcher formatting: `cargo fmt --manifest-path xtask/Cargo.toml -- --check`.
 
-## 日常 CI
+<a id="日常-ci"></a>
 
-`ci.yml` 在 `master` push、面向 `master` 的 PR 和手动触发时运行。PR 按改动范围选择检查；`master`、手动运行、版本 PR 和发布调用执行全量检查。Windows 执行 Rust fmt/clippy/test、前端测试与构建、在线包校验测试；Linux 执行 Python runtime 和分析评测工具测试。外部 PR 不获取 Docker Hub Secret。范围规则与缓存策略见 [GitHub 维护功能](github-maintenance.md)。
+## Everyday CI
 
-Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。上游 Debian/Python 的全部传递依赖并未完全锁死；已发布镜像以 digest 为准，不能把重新构建视为逐位可复现。
+`ci.yml` runs on master pushes, PRs targeting master and manual dispatch. PRs select checks by scope; master/manual/version PR/release invocations run full checks. Windows runs Rust fmt/clippy/test, frontend tests/build and online-package validation. Linux runs Python runtime/analysis evaluation tests. External PRs receive no Docker Hub secret. See [GitHub maintenance](github-maintenance.md) for scope/caches.
 
-## 发布版本
+`rust-toolchain.toml` pins Rust; Cargo/npm use lockfiles. Debian/Python transitive dependencies are not fully locked. Released image digests are authoritative; rebuilding is not guaranteed byte-for-byte reproducible.
 
-1. 打开 **Actions → Prepare Version PR → Run workflow**，分支选择 `master`，填写完整的新 tag，例如 `v0.2.0`。正常准备版本时不要勾选 `dry_run`。
-2. 工作流同步 `Cargo.toml`、`Cargo.lock` 中 wukong 的版本、`tauri.conf.json`、`ui/package.json`、`package-lock.json` 中 ui 的版本；检查格式、版本递增和一致性，运行发布脚本测试，然后创建 `codex/release-v0.2.0` 分支及目标为 `master` 的 PR。
-3. App 创建 PR 后，原生 CI 自动启动并显示在 PR 页面。Windows、Linux、summary 通过后，由维护者确认合并；**合并版本 PR 即批准发布**。
-4. 合并提交在 `master` 上执行全量 CI，并行预构建 Windows Release 客户端、Linux 验收 CLI 和 Ubuntu 22.04 Linux 桌面 Release 客户端。全部成功后 **Tag Merged Release** 自动校验并推送 tag，指向经过检查的合并提交；即使随后 `master` 前进，也不会误标到新提交。
-5. tag 自动触发 **Build and Publish**，完成构建、验收并发布 Docker Hub 镜像和 GitHub Release。无需本地操作或手动推送 tag。
+<a id="发布版本"></a>
 
-`Prepare Version PR` 使用标准 GitHub 托管 runner 和发布 App，不需要个人 PAT；内置 `GITHUB_TOKEN` 仅承担只读工作。
-普通 PR 不会触发自动打 tag。自动发布只接受同仓库、由所配置 App 创建、分支为 `codex/release-vX.Y.Z` 的已合并版本 PR；合并结果必须是五个版本文件的纯版本递增，不能夹带其他改动。
-打 tag 前重新查询该合并提交的 CI 及当前尝试，要求 changes、windows、linux、summary 全部成功。CI 未通过就不会打 tag；修复后需准备新的有效版本 PR，或重跑该提交的 CI/打 tag 工作流处理临时故障。
-同名 tag 已指向相同提交时重试直接通过；指向其他提交时拒绝覆盖。已有 tag 的发布失败应重跑对应 **Build and Publish**，不删除重建 tag。
-旧的 `github-actions[bot]` 版本 PR、手动创建的版本 PR以及本功能安装前已合并的 PR不作追溯发布。
-版本准备不创建 tag、不构建镜像、不发布 Release。输入的版本必须高于当前版本；已存在的 tag 会被拒绝。
-重试只复用文件树与本次准备完全一致的版本分支，不强推覆盖。若 `master` 或版本分支已有变化导致重试失败，先处理已有 PR/分支，再重新准备。
+## Publish a version
 
-勾选 `dry_run` 可以查看同步后的 diff 和测试结果，不创建远端分支或 PR。
-本地也可以执行 `python -m scripts.release.cli bump --tag v0.2.0` 一次同步全部版本文件用于检查；自动发布请通过上述 App 版本 PR 流程。
-该命令不更新依赖，也不运行 Cargo/npm 依赖解析；原有版本不一致、版本倒退或格式错误时拒绝修改。
+1. Open **Actions → Prepare Version PR → Run workflow**, choose master and enter a complete tag such as `v0.2.0`. Leave `dry_run` unchecked for normal preparation.
+2. Synchronize Wukong versions in `Cargo.toml`/`Cargo.lock`, `tauri.conf.json`, and UI versions in `ui/package.json`/`package-lock.json`. Check syntax, monotonic increase and consistency, run release tests, then create `codex/release-v0.2.0` and a PR targeting master.
+3. The App-created PR starts native CI visible on the PR. After Windows/Linux/summary pass, the maintainer approves merging; **merging the version PR authorizes publication**.
+4. Master merge CI runs fully and prebuilds Windows Release client, Linux acceptance CLI and Ubuntu 22.04 Linux desktop Release client. After all succeed, **Tag Merged Release** validates/pushes a tag pointing to that checked merge commit, even if master subsequently advances.
+5. The tag triggers **Build and Publish**, building, validating and publishing Docker Hub/GitHub Release. No local action/manual tag push is required.
 
-tag 只允许 `v主版本.次版本.补丁版本`，例如 `v0.1.0`、`v12.3.45`。
-每段使用 ASCII 数字，允许单独的 `0`，不允许前导零。
-`1.2.3`、`V1.2.3`、`v1.2`、`v01.2.3`、`v1.2.3-rc.1`、`v1.2.3+build` 都会被拒绝发布。
-tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `master`。
+Preparation uses standard hosted runners and the App, not a personal PAT; built-in `GITHUB_TOKEN` is read-only. Ordinary PRs do not auto-tag. Automatic publication accepts only same-repository merged PRs created by the configured App from `codex/release-vX.Y.Z`, whose merge changes only the five version files by a pure version increase.
 
-工作流监听所有 tag，在 metadata 阶段先校验格式和版本，不通过就不会进入镜像构建、
-打包或发布。本仓库当前未能启用服务器端 tag Rulesets，因此非法 tag 仍可能被推送到
-仓库，只是不能通过本发布流程；指向历史提交的 tag 使用该历史提交中的工作流。
-若要在推送时强制拒绝非法名称，需要可用的服务器端 Rulesets。
+Before tagging, requery the merge commit's CI/current attempt and require changes/windows/linux/summary success. Failed CI prevents tags. Prepare a new valid version PR after code fixes, or rerun that commit's CI/tag workflow for transient failure. A tag already pointing to the same commit is idempotent; another target is rejected. Retry **Build and Publish** for existing-tag release failures, never delete/recreate the tag. Old `github-actions[bot]`, manually created or pre-feature merged version PRs are not published retroactively.
 
-`release.yml` 自动执行：
+Preparation creates no tag/image/Release. Version must increase; existing tags are rejected. Retry reuses a version branch only if its tree exactly matches this preparation, without force-push. If master/branch changes cause failure, resolve the existing PR/branch before preparing again.
 
-1. 校验版本与来源；查询同仓库、同 SHA 的成功 master push CI，核对当前尝试的 changes/windows/linux/summary 后复用结果。无合格记录或 API 查询失败时执行完整 CI。
-2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
-3. 新 runner 按 digest 拉取候选，运行网络隔离、固定目标转发、LaunchSpec、归档测试，以及 host CLI 的 doctor、题目导入/构建/提取/启动/连接、GDB 附加、更新回滚。
-4. Windows/Linux 均使用已校验桌面客户端直接打包 NSIS EXE/AppImage，不重复编译；Linux 验收 CLI 单独复用；签名并执行原生安装/启动检查。汇总两个平台文件，生成签名 `latest.json`、`release.json`、SHA256SUMS 与验收报告，再用 Rust 验证全部安装文件签名与哈希。
-5. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
-6. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
+`dry_run` shows synchronized diff/tests without remote branch/PR. Local `python -m scripts.release.cli bump --tag v0.2.0` synchronizes files for inspection, but use App PR flow for automatic publication. It does not update/resolve dependencies and rejects inconsistent current versions, downgrades or invalid format before editing.
 
-固定版本不会覆盖已发布镜像。GitHub 与 Docker Hub 没有跨服务原子事务，失败时可能留有候选或草稿/固定镜像标签；修复后使用 Actions **Re-run failed jobs**，复用原始 artifacts 和候选 digest。已经发布的附件若与重试产物不同，流程拒绝覆盖，应发布新版本。
+Tags must be `vMAJOR.MINOR.PATCH`, e.g. `v0.1.0`, `v12.3.45`. Components are ASCII digits, allowing standalone zero but no leading zeros. Reject `1.2.3`, `V1.2.3`, `v1.2`, `v01.2.3`, `v1.2.3-rc.1`, `v1.2.3+build`. Tags must match source versions and point to commits included in default branch master.
 
-同 SHA 的其他可信运行可提供成功上传、尚未过期的客户端及原生安装器。上一尝试的产物只有在 GitHub 仍保留时才可复用；完整 Re-run all jobs 可能删除旧产物，不能保证复用。优先 Re-run failed jobs；验证跨运行复用时，在同一提交新建一次手动演练，保留成功的来源运行，不要重跑或删除它。仅接受当前所查询尝试中成功的构建 job，PR 产物不进入发布链。元数据不符、文件损坏会直接失败，不执行可疑客户端。安装器复用固定来源运行及 artifact ID，要求对应安装/启动冒烟 job 成功；下载后核对提交、版本、打包配方、公钥配置及安装文件/签名的哈希和大小。旧格式安装器不会复用。复用安装器不重复执行安装测试，但最终 Rust 更新签名验证仍必须通过。产物过期、被删除时需要重建；发现身份或配方不匹配直接失败；缓存只加速编译，不能替代这些校验。
+The workflow listens to all tags and validates metadata before image build/package/publication. Workflow validation does not itself reject invalid Git pushes; server-side enforcement requires an applicable tag Ruleset. Historical-commit tags execute that commit's workflow. Check current repository Rulesets separately rather than assuming workflow filtering is server enforcement.
 
-客户端和报告保留 14 天。客户端以低压缩级别上传；原生安装文件不再重复压缩。摘要只下载 `release-report` 小型元数据与验收报告，不下载完整安装包。运行名区分 CI、版本打 tag、正式发布与手动演练，摘要链接到实际复用的运行。
+`release.yml` performs:
 
-发布使用全局 concurrency 锁，避免并行更改 latest。GitHub concurrency 对待运行任务不保证 FIFO；不要连续推送多个待发布 tag，若某次等待任务被替换，手动重跑该 tag 对应的工作流。
+1. Validate version/origin. Reuse successful same-repository/same-SHA master push CI only after checking current-attempt changes/windows/linux/summary. Otherwise, including API failure, run full CI.
+2. Find trusted same-SHA CI/release clients or build them. Before execution/packaging, verify platform, version, full commit, recipe and binary SHA256/size. Bake stable toolchain/workbench together; verify external assets against `workers/toolchain.lock.json`, even on cache hits. Publish candidate `build-<fullcommit>` with SBOM/provenance.
+3. On a fresh runner pull by digest and run network isolation, fixed-target relay, LaunchSpec/archive tests, and host-CLI doctor, challenge import/build/extract/start/connect, GDB attach, update/rollback.
+4. Package both platforms' validated desktop binaries directly into NSIS/AppImage without recompiling; reuse Linux acceptance CLI separately. Sign and run native install/start checks. Combine platform files into signed `latest.json`, `release.json`, SHA256SUMS and acceptance reports; Rust verifies every installer signature/hash.
+5. Upload a draft GitHub Release, add fixed-version tags to the same image digest, then publish.
+6. Advance Docker/GitHub latest only if no higher stable version exists; finally recheck attachments/digest.
 
-本仓库启用 GitHub immutable releases，后续正式发布会锁定附件及关联 tag。
-所有附件均在草稿阶段上传，发布前检查远端附件名称、大小、SHA256 与本地产物完全一致；
-发布后确认 `immutable=true` 才推进 latest。草稿中有旧附件时会拒绝发布，先清理草稿再重试。
-不向 Actions 提供管理员 Token；仓库设置由管理员开启，流水线只读取 Release 的锁定状态。
-这不锁定 Docker Hub 标签；固定镜像版本仍由发布脚本的禁止覆盖检查保护，
-Docker Hub 如支持也可将精确版本标签设为不可变，但 `latest`、`buildcache` 必须可更新。
+Fixed versions never overwrite published images. GitHub/Docker Hub have no cross-service atomic transaction: failures may leave candidates, drafts or fixed image tags. Use **Re-run failed jobs** after repair, reusing original artifacts/digest. Different bytes for already-published attachments are rejected; publish a new version.
 
-## 演练与排错
+Other trusted same-SHA runs may supply successfully uploaded, unexpired clients/installers. Previous-attempt reuse depends on GitHub retaining artifacts; full reruns may delete them. Prefer failed-job reruns. To test cross-run reuse, start another manual rehearsal at the same commit and retain the successful source run. Only successful build jobs from the queried current attempt qualify; PR artifacts never enter releases. Metadata mismatch/corruption fails before execution. Installer reuse pins source run/artifact ID and requires successful install/start smoke tests; verify commit, version, packaging recipe, public-key configuration and installer/signature hash/size. Old formats are not reused. Reuse skips repeated installation testing, but final Rust signature verification remains mandatory. Missing/expired/deleted artifacts rebuild; identity/recipe mismatch fails. Caches only accelerate compilation.
 
-Actions → Build and Publish → Run workflow，选择默认分支。手动演练会推送公开候选镜像并生成 `online-release` artifact，**不创建 GitHub Release、不更新版本标签或 latest**。正式发布由 tag push 触发。
+Clients/reports retain 14 days. Clients use low compression; native installers are not recompressed. Summaries download small `release-report` metadata/acceptance only, not complete packages. Run names distinguish CI, tagging, publication and rehearsal, with links to reused source runs.
 
-首次预热或验证客户端复用时，先运行 **CI**，选择 `master` 并勾选 `build_release_clients`；成功后在同一提交上运行发布演练。正常版本合并自动预构建，不需每次手工预热。普通 master push 不额外编译 Release 客户端。Linux 桌面预构建和 AppImage 打包均使用 Ubuntu 22.04；预构建在 master 保存独立的 linux-desktop 编译缓存，tag 复用同 SHA 的二进制，缺失时按相同配方构建。
+Global release concurrency prevents simultaneous latest changes. GitHub does not guarantee FIFO pending jobs; do not push multiple queued release tags in succession. Manually rerun a replaced pending tag workflow.
 
-Actions → Tag Merged Release → Run workflow，选择 `master`，填写一个已成功的 master push CI run ID，只读检查该提交是否符合自动打 tag 条件。手动入口永远不创建 tag，也不签发 App token；只有成功 CI 的 `workflow_run` 事件可以进入自动打 tag 步骤。
+Immutable Releases lock attachments/tags after publication. Upload all files while draft; compare remote names/sizes/SHA256 with local artifacts before publishing, then require `immutable=true` before latest. Stale draft attachments cause refusal; clean the draft and retry. No admin token is supplied to Actions; admins enable the setting, workflows read lock status. This does not lock Docker tags: script no-overwrite checks protect fixed versions. If supported, registry exact-version immutability may add protection, but `latest`/`buildcache` must remain mutable.
 
-查看失败 job：
+<a id="演练与排错"></a>
 
-- 登录失败：检查 Docker Hub PAT 对 `hlmark0/wukong` 的读写权限、有效期和 GitHub 配置。
-- App token 失败：检查 App ID/PEM、App 是否安装到该仓库、Contents/PR 权限及新增权限是否获安装批准。
-- PR 未显示 CI：核对 PR 作者是否为发布 App，查看 PR Checks 页面；不要将 Prepare Version PR 成功视为全部 CI 通过。
-- 空间预检失败：查看 `df` 输出，改用更大托管 runner 或进一步缩减镜像；不自动降级/跳过验收。
-- 依赖下载失败：重试，缓存文件仍按 SHA256 核对。
-- 镜像已存在但不匹配：不删除或覆盖已有版本，改发新版本。
-- 验收失败：查看 `image-validation` artifact 的 doctor 与失败报告，不升级 latest。
+## Rehearsal and troubleshooting
 
-候选标签与 buildcache 共用公开镜像仓库，需按空间情况定期清理无引用的旧候选。CI Token 没有 Delete 权限，因此工作流不删除仓库标签。正式版本及用户正在使用的 digest 应保留。
+**Actions → Build and Publish → Run workflow** on the default branch pushes a public candidate and creates `online-release`, but **does not create a GitHub Release or update version/latest tags**. Official publication starts from tag push.
 
-## 验收边界
+For initial warmup/reuse checks, run **CI** on master with `build_release_clients`, then rehearse the same commit after success. Normal version merges prebuild automatically; ordinary master pushes do not add Release compilation. Linux desktop prebuild/AppImage packaging use Ubuntu 22.04. Master saves a separate linux-desktop cache; tags reuse same-SHA binaries or rebuild with the same recipe.
 
-Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改拒绝，并用独立进程夹具验证首次安装、doctor 失败后的恢复、升级成功和手动回滚；这些安装器事务测试不调用真实 Docker。Linux runner 执行真实 Docker 集成测试。标准 Windows runner 不等同于用户 Docker Desktop + WSL2 桌面，不能声称完成了该环境的全自动端到端验收。首次及关键安装器改动应在真实 Windows 桌面补充安装/升级确认。当前 Windows 文件未做 Authenticode 签名。
+Manual **Tag Merged Release** on master takes a successful master push CI run ID for read-only eligibility checks. It never creates tags/issues App tokens; only successful CI `workflow_run` events can auto-tag.
 
-用户安装方法见 [在线安装](../user/online-install.md)。发布包不包含镜像 tar、模型密钥、用户配置或题目数据；原有工作区导入/导出功能与 CI 在线发行独立。
+Inspect failed jobs:
 
-## 应用内更新信任与恢复
+- Docker login: check PAT validity/Read-Write access to `hlmark0/wukong` and GitHub configuration.
+- App token: check ID/PEM, installation, Contents/PR permissions and installation approval for added permissions.
+- Missing PR CI: check release-App authorship and PR Checks. Preparation success is not full CI success.
+- Disk preflight: inspect `df`; use a larger hosted runner/reduce image size, never silently downgrade/skip acceptance.
+- Dependency download: retry, still checking cached SHA256.
+- Existing mismatched image: publish a new version, never overwrite/delete the old one.
+- Acceptance: inspect doctor/failure reports in `image-validation`; do not advance latest.
 
-客户端读取正式 Release 的 `latest.json` 和 `latest.json.sig`，先验证清单签名，再读取版本、平台、镜像 digest 与兼容性。
-下载 EXE/AppImage 后再次验证文件签名、SHA256 与大小；不使用 Docker `latest` 决定运行环境。
-公钥位于 `src/desktop/update-public.key` 和 Tauri 配置，必须保持一致。私钥存于 Actions Secret，并由管理员在仓库外备份；丢失密钥不能通过重新生成密钥为已有客户端无缝更新。
-更新签名不替代 Windows Authenticode；当前安装文件没有系统代码签名。
+Candidates/buildcache share the public repository. Periodically clean unreferenced old candidates as capacity requires. CI lacks Delete permission and does not remove tags. Preserve official versions/digests still in use.
 
-更新的检查、准备、切换和确认规则见[桌面更新设计](desktop-updates.md)。手动演练签署候选产物，但不修改正式 Release 或应用稳定更新入口。
+<a id="验收边界"></a>
 
-## 已验收产物的发布恢复
+## Acceptance boundary
 
-如果 tag 发布已完成构建、原生安装器检查、容器验收及 package，但 publish 被跳过或发布操作临时失败，可以在 master 手动执行 **Recover Accepted Publication**，填写原始 tag 发布 run ID。执行此入口表示批准发布该已有版本。
-入口只接受同仓库 tag push 的已结束运行，逐项要求验收 job 成功，固定该尝试上传的 online-release artifact ID，并核对 tag 未移动、提交仍属于 master。下载原始安装文件、签名和验收清单后，使用原提交的发布逻辑校验并发布原始字节和镜像 digest。
-此入口不编译、不重新签名、不移动或新建 tag，不需要更新签名私钥。已发布且内容不同的附件或固定镜像仍拒绝覆盖。产物过期或缺失时不能使用此入口。
+Windows runners build the frontend-embedded production client, validate packages/tamper rejection and use isolated-process fixtures for first installation, doctor-failure recovery, successful upgrades and manual rollback. These transaction tests do not call real Docker. Linux runners perform actual Docker integration. Standard Windows runners are not users' Docker Desktop/WSL2 desktops and do not prove full end-to-end acceptance there. First/key installer changes need real desktop install/upgrade checks. Windows files currently lack Authenticode signatures.
 
-完整重跑导致来源 artifact ID 返回 404 时，客户端和安装器会正常回退构建；这不是跳过校验或复用错误。Docker 候选镜像存于 registry，不随 Actions 产物删除，因此仍可按候选 digest 复用。
+See [online installation](../user/online-install.md). Packages exclude image tars, model keys, user configuration and challenge data. Workspace import/export is separate from CI's online distribution.
+
+<a id="应用内更新信任与恢复"></a>
+
+## In-app update trust and recovery
+
+Clients read official `latest.json`/`latest.json.sig`, verify the manifest first, then inspect version/platform/digest/compatibility. Downloaded EXE/AppImage also requires signature/SHA256/size verification. Docker `latest` never selects the runtime environment. Public keys in `src/desktop/update-public.key` and Tauri configuration must match. Private keys live in Actions Secrets with an external administrator backup; losing a key cannot be fixed by silently generating another for seamless existing-client updates. Updater signing does not replace Authenticode; current installers lack OS code signing.
+
+See [desktop updates](desktop-updates.md) for check/prepare/switch/confirm rules. Manual rehearsals sign candidates without changing official releases/stable update entry points.
+
+<a id="已验收产物的发布恢复"></a>
+
+## Recover publication of accepted artifacts
+
+If a tag run completed builds, native installer checks, container acceptance and package, but publish was skipped/transiently failed, run **Recover Accepted Publication** manually on master with the original tag run ID. Invoking it authorizes publishing that existing version.
+
+It accepts only completed same-repository tag-push runs, requires each acceptance job success, pins that attempt's online-release artifact ID and checks unmoved tag/master ancestry. Download original installers/signatures/acceptance manifests; use the original commit's publisher to validate/publish identical bytes/digest. It neither compiles, resigns nor moves/creates tags, and needs no signing private key. Different existing attachments/fixed images remain protected. Missing/expired artifacts cannot use this path.
+
+When full reruns make source artifact IDs return 404, clients/installers fall back to rebuilding; this is not skipped verification or invalid reuse. Registry candidate images survive Actions artifact deletion and can still be reused by digest.

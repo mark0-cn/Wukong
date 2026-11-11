@@ -1,10 +1,18 @@
+<a id="实现契约"></a>
+
 # Implementation contract
 
-The architecture in `strix-rig-binary-agent-plan.md` is the requirement baseline. This document records the Rust implementation contract and the evidence required for acceptance.
+English · [简体中文](implementation-contract.zh-CN.md)
+
+The architecture in [the historical plan](../history/strix-rig-binary-agent-plan.md) is the requirement baseline. This document records the Rust implementation contract and the evidence required for acceptance.
+
+<a id="模块归属"></a>
 
 ## Module ownership
 
-`domain` defines durable records; `store` owns transactional SQLite persistence and content-addressed artifacts; `coordinator` implements business task, contract and mailbox semantics; `prompts` registers built-in metadata/resources and `agents` renders selected role/skill prompts; `llm` adapts provider connections and typed summaries; `runner` owns leases, usage accounting and events; `kernel` integrates the native Rig ECS execution, session logs and subagent protocol with business admission/completion gates; `tools` dispatches typed operations using Rig schemas; `binary` and `runtime` implement external backends; `mcp` uses rmcp for third-party protocol handling; `report` exports evidence-backed findings; `interface` exposes CLI commands; `gui` provides the native desktop workspace.
+`domain` defines durable records; `store` owns transactional SQLite persistence and content-addressed artifacts; `coordinator` implements business task, contract and mailbox semantics; `prompts` registers built-in metadata/resources and `agents` renders selected role/skill prompts; `llm` adapts provider connections and typed summaries; `runner` owns run lifecycle through supervision and business services for leases, usage accounting and events; `kernel` integrates the native Rig ECS execution, session logs and subagent protocol with business admission/completion gates; `tools` dispatches typed operations using Rig schemas; `binary` and `runtime` implement external backends; `mcp` uses rmcp for third-party protocol handling; `report` exports evidence-backed findings; `interface` exposes CLI commands; `desktop` and `ui/src` provide the native desktop workspace.
+
+<a id="必须保持的不变量"></a>
 
 ## Required invariants
 
@@ -23,13 +31,19 @@ The architecture in `strix-rig-binary-agent-plan.md` is the requirement baseline
 13. Resolved model endpoint/configuration is saved before model IO. Resume uses that configuration even if endpoint environment defaults change. Role output budgets remain distinct from model capacity. Missing usage/cost information preserves the response and pauses before tool IO. Remote MCP read-only hints cannot authorize replay of uncertain effects.
 14. Runtime roles are root, analyst and verifier. Capability skills supplement methods and artifacts without changing the assigned role, permissions or completion protocol. Role instructions cannot be added as skills. Analyst work in the same active scope shares a deduplication owner across capabilities; independent verification uses a separate verifier instance. Ordinary reporting belongs to root.
 
+<a id="验收证据"></a>
+
 ## Acceptance evidence
 
 Use unit/integration tests for transactional lifecycle, concurrent messages, deduplication, checkpoint replay, finding gates, tool path confinement and real binary parsing. Exercise the actual CLI end to end. Exercise external adapters against their tools when installed; clearly label adapter tests and environment-dependent tests rather than treating a mock protocol as full Ghidra/GDB/AFL verification.
 
+<a id="交付审计"></a>
+
 ## Delivery audit
 
 Track CLI/config, dynamic scheduling, persistence/resume, static analysis, Ghidra, GDB/MI, AFL++, crash reduction, independent verification, skills, MCP, GUI, JSON/Markdown/HTML reports, replayable artifacts, Docker runtime, evaluation fixtures and regression tests. Do not mark the project complete on compilation alone.
+
+<a id="结构化方法产物"></a>
 
 ## Structured method deliverables
 

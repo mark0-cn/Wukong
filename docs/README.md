@@ -1,21 +1,37 @@
-# 文档索引
+<a id="文档索引"></a>
 
-## 使用与安装
+# Documentation index
 
-- [使用指南](user/usage.md)：桌面、模型配置、任务管理与报告。
-- [在线安装与升级](user/online-install.md)：Windows、Linux 安装程序与应用内更新。
-- [Pwn 工作环境](user/pwn-workbench.md)：工具容器、题目环境与迁移。
+English · [简体中文](README.zh-CN.md)
 
-## 设计与开发
+<a id="使用与安装"></a>
 
-- [实现架构](design/architecture.md)与[实现契约](design/implementation-contract.md)：模块职责、运行语义及验收不变量。
-- [维护约定](development/maintenance.md)：代码边界、工具文档生成及检查入口。
-- [发布流程](development/releases.md)与[GitHub 维护](development/github-maintenance.md)：版本、CI、缓存及发布演练。
-- [仓库自动化](../scripts/README.md)、[worker 测试](../workers/tests/README.md)、[行为评测](../evals/README.md)：目录职责与执行入口。
+## Usage and installation
 
-## 参考与历史
+- [User guide](user/usage.md): desktop, models, tasks and reports.
+- [Online installation and updates](user/online-install.md): Windows/Linux installers and in-app updates.
+- [Language settings](user/languages.md): interface and task output languages.
+- [Pwn workbench](user/pwn-workbench.md): tools, challenge environments and migration.
 
-- [工具目录](reference/tool-catalog.md)、[报告格式](reference/report-format.md)、[Pwn 知识参考](reference/pwn-knowledge.md)。
-- [历史资料](history/README.md)：历史设计与原始验收记录，不代表当前提交已经通过验证。
+<a id="设计与开发"></a>
 
-执行后端说明保留在对应组件旁：[worker](../workers/runtime/README.md)、[Ghidra](../workers/ghidra/README.md)。
+## Design and development
+
+- [Architecture](design/architecture.md) and [implementation contract](design/implementation-contract.md): module responsibilities, runtime semantics and acceptance invariants.
+- [Maintenance](development/maintenance.md): boundaries, generated catalogs and checks.
+- [Documentation maintenance](development/documentation.md) and [localization](development/localization.md): paired guides and product translations.
+- [Desktop updates](development/desktop-updates.md): installation trust, progress, storage and recovery.
+- [Releases](development/releases.md) and [GitHub maintenance](development/github-maintenance.md): versions, CI, caches and rehearsals.
+- [Automation](../scripts/README.md), [worker tests](../workers/tests/README.md), [evaluations](../evals/README.md): responsibilities and entry points.
+
+<a id="参考与历史"></a>
+
+## Reference and history
+
+- [Tool catalog](reference/tool-catalog.md), [Skill coverage](reference/skill-coverage.md), [report format](reference/report-format.md).
+- [Pwn knowledge sources](reference/pwn-knowledge.md) and [Pwn evidence tools](reference/pwn-tools.md).
+- [Fixtures](../fixtures/README.md), [Pwn fixtures](../fixtures/pwn/README.md), [analysis experiments](../evals/analysis/experiments.md).
+- [Historical materials](history/README.md): historical plans and original acceptance records, not proof that the current commit passed.
+- [Icon assets](../icons/README.md): design and regeneration.
+
+Backend guides remain beside their components: [worker](../workers/runtime/README.md), [Ghidra](../workers/ghidra/README.md).

@@ -1,4 +1,8 @@
+<a id="agent--skill-配对评测"></a>
+
 # Agent / Skill paired evaluation
+
+English · [简体中文](experiments.zh-CN.md)
 
 Run the existing analysis fixture tasks under two conditions, changing exactly one variable:
 

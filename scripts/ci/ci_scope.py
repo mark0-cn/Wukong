@@ -13,7 +13,7 @@ def select_scope(paths, event_name, head_branch=""):
         return full
     result = dict(rust=False, frontend=False, linux=False, reason="PR checks selected from changed paths")
     for path in paths:
-        if path in ("README.md", "README.en.md") or (path.startswith("docs/") and path.endswith(".md")):
+        if path in ("README.md", "README.en.md", "README.zh-CN.md", "docs/translations.json") or (path.startswith("docs/") and path.endswith(".md")):
             continue
         if path.startswith("ui/"):
             result["frontend"] = True

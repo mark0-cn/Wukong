@@ -1,4 +1,8 @@
+<a id="证据报告与重放包"></a>
+
 # Evidence report and replay bundle
+
+English · [简体中文](report-format.zh-CN.md)
 
 `wukong::report::export(store, run_id, output)` exports one transactional run snapshot to a **new directory**. Export reads and hashes the original target and each evidence artifact; it never executes the sample. A verified staging directory is renamed to the destination only after all payloads pass verification. Existing destinations are refused.
 

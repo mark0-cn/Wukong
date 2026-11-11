@@ -1,9 +1,11 @@
-# 历史资料
+<a id="历史资料"></a>
 
-- [原始设计基线](strix-rig-binary-agent-plan.md)：用于追溯需求；当前实现入口见[架构](../design/architecture.md)与[实现契约](../design/implementation-contract.md)。
-- [2026-11-06 验收记录](validation/2026-11-06/README.md)：原始控制端日志、Linux worker 与 Ghidra 记录。
-- [2026-11-09 Agent / Skill 验证](validation/2026-11-09/agent-skills.md)。
+# Historical materials
 
-验收文件按其原文标注的执行日期归档，内容保持不变；没有在原始记录中注明的提交身份仍视为未记录，不从日期推断。
-记录中的命令、文件路径、版本与测试数量属于当时环境，部分路径已经调整。当前复现方法见[维护约定](../development/maintenance.md)、[发布流程](../development/releases.md)和 [worker 说明](../../workers/runtime/README.md)。
-新的验证结论应关联当前提交及实际运行结果，不修改旧日志来代表新结果。
+English · [简体中文](README.zh-CN.md)
+
+- [Original design baseline](strix-rig-binary-agent-plan.md): requirements provenance; current implementation is in [architecture](../design/architecture.md) and [implementation contract](../design/implementation-contract.md).
+- [2026-11-06 acceptance](validation/2026-11-06/README.md): original controller logs, Linux worker and Ghidra records.
+- [2026-11-09 Agent/Skill validation](validation/2026-11-09/agent-skills.md).
+
+Records are archived by their stated execution date. Raw evidence is unchanged; translations do not change historical results. Commit identities absent from originals remain unrecorded, never inferred from dates. Commands, paths, versions and counts describe those environments; some paths have since moved. Current reproduction entry points are in [maintenance](../development/maintenance.md), [releases](../development/releases.md) and [worker guide](../../workers/runtime/README.md). New conclusions must link current commits/actual results, never rewrite old logs as new results.

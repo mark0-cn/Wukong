@@ -34,7 +34,7 @@ class ScopeTests(unittest.TestCase):
         self.assertTrue(select_scope(["ui/package.json"], "pull_request", "codex/release-v0.2.0")["rust"])
 
     def test_known_paths_select_only_relevant_expensive_checks(self):
-        for paths, expected in [(["README.md", "README.en.md", "docs/development/releases.md"], (False, False, False)),
+        for paths, expected in [(["README.md", "README.en.md", "README.zh-CN.md", "docs/translations.json", "docs/development/releases.zh-CN.md"], (False, False, False)),
                                 (["ui/src/App.tsx"], (False, True, False)),
                                 (["workers/runtime/requirements.txt"], (False, False, True)),
                                 (["workers/tests/unit/test_profile.py"], (False, False, True)),
