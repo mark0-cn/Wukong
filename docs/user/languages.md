@@ -1,21 +1,23 @@
-# 语言设置
+<a id="语言设置"></a>
 
-[English](../en/user/languages.md)
+# Language settings
 
-在“工作区设置”顶部可以分别选择：
+English · [简体中文](languages.zh-CN.md)
 
-| 设置 | 选项 | 生效范围 |
+Open **Workspace settings** to choose independently:
+
+| Preference | Choices | Applies to |
 | --- | --- | --- |
-| 界面语言 | 跟随系统、简体中文、English | 立即更新菜单、状态、工具标题、对话框和日期/数字显示 |
-| 新任务输出语言 | 跟随任务语言、简体中文、English | 新创建任务的 Agent 进展说明、发现和结论 |
+| Interface language | Follow system, 简体中文, English | Menus, status, tool titles, dialogs, dates and number formatting, immediately |
+| New task output language | Match task language, 简体中文, English | New Agents' public progress, findings and conclusions |
 
-界面语言可在分析运行中切换。消息草稿、配置草稿、选中的任务和已有结果保留。未支持的系统语言回退英文。安装时选择的 NSIS 语言不改变应用的语言偏好。
+You can change interface language during analysis. Message and configuration drafts, selected tasks and existing results remain intact. Unsupported system languages fall back to English. NSIS installer language does not change application preferences.
 
-“跟随任务语言”按初始描述选择默认值：含汉字选中文，含 ASCII 字母选英文，否则使用界面语言。混合语言建议显式选择。任务中明确要求的输出语言优先；已有任务和恢复任务不会因为修改设置而更换保存的默认语言。
+Automatic task language uses the initial description: Chinese characters select Chinese; otherwise ASCII letters select English; other input uses interface language. Choose explicitly for mixed-language tasks. An explicit language request in the task takes priority. Existing and resumed tasks retain their saved default language when preferences change.
 
-工具标识、命令、原始日志、文件内容和证据不翻译。已有 Agent 正文不会被重新翻译。导出报告时，标题、表头和状态使用当前界面语言，保留原始正文。
+Tool identifiers, commands, raw logs, file contents and evidence are not translated. Existing Agent prose is not rewritten. Report headings, columns and status use the interface language at export time, preserving original content.
 
-CLI 示例：
+CLI examples:
 
 ```sh
 wukong --locale en-US --help
@@ -23,4 +25,4 @@ wukong --locale zh-CN analyze ./sample --output-language en-US --task "分析输
 wukong --locale en-US report RUN_ID --output ./report-en
 ```
 
-`WUKONG_LOCALE` 与 `WUKONG_OUTPUT_LANGUAGE` 可提供命令行默认值。恢复任务仍使用任务创建时保存的输出语言。切换语言不需要重建或下载 Docker 镜像。
+`WUKONG_LOCALE` and `WUKONG_OUTPUT_LANGUAGE` supply CLI defaults; explicit options take priority. Resumed tasks retain the output language saved at creation. Language changes do not require rebuilding or downloading Docker images.

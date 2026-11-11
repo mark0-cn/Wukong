@@ -1,61 +1,74 @@
-# 维护与性能检查
+<a id="维护与性能检查"></a>
 
-## 模块边界
+# Maintenance and performance checks
 
-- `kernel` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`kernel_host` 暴露业务操作，`supervisor` 独立管理心跳和后台任务观察；`model_catalog`、`usage`、`bootstrap` 分别负责模型选择、用量和装配。
-- `tools` 保留执行管线和共同校验入口，`effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
-- `queries` 定义共享查询与 DTO，`store/workspace`、`store/report_queries` 实现 SQL；`desktop/workspace` 通过 `store/desktop_queries` 读取桌面快照，`desktop/presentation` 适配公开进度和工具结果，React 界面消费 DTO。`ui/src/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
-- `coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
-- `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 3，不提供旧数据库迁移。
+English · [简体中文](maintenance.zh-CN.md)
 
-worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录，入口文件不承担模块重导出。
+<a id="模块边界"></a>
 
-跨模块调用保持类型化，资源归属和业务完成门槛保留在统一入口。通用元数据查询不读取 checkpoint；需要继承、follow-up 或完整导出时显式使用完整读取接口。元数据写入不得清空会话，checkpoint 与邮箱确认仍在同一持久化事务提交。
+## Module boundaries
 
-## 桌面界面样式
+- `kernel` assembles Rig and drives lifecycle. `admission` controls admission; `models` manages requests/metering; `coordination` projects messages/state; `business_tools` integrates effects. `kernel_host` exposes business operations; `supervisor` manages heartbeats/background observation independently; `model_catalog`, `usage`, `bootstrap` own model selection, accounting and assembly.
+- `tools` retains the execution pipeline/shared validation. `effects` owns durable receipts; `catalog` registers schemas, roles, recovery policy and handlers. `handlers` routes business operations; `coordination` handles shared documents/tasks; `analysis` static queries; `execution` worker dispatch; `verification` independent admission/certification; `files`, `jobs`, `sessions` their resources. Argument/handler subdirectories group by responsibility while one catalog registers them.
+- `queries` defines shared queries/DTOs; `store/workspace` and `store/report_queries` implement SQL. `desktop/workspace` reads snapshots through `store/desktop_queries`; `desktop/presentation` adapts public progress/tool results for React. `ui/src/commands.ts` constrains command arguments/responses; lifecycle effects belong in corresponding hooks.
+- `coordinator` separates runs/tasks/messages/waits/completion use cases, committing through the same Store transactions. `binary` retains public address/hash APIs; profiling, strings and Ghidra lifecycle have separate modules.
+- `store` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `store/conversations` owns conversation payloads/revisions. Current state schema is 3, without legacy migration.
 
-界面、原生消息和报告的双语资源及验收要求见[多语言维护](localization.md)。用户语言偏好不得通过工作区配置保存流程修改。
+See [worker components](../../workers/runtime/README.md). Deploy the entire runtime directory; entry files do not re-export modules.
 
-`ui/src/styles.css` 只按固定顺序导入 `styles/` 中的基础、工作区、聊天、Agent、证据、设置、响应式及维护界面样式；移动规则时保持层叠顺序。
-前端使用现有的 Radix、assistant-ui 和 Lucide 组件。颜色统一定义在 `ui/src/theme.css`，组件样式引用语义变量；不要在组件中重新散布颜色值。
-`ui/src/workspace-layout.css` 只放分栏容器和拖动分隔条；组件的尺寸、间距、边框直接归入 `styles/` 对应文件，响应式规则统一放在 `styles/responsive.css`，不叠加一层旧布局覆盖。分栏使用 `react-resizable-panels`，与 shadcn/ui 的分栏采用同一基础组件，保留键盘调整和宽度记忆。
-桌面视图偏好通过 `useViewPreference` 保存为本机 WebView 数据；任务别名按工作区路径和 run ID 区分，不能写回任务指令或作为目标身份。设置与存储草稿留在设置组件状态中，目录操作仍经过既有 epoch 与维护锁检查。
+Keep cross-module calls typed and ownership/completion gates centralized. General metadata queries do not read checkpoints. Inheritance, follow-ups and complete export explicitly request full reads. Metadata writes must not clear conversations; checkpoints/mailbox acknowledgments still commit atomically.
 
-默认采用中性深灰底色，金色表示主要操作或选中，蓝色表示执行中，绿色表示成功，黄色表示等待/警告，红色表示失败。状态同时保留图标和文字。
-字体栈采用桌面系统无衬线字体，代码使用系统等宽字体；统一字号变量定义在 `ui/src/theme.css`。根字号 16px，正文和输入正文 16px，导航、按钮、表单及代码 14px，时间与路径等辅助信息至少 13px；字号以 rem 表示，避免组件重新硬编码小字号。调整布局时检查桌面最小窗口下的滚动、长路径和消息草稿保留。
-颜色层级参考 [Radix Colors](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale)，工作区分区参考 [VS Code](https://code.visualstudio.com/docs/editing/getting-started/userinterface)。
+<a id="桌面界面样式"></a>
 
-## 工具文档
+## Desktop styling
 
-工具定义、参数 schema、角色权限、模型可见性和显示消息 ID 来自同一注册表；双语文案来自共享 Fluent 资源。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供消息 ID 并补齐双语标题。Markdown 工具清单也从注册表生成：
+See [localization](localization.md) for shared bilingual UI/native/report resources and acceptance. User language preferences must not use workspace-configuration saving.
+
+`ui/src/styles.css` imports base, workspace, chat, Agent, evidence, settings, responsive and maintenance styles in fixed order; preserve cascade order when moving rules. Reuse Radix, assistant-ui and Lucide. Define colors centrally in `ui/src/theme.css`; components use semantic variables rather than scattered values. `ui/src/workspace-layout.css` contains only column containers/resize handles; put component sizes, spacing and borders in corresponding `styles/` files and responsive rules in `styles/responsive.css`, without another legacy override layer. Columns use `react-resizable-panels`, the same base as shadcn/ui, retaining keyboard resizing/persistence. `useViewPreference` stores device-local WebView preferences; aliases are scoped by workspace/run ID, never task instructions or target identity. Settings/storage drafts stay in component state; directory operations retain epoch/maintenance-lock checks.
+
+Use neutral charcoal, gold for primary/selected actions, blue for running, green for success, yellow for waiting/warnings and red for failures, always with icons/text. Fonts use system sans-serif and system monospace for code. Central size tokens live in `ui/src/theme.css`: root/body/composer 16px; navigation/buttons/forms/code 14px; auxiliary times/paths at least 13px. Express sizes in rem; do not reintroduce small hardcoded component sizes. Check scrolling, long paths and draft retention at minimum window size. Color hierarchy references [Radix Colors](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale); workspace organization references [VS Code](https://code.visualstudio.com/docs/editing/getting-started/userinterface).
+
+<a id="工具文档"></a>
+
+## Tool documentation
+
+Definitions, parameter schemas, roles, model visibility and display message IDs share one registry; bilingual text uses Fluent. `Visibility::Internal` marks internal entries rather than name blacklists; internal transactions retain permission checks. Desktop aliases exist only for native Rig tools/legacy events. New builtins require catalog message IDs and both translated titles. Generate Markdown from the registry:
 
 ```sh
 cargo run -- tool-catalog > docs/reference/tool-catalog.md
+cargo run -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
 cargo run -- --json tool-catalog
 cargo test --test tool_catalog
 ```
 
-导出目录无需模型凭据，也不会打开配置或状态目录。测试比较生成结果与已提交文档，防止工具改动后遗漏更新。
+Export needs no model credentials and opens neither configuration nor state. Tests compare generated output with committed documentation to catch stale catalogs.
 
-## Skill 覆盖清单
+<a id="skill-覆盖清单"></a>
 
-内置方法的工具、来源及机制夹具关联记录在 `prompts/coverage.json`，复用 `SkillManifest` 的 `related_tools`、`sources`、`fixtures` 字段。更新后生成 [覆盖清单](../reference/skill-coverage.md)：
+## Skill coverage
+
+`prompts/coverage.json` associates builtin methods with tools, sources and mechanism fixtures using `SkillManifest.related_tools`, `sources`, `fixtures`. Regenerate [coverage](../reference/skill-coverage.md):
 
 ```sh
 cargo run -- skill-catalog > docs/reference/skill-coverage.md
+cargo run -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
 cargo run -- --json skill-catalog
 cargo test --test tool_catalog
 ```
 
-这些字段只用于维护和查询，不授予工具权限，也不证明当前后端可用、原题复现或 Agent 解题成功率。未登记表示没有关联记录。自定义 Skill 可在原有 manifest 中填写这些字段；覆盖内置正文时不会自动继承内置夹具声明。单元测试校验内置关联的工具、来源文件及夹具 ID 存在，导出不读取模型凭据或状态目录。
+These are maintenance/query fields, not permissions or proof of backend availability, original-challenge reproduction or Agent solve rates. Unregistered means no recorded association. Custom manifests may set these fields; overriding a builtin body does not inherit builtin fixture claims. Unit tests verify referenced tools/source files/fixture IDs exist. Export reads no credentials/state.
 
-## 共享校验与内容身份
+<a id="共享校验与内容身份"></a>
 
-`domain/claims` 统一解析 flag 形状的声明；完成工具拒绝占位符，协调器按具体声明执行独立验证门槛。解析结果只表示文本分类，不证明利用成功。
+## Shared validation and content identity
 
-Rust 文件哈希和实际读取字节计数放在 `content`，`binary` 保留公开哈希接口；worker 使用 `worker_common.sha256_file`，构建与发布脚本使用 `scripts._lib.checksums.sha256`。独立注入沙箱的脚本保持自包含，不引入控制端模块。路径限制、大小预算和控制端/worker 的独立身份核对仍留在调用边界，不因共用哈希函数而合并或删除。
+`domain/claims` parses flag-shaped claims centrally. Completion tools reject placeholders; coordinator applies independent verification to specific claims. Parsing classifies text, not exploitation success.
 
-## 验证
+Rust file hashes/actual byte counts live in `content`; `binary` keeps its public hash API. Workers use `worker_common.sha256_file`; build/release scripts use `scripts._lib.checksums.sha256`. Independently injected sandbox scripts remain self-contained without controller imports. Path limits, size budgets and independent controller/worker identity checks remain at call boundaries; shared hashing does not merge/remove them.
+
+<a id="验证"></a>
+
+## Validation
 
 ```sh
 cargo fmt --all -- --check
@@ -64,26 +77,30 @@ cargo test --offline --all-targets
 python workers/tests/run.py unit -p test_bridge.py
 ```
 
-运行 worker 测试前，在虚拟环境中安装 `workers/runtime/requirements.txt` 并确保 `python` 命令可用。普通测试使用可信本地夹具和回环服务；被忽略的真实 Ghidra/Docker 验收需要按各测试说明配置环境。
+Install `workers/runtime/requirements.txt` in a virtual environment and make `python` available before worker tests. Ordinary tests use trusted local fixtures/loopback services; ignored real Ghidra/Docker acceptance requires each test's documented environment.
 
-## 可重复性能基准
+<a id="可重复性能基准"></a>
+
+## Repeatable performance baseline
 
 ```sh
 cargo test --offline --lib workspace_history_performance_baseline -- --ignored --nocapture
 ```
 
-基准在临时目录分别生成 1000、10000 和 100000 条事件，输出首次读取耗时和 100 次空闲读取的平均耗时；每档只加载最新 500 条事件，空闲读取不返回重复的历史和 Agent 列表。输出为实测值，不设置依赖硬件速度的断言。
+The benchmark generates 1,000, 10,000 and 100,000 events in temporary directories, reporting initial-read time and the mean of 100 idle reads. Each loads only the latest 500 events; idle reads do not repeat unchanged history/Agent lists. Measurements are observed values, with no hardware-speed assertions.
 
-2026-11-08 本地基准（Darwin arm64、Rust 1.99.1、未优化 test 构建；首次读取单次，空闲读取取 100 次平均）：
+Local baseline on 2026-11-08 (Darwin arm64, Rust 1.99.1, unoptimized test build; one initial read, 100 idle reads averaged):
 
-| 历史事件数 | 首次读取 / ms | 空闲读取平均 / ms | 加载事件数 |
+| Historical events | Initial read / ms | Mean idle read / ms | Loaded events |
 |---:|---:|---:|---:|
 | 1000 | 3.769 | 0.135 | 500 |
 | 10000 | 3.723 | 0.139 | 500 |
 | 100000 | 3.761 | 0.134 | 500 |
 
-这些数值用于后续同环境比较，不代表界面端到端帧耗时，也未与改动前版本作速度对比。
+Use these for later same-environment comparisons, not end-to-end frame timing or a comparison against the previous implementation.
 
-前端使用虚拟列表限制聊天 DOM 数量；运行 `npm test`、`npm run build` 和 `npm run test:e2e` 验证类型、组件、任务切换、草稿、关闭确认、文件拖入与最小窗口交互。浏览器测试通过 Tauri 模拟边界运行，不代表真实桌面安装验收。存储测试验证有写事务时仍可读取已提交快照，元数据更新与重复 checkpoint 不改写会话。
+Frontend virtualization bounds chat DOM size. `npm test`, `npm run build` and `npm run test:e2e` cover types/components, task switching, drafts, close confirmation, file drops and minimum-window interaction. Browser tests simulate Tauri and do not prove native installation. Storage tests check committed reads during writes and that metadata/repeated checkpoints do not rewrite conversations.
 
-评估后续改动时记录数据规模、构建模式和硬件环境，并分别观察界面帧耗时、查询等待、内存和数据库写入量。审计记录、证据与恢复边界的持久化不可因 UI 降频而丢失。
+Record data scale, build mode and hardware when evaluating changes. Observe frame time, query waiting, memory and database writes separately. UI throttling must not lose audit, evidence or recovery persistence.
+
+See [documentation maintenance](documentation.md) for pairs, semantic review and CI checks.

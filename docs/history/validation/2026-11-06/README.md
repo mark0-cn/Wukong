@@ -1,10 +1,18 @@
+<a id="验收证据"></a>
+
 # Acceptance evidence
+
+English · [简体中文](README.zh-CN.md)
+
+Historical record dated 2026-11-06. Commands and counts below describe that environment, not current acceptance. Unrecorded commit identity remains unknown. For current entry points, see [maintenance](../../../development/maintenance.md).
 
 Raw acceptance records for the implementation contract (`docs/implementation-contract.md`)
 and the delivery audit. Regenerate with the commands listed below; every record here was
 produced by actually running the tool, worker, or harness it describes. None of the
 Linux/Ghidra rows below are mocks: they exercise real GDB/MI, real AFL++ QEMU, real
 Ghidra headless analysis and real Docker worker containers.
+
+<a id="文件"></a>
 
 ## Files
 
@@ -13,6 +21,8 @@ Ghidra headless analysis and real Docker worker containers.
 | `build-and-tests.log` | Windows controller checks: fmt, clippy (`-D warnings`), full Rust test suite, Python syntax check, portable worker protocol tests |
 | `runtime-linux.json` | Raw Linux worker records: doctor, GDB/MI breakpoint/stack/memory, transport-restart reconnect, crash replay, 3/3 independent verification, input minimization, AFL++ QEMU fuzz job with parsed statistics |
 | `ghidra-linux.json` | Raw Ghidra worker records: headless import and auto-analysis, function search, decompile, xrefs, identity-bound cache hit, hash-mismatch rejection |
+
+<a id="当时的复现命令"></a>
 
 ## How to reproduce
 
@@ -36,6 +46,8 @@ $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 & $docker exec re-agent-worker sh -c 'cat /state/ghidra-acceptance/ghidra-acceptance-results.json' > docs\validation\ghidra-linux.json
 ```
 
+<a id="2026-11-06-的结果"></a>
+
 ## Results recorded on 2026-11-06
 
 | Suite | Result |
@@ -47,6 +59,8 @@ $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 | Linux runtime acceptance | GDB break at `main` + stack/memory reads via GDB/MI, relay restart preserves debugger ownership and running jobs, crash replay passes with observed `crash` stage, independent verification 3/3 trials, minimization to the exact 3-byte `BAD` input, AFL++ QEMU fuzz completes with 17,059 executions and a saved `SIGABRT` crash |
 | Ghidra worker acceptance | Ghidra 12.2 headless import + auto-analysis, `functions` search resolves `main` and the noinline helper, decompile of the helper contains the `memcpy` sink, decompile of `main` shows the `copy_input` call, xrefs contain a `UNCONDITIONAL_CALL` from inside `main`, identical repeat query hits the identity-bound cache, mismatched target hash rejected |
 | Fixture ground truth | `fixtures/build.sh` + `fixtures/evaluate.py --repetitions 3` inside the worker container: 33/33 behavior checks pass (normal path, vulnerable path, fixed path; exit codes/signals recorded with sample/input/source hashes) |
+
+<a id="交付审计"></a>
 
 ## Delivery audit
 
@@ -72,6 +86,8 @@ Mapping of the implementation-contract audit items to evidence:
 | Evaluation fixtures | `fixtures/` manifest, `build.sh`, `evaluate.py`, `score_reports.py`; 33 behavior checks in `fixtures/build/results.json` |
 | Regression tests | 44 Rust tests + 6 Python protocol tests + 2 live Linux worker suites |
 
+<a id="环境说明"></a>
+
 ## Environment notes
 
 - **DSH sandbox on Windows:** binaries located under the workspace are denied writes to the
@@ -81,6 +97,7 @@ Mapping of the implementation-contract audit items to evidence:
 - **Execution policy:** `scripts/check.ps1` needs `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
   on hosts that block unsigned scripts.
 - **Worker capabilities:** the Linux worker requires `CAP_CHOWN/SEGUID/SETGID/SYS_PTRACE/DAC_OVERRIDE`
+  (SEGUID is the original spelling; see the worker guide for current requirements)
   with `no-new-privileges`; a container started without them reports a clear capability error
   instead of failing silently (see `workers/runtime/README.md`).
 - **AFL++ vs Docker Desktop core pattern:** Docker Desktop's host core pattern is an external

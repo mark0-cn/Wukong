@@ -1,32 +1,30 @@
-# 本地回归与评测集
+<a id="本地回归与评测集"></a>
 
-[Pwn 方法回归](pwn/README.md)补充 FILE、退出、过滤器、堆生命周期、输入转换、
-压缩格式、VM handle 与 musl 的可信夹具和失败对照。其行为检查与 Agent 评分分开。
+# Local regressions and evaluation fixtures
 
-## 通用逆向分析样本
+English · [简体中文](README.zh-CN.md)
 
-`analysis/` 补充格式解析、对象布局、32 位变换、交互状态机和版本差异任务。
-`analysis/tasks.json` 定义用户问题与逐题评分项，不以漏洞发现或 flag 为完成条件。
+[Pwn method regressions](pwn/README.md) add trusted fixtures/negative controls for FILE, exit, filters, heap lifecycle, input conversion, compression, VM handles and musl. Behavior checks remain separate from Agent scoring.
+
+<a id="通用逆向分析样本"></a>
+
+## General reverse-engineering samples
+
+`analysis/` covers formats, object layout, 32-bit transformations, interactive state machines and version differences. `analysis/tasks.json` defines user questions/per-question scoring, not vulnerability/flag completion requirements.
 
 ```sh
 python3 -m evals.analysis.evaluate --build-dir /tmp/wukong-analysis-fixtures
 python3 -m evals.tests.test_analysis
 ```
 
-行为 harness 使用 C11 编译器构建四个可信程序，并检查有效/无效记录、整数边界和
-命令序列。`CC` 可指定编译器；这些检查可在本机运行，但要供当前动态分析后端使用，
-须在 Linux x86_64 环境构建目标。生成文件记录源码/目标哈希、编译命令与实际输出。
-`fixture_checks_passed` 只代表样本行为回归通过，`agent_accuracy` 保持 null。
+The C11 harness builds four trusted programs and checks valid/invalid records, integer boundaries and command sequences. `CC` selects the compiler. Local checks are supported, but current dynamic-backend targets must be built on Linux x86_64. Records include source/target hashes, compiler commands and actual output. `fixture_checks_passed` means behavior regression only; `agent_accuracy` remains null.
 
-运行 agent 时只提供目标二进制和对应 task 文本；盲测不提供 C 源码、`results.json`
-或构建元数据。版本差异任务额外提供生成的 `baseline_profile.json` 内容作为分析上下文，
-它包含基线版本的原始输入与实际观察；缺少基线时应报告缺口。
+Give the Agent only the target binary/task text, not C source, `results.json` or build metadata. For version differences also provide generated `baseline_profile.json`, containing baseline raw inputs/observations; missing baselines must be reported.
 
-实际回答质量由独立复核逐题判定。报告映射仍为 case ID 到导出的 `report.json` 路径；
-复核文件示例（每个已运行任务的每道问题都须有标签）：
+Independent review judges each answer. Map case IDs to exported `report.json` paths. Every question of each executed task needs a label, for example:
 
 ```json
-{"labels":[{"case":"record-format","question_id":"field_layout","verdict":"correct","evidence_ids":["ev_actual_id"],"rationale":"独立对照实际 parser 与样本，字段边界和字节序一致"}]}
+{"labels":[{"case":"record-format","question_id":"field_layout","verdict":"correct","evidence_ids":["ev_actual_id"],"rationale":"Independently compared the parser and samples: field boundaries and byte order match"}]}
 ```
 
 ```sh
@@ -35,36 +33,35 @@ python3 -m evals.analysis.score --build-dir /tmp/wukong-analysis-fixtures \
   --output reports/analysis-metrics.json
 ```
 
-评分器读取当前真实导出格式的 `snapshot`，核对样本哈希，要求正确标签关联该报告中的
-证据 ID；不检查标题关键词，也不要求创建漏洞 finding。指标包括逐题正确/错误/未解决数、
-有证据支撑的正确率、缺失任务和模型用量。未运行任务保持未解决；这些小样本不足以支持
-对真实软件逆向准确率的统计结论。
+Scoring reads actual export `snapshot`, verifies sample hashes and requires correct labels to reference evidence in that report. It does not match title keywords or require vulnerability findings. Metrics cover correct/incorrect/unresolved questions, evidence-supported accuracy, missing tasks and model usage. Unrun tasks remain unresolved; these small samples do not support statistical claims about real-software reverse engineering.
 
-## 漏洞与崩溃回归基线
+<a id="漏洞与崩溃回归基线"></a>
 
-这套样本用于验证项目能力：有符号与 stripped ELF、一个有明确源码根因的栈越界样本、对应修复版本，以及正常程序。样本只接受本地文件输入；不包含网络目标或现成利用载荷。
+## Vulnerability and crash baseline
 
-在 Linux x86_64 环境中执行：
+Fixtures include symbol/stripped ELF, a stack overflow with a source-confirmed cause, its fix and a normal program. They take local file input only, with no network targets or ready-made exploit payloads.
+
+Run on Linux x86_64:
 
 ```sh
 sh fixtures/build.sh
 python3 -m evals.vulnerability.evaluate --repetitions 3
 ```
 
-`CC`、`STRIP` 可指定编译器工具。构建需要 C 编译器、binutils 与 Python 3；产物写入 `fixtures/build/`。漏洞版本关闭栈保护与 PIE，使越界回归不依赖具体保护器诊断，保留 NX；正常程序启用 PIE、栈保护与完整 RELRO。`overflow.bin` 是 256 个 `A`，只用于观察本地崩溃。
+`CC`/`STRIP` select tools. Builds need a C compiler, binutils and Python 3; output goes to `fixtures/build/`. Vulnerable builds disable stack protection/PIE so regression does not depend on a specific protector diagnostic, while retaining NX. Normal builds enable PIE, stack protection and full RELRO. `overflow.bin` is 256 `A` bytes for local crash observation only.
 
-`manifest.json` 是人工从源码确定的 ground truth，不能作为模型输入。`evaluate.py` 实际重复执行六个程序，用退出码/信号验证正常路径、漏洞路径和修复路径，限制时间、内存并禁止 core dump。`results.json` 记录样本/输入/源码哈希、原始结果与耗时。33 个行为检查通过，**不代表 agent 自动发现了漏洞**；检测指标保持 `null`。
+`manifest.json` is human source-derived ground truth, never model input. `evaluate.py` repeatedly runs six programs, checking normal/vulnerable/fixed paths via exits/signals with time/memory limits and no core dumps. `results.json` stores sample/input/source hashes, raw results and durations. Passing 33 behavior checks **does not mean the Agent discovered a vulnerability**; detection metrics remain `null`.
 
-实际 agent 检测评测应在每个二进制上单独建 run，将 JSON 报告保存到独立路径，然后建立报告映射，例如：
+Create a separate Agent run for each binary, save JSON reports separately and map them:
 
 ```json
 {"overflow-vuln":"reports/vuln.json","overflow-fixed":"reports/fixed.json"}
 ```
 
-独立复核每个被声明为 reproduced、root_cause_confirmed 或 impact_verified 的发现后，填写判定文件；`truth_id:null` 表示误报：
+Independently review every reproduced/root_cause_confirmed/impact_verified finding before labeling; `truth_id:null` denotes a false positive:
 
 ```json
-{"labels":[{"case":"overflow-vuln","finding_id":"finding_actual_id","truth_id":"copy-overflow","rationale":"已独立核对输入、memcpy 长度与栈缓冲区大小及对应原始证据"}]}
+{"labels":[{"case":"overflow-vuln","finding_id":"finding_actual_id","truth_id":"copy-overflow","rationale":"Independently checked input, memcpy length, stack buffer size and linked original evidence"}]}
 ```
 
 ```sh
@@ -72,6 +69,6 @@ python3 -m evals.vulnerability.score_reports --reports reports/index.json \
   --adjudications reports/reviewed.json --output reports/metrics.json
 ```
 
-评分前检查目标 SHA256；没有独立标签的确认发现会报错，不会按标题、CWE 或崩溃现象自动判为正确。重复报告同一个根因计为重复误报；缺失 run 的已知正例计为漏报。指标包括精确率、召回率、独立验证成功率、token 数和配置价格估算。源码根因、利用原语与影响范围仍需复核，尤其不能用一次崩溃推导代码执行。
+Scoring verifies target SHA256 first. Confirmed findings without independent labels fail instead of being accepted by title/CWE/crash. Duplicate root causes count as duplicate false positives; missing runs for known positives count as misses. Metrics include precision, recall, independent verification success, tokens and configured-price estimates. Source cause, primitive and impact still need review; one crash cannot imply code execution.
 
-这个小型评测集属于回归基线；没有足够样本支持对真实软件漏洞发现率的统计结论。后续可以按输入格式、保护机制、编译器和优化等级扩展 manifest，但每个正例必须同时保留修复版本与可验证根因。
+This is a small regression baseline, not statistically sufficient evidence of real-software vulnerability discovery rates. Extend by format, mitigation, compiler/optimization, but retain a fixed counterpart and verifiable cause for every positive.
