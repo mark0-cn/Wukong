@@ -31,13 +31,18 @@ class HostedWorkerGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             metadata = root / 'metadata'; metadata.mkdir()
-            for name in ['endpoint.json','exclusive-lease.json','authority.json','ssh_host_ed25519_key']:
+            for name in ['endpoint.json','exclusive-lease.json','authority.json','ssh_host_ed25519_key',
+                         'install-tool-unreviewed.log']:
                 (metadata/name).write_text('CONTROLLED-PRIVATE-CANARY-NOT-A-CREDENTIAL', encoding='utf-8')
             (metadata/'last-service-error.txt').write_text('known fixture failure',encoding='utf-8')
             (metadata/'selftest-fixture.log').write_text('x'*9000,encoding='utf-8')
+            (metadata/'install-tool-sshd.log').write_text('y'*9000,encoding='utf-8')
+            (metadata/'install-tool-ssh-keygen.log').write_text('trusted keygen status',encoding='utf-8')
             report = fixture.diagnostics(root)
             self.assertEqual(report['last-service-error.txt'],'known fixture failure')
             self.assertEqual(len(report['selftest-fixture.log']),4096)
+            self.assertEqual(len(report['install-tool-sshd.log']),4096)
+            self.assertEqual(report['install-tool-ssh-keygen.log'],'trusted keygen status')
             self.assertNotIn('CONTROLLED-PRIVATE-CANARY',json.dumps(report))
 
     def test_default_and_self_hosted_environments_cannot_reach_installation_effects(self):

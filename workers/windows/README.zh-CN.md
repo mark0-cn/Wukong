@@ -66,6 +66,8 @@ python -m scripts.worker.bundle --package ABSOLUTE_PACKAGE --enrollment ABSOLUTE
 
 已在独立测试环境取得管理员权限的自动化可以运行 `WukongWorkerSetup.exe install-reviewed ABSOLUTE_SETUP_JSON PINNED_CONTROLLER_PUBLIC_KEY_HEX REVIEWED_ENROLLMENT_SHA256`。参数须提供独立固定的控制端公钥，以及在控制端审阅过的精确规范 `enrollment.json` 的 SHA256。该命令采用相同的校验和安装路径，返回 JSON 凭据，不显示对话框，也不会自行提权。它是操作员入口，不是 worker RPC；不能用于覆盖开发宿主上的安装。
 
+创建服务前，固定的主机密钥生成及 SSH 配置检查将诊断保存在仅 System/管理员可访问的 `metadata/install-tool-ssh-keygen.log` 和 `metadata/install-tool-sshd.log`。错误会标明失败的程序；SSH 语法检查输出详细诊断，但不监听连接。托管夹具仅将这两个固定日志各自最后 4 KiB 纳入公开报告，不包含私钥或其他元数据。
+
 安装创建独立的管理、元数据 worker、调试器和目标账户，在 Windows ProgramData 已知目录下记录归属，并将生成的 worker 密码存入 LSA。所有账户禁止交互式/RDP 登录，仅 broker 持有的账户取得批处理登录权限。服务验证活动版本签名、目录及自身程序后，以普通账户、独立桌面和移除所有枚举特权的令牌启动 Python。显式进程属性确保子进程在执行前进入不允许脱离的 Job，且只继承输入/日志句柄。worker 代次退出时，服务先终止其所有后代进程再停止。首次就绪前必须通过固定依赖自检，并保存仅 System/管理员可写、绑定清单的凭据；其验证范围仍为可信样例。
 
 随包 SSH 使用独立主机密钥、仅公钥认证、登记的控制端地址和忽略请求命令的固定原生中继。转发、TTY 及用户启动钩子均被禁用。原生防火墙规则限定来源、端口和程序。管道 ACL 不授予客户端创建服务端实例的权限；每帧检查实际 Windows 调用者 SID，中继发送数据前将服务端 PID 与 SCM 比对。回环端点令牌留在受保护 worker 状态中。原生身份绑定覆盖完整签名清单。遇到现有安装、服务或账户名时拒绝采用或覆盖；中断记录保留供显式修复。

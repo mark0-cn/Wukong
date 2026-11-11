@@ -84,6 +84,7 @@ def diagnostics(installed):
     """Only fixed native diagnostics; never endpoint/lease/LSA/key records."""
     metadata = installed / 'metadata'
     selected = [metadata / 'last-service-error.txt', metadata / 'sshd-native.log']
+    selected += [metadata / f'install-tool-{name}.log' for name in ['ssh-keygen', 'sshd']]
     selected += sorted(metadata.glob('selftest-*.log'))[-2:]
     result = {}
     for path in selected:

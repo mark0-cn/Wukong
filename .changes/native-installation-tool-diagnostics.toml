@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Identify failing offline SSH installation tools and retain protected diagnostics before service creation, with bounded fixed-log collection in dedicated hosted acceptance."
+zh_CN = "标明离线 SSH 安装工具的失败步骤，并在创建服务前保留受保护诊断；独立托管验收仅收集固定日志的有界内容。"

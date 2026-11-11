@@ -155,6 +155,15 @@ fn fixed_command(
     timeout: Duration,
 ) -> Result<()> {
     security::no_links(executable)?;
+    let tool = match executable.file_name().and_then(OsStr::to_str) {
+        Some("ssh-keygen.exe") => "ssh-keygen",
+        Some("sshd.exe") => "sshd",
+        _ => anyhow::bail!("unexpected fixed offline installation tool"),
+    };
+    // These two reviewed commands never emit key material. Retain their
+    // diagnostics privately instead of losing pre-service failures to NUL.
+    let log = AclPolicy::private_vm()
+        .create_file(&root.join(format!("metadata/install-tool-{tool}.log")))?;
     let mut command = std::process::Command::new(executable);
     use std::os::windows::process::CommandExt;
     command
@@ -167,23 +176,25 @@ fn fixed_command(
         .env("ProgramData", program_data()?)
         .current_dir(root)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log)
         .creation_flags(0x08000000);
-    let mut child = command.spawn()?;
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("cannot launch fixed offline installation tool {tool}"))?;
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait()? {
             ensure!(
                 status.success(),
-                "fixed offline installation tool failed: {status}"
+                "fixed offline installation tool {tool} failed: {status}; inspect its protected install-tool log"
             );
             return Ok(());
         }
         if Instant::now() >= deadline {
             child.kill()?;
             let _ = child.wait();
-            anyhow::bail!("fixed offline installation tool exceeded its deadline");
+            anyhow::bail!("fixed offline installation tool {tool} exceeded its deadline");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -441,6 +452,8 @@ pub fn install(plan: Plan) -> Result<Value> {
     fixed_command(
         &package.join(&entry.sshd),
         &[
+            "-e".into(),
+            "-ddd".into(),
             "-t".into(),
             "-f".into(),
             root.join("ssh/sshd_config").into_os_string(),
