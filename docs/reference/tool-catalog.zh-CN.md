@@ -11,6 +11,7 @@
 | `agent_finish` | analyst / verifier | 是 | 以结构化结果结束子任务，覆盖契约、证据和缺口。summary 仅用于无必需产物的任务；提供 result 时忽略 summary，以 result.answer 为准。活动后代必须先结束。 |
 | `analysis_verify` | analyst / verifier | 是 | 仅 verifier：记录独立通用分析判定，包含期望/观察、范围、反例及验证者自己的证据。不提升安全影响；记录不可变并出现在共享笔记中。 |
 | `angr_solve` | analyst / verifier | 是 | 对 stdin 校验路径进行有界符号输入还原。提供模块相对成功/失败地址与输入长度，返回候选输入和探索统计的后台 job。简单可逆变换优先直接求逆，大状态空间使用切片或明确约束；必须在真实目标重放候选字节。 |
+| `artifact_stage` | analyst / verifier | 是 | 通过有界可恢复传输，将同一 run 中通过哈希校验的证据制品传入分配的环境，返回 worker 文件和原始证据 ID。 |
 | `binary_inspect` | analyst / verifier | 否 | 检查本 run 的精确目标、架构、节、导入、符号和缓解机制。 |
 | `binary_strings` | analyst / verifier | 否 | 分页搜索可打印字符串，附文件偏移地址引用。 |
 | `context_read` | 全部 | 否 | 按字符范围读取同 run 的确切共享文档 JSON，含 amendments。kind/id 来自 context_search；沿 content.next_offset 读取所需完整内容。 |
@@ -26,6 +27,8 @@
 | `debug_start` | analyst / verifier | 是 | 对暂存目标启动自己拥有的 GDB/MI 会话。 |
 | `differential_test` | analyst / verifier | 是 | 在隔离后台 job 中，以有界 stdin 向量比较暂存目标/参考实现。原始输出、哈希、差异保留产物；超时/截断是 inconclusive，不是匹配。 |
 | `emulate_run` | analyst / verifier | 否 | 从起始地址用 Unicorn 有界模拟暂存目标：映射 ELF 段和栈，运行到 count 条指令或 PC 到 until 地址，返回寄存器及所需内存 data_base64。目标不原生执行；可用于 VM/手工代码（解释器循环、x87/FPU）而无需自写 Unicorn harness。init_regs 设置前提寄存器，memory 注入字节；watchdog 限制失控循环，未知指令错误包含地址。 |
+| `environment_doctor` | 全部 | 否 | 探测已登记环境的实际平台和工具；子任务只能探测分配给自己的环境。 |
+| `environment_list` | 全部 | 否 | 列出已登记的分析环境，不建立连接；配置存在不代表环境已就绪。 |
 | `evidence_read` | 全部 | 否 | 读取完整性已核对证据的有界字节范围；非 UTF-8 使用 base64。 |
 | `exec_command` | analyst / verifier | 是 | 在 worker 同步执行一条有界 shell 命令，返回 stdout/stderr/退出码。每次使用新临时目录；target 接收 stage_target 路径，并通过 $TARGET 暴露解析后文件（例如 "printf '<payload>' \| $TARGET"）。适合快速检查和 stdin PoC；长任务用 job_start 并重定向日志。files/... 只在直接 argv 项解析，不在 shell 字符串中解析；状态根使用 $WUKONG_STATE_DIR。 |
 | `file_get` | analyst / verifier | 否 | 取回同 run 已声明的 worker 文件，并将原始字节保存为证据。 |

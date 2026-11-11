@@ -35,6 +35,17 @@ impl Coordinator {
         if run.status.terminal() {
             bail!("run is terminal");
         }
+        let environment_id = request
+            .environment_id
+            .clone()
+            .or_else(|| parent.environment_id.clone());
+        if let Some(environment) = &environment_id {
+            crate::environments::validate_id(environment)?;
+            ensure!(
+                run.config["environments"].get(environment).is_some(),
+                "environment is outside this assessment's registered environments: {environment}"
+            );
+        }
         if request.contract.objective.trim().is_empty() {
             request.contract.objective = request.task.clone();
         }
@@ -44,6 +55,7 @@ impl Coordinator {
         if let Some(failed) = agents.iter().find(|a| {
             a.scope.trim() == request.scope.trim()
                 && a.role == request.role
+                && a.environment_id == environment_id
                 && a.status.terminal()
                 && a.error
                     .as_deref()
@@ -56,7 +68,10 @@ impl Coordinator {
             );
         }
         if let Some(existing) = agents.iter().find(|a| {
-            a.scope.trim() == request.scope.trim() && a.role == request.role && !a.status.terminal()
+            a.scope.trim() == request.scope.trim()
+                && a.role == request.role
+                && a.environment_id == environment_id
+                && !a.status.terminal()
         }) {
             let mut existing_contract = existing.contract.clone();
             if existing_contract.objective.trim().is_empty() {
@@ -109,6 +124,7 @@ impl Coordinator {
                 role: request.role,
                 task: request.task,
                 scope: request.scope,
+                environment_id,
                 contract: request.contract,
                 task_result: None,
                 skills: request.skills,
@@ -147,7 +163,7 @@ impl Coordinator {
             &run.id,
             Some(&agent.id),
             "agent.created",
-            json!({"parent_id":parent.id,"role":agent.role,"scope":agent.scope}),
+            json!({"parent_id":parent.id,"role":agent.role,"scope":agent.scope,"environment_id":agent.environment_id}),
         )?;
         Ok(SpawnResult {
             created: true,

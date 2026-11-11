@@ -143,6 +143,7 @@ impl ExecutionService {
                 let job_id = raw["job_id"].as_str().context("worker job ID missing")?;
                 let record = JobRecord {
                     id: job_id.into(),
+                    worker_resource_id: text(&raw, "worker_job_id")?.into(),
                     run_id: agent.run_id.clone(),
                     agent_id: agent.id.clone(),
                     worker_id: self.gateway.worker_identity()?,

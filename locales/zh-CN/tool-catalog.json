@@ -11,6 +11,10 @@
     "source": "Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target.",
     "text": "对 stdin 校验路径进行有界符号输入还原。提供模块相对成功/失败地址与输入长度，返回候选输入和探索统计的后台 job。简单可逆变换优先直接求逆，大状态空间使用切片或明确约束；必须在真实目标重放候选字节。"
   },
+  "artifact_stage": {
+    "source": "Stage a hash-verified same-run evidence artifact into your assigned environment using bounded resumable transfer; returns the worker file and original evidence ID.",
+    "text": "通过有界可恢复传输，将同一 run 中通过哈希校验的证据制品传入分配的环境，返回 worker 文件和原始证据 ID。"
+  },
   "binary_inspect": {
     "source": "Inspect the exact run target, architecture, sections, imports, symbols and mitigations.",
     "text": "检查本 run 的精确目标、架构、节、导入、符号和缓解机制。"
@@ -70,6 +74,14 @@
   "emulate_run": {
     "source": "Bounded Unicorn emulation of the staged target from a start address: maps the ELF segments plus a stack, executes up to count instructions or until the PC reaches the until address (whichever first), and returns registers plus requested memory dumps (data_base64). The target never runs natively — this is a pure simulation for VM-style or hand-crafted code (interpreter loops, x87/FPU blocks) without hand-building Unicorn harnesses. Use init_regs for register preconditions and memory to inject bytes. The watchdog timeout bounds runaway loops; unsupported instructions report the failing address in error.",
     "text": "从起始地址用 Unicorn 有界模拟暂存目标：映射 ELF 段和栈，运行到 count 条指令或 PC 到 until 地址，返回寄存器及所需内存 data_base64。目标不原生执行；可用于 VM/手工代码（解释器循环、x87/FPU）而无需自写 Unicorn harness。init_regs 设置前提寄存器，memory 注入字节；watchdog 限制失控循环，未知指令错误包含地址。"
+  },
+  "environment_doctor": {
+    "source": "Probe a registered environment's real platform and tools; children may probe only their assigned environment.",
+    "text": "探测已登记环境的实际平台和工具；子任务只能探测分配给自己的环境。"
+  },
+  "environment_list": {
+    "source": "List registered analysis environments without connecting; configuration is not proof of readiness.",
+    "text": "列出已登记的分析环境，不建立连接；配置存在不代表环境已就绪。"
   },
   "evidence_read": {
     "source": "Read a bounded byte range from an integrity-checked evidence artifact. Non-UTF8 is base64.",

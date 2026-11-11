@@ -379,6 +379,7 @@ mod tests {
             },
             task: "fixture".into(),
             scope: id.into(),
+            environment_id: None,
             contract: TaskContract::default(),
             task_result: None,
             skills: vec![],

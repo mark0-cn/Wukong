@@ -12,6 +12,9 @@ pub(in crate::tools) struct CreateAgentArgs {
     pub task: String,
     #[schemars(length(min = 1))]
     pub scope: String,
+    /// Registered environment to bind to this child; omitted inherits the parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Optional capabilities, such as recon, reverse, hunter, fuzz, crash, exploit or reporter.
     /// These supplement the assigned role and never change its permissions or lifecycle.

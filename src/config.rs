@@ -86,6 +86,8 @@ pub struct AppConfig {
     pub model: ModelConfig,
     pub budget: Budget,
     pub runtime: RuntimeConfig,
+    pub environments: std::collections::BTreeMap<String, crate::environments::EnvironmentConfig>,
+    pub default_environment: Option<String>,
     pub workbench: crate::workbench::WorkbenchConfig,
     pub analysis: StaticConfig,
     pub pricing: Pricing,
@@ -103,6 +105,8 @@ impl Default for AppConfig {
             model: ModelConfig::default(),
             budget: Budget::default(),
             runtime: RuntimeConfig::default(),
+            environments: Default::default(),
+            default_environment: None,
             workbench: crate::workbench::WorkbenchConfig::default(),
             analysis: StaticConfig::default(),
             pricing: Pricing::default(),
@@ -146,6 +150,10 @@ impl AppConfig {
         resolve(base, &mut self.state_dir);
         resolve(base, &mut self.runtime.state_dir);
         resolve(base, &mut self.runtime.bridge_path);
+        for environment in self.environments.values_mut() {
+            resolve(base, &mut environment.runtime.state_dir);
+            resolve(base, &mut environment.runtime.bridge_path);
+        }
         resolve(base, &mut self.analysis.ghidra_cache_dir);
         if let Some(p) = &mut self.skills_dir {
             resolve(base, p);
@@ -164,6 +172,20 @@ impl AppConfig {
     }
     pub fn validate(&self) -> Result<()> {
         self.model.validate()?;
+        for (id, environment) in &self.environments {
+            crate::environments::validate_id(id)?;
+            environment.validate()?;
+        }
+        if let Some(default) = &self.default_environment {
+            ensure!(
+                self.environments.contains_key(default),
+                "default environment is not registered: {default}"
+            );
+        }
+        ensure!(
+            self.environments.is_empty() || self.default_environment.is_some(),
+            "registered environments require a default_environment"
+        );
         ensure!(
             self.budget.max_agents > 0 && self.budget.max_concurrent_agents > 0,
             "agent limits must be positive"

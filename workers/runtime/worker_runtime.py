@@ -14,6 +14,7 @@ from worker_profile import ProfileService
 from worker_crash import CrashService
 from worker_operations import OperationLedger
 from worker_sessions import SessionManager
+from worker_transfers import TransferService
 
 class Runtime:
     def __init__(self, root, trusted):
@@ -30,8 +31,9 @@ class Runtime:
         self.seccomp = SeccompService(self.root, trusted, self.isolated)
         self.network = NetworkService(self.root, trusted, self.isolated)
         self.operations = OperationLedger(self.root)
+        self.transfers = TransferService(self.root)
         self.handlers = {}
-        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu, self.libc, self.profile, self.crash, self.seccomp, self.network]:
+        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu, self.libc, self.profile, self.crash, self.seccomp, self.network, self.transfers]:
             for name in service.methods:
                 if name in self.handlers:
                     raise ValueError("duplicate worker method: " + name)

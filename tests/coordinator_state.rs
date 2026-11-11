@@ -23,6 +23,7 @@ fn request(scope: &str) -> ChildRequest {
         role: Role::Analyst,
         task: "inspect exact target".into(),
         scope: scope.into(),
+        environment_id: None,
         skills: vec!["recon".into()],
         inherit_context: true,
         wait_for_predecessors: vec![],

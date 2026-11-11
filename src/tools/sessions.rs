@@ -105,7 +105,9 @@ impl SessionsService {
                 let transcript = raw["transcript"]
                     .as_str()
                     .map(str::to_owned)
-                    .unwrap_or_else(|| format!("debug/{session_id}/transcript.mi"));
+                    .unwrap_or_else(|| {
+                        format!("debug/{}/transcript.mi", session.worker_resource_id)
+                    });
                 let transcript = self
                     .gateway
                     .runtime()?
@@ -133,6 +135,7 @@ impl SessionsService {
                 let session_id = handle.session_id.as_str();
                 let record = SessionRecord {
                     id: session_id.into(),
+                    worker_resource_id: text(&raw, "worker_session_id")?.into(),
                     run_id: agent.run_id.clone(),
                     agent_id: agent.id.clone(),
                     worker_id: self.gateway.worker_identity()?,
@@ -158,6 +161,7 @@ impl SessionsService {
                 let session_id = handle.session_id.as_str();
                 let record = SessionRecord {
                     id: session_id.into(),
+                    worker_resource_id: text(&raw, "worker_session_id")?.into(),
                     run_id: agent.run_id.clone(),
                     agent_id: agent.id.clone(),
                     worker_id: self.gateway.worker_identity()?,

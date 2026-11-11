@@ -70,7 +70,7 @@ remote_state_dir = "/state/wukong"
 
 ## 协议
 
-JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`doctor` 返回真实能力、路径、版本，不宣称缺失后端可用。请求/响应最大 48 MiB，上传最大 32 MiB。控制端使用 jsonrpsee 有界 stdio；RPC 错误保留健康连接，格式/大小错误及超时关闭连接。下次重连不自动重放失败请求。
+JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`doctor` 返回真实能力、路径、版本，不宣称缺失后端可用。请求/响应最大 48 MiB；单帧上传最大 32 MiB，可恢复传输支持最大 16 GiB 文件，每块最多 1 MiB。参见[分析环境](../../docs/design/cross-platform-environments.zh-CN.md)。控制端使用 jsonrpsee 有界 stdio；RPC 错误保留健康连接，格式/大小错误及超时关闭连接。下次重连不自动重放失败请求。
 
 | 方法 | 参数 / 结果 |
 | --- | --- |

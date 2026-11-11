@@ -9,6 +9,7 @@ mod credentials;
 pub mod desktop;
 pub mod domain;
 mod effects;
+pub mod environments;
 pub mod i18n;
 pub mod interface;
 mod kernel;

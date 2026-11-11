@@ -20,6 +20,7 @@ fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Resu
                 role,
                 task: "investigate a trusted fixture".into(),
                 scope: scope.into(),
+                environment_id: None,
                 skills: vec![],
                 inherit_context: false,
                 wait_for_predecessors: vec![],
@@ -233,6 +234,7 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
         role: Role::Analyst,
         task: "investigate the parser boundary".into(),
         scope: "parser boundary".into(),
+        environment_id: None,
         skills: vec!["reverse".into(), "hunter".into(), "crash".into()],
         inherit_context: false,
         wait_for_predecessors: vec![],
@@ -426,7 +428,7 @@ async fn poc_verify_budget_enforces_closure_after_two_jobs() -> Result<()> {
             "job",
             &format!("closure-job-{index}"),
             &run.id,
-            &json!({"id":format!("closure-job-{index}"),"run_id":run.id,"agent_id":verifier.id,"worker_id":"fixture","owner_generation":verifier.generation,"call_id":format!("closure-call-{index}"),"worker_request_id":format!("request-{index}"),"parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"tool_name":"poc_verify","finding_id":finding_id,"status":{"job_id":format!("closure-job-{index}"),"state":"completed"}}),
+            &json!({"id":format!("closure-job-{index}"),"run_id":run.id,"agent_id":verifier.id,"worker_id":"fixture","worker_resource_id":format!("worker-closure-{index}"),"owner_generation":verifier.generation,"call_id":format!("closure-call-{index}"),"worker_request_id":format!("request-{index}"),"parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"tool_name":"poc_verify","finding_id":finding_id,"status":{"job_id":format!("closure-job-{index}"),"state":"completed"}}),
         )?;
     }
     let third = service
@@ -636,7 +638,7 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
         "interact_session",
         "ghost-session",
         &run.id,
-        &json!({"id":"ghost-session","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}),
+        &json!({"id":"ghost-session","worker_resource_id":"ghost-session","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}),
     )?;
     let ghost = service
         .execute(
@@ -650,7 +652,7 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
     let record: Value = store.require("interact_session", "ghost-session")?;
     assert_eq!(record["state"], "lost");
     store.put("debug_session", "ghost-debug", &run.id,
-        &json!({"id":"ghost-debug","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}))?;
+        &json!({"id":"ghost-debug","worker_resource_id":"ghost-debug","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}))?;
     let debug = service
         .execute(
             &owner.id,

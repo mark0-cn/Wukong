@@ -7,7 +7,21 @@ pub(in crate::tools) struct RuntimeDoctorArgs {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(in crate::tools) struct EnvironmentDoctorArgs {
+    pub environment_id: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::tools) struct StageTargetArgs {}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::tools) struct ArtifactStageArgs {
+    pub artifact_id: String,
+    #[serde(default)]
+    pub executable: bool,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -29,7 +43,7 @@ pub(in crate::tools) struct FilePutArgs {
 pub(in crate::tools) struct FileGetArgs {
     #[schemars(length(min = 1))]
     pub path: String,
-    #[schemars(range(min = 1, max = 33554432))]
+    #[schemars(range(min = 1, max = 17179869184_u64))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<u64>,
 }

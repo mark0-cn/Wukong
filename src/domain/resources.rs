@@ -63,6 +63,7 @@ pub struct SessionHandle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobRecord {
     pub id: String,
+    pub worker_resource_id: String,
     pub run_id: String,
     pub agent_id: String,
     pub worker_id: String,
@@ -83,6 +84,7 @@ pub struct JobRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: String,
+    pub worker_resource_id: String,
     pub run_id: String,
     pub agent_id: String,
     pub worker_id: String,

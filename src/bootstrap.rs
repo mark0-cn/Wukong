@@ -26,7 +26,9 @@ pub(crate) async fn build_runner(mut config: AppConfig, store: Store) -> Result<
 
 pub(crate) async fn build_tools(config: AppConfig, store: Store) -> Result<ToolService> {
     config.validate()?;
-    let client = if config.runtime.backend == crate::runtime::RuntimeBackend::Disabled {
+    let client = if !config.environments.is_empty()
+        || config.runtime.backend == crate::runtime::RuntimeBackend::Disabled
+    {
         None
     } else {
         Some(crate::runtime::RuntimeClient::connect(config.runtime.clone()).await?)

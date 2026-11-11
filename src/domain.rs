@@ -178,6 +178,8 @@ pub struct AgentMetadata {
     pub role: Role,
     pub task: String,
     pub scope: String,
+    /// Immutable execution environment selected when this agent is created.
+    pub environment_id: Option<String>,
     pub contract: TaskContract,
     #[serde(default)]
     pub task_result: Option<TaskResult>,

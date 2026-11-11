@@ -6,7 +6,7 @@ use std::path::Path;
 
 pub const PUBLIC_KEY: &str = include_str!("../desktop/update-public.key");
 pub const RELEASES: &str = "https://github.com/mark0-cn/Wukong/releases";
-pub const DATA_SCHEMA: u32 = 3;
+pub const DATA_SCHEMA: u32 = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Artifact {

@@ -12,7 +12,7 @@ English · [简体中文](maintenance.zh-CN.md)
 - `tools` retains the execution pipeline/shared validation. `effects` owns durable receipts; `catalog` registers schemas, roles, recovery policy and handlers. `handlers` routes business operations; `coordination` handles shared documents/tasks; `analysis` static queries; `execution` worker dispatch; `verification` independent admission/certification; `files`, `jobs`, `sessions` their resources. Argument/handler subdirectories group by responsibility while one catalog registers them.
 - `queries` defines shared queries/DTOs; `store/workspace` and `store/report_queries` implement SQL. `desktop/workspace` reads snapshots through `store/desktop_queries`; `desktop/presentation` adapts public progress/tool results for React. `ui/src/commands.ts` constrains command arguments/responses; lifecycle effects belong in corresponding hooks.
 - `coordinator` separates runs/tasks/messages/waits/completion use cases, committing through the same Store transactions. `binary` retains public address/hash APIs; profiling, strings and Ghidra lifecycle have separate modules.
-- `store` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `store/conversations` owns conversation payloads/revisions. Current state schema is 3, without legacy migration.
+- `store` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `store/conversations` owns conversation payloads/revisions. Current state schema is 4, without legacy migration.
 
 See [worker components](../../workers/runtime/README.md). Deploy the entire runtime directory; entry files do not re-export modules.
 

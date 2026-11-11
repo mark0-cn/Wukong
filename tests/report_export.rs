@@ -37,6 +37,7 @@ fn fixture(root: &Path) -> (Store, String, String) {
             role: Role::Root,
             task: "inspect".into(),
             scope: "fixture".into(),
+            environment_id: None,
             skills: vec![],
             active_skills: vec![],
             contract: Default::default(),

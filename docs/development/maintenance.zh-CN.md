@@ -12,7 +12,7 @@
 - `tools` 保留执行管线和共同校验入口，`effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
 - `queries` 定义共享查询与 DTO，`store/workspace`、`store/report_queries` 实现 SQL；`desktop/workspace` 通过 `store/desktop_queries` 读取桌面快照，`desktop/presentation` 适配公开进度和工具结果，React 界面消费 DTO。`ui/src/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
 - `coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
-- `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 3，不提供旧数据库迁移。
+- `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 4，不提供旧数据库迁移。
 
 worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录，入口文件不承担模块重导出。
 

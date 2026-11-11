@@ -57,7 +57,6 @@ impl RunSupervisor {
         let monitor_run = run_id.to_owned();
         let monitor_cancel = supervisor.cancel.clone();
         let monitor = tokio::spawn(async move {
-            let jobs = monitor_runner.tools.jobs();
             let mut timer = tokio::time::interval(Duration::from_secs(1));
             loop {
                 tokio::select! {
@@ -66,7 +65,7 @@ impl RunSupervisor {
                     _ = timer.tick() => {
                         tokio::select! {
                             _ = monitor_cancel.cancelled() => break,
-                            result = jobs.refresh(&monitor_run) => {
+                            result = monitor_runner.tools.refresh_jobs(&monitor_run) => {
                                 if let Err(error) = result { tracing::warn!(%error, "job monitor failed"); }
                             }
                         }
@@ -173,7 +172,7 @@ for line in sys.stdin:
                 "job",
                 "job",
                 &run.id,
-                &json!({"id":"job","run_id":run.id,"agent_id":run.root_id,"owner_generation":0,"tool_name":"job_start","call_id":"fixture","worker_request_id":"fixture","parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"worker_id":runner.tools.worker_identity()?,"status":{"job_id":"job","state":"queued"}}),
+                &json!({"id":"job","worker_resource_id":"job","run_id":run.id,"agent_id":run.root_id,"owner_generation":0,"tool_name":"job_start","call_id":"fixture","worker_request_id":"fixture","parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"worker_id":runner.tools.worker_identity()?,"status":{"job_id":"job","state":"queued"}}),
             )?;
             let cancel = CancellationToken::new();
             let child_cancel = cancel.clone();

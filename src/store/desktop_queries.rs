@@ -79,7 +79,7 @@ mod tests {
             json!({"call_id":call.id}),
         )?;
         let mut job: JobRecord = serde_json::from_value(json!({
-            "id":"replay-job", "run_id":run.id, "agent_id":agent.id, "worker_id":"fixture",
+            "id":"replay-job", "run_id":run.id, "agent_id":agent.id, "worker_id":"fixture", "worker_resource_id":"local-replay-job",
             "owner_generation":agent.generation, "call_id":call.id, "worker_request_id":"request",
             "tool_name":call.name, "finding_id":null, "parameters":{}, "target_sha256":run.target_sha256,
             "status":{"job_id":"replay-job", "state":"running", "started_at":1700000000},

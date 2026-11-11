@@ -32,6 +32,7 @@ pub struct ToolService {
     analysis: AnalysisService,
     mcp: McpRegistry,
     locks: Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>,
+    environments: crate::environments::EnvironmentRegistry,
 }
 
 mod analysis;
@@ -51,6 +52,7 @@ mod files;
 mod handlers;
 mod jobs;
 mod sessions;
+mod transfers;
 mod verification;
 mod verification_protocol;
 use catalog::builtins;
@@ -109,6 +111,8 @@ impl ToolService {
         client: Option<RuntimeClient>,
         mcp: McpRegistry,
     ) -> Result<Self> {
+        let environments =
+            crate::environments::EnvironmentRegistry::new(config.environments.clone())?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
         let gateway = WorkerGateway {
             store: store.clone(),
@@ -132,8 +136,56 @@ impl ToolService {
             analysis,
             mcp,
             locks,
+            environments,
         })
     }
+    async fn bound_to(&self, agent: &AgentMetadata) -> Result<Self> {
+        let Some(environment_id) = &agent.environment_id else {
+            return Ok(self.clone());
+        };
+        let config = self.environments.config(environment_id)?;
+        let run: RunRecord = self.store.load(&agent.run_id)?;
+        ensure!(
+            run.config["environments"][environment_id] == serde_json::to_value(config)?,
+            "environment configuration changed since this assessment was created"
+        );
+        let gateway = WorkerGateway {
+            store: self.store.clone(),
+            client: Some(self.environments.client(environment_id).await?),
+            identity: stable("worker", &serde_json::to_string(&(environment_id, config))?),
+            output_limit: self.limits.max_output_bytes,
+        };
+        let execution =
+            ExecutionService::new(self.store.clone(), gateway.clone(), self.locks.clone());
+        let analysis = AnalysisService {
+            store: self.store.clone(),
+            files: execution.files.clone(),
+            gateway,
+            config: self.analysis.config.clone(),
+        };
+        Ok(Self {
+            execution,
+            analysis,
+            ..self.clone()
+        })
+    }
+
+    pub(crate) async fn refresh_jobs(&self, run: &str) -> Result<()> {
+        for job in self.store.records::<JobRecord>(run)? {
+            if job.notification_message_id.is_some() {
+                continue;
+            }
+            let owner: AgentMetadata = require_in_run(&self.store, &job.agent_id, run)?;
+            let tools = self.bound_to(&owner).await?;
+            tools
+                .execution
+                .jobs
+                .observe(&owner, &format!("job-observation:{}", job.id), &job.id)
+                .await?;
+        }
+        Ok(())
+    }
+    #[cfg(test)]
     pub(crate) fn jobs(&self) -> &jobs::JobService {
         &self.execution.jobs
     }
@@ -172,6 +224,7 @@ impl ToolService {
     }
     pub async fn close(&self) {
         self.mcp.close().await;
+        self.environments.close().await;
         if let Some(runtime) = &self.execution.gateway.client {
             let _ = runtime.close().await;
         }
@@ -268,7 +321,12 @@ impl ToolService {
                 args
             };
             if let Some(spec) = builtin {
-                (spec.handler)(self, &agent, call_id, name, args).await
+                if spec.worker_bound {
+                    let scoped = self.bound_to(&agent).await?;
+                    (spec.handler)(&scoped, &agent, call_id, name, args).await
+                } else {
+                    (spec.handler)(self, &agent, call_id, name, args).await
+                }
             } else if self.mcp.contains(name) {
                 self.mcp.call(name, args).await
             } else {

@@ -51,12 +51,12 @@ def doctor(root, trusted, isolated):
             spec=json.loads(launch.read_text())
             workbench={"launch_spec":"files/challenge/launch.json","challenge_id":spec["challenge_id"],"target":str(Path(spec["base"])/spec["target"]) if spec.get("target") else None,"input_mode":spec["input_mode"],"service":spec["service"],"runtime_confirmed":False}
         except (OSError,ValueError,KeyError) as error:workbench={"error":str(error)}
-    return {"workbench":workbench,"protocol": PROTOCOL, "platform": platform.platform(), "python": platform.python_version(),
+    return {"workbench":workbench,"protocol": PROTOCOL, "os": platform.system().lower(), "platform": platform.platform(), "python": platform.python_version(),
             "worker_root": str(root), "isolation": "trusted_local" if trusted else "external_worker",
             "core_pattern": core_pattern, "external_core_handler": bool(core_pattern and core_pattern.startswith("|")),
             "metadata_protected_from_targets": isolated, "unique_experiment_uids": isolated,
             "tools": tools, "python_toolchain": python_toolchain,
-            "capabilities": {"process_jobs": True, "persistent_jobs": True,
+            "capabilities": {"process_jobs": True, "persistent_jobs": True, "resumable_file_transfer": True,
             "debug_gdb_mi": tools["gdb"]["available"] and python_toolchain["pygdbmi"], "fuzz_qemu": linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
             "crash_replay": True, "input_minimize": tools["gdb"]["available"] and python_toolchain["pygdbmi"] and linux,
             "input_minimize_signal_only": True, "runtime_profile": True,

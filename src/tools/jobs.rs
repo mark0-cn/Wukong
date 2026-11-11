@@ -11,6 +11,7 @@ pub(crate) struct JobService {
 }
 
 impl JobService {
+    #[cfg(test)]
     pub(crate) async fn refresh(&self, run: &str) -> Result<()> {
         if self.gateway.client.is_none() {
             return Ok(());
@@ -51,7 +52,11 @@ impl JobService {
         let status = if let Some(status) = cached.filter(|status| status.state.terminal()) {
             status
         } else {
-            self.gateway.runtime()?.job_status(job_id).await?
+            serde_json::from_value(
+                self.gateway
+                    .worker_query(agent, "job.status", json!({"job_id":job_id}))
+                    .await?,
+            )?
         };
         let raw = serde_json::to_value(&status)?;
         self.store.write(|tx| {
@@ -195,8 +200,7 @@ impl JobService {
         }
         let artifacts = self
             .gateway
-            .runtime()?
-            .call("job.artifacts", json!({"job_id":job_id}))
+            .worker_query(agent, "job.artifacts", json!({"job_id":job_id}))
             .await?;
         let mut imported = Vec::new();
         for artifact in artifacts

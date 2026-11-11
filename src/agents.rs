@@ -262,6 +262,7 @@ pub fn preamble(
         "\nTask contract (requirements; check deliverables before agent_finish):\n{}\n",
         serde_json::to_string(&agent.contract)?
     ));
+    text.push_str(&format!("\nExecution environment binding: {:?}. This binding is immutable. Use environment_list/environment_doctor to inspect actual capabilities. A child inherits this binding unless task explicitly selects another registered environment. Transfer shared evidence with artifact_stage; another environment's paths are not valid here.\n", agent.environment_id));
     // Only presentation is localized; canonical methods and permission checks are shared.
     let language = run
         .config
