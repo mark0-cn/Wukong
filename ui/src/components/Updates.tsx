@@ -35,7 +35,7 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
     {status && !status.needs_setup && !busy && <EnvironmentHealth health={status?.health} />}
     {status?.needs_setup && <SetupProgress step={status.environment_step} busy={busy} failed={Boolean(failure)} />}
     <ImagePullProgress value={status?.image_progress} version={status?.image_version} busy={status?.phase === 'pulling'} />
-    {!failure && <p className="update-status" role="status">{busy && status?.message ? message(status.message) : status?.needs_setup && status.phase !== 'cancelled' ? t('updates-setup-ready-to-start') : (status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>}
+    {!failure && <p className="update-status" role="status">{status?.cancelling ? t('updates-cancelling') : busy && status?.message ? message(status.message) : status?.needs_setup && status.phase !== 'cancelled' ? t('updates-setup-ready-to-start') : (status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>}
     {status?.phase === 'downloading' && status.total && <div><progress aria-label={t('updates-client-download-progress')} max={status.total} value={status.downloaded} /><p className="muted">{(status.downloaded / 1048576).toFixed(1)} / {(status.total / 1048576).toFixed(1)} MiB</p></div>}
     {busy && <p className="muted">{t('updates-keep-the-application-open-while-processing-image')}</p>}
     {failure && <section className="update-error">

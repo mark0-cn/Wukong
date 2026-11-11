@@ -72,7 +72,7 @@ test('tools repair uses the shared update operation rather than a raw workbench 
 
 test('a running preparation can be hidden and cancellation targets its operation id', async () => {
   const running = { ...status, busy: true, operation_id: 'prepare-123', cancellable: true, phase: 'pulling' };
-  vi.mocked(api<'update_action'>).mockResolvedValue(running);
+  vi.mocked(api<'update_action'>).mockImplementation(async (name) => name as string === 'update_cancel' ? { ...running, cancelling: true } : running);
   const close = vi.fn();
   render(<Updates epoch={1} onClose={close} onChanged={() => {}} />);
   await screen.findByText('0.2.0');
@@ -80,6 +80,7 @@ test('a running preparation can be hidden and cancellation targets its operation
   expect(close).toHaveBeenCalledOnce();
   await userEvent.click(screen.getByRole('button', { name: '取消准备' }));
   expect(api).toHaveBeenCalledWith('update_cancel', { operationId: 'prepare-123' });
+  expect((screen.getByRole('button', { name: '正在取消并清理…' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 test('activation explains why cancellation is unavailable', async () => {
