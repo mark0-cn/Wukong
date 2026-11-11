@@ -7,6 +7,7 @@ import { CopyButton } from './CopyButton';
 import { SetupProgress } from './SetupProgress';
 import { ImagePullProgress } from './ImagePullProgress';
 import { useUpdateController, type UpdateController } from '../hooks/useUpdateController';
+import { UpdateDiagnostics } from './UpdateDiagnostics';
 import { EnvironmentHealth } from './EnvironmentHealth';
 import { Modal } from './Modal';
 
@@ -42,6 +43,7 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
       {detail && <details><summary>{t('updates-diagnostic-output')}</summary><pre className="workbench-result">{detail}</pre></details>}
       <CopyButton value={errorText(failure)} label={t('updates-copy-error')} />
     </section>}
+    {status?.operation_id && (status.diagnosis || status.log_available) && <UpdateDiagnostics key={status.operation_id} status={status} retry={() => void run(status.action === 'prepare' ? 'prepare' : status.action === 'check' ? 'check' : status.action === 'health' || status.action === 'doctor' ? status.action : 'setup')} />}
     {!status?.needs_setup && status?.notes && <details><summary>{t('updates-release-notes')}</summary><p>{status.notes}</p></details>}
 
     {status?.pending && <p className="error-banner">{t('updates-the-previous-update-is-not-confirmed-new')}</p>}

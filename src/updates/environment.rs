@@ -8,12 +8,15 @@ pub fn prepare(
     config: &AppConfig,
     image: &str,
     cancel: tokio_util::sync::CancellationToken,
+    diagnostics: impl Fn(&Path),
     progress: impl Fn(UiMessage),
     pull: impl Fn(crate::workbench::pull_progress::PullProgress),
 ) -> Result<()> {
     let root = super::storage::cache_root()?
         .join("probes")
         .join(uuid::Uuid::new_v4().to_string());
+    std::fs::create_dir_all(root.join("logs"))?;
+    diagnostics(&root.join("logs/pull.log"));
     let mut probe = config.clone();
     probe.workbench.root = root.clone();
     let mut workbench = Workbench::open(&probe)?;

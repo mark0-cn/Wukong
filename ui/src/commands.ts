@@ -9,6 +9,8 @@ export interface EnvironmentHealth {
 }
 export interface UpdateStatus {
   health?: EnvironmentHealth;
+  diagnosis?: 'daemon' | 'credentials' | 'network' | 'rate_limit' | 'disk' | 'unknown' | null;
+  log_available?: boolean;
   cancellable?: boolean; cancelling?: boolean;
 
   operation_id?: string | null; revision?: number; busy?: boolean; action?: UpdateAction | null;
@@ -54,6 +56,8 @@ export interface Commands {
   tool_details: Command<Item, ToolRecord>;
   shutdown_workspace: Command<undefined, void>;
   update_action: Command<Epoch & { action: UpdateAction }, UpdateStatus>;
+  update_log_directory: Command<{ operationId: string }, void>;
+  update_diagnostics: Command<{ operationId: string }, string | null>;
   update_cancel: Command<{ operationId: string }, UpdateStatus>;
   update_storage: Command<Epoch, { data_dir: string; cache_dir: string }>;
   update_cache_directory: Command<Epoch & { destination: string }, string>;

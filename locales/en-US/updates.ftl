@@ -145,3 +145,16 @@ updates-critical-phase = This stage cannot be cancelled. Installation or environ
 system-tool-image-needs-repair = The local tool image is missing. Use Validate and repair environment to prepare it again.
 
 updates-step-details = Step details
+
+updates-help-daemon = Docker may be stopped or using Windows containers. Start Docker and switch to Linux containers, then retry.
+updates-help-credentials = The Docker credential helper or login state needs attention. Repair Docker Desktop or refresh its login, restart Wukong, then retry. Wukong does not delete your login configuration.
+updates-help-network = The connection may have timed out or dropped. Check Docker proxy, DNS and connectivity, then retry. Cached image layers will be reused.
+updates-help-rate-limit = The registry may be rate limiting requests. Wait before retrying or sign in through Docker with an account that has available quota. Avoid repeated immediate retries.
+updates-help-disk = Storage is insufficient. Check the Docker data disk and update cache disk. Change cache location in workspace settings and image storage in Docker settings.
+updates-help-unknown = This error could not be classified. Inspect the full local logs and technical details, or export a diagnostic bundle for investigation.
+updates-diagnostics-title = Diagnostics and recovery
+updates-retry-operation = Retry after resolving
+updates-open-log-directory = Open log directory
+updates-export-diagnostics = Export redacted diagnostics
+updates-diagnostics-redaction = Export includes platform, stage, error category and check counts only. Raw logs, paths, configuration and credentials are omitted. Full logs remain on this computer.
+updates-diagnostics-saved = Diagnostics saved:

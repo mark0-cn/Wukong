@@ -464,10 +464,14 @@ export interface Messages {
   'updates-critical-phase': undefined;
   'updates-current-client': undefined;
   'updates-diagnostic-output': undefined;
+  'updates-diagnostics-redaction': undefined;
+  'updates-diagnostics-saved': undefined;
+  'updates-diagnostics-title': undefined;
   'updates-docker-installation-guide': undefined;
   'updates-download-and-verify-update': undefined;
   'updates-enter-a-new-directory-that-does-not': undefined;
   'updates-environment-ready': undefined;
+  'updates-export-diagnostics': undefined;
   'updates-export-offline-migration-package': undefined;
   'updates-for-example-bin-challenge': undefined;
   'updates-for-example-heap-demo': undefined;
@@ -487,6 +491,12 @@ export interface Messages {
   'updates-health-unchecked-help': undefined;
   'updates-health-unconfigured': undefined;
   'updates-health-unknown': undefined;
+  'updates-help-credentials': undefined;
+  'updates-help-daemon': undefined;
+  'updates-help-disk': undefined;
+  'updates-help-network': undefined;
+  'updates-help-rate-limit': undefined;
+  'updates-help-unknown': undefined;
   'updates-image-cached': undefined;
   'updates-image-elapsed': { time: string | number };
   'updates-image-layer-details': undefined;
@@ -516,6 +526,7 @@ export interface Messages {
   'updates-no-recent-layer-change': undefined;
   'updates-no-update-found-yet': undefined;
   'updates-once-ready-configure-your-model-provider-in': undefined;
+  'updates-open-log-directory': undefined;
   'updates-operation-result': undefined;
   'updates-prepare-runtime-files': undefined;
   'updates-prepare-tool-environment': undefined;
@@ -525,6 +536,7 @@ export interface Messages {
   'updates-refresh-failed': undefined;
   'updates-release-notes': undefined;
   'updates-restore-previous-version': undefined;
+  'updates-retry-operation': undefined;
   'updates-retry-setup': undefined;
   'updates-run-diagnostics': undefined;
   'updates-select-prepare-tool-environment-to-download-and': undefined;

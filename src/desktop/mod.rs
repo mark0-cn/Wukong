@@ -8,6 +8,8 @@ pub mod presentation;
 pub mod service;
 mod tool_aliases;
 #[cfg(feature = "desktop")]
+mod update_diagnostics;
+#[cfg(feature = "desktop")]
 mod update_health;
 #[cfg(feature = "desktop")]
 pub mod updates;

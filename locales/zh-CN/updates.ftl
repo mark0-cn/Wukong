@@ -145,3 +145,16 @@ updates-critical-phase = 当前阶段不支持取消。安装或环境切换必�
 system-tool-image-needs-repair = 本地工具镜像不存在，请使用“自检并修复环境”重新准备。
 
 updates-step-details = 查看步骤说明
+
+updates-help-daemon = Docker 服务可能未启动，或当前处于 Windows 容器模式。启动 Docker 并切换到 Linux 容器后重试。
+updates-help-credentials = Docker 凭据助手或登录状态异常。修复 Docker Desktop 安装或刷新其登录状态，再重启 Wukong 后重试；应用不会删除你的登录配置。
+updates-help-network = 连接可能超时或中断。检查 Docker 的代理、DNS 和网络连接后重试；已缓存的镜像层会复用。
+updates-help-rate-limit = 镜像仓库可能触发限流。等待后重试，或在 Docker 中登录有可用配额的账号；不要反复立即重试。
+updates-help-disk = 存储空间不足。检查 Docker 数据盘和更新缓存所在磁盘；缓存目录可在工作区设置中调整，镜像磁盘位置在 Docker 设置中调整。
+updates-help-unknown = 暂时无法归类该错误。查看本机完整日志和技术详情，或导出诊断包以便排查。
+updates-diagnostics-title = 诊断与恢复
+updates-retry-operation = 处理后重试
+updates-open-log-directory = 打开日志目录
+updates-export-diagnostics = 导出脱敏诊断包
+updates-diagnostics-redaction = 导出仅包含平台、阶段、错误类别和检查计数；原始日志、路径、配置及凭据均不导出。完整日志保留在本机。
+updates-diagnostics-saved = 诊断包已保存：
