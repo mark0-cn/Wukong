@@ -44,7 +44,7 @@ def duration(name, jobs):
     return f"{minutes}m {seconds}s"
 
 
-def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
+def checks_succeeded(kind, needs, event):
     failed = any(v["result"] in {"failure", "cancelled"} for v in needs.values())
     if kind == "release":
         passed = all(needs.get(n, {}).get("result") == "success" for n in
@@ -53,11 +53,16 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         for target in ("windows", "linux"):
             result = needs.get(target + "-client", {}).get("result")
             passed = passed and (result == "success" or (result == "skipped" and bool(metadata.get(target + "_run") or metadata.get(target + "_installer_id"))))
-        if context.get("event") == "push":
+        if event == "push":
             passed = passed and needs.get("publish", {}).get("result") == "success"
     else:
         passed = checks_passed(needs) if "changes" in needs else all(needs.get(n, {}).get("result") == "success" for n in ("windows", "linux"))
-    state = "通过 / Passed" if passed and not failed else "未完成或失败 / Incomplete or failed"
+    return bool(passed and not failed)
+
+
+def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
+    passed = checks_succeeded(kind, needs, context.get("event"))
+    state = "通过 / Passed" if passed else "未完成或失败 / Incomplete or failed"
     run_url = context["run_url"]
     lines = [f"## {kind.upper()} — {state}", "", f"- Ref: {cell(context['ref'])}",
              f"- Commit: `{cell(context['sha'])}`", f"- [本次运行与日志]({run_url})", "",
@@ -161,6 +166,8 @@ def main():
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
             stream.write(output)
     print(output)
+    if not checks_succeeded(args.kind, json.loads(os.environ["NEEDS_JSON"]), context["event"]):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
