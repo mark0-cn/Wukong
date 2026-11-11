@@ -1,0 +1,10 @@
+.modal.cleanup-review {max-width:820px; width:calc(100vw - 32px); max-height:calc(100vh - 32px); display:flex; flex-direction:column; padding-bottom:0;}
+.cleanup-body {overflow:auto; min-height:0; padding-bottom:20px;}
+.cleanup-review fieldset {border:0; padding:0; margin:0;}
+.cleanup-review legend {font-weight:600; margin-bottom:12px;}
+.cleanup-review fieldset label {display:flex; gap:12px; align-items:flex-start; border:1px solid var(--border); padding:14px; margin:10px 0; border-radius:8px; cursor:pointer;}
+.cleanup-review fieldset input {margin-top:5px; flex-shrink:0;}
+.cleanup-review small {display:block; color:var(--muted); margin-top:4px;}
+.cleanup-review code {overflow-wrap:anywhere; white-space:normal;}
+.cleanup-review ul {padding-left:22px;}
+.cleanup-actions {display:flex; justify-content:flex-end; gap:10px; padding:16px 0; border-top:1px solid var(--border); flex-wrap:wrap;}

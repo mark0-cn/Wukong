@@ -37,6 +37,9 @@ type Command<A, R> = { args: A; result: R };
 
 /** Native command boundary: result types follow command names, never callers. */
 export interface Commands {
+  cleanup_preview: Command<{ selection: { data: boolean; tools: boolean; challenges: boolean } }, CleanupPreview>;
+  cleanup_confirm: Command<{ fingerprint: string }, void>;
+  cleanup_cancel: Command<undefined, void>;
   preferences_read: Command<undefined, PreferenceSnapshot>;
   preferences_save: Command<{ preferences: Preferences }, PreferenceSnapshot>;
   workspace_read: Command<{ request: { run: string | null; agent: string | null; event_limit: number; known_revision: string | null } }, Envelope>;
@@ -64,6 +67,11 @@ export interface Commands {
   update_cache_directory: Command<Epoch & { destination: string }, string>;
   update_data_directory: Command<Epoch & { destination: string }, void>;
   workbench_action: Command<Epoch & { request: WorkbenchRequest }, Json>;
+}
+export interface CleanupPreview {
+  fingerprint: string; files: number; bytes: number; paths: string[];
+  resources: {kind: string; id: string; name: string}[];
+  retained: {path: string; reason: string}[]; errors: string[]; truncated: boolean;
 }
 export interface Events {
   'workspace-changed': unknown;

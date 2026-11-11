@@ -1,4 +1,6 @@
 //! Desktop application boundary shared by the webview and its native host.
+#[cfg(feature = "desktop")]
+pub mod cleanup;
 pub mod configuration;
 #[cfg(feature = "desktop")]
 pub mod host;

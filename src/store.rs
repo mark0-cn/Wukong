@@ -34,7 +34,7 @@ pub struct Store {
 
 impl Store {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
-        fs::create_dir_all(root.as_ref())?;
+        crate::cleanup::create_owned_directory(root.as_ref())?;
         let root = fs::canonicalize(root.as_ref())?;
         fs::create_dir_all(root.join("artifacts"))?;
         let conn = Connection::open(root.join("state.sqlite3"))?;
