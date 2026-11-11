@@ -99,3 +99,5 @@ Docker 镜像及卷的物理磁盘位置由 Docker Desktop / Docker Engine 设�
 
 CI 验证 Windows 安装/卸载、Linux AppImage 与真实 WebView 启动、签名完整性及 Linux Docker 集成。
 Windows Docker Desktop 的真实首次安装与跨版本升级仍需桌面实机验收；托管 runner 的安装器检查及语言界面浏览器测试不代替这项验收。
+
+清理 CLI 可以预览应用管理的本机数据，不打开模型、worker 或数据库。运行 `wukong cleanup plan --data --output cleanup-review.json`，核对路径、文件数量、大小和保留项，再显式执行 `wukong cleanup execute --review cleanup-review.json --yes --report cleanup-report.json`。这些文件应保存在待清理目录之外。执行时获取维护锁并重新生成清单；内容变化后需要重新预览。未知文件、符号链接和重解析路径会保留；配置指向一个目录不代表允许删除该目录中的所有内容。

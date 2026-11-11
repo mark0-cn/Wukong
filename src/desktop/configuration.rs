@@ -91,6 +91,8 @@ impl ConfigDocument {
         Ok(())
     }
     pub fn save(&mut self, state_override: Option<&Path>) -> Result<(AppConfig, Store)> {
+        let _maintenance =
+            crate::updates::maintenance::lock(&crate::updates::recovery::root()?, true)?;
         let form: AppConfig = toml::from_str(&self.source)
             .context(UiMessage::new("system-invalid-toml-configuration"))?;
         form.validate()?;
@@ -116,6 +118,11 @@ impl ConfigDocument {
             )
         );
         let store = Store::open(&resolved.state_dir)?;
+        // Keep both the previous and new locations discoverable after a switch.
+        if let Ok(previous) = AppConfig::load(Some(&self.path)) {
+            crate::cleanup::register_configuration_locked(&previous, Some(&self.path))?;
+        }
+        crate::cleanup::register_configuration_locked(&resolved, Some(&self.path))?;
         temporary
             .persist(&self.path)
             .map_err(|error| error.error)

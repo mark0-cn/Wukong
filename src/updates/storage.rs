@@ -79,11 +79,19 @@ pub fn set_cache(destination: &Path) -> Result<PathBuf> {
         fs::read_dir(&destination)?.next().is_none(),
         UiMessage::new("system-choose-an-empty-directory-existing-files-will-not")
     );
+    crate::cleanup::register_cache(&crate::desktop::paths::home()?, &source)?;
     let staging = tempfile::tempdir_in(&destination)?;
     let releases = source.join("releases");
     if releases.exists() {
         copy_releases(&releases, &staging.path().join("releases"))?;
     }
+    crate::cleanup::create_owned_directory(&destination.join("probes"))?;
+    // The destination was verified empty before Wukong populated it.
+    crate::workbench::write_json(
+        &destination.join(".wukong-owned.json"),
+        &serde_json::json!({"schema_version":1,"application":"io.wukong.desktop"}),
+    )?;
+    crate::cleanup::register_cache(&crate::desktop::paths::home()?, &destination)?;
     let staged = staging.path().join("releases");
     if staged.exists() {
         fs::rename(staged, destination.join("releases"))?;

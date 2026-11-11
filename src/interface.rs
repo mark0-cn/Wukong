@@ -36,6 +36,11 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 pub enum Command {
+    /// Preview or remove explicitly selected local application data.
+    Cleanup {
+        #[command(subcommand)]
+        command: crate::cleanup::cli::Command,
+    },
     /// Restore the last desktop installation without opening the webview.
     RecoverUpdate,
     /// Validate the signed desktop release and all installer files before publication.
@@ -147,6 +152,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         crate::i18n::Locale::EnUs
     };
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
+    if let Command::Cleanup { command } = command {
+        return crate::cleanup::cli::run(command);
+    }
     if matches!(command, Command::RecoverUpdate) {
         return crate::updates::recovery::recover();
     }
@@ -224,6 +232,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         print_json(&result)?;
         return Ok(());
     }
+    crate::cleanup::register_configuration(&config, path.as_deref())?;
     if let Command::Env { command } = command {
         print_json(&crate::workbench::cli::environment(&config, command)?)?;
         return Ok(());
@@ -236,6 +245,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     let service = AssessmentService::new(config.clone(), store.clone());
     match command {
         Command::VerifyUpdate { .. }
+        | Command::Cleanup { .. }
         | Command::RecoverUpdate
         | Command::Init { .. }
         | Command::Inspect { .. }
