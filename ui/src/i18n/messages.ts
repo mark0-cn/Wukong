@@ -371,11 +371,17 @@ export interface Messages {
   'ui-advanced-settings': undefined;
   'ui-all-tasks': undefined;
   'ui-append-help': undefined;
+  'ui-back-findings': undefined;
   'ui-challenge-environment': undefined;
   'ui-collapse-input': undefined;
   'ui-completed-hint': undefined;
+  'ui-copy-evidence-id': undefined;
+  'ui-copy-failed': undefined;
+  'ui-copy-hash': undefined;
+  'ui-copy-source': undefined;
   'ui-ended-recipient': undefined;
   'ui-environment-busy': undefined;
+  'ui-environment-facts': undefined;
   'ui-expand-input': undefined;
   'ui-failed-hint': undefined;
   'ui-filter-tasks': undefined;
@@ -389,6 +395,7 @@ export interface Messages {
   'ui-rename-task': undefined;
   'ui-save-before-storage': undefined;
   'ui-save-name': undefined;
+  'ui-select-evidence': undefined;
   'ui-send-information': undefined;
   'ui-send-mode': undefined;
   'ui-send-task': undefined;

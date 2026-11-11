@@ -92,21 +92,11 @@ summary {
 @container (max-width: 650px) {
   .findings-page {
     flex-direction: column; }
-  .finding-list {
-    flex: 0 0 auto;
-    max-height: 190px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border); }
-  .finding-list>input, .finding-list>select {
-    width: calc(50% - 5px); }
-  .finding-list>select {
-    margin-left: 10px; }
-  .finding-card {
-    padding: 8px 10px; }
-  .finding-card>div {
-    margin-top: 5px; }
-  .finding-detail-scroll {
-    padding: 18px; }
+  .findings-page[data-detail=true] .finding-list,
+  .findings-page[data-detail=false] .finding-detail-scroll { display:none; }
+  .finding-list { flex:1; border:0; }
+  .finding-detail-scroll { padding:16px; }
+  .findings-back { display:inline-flex; margin-bottom:12px; }
   .tool-label {
     flex-direction: column;
     gap: 2px; }
