@@ -52,6 +52,8 @@ def native(installer):
                 raise AssertionError('native uninstaller retained executable unexpectedly')
 
         install()
+        # Keep the bootstrapped runtime/profile alive for the real WebView test.
+        subprocess.run(['node', 'tests/acceptance/check_cleanup_ui.mjs', str(destination / 'wukong.exe')], env=env, check=True, timeout=120)
         uninstall()
         assert owned.is_file() and browser.is_file() and original.is_file()
         install()
