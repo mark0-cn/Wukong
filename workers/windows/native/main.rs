@@ -26,6 +26,18 @@ fn main() -> Result<()> {
         );
     }
     #[cfg(windows)]
+    if args.len() == 5 && args[1] == "install-reviewed" {
+        let result = wukong_windows_worker::setup_ui::install_reviewed(
+            Path::new(&args[2]),
+            &PublicKey::from_hex(args[3].to_str().context("invalid pinned controller key")?)?,
+            args[4]
+                .to_str()
+                .context("invalid reviewed enrollment hash")?,
+        )?;
+        println!("{}", result);
+        return Ok(());
+    }
+    #[cfg(windows)]
     if args.len() == 6 && args[1] == "verify-enrollment" {
         let key = PublicKey::from_hex(args[4].to_str().context("invalid controller key")?)?;
         let controller = args[5].to_str().context("invalid controller version")?;

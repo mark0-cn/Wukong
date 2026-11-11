@@ -195,6 +195,131 @@ fn client_path(path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Invoked only by the explicitly selected disposable Windows CI fixture.
+    /// This exercises the real controller transport, never target execution.
+    #[tokio::test]
+    #[ignore = "requires an installed worker on a dedicated GitHub-hosted Windows runner"]
+    async fn installed_windows_worker_controller_acceptance() -> Result<()> {
+        use crate::runtime::{
+            RuntimeClient, RuntimeConfig,
+            protocol::{EnvironmentLease, WorkerError, WorkerErrorKind},
+        };
+        use serde_json::{Value, json};
+        ensure!(
+            cfg!(windows)
+                && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+                && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted"),
+            "installed-worker acceptance requires an isolated hosted Windows runner"
+        );
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Profile {
+            config: RuntimeConfig,
+            output: PathBuf,
+            manifest_sha256: String,
+            minimum_epoch: u64,
+        }
+        let path = PathBuf::from(
+            std::env::var_os("WUKONG_INSTALLED_WORKER_TEST")
+                .context("missing dedicated acceptance profile")?,
+        );
+        let mut bytes = Vec::new();
+        fs::File::open(path)?
+            .take(16 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        ensure!(bytes.len() <= 16 * 1024, "acceptance profile exceeds limit");
+        let profile: Profile = serde_json::from_slice(&bytes)?;
+        ensure!(
+            profile.config.ssh_host.as_deref() == Some("127.0.0.1")
+                && profile.config.managed_ssh.is_some(),
+            "hosted acceptance must use its local installed managed worker"
+        );
+        let client = RuntimeClient::connect(profile.config).await?;
+        ensure!(
+            client.identity().package_sha256 == profile.manifest_sha256,
+            "installed package differs from prepared payload"
+        );
+        let ping = client.call("ping", json!({})).await?;
+        let doctor = client.doctor().await?;
+        ensure!(
+            doctor["capabilities"]["native_target_execution"] == false,
+            "unaccepted production execution must remain unavailable"
+        );
+        let acquire = json!({"run_id":"hosted-installation-check","owner_id":"controller-fixture"});
+        let first: EnvironmentLease = serde_json::from_value(
+            client
+                .call("environment.lease.acquire", acquire.clone())
+                .await?,
+        )?;
+        first.validate(
+            "hosted-installation-check",
+            "controller-fixture",
+            client.identity(),
+        )?;
+        ensure!(
+            first.epoch > profile.minimum_epoch,
+            "service restart did not preserve increasing native epochs"
+        );
+        let conflict = client
+            .call(
+                "environment.lease.acquire",
+                json!({"run_id":"other","owner_id":"other"}),
+            )
+            .await
+            .err()
+            .context("another controller unexpectedly acquired the installed worker")?;
+        ensure!(
+            conflict
+                .downcast_ref::<WorkerError>()
+                .is_some_and(|e| e.kind == WorkerErrorKind::Conflict),
+            "another controller unexpectedly acquired the installed worker"
+        );
+        let bound = client.with_lease(first.clone());
+        let put = json!({"path":"hosted-smoke.bin","data_base64":"AAECAw==","request_id":"hosted-stable-upload"});
+        let artifact = bound.call("file.put", put.clone()).await?;
+        ensure!(
+            bound.call("file.put", put.clone()).await? == artifact,
+            "immutable upload receipt changed"
+        );
+        let read = bound
+            .call("file.get", json!({"path":"files/hosted-smoke.bin"}))
+            .await?;
+        ensure!(
+            read["data_base64"] == "AAECAw==" && read["sha256"] == artifact["sha256"],
+            "installed transfer identity mismatch"
+        );
+        client
+            .call("environment.lease.release", json!({"lease":first}))
+            .await?;
+        let second: EnvironmentLease =
+            serde_json::from_value(client.call("environment.lease.acquire", acquire).await?)?;
+        ensure!(
+            second.epoch > first.epoch,
+            "released native fence was reused"
+        );
+        let stale = bound
+            .call("file.put", put)
+            .await
+            .err()
+            .context("stale fence reached a cached worker receipt")?;
+        ensure!(
+            stale
+                .downcast_ref::<WorkerError>()
+                .is_some_and(|e| e.kind == WorkerErrorKind::LeaseLost),
+            "stale fence reached a cached worker receipt"
+        );
+        client
+            .call("environment.lease.release", json!({"lease":second}))
+            .await?;
+        let report: Value = json!({"passed":true,"scope":"hosted_native_service_and_controller_ssh",
+            "identity":client.identity(),"daemon_id":ping["daemon_id"],"daemon_pid":ping["daemon_pid"],
+            "first_epoch":first.epoch,"last_epoch":second.epoch,"artifact_sha256":artifact["sha256"],
+            "production_isolation_verified":false});
+        use std::io::Write;
+        fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&report)?)?;
+        client.close().await?;
+        Ok(())
+    }
     fn fixture(root: &Path) -> Result<ManagedSsh> {
         use base64::Engine;
         fs::create_dir_all(root)?;

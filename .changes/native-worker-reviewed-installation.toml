@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add a dialog-free offline installation command for already-elevated dedicated Windows test environments, requiring an independently pinned controller key and exact reviewed enrollment hash. Provide opt-in hosted native-service and controller SSH acceptance."
+zh_CN = "为已提权的独立 Windows 测试环境增加无对话框离线安装命令，要求独立固定控制端公钥及精确审阅登记哈希；提供可选的托管原生服务和控制端 SSH 验收。"

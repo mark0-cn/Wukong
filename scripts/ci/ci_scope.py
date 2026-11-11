@@ -8,8 +8,10 @@ import tomllib
 from scripts.release.note_entries import FRAGMENT
 
 
-def select_scope(paths, event_name, head_branch=""):
+def select_scope(paths, event_name, head_branch="", force_full=False):
     full = dict(rust=True, frontend=True, linux=True, reason="Full checks: non-PR or shared changes")
+    if force_full:
+        return dict(full, reason="Full checks: explicit installed-worker acceptance")
     if event_name != "pull_request" or head_branch.startswith("codex/release-") or not paths:
         return full
     result = dict(rust=False, frontend=False, linux=False, reason="PR checks selected from changed paths")
@@ -72,7 +74,7 @@ def main():
         raw = subprocess.check_output(["git", "diff", "--name-only", "--no-renames", "-z", base + "..." + head])
         paths = [p.decode("utf-8", errors="replace") for p in raw.split(b"\0") if p]
         head_branch = pr["head"]["ref"]
-    scope = select_scope(paths, event_name, head_branch)
+    scope = select_scope(paths, event_name, head_branch, force_full=os.environ.get("WINDOWS_WORKER_ACCEPTANCE") == "true")
     previous = current = "0.0.0"
     if event_name == "push" and os.environ.get("GITHUB_REF") == "refs/heads/master":
         previous = tomllib.loads(subprocess.check_output(["git", "show", "HEAD^1:Cargo.toml"]).decode())["package"]["version"]

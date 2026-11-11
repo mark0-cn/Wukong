@@ -76,21 +76,28 @@ pub fn review() -> Result<()> {
     }
     Ok(())
 }
+/// Already-elevated dedicated-VM automation uses the same independently pinned
+/// key and exact reviewed enrollment as the GUI. This never elevates itself.
+pub fn install_reviewed(
+    configuration: &Path,
+    key: &PublicKey,
+    enrollment_hash: &str,
+) -> Result<serde_json::Value> {
+    ensure!(
+        installer::elevated()?,
+        "administrator elevation is required for VM installation"
+    );
+    let plan = Plan::read(configuration, key)?;
+    ensure!(
+        hex::encode(Sha256::digest(
+            plan.enrollment.enrollment().canonical_bytes()?
+        )) == enrollment_hash,
+        "offline enrollment changed after setup review"
+    );
+    installer::install(plan)
+}
 pub fn elevated(configuration: &Path, key: &PublicKey, enrollment_hash: &str) -> Result<()> {
-    let result = (|| -> Result<serde_json::Value> {
-        ensure!(
-            installer::elevated()?,
-            "administrator elevation is required for VM installation"
-        );
-        let plan = Plan::read(configuration, key)?;
-        ensure!(
-            hex::encode(Sha256::digest(
-                plan.enrollment.enrollment().canonical_bytes()?
-            )) == enrollment_hash,
-            "offline enrollment changed after setup review"
-        );
-        installer::install(plan)
-    })();
+    let result = install_reviewed(configuration, key, enrollment_hash);
     match result {
         Ok(value) => {
             message(

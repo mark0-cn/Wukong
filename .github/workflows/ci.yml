@@ -11,6 +11,10 @@ on:
         description: 'Prebuild release clients and seed master caches (no publication)'
         type: boolean
         default: false
+      windows_worker_acceptance:
+        description: 'Install and test the native worker only on the disposable hosted Windows runner'
+        type: boolean
+        default: false
   workflow_call:
 
 permissions:
@@ -43,6 +47,7 @@ jobs:
         id: scope
         env:
           BUILD_RELEASE_CLIENTS: ${{ inputs.build_release_clients || false }}
+          WINDOWS_WORKER_ACCEPTANCE: ${{ inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance') }}
         run: python -m scripts.ci.ci_scope
       - name: Documentation pairs, links and review records
         run: python -m scripts.ci.check_docs
@@ -160,6 +165,20 @@ jobs:
           $env:WUKONG_PACKAGE_CLI = Join-Path $PWD 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-package.exe'
           cargo test --locked --manifest-path workers/package/Cargo.toml --test contract --target-dir target/worker-package-checks -- --ignored
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Dedicated hosted Windows worker installation acceptance
+        if: inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance')
+        run: |
+          python tests/acceptance/check_windows_worker.py --confirm-hosted-runner --report target/windows-worker-acceptance/report.json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Preserve public native installation report
+        if: always() && (inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance'))
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-worker-installation-report
+          path: target/windows-worker-acceptance/report.json
+          if-no-files-found: error
+          retention-days: 7
 
   linux:
     needs: changes

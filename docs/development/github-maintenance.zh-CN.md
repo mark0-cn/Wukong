@@ -65,6 +65,8 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 未开 PR 的分支可手动启动 CI；版本准备工作流使用发布 App 创建 PR，由原生 PR 事件启动完整 CI。
 PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
 
+Windows 原生 worker 安装验收需要显式选择：手动运行 CI 时启用 `windows_worker_acceptance`，或在推送待验收修订前给 PR 加上 `windows-worker-acceptance` 标签。仅修改标签不会启动 CI。此选项强制完整组件检查，并在原生编译后运行独立托管夹具；所选运行启动后移除标签，避免之后无关修订重复安装。夹具拒绝开发宿主和自托管机器，仅上传公开报告。按 worker 程序阻断外网会保留 CI agent 联网，不能替代最终的 Windows VM 整机断网验收。它不发布 Release，也不证明生产目标隔离或卸载已经完成；参见[原生组件指南](../../workers/windows/README.zh-CN.md)。
+
 PR 使用 `scripts/ci/ci_scope.py` 选择检查：仅 README/docs Markdown 及配套翻译核对记录改动执行轻量检查；文档配对、链接与核对记录始终在 changes job 检查；
 `ui/` 增加前端检查；`workers/runtime/`、`workers/tests/`、`fixtures/`、`evals/` 增加 Linux 测试。
 Rust、公共脚本、锁文件、工作流、未知路径或版本准备 PR 都执行全量检查。
