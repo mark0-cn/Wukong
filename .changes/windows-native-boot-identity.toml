@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Establish the Windows worker boot identity through a bounded native System process query, removing PowerShell/WMI startup dependencies that could prevent the worker from starting. Missing or unsupported native identity data fails closed."
+zh_CN = "通过有界原生 System 进程查询建立 Windows worker 启动身份，去掉可能导致 worker 无法启动的 PowerShell/WMI 依赖；缺失或不受支持的原生身份数据会被拒绝。"

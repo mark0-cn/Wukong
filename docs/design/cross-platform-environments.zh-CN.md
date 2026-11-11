@@ -34,6 +34,8 @@ docker_container = "wukong-worker"
 
 协议 2 握手确认安装 ID、操作系统启动身份以及 worker 代码/后端内容哈希。控制器在连接时固定该身份，并在每轮分析首次使用环境时以事务持久化。重连或恢复任务发现身份变化时，在执行前拒绝请求。环境配置可通过可选的 `installation_id` 进一步固定登记的安装实例。daemon 重启使用单独的诊断 ID，不代表操作系统重启，也不证明会话仍然存活。
 
+Windows 通过动态链接的 `NtQuerySystemInformation(SystemProcessInformation)` 读取内核 System 进程的创建时间身份，不启动 PowerShell，也不查询 WMI。实现检查有界原生记录范围，不解引用返回的指针；若找不到 System 记录或其创建时间则拒绝建立身份。进程清单内存分配上限为 16 MiB，最多查询八次。原生布局与 [Go Windows 绑定](https://github.com/golang/sys/blob/master/windows/types_windows.go)中的结构对应，并遵循 Microsoft [原生查询约定](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntquerysysteminformation)的兼容性限制；当前机器及跨进程检查不替代真实 VM 重启验收。
+
 生产 Windows 环境要求 120 秒独占 run/controller 租约，并持久化递增 epoch。独立传输通道每 15 秒续租已使用的环境，与模型/调试器请求及控制器数据库心跳分开。worker 在读取持久回执前验证身份与隔离令牌；续租不改变业务请求指纹。仅超时不能证明进程已退出：执行中的请求阻止接管，仍有所属会话/job 时，另一轮分析不能获取租约。释放前须关闭和核对资源。显式可信夹具绕过生产租约，但不绕过身份检查。
 
 ## 共享制品与大文件

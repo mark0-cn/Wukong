@@ -103,8 +103,8 @@ def ensure_daemon(root, trusted):
             argv.append("--trusted-local")
         with (root / "daemon.log").open("ab") as log:
             process = subprocess.Popen(argv, env=safe_env(), stdin=subprocess.DEVNULL, stdout=log, stderr=log, **detached_options())
-        # A cold Windows boot-identity query alone can take up to 15 seconds.
-        # Keep the startup lock while that bounded initialization is in flight.
+        # Cold interpreter imports and state initialization can outlast a warm
+        # reconnect. Keep the startup lock across the bounded readiness wait.
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             endpoint = existing()

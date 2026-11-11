@@ -5,26 +5,19 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import threading
 import time
 import uuid
 
-from worker_common import PROTOCOL, WorkerError, atomic_json, load_json, safe_env
+from worker_common import PROTOCOL, WorkerError, atomic_json, load_json
 
 
 @functools.lru_cache(maxsize=1)
 def boot_identity():
     if os.name != "nt":
         return "linux:" + Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    executable = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
-    result = subprocess.run([str(executable),'-NoLogo','-NoProfile','-NonInteractive','-Command',
-        '[Console]::Write((Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().Ticks)'],
-        env=safe_env(),capture_output=True,timeout=15,creationflags=subprocess.CREATE_NO_WINDOW)
-    value=result.stdout.decode('ascii').strip()
-    if result.returncode or not re.fullmatch(r'[0-9]{16,20}',value):
-        raise ValueError('cannot establish the Windows boot identity')
-    return 'windows:' + value
+    from worker_windows_identity import windows_boot_identity
+    return windows_boot_identity()
 
 
 def installation_identity(root):

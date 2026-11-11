@@ -13,9 +13,23 @@ from worker_identity import ExclusiveLease, installation_identity, native_packag
 class WorkerFenceTests(unittest.TestCase):
     @unittest.skipUnless(os.name=='nt','Windows boot identity requires Windows')
     def test_real_windows_boot_identity_is_available_and_stable(self):
-        first=boot_identity()
+        from unittest.mock import patch
+        boot_identity.cache_clear()
+        with patch('subprocess.run',side_effect=AssertionError('boot identity must not spawn a shell')):
+            first=boot_identity()
+            boot_identity.cache_clear()
+            self.assertEqual(first,boot_identity())
         self.assertRegex(first,r'^windows:[0-9]{16,20}$')
-        self.assertEqual(first,boot_identity())
+
+    @unittest.skipUnless(os.name=='nt','Windows boot identity requires Windows')
+    def test_native_windows_boot_epoch_matches_a_fresh_minimal_environment_process(self):
+        import subprocess,sys
+        from worker_common import safe_env
+        runtime=Path(__file__).resolve().parents[2]/'runtime'
+        code=f"import sys;sys.path.insert(0,{str(runtime)!r});from worker_identity import boot_identity;print(boot_identity())"
+        result=subprocess.run([sys.executable,'-I','-c',code],env=safe_env(),capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.strip(),boot_identity())
 
     def setUp(self):
         self.temporary=tempfile.TemporaryDirectory()
