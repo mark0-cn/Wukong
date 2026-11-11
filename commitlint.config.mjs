@@ -8,6 +8,7 @@ export default {
     'body-max-line-length': [0],
     'footer-max-line-length': [0],
     'subject-specific': [2, 'always'],
+    'breaking-change-exclamation-mark': [2, 'always'],
   },
   plugins: [{
     rules: {

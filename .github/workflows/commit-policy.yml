@@ -27,6 +27,14 @@ jobs:
           python-version: '3.12'
       - run: npm ci --ignore-scripts
       - name: Validate policy with real commitlint
-        run: python -m unittest tests.automation.test_commit_policy -v
+        run: python -m unittest tests.automation.test_commit_policy tests.automation.test_release_notes -v
       - name: Check PR title, new commits and release summaries
         run: python -m scripts.ci.commit_policy
+      - name: Preview PR changes and the next release
+        run: python -m scripts.ci.release_preview
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-description-preview
+          path: target/release-description-preview/
+          retention-days: 14
+          if-no-files-found: error

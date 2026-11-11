@@ -83,6 +83,7 @@ class RealCommitlintTests(unittest.TestCase):
                         "build(deps): bump filelock from 3.20.0 to 4.2.9", "feat(config)!: replace legacy storage keys\n\nBREAKING CHANGE: migrate storage keys in settings"):
             with self.subTest(message=message):
                 commit_policy.lint(message)
-        for message in ("fix bugs", "fix: update", "feat: improvements", "Merge pull request #1 from forged", "unknown(ui): show progress"):
+        for message in ("fix bugs", "fix: update", "feat: improvements", "Merge pull request #1 from forged", "unknown(ui): show progress",
+                        "feat(config)!: replace storage keys without migration details"):
             with self.subTest(message=message), self.assertRaises(subprocess.CalledProcessError):
                 commit_policy.lint(message)

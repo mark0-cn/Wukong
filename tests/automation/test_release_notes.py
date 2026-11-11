@@ -7,6 +7,7 @@ from unittest.mock import patch
 from scripts._lib.repository import ROOT
 from scripts._lib.checksums import sha256
 from scripts.release.release_notes import collect, previous_tag, render, update_summary, validate
+from scripts.ci.release_preview import preview
 from tests.automation.test_commit_policy import FRAGMENT
 
 
@@ -95,12 +96,14 @@ class RealGitCliffTests(unittest.TestCase):
             run("init", "-q")
             run("config", "user.name", "Fixture")
             run("config", "user.email", "fixture@example.invalid")
+            (root / "Cargo.toml").write_text('[package]\nversion = "1.0.0"\n')
             old = commit("feat(ui): historical entry outside release range")
             run("tag", "v1.0.0")
             (root / ".changes").mkdir()
             (root / ".changes/progress.toml").write_text(FRAGMENT, encoding="utf-8")
             commit("feat(ui): display live tool progress")
             commit("chore(config)!: replace storage keys\n\nBREAKING CHANGE: migrate storage keys in settings")
+            (root / "Cargo.toml").write_text('[package]\nversion = "1.1.0"\n')
             head = commit("release: prepare v1.1.0")
             run("tag", "v1.1.0")
             self.assertEqual(previous_tag("v1.1.0", head, root), "v1.0.0")
@@ -113,5 +116,14 @@ class RealGitCliffTests(unittest.TestCase):
             self.assertIn("migrate storage keys", content["changelog"])
             self.assertNotIn("historical entry", content["changelog"])
             self.assertNotIn("prepare v1.1.0", content["changelog"])
+            pr = dict(base=dict(sha=old), head=dict(sha=head, ref="codex/release-v1.1.0"))
+            output = root / "preview"
+            summary = preview(pr, output, root=root)
+            self.assertIn("Cumulative version changes", summary)
+            self.assertIn(head, summary)
+            self.assertEqual(json.loads((output / "next-release.json").read_text(encoding="utf-8"))["source_revision"], head)
+            self.assertTrue((output / "pr-changes.md").is_file())
+            pr["head"]["ref"] = "codex/ui-progress"
+            self.assertIn("Changes in this PR", preview(pr, output, root=root))
             with self.assertRaises(ValueError):
                 collect("v01.1.0", head, root=root)

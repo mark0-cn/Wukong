@@ -42,3 +42,7 @@ For an internal-only change without a fragment, add an explicit English reason t
 ```
 
 Do not combine this marker with public fragments. Reviewers decide whether the internal-only declaration is appropriate. Historical changes need no backfilled fragments and remain visible in the technical changelog. The version-only PR continues to change exactly the existing five version files.
+
+## Preview before merging
+
+The lightweight policy workflow writes a PR-only preview and a cumulative next-release preview to its Actions summary/artifact. A version PR shows cumulative changes by default; ordinary PRs show their own changes. JSON and Markdown snapshots bind the preview to the head commit, not later edits. Editing PR text reruns only this lightweight workflow. Previews neither publish nor claim installer acceptance. The version preparation workflow also previews cumulative descriptions, including dry runs, without adding files to the version PR.

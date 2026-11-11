@@ -106,7 +106,8 @@ def render(content, *, directory=None):
                 raise ValueError("Installer link/hash/size differs from the accepted asset")
             downloads.append(f"| {label} | [{name}]({expected_url}) | {asset['size'] / 1024 / 1024:.1f} MiB |")
     download_table = "| Platform / 平台 | Installer / 安装程序 | Size / 大小 |\n| --- | --- | --- |\n" + "\n".join(downloads)
-    english = [f"# Wukong {tag}", "", "## Highlights", "", bullets(content, "en"), "", "## Download and update", ""]
+    title = f"# Wukong {tag}" if directory is not None else "# Wukong — release description preview"
+    english = [title, "", "## Highlights", "", bullets(content, "en"), "", "## Download and update", ""]
     chinese = ["## 本版变化", "", bullets(content, "zh_CN"), "", "## 下载与更新", ""]
     if downloads:
         english += [download_table, "", "New installation: download the installer for your platform. Existing users: open **Updates & environments** in Wukong. Prepare the matching tool environment when needed; normal public image pulls need no Docker Hub account.", ""]
