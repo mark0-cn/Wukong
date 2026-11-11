@@ -48,12 +48,22 @@ impl Registry {
             std::fs::metadata(&path)?.len() <= 1024 * 1024,
             "managed-location registry is too large"
         );
-        let value: Self = read_json(&path)?;
+        let mut value: Self = read_json(&path)?;
         ensure!(
             value.schema_version == 1 && value.application == "io.wukong.desktop",
             "invalid managed-location registry identity"
         );
         ensure!(value.locations.len() <= 1024, "too many managed locations");
+        value.locations = value
+            .locations
+            .into_iter()
+            .map(|entry| {
+                Ok(Location {
+                    kind: entry.kind,
+                    path: files::absolute(&entry.path)?,
+                })
+            })
+            .collect::<Result<_>>()?;
         Ok(value)
     }
     pub fn include_config(&mut self, config: &AppConfig, path: Option<&Path>) -> Result<()> {
@@ -174,9 +184,8 @@ pub(super) fn inventory(home: &Path) -> Result<Registry> {
 /// arbitrary folders are never adopted just because a config names them.
 pub fn create_owned_directory(path: &Path) -> Result<()> {
     let new = !path.try_exists()?;
-    files::safe(path)?;
     std::fs::create_dir_all(path)?;
-    if new {
+    if new && files::safe(path).is_ok() {
         write_json(
             &path.join(".wukong-owned.json"),
             &serde_json::json!({"schema_version":1,"application":"io.wukong.desktop"}),
