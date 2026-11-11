@@ -4,7 +4,7 @@ import { FileCode2, FolderOpen, RotateCcw, Save } from 'lucide-react';
 import { api, errorText, errorValue } from '../bridge';
 import type { ConfigDocument, ConfigEdit, Host, Json } from '../types';
 import { Modal } from './Modal';
-import { StorageLocations } from './StorageLocations';
+import { StorageLocations, type StorageDraft } from './StorageLocations';
 import { LanguageSettings } from './LanguageSettings';
 
 type Field = { path: string; label: string; kind?: 'number' | 'checkbox' | 'provider' | 'backend'; help?: string };
@@ -50,11 +50,14 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
   const [edits, setEdits] = useState<Record<string, Json>>({});
   const [section, setSection] = useState<'general' | 'budget' | 'storage' | 'advanced'>('general');
   const [storageVisited, setStorageVisited] = useState(false);
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageDraft, setStorageDraft] = useState<StorageDraft>();
+  const storageDirty = Boolean(storageDraft && (storageDraft.data !== storageDraft.initialData || storageDraft.cache !== storageDraft.initialCache));
   const [raw, setRaw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ReturnType<typeof errorValue>>('');
   const dirty = Boolean(document && (document.source !== (document.original ?? '') || Object.keys(edits).length));
-  useEffect(() => { onDirty(dirty); }, [dirty, onDirty]);
+  useEffect(() => { onDirty(dirty || storageDirty); }, [dirty, storageDirty, onDirty]);
   useEffect(() => {
     if (!open || document) return;
     let alive = true;
@@ -100,14 +103,14 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     finally { setBusy(false); }
   };
   if (!open) return null;
-  return <Modal title={t('settings-workspace-settings')} description={t('settings-new-tasks-use-the-current-configuration-resumed')} onClose={onClose} wide>
+  return <Modal title={t('settings-workspace-settings')} description={t('settings-new-tasks-use-the-current-configuration-resumed')} onClose={() => { if (!storageBusy) onClose(); }} wide>
     <nav className="settings-sections" aria-label={t('ui-settings-sections')}>
-      {(['general', 'budget', 'storage', 'advanced'] as const).map(value => <button key={value} aria-pressed={section === value} disabled={busy} onClick={() => { void selectSection(value); }}>
+      {(['general', 'budget', 'storage', 'advanced'] as const).map(value => <button key={value} aria-pressed={section === value} disabled={busy || storageBusy} onClick={() => { void selectSection(value); }}>
         {value === 'general' ? t('ui-general-settings') : value === 'budget' ? t('settings-task-budget') : value === 'storage' ? t('settings-storage-locations') : t('ui-advanced-settings')}
       </button>)}
     </nav>
     <div hidden={section !== 'general'}><LanguageSettings /></div>
-    {storageVisited && <div hidden={section !== 'storage'}><StorageLocations epoch={host.epoch} disabled={busy || dirty || Boolean(host.execution) || host.pending_operations > 0} onChanged={() => { setDocument(undefined); onSaved(); onClose(); }} />{dirty && <p className="muted">{t('ui-save-before-storage')}</p>}</div>}
+    {storageVisited && <div hidden={section !== 'storage'}><StorageLocations onWorking={setStorageBusy} draft={storageDraft} onDraft={setStorageDraft} epoch={host.epoch} disabled={busy || dirty || Boolean(host.execution) || host.pending_operations > 0} onChanged={() => { setDocument(undefined); setStorageVisited(false); setStorageDraft(undefined); onSaved(); onClose(); }} />{dirty && <p className="muted">{t('ui-save-before-storage')}</p>}</div>}
     <div hidden={section !== 'advanced'}><div className="settings-toolbar"><span title={document?.path ?? host.config_path}><FileCode2 size={14} />{document?.path ?? host.config_path}</span>
       <button disabled={busy} onClick={() => { void load(true); }}><FolderOpen size={14} />{t('settings-open-configuration')}</button>
       <button disabled={busy} onClick={() => { void load(false); }}><RotateCcw size={14} />{t('settings-reload')}</button>
@@ -127,8 +130,8 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
                   onChange={event => change(field.kind === 'number' ? event.target.value === '' ? '' : Number(event.target.value) : event.target.value || null)} />}
             {field.help && <small>{field.help}</small>}</label>;
         })}</div></section>)}</div>
-    <div className="modal-footer"><span className="muted">{dirty ? t('settings-unsaved-changes') : t('settings-configuration-loaded')} {t('settings-comments-and-relative-paths-are-preserved')}</span>
-      <button onClick={onClose}>{t('workspace-close')}</button>{section !== 'storage' && <button className="primary" disabled={busy || !document || loadedEpoch !== host.epoch || Boolean(host.execution) || host.pending_operations > 0} onClick={() => { void save(); }}><Save size={14} />{busy ? t('settings-processing') : t('settings-save-and-apply')}</button>}</div>
+    <div className="modal-footer"><span className="muted">{dirty || storageDirty ? t('settings-unsaved-changes') : t('settings-configuration-loaded')} {t('settings-comments-and-relative-paths-are-preserved')}</span>
+      <button disabled={storageBusy} onClick={onClose}>{t('workspace-close')}</button>{section !== 'storage' && <button className="primary" disabled={busy || !document || loadedEpoch !== host.epoch || Boolean(host.execution) || host.pending_operations > 0} onClick={() => { void save(); }}><Save size={14} />{busy ? t('settings-processing') : t('settings-save-and-apply')}</button>}</div>
     {(host.execution || host.pending_operations > 0) && <p className="muted">{t('settings-pause-analysis-and-wait-for-active-operations')}</p>}
   </Modal>;
 }
