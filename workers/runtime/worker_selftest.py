@@ -20,6 +20,17 @@ from worker_common import PROTOCOL, safe_env, sha256_file
 from worker_runtime import Runtime
 
 
+def ssh_probe_environment():
+    environment = safe_env()
+    # Win32-OpenSSH initializes its ProgramData paths even for ssh-keygen.
+    # Keep this extra OS path scoped to the fixed SSH probe, not target jobs.
+    program_data = next((value for key, value in os.environ.items() if key.casefold() == "programdata"), None)
+    if not program_data or not Path(program_data).is_absolute():
+        raise ValueError("Windows ProgramData is missing from the SSH probe environment")
+    environment["ProgramData"] = program_data
+    return environment
+
+
 def checked_file(root, manifest, name):
     if name.startswith(("/", "\\")) or "\\" in name or any(part in {"", ".", ".."} for part in name.split("/")):
         raise ValueError("Invalid self-test package member")
@@ -116,7 +127,7 @@ def run(package, state):
     ssh = checked_file(package, manifest, manifest["entrypoints"]["ssh_keygen"])
     try:
         subprocess.run([str(ssh), "-q", "-t", "ed25519", "-N", "", "-f", str(attempt / "ssh-probe")],
-                       cwd=attempt, env=safe_env(), check=True, capture_output=True, timeout=20)
+                       cwd=attempt, env=ssh_probe_environment(), check=True, capture_output=True, timeout=20)
     finally:
         # Only the dummy key just created for this attempt; never host/auth keys.
         (attempt / "ssh-probe").unlink(missing_ok=True)
