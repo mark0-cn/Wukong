@@ -75,6 +75,22 @@ impl Docker {
     }
     /// Long build/pull/save operations stream to disk instead of buffering logs.
     pub fn logged(&self, args: &[&str], log: &Path) -> Result<()> {
+        self.logged_internal(args, log, None)
+    }
+    pub fn pull_observed(
+        &self,
+        image: &str,
+        log: &Path,
+        mut report: impl FnMut(super::pull_progress::PullProgress),
+    ) -> Result<()> {
+        self.logged_internal(&["pull", image], log, Some(&mut report))
+    }
+    fn logged_internal(
+        &self,
+        args: &[&str],
+        log: &Path,
+        report: Option<&mut dyn FnMut(super::pull_progress::PullProgress)>,
+    ) -> Result<()> {
         if args.first() == Some(&"pull")
             && let Some(image) = args.get(1)
         {
@@ -82,12 +98,21 @@ impl Docker {
         }
         fs::create_dir_all(log.parent().context("log needs parent")?)?;
         let file = fs::File::create(log)?;
-        let status = self
+        let mut child = self
             .command()
             .args(args)
             .stdout(Stdio::from(file.try_clone()?))
             .stderr(Stdio::from(file))
-            .status()?;
+            .spawn()?;
+        let result = match report {
+            Some(report) => super::pull_progress::monitor(&mut child, log, report),
+            None => child.wait(),
+        };
+        if result.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        let status = result?;
         if !status.success() {
             return Err(logged_failure(log, &status.to_string()).into());
         }

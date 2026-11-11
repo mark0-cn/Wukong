@@ -4,7 +4,12 @@ use crate::{config::AppConfig, workbench::Workbench};
 use anyhow::{Context, Result, ensure};
 use std::path::Path;
 
-pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(UiMessage)) -> Result<()> {
+pub fn prepare(
+    config: &AppConfig,
+    image: &str,
+    progress: impl Fn(UiMessage),
+    pull: impl Fn(crate::workbench::pull_progress::PullProgress),
+) -> Result<()> {
     let root = super::storage::cache_root()?
         .join("probes")
         .join(uuid::Uuid::new_v4().to_string());
@@ -17,6 +22,17 @@ pub fn prepare(config: &AppConfig, image: &str, progress: impl Fn(UiMessage)) ->
         progress(UiMessage::new(
             "system-pulling-the-tool-image-docker-will-reuse-downloaded",
         ));
+        if workbench.docker.inspect("image", image)?.is_none() {
+            workbench
+                .docker
+                .pull_observed(image, &root.join("logs/pull.log"), &pull)?;
+        } else {
+            pull(crate::workbench::pull_progress::PullProgress {
+                cached: true,
+                finished: true,
+                ..Default::default()
+            });
+        }
         workbench.up(Some(image))?;
         progress(UiMessage::new(
             "system-checking-the-candidate-tool-environment",

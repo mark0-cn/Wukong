@@ -555,3 +555,31 @@ test('Windows storage paths display cleanly but unchanged paths retain native id
   const requests = await page.evaluate(() => (window as any).__desktopTest.requests);
   expect(requests.find((r: any) => r.command === 'update_data_directory')?.args.destination).toBe(original);
 });
+
+
+test('image layer progress updates while pulling and keeps self-check separate', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await page.goto('/');
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    const progress = { layers: [{ id: 'abcdef123456', state: 'ready' }, { id: '123456abcdef', state: 'downloaded' }], elapsed_ms: 65000, finished: false, cached: false, truncated: false };
+    Object.assign(window, { __pullTest: progress });
+    native.invoke = async (command: string, args: any) => command === 'update_action' ? {
+      version: '0.2.0', needs_setup: true, phase: progress.finished ? 'validating' : 'pulling', environment_step: progress.finished ? 'validating' : 'pulling',
+      image_version: '0.2.0', image_progress: progress,
+      message: { code: progress.finished ? 'system-checking-the-candidate-tool-environment' : 'system-pulling-the-tool-image-docker-will-reuse-downloaded', args: {} },
+      available: null, notes: '', downloaded: 0, total: null, prepared: null, recovery: null, pending: false,
+    } : invoke(command, args);
+  });
+  await page.getByRole('button', { name: '更新', exact: true }).click();
+  await expect(page.getByText('已就绪 1 层 / 已发现 2 层')).toBeVisible();
+  await page.getByText('镜像层详情', { exact: true }).click();
+  await expect(page.locator('.pull-layers')).toContainText('已下载');
+  await page.locator('.image-pull-progress').scrollIntoViewIfNeeded();
+  await expect(page.locator('.modal-heading')).toBeInViewport();
+  await page.screenshot({ path: 'target/setup-image-progress.png' });
+  await page.evaluate(() => { const p = (window as any).__pullTest; p.finished = true; p.layers[1].state = 'ready'; });
+  await expect(page.getByText('镜像已拉取，环境自检仍需单独完成')).toBeVisible();
+  await expect(page.locator('.setup-steps li').nth(2)).toHaveAttribute('data-state', 'active');
+  await expect(page.getByRole('progressbar')).toHaveCount(0);
+});

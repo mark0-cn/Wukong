@@ -6,6 +6,11 @@ export interface UpdateStatus {
   version: string; phase: string; message: string | LocalizedMessage; available: string | null; notes: string;
   downloaded: number; total: number | null; prepared: string | null; recovery: string | null;
   needs_setup: boolean; pending: boolean; environment_step?: string | null;
+  image_version?: string | null; image_progress?: ImagePullProgress | null;
+}
+export interface ImagePullProgress {
+  layers: { id: string; state: 'waiting' | 'downloading' | 'downloaded' | 'extracting' | 'verifying' | 'ready' }[];
+  elapsed_ms: number; finished: boolean; cached: boolean; truncated: boolean;
 }
 export type WorkbenchRequest =
   | { action: 'status' | 'up' | 'down' | 'doctor' | 'list' }
