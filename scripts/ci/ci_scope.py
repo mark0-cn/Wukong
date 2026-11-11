@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 import tomllib
+from scripts.release.note_entries import FRAGMENT
 
 
 def select_scope(paths, event_name, head_branch=""):
@@ -13,6 +14,10 @@ def select_scope(paths, event_name, head_branch=""):
         return full
     result = dict(rust=False, frontend=False, linux=False, reason="PR checks selected from changed paths")
     for path in paths:
+        # Required commit-policy checks validate these data-only release notes.
+        # Keep unknown files under .changes conservative, just like other paths.
+        if FRAGMENT.fullmatch(path):
+            continue
         if path in ("README.md", "README.en.md", "README.zh-CN.md", "docs/translations.json") or (path.startswith("docs/") and path.endswith(".md")):
             continue
         if path.startswith("ui/"):

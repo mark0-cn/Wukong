@@ -1,0 +1,3 @@
+kind = "fix"
+en = "In-app release notes display headings and lists clearly and use the existing confirmation flow before opening an external release link."
+zh_CN = "应用内发布说明清晰展示标题和列表，打开外部发布链接前复用已有的确认流程。"

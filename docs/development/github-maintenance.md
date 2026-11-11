@@ -40,7 +40,7 @@ The publisher verifies every draft attachment name/size/SHA256 before publicatio
 
 Ordinary CI triggers on `master` pushes and PRs targeting `master`, avoiding duplicate branch push/PR runs. Unopened branches can run manually. Version preparation uses the release App to create PRs, triggering native PR CI. New PR revisions cancel old runs; master runs finish to save caches, while GitHub concurrency coalesces pending work.
 
-`scripts/ci/ci_scope.py` selects PR checks: README/docs-only Markdown and the paired translation review record get lightweight checks; the changes job always validates documentation pairs, links and review fingerprints; `ui/` adds frontend; runtime/tests/fixtures/evals add Linux tests. Rust, common scripts, locks, workflows, unknown paths and version PRs get full checks. Renames inspect both paths; scope-computation failure blocks CI. Windows version/release-script/installer checks always run. Master/manual/release calls are always full.
+`scripts/ci/ci_scope.py` selects PR checks: README/docs-only Markdown, append-only `.changes/<slug>.toml` release fragments and the paired translation review record get lightweight checks; the changes job always validates documentation pairs, links and review fingerprints; `ui/` adds frontend; runtime/tests/fixtures/evals add Linux tests. Rust, common scripts, locks, workflows, unknown paths and version PRs get full checks. Renames inspect both paths; scope-computation failure blocks CI. Windows version/release-script/installer checks always run. Master/manual/release calls are always full.
 
 `summary` is the final gate: scope/Windows must succeed; Linux status must match selected scope; selected release-client prebuilds must also succeed. Require `summary`, not only conditionally skipped `linux`. Expected skips are explicit; failures, cancellations or unexpected skips cannot pass.
 
@@ -65,3 +65,7 @@ Workbench inherits a stable toolchain stage; runtime/prompts/version labels come
 ### Closed-PR cache cleanup
 
 `Clean Closed PR Caches` runs daily at 06:41 Beijing time, rechecks current PR state and deletes by cache ID: closed PR `refs/pull/N/merge` caches and corresponding closed Dependabot branch caches. Master/tags/open PRs/unknown ordinary branches remain. Scheduling may be delayed. Manual runs only list candidates unless `apply` is selected. Summaries show count/reclaimed bytes. It runs only on master, never `pull_request_target` or PR code, and needs no personal admin token.
+
+## Commit policy and release previews
+
+The read-only `Commit policy` workflow validates PR titles/new non-merge commits with pinned commitlint and checks release fragments. PRs require English only. It reruns on PR title/body edits without restarting platform CI, and runs real git-cliff/commitlint regression tests before generating PR-only/cumulative previews. See [commit rules](commits.md) for optional local hooks and bilingual release fragments. Require the GitHub Actions `commit-policy` context alongside the existing `summary` context in the master Ruleset. Neither context substitutes for the other; retain existing approval, thread-resolution and strict-update requirements. A workflow file alone cannot enable a server-side merge requirement. No release authorization or tag is implied by this policy check.

@@ -10,6 +10,7 @@ import { useUpdateController, type UpdateController } from '../hooks/useUpdateCo
 import { UpdateDiagnostics } from './UpdateDiagnostics';
 import { EnvironmentHealth } from './EnvironmentHealth';
 import { Modal } from './Modal';
+import { Markdown } from './Markdown';
 
 import type { UpdateAction, UpdateStatus } from '../commands';
 export type { UpdateStatus } from '../commands';
@@ -44,7 +45,7 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
       <CopyButton value={errorText(failure)} label={t('updates-copy-error')} />
     </section>}
     {status?.operation_id && (status.diagnosis || status.log_available) && <UpdateDiagnostics key={status.operation_id} status={status} retry={() => void run(status.action === 'prepare' ? 'prepare' : status.action === 'check' ? 'check' : status.action === 'health' || status.action === 'doctor' ? status.action : 'setup')} />}
-    {!status?.needs_setup && status?.notes && <details><summary>{t('updates-release-notes')}</summary><p>{status.notes}</p></details>}
+    {!status?.needs_setup && status?.notes && <details><summary>{t('updates-release-notes')}</summary><Markdown text={status.notes} /></details>}
 
     {status?.pending && <p className="error-banner">{t('updates-the-previous-update-is-not-confirmed-new')}</p>}
     {status?.recovery && <details><summary>{t('updates-recovery-when-the-app-will-not-start')}</summary><p>{t('updates-close-wukong-and-run-this-independent-recovery')}</p><code className="path">{displayPath(status.recovery)}</code></details>}
