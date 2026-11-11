@@ -12,6 +12,29 @@ fn fixture() -> Result<(tempfile::TempDir, Cleanup)> {
     let cleanup = Cleanup::at(home)?;
     Ok((temp, cleanup))
 }
+#[test]
+fn data_cleanup_removes_probe_logs_without_losing_retained_docker_identity() -> Result<()> {
+    let (_temp, cleanup) = fixture()?;
+    let probe = cleanup
+        .home
+        .join("updates/probes")
+        .join(uuid::Uuid::new_v4().to_string());
+    crate::workbench::write_json(
+        &probe.join("workspace.json"),
+        &serde_json::json!({"schema_version":1,"id":"test-probe"}),
+    )?;
+    fs::create_dir_all(probe.join("logs"))?;
+    fs::write(probe.join("logs/pull.log"), b"old log")?;
+    let plan = cleanup.plan(Selection {
+        data: true,
+        ..Default::default()
+    })?;
+    assert!(check_output(&plan, &probe.join("report.json")).is_err());
+    assert!(cleanup.execute(&plan)?.complete);
+    assert!(probe.join("workspace.json").is_file());
+    assert!(!probe.join("logs/pull.log").exists());
+    Ok(())
+}
 #[cfg(windows)]
 #[test]
 fn canonical_verbatim_drive_paths_are_supported() -> Result<()> {
