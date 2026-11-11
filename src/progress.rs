@@ -56,9 +56,11 @@ mod tests {
     #[test]
     fn partial_snapshots_survive_reopen_and_finalize_once_without_token_events() -> Result<()> {
         let directory = tempfile::tempdir()?;
+        let target = directory.path().join("sample");
+        std::fs::write(&target, b"public progress fixture")?;
         let store = Store::open(directory.path())?;
         let run = crate::coordinator::Coordinator::new(store.clone()).create_run(
-            &std::env::current_exe()?,
+            &target,
             "fixture",
             Budget::default(),
             json!({}),
@@ -125,9 +127,11 @@ mod tests {
     #[test]
     fn bounded_text_is_interrupted_on_lease_expiry_and_rejects_old_generations() -> Result<()> {
         let directory = tempfile::tempdir()?;
+        let target = directory.path().join("sample");
+        std::fs::write(&target, b"public progress fixture")?;
         let store = Store::open(directory.path())?;
         let run = crate::coordinator::Coordinator::new(store.clone()).create_run(
-            &std::env::current_exe()?,
+            &target,
             "fixture",
             Budget::default(),
             json!({}),

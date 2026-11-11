@@ -50,9 +50,11 @@ mod tests {
     #[test]
     fn returned_call_tracks_job_outcome_without_duplicate_rows() -> Result<()> {
         let dir = tempfile::tempdir()?;
+        let target = dir.path().join("sample");
+        std::fs::write(&target, b"desktop projection fixture")?;
         let store = Store::open(dir.path())?;
         let run = crate::coordinator::Coordinator::new(store.clone()).create_run(
-            &std::env::current_exe()?,
+            &target,
             "fixture",
             Budget::default(),
             json!({}),
@@ -173,9 +175,11 @@ mod tests {
     #[test]
     fn snapshot_is_scoped_incremental_and_excludes_private_configuration() -> Result<()> {
         let dir = tempfile::tempdir()?;
+        let target = dir.path().join("sample");
+        std::fs::write(&target, b"desktop projection fixture")?;
         let store = Store::open(dir.path())?;
         let run = crate::coordinator::Coordinator::new(store.clone()).create_run(
-            &std::env::current_exe()?,
+            &target,
             "fixture",
             Budget::default(),
             json!({"secret":"excluded"}),
