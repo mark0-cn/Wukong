@@ -134,8 +134,8 @@ pub(super) fn inventory(home: &Path) -> Result<Registry> {
         );
         let raw = std::fs::read_to_string(&config_path)?;
         // Ignore invalid model configuration: cleanup needs paths, never credentials.
-        let value: toml::Value =
-            toml::from_str(&raw).context("cannot inspect paths in invalid configuration")?;
+        let value: toml::Value = toml::from_str(&raw)
+            .map_err(|_| anyhow::anyhow!("cannot inspect paths in invalid configuration"))?;
         for (kind, keys) in [
             (LocationKind::State, vec!["state_dir"]),
             (LocationKind::Worker, vec!["runtime", "state_dir"]),
