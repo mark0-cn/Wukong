@@ -221,3 +221,13 @@ ui-completed-hint = 分析已完成，可查看发现或导出报告。
 ui-stopped-hint = 任务已停止，已保存的进展仍可查看。
 ui-failed-hint = 分析异常结束，请查看失败操作与协作面板中的错误。
 ui-model-and-usage = 模型与用量
+
+ui-new-messages = 有 { $count } 条新消息
+ui-recipient = 发送给：
+ui-send-mode = 发送方式
+ui-send-information = 补充信息
+ui-send-task = 追加任务
+ui-expand-input = 展开输入框
+ui-collapse-input = 收起输入框
+ui-ended-recipient = 此 Agent 已结束。已完成的 Agent 可通过“追加任务”继续；失败或停止的任务需要新建分析。
+ui-append-help = 明确安排后续工作，保留已有分析记录。
