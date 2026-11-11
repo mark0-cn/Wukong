@@ -10,6 +10,12 @@ pub(super) struct ReplyProgress {
     last_flush: Option<Instant>,
     last_bytes: usize,
 }
+type SettlingReplies<'w, 's> = Query<
+    'w,
+    's,
+    (&'static ForAgent, &'static Outcome, &'static ReplyProgress),
+    (ReadyToSettle, ModelCalls, Without<HostFinal>),
+>;
 
 fn public_text<'a>(parts: impl IntoIterator<Item = &'a AssistantContent>) -> String {
     parts
@@ -148,10 +154,7 @@ pub(super) fn prepare_models(
 }
 
 pub(super) fn account_replies(
-    calls: Query<
-        (&ForAgent, &Outcome, &ReplyProgress),
-        (ReadyToSettle, ModelCalls, Without<HostFinal>),
-    >,
+    calls: SettlingReplies<'_, '_>,
     ids: Query<&AgentId>,
     application: Res<Application>,
     mut fatal: ResMut<Fatal>,
