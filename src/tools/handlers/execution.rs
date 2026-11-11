@@ -123,12 +123,20 @@ pub(in crate::tools) fn handle_seccomp_analyze<'a>(
 
 pub(in crate::tools) fn handle_runtime_doctor<'a>(
     tools: &'a ToolService,
-    _agent: &'a AgentMetadata,
+    agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
     _args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.doctor().await })
+    Box::pin(async move {
+        if agent.environment_id.is_some() {
+            tools.checked_environment(agent).await?.doctor().await
+        } else {
+            Ok(
+                json!({"enabled":false,"capabilities":{},"reason":"task has no assigned environment"}),
+            )
+        }
+    })
 }
 
 pub(in crate::tools) fn handle_stage_target<'a>(

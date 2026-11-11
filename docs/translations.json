@@ -14,12 +14,12 @@
       "zh-CN": "de0a40e7c0023ae1de86fc6ff0d01a8313337ef6228b8f58d01cb1fe6f4ec46d"
     },
     "docs/design/architecture.md": {
-      "en": "51205dd799937431f6e9e67877060bd6b814b03d417929a17734e39b2fac6a47",
-      "zh-CN": "71da4b258c14c403ec0ca5ff6fcdf95077347b75fe5a2294fa1b0e6a9eca93fc"
+      "en": "40551f395ada2f520c4d9e8a4e0f8a303a27fbb0bbbe9089f28acee760e8d3bb",
+      "zh-CN": "65a50bc56f0d3eb3a4297866ffdf4874012a038399b2b0ae1746b03b0780a989"
     },
     "docs/design/cross-platform-environments.md": {
-      "en": "0a45cfef1023ff64995c1fd0a3d26e09c14927fe38fbfb06d065a2daac143cbd",
-      "zh-CN": "0e47a6d2ec0041fb2789c8403c6448914f436eeaaffacb4c92e900b4a2ef3be0"
+      "en": "6c7a4bc3d4ddbb4cdcf3f8ea2d47f1f344fc0df5b4f5650fd3b53b43639caaf8",
+      "zh-CN": "c1c0f886862734d8204555809aea66ecdd66372bd002135356050203e2c8a33a"
     },
     "docs/design/implementation-contract.md": {
       "en": "34b958279e68476f2d62f42962102de8794a49a2ac12da61d5b8c84286698c2c",
@@ -86,8 +86,8 @@
       "zh-CN": "39c142f85e35eba625ee588a9fd5dd18d0f327e51e4c1a5ca724422b4987bf20"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "191697e89c49051614eaa61f93e0cd7ccffd505786a2604adec8573b24d3cbbd",
-      "zh-CN": "cc64bdb41c46c49cac14c7c63caa623294638d5f3fe993c1e9385c121738d997"
+      "en": "a67e62d3023c2f6634f34bd34e4f4d0d5da130fd6a4db9d376043887bca739a7",
+      "zh-CN": "9c0f38eadc25c366bdbeb864dc9e57ec1b8ca71b0a2586d71e6213b625188a83"
     },
     "docs/user/languages.md": {
       "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",

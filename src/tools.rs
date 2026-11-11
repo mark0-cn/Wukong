@@ -41,8 +41,10 @@ mod args;
 mod catalog;
 mod coordination;
 mod discovery;
+pub(crate) use discovery::ToolSelection;
 mod execution;
 mod gateway;
+mod requirements;
 use analysis::AnalysisService;
 use execution::ExecutionService;
 use files::FilesService;
@@ -144,22 +146,7 @@ impl ToolService {
         let Some(environment_id) = &agent.environment_id else {
             return Ok(self.clone());
         };
-        let config = self.environments.config(environment_id)?;
-        let run: RunRecord = self.store.load(&agent.run_id)?;
-        ensure!(
-            run.config["environments"][environment_id] == serde_json::to_value(config)?,
-            "environment configuration changed since this assessment was created"
-        );
-        let client = self.environments.client(environment_id).await?;
-        self.store.bind_environment(&EnvironmentBinding {
-            id: stable(
-                "environment-binding",
-                &format!("{}:{environment_id}", agent.run_id),
-            ),
-            run_id: agent.run_id.clone(),
-            environment_id: environment_id.clone(),
-            identity: client.identity().clone(),
-        })?;
+        self.checked_environment(agent).await?;
         let client = self
             .environments
             .bind(
@@ -188,6 +175,30 @@ impl ToolService {
             analysis,
             ..self.clone()
         })
+    }
+
+    async fn checked_environment(&self, agent: &AgentMetadata) -> Result<RuntimeClient> {
+        let environment_id = agent
+            .environment_id
+            .as_ref()
+            .context("task has no assigned environment")?;
+        let config = self.environments.config(environment_id)?;
+        let run: RunRecord = self.store.load(&agent.run_id)?;
+        ensure!(
+            run.config["environments"][environment_id] == serde_json::to_value(config)?,
+            "environment configuration changed since this assessment was created"
+        );
+        let client = self.environments.client(environment_id).await?;
+        self.store.bind_environment(&EnvironmentBinding {
+            id: stable(
+                "environment-binding",
+                &format!("{}:{environment_id}", agent.run_id),
+            ),
+            run_id: agent.run_id.clone(),
+            environment_id: environment_id.clone(),
+            identity: client.identity().clone(),
+        })?;
+        Ok(client)
     }
 
     pub(crate) async fn refresh_jobs(&self, run: &str) -> Result<()> {
@@ -347,10 +358,12 @@ impl ToolService {
                 args
             };
             if let Some(spec) = builtin {
-                if spec.worker_bound {
+                if self.needs_worker(spec) {
                     let scoped = self.bound_to(&agent).await?;
+                    scoped.require_backend(spec, &args).await?;
                     (spec.handler)(&scoped, &agent, call_id, name, args).await
                 } else {
+                    self.require_backend(spec, &args).await?;
                     (spec.handler)(self, &agent, call_id, name, args).await
                 }
             } else if self.mcp.contains(name) {

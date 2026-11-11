@@ -11,7 +11,7 @@ pub(super) struct Spec {
     pub(super) root_only: bool,
     pub(super) child_only: bool,
     pub(super) model_visible: bool,
-    pub(super) worker_bound: bool,
+    pub(super) requirement: super::requirements::Requirement,
 }
 impl Spec {
     pub(super) fn allows(&self, role: Role) -> bool {
@@ -62,50 +62,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         parse: |value| Ok(serde_json::to_value(serde_json::from_value::<A>(value)?)?),
         side_effecting,
         model_visible: !matches!(visibility, Visibility::Internal),
-        worker_bound: matches!(
-            name,
-            "artifact_stage"
-                | "runtime_doctor"
-                | "stage_target"
-                | "file_put"
-                | "file_get"
-                | "job_start"
-                | "job_status"
-                | "job_cancel"
-                | "job_artifacts"
-                | "debug_start"
-                | "debug_command"
-                | "debug_inspect"
-                | "debug_control"
-                | "debug_close"
-                | "debug_profile"
-                | "debug_snapshot"
-                | "interactive_start"
-                | "interactive_send"
-                | "interactive_close"
-                | "interactive_profile"
-                | "exec_command"
-                | "fuzz_start"
-                | "fuzz_status"
-                | "crash_replay"
-                | "input_minimize"
-                | "poc_verify"
-                | "angr_solve"
-                | "py_run"
-                | "emulate_run"
-                | "libc_identify"
-                | "seccomp_analyze"
-                | "runtime_profile"
-                | "runtime_prepare"
-                | "mitigation_profile"
-                | "crash_snapshot"
-                | "functions_search"
-                | "decompile_function"
-                | "xrefs_query"
-                | "core_dump"
-                | "cyclic_offset"
-                | "verification_record"
-        ),
+        requirement: super::requirements::Requirement::for_tool(name),
         root_only: matches!(visibility, Visibility::Root),
         child_only: matches!(visibility, Visibility::Child) || (target && name != "runtime_doctor"),
     }

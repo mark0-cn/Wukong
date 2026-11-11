@@ -131,16 +131,17 @@ async fn model_server() -> Result<(
                 ("analyst", 0) => {
                     ensure!(
                         names.contains(&"coverage_record")
-                            && names.contains(&"debug_start")
-                            && names.contains(&"poc_verify"),
-                        "full catalog was not exposed from the first request"
+                            && names.contains(&"binary_inspect")
+                            && !names.contains(&"debug_start")
+                            && !names.contains(&"poc_verify"),
+                        "controller-only selection must expose static tools without unobserved execution tools"
                     );
                     vec![call("inspect", "binary_inspect", json!({}))]
                 }
                 ("analyst", 1) => {
                     ensure!(
-                        names.contains(&"coverage_record") && names.contains(&"debug_start"),
-                        "full catalog missing on a later request"
+                        names.contains(&"coverage_record") && !names.contains(&"debug_start"),
+                        "later requests must retain controller-only capability filtering"
                     );
                     let evidence = tool_evidence(&request, "inspect")
                         .context("model did not receive inspect evidence")?;

@@ -2,11 +2,30 @@
 from pathlib import Path
 import importlib.util
 import json
+import os
 import platform
 import shutil
 import subprocess
 import sys
 from worker_common import PROTOCOL, safe_env
+
+
+def _ghidra_ready(linux, execution_ready):
+    if not linux or not execution_ready:
+        return False
+    launcher = Path(os.environ.get("WUKONG_GHIDRA_HEADLESS", "/opt/ghidra/support/analyzeHeadless"))
+    scripts = Path(os.environ.get("WUKONG_GHIDRA_SCRIPT_DIR", "/opt/wukong/ghidra"))
+    if not (launcher.is_file() and os.access(launcher, os.X_OK)
+            and (scripts / "WukongBridge.java").is_file()
+            and (launcher.parent.parent / "Ghidra/application.properties").is_file()):
+        return False
+    java = shutil.which("java")
+    if not java:
+        return False
+    try:
+        return subprocess.run([java, "-version"], env=safe_env(), capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def _python_module(name):
@@ -59,7 +78,8 @@ def doctor(root, trusted, isolated):
             "core_pattern": core_pattern, "external_core_handler": bool(core_pattern and core_pattern.startswith("|")),
             "metadata_protected_from_targets": isolated, "unique_experiment_uids": isolated,
             "tools": tools, "python_toolchain": python_toolchain, "dbgeng":dbgeng,
-            "capabilities": {"process_jobs": execution_ready, "persistent_jobs": execution_ready, "resumable_file_transfer": True,
+            "capabilities": {"process_jobs": execution_ready, "persistent_jobs": execution_ready, "interactive_process": execution_ready, "resumable_file_transfer": True,
+            "ghidra_query": _ghidra_ready(linux, execution_ready),
             "debug_gdb_mi": execution_ready and linux and tools["gdb"]["available"] and python_toolchain["pygdbmi"],
             "debug_dbgeng": dbgeng["available"] and trusted, "fuzz_qemu": execution_ready and linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
             "crash_replay": execution_ready, "input_minimize": execution_ready and tools["gdb"]["available"] and python_toolchain["pygdbmi"] and linux,
@@ -70,5 +90,5 @@ def doctor(root, trusted, isolated):
             "process_mapping_observations": linux, "core_snapshot": linux and python_toolchain["pwntools"],
             "cyclic_offset": python_toolchain["pwntools"], "poc_verify": execution_ready, "shell_exec": execution_ready,
             "py_run": execution_ready, "emulation": python_toolchain["unicorn"],
-            "symbolic_execution": python_toolchain["angr"],
-            "formats": ["ELF"] if linux and execution_ready else ["PE"] if trusted and dbgeng["available"] else [], "native_target_execution": execution_ready}}
+            "symbolic_execution": execution_ready and python_toolchain["angr"],
+            "formats": ["ELF"] if linux and execution_ready else ["PE"] if execution_ready and os.name=='nt' else [], "native_target_execution": execution_ready}}

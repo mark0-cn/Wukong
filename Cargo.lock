@@ -11821,6 +11821,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bevy_ecs",
+ "bevy_tasks",
  "chrono",
  "clap",
  "fluent-bundle",

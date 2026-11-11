@@ -34,6 +34,21 @@ class WorkerFenceTests(unittest.TestCase):
         for name in ['process_jobs','persistent_jobs','crash_replay','poc_verify','shell_exec','py_run','native_target_execution']:
             self.assertFalse(capabilities[name],name)
 
+    def test_windows_probe_keeps_portable_analysis_but_excludes_linux_engines(self):
+        from unittest.mock import patch
+        from worker_capabilities import doctor
+        with patch('worker_capabilities.sys.platform', 'win32'), \
+                patch('worker_capabilities.platform.system', return_value='Windows'), \
+                patch('worker_dbgeng.doctor', return_value={'available':True}), \
+                patch('worker_capabilities._python_module', return_value=True):
+            capabilities=doctor(self.root,True,False)['capabilities']
+        self.assertTrue(capabilities['debug_dbgeng'])
+        self.assertTrue(capabilities['resumable_file_transfer'])
+        for name in ['debug_gdb_mi','fuzz_qemu','ghidra_query','core_snapshot']:
+            self.assertFalse(capabilities[name],name)
+        for name in ['seccomp_analyze','runtime_profile','libc_identify','crash_replay','poc_verify']:
+            self.assertTrue(capabilities[name],name)
+
     def test_live_lease_rejects_other_controllers_and_renews_the_same_fence(self):
         first=self.acquire()
         with self.assertRaises(WorkerError): self.acquire(owner='other')

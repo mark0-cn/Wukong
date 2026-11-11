@@ -77,7 +77,7 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 共享资料按需装配：每次新模型请求按作者、父任务、前驱、scope 和任务关键词选择最多 6 条笔记、待办或可选 threat model 的有界预览。选择属于启发式提示，不保证覆盖全部相关资料；提示词明确提供遗漏数量和检索入口。`context_search` 支持文本、kind、作者 scope、agent_id 和分页，`context_read` 按 Unicode 字符位置读取原始文档 JSON（含 amendments）。两者按工具输出字节限额自动缩小页面，并保留下一页位置，不经过模型摘要。所有读取限于当前 run；原始证据继续通过 `evidence_read` 读取。会话压缩只保存同样的有界预览、账本计数和完整会话证据引用，不重新注入全部文档或任务树。计划和约束仍来自任务契约，筛选不会替代验收。
 
-内置工具由 `src/tools/catalog.rs` 统一注册，模型从第一轮获得角色可见的完整目录；原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；目标身份、证据、会话 owner 和独立复核仍由实际操作校验。工具定义直接用于执行、参数校验和[生成的工具目录](../reference/tool-catalog.zh-CN.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，实际能力仍需探测。运行 `wukong tool-catalog` 重新生成 Markdown，`wukong --json tool-catalog` 导出机器可读 schema。
+内置工具及其后端要求由 `src/tools/catalog.rs` 统一注册。每次模型请求前，异步环境预检根据实际观测能力选择角色可见的工具；root 编排保持延迟连接。预检失败时保留控制器工具，并报告不可用工具的要求。原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；实际操作再次校验后端能力、目标身份、证据、会话 owner 和独立复核。工具定义直接用于执行、参数校验和[生成的工具目录](../reference/tool-catalog.zh-CN.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，其实际能力仍需探测。运行 `wukong tool-catalog` 重新生成 Markdown，`wukong --json tool-catalog` 导出机器可读 schema。
 
 内置方法的来源、相关工具和机制夹具由 `prompts/coverage.json` 关联到现有 `SkillManifest`，通过 `wukong skill-catalog` 生成[覆盖清单](../reference/skill-coverage.zh-CN.md)。这些维护信息不改变角色权限、工具可用性或完成门槛。
 

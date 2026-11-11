@@ -77,6 +77,13 @@ mod tests {
     };
 
     async fn fixture(base: String) -> (tempfile::TempDir, AssessmentRunner, RunRecord) {
+        fixture_config(base, |_, _| {}).await
+    }
+
+    async fn fixture_config(
+        base: String,
+        configure: impl FnOnce(&mut AppConfig, &std::path::Path),
+    ) -> (tempfile::TempDir, AssessmentRunner, RunRecord) {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("target.bin");
         std::fs::write(&target, b"scheduler fixture").unwrap();
@@ -88,6 +95,7 @@ mod tests {
         config.model.base_url = Some(base);
         config.execution.stream = false;
         config.execution.model_retries = 0;
+        configure(&mut config, dir.path());
         let store = Store::open(&config.state_dir).unwrap();
         let runner = AssessmentRunner::new(config.clone(), store).await.unwrap();
         let run = runner
@@ -138,6 +146,72 @@ mod tests {
     async fn respond(socket: &mut TcpStream, value: Value) {
         let body = value.to_string();
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stalled_environment_preflight_does_not_block_root_or_cancellation() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (dir, runner, run) = fixture_config(format!("http://{}", listener.local_addr().unwrap()), |config, root| {
+            let bridge=root.join("slow_preflight.py");
+            std::fs::write(&bridge, r#"import json,pathlib,platform,sys,time
+root=pathlib.Path(sys.argv[sys.argv.index('--state')+1]);root.mkdir(exist_ok=True)
+for line in sys.stdin:
+ request=json.loads(line)
+ if request['method']=='doctor':
+  (root/'probing').write_text('ready');time.sleep(60)
+ result={'identity':{'protocol':2,'installation_id':'slow-fixture','boot_id':'boot','package_sha256':'0'*64}}
+ print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
+"#).unwrap();
+            config.default_environment=Some("slow".into());
+            config.environments.insert("slow".into(),crate::environments::EnvironmentConfig {
+                name:"Slow fixture".into(),platform:crate::environments::Platform::current(),installation_id:None,
+                runtime:crate::runtime::RuntimeConfig {backend:crate::runtime::RuntimeBackend::TrustedLocal,
+                    state_dir:root.join("worker"),bridge_path:bridge,..Default::default()},
+            });
+        }).await;
+        let (seen, root_request) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            request(&mut socket).await;
+            respond(&mut socket, reply("task", json!({"description":"Analyst","prompt":"Inspect","scope":"preflight","role":"analyst","inherit_context":false}))).await;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            seen.send(request(&mut socket).await).unwrap();
+            std::future::pending::<()>().await;
+        });
+        let cancel = CancellationToken::new();
+        let task = {
+            let runner = runner.clone();
+            let id = run.id.clone();
+            let cancel = cancel.clone();
+            tokio::spawn(async move { runner.drive(&id, cancel).await })
+        };
+        let input = tokio::time::timeout(Duration::from_secs(4), root_request)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !input["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["function"]["name"] == "debug_start")
+        );
+        tokio::time::timeout(Duration::from_secs(4), async {
+            while !dir.path().join("worker/probing").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        cancel.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(4), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.status, Status::BudgetPaused);
+        server.abort();
+        runner.tools.close().await;
     }
 
     #[tokio::test]

@@ -257,6 +257,7 @@ pub(in crate::tools) struct InteractiveCloseArgs {
 pub(in crate::tools) struct AngrSolveArgs {
     #[schemars(length(min = 1))]
     pub target: String,
+    #[schemars(length(min = 1))]
     pub find: Vec<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avoid: Option<Vec<u64>>,

@@ -23,9 +23,9 @@ pub fn builtin_catalog_markdown_for_locale(locale: Locale) -> Result<String> {
         BTreeMap::new()
     };
     let mut output = String::from(if chinese {
-        "# 内置工具目录\n\n[English](tool-catalog.md) · 简体中文\n\n由 `wukong --locale zh-CN tool-catalog` 从工具注册表生成。不要手动编辑。\n\n原生协调工具 `task`、`message`、`wait` 由 Rig 提供；MCP 工具取决于配置。下表列出模型可见的内置业务工具及生命周期可见性，具体执行仍校验目标、证据、会话归属和后端能力。中文说明仅用于文档，不改变模型协议。\n\n| 工具 | 可见角色 | 有副作用 | 用途 |\n|---|---|---|---|\n"
+        "# 内置工具目录\n\n[English](tool-catalog.md) · 简体中文\n\n由 `wukong --locale zh-CN tool-catalog` 从工具注册表生成。不要手动编辑。\n\n原生协调工具 `task`、`message`、`wait` 由 Rig 提供；MCP 工具取决于配置。下表列出内置业务工具的角色边界及后端要求（保留技术标识）。实际模型列表还会根据环境预检过滤；执行仍校验目标、证据、会话归属和当前后端能力。中文说明仅用于文档，不改变模型协议。\n\n| 工具 | 可见角色 | 有副作用 | 后端要求 | 用途 |\n|---|---|---|---|---|\n"
     } else {
-        "# Built-in tool catalog\n\nEnglish · [简体中文](tool-catalog.zh-CN.md)\n\nGenerated from the registry by `wukong tool-catalog`. Do not edit manually.\n\nRig provides native coordination tools `task`, `message`, `wait`; MCP tools depend on configuration. This table lists model-visible business tools and lifecycle visibility. Execution still checks target identity, evidence, session ownership and backend capabilities. Translated descriptions are documentation only and do not change the model protocol.\n\n| Tool | Visible roles | Side effects | Purpose |\n|---|---|---|---|\n"
+        "# Built-in tool catalog\n\nEnglish · [简体中文](tool-catalog.zh-CN.md)\n\nGenerated from the registry by `wukong tool-catalog`. Do not edit manually.\n\nRig provides native coordination tools `task`, `message`, `wait`; MCP tools depend on configuration. This table lists business tools, role boundaries and backend requirements. Actual model selections are also filtered by environment preflight; execution checks target identity, evidence, session ownership and current backend capabilities. Translated descriptions are documentation only and do not change the model protocol.\n\n| Tool | Visible roles | Side effects | Backend requirement | Purpose |\n|---|---|---|---|---|\n"
     });
     let mut specs = builtins()
         .iter()
@@ -72,7 +72,8 @@ pub fn builtin_catalog_markdown_for_locale(locale: Locale) -> Result<String> {
             (false, false) => "no",
         };
         output.push_str(&format!(
-            "| `{name}` | {roles} | {side_effects} | {} |\n",
+            "| `{name}` | {roles} | {side_effects} | {} | {} |\n",
+            spec.requirement.label(),
             description.replace('|', "\\|").replace('\n', " ")
         ));
     }

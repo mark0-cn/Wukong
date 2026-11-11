@@ -430,8 +430,9 @@ async fn exec_command_routes_to_the_runtime_instead_of_unknown_tool() -> Result<
 #[tokio::test]
 async fn poc_verify_budget_enforces_closure_after_two_jobs() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let (store, coordinator, run, agent) = fixture(temp.path())?;
-    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let config = worker_config(temp.path());
+    let (store, coordinator, run, agent) = fixture_with_config(temp.path(), &config)?;
+    let service = ToolService::new(config, store.clone()).await?;
     let verifier = child(&coordinator, &run.root_id, Role::Verifier, "closure check")?;
     let evidence = store.artifact(
         &run.id,
@@ -923,8 +924,8 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, _run, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    // Both spellings pass schema validation and reach dispatch, which then
-    // reports the unstaged worker target instead of a schema error.
+    // Both spellings pass schema validation and reach backend admission,
+    // which reports the disabled runtime instead of a schema error.
     for (index, find) in [
         json!(["0x401000"]),
         json!([4198400]),
@@ -944,7 +945,7 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
         assert!(outcome.is_error);
         let error = result(&outcome)["error"].as_str().unwrap().to_owned();
         assert!(!error.contains("expected an integer"), "{error}");
-        assert!(error.contains("worker_file"), "{error}");
+        assert!(error.contains("runtime is disabled"), "{error}");
     }
     // Malformed spellings still fail schema validation before dispatch.
     let bad = service
@@ -987,7 +988,7 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
         result(&empty)["error"]
             .as_str()
             .unwrap()
-            .contains("at least one find address")
+            .contains("invalid tool arguments")
     );
     service.close().await;
     Ok(())

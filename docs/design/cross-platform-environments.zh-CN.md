@@ -10,6 +10,8 @@
 
 例如，Linux Ghidra 专家和 Windows 调试专家可以共享同一原始 PE 制品，而不共享 worker 文件系统路径。角色权限仍为 root/analyst/verifier；选择环境不会授予额外权限，也不会启用尚不可用的后端。
 
+每次子任务模型请求前，异步 worker 预检将角色注册表定义与实际观测到的能力及平台要求取交集。Rig 仅在探测期间挂起该请求；root 编排保持延迟连接，取消会释放尚未完成的探测。探测失败或超时后仍保留控制器工具，并在请求中明确给出诊断与不可用工具的要求。工具执行时再次校验后端，包括指定调试引擎和保留崩溃位置的输入最小化模式。缺失能力会在派发给 worker 前拒绝，即使调用由手工构造。Windows 工具列表排除仅支持 Linux 的工具。本地配置的 Ghidra 使用控制器；远程 Ghidra 需要通过启动器、桥接脚本和 Java 可用性探测。能力观测只表示可用性，不代表分析成功或已完成验收。
+
 配置不再提供顶层 `[runtime]`。传输配置位于 `environments.<id>.runtime`，由 `default_environment` 选择默认环境；空登记表允许仅使用控制器进行静态分析。拒绝旧单运行时配置，不进行转换。工作台的 Docker CLI 配置位于 `[workbench].docker_executable`；生成的工作台配置登记名为 `workbench` 的 Linux 环境，并保留其他已登记环境。桌面初始化与健康检查使用选中的环境，因此已配置的 Windows VM 不要求 Docker。`wukong doctor` 分别报告每个已登记环境。
 
 ```toml

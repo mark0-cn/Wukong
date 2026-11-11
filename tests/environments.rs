@@ -284,7 +284,7 @@ for line in sys.stdin:
     request=json.loads(line)
     method=request['method']
     if method=='ping': result={'identity':{'protocol':2,'installation_id':__import__('hashlib').sha256(str(sys.argv).encode()).hexdigest(),'boot_id':'fixture-boot','package_sha256':'0'*64}}
-    elif method=='doctor': result={'os':platform.system().lower()}
+    elif method=='doctor': result={'os':platform.system().lower(),'capabilities':{'process_jobs':True}}
     elif method=='job.start': result={'job_id':'same-local-id','state':'running'}
     elif method=='job.status': result={'job_id':'same-local-id','state':'completed','result':{'exit_code':0}}
     elif method=='job.artifacts': result=[]
