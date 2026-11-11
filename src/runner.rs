@@ -565,25 +565,103 @@ mod tests {
             fixture(format!("http://{}", listener.local_addr().unwrap())).await;
         runner.config.execution.stream = true;
         let mut events = runner.subscribe();
+        let (release, continue_stream) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             assert_eq!(request(&mut socket).await["stream"], true);
             let parts = [
                 json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","thinking":"check the evidence"},"done":false}),
+                json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":"I am inspecting "},"done":false}),
+                json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":"the fixture."},"done":false}),
                 json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","tool_calls":[{"function":{"name":"finish_scan","arguments":{"summary":"streamed completion"}}}]},"done":false}),
                 json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":2}),
             ];
-            let body = parts
+            let lines = parts
                 .iter()
-                .map(Value::to_string)
-                .collect::<Vec<_>>()
-                .join("\n")
-                + "\n";
-            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+                .map(|part| part.to_string() + "\n")
+                .collect::<Vec<_>>();
+            let length: usize = lines.iter().map(String::len).sum();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            socket
+                .write_all(lines[..2].concat().as_bytes())
+                .await
+                .unwrap();
+            // Keep the HTTP response open until the operator-facing snapshot was read.
+            continue_stream.await.unwrap();
+            socket
+                .write_all(lines[2..].concat().as_bytes())
+                .await
+                .unwrap();
         });
-        assert_eq!(
-            drive_bounded(&runner, &run.id).await.status,
-            Status::Completed
+        let read_partial = async {
+            let partial = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Some(reply) = runner
+                        .store
+                        .records::<PublicReply>(&run.id)
+                        .unwrap()
+                        .into_iter()
+                        .next()
+                    {
+                        break reply;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("public text was not persisted while the provider was still streaming");
+            assert_eq!(partial.text, "I am inspecting ");
+            let data = crate::desktop::workspace::read(
+                &runner.store,
+                1,
+                &crate::desktop::workspace::WorkspaceRequest {
+                    run: Some(run.id.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .data
+            .unwrap();
+            assert_eq!(
+                data.transcript
+                    .iter()
+                    .find(|message| message.id == partial.id)
+                    .expect("streamed message missing")
+                    .state,
+                Some(ReplyState::Streaming)
+            );
+            assert!(
+                !serde_json::to_string(&data)
+                    .unwrap()
+                    .contains("check the evidence")
+            );
+            release.send(()).unwrap();
+            partial.id
+        };
+        let (result, reply_id) = tokio::join!(drive_bounded(&runner, &run.id), read_partial);
+        assert_eq!(result.status, Status::Completed);
+        let data = crate::desktop::workspace::read(
+            &runner.store,
+            1,
+            &crate::desktop::workspace::WorkspaceRequest {
+                run: Some(run.id.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .data
+        .unwrap();
+        let replies = data
+            .transcript
+            .iter()
+            .filter(|message| message.id == reply_id)
+            .collect::<Vec<_>>();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].state, Some(ReplyState::Complete));
+        assert!(
+            serde_json::to_string(&replies)
+                .unwrap()
+                .contains("I am inspecting the fixture.")
         );
         assert_eq!(
             runner
@@ -605,6 +683,93 @@ mod tests {
             progress |= event["kind"] == "model.stream_progress";
         }
         assert!(progress);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_partial_survives_native_pause_and_inflight_request_recovery() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (_dir, mut runner, run) =
+            fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+        runner.config.execution.stream = true;
+        let (release, cancelled) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            assert_eq!(request(&mut socket).await["stream"], true);
+            let partial=json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":"Inspecting the fixture"},"done":false}).to_string()+"\n";
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{partial}",partial.len()+1024).as_bytes()).await.unwrap();
+            cancelled.await.unwrap();
+            drop(socket);
+            let (mut socket, _) = listener.accept().await.unwrap();
+            assert_eq!(request(&mut socket).await["stream"], true);
+            let mut final_reply = reply("finish_scan", json!({"summary":"resumed completion"}));
+            final_reply["message"]["content"] = json!("Inspecting the fixture is complete.");
+            let body = final_reply.to_string() + "\n";
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+        });
+        let cancel = CancellationToken::new();
+        let interrupt = async {
+            let reply = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Some(reply) = runner
+                        .store
+                        .records::<PublicReply>(&run.id)
+                        .unwrap()
+                        .into_iter()
+                        .next()
+                    {
+                        break reply;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("in-flight text missing");
+            cancel.cancel();
+            reply.id
+        };
+        let (paused, reply_id) = tokio::join!(runner.drive(&run.id, cancel.clone()), interrupt);
+        assert_eq!(paused.unwrap().status, Status::BudgetPaused);
+        let snapshot = || {
+            crate::desktop::workspace::read(
+                &runner.store,
+                1,
+                &crate::desktop::workspace::WorkspaceRequest {
+                    run: Some(run.id.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .data
+            .unwrap()
+        };
+        assert_eq!(
+            snapshot()
+                .transcript
+                .iter()
+                .find(|message| message.id == reply_id)
+                .unwrap()
+                .state,
+            Some(ReplyState::Interrupted)
+        );
+        release.send(()).unwrap();
+        assert_eq!(
+            drive_bounded(&runner, &run.id).await.status,
+            Status::Completed
+        );
+        let replies = runner.store.records::<PublicReply>(&run.id).unwrap();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].id, reply_id);
+        assert_eq!(replies[0].state, ReplyState::Complete);
+        assert_eq!(replies[0].text, "Inspecting the fixture is complete.");
+        assert_eq!(
+            snapshot()
+                .transcript
+                .iter()
+                .filter(|message| message.id == reply_id)
+                .count(),
+            1
+        );
         server.await.unwrap();
     }
 

@@ -99,6 +99,16 @@ export interface Messages {
   'language-match-task': undefined;
   'language-output': undefined;
   'language-ui': undefined;
+  'progress-invocation-state': undefined;
+  'progress-job-attempts': { count: string | number };
+  'progress-job-background': undefined;
+  'progress-job-identity': { id: string | number };
+  'progress-job-stale': undefined;
+  'progress-job-successes': { count: string | number };
+  'progress-preview-truncated': undefined;
+  'progress-text-interrupted': undefined;
+  'progress-text-streaming': undefined;
+  'progress-text-truncated': undefined;
   'report-accounting': undefined;
   'report-accounting-body': { agents: string | number; calls: string | number; cost: string | number; evidence: string | number; tokens: string | number };
   'report-attempts': undefined;
@@ -142,6 +152,7 @@ export interface Messages {
   'report-unconfirmed': undefined;
   'report-verified-impact': undefined;
   'result-completed': undefined;
+  'result-decompiled': { chars: string | number; name: string | number };
   'result-failed': undefined;
   'result-findings': { count: string | number };
   'result-functions': { count: string | number };
@@ -149,6 +160,7 @@ export interface Messages {
   'result-matches': { count: string | number };
   'result-paused': undefined;
   'result-results': { count: string | number };
+  'result-stopped': undefined;
   'result-strings': { count: string | number };
   'result-uncertain': undefined;
   'settings-api-endpoint': undefined;
@@ -382,6 +394,7 @@ export interface Messages {
   'transcript-paused-reason': { reason: string | number };
   'transcript-recipient': { name: string | number };
   'transcript-resumed': undefined;
+  'transcript-started': undefined;
   'transcript-stopped': undefined;
   'transcript-workspace': undefined;
   'transcript-you': undefined;

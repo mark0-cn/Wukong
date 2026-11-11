@@ -7,8 +7,9 @@ import * as Collapsible from '@radix-ui/react-collapsible';
 import { ArrowDown, ArrowUp, Bot, ChevronRight, Code2, User, Maximize2, Minimize2 } from 'lucide-react';
 import { api, errorText, errorValue } from '../bridge';
 import type { Agent, ChatMessage, Host, ToolDisplay, ToolRecord, Workspace } from '../types';
-import { Markdown } from './Markdown';
+import { CodeBlock, Markdown } from './Markdown';
 import { labels, StateIcon, Status, terminal } from './Status';
+import { JobFacts, ToolDuration } from './ToolActivity';
 
 const TranscriptContext = createContext<{ epoch: number; run: string; onAgent: (id: string) => void }>({ epoch: 0, run: '', onAgent: () => {} });
 const groupTools = groupPartByType({ 'tool-call': ['group-tools'] });
@@ -35,15 +36,20 @@ export function ToolStep({ display }: { display: ToolDisplay }) {
       <span className="tool-label"><strong>{text(display.title)}</strong>{display.target && <span className="tool-target" title={display.target}>{display.target}</span>}</span>
       {display.state === 'completed' && !open && display.summary && <span className="tool-inline-summary" title={formatMessage(display.summary)}>{formatMessage(display.summary)}</span>}
       <span className="tool-state">{labels[display.state] ?? display.state}</span>
-      {display.duration_ms != null && <span className="tool-duration">{(display.duration_ms / 1000).toFixed(1)}s</span>}
+      <ToolDuration display={display} />
       <ChevronRight size={13} className={open ? 'rotate' : ''} />
     </Collapsible.Trigger>
     {(open || display.state !== 'completed') && display.purpose && <p className="tool-purpose">{display.purpose}</p>}
     {(open || display.state !== 'completed') && display.summary && <p className="tool-summary">{formatMessage(display.summary)}</p>}
+    <JobFacts display={display} />
+    {display.preview && <div className="tool-code-preview"><CodeBlock text={display.preview.text} language={display.preview.language} />
+      <p className="muted">{t('workspace-evidence')}<code>{display.preview.evidence_id}</code>{display.preview.truncated && <> · {t('progress-preview-truncated')}</>}</p></div>}
     <Collapsible.Content className="tool-details">
       {loading && <p className="muted">{t('workspace-loading-operation-details')}</p>}
       {error && <p className="error" role="alert">{errorText(error)}</p>}
       {record && <><div className="detail-caption"><Code2 size={13} />{t('workspace-raw-operation-details')}</div>
+        <p className="muted">{t('progress-invocation-state')}: {labels[record.state] ?? record.state}
+          {display.job && <> · {t('progress-job-identity', { id: display.job.id })} <code>{display.job.state}</code></>}</p>
         <pre>{JSON.stringify(record.arguments, null, 2)}</pre>
         {record.result != null && <><div className="detail-caption">{t('workspace-raw-result')}</div><pre>{typeof record.result === 'string' ? record.result : JSON.stringify(record.result, null, 2)}</pre></>}
         {record.evidence_id && <p className="muted">{t('workspace-evidence')}<code>{record.evidence_id}</code></p>}</>}
@@ -75,13 +81,16 @@ function Message() {
   useLocale();
   const message = useAuiState(s => s.message);
   const context = useContext(TranscriptContext);
-  const custom = message.metadata.custom as { author?: string; agent?: string; delivery?: string };
+  const custom = message.metadata.custom as { author?: string; agent?: string; delivery?: string; state?: ChatMessage['state']; truncated?: boolean };
   const user = message.role === 'user';
   return <MessagePrimitive.Root className={`message ${user ? 'message-user' : 'message-assistant'}`}>
     <div className="message-heading"><span className={`avatar ${user ? 'avatar-user' : ''}`}>{user ? <User size={15} /> : <Bot size={16} />}</span>
       <button className="author" onClick={() => { if (custom.agent) context.onAgent(custom.agent); }} disabled={!custom.agent}>{custom.author ?? (user ? t('workspace-you') : 'Agent')}</button>
       <time dateTime={message.createdAt.toISOString()}>{message.createdAt.toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' })}</time>
       {custom.delivery && <span className={`delivery delivery-${custom.delivery}`}>{custom.delivery === 'queued' ? t('workspace-awaiting-delivery') : labels[custom.delivery] ?? custom.delivery}</span>}
+      {custom.state === 'streaming' && <span className="delivery" role="status">{t('progress-text-streaming')}</span>}
+      {custom.state === 'interrupted' && <span className="delivery delivery-stale">{t('progress-text-interrupted')}</span>}
+      {custom.truncated && <span className="delivery">{t('progress-text-truncated')}</span>}
     </div>
     <div className="message-content"><MessagePrimitive.GroupedParts groupBy={groupTools} indicator="never">
       {({ part }) => {
@@ -98,9 +107,11 @@ function Message() {
 const messageComponents = { Message };
 export function convertMessage(message: ChatMessage): ThreadMessageLike {
   return { id: message.id, role: message.role, createdAt: new Date(message.created_at),
-    status: message.role === 'assistant' ? { type: 'complete', reason: 'stop' } : undefined,
+    status: message.role === 'assistant' ? message.state === 'streaming' ? { type: 'running' }
+      : message.state === 'interrupted' ? { type: 'incomplete', reason: 'cancelled' }
+      : { type: 'complete', reason: 'stop' } : undefined,
     content: message.content.map(part => part.type === 'text' ? { ...part, text: formatMessage(part.text) } : part) as unknown as ThreadMessageLike['content'],
-    metadata: { custom: { author: formatMessage(message.author), agent: message.agent_id, delivery: message.delivery } } };
+    metadata: { custom: { author: formatMessage(message.author), agent: message.agent_id, delivery: message.delivery, state: message.state, truncated: message.truncated } } };
 }
 function Transcript({ data, loadEarlier, limit }: { data: Workspace; loadEarlier: () => void; limit: number }) {
   useLocale();

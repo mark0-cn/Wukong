@@ -345,3 +345,11 @@ Register supplied libc/loader with `file_put`; `runtime_profile` reads target/li
 ### Mitigation evidence layers
 
 `mitigation_profile` separates static declarations, worker support and owned-process runtime observations; `mitigation_analysis` interprets their experimental constraints. Debugger/interactive sessions are supported, not arbitrary PIDs. Optional `address` queries only its mapping permissions. CET ELF notes do not prove runtime enablement; SHSTK is per-thread, and missing fields remain unknown. Seccomp mode 2 does not imply a syscall allowlist. Reobserve after environment/mapping changes.
+
+Tool rows derive filenames, module-relative addresses and decompiled function names from recorded data. Available decompiler results show a C preview linked to the original evidence ID, capped at 12 lines/1600 characters with explicit truncation. Raw parameters/results still expand on demand; previews do not establish independent verification.
+
+Background jobs update their originating tool row and the active-operation bar from persisted worker status. Returning a job ID does not mean execution has finished. Elapsed time uses worker timestamps; attempt/success counts appear only when reported. A failed validation predicate remains a failed outcome even if the worker process completed. Jobs are bound to the run, call, agent generation and target hash; earlier-generation work is marked and excluded from current activity. These views do not change job ownership or independent verification gates.
+
+Public narration streams into one stable message per agent generation/model request, with at most one persisted snapshot per 250 ms and a 64 Ki character display bound. Final text replaces that message. Paused, failed or disconnected controllers leave clearly marked partial text; legacy completed events remain readable. Only public text is projected, never reasoning. This does not guarantee a particular sentence, number of agents or successful analysis result.
+
+The first controller start is labeled as a new analysis; a later start after a pause or controller recovery is labeled as resumed. These labels follow persisted lifecycle events.

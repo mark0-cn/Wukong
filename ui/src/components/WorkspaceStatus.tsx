@@ -1,6 +1,7 @@
 import { t, text, useLocale } from '../i18n';
 import type { Host, Run, Workspace } from '../types';
 import { compact, labels, StateIcon } from './Status';
+import { ToolDuration } from './ToolActivity';
 
 export function WorkspaceStatus({ run, data }: { run: Run; data: Workspace }) {
   useLocale();
@@ -15,6 +16,7 @@ export function WorkspaceStatus({ run, data }: { run: Run; data: Workspace }) {
     <span className="work-status-icon"><StateIcon state={active?.state ?? run.status} /></span>
     <div><strong>{active ? text(active.title) : labels[run.status]}</strong>
       <p title={active ? active.target || active.purpose : hint}>{active ? `${active.target || active.purpose}${data.active_tools.length > 1 ? t('workspace-more-operations', { v0: data.active_tools.length - 1 }) : ''}` : hint}</p></div>
+    {active && <ToolDuration display={active} />}
   </div>;
 }
 

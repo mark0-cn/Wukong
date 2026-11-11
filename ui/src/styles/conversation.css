@@ -490,3 +490,7 @@
 .tool-inline-summary { min-width:0; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:var(--text-ui); color:var(--muted); text-align:left; }
 .message-heading .author { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .message-heading time { flex-shrink:0; }
+
+.tool-code-preview { margin: 12px 0 16px 22px; min-width: 0; }
+.tool-code-preview .code-block { margin-bottom: 6px; }
+.tool-code-preview p { font-size: var(--text-caption); overflow-wrap: anywhere; }

@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { openLink } from '../bridge';
 import { Modal } from './Modal';
 
-function Code({ text, language }: { text: string; language?: string }) {
+export function CodeBlock({ text, language }: { text: string; language?: string }) {
   useLocale();
   return <div className="code-block"><div className="code-heading"><span>{language ?? t('workspace-code')}</span>
     <CopyButton value={text} /></div>
@@ -28,7 +28,7 @@ export function Markdown({ text }: { text: string }) {
     code: ({ className, children, node }) => {
       const text = String(children).replace(/\n$/, '');
       const block = Boolean(className) || Boolean(node?.position && node.position.end.line > node.position.start.line);
-      return block ? <Code text={text} language={className?.replace('language-', '')} /> : <code>{children}</code>;
+      return block ? <CodeBlock text={text} language={className?.replace('language-', '')} /> : <code>{children}</code>;
     },
   }}>{text}</ReactMarkdown>
     {pending && <Modal title={t('workspace-open-external-link')} description={t('workspace-this-link-opens-in-your-system-browser')} onClose={() => setPending(null)}>

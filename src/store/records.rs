@@ -29,6 +29,7 @@ record!(Verification, "verification");
 record!(Evidence, "evidence");
 record!(Coverage, "coverage");
 record!(Thought, "thought");
+record!(PublicReply, "public_reply");
 impl StoredRecord for RunRecord {
     const KIND: &'static str = "run";
     fn record_id(&self) -> &str {

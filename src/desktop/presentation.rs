@@ -17,6 +17,28 @@ pub struct ToolDisplay {
     pub summary: DisplayText,
     pub duration_ms: Option<i64>,
     pub evidence_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<CodePreview>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job: Option<JobDisplay>,
+}
+#[derive(Clone, Serialize)]
+pub struct JobDisplay {
+    pub id: String,
+    pub state: JobState,
+    pub stale: bool,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+    pub attempts: Option<u64>,
+    pub successes: Option<u64>,
+}
+#[derive(Clone, Serialize)]
+pub struct CodePreview {
+    pub language: String,
+    pub text: String,
+    pub truncated: bool,
+    pub evidence_id: String,
 }
 #[derive(Clone, Serialize)]
 pub struct ChatMessage {
@@ -27,6 +49,9 @@ pub struct ChatMessage {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub content: Vec<ChatPart>,
     pub delivery: Option<MessageDelivery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<ReplyState>,
+    pub truncated: bool,
 }
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -67,157 +92,25 @@ fn text<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
             .filter(|text| !text.trim().is_empty())
     })
 }
-pub fn result_summary(value: &Value) -> DisplayText {
-    summary(value, 0)
+mod tools;
+pub use tools::{result_summary, tool_display};
+mod jobs;
+pub use jobs::with_job;
+
+#[derive(Default)]
+pub struct TranscriptState<'a> {
+    pub target_name: &'a str,
+    pub jobs: &'a [JobRecord],
+    pub replies: &'a [PublicReply],
+    pub controller_live: bool,
 }
-fn summary(value: &Value, depth: usize) -> DisplayText {
-    if depth > 6 {
-        return DisplayText::default();
-    }
-    match value {
-        Value::String(text) => serde_json::from_str::<Value>(text)
-            .ok()
-            .map(|value| summary(&value, depth + 1))
-            .filter(|text| !text.is_empty())
-            .unwrap_or_else(|| excerpt(text, 600).into()),
-        Value::Array(items) => items
-            .iter()
-            .map(|item| summary(item, depth + 1))
-            .find(|text| !text.is_empty())
-            .unwrap_or_default(),
-        Value::Object(map) => {
-            if let Some(text) = text(
-                value,
-                &[
-                    "error",
-                    "summary",
-                    "answer",
-                    "message",
-                    "stdout",
-                    "stderr",
-                    "text",
-                    "description",
-                ],
-            ) {
-                return excerpt(text, 600).into();
-            }
-            // These are technical result fields, not translated raw evidence.
-            let facts = ["format", "architecture", "arch", "status", "exit_code"]
-                .into_iter()
-                .filter_map(|key| {
-                    map.get(key)
-                        .filter(|v| v.is_string() || v.is_number())
-                        .map(|value| {
-                            format!(
-                                "{key}: {}",
-                                value
-                                    .as_str()
-                                    .map(str::to_owned)
-                                    .unwrap_or_else(|| value.to_string())
-                            )
-                        })
-                })
-                .collect::<Vec<_>>();
-            if !facts.is_empty() {
-                return facts.join(" · ").into();
-            }
-            for key in ["matches", "functions", "strings", "findings", "results"] {
-                if let Some(Value::Array(items)) = map.get(key) {
-                    return UiMessage::new(format!("result-{key}"))
-                        .arg("count", items.len())
-                        .into();
-                }
-            }
-            for key in ["result", "content", "output", "value", "data"] {
-                if let Some(value) = map.get(key) {
-                    let text = summary(value, depth + 1);
-                    if !text.is_empty() {
-                        return text;
-                    }
-                }
-            }
-            DisplayText::default()
-        }
-        _ => DisplayText::default(),
-    }
-}
-pub fn tool_display(call: &ToolCallRecord, agent: Option<&AgentSummary>) -> ToolDisplay {
-    let terminal = agent.is_some_and(|agent| agent.status.terminal());
-    let paused = agent.is_some_and(|agent| agent.status == Status::BudgetPaused);
-    let state = match call.state {
-        CallState::Prepared => "queued",
-        CallState::Running if paused => "paused",
-        CallState::Running if terminal => "interrupted",
-        CallState::Running => "running",
-        CallState::Completed => "completed",
-        CallState::Failed => "failed",
-        CallState::Uncertain => "uncertain",
-    };
-    let target = text(
-        &call.arguments,
-        &[
-            "path",
-            "function",
-            "function_name",
-            "address",
-            "query",
-            "pattern",
-            "name",
-            "job_id",
-            "evidence_id",
-            "scope",
-        ],
-    )
-    .map(|text| excerpt(text, 180))
-    .unwrap_or_else(|| {
-        call.arguments["argv"]
-            .as_array()
-            .map(|argv| {
-                excerpt(
-                    &argv
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    180,
-                )
-            })
-            .unwrap_or_default()
-    });
-    let purpose = text(&call.arguments, &["description", "objective", "task"])
-        .map(|text| excerpt(text, 240))
-        .unwrap_or_default();
-    let summary = call
-        .result
-        .as_ref()
-        .map(result_summary)
-        .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| match state {
-            "completed" | "failed" | "uncertain" | "paused" | "interrupted" => {
-                UiMessage::new(format!("result-{state}")).into()
-            }
-            _ => DisplayText::default(),
-        });
-    ToolDisplay {
-        call_id: call.id.clone(),
-        title: tool_title(&call.name).into(),
-        target,
-        purpose,
-        state: state.into(),
-        summary,
-        duration_ms: matches!(call.state, CallState::Completed | CallState::Failed).then_some(
-            (call.updated_at - call.created_at)
-                .num_milliseconds()
-                .max(0),
-        ),
-        evidence_id: call.evidence_id.clone(),
-    }
-}
+
 pub fn transcript(
     events: &[Event],
     calls: &[ToolCallRecord],
     agents: &[AgentSummary],
     mail: &[Message],
+    state: &TranscriptState<'_>,
 ) -> Vec<ChatMessage> {
     let agents: BTreeMap<_, _> = agents
         .iter()
@@ -243,6 +136,8 @@ pub fn transcript(
             created_at: event.created_at,
             content: vec![],
             delivery: None,
+            state: None,
+            truncated: false,
         };
         if matches!(event.kind.as_str(), "tool.started" | "tool.finished") {
             let Some(id) = event.data["call_id"].as_str() else {
@@ -254,7 +149,16 @@ pub fn transcript(
             let Some(call) = by_call.get(id) else {
                 continue;
             };
-            let display = tool_display(call, agents.get(call.agent_id.as_str()).copied());
+            let display = with_job(
+                tool_display(
+                    call,
+                    agents.get(call.agent_id.as_str()).copied(),
+                    state.target_name,
+                ),
+                call,
+                agents.get(call.agent_id.as_str()).copied(),
+                state.jobs,
+            );
             message.id = format!("call-{}", call.id);
             message.created_at = call.created_at;
             message.content.push(ChatPart::ToolCall {
@@ -262,7 +166,40 @@ pub fn transcript(
                 tool_name: call.name.clone(),
                 args: json!({"display":display}),
                 result: call.result.as_ref().map(|_| json!({"display":display})),
-                is_error: matches!(call.state, CallState::Failed | CallState::Uncertain),
+                is_error: matches!(display.state.as_str(), "failed" | "uncertain"),
+            });
+        } else if matches!(event.kind.as_str(), "model.text" | "model.text.started")
+            && event.data["reply_id"].is_string()
+        {
+            let Some(reply) = state.replies.iter().find(|reply| {
+                Some(reply.id.as_str()) == event.data["reply_id"].as_str()
+                    && reply.run_id == event.run_id
+                    && Some(reply.agent_id.as_str()) == event.agent_id.as_deref()
+            }) else {
+                continue;
+            };
+            if !seen.insert(reply.id.clone()) || reply.text.trim().is_empty() {
+                continue;
+            }
+            message.id = reply.id.clone();
+            message.created_at = reply.created_at;
+            message.state = Some(
+                if reply.state == ReplyState::Streaming
+                    && (!state.controller_live
+                        || agents.get(reply.agent_id.as_str()).is_none_or(|agent| {
+                            agent.generation != reply.generation
+                                || agent.status.terminal()
+                                || agent.status == Status::BudgetPaused
+                        }))
+                {
+                    ReplyState::Interrupted
+                } else {
+                    reply.state
+                },
+            );
+            message.truncated = reply.truncated;
+            message.content.push(ChatPart::Text {
+                text: reply.text.clone().into(),
             });
         } else {
             let content = match event.kind.as_str() {
@@ -293,6 +230,7 @@ pub fn transcript(
                     None => UiMessage::new("system-analysis-paused-progress-is-saved").into(),
                 }),
                 "run.resumed" => Some(UiMessage::new("transcript-resumed").into()),
+                "run.started" => Some(UiMessage::new("transcript-started").into()),
                 _ => None,
             };
             let Some(content) = content else {
@@ -320,6 +258,8 @@ pub fn transcript(
                 text: mail.content.clone().into(),
             }],
             delivery: Some(mail.envelope.delivery),
+            state: None,
+            truncated: false,
         });
     }
     messages.sort_by(|a, b| {
@@ -375,7 +315,16 @@ mod tests {
                 created_at: now(),
             })
             .collect::<Vec<_>>();
-        let messages = transcript(&events, &[call.clone()], &[], &[]);
+        let messages = transcript(
+            &events,
+            &[call.clone()],
+            &[],
+            &[],
+            &TranscriptState {
+                target_name: "sample.elf",
+                ..Default::default()
+            },
+        );
         assert_eq!(messages.len(), 1);
         let ChatPart::ToolCall { args, is_error, .. } = &messages[0].content[0] else {
             panic!("tool missing")
@@ -385,7 +334,7 @@ mod tests {
         call.state = CallState::Completed;
         call.result = Some(json!({"matches":[1,2,3]}));
         assert_eq!(
-            tool_display(&call, None)
+            tool_display(&call, None, "sample.elf")
                 .summary
                 .render(crate::i18n::Locale::ZhCn),
             "返回 3 项匹配"

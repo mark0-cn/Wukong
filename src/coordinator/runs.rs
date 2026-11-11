@@ -112,6 +112,10 @@ impl Coordinator {
             if run.status.terminal() {
                 bail!("terminal run cannot be resumed");
             }
+            let first_start = run.status != Status::BudgetPaused
+                && !tx.has_event(run_id, "controller.started")?
+                && !tx.has_event(run_id, "run.started")?
+                && !tx.has_event(run_id, "run.resumed")?;
             if let Some(budget) = budget {
                 run.budget = budget;
             }
@@ -140,7 +144,16 @@ impl Coordinator {
                     tx.save_record(&a)?;
                 }
             }
-            tx.event(run_id, None, "run.resumed", json!({}))?;
+            tx.event(
+                run_id,
+                None,
+                if first_start {
+                    "run.started"
+                } else {
+                    "run.resumed"
+                },
+                json!({}),
+            )?;
             Ok(())
         })
     }

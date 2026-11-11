@@ -662,6 +662,40 @@ fn pause_resume_preserves_an_unfinished_wait() {
 }
 
 #[test]
+fn first_start_and_pause_or_crash_recovery_have_distinct_events() {
+    let (_dir, store, c, run) = fixture();
+    c.resume(&run.id, None).unwrap();
+    let events = store.events(&run.id, 0, 100).unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "run.started")
+            .count(),
+        1
+    );
+    assert!(!events.iter().any(|event| event.kind == "run.resumed"));
+    c.pause_budget(&run.id, "operator pause").unwrap();
+    c.resume(&run.id, None).unwrap();
+    // Recovery without a preceding budget pause is also a continuation.
+    c.resume(&run.id, None).unwrap();
+    let events = store.events(&run.id, 0, 100).unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "run.started")
+            .count(),
+        1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.kind == "run.resumed")
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn information_preserves_completed_tasks_and_wait_conditions() {
     let (_dir, store, c, run) = fixture();
     let child = c

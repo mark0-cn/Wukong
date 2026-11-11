@@ -206,3 +206,5 @@ satisfied or blocked, separate from timeout. Both creation gates and runtime wai
 edges join the parent-completion dependency graph; cyclic waits are rejected
 transactionally. Wait parking and tool receipts commit together, so replay cannot
 park the same turn a second time after a lost response.
+
+The desktop transcript projects persisted calls, worker jobs and bounded public model replies. `progress` stores public snapshots using existing transaction/revision notifications; the kernel reads Rig `Partial.text` and delegates persistence through `KernelHost`. Rig retains streaming/retry ownership. Reply identity uses agent/generation/metered turn, not ECS entity IDs; late generations/turns cannot replace newer replies. Start/final events reference one reply while intermediate snapshots replace its record. Lease expiry participates in desktop revisions and marks unfinished text interrupted. Public text is presentation only and never releases completion or evidence gates.
