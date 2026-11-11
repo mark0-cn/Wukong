@@ -1,0 +1,31 @@
+name: Ubuntu dependency acceptance
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'scripts/ci/install_apt.py'
+      - 'tests/automation/test_install_apt.py'
+      - 'tests/acceptance/check_ci_apt.py'
+      - '.github/workflows/apt-acceptance.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: apt-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apt:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install real packages and reject a failed index download
+        timeout-minutes: 12
+        run: python tests/acceptance/check_ci_apt.py
