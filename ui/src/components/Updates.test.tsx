@@ -61,3 +61,11 @@ test('reopening during preparation retains actual progress and blocks competing 
   expect(list.children[1].getAttribute('aria-current')).toBe('step');
   expect(screen.getByRole('button', { name: '准备工具环境' }).closest('fieldset')?.disabled).toBe(true);
 });
+
+test('tools repair uses the shared update operation rather than a raw workbench result', async () => {
+  vi.mocked(api<'update_action'>).mockResolvedValue(status);
+  render(<Updates mode="tools" epoch={1} onClose={() => {}} onChanged={() => {}} />);
+  await screen.findByText('0.2.0');
+  await userEvent.click(screen.getByRole('button', { name: '自检并修复环境' }));
+  expect(vi.mocked(api<'update_action'>).mock.calls.some(([name, args]) => name === 'update_action' && args?.action === 'setup')).toBe(true);
+});

@@ -22,6 +22,7 @@ import { compact, fileName, StateIcon, Status } from './components/Status';
 import { defaultTask, NewTask, ResumeTask } from './components/TaskDialogs';
 
 import { useDesktopLifecycle } from './hooks/useDesktopLifecycle';
+import { useUpdateController } from './hooks/useUpdateController';
 import { useStartupUpdates } from './hooks/useStartupUpdates';
 
 type Confirmation = { kind: 'close'; busy: boolean } | { kind: 'stop'; agent: Agent; run: string; epoch: number };
@@ -29,6 +30,7 @@ export default function App() {
   useLocale();
   const workspace = useWorkspace();
   const { data, host } = workspace;
+  const updateController = useUpdateController(host?.epoch, workspace.reset);
   const [tab, setTab] = useState<'conversation' | 'findings' | 'overview'>('conversation');
   const wideWorkspace = useWideWorkspace();
   const [showAgents, setShowAgents] = useViewPreference<boolean | null>('agents-visible', null, optionalBooleanPreference);
@@ -56,7 +58,7 @@ export default function App() {
   const recipient = selectedAgent ?? data?.agents.find(agent => agent.id === selectedRun?.root_id);
   const draftKey = `${host?.state_dir}|${data?.selected}|${recipient?.id}`;
   const draft = drafts[draftKey] ?? { text: '', followUp: false };
-  const busy = Boolean(host?.execution || host?.pending_operations || pending);
+  const busy = Boolean(host?.execution || host?.pending_operations || updateController.working || pending);
   const anyDraft = settingsDirty || Object.values(drafts).some(value => value.text.trim()) || Boolean(target.trim() || task !== initialTask.current);
   const { close, closing } = useDesktopLifecycle({ busy, hasDraft: anyDraft,
     onConfirm: busy => setConfirmation({ kind: 'close', busy }),
@@ -80,8 +82,8 @@ export default function App() {
     workspace.selectRun(id); workspace.refresh(); setResume(undefined); setTab('conversation');
   };
   return <div className="app-shell">
-    {updates && host && <Updates epoch={host.epoch} onClose={() => setUpdates(false)} onChanged={workspace.reset} />}
-    {workbench && host && <Workbench mode={workbench} epoch={host.epoch} onClose={() => setWorkbench(null)} onChanged={workspace.refresh} />}
+    {updates && host && <Updates controller={updateController} epoch={host.epoch} onClose={() => setUpdates(false)} onChanged={workspace.reset} />}
+    {workbench && host && <Workbench controller={updateController} mode={workbench} epoch={host.epoch} onClose={() => setWorkbench(null)} onChanged={workspace.refresh} />}
     <WorkspaceSplit id="task-navigation" label={t('workspace-resize-task-list')} leading visible={showSidebar && !focused}
       side={<Sidebar names={runNames} runs={data?.runs ?? []} selected={data?.selected} host={host} onSelect={id => { workspace.selectRun(id); setTab('conversation'); }}
         onNew={() => setNewTask(true)} onSettings={() => setSettings(true)} onUpdates={() => setUpdates(true)} onTools={() => setWorkbench('tools')} onWorkbench={() => setWorkbench('challenges')} busy={busy || closing} />}>
