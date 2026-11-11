@@ -36,12 +36,12 @@ class ReuseTests(unittest.TestCase):
             if "/artifacts?" in path:
                 return dict(artifacts=[self.artifact])
             return dict(workflow_runs=[self.run])
-        self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="1", windows_run="1", linux_run="", linux_desktop_run=""))
+        self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="1", windows_run="1", linux_run="", linux_desktop_run="", windows_installer_id="", linux_installer_id="", windows_installer_run="", linux_installer_run=""))
         self.assertTrue(any("/attempts/2/jobs" in path for path in paths))
         self.run["conclusion"] = "failure"
-        self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="", windows_run="1", linux_run="", linux_desktop_run=""))
+        self.assertEqual(discover("o/r", "a" * 40, 99, request), dict(ci_run="", windows_run="1", linux_run="", linux_desktop_run="", windows_installer_id="", linux_installer_id="", windows_installer_run="", linux_installer_run=""))
         self.run["run_attempt"] = 1
-        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="", linux_run="", linux_desktop_run=""))
+        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="", linux_run="", linux_desktop_run="", windows_installer_id="", linux_installer_id="", windows_installer_run="", linux_installer_run=""))
 
     def test_whole_run_retry_reads_only_previous_completed_attempt(self):
         previous = dict(self.run, run_attempt=1, path=".github/workflows/release.yml", event="workflow_dispatch")
@@ -56,7 +56,7 @@ class ReuseTests(unittest.TestCase):
             if "/attempts/2" in path:
                 self.fail("Must not consume jobs from running attempt")
             return dict(workflow_runs=[current])
-        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="1", linux_run="", linux_desktop_run=""))
+        self.assertEqual(discover("o/r", "a" * 40, 1, request), dict(ci_run="", windows_run="1", linux_run="", linux_desktop_run="", windows_installer_id="", linux_installer_id="", windows_installer_run="", linux_installer_run=""))
 
     def test_acceptance_cli_cannot_replace_desktop_client(self):
         jobs = [dict(self.jobs[-1], name="linux-client / build")]
@@ -66,3 +66,24 @@ class ReuseTests(unittest.TestCase):
         jobs[0]["name"] = "linux-desktop-client / build"
         artifacts[0]["name"] = "linux-desktop-client-v1"
         self.assertTrue(successful_artifact("linux-desktop", jobs, artifacts))
+
+    def test_installer_reuse_pins_id_and_requires_successful_smoke_job(self):
+        job = dict(self.jobs[-1], name="windows-installer / build")
+        artifact = dict(self.artifact, id=456, name="windows-installer-v1")
+        def request(path):
+            if "/attempts/" in path:
+                return dict(jobs=[job], total_count=1)
+            if "/artifacts?" in path:
+                return dict(artifacts=[artifact])
+            return dict(workflow_runs=[self.run])
+        result = discover("o/r", "a" * 40, 99, request)
+        self.assertEqual(result["windows_installer_id"], "456")
+        self.assertEqual(result["windows_installer_run"], "1")
+        for bad in (dict(expired=True), dict(name="windows-installer"), dict(created_at="2026-01-01T00:00:00Z")):
+            original = artifact.copy()
+            artifact.update(bad)
+            self.assertEqual(discover("o/r", "a" * 40, 99, request)["windows_installer_id"], "")
+            artifact.clear()
+            artifact.update(original)
+        job["conclusion"] = "failure"
+        self.assertEqual(discover("o/r", "a" * 40, 99, request)["windows_installer_id"], "")
