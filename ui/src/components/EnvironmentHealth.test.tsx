@@ -9,3 +9,9 @@ test('a configured environment with an offline daemon does not claim tool health
   expect(within(screen.getByText('工具自检').parentElement!).getByText('未检查')).toBeTruthy();
   expect(screen.getByText('技术详情').closest('details')?.open).toBe(false);
 });
+
+test('a workspace configuration change invalidates a previously successful observation', () => {
+  render(<EnvironmentHealth epoch={2} health={{ epoch: 1, configured: true, docker: true, running: true, tools: true, checked_at: '2026-11-11T00:00:00Z', tools_checked_at: '2026-11-11T00:00:00Z', image: null, checks: {}, error: null }} />);
+  expect(screen.queryByText('通过')).toBeNull();
+  expect(screen.getAllByText('未检查')).toHaveLength(4);
+});

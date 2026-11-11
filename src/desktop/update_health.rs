@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Default, Serialize)]
 pub struct Health {
     pub configured: bool,
+    pub epoch: Option<u64>,
     pub docker: Option<bool>,
     pub running: Option<bool>,
     pub tools: Option<bool>,
@@ -17,10 +18,11 @@ pub struct Health {
     pub error: Option<Message>,
 }
 impl Health {
-    pub fn verified_now() -> Self {
+    pub fn verified_now(epoch: u64) -> Self {
         let timestamp = chrono::Utc::now().to_rfc3339();
         Self {
             configured: true,
+            epoch: Some(epoch),
             docker: Some(true),
             running: Some(true),
             tools: Some(true),
@@ -30,12 +32,13 @@ impl Health {
         }
     }
 }
-pub fn check(config: &AppConfig, full: bool) -> Result<Health> {
+pub fn check(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     let environment = workbench.environment().ok();
     let mut health = Health {
         configured: environment.is_some(),
+        epoch: Some(epoch),
         checked_at: Some(chrono::Utc::now().to_rfc3339()),
         image: environment.as_ref().map(|e| e.image.clone()),
         ..Default::default()
@@ -113,7 +116,7 @@ mod tests {
                 "network": workbench.name("offline"), "volume": workbench.name("state")
             }),
         )?;
-        let health = check(&config, true)?;
+        let health = check(&config, true, 1)?;
         assert!(health.configured);
         assert_eq!(health.docker, Some(false));
         assert_eq!(health.tools, None);

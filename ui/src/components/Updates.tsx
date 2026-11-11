@@ -32,7 +32,7 @@ export function Updates({ epoch, onClose, onChanged, controller, mode = 'updates
       {!status?.needs_setup && <div><span className="muted">{t('updates-available-version')}</span><strong>{status?.available ?? t('updates-no-update-found-yet')}</strong></div>}
       {(!status || status.needs_setup) && <div><span className="muted">{t('ui-tools-environment')}</span><strong>{!status ? t('updates-loading') : status.needs_setup ? busy ? t('updates-setup-working') : failure ? t('updates-setup-failed') : t('updates-setup-required') : t('updates-health-configured')}</strong></div>}
     </div>
-    {status && !status.needs_setup && !busy && <EnvironmentHealth health={status?.health} />}
+    {status && !status.needs_setup && !busy && <EnvironmentHealth epoch={epoch} health={status?.health} />}
     {status?.needs_setup && <SetupProgress step={status.environment_step} busy={busy} failed={Boolean(failure)} />}
     <ImagePullProgress value={status?.image_progress} version={status?.image_version} busy={status?.phase === 'pulling'} />
     {!failure && <p className="update-status" role="status">{status?.cancelling ? t('updates-cancelling') : busy && status?.message ? message(status.message) : status?.needs_setup && status.phase !== 'cancelled' ? t('updates-setup-ready-to-start') : (status?.message && message(status.message)) || t('updates-check-for-updates-or-prepare-the-current')}</p>}
