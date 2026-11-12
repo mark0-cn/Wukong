@@ -20,6 +20,7 @@ class InteractSession:
         self.directory = root / "interact" / self.id
         self.directory.mkdir(parents=True)
         self.lock = threading.Lock()
+        self.drained = threading.Event()
         self.dead = False
         self.closed = False
         self.buffer = bytearray()
@@ -97,6 +98,7 @@ class InteractSession:
         with self.lock:
             self.dead = True
             state = "closed" if self.closed else "exited"
+            self.drained.set()
         self.persist(state)
 
     def write(self, data, read_timeout_secs, quiet_ms=250):
@@ -106,17 +108,25 @@ class InteractSession:
                 self.process.stdin.write(data)
                 self.process.stdin.flush()
                 self.last_data = time.time()
-        if exited:
-            return self.snapshot("exited", data_sent=False)
         deadline = time.monotonic() + read_timeout_secs
+        if exited:
+            return self.exited_snapshot(deadline, data_sent=False)
         while time.monotonic() < deadline:
             with self.lock:
                 exited = self.process.poll() is not None
                 quiet = time.time() - self.last_data >= quiet_ms / 1000.0
-            if exited or quiet:
-                return self.snapshot("exited" if exited else "running")
+            if exited:
+                return self.exited_snapshot(deadline)
+            if quiet:
+                return self.snapshot("running")
             time.sleep(0.02)
         return self.snapshot("running", timed_out=True)
+
+    def exited_snapshot(self, deadline, data_sent=True):
+        # A signaled leader can still have unread bytes in its stdout pipe.
+        # Keep the caller's read deadline, including inherited open writers.
+        complete = self.drained.wait(max(0, deadline - time.monotonic()))
+        return self.snapshot("exited", data_sent=data_sent, timed_out=not complete)
 
     def snapshot(self, state, data_sent=True, timed_out=False):
         with self.lock:

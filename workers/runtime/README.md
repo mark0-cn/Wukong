@@ -143,7 +143,7 @@ Relay-managed daemon startup allows 30 seconds for initialization, including the
 | `debug.command` | `session_id`, one GDB/MI `command`, optional `timeout_secs` |
 | `debug.events`, `debug.close` | `session_id`; bounded async records / stop session |
 | `interact.start` | `argv`, optional `env`; a persistent interactive process with a worker-owned `session_id` |
-| `interact.write` | `session_id`, `data_base64`, optional `read_timeout_secs`; writes stdin and returns newly produced bounded output |
+| `interact.write` | `session_id`, `data_base64`, optional `read_timeout_secs`; writes stdin and returns newly produced bounded output. After leader exit, waits for stdout EOF up to the read deadline; `timed_out` can remain true while final pipe output is pending, and `data_sent=false` means no new write was attempted. |
 | `interact.close` | `session_id`; terminate the session's process tree |
 | `angr.solve` | `target`, `find`, optional `avoid`/`stdin_length`/`max_steps`/`timeout_secs`/`printable_only`; a bounded symbolic-execution job whose result JSON carries `input_base64` and exploration stats |
 | `crash.replay` | `target`, `input`, `args` (`@@` input substitution), timeout; job |

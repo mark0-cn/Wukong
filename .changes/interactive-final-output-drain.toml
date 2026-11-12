@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Wait within the interactive read deadline for stdout to drain after a process exits, so fast argv-file targets retain their final output. Pending pipe output remains bounded by the timeout and can be collected by a later read without resending input."
+zh_CN = "交互进程退出后，在读取期限内等待 stdout 收尾，保留快速 argv-file 目标的最后输出。尚未收完的管道输出仍受超时约束，后续读取可继续收集，无须重发输入。"

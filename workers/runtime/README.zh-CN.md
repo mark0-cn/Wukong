@@ -107,7 +107,7 @@ JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`docto
 | `debug.command` | `session_id`、一条 GDB/MI `command`、可选 `timeout_secs` |
 | `debug.events`, `debug.close` | `session_id`；有界异步记录 / 关闭 |
 | `interact.start` | `argv`、可选 `env`；持久化交互进程与 `session_id` |
-| `interact.write` | `session_id`, `data_base64`、可选 `read_timeout_secs`；写 stdin 并返回新增有界输出 |
+| `interact.write` | `session_id`, `data_base64`、可选 `read_timeout_secs`；写 stdin 并返回新增有界输出。主进程退出后，在本次读取期限内等待 stdout EOF；管道尾部输出未收完时仍可返回 `timed_out=true`，`data_sent=false` 表示未尝试新的写入。 |
 | `interact.close` | `session_id`；终止会话进程树 |
 | `angr.solve` | `target`, `find`、可选 `avoid`/`stdin_length`/`max_steps`/`timeout_secs`/`printable_only`；有界符号执行 job，结果含 `input_base64` 和探索统计 |
 | `crash.replay` | `target`, `input`, `args`（`@@` 替换输入）、timeout；返回 job |
