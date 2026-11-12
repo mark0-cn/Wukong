@@ -200,7 +200,7 @@ fn check_persona(
     let input = fs::File::open("NUL")?;
     let environment = scratch_environment(system_environment, &scratch_path);
     let executable = std::env::current_exe()?;
-    let process = Spawn {
+    let spawn = Spawn {
         executable: &executable,
         arguments: &[
             "isolation-probe".into(),
@@ -213,8 +213,19 @@ fn check_persona(
         environment: &environment,
         log: &log,
         input: &input,
-    }
-    .sandbox(&persona, scratch)?;
+    };
+    let process = match spawn.sandbox(&persona, scratch) {
+        Ok(process) => process,
+        Err(error) => {
+            let diagnostic = match spawn.sandbox_creation_diagnostics(&persona, &error) {
+                Ok(value) => value,
+                Err(reason) => json!({"diagnostic_error":format!("{reason:#}")}),
+            };
+            anyhow::bail!(
+                "owned {role:?} sandbox creation failed: {error:#}; controls: {diagnostic}"
+            );
+        }
+    };
     wait(&process, Duration::from_secs(15))?;
     let code = process.exit_code()?;
     process.stop(Duration::from_secs(10))?;

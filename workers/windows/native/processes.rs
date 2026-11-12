@@ -253,8 +253,8 @@ fn seal_sandbox_token(
     expected_sid: windows_sys::Win32::Security::PSID,
 ) -> Result<()> {
     use windows_sys::Win32::Security::{
-        AdjustTokenPrivileges, SE_PRIVILEGE_REMOVED, TOKEN_ADJUST_PRIVILEGES,
-        TOKEN_APPCONTAINER_INFORMATION, TOKEN_QUERY, TokenAppContainerSid, TokenIsAppContainer,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_APPCONTAINER_INFORMATION, TOKEN_QUERY, TokenAppContainerSid,
+        TokenCapabilities, TokenIsAppContainer,
     };
     let mut token = null_mut();
     security::check(unsafe {
@@ -302,6 +302,33 @@ fn seal_sandbox_token(
         security::sid_text(app.TokenAppContainer)? == security::sid_text(expected_sid)?,
         "native target AppContainer SID changed"
     );
+    unsafe {
+        GetTokenInformation(token.0, TokenCapabilities, null_mut(), 0, &mut bytes);
+    }
+    ensure!(
+        bytes >= size_of::<u32>() as u32 && bytes < 65536,
+        "invalid created token capability data"
+    );
+    let mut capabilities = vec![0usize; (bytes as usize).div_ceil(size_of::<usize>())];
+    security::check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenCapabilities,
+            capabilities.as_mut_ptr().cast(),
+            bytes,
+            &mut bytes,
+        )
+    })?;
+    ensure!(
+        unsafe { *capabilities.as_ptr().cast::<u32>() } == 0,
+        "created AppContainer token has capabilities"
+    );
+    remove_token_privileges(&token)
+}
+
+fn remove_token_privileges(token: &Handle) -> Result<()> {
+    use windows_sys::Win32::Security::{AdjustTokenPrivileges, SE_PRIVILEGE_REMOVED};
+    let mut bytes = 0;
     unsafe {
         GetTokenInformation(token.0, TokenPrivileges, null_mut(), 0, &mut bytes);
     }
@@ -519,6 +546,20 @@ pub struct Spawn<'a> {
     pub log: &'a File,
     pub input: &'a File,
 }
+enum Start {
+    Execute,
+    InspectSuspended,
+}
+#[derive(Debug)]
+struct DrainFailure(anyhow::Error);
+impl std::fmt::Display for DrainFailure {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(out, "{}", self.0)
+    }
+}
+impl std::error::Error for DrainFailure {}
+#[path = "process_creation_probe.rs"]
+mod creation_probe;
 impl Spawn<'_> {
     #[cfg(test)]
     pub(crate) fn inert_fixture(&self) -> Result<OwnedProcess> {
@@ -526,19 +567,19 @@ impl Spawn<'_> {
             self.executable == std::env::current_exe()?,
             "native fixture must execute this test binary"
         );
-        self.create(None, None, None, None)
+        self.create(None, None, None, None, Start::Execute)
     }
     pub fn worker(&self, installation: &str, account: &Account) -> Result<OwnedProcess> {
         security::require_system()?;
         let token = without_privileges(&account.logon(installation)?)?;
         let desktop = Desktop::new(&account.sid)?;
-        self.create(Some(token), Some(desktop), None, None)
+        self.create(Some(token), Some(desktop), None, None, Start::Execute)
     }
     /// Fixed trusted executables such as the packaged SSH daemon. This is never
     /// a target execution API and must not be reachable from analysis requests.
     pub(crate) fn system(&self) -> Result<OwnedProcess> {
         security::require_system()?;
-        self.create(None, None, None, None)
+        self.create(None, None, None, None, Start::Execute)
     }
     /// Resource-host thread only: private station setup is process-wide.
     pub(crate) fn sandbox(
@@ -565,7 +606,22 @@ impl Spawn<'_> {
         debugger: Option<&crate::persona::Persona>,
     ) -> Result<OwnedProcess> {
         security::require_system()?;
-        let token = without_privileges(persona.token())?;
+        // Windows prepares the lowbox namespace/profile using this ordinary
+        // role token. It remains parent-only; the actual child is suspended,
+        // checked and stripped of every privilege before its first instruction.
+        let mut token = null_mut();
+        security::check(unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                persona.token().0,
+                GetCurrentProcess(),
+                &mut token,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        })?;
+        let token = Handle(token);
         let desktop = Desktop::sandbox(&persona.sid_text()?, persona.logon_sid())?;
         let capabilities = windows_sys::Win32::Security::SECURITY_CAPABILITIES {
             AppContainerSid: persona.sid(),
@@ -579,6 +635,7 @@ impl Spawn<'_> {
             Some(desktop),
             Some(capabilities),
             Some(descriptor),
+            Start::Execute,
         )?;
         process._directory = Some(directory);
         Ok(process)
@@ -589,6 +646,7 @@ impl Spawn<'_> {
         mut desktop: Option<Desktop>,
         mut capabilities: Option<windows_sys::Win32::Security::SECURITY_CAPABILITIES>,
         descriptor: Option<crate::process_access::Policy>,
+        start: Start,
     ) -> Result<OwnedProcess> {
         security::no_links(self.executable)?;
         security::no_links(self.directory)?;
@@ -672,7 +730,12 @@ impl Spawn<'_> {
                 ),
             }
         };
-        security::check(success).context("native suspended process creation failed")?;
+        security::check(success).with_context(|| {
+            format!(
+                "native suspended process creation failed (appcontainer={})",
+                capabilities.is_some()
+            )
+        })?;
         let process = OwnedProcess {
             process: Handle(information.hProcess),
             pid: information.dwProcessId,
@@ -681,22 +744,64 @@ impl Spawn<'_> {
             _directory: None,
         };
         let thread = Handle(information.hThread);
-        if let Some(policy) = &descriptor {
-            policy
-                .verify(process.process.0)
-                .context("verify suspended resource process policy")?;
-            policy
-                .verify(thread.0)
-                .context("verify suspended resource thread policy")?;
+        let prepared: Result<()> = (|| {
+            if let Some(policy) = &descriptor {
+                policy
+                    .verify(process.process.0)
+                    .context("verify suspended resource process policy")?;
+                policy
+                    .verify(thread.0)
+                    .context("verify suspended resource thread policy")?;
+            }
+            if let Some(capabilities) = capabilities.as_ref() {
+                seal_sandbox_token(&process, capabilities.AppContainerSid)?;
+            }
+            #[cfg(test)]
+            if self
+                .environment
+                .get("WUKONG_NATIVE_SEAL_PRIVILEGES")
+                .is_some_and(|value| value == "1")
+            {
+                let mut token = null_mut();
+                security::check(unsafe {
+                    OpenProcessToken(
+                        process.process.0,
+                        windows_sys::Win32::Security::TOKEN_QUERY
+                            | windows_sys::Win32::Security::TOKEN_ADJUST_PRIVILEGES,
+                        &mut token,
+                    )
+                })?;
+                remove_token_privileges(&Handle(token))?;
+            }
+            if matches!(start, Start::Execute) {
+                ensure!(
+                    unsafe { ResumeThread(thread.0) } != u32::MAX,
+                    "cannot resume owned native child"
+                );
+            }
+            Ok(())
+        })();
+        if let Err(error) = prepared {
+            if let Err(drain) = process.stop(Duration::from_secs(10)) {
+                return Err(DrainFailure(anyhow::anyhow!(
+                    "native child preparation failed: {error:#}; Job drain failed: {drain:#}"
+                ))
+                .into());
+            }
+            return Err(error);
         }
-        if let Some(capabilities) = capabilities.as_ref() {
-            seal_sandbox_token(&process, capabilities.AppContainerSid)?;
-        }
-        ensure!(
-            unsafe { ResumeThread(thread.0) } != u32::MAX,
-            "cannot resume owned native child"
-        );
         Ok(process)
+    }
+    pub(crate) fn sandbox_creation_diagnostics(
+        &self,
+        persona: &crate::persona::Persona,
+        failure: &anyhow::Error,
+    ) -> Result<serde_json::Value> {
+        ensure!(
+            failure.downcast_ref::<DrainFailure>().is_none(),
+            "creation controls refused after an uncertain original Job drain"
+        );
+        creation_probe::inspect(self, persona)
     }
 }
 
@@ -708,7 +813,25 @@ mod tests {
         let Some(mode) = std::env::var_os("WUKONG_NATIVE_JOB_FIXTURE") else {
             return;
         };
-        if mode == "parent" || mode == "parent-exits" {
+        if mode == "privileges" {
+            let mut token = null_mut();
+            security::check(unsafe {
+                OpenProcessToken(
+                    GetCurrentProcess(),
+                    windows_sys::Win32::Security::TOKEN_QUERY,
+                    &mut token,
+                )
+            })
+            .unwrap();
+            let count = privilege_count(&Handle(token)).unwrap();
+            std::fs::write(
+                std::env::current_dir()
+                    .unwrap()
+                    .join("observed-privileges.txt"),
+                count.to_string(),
+            )
+            .unwrap();
+        } else if mode == "parent" || mode == "parent-exits" {
             let mut command = std::process::Command::new(std::env::current_exe().unwrap());
             command
                 .args([
@@ -730,6 +853,121 @@ mod tests {
             .unwrap();
             std::thread::sleep(std::time::Duration::from_secs(30));
         }
+    }
+    fn privilege_count(token: &Handle) -> Result<u32> {
+        let mut size = 0;
+        unsafe {
+            GetTokenInformation(token.0, TokenPrivileges, null_mut(), 0, &mut size);
+        }
+        ensure!(size > 0 && size < 65536, "invalid fixture privilege list");
+        let mut data = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+        security::check(unsafe {
+            GetTokenInformation(
+                token.0,
+                TokenPrivileges,
+                data.as_mut_ptr().cast(),
+                size,
+                &mut size,
+            )
+        })?;
+        Ok(unsafe { *data.as_ptr().cast::<u32>() })
+    }
+    #[test]
+    fn suspended_child_privileges_are_removed_without_changing_its_parent() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let mut parent = null_mut();
+        security::check(unsafe {
+            OpenProcessToken(
+                GetCurrentProcess(),
+                windows_sys::Win32::Security::TOKEN_QUERY,
+                &mut parent,
+            )
+        })?;
+        let parent = Handle(parent);
+        let before = privilege_count(&parent)?;
+        let mut values = BTreeMap::new();
+        for name in [
+            "SystemRoot",
+            "PATH",
+            "TEMP",
+            "TMP",
+            "SYSTEMDRIVE",
+            "PROGRAMDATA",
+        ] {
+            if let Some(value) = std::env::var_os(name) {
+                values.insert(name.into(), value);
+            }
+        }
+        values.insert("WUKONG_NATIVE_JOB_FIXTURE".into(), "privileges".into());
+        values.insert("WUKONG_NATIVE_SEAL_PRIVILEGES".into(), "1".into());
+        let log_path = temporary.path().join("fixture.log");
+        let log = File::create(&log_path)?;
+        let input = File::open("NUL")?;
+        let executable = std::env::current_exe()?;
+        let child = Spawn {
+            executable: &executable,
+            arguments: &[
+                "--exact".into(),
+                "processes::tests::native_job_fixture_entry".into(),
+                "--nocapture".into(),
+            ],
+            directory: temporary.path(),
+            environment: &values,
+            log: &log,
+            input: &input,
+        }
+        .inert_fixture()?;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !child.exited() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let code = child.exit_code()?;
+        child.stop(Duration::from_secs(10))?;
+        drop(child);
+        drop(log);
+        ensure!(
+            code == Some(0),
+            "sealed child failed: {}",
+            String::from_utf8_lossy(&crate::deployment::read_bytes(&log_path, 8192)?)
+        );
+        assert_eq!(
+            std::fs::read_to_string(temporary.path().join("observed-privileges.txt"))?,
+            "0"
+        );
+        assert_eq!(privilege_count(&parent)?, before);
+        Ok(())
+    }
+    #[test]
+    fn creation_control_drains_without_running_the_child() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let mut values = BTreeMap::new();
+        for name in ["SystemRoot", "PATH", "TEMP", "TMP"] {
+            if let Some(value) = std::env::var_os(name) {
+                values.insert(name.into(), value);
+            }
+        }
+        values.insert("WUKONG_NATIVE_JOB_FIXTURE".into(), "privileges".into());
+        let log = File::create(temporary.path().join("fixture.log"))?;
+        let input = File::open("NUL")?;
+        let executable = std::env::current_exe()?;
+        let child = Spawn {
+            executable: &executable,
+            arguments: &[
+                "--exact".into(),
+                "processes::tests::native_job_fixture_entry".into(),
+            ],
+            directory: temporary.path(),
+            environment: &values,
+            log: &log,
+            input: &input,
+        }
+        .create(None, None, None, None, Start::InspectSuspended)?;
+        assert!(!child.exited());
+        assert_eq!(child.job().active_processes()?, 1);
+        child.stop(Duration::from_secs(10))?;
+        assert_eq!(child.job().active_processes()?, 0);
+        assert!(!temporary.path().join("observed-privileges.txt").exists());
+        Ok(())
     }
     #[test]
     fn native_job_contains_spawned_descendants_before_execution_and_kills_them_together()
@@ -757,7 +995,7 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None, None, None)?;
+        .create(None, None, None, None, Start::Execute)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let leaf_path = temporary.path().join("leaf.pid");
         while !leaf_path.exists() && std::time::Instant::now() < deadline {
@@ -809,7 +1047,7 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None, None, None)?;
+        .create(None, None, None, None, Start::Execute)?;
         let leaf_path = temporary.path().join("leaf.pid");
         let deadline = Instant::now() + Duration::from_secs(10);
         while (!leaf_path.exists() || !fixture.exited()) && Instant::now() < deadline {
