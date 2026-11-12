@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import queue
-import struct
 import subprocess
 import threading
 import time
@@ -13,6 +12,7 @@ import uuid
 from worker_common import WorkerError, atomic_json, load_json, public_file, safe_env, sha256_file
 from worker_debug_operations import inspect_request, control_request
 from worker_processes import attach_windows_job, detached_options, terminate_tree
+from worker_windows_image_identity import match_module, local_symbols
 
 MAX_FRAME = 1024 * 1024
 MAX_TRANSCRIPT = 8 * 1024 * 1024
@@ -51,24 +51,6 @@ def profile(root):
     symbols = Path(root) / "files" / "symbols"
     symbols.mkdir(parents=True, exist_ok=True)
     return helper, directory, symbols, configuration
-
-
-def architecture(path):
-    with Path(path).open("rb") as stream:
-        header = stream.read(64)
-        if len(header) != 64 or header[:2] != b"MZ":
-            return None
-        offset = struct.unpack_from("<I", header, 60)[0]
-        if offset > 1024 * 1024:
-            raise ValueError("PE header offset exceeds inspection limit")
-        stream.seek(offset)
-        signature = stream.read(6)
-        if len(signature) != 6 or signature[:4] != b"PE\0\0":
-            raise ValueError("invalid PE header")
-        machine = struct.unpack_from("<H", signature, 4)[0]
-        if machine not in {0x14c, 0x8664}:
-            raise ValueError("DbgEng worker supports x86 and x64 targets")
-        return "x86" if machine == 0x14c else "x64"
 
 
 def doctor(root, trusted=False):
@@ -120,6 +102,9 @@ class DebugSession:
         target = public_file(self.root, params["target"])
         self.target_sha256 = sha256_file(target)
         self.dump_sha256 = None
+        self.image_identity = None
+        self.image_correspondence = None
+        self.symbol_identity = None
         if self.mode not in {"launch", "dump"}:
             raise ValueError("invalid Windows debugger mode")
         helper, directory, symbols, self.configuration = profile(root)
@@ -130,6 +115,11 @@ class DebugSession:
             attach_windows_job(self.process)
             threading.Thread(target=self._read, daemon=True).start()
             threading.Thread(target=self._drain_stderr, daemon=True).start()
+            self.image_identity = self._request({"operation":"identity", "kind":"pe", "path":str(target)}, 30)
+            if self.image_identity["file_sha256"] != self.target_sha256:
+                raise ValueError("staged PE changed during SDK identity inspection")
+            self.symbol_identity = local_symbols(self.image_identity, symbols, local_path,
+                lambda path:self._request({"operation":"identity", "kind":"pdb", "path":str(path)}, 30))
             timeout = params.get("timeout_secs", 30)
             if self.mode == "dump":
                 if params.get("args") or params.get("launch_spec") or params.get("input"):
@@ -137,13 +127,9 @@ class DebugSession:
                 dump = public_file(self.root, params["dump"])
                 self.dump_sha256 = sha256_file(dump)
                 request = {"operation":"open", "mode":"dump", "dump":str(dump), "timeout_secs":timeout}
-                detected = architecture(target)
-                if detected:
-                    request["architecture"] = detected
+                request["architecture"] = self.image_identity["architecture"]
             else:
-                detected = architecture(target)
-                if detected is None:
-                    raise ValueError("Windows launch requires a staged PE executable")
+                detected = self.image_identity["architecture"]
                 if broker is not None:
                     self.inferior = broker.start_debuggee(self.directory, target, params)
                 else:
@@ -155,6 +141,15 @@ class DebugSession:
                 request = {"operation":"open", "mode":"attach", "pid":self.inferior.pid,
                            "architecture":detected, "timeout_secs":timeout}
             opened = self._request(request, timeout + 5)
+            if opened.get("architecture") != self.image_identity["machine"]:
+                raise ValueError("DbgEng processor architecture does not match the staged PE")
+            observed = self._request({"operation":"inspect", "kind":"modules", "limit":256}, 30)["data"]
+            if observed["loaded_count"] != len(observed["modules"]):
+                raise ValueError("DbgEng module observations exceed the correspondence bound")
+            self.image_correspondence = {**match_module(self.image_identity, observed["modules"], target.name,
+                codeview_available=True), "engine_module_observed":True, "source":"dbgeng_module_sdk"}
+            opened["image_correspondence"] = self.image_correspondence
+            opened["symbol_identity"] = self.symbol_identity
             self.events.append({"engine":"dbgeng", "message":"opened", "payload":opened})
             self.persist("running")
         except Exception:
@@ -170,7 +165,9 @@ class DebugSession:
         atomic_json(self.directory / "session.json", {"session_id":self.id, "engine":"dbgeng", "mode":self.mode,
             "state":state, "daemon_pid":os.getpid(), "helper_pid":self.process.pid if self.process else None,
             "inferior_pid":self.inferior.pid if self.inferior else None, "target_sha256":self.target_sha256,
-            "dump_sha256":self.dump_sha256, "transcript_truncated":self.transcript_truncated, "updated_at":time.time()})
+            "dump_sha256":self.dump_sha256, "image_identity":self.image_identity,
+            "image_correspondence":self.image_correspondence, "symbol_identity":self.symbol_identity,
+            "transcript_truncated":self.transcript_truncated, "updated_at":time.time()})
 
     def _read(self):
         path = self.directory / "transcript.jsonl"
@@ -252,6 +249,7 @@ class DebugSession:
     def _envelope(self, result):
         return {**result, "session_id":self.id, "engine":"dbgeng", "target_sha256":self.target_sha256,
                 "dump_sha256":self.dump_sha256, "transcript":"debug/" + self.id + "/transcript.jsonl",
+                "image_correspondence":self.image_correspondence, "symbol_identity":self.symbol_identity,
                 "transcript_truncated":self.transcript_truncated,
                 "engine_sha256":self.configuration["engine_sha256"], "helper_sha256":self.configuration["helper_sha256"]}
 
@@ -274,7 +272,8 @@ class DebugSession:
     def profile(self):
         modules = self.inspect({"kind":"modules", "limit":256}, 30)
         return {**modules, "process":{"pid":self.inferior.pid if self.inferior else None,
-                "modules":modules["data"]["modules"], "runtime_identity_confirmed":False}}
+                "modules":modules["data"]["modules"], "runtime_identity_confirmed":False,
+                "image_correspondence":self.image_correspondence, "symbol_identity":self.symbol_identity}}
 
     def snapshot(self):
         return self._envelope({"registers":self.inspect({"kind":"registers"},30)["data"],

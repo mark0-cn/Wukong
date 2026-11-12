@@ -9,12 +9,15 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import tempfile
 import time
+import uuid
 
 from worker_common import safe_env, sha256_file
 from worker_runtime import Runtime
+from support.windows_identity import GUID, pe, dump, pdb
 
 FIXTURE = (Path(__file__).resolve().parents[2] / "windows/fixtures/probe.c").read_text(encoding="utf-8")
 
@@ -95,8 +98,14 @@ def trusted_replay(runtime, image):
     return job
 
 
-def run_architecture(root, helper, engine_dir, architecture):
-    target, pdb = build_fixture(root, architecture)
+def run_architecture(root, helper, engine_dir, architecture, prebuilt=None):
+    if prebuilt is None:
+        target, pdb = build_fixture(root, architecture)
+    else:
+        directory = root / ("fixture_" + architecture)
+        shutil.copytree(prebuilt / ("fixture_" + architecture), directory)
+        target = directory / ("fixture_" + architecture + ".exe")
+        pdb = target.with_suffix(".pdb")
     state = root / ("worker_" + architecture)
     state.mkdir()
     configuration = {"helper":str(helper), "helper_sha256":sha256_file(helper),
@@ -122,6 +131,9 @@ def run_architecture(root, helper, engine_dir, architecture):
     try:
         event = checked(runtime,"debug.events",session_id=session)["events"][0]["payload"]
         assert event["debuggee_class"] == 2 and event["debuggee_qualifier"] in {1024,1025},event
+        assert event["image_correspondence"]["codeview_matched"] is True,event
+        assert event["image_correspondence"]["byte_identity_verified"] is False,event
+        assert event["symbol_identity"]["pdb_identity_matched"] is True,event
         evidence["dump_debuggee_type"] = event
         registers = checked(runtime,"debug.inspect",session_id=session,kind="registers",limit=64)
         expected = "eip" if architecture == "x86" else "rip"
@@ -181,11 +193,182 @@ def run_architecture(root, helper, engine_dir, architecture):
     return evidence
 
 
+def reject_mismatched_identity(root, architecture, other, symbol_identity):
+    state = root / ("worker_" + architecture)
+    runtime = Runtime(state, trusted=True)
+    target = state / "files" / ("fixture_" + architecture + ".exe")
+    source_pdb = root / ("fixture_" + architecture) / ("fixture_" + architecture + ".pdb")
+    cached = state / "files/symbols" / source_pdb.name
+    params = dict(engine="dbgeng", mode="dump", target="files/" + target.name, dump="files/self.dmp")
+    # Mutate only the exact known RSDS marker in our own SDK-generated fixture,
+    # preserving dump structure. DbgEng must observe this dump GUID even while
+    # the configured cache contains the original image's matching PDB.
+    original_dump = (state / "files/self.dmp").read_bytes()
+    marker = b"RSDS" + uuid.UUID(hex=symbol_identity["guid"]).bytes_le + struct.pack("<I",symbol_identity["age"])
+    assert marker in original_dump
+    changed_dump = original_dump.replace(marker, b"RSDS" + uuid.UUID(int=1).bytes_le + marker[20:])
+    wrong_dump = checked(runtime,"file.put",path="wrong-dump-guid.dmp",
+        data_base64=__import__("base64").b64encode(changed_dump).decode())
+    try:
+        checked(runtime,"debug.start", **{**params, "dump":wrong_dump["path"]})
+        raise AssertionError("SDK module identity was inferred from the cache instead of the dump")
+    except ValueError as error:
+        assert "correspond" in str(error),error
+    assert (state / "files/self.dmp").read_bytes() == original_dump
+    assert not runtime.active_resources()
+    changed = bytearray(target.read_bytes())
+    pe = struct.unpack_from("<I", changed, 60)[0]
+    timestamp = struct.unpack_from("<I", changed, pe + 8)[0]
+    struct.pack_into("<I", changed, pe + 8, timestamp ^ 1)
+    wrong = checked(runtime, "file.put", path="wrong-timestamp.exe",
+        data_base64=__import__("base64").b64encode(changed).decode(), executable=True)
+    try:
+        checked(runtime, "debug.start", **{**params, "target":wrong["path"]})
+        raise AssertionError("dump accepted a mismatched PE timestamp")
+    except ValueError as error:
+        assert "correspond" in str(error), error
+    assert not runtime.active_resources()
+    try:
+        other_pdb = root / ("fixture_" + other) / ("fixture_" + other + ".pdb")
+        shutil.copyfile(other_pdb, cached)
+        try:
+            checked(runtime, "debug.start", **params)
+            raise AssertionError("debugger accepted a valid PDB for another PE")
+        except ValueError as error:
+            assert "GUID/age" in str(error), error
+        assert not runtime.active_resources()
+    finally:
+        shutil.copyfile(source_pdb, cached)
+    # The index SDK accepts images as well as PDBs. A matching PE renamed to
+    # .pdb must not qualify as the local symbol file merely by carrying RSDS.
+    try:
+        shutil.copyfile(target, cached)
+        try:
+            checked(runtime, "debug.start", **params)
+            raise AssertionError("debugger accepted an image renamed to .pdb")
+        except ValueError as error:
+            assert "PDB" in str(error), error
+        assert not runtime.active_resources()
+    finally:
+        shutil.copyfile(source_pdb, cached)
+    # The matching producer PDB still exists at the path embedded in the image.
+    # A fresh helper must not load it when the explicitly configured cache lacks it.
+    held = cached.with_name("held-" + cached.name)
+    assert not held.exists()
+    cached.rename(held)
+    try:
+        opened = checked(runtime, "debug.start", **{**params, "mode":"launch", "dump":None})
+        session = opened["session_id"]
+        try:
+            event = checked(runtime, "debug.events", session_id=session)["events"][0]["payload"]
+            assert event["symbol_identity"]["status"] == "missing", event
+            try:
+                checked(runtime, "debug.control", session_id=session, action="breakpoint_add",
+                        symbol=target.stem+"!fixture_step", request_id="outside-symbol-refusal")
+                raise AssertionError("helper loaded symbols from outside the configured cache")
+            except ValueError:
+                pass
+            assert checked(runtime, "debug.inspect", session_id=session, kind="registers")["data"]["registers"]
+        finally:
+            checked(runtime, "debug.close", session_id=session)
+    finally:
+        held.rename(cached)
+    assert not runtime.active_resources()
+    return {"architecture":architecture,"wrong_pe_rejected":True,"wrong_pdb_rejected":True,"wrong_dump_guid_rejected":True,"renamed_pe_as_pdb_rejected":True,
+            "missing_symbols_reported":True,"embedded_outside_pdb_ignored":True,"active_resources":0}
+
+
+def native_format_boundaries(root, helper, engine):
+    """Run the actual native parser/SDK, preserving inert hostile format fixtures."""
+    directory = root / "identity-formats"
+    directory.mkdir()
+    symbols = directory / "symbols"
+    symbols.mkdir()
+    def request(kind, data, reject=False):
+        path = directory / ("inert." + {"pe":"exe", "pdb":"pdb", "dump":"dmp"}[kind])
+        path.write_bytes(data)
+        operation = ({"operation":"identity", "kind":kind, "path":str(path)} if kind != "dump" else
+                     {"operation":"open", "mode":"dump", "dump":str(path), "architecture":"x64", "timeout_secs":2})
+        process = subprocess.run([str(helper),str(engine),str(symbols)],
+            input=(json.dumps({"id":1, **operation})+'\n'+json.dumps({"id":2,"operation":"close"})+'\n').encode(),
+            capture_output=True, env=safe_env(), timeout=12)
+        responses = [json.loads(line) for line in process.stdout.splitlines()]
+        assert responses and responses[0]["id"] == 1, (process.returncode, process.stderr[-2048:])
+        response = responses[0]
+        if reject:
+            assert "error" in response, response
+        else:
+            assert process.returncode == 0 and "result" in response, response
+            assert response["result"]["file_sha256"] == hashlib.sha256(data).hexdigest(), response
+        return response
+    positives = []
+    for machine, architecture in [(0x14c,"x86"),(0x8664,"x64")]:
+        observed = request("pe", pe(machine))["result"]
+        assert observed["architecture"] == architecture, observed
+        assert observed["codeview"] == {"format":"RSDS","guid":GUID.hex,"age":7,"pdb_name":"probe.pdb"}, observed
+        positives.append(observed)
+    no_cv = pe(record=b"NB10inert unsupported identity")
+    assert request("pe",no_cv)["result"]["codeview"] is None
+    for mutation in ["offset","optional","debug","cv","duplicate"]:
+        data = pe()
+        if mutation == "offset": struct.pack_into("<I",data,60,0xffffffff)
+        elif mutation == "optional": struct.pack_into("<H",data,148,65535)
+        elif mutation == "debug": struct.pack_into("<II",data,152+112+48,0x90000000,28)
+        elif mutation == "cv": struct.pack_into("<I",data,512+16,0xffffffff)
+        else:
+            struct.pack_into("<I",data,152+112+52,56)
+            data[540:568] = data[512:540]
+        request("pe",data,reject=True)
+    # Real compiler PDBs are exercised by both live and dump sessions. These
+    # invalid MSF fixtures exercise the SDK's own refusal, not a Python parser.
+    for mutation in ["block","map","count","version"]:
+        data = pdb()
+        if mutation == "block": struct.pack_into("<I",data,32,0xffffffff)
+        elif mutation == "map": struct.pack_into("<I",data,512*3,99)
+        elif mutation == "count": struct.pack_into("<I",data,512*5,0xffffffff)
+        else: struct.pack_into("<I",data,512*4,0)
+        request("pdb",data,reject=True)
+    for mutation in ["count","length","name","duplicate"]:
+        data = dump([{}])
+        if mutation == "count": struct.pack_into("<I",data,48,0xffffffff)
+        elif mutation == "length": struct.pack_into("<I",data,36,0xffffffff)
+        elif mutation == "name":
+            location = struct.unpack_from("<I",data,52+20)[0]
+            struct.pack_into("<I",data,location,1)
+        else:
+            struct.pack_into("<I",data,8,2)
+            data[44:56] = data[32:44]
+        request("dump",data,reject=True)
+    path = directory / "protocol.exe"
+    path.write_bytes(pe())
+    sequence = [{"operation":"identity","kind":"pe","path":str(path)}, {"operation":"doctor"},
+                {"operation":"identity","kind":"pdb","path":str(path)}, {"operation":"close"}]
+    process = subprocess.run([str(helper),str(engine),str(symbols)],
+        input=b"".join((json.dumps({"id":i+1, **row})+'\n').encode() for i,row in enumerate(sequence)),
+        capture_output=True, env=safe_env(), timeout=12)
+    replies = [json.loads(line) for line in process.stdout.splitlines()]
+    assert len(replies) == 4 and replies[0]["result"]["file_sha256"] == sha256_file(path), replies
+    assert replies[1]["result"]["engine"] == "dbgeng", replies
+    assert "before DbgEng" in replies[2].get("error", "") and not replies[2]["session_invalidated"], replies
+    assert replies[3]["result"]["state"] == "closed", replies
+    # A partially attempted engine initialization is terminal even if no Engine
+    # object was returned; later requests must not re-enter DbgHelp.
+    process = subprocess.run([str(helper),str(symbols),str(symbols)],
+        input=b'{"id":1,"operation":"doctor"}\n'+(json.dumps({"id":2, **sequence[0]})+'\n').encode(),
+        capture_output=True, env=safe_env(), timeout=12)
+    replies = [json.loads(line) for line in process.stdout.splitlines()]
+    assert len(replies) == 1 and replies[0].get("error") and replies[0]["session_invalidated"], replies
+    return {"pe_positive":positives,"pe_negative":5,"pdb_negative":4,"dump_negative":4,
+            "identity_after_engine_rejected":True,"initialization_failure_terminal":True,
+            "format_readers":["object_pe","pinned_dbghelp_file_index","dbgeng_module_sdk"]}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state",required=True)
     parser.add_argument("--helper",required=True)
     parser.add_argument("--engine-dir",required=True)
+    parser.add_argument("--prebuilt-fixtures", help="Explicit self-built trusted x64/x86 fixture directory for a compiler-free test VM")
     args=parser.parse_args()
     if os.name != "nt":
         raise SystemExit("real DbgEng acceptance requires Windows")
@@ -195,9 +378,14 @@ def main():
     engine=Path(args.engine_dir).resolve(strict=True)
     temporary=Path(tempfile.mkdtemp(prefix="dbgeng-",dir=root))
     print(json.dumps({"attempt_directory":str(temporary)}),flush=True)
-    results=[run_architecture(temporary,helper,engine,arch) for arch in ["x64","x86"]]
+    prebuilt = Path(args.prebuilt_fixtures).resolve(strict=True) if args.prebuilt_fixtures else None
+    formats = native_format_boundaries(temporary, helper, engine)
+    results=[run_architecture(temporary,helper,engine,arch,prebuilt) for arch in ["x64","x86"]]
+    identity_checks = [reject_mismatched_identity(temporary, row["architecture"], other, row["dump_debuggee_type"]["symbol_identity"])
+                       for row, other in zip(results,["x86","x64"])]
     report={"passed":True,"scope":"trusted_development_fixture_debugger_adapter", "production_isolation_verified":False,
-            "offline_installation_verified":False,"architectures":results}
+            "offline_installation_verified":False,"architectures":results,"image_correspondence":identity_checks,
+            "native_format_boundaries":formats}
     destination=root/"acceptance-results.json"
     destination.write_text(json.dumps(report,indent=2),encoding="utf-8")
     print(json.dumps({"passed":True,"architectures":["x64","x86"],"results":str(destination)}))

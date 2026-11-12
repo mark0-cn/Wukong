@@ -33,6 +33,8 @@ use windows::{
     core::{Interface, PCWSTR, implement, s, w},
 };
 
+#[path = "dbgeng_identity.rs"]
+mod identity;
 #[path = "dbgeng_paths.rs"]
 mod paths;
 use paths::local_path;
@@ -100,6 +102,7 @@ pub struct Engine {
     registers: IDebugRegisters2,
     memory: IDebugDataSpaces,
     systems: IDebugSystemObjects,
+    advanced: IDebugAdvanced3,
     output: Arc<Mutex<OutputLog>>,
     mode: String,
     invalidated: bool,
@@ -174,7 +177,7 @@ impl Engine {
             // restricted debugger mode and prevents live user-mode attachment.
             symbols
                 .SetSymbolOptions(
-                    0x200 | 0x80000 | 0x400 | 0x4 | 0x1000 | 0x20000 | 0x200000 | 0x2000000,
+                    0x200 | 0x80000 | 0x400 | 0x4 | 0x80 | 0x1000 | 0x20000 | 0x200000 | 0x2000000,
                 )
                 .context("set local-only DbgEng symbol options")?;
             symbols
@@ -185,6 +188,7 @@ impl Engine {
             registers: client.cast().context("query DbgEng register interface")?,
             memory: client.cast().context("query DbgEng memory interface")?,
             systems: client.cast().context("query DbgEng system interface")?,
+            advanced: client.cast().context("query DbgEng advanced interface")?,
             client,
             control,
             symbols,
@@ -460,7 +464,8 @@ impl Engine {
                             .GetModuleParameters(1, Some(&base), 0, &mut parameters)?;
                         modules.push(json!({"base":base,"size":parameters.Size,"timestamp":parameters.TimeDateStamp,
                         "checksum":parameters.Checksum,"symbol_type":parameters.SymbolType,
-                        "image":utf16(&image),"name":utf16(&module)}));
+                        "image":utf16(&image),"name":utf16(&module),
+                        "codeview":identity::module_codeview(&self.advanced, base)}));
                     }
                     json!({"modules":modules,"loaded_count":loaded,"unloaded_count":unloaded})
                 }
@@ -692,7 +697,10 @@ pub fn serve() -> Result<()> {
     } else {
         None
     };
-    let mut engine = Engine::new(Path::new(&arguments[1]), Path::new(&arguments[2]), context)?;
+    // DbgHelp is single-threaded. Perform file-index observations on this owning
+    // thread before creating DbgEng and its internal symbol-handler threads.
+    let mut engine: Option<Engine> = None;
+    let mut engine_started = false;
     let mut output = std::io::stdout().lock();
     loop {
         let mut line = Vec::new();
@@ -709,31 +717,70 @@ pub fn serve() -> Result<()> {
         );
         let request: Value = serde_json::from_slice(&line)?;
         let operation = text(&request, "operation")?;
-        let result = match operation {
-            "doctor" => Ok(
-                json!({"engine":"dbgeng","protocol":1,"engine_path":engine.engine_path,
+        let result = (|| -> Result<Value> {
+            if operation == "close" {
+                return Ok(json!({"state":"closed"}));
+            }
+            if operation == "identity" {
+                ensure!(
+                    !engine_started,
+                    "file identity must be observed before DbgEng initialization"
+                );
+                let path = local_path(Path::new(text(&request, "path")?), context.as_ref())?;
+                return match text(&request, "kind")? {
+                    "pe" => identity::pe(&path),
+                    "pdb" => identity::pdb(
+                        &path,
+                        &local_path(Path::new(&arguments[1]), context.as_ref())?,
+                    ),
+                    _ => bail!("unsupported binary identity kind"),
+                };
+            }
+            ensure!(
+                matches!(operation, "doctor" | "open" | "inspect" | "control"),
+                "unsupported helper operation"
+            );
+            if engine.is_none() {
+                engine_started = true;
+                engine = Some(Engine::new(
+                    Path::new(&arguments[1]),
+                    Path::new(&arguments[2]),
+                    context.clone(),
+                )?);
+            }
+            let engine = engine.as_mut().expect("engine initialized above");
+            match operation {
+                "doctor" => Ok(
+                    json!({"engine":"dbgeng","protocol":1,"engine_path":engine.engine_path,
                 "capabilities":["dump","owned_process_attach","inspect","control"],"local_symbols_only":true}),
-            ),
-            "open" => engine.open(&request),
-            "inspect" => engine.inspect(&request),
-            "control" => engine.control(&request),
-            "close" => Ok(json!({"state":"closed"})),
-            _ => Err(anyhow::anyhow!("unsupported helper operation")),
-        };
-        let log = std::mem::take(&mut *engine.output.lock().unwrap_or_else(|e| e.into_inner()));
+                ),
+                "open" => engine.open(&request),
+                "inspect" => engine.inspect(&request),
+                "control" => engine.control(&request),
+                _ => Err(anyhow::anyhow!("unsupported helper operation")),
+            }
+        })();
+        let invalidated = (engine_started && engine.is_none())
+            || engine.as_ref().is_some_and(|engine| engine.invalidated);
+        let log = engine
+            .as_ref()
+            .map(|engine| {
+                std::mem::take(&mut *engine.output.lock().unwrap_or_else(|e| e.into_inner()))
+            })
+            .unwrap_or_default();
         let reply = match result {
             Ok(value) => {
                 json!({"id":request["id"],"result":value,"output":log.text,"output_truncated":log.truncated})
             }
             Err(error) => {
-                json!({"id":request["id"],"error":format!("{error:#}"),"session_invalidated":engine.invalidated,
+                json!({"id":request["id"],"error":format!("{error:#}"),"session_invalidated":invalidated,
                 "output":log.text,"output_truncated":log.truncated})
             }
         };
         serde_json::to_writer(&mut output, &reply)?;
         output.write_all(b"\n")?;
         output.flush()?;
-        if operation == "close" || engine.invalidated {
+        if operation == "close" || invalidated {
             break;
         }
     }

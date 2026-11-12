@@ -4,6 +4,10 @@
 
 独立 Cargo 包构建 worker 组件，不链接桌面控制器、WebView 或模型客户端。`native/dbgeng.rs` 与控制器仓库的开发辅助程序共享。组件包版本独立于应用发布版本；交付的 worker 身份还绑定实际源码及二进制内容与运行时协议。
 
+辅助程序复用已有的 `object` 库读取 x86/x64 PE 元数据，使用显式配置的 SDK 中 `dbghelp.dll` 的[文件索引 API](https://learn.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symsrvgetfileindexinfow)读取 GUID PDB 身份，并使用 DbgEng 的[模块信息 API](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/dbgeng/nf-dbgeng-idebugadvanced3-getsymbolinformationwide)观察实时进程与 dump 的 CodeView。Python 负责对应关系策略，不再另写 PE、minidump 或 MSF 解析器。文件索引调用在辅助程序的所属线程上、DbgEng 初始化前完成；初始化后拒绝再次索引文件，初始化失败则终止辅助程序。持有的文件句柄不共享写入或删除权限，并以 SHA256 绑定观察结果。PE 检查接受不超过 256 MiB 的普通文件，限制为 96 个节、128 个调试条目及一条不超过 64 KiB 的 CodeView 记录；PDB 以流式方式哈希，最大 4 GiB。模块对应关系要求完整的已加载模块列表，最多 256 项。
+
+对应关系比较映射大小、时间戳、双方均提供的校验和及支持的 RSDS GUID/age；同名模块冲突或候选不唯一时失败。缺少 CodeView 时明确记录 `module_metadata_only` 缺口。匹配始终记录 `byte_identity_verified = false`：模块元数据不证明可执行字节相同。符号只能来自配置缓存目录下的简单、非设备文件名；忽略内嵌的生产者目录、符号服务器及环境路径。存在的 PDB 必须符合预期 GUID/age 和内容哈希；缺失符号保持明确状态。SDK 文件索引身份与符号成功加载分别记录，改名为 `.pdb` 的映像会被拒绝。[可信调试器夹具](../tests/README.zh-CN.md)覆盖两种架构，保留原生格式拒绝结果和原始转录。这些检查不证明受限进程已加载 PDB、旧式完整用户态 dump 已通过、有效内核 dump 已被拒绝，或尚未完成的生产 broker 可用。
+
 在仓库根目录的 x64 MSVC Native Tools shell 中运行：
 
 ```powershell

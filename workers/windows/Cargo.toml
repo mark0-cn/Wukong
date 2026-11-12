@@ -32,6 +32,8 @@ serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 zeroize = "1"
 socket2 = "0.6.5"
+object = { version = "0.40", default-features = false, features = ["read_core", "pe", "std"] }
+uuid = { version = "1", default-features = false, features = ["std"] }
 tokio = { version = "1.54", features = ["io-util", "io-std", "net", "macros", "process", "rt-multi-thread", "sync", "time"] }
 wukong-worker-package = { path = "../package" }
 

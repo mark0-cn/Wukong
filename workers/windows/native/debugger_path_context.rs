@@ -9,13 +9,13 @@ use windows_sys::Win32::{
     },
 };
 pub const MAX_CONTEXT_BYTES: usize = 8192;
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DirectoryIdentity {
     pub dos: String,
     pub native: String,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PathContext {
     pub schema: u32,
