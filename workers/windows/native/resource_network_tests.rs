@@ -20,7 +20,9 @@ fn record() -> Record {
         remote_address: 0x7f000001,
         user_sid: "S-1-5-18".into(),
         loopback: true,
-        direction: 0x3900,
+        // Actual SDK observation in the dedicated Windows 10 VM: outgoing
+        // loopback packet, even though filter layer 44 is receive/accept.
+        direction: 0x3901,
         filter_id: 123,
         layer_id: 44,
     }
@@ -30,7 +32,7 @@ fn record() -> Record {
 fn drop_correlation_rejects_other_sockets_images_times_or_listener_identities() {
     let capture = capture();
     assert!(capture.matches(&record(), 45124, 200));
-    for change in 0..11 {
+    for change in 0..12 {
         let mut value = record();
         match change {
             0 => value.time = 99,
@@ -42,7 +44,8 @@ fn drop_correlation_rejects_other_sockets_images_times_or_listener_identities() 
             6 => value.remote_address = 0x0100007f,
             7 => value.user_sid = "S-1-5-21-1-2-3-1000".into(),
             8 => value.loopback = false,
-            9 => value.direction = 0x3901,
+            9 => value.direction = 0x3900,
+            10 => value.direction = FWP_DIRECTION_OUTBOUND as u32,
             _ => value.direction = FWP_DIRECTION_INBOUND as u32,
         }
         assert!(
@@ -79,7 +82,7 @@ fn qualification_evidence_rejects_plain_timeout_and_missing_or_changed_enforceme
     validate_evidence(&denied)?;
     let evidence = json!({"method":"wfp_appcontainer_loopback_drop","source_port":45124,"listener_port":45123,
         "filter_id":123,"layer_id":44,"event_time":150,"window_start":100,"window_end":200,
-        "listener_sid":"S-1-5-18","application_id_matched":true,"loopback":true,"filter":"AppContainerLoopback","action":"block"});
+        "listener_sid":"S-1-5-18","application_id_matched":true,"loopback":true,"event_direction":"outbound","filter":"AppContainerLoopback","action":"block"});
     validate_evidence(&evidence)?;
     for (key, value) in [
         ("method", json!("timed_out")),
@@ -93,6 +96,7 @@ fn qualification_evidence_rejects_plain_timeout_and_missing_or_changed_enforceme
         ("listener_sid", json!("S-1-5-19")),
         ("application_id_matched", json!(false)),
         ("loopback", json!(false)),
+        ("event_direction", json!("inbound")),
         ("filter", json!("unrelated block")),
         ("action", json!("allow")),
     ] {

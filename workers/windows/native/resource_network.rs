@@ -283,7 +283,7 @@ impl Capture {
                 {
                     self.verify_filter(engine, record.filter_id, record.layer_id)?;
                     return Ok(Some(
-                        json!({"method":"wfp_appcontainer_loopback_drop","filter_id":record.filter_id,"layer_id":record.layer_id,"event_time":record.time,"window_start":ticks(self.start),"window_end":ticks(end),"source_port":source_port,"listener_port":self.listener_port,"listener_sid":"S-1-5-18","application_id_matched":true,"loopback":true,"filter":"AppContainerLoopback","action":"block"}),
+                        json!({"method":"wfp_appcontainer_loopback_drop","filter_id":record.filter_id,"layer_id":record.layer_id,"event_time":record.time,"window_start":ticks(self.start),"window_end":ticks(end),"source_port":source_port,"listener_port":self.listener_port,"listener_sid":"S-1-5-18","application_id_matched":true,"loopback":true,"event_direction":"outbound","filter":"AppContainerLoopback","action":"block"}),
                     ));
                 }
             }
@@ -303,9 +303,10 @@ impl Capture {
             && record.remote_address == 0x7f000001
             && record.user_sid == "S-1-5-18"
             && record.loopback
-            // msFwpDirection uses FWP_DIRECTION_IN (0x3900), not the
-            // differently encoded FWP_DIRECTION_INBOUND (1).
-            && record.direction == 0x3900
+            // The observed outgoing loopback attempt reports FWP_DIRECTION_OUT
+            // (0x3901), independently of the enforcing receive/accept layer.
+            // msFwpDirection does not use FWP_DIRECTION_OUTBOUND (0).
+            && record.direction == 0x3901
     }
     fn verify_filter(&self, engine: &Engine, id: u64, layer_id: u16) -> Result<()> {
         let mut filter = Memory(null_mut());
@@ -419,6 +420,7 @@ pub(super) fn validate_evidence(value: &Value) -> Result<()> {
                     && value["listener_sid"] == "S-1-5-18"
                     && value["application_id_matched"] == true
                     && value["loopback"] == true
+                    && value["event_direction"] == "outbound"
                     && value["filter"] == "AppContainerLoopback"
                     && value["action"] == "block",
                 "WFP denial evidence is incomplete"
