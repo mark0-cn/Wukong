@@ -86,6 +86,8 @@ def diagnostics(installed):
     selected = [metadata / 'last-service-error.txt', metadata / 'sshd-native.log']
     selected += [metadata / f'install-tool-{name}.log' for name in ['ssh-keygen', 'sshd']]
     selected += sorted(metadata.glob('selftest-*.log'))[-2:]
+    selected += sorted(metadata.glob('isolation-host-*.log'))[-2:]
+    selected += sorted(metadata.glob('resource-probe-*.log'))[-2:]
     result = {}
     for path in selected:
         if path.is_file() and not path.is_symlink():
@@ -225,6 +227,11 @@ def main():
         if (installed_result.get('installed') is not True or installed_result['installation_id'] != installation
                 or installed_result['manifest_sha256'] != sealed['manifest_sha256']):
             raise RuntimeError('Installer receipt differs from prepared fixture')
+        report['native_isolation'] = control('Isolation')
+        if (report['native_isolation'].get('passed') is not True
+                or report['native_isolation'].get('production_execution') is not False
+                or len(report['native_isolation'].get('personas', [])) != 2):
+            raise RuntimeError('Native resource qualification did not pass')
         connection = json.loads((installed / 'connection.json').read_text(encoding='utf-8'))
         host = connection['host_key']
         fingerprint = 'SHA256:' + base64.b64encode(hashlib.sha256(base64.b64decode(host['key'], validate=True)).digest()).decode().rstrip('=')

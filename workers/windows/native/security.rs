@@ -88,6 +88,76 @@ pub(crate) fn validate_account_sid(sid: &str) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn validate_app_sid(sid: &str) -> Result<()> {
+    ensure!(
+        sid.starts_with("S-1-15-2-") && sid.split('-').count() == 11 && sid.len() < 192,
+        "resource identity must be a complete AppContainer SID"
+    );
+    validate_sid_text(sid)
+}
+pub(crate) fn validate_logon_sid(sid: &str) -> Result<()> {
+    ensure!(
+        sid.starts_with("S-1-5-5-") && sid.split('-').count() == 6 && sid.len() < 96,
+        "resource identity must be a logon SID"
+    );
+    validate_sid_text(sid)
+}
+fn validate_sid_text(sid: &str) -> Result<()> {
+    let encoded = wide(std::ffi::OsStr::new(sid))?;
+    let mut decoded = null_mut();
+    check(unsafe { ConvertStringSidToSidW(encoded.as_ptr(), &mut decoded) })?;
+    let _memory = Local(decoded);
+    ensure!(sid_text(decoded)? == sid, "noncanonical resource SID");
+    Ok(())
+}
+pub(crate) fn token_logon_sid(token: &Handle) -> Result<String> {
+    use windows_sys::Win32::{
+        Security::{TOKEN_GROUPS, TokenGroups},
+        System::SystemServices::SE_GROUP_LOGON_ID,
+    };
+    let mut size = 0;
+    unsafe {
+        GetTokenInformation(token.0, TokenGroups, null_mut(), 0, &mut size);
+    }
+    ensure!(
+        size >= size_of::<TOKEN_GROUPS>() as u32 && size < 65536,
+        "invalid resource logon groups"
+    );
+    let mut data = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenGroups,
+            data.as_mut_ptr().cast(),
+            size,
+            &mut size,
+        )
+    })?;
+    let groups = unsafe { &*data.as_ptr().cast::<TOKEN_GROUPS>() };
+    ensure!(
+        std::mem::offset_of!(TOKEN_GROUPS, Groups)
+            + groups.GroupCount as usize
+                * size_of::<windows_sys::Win32::Security::SID_AND_ATTRIBUTES>()
+            <= size as usize,
+        "truncated resource logon groups"
+    );
+    let mut found = None;
+    for group in
+        unsafe { std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize) }
+    {
+        if group.Attributes & SE_GROUP_LOGON_ID as u32 == SE_GROUP_LOGON_ID as u32 {
+            ensure!(found.is_none(), "ambiguous resource logon identity");
+            let sid = sid_text(group.Sid)?;
+            validate_logon_sid(&sid)?;
+            found = Some(sid);
+        }
+    }
+    found.context("resource token has no logon SID")
+}
+#[path = "resource_directory.rs"]
+mod resource_directory;
+pub(crate) use resource_directory::ResourceDirectory;
+
 pub fn check(value: i32) -> Result<()> {
     if value == 0 {
         Err(std::io::Error::last_os_error().into())

@@ -416,6 +416,19 @@ async fn run(context: &ContextState) -> Result<()> {
         "native worker binding differs from active signed payload"
     );
     offline_selftest(&root, &package, &deployment, &manifest).await?;
+    let mut checkpoint = tokio::time::Instant::now();
+    crate::resource_host::qualify(&root, &package, &deployment, &manifest, || {
+        ensure!(
+            !STOP.load(Ordering::Acquire),
+            "service stopped during resource qualification"
+        );
+        if checkpoint.elapsed() > Duration::from_secs(5) {
+            report(SERVICE_START_PENDING, 0)?;
+            checkpoint = tokio::time::Instant::now();
+        }
+        Ok(())
+    })
+    .await?;
     let worker = spawn_worker(&root, &package, &deployment, &manifest)?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
     let (endpoint, identity) = loop {

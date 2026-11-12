@@ -138,12 +138,26 @@ impl Desktop {
     /// service work, on the single startup thread; restore it before returning.
     fn new(sid: &str) -> Result<Self> {
         security::validate_account_sid(sid)?;
+        Self::create(sid, false, None)
+    }
+    fn sandbox(sid: &str, logon: &str) -> Result<Self> {
+        security::validate_app_sid(sid)?;
+        security::validate_logon_sid(logon)?;
+        Self::create(sid, true, Some(logon))
+    }
+    fn create(sid: &str, low: bool, logon: Option<&str>) -> Result<Self> {
         let name = format!(
             "Wukong-{}",
             hex::encode(crate::accounts::random_bytes::<16>()?)
         );
         let station_name = security::wide(OsStr::new(&name))?;
-        let descriptor = SecurityDescriptor::from_sddl(&format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid})"))?;
+        let label = if low { "S:(ML;;NW;;;LW)" } else { "" };
+        let logon = logon
+            .map(|sid| format!("(A;;GA;;;{sid})"))
+            .unwrap_or_default();
+        let descriptor = SecurityDescriptor::from_sddl(&format!(
+            "D:P(A;;GA;;;SY){logon}(A;;GA;;;{sid}){label}"
+        ))?;
         let attributes = descriptor.attributes();
         let station =
             unsafe { CreateWindowStationW(station_name.as_ptr(), 0, 0x000f037f, &attributes) };
@@ -232,6 +246,112 @@ fn without_privileges(token: &Handle) -> Result<Handle> {
         "worker token retains native privileges"
     );
     Ok(restricted)
+}
+
+fn seal_sandbox_token(
+    process: &OwnedProcess,
+    expected_sid: windows_sys::Win32::Security::PSID,
+) -> Result<()> {
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, SE_PRIVILEGE_REMOVED, TOKEN_ADJUST_PRIVILEGES,
+        TOKEN_APPCONTAINER_INFORMATION, TOKEN_QUERY, TokenAppContainerSid, TokenIsAppContainer,
+    };
+    let mut token = null_mut();
+    security::check(unsafe {
+        OpenProcessToken(
+            process.process.0,
+            TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES,
+            &mut token,
+        )
+    })?;
+    let token = Handle(token);
+    let mut actual = 0u32;
+    let mut bytes = 0;
+    security::check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenIsAppContainer,
+            (&mut actual as *mut u32).cast(),
+            size_of::<u32>() as u32,
+            &mut bytes,
+        )
+    })?;
+    ensure!(
+        actual == 1,
+        "native target was not created in its AppContainer"
+    );
+    unsafe {
+        GetTokenInformation(token.0, TokenAppContainerSid, null_mut(), 0, &mut bytes);
+    }
+    ensure!(
+        bytes as usize >= size_of::<TOKEN_APPCONTAINER_INFORMATION>() && bytes < 65536,
+        "invalid created AppContainer token data"
+    );
+    let mut app_data = vec![0usize; (bytes as usize).div_ceil(size_of::<usize>())];
+    security::check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenAppContainerSid,
+            app_data.as_mut_ptr().cast(),
+            bytes,
+            &mut bytes,
+        )
+    })?;
+    let app = unsafe { &*app_data.as_ptr().cast::<TOKEN_APPCONTAINER_INFORMATION>() };
+    ensure!(
+        security::sid_text(app.TokenAppContainer)? == security::sid_text(expected_sid)?,
+        "native target AppContainer SID changed"
+    );
+    unsafe {
+        GetTokenInformation(token.0, TokenPrivileges, null_mut(), 0, &mut bytes);
+    }
+    ensure!(
+        bytes > 0 && bytes < 65536,
+        "invalid created token privilege list"
+    );
+    let mut data = vec![0usize; (bytes as usize).div_ceil(size_of::<usize>())];
+    security::check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenPrivileges,
+            data.as_mut_ptr().cast(),
+            bytes,
+            &mut bytes,
+        )
+    })?;
+    let count = unsafe { *data.as_ptr().cast::<u32>() };
+    if count > 0 {
+        ensure!(
+            std::mem::offset_of!(TOKEN_PRIVILEGES, Privileges)
+                + count as usize * size_of::<windows_sys::Win32::Security::LUID_AND_ATTRIBUTES>()
+                <= bytes as usize,
+            "truncated created token privilege list"
+        );
+        let privileges = unsafe { &mut *data.as_mut_ptr().cast::<TOKEN_PRIVILEGES>() };
+        for entry in unsafe {
+            std::slice::from_raw_parts_mut(privileges.Privileges.as_mut_ptr(), count as usize)
+        } {
+            entry.Attributes = SE_PRIVILEGE_REMOVED;
+        }
+        security::check(unsafe {
+            AdjustTokenPrivileges(token.0, 0, privileges, 0, null_mut(), null_mut())
+        })?;
+    }
+    let mut remaining = TOKEN_PRIVILEGES::default();
+    security::check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenPrivileges,
+            (&mut remaining as *mut TOKEN_PRIVILEGES).cast(),
+            size_of::<TOKEN_PRIVILEGES>() as u32,
+            &mut bytes,
+        )
+    })?;
+    ensure!(
+        remaining.PrivilegeCount == 0,
+        "created target token retains privileges"
+    );
+    Ok(())
 }
 
 struct Attributes {
@@ -355,6 +475,7 @@ pub struct OwnedProcess {
     pid: u32,
     job: Job,
     _desktop: Option<Desktop>,
+    _directory: Option<security::ResourceDirectory>,
 }
 impl OwnedProcess {
     pub fn pid(&self) -> u32 {
@@ -375,7 +496,11 @@ impl OwnedProcess {
         &self.job
     }
     pub fn stop(&self, timeout: Duration) -> Result<()> {
-        self.job.terminate_and_wait(timeout)
+        self.job.terminate_and_wait(timeout)?;
+        if let Some(directory) = &self._directory {
+            directory.reclaim()?;
+        }
+        Ok(())
     }
 }
 impl Drop for OwnedProcess {
@@ -401,21 +526,45 @@ impl Spawn<'_> {
             self.executable == std::env::current_exe()?,
             "native fixture must execute this test binary"
         );
-        self.create(None, None)
+        self.create(None, None, None)
     }
     pub fn worker(&self, installation: &str, account: &Account) -> Result<OwnedProcess> {
         security::require_system()?;
         let token = without_privileges(&account.logon(installation)?)?;
         let desktop = Desktop::new(&account.sid)?;
-        self.create(Some(token), Some(desktop))
+        self.create(Some(token), Some(desktop), None)
     }
     /// Fixed trusted executables such as the packaged SSH daemon. This is never
     /// a target execution API and must not be reachable from analysis requests.
     pub(crate) fn system(&self) -> Result<OwnedProcess> {
         security::require_system()?;
-        self.create(None, None)
+        self.create(None, None, None)
     }
-    fn create(&self, token: Option<Handle>, mut desktop: Option<Desktop>) -> Result<OwnedProcess> {
+    /// Resource-host thread only: private station setup is process-wide.
+    pub(crate) fn sandbox(
+        &self,
+        persona: &crate::persona::Persona,
+        directory: security::ResourceDirectory,
+    ) -> Result<OwnedProcess> {
+        security::require_system()?;
+        let token = without_privileges(persona.token())?;
+        let desktop = Desktop::sandbox(&persona.sid_text()?, persona.logon_sid())?;
+        let capabilities = windows_sys::Win32::Security::SECURITY_CAPABILITIES {
+            AppContainerSid: persona.sid(),
+            Capabilities: null_mut(),
+            CapabilityCount: 0,
+            Reserved: 0,
+        };
+        let mut process = self.create(Some(token), Some(desktop), Some(capabilities))?;
+        process._directory = Some(directory);
+        Ok(process)
+    }
+    fn create(
+        &self,
+        token: Option<Handle>,
+        mut desktop: Option<Desktop>,
+        mut capabilities: Option<windows_sys::Win32::Security::SECURITY_CAPABILITIES>,
+    ) -> Result<OwnedProcess> {
         security::no_links(self.executable)?;
         security::no_links(self.directory)?;
         ensure!(
@@ -433,9 +582,23 @@ impl Spawn<'_> {
         let (log, input) = (inheritable(self.log)?, inheritable(self.input)?);
         let mut handles = [log.0, input.0];
         let mut jobs = [job.0.0];
-        let mut attributes = Attributes::new(2)?;
+        let mut attributes = Attributes::new(if capabilities.is_some() { 3 } else { 2 })?;
         attributes.set_handles(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &mut handles)?;
         attributes.set_handles(PROC_THREAD_ATTRIBUTE_JOB_LIST, &mut jobs)?;
+        if let Some(capabilities) = capabilities.as_mut() {
+            security::check(unsafe {
+                UpdateProcThreadAttribute(
+                    attributes.pointer(),
+                    0,
+                    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
+                    (capabilities as *mut windows_sys::Win32::Security::SECURITY_CAPABILITIES)
+                        .cast(),
+                    size_of::<windows_sys::Win32::Security::SECURITY_CAPABILITIES>(),
+                    null_mut(),
+                    null(),
+                )
+            })?;
+        }
         let mut startup = STARTUPINFOEXW::default();
         startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
         startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
@@ -486,8 +649,12 @@ impl Spawn<'_> {
             pid: information.dwProcessId,
             job,
             _desktop: desktop,
+            _directory: None,
         };
         let thread = Handle(information.hThread);
+        if let Some(capabilities) = capabilities.as_ref() {
+            seal_sandbox_token(&process, capabilities.AppContainerSid)?;
+        }
         ensure!(
             unsafe { ResumeThread(thread.0) } != u32::MAX,
             "cannot resume owned native child"
@@ -553,7 +720,7 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None)?;
+        .create(None, None, None)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let leaf_path = temporary.path().join("leaf.pid");
         while !leaf_path.exists() && std::time::Instant::now() < deadline {
@@ -605,7 +772,7 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None)?;
+        .create(None, None, None)?;
         let leaf_path = temporary.path().join("leaf.pid");
         let deadline = Instant::now() + Duration::from_secs(10);
         while (!leaf_path.exists() || !fixture.exited()) && Instant::now() < deadline {

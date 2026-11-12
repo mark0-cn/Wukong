@@ -19,11 +19,15 @@ pub mod installer;
 #[cfg(windows)]
 mod lease_proxy;
 #[cfg(windows)]
+mod persona;
+#[cfg(windows)]
 pub mod pipe_transport;
 #[cfg(windows)]
 pub mod processes;
 #[cfg(windows)]
 pub mod recovery;
+#[cfg(windows)]
+pub mod resource_host;
 #[cfg(windows)]
 pub mod security;
 #[cfg(windows)]

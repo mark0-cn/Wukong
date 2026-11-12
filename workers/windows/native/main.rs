@@ -8,6 +8,26 @@ fn main() -> Result<()> {
     ensure!(cfg!(windows), "native Windows worker requires Windows");
     let args: Vec<_> = std::env::args_os().collect();
     #[cfg(windows)]
+    if args.len() == 4 && args[1] == "resource-selftest" {
+        let report = wukong_windows_worker::resource_host::selftest(
+            args[2].to_str().context("invalid resource installation")?,
+            Path::new(&args[3]),
+        )?;
+        println!("{report}");
+        return Ok(());
+    }
+    #[cfg(windows)]
+    if args.len() == 6 && args[1] == "isolation-probe" {
+        let report = wukong_windows_worker::resource_host::probe(
+            Path::new(&args[2]),
+            Path::new(&args[3]),
+            args[4].to_str().context("invalid probe port")?.parse()?,
+            args[5].to_str().context("invalid probe SID")?,
+        )?;
+        println!("{report}");
+        return Ok(());
+    }
+    #[cfg(windows)]
     if args.len() == 1 {
         let result = wukong_windows_worker::setup_ui::review();
         if let Err(error) = &result {

@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('Block','Restart','Cleanup')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Block','Restart','Cleanup','Isolation')][string]$Mode,
     [Parameter(Mandatory)][string]$Plan,
     [switch]$ConfirmHostedRunner
 )
@@ -83,6 +83,14 @@ if($Mode -eq 'Block'){
 if(-not (Test-Path -LiteralPath $marker)){throw 'No cold preflight proof; refusing resource cleanup or restart'}
 $proof=Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
 if($proof.installation_id -ne $fixture.installation_id){throw 'Fixture ownership proof changed'}
+if($Mode -eq 'Isolation'){
+    $receipt=Join-Path $ownedRoot ('metadata\isolation-selftest-'+$fixture.manifest_sha256+'.json')
+    if((Get-Item -LiteralPath $receipt).Length -gt 8192){throw 'Resource receipt exceeds bound'}
+    $value=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+    if($value.schema -ne 1 -or -not $value.passed -or $value.scope -cne 'owned_appcontainer_trusted_probes' -or $value.manifest_sha256 -cne $fixture.manifest_sha256 -or $value.production_execution){throw 'Resource receipt differs'}
+    $value | ConvertTo-Json -Depth 6 -Compress
+    exit 0
+}
 $service=Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 if($service){
     $image=(Get-ItemProperty -LiteralPath ('HKLM:\SYSTEM\CurrentControlSet\Services\'+$serviceName) -Name ImagePath).ImagePath
@@ -111,6 +119,11 @@ foreach($role in $roles.Keys){
     $account=Get-LocalUser -Name $name -ErrorAction SilentlyContinue
     if($account){
         if($account.Description -cne ('Wukong owned '+$fixture.installation_id+' '+$role)){throw 'Fixture account ownership comment differs'}
+        $ownedProfiles=@(Get-CimInstance -ClassName Win32_UserProfile -Filter ("SID = '"+$account.SID.Value+"'"))
+        foreach($ownedProfile in $ownedProfiles){
+            if($ownedProfile.SID -cne $account.SID.Value -or $ownedProfile.Special -or $ownedProfile.Loaded){throw 'Owned fixture profile cannot be safely removed'}
+            $ownedProfile | Remove-CimInstance
+        }
         Remove-LocalUser -SID $account.SID
     }
 }
