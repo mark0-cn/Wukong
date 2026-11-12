@@ -85,15 +85,19 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
             _ => anyhow::bail!("resource could open a private sentinel or denial was inconclusive"),
         }
     }
-    let network_observation = network::observe(port)?;
-    let scratch = std::env::current_dir()?.join("writable-probe.bin");
-    fs::write(&scratch, b"owned-low-scratch")?;
+    let network_observation =
+        network::observe(port).context("observe contained loopback attempt")?;
+    let scratch = std::env::current_dir()
+        .context("resolve contained scratch directory")?
+        .join("writable-probe.bin");
+    fs::write(&scratch, b"owned-low-scratch").context("write contained scratch probe")?;
     ensure!(
-        fs::read(&scratch)? == b"owned-low-scratch",
+        fs::read(&scratch).context("read contained scratch probe")? == b"owned-low-scratch",
         "resource scratch differs"
     );
-    fs::remove_file(&scratch)?;
-    security::probe_resource_root(&std::env::current_dir()?)?;
+    fs::remove_file(&scratch).context("remove contained scratch probe")?;
+    security::probe_resource_root(&std::env::current_dir()?)
+        .context("qualify held resource root")?;
     Ok(
         json!({"probe_completed":true,"appcontainer_sid":sid,"logon_sid":security::token_logon_sid(&token)?,"privileges":["SeChangeNotifyPrivilege"],"capabilities":0,
         "metadata_denied":true,"worker_data_denied":true,"network_observation":network_observation,"scratch_writable":true,"root_guard_denied":true}),

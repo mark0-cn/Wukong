@@ -33,10 +33,14 @@ enum Outcome {
 }
 
 pub(super) fn observe(listener_port: u16) -> Result<Observation> {
-    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))?;
-    socket.bind(&SocketAddr::from((Ipv4Addr::LOCALHOST, 0)).into())?;
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
+        .context("create contained loopback socket")?;
+    socket
+        .bind(&SocketAddr::from((Ipv4Addr::LOCALHOST, 0)).into())
+        .context("bind contained loopback source")?;
     let source_port = socket
-        .local_addr()?
+        .local_addr()
+        .context("read contained loopback source")?
         .as_socket()
         .context("missing probe socket address")?
         .port();
