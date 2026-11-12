@@ -214,7 +214,7 @@ pub(crate) fn probe_root(path: &Path) -> Result<()> {
         "sandbox root guard deletion was not denied"
     );
     match options().access_mode(FILE_WRITE_DATA).open(path) {
-        Err(error) if error.raw_os_error() == Some(5) => return Ok(()),
+        Err(error) if matches!(error.raw_os_error(), Some(5 | 32)) => return Ok(()),
         Err(error) => return Err(error.into()),
         Ok(directory) => {
             let text = path.to_string_lossy();
@@ -262,6 +262,31 @@ pub(crate) fn probe_root(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shared_write_denial_qualifies_the_guarded_root_probe() -> Result<()> {
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_SHARE_DELETE, FILE_SHARE_WRITE, FILE_WRITE_DATA,
+        };
+        let temporary = tempfile::tempdir()?;
+        let root = temporary.path().join("plain-root");
+        fs::create_dir(&root)?;
+        let guard = AclPolicy::current_user()?.create_file(&root.join(ROOT_GUARD))?;
+        let held = fs::OpenOptions::new()
+            .access_mode(FILE_LIST_DIRECTORY | READ_CONTROL | WRITE_DAC | WRITE_OWNER)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&root)?;
+        let write = fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_DATA)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&root);
+        assert!(matches!(write, Err(error) if error.raw_os_error()==Some(32)));
+        probe_root(&root)?;
+        drop(guard);
+        drop(held);
+        Ok(())
+    }
     #[test]
     fn directory_list_access_establishes_the_delete_share_reservation() -> Result<()> {
         use windows_sys::Win32::Storage::FileSystem::{
