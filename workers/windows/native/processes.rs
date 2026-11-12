@@ -550,6 +550,11 @@ enum Start {
     Execute,
     InspectSuspended,
 }
+#[derive(Clone, Copy)]
+enum CreationContext {
+    Process,
+    Role,
+}
 #[derive(Debug)]
 struct DrainFailure(anyhow::Error);
 impl std::fmt::Display for DrainFailure {
@@ -567,19 +572,40 @@ impl Spawn<'_> {
             self.executable == std::env::current_exe()?,
             "native fixture must execute this test binary"
         );
-        self.create(None, None, None, None, Start::Execute)
+        self.create(
+            None,
+            None,
+            None,
+            None,
+            Start::Execute,
+            CreationContext::Process,
+        )
     }
     pub fn worker(&self, installation: &str, account: &Account) -> Result<OwnedProcess> {
         security::require_system()?;
         let token = without_privileges(&account.logon(installation)?)?;
         let desktop = Desktop::new(&account.sid)?;
-        self.create(Some(token), Some(desktop), None, None, Start::Execute)
+        self.create(
+            Some(token),
+            Some(desktop),
+            None,
+            None,
+            Start::Execute,
+            CreationContext::Process,
+        )
     }
     /// Fixed trusted executables such as the packaged SSH daemon. This is never
     /// a target execution API and must not be reachable from analysis requests.
     pub(crate) fn system(&self) -> Result<OwnedProcess> {
         security::require_system()?;
-        self.create(None, None, None, None, Start::Execute)
+        self.create(
+            None,
+            None,
+            None,
+            None,
+            Start::Execute,
+            CreationContext::Process,
+        )
     }
     /// Resource-host thread only: private station setup is process-wide.
     pub(crate) fn sandbox(
@@ -636,6 +662,7 @@ impl Spawn<'_> {
             Some(capabilities),
             Some(descriptor),
             Start::Execute,
+            CreationContext::Role,
         )?;
         process._directory = Some(directory);
         Ok(process)
@@ -647,6 +674,7 @@ impl Spawn<'_> {
         mut capabilities: Option<windows_sys::Win32::Security::SECURITY_CAPABILITIES>,
         descriptor: Option<crate::process_access::Policy>,
         start: Start,
+        creation_context: CreationContext,
     ) -> Result<OwnedProcess> {
         security::no_links(self.executable)?;
         security::no_links(self.directory)?;
@@ -701,39 +729,57 @@ impl Spawn<'_> {
             .as_ref()
             .map(crate::process_access::Policy::attributes);
         let object_attributes = object_attributes.as_ref().map_or(null(), |value| value);
-        let success = unsafe {
-            match token.as_ref() {
-                Some(token) => CreateProcessAsUserW(
-                    token.0,
-                    app.as_ptr(),
-                    command.as_mut_ptr(),
-                    object_attributes,
-                    object_attributes,
-                    1,
-                    flags,
-                    environment.as_ptr().cast(),
-                    directory.as_ptr(),
-                    &startup.StartupInfo,
-                    &mut information,
-                ),
-                None => CreateProcessW(
-                    app.as_ptr(),
-                    command.as_mut_ptr(),
-                    object_attributes,
-                    object_attributes,
-                    1,
-                    flags,
-                    environment.as_ptr().cast(),
-                    directory.as_ptr(),
-                    &startup.StartupInfo,
-                    &mut information,
-                ),
+        let mut launch = || {
+            let success = unsafe {
+                match token.as_ref() {
+                    Some(token) => CreateProcessAsUserW(
+                        token.0,
+                        app.as_ptr(),
+                        command.as_mut_ptr(),
+                        object_attributes,
+                        object_attributes,
+                        1,
+                        flags,
+                        environment.as_ptr().cast(),
+                        directory.as_ptr(),
+                        &startup.StartupInfo,
+                        &mut information,
+                    ),
+                    None => CreateProcessW(
+                        app.as_ptr(),
+                        command.as_mut_ptr(),
+                        object_attributes,
+                        object_attributes,
+                        1,
+                        flags,
+                        environment.as_ptr().cast(),
+                        directory.as_ptr(),
+                        &startup.StartupInfo,
+                        &mut information,
+                    ),
+                }
+            };
+            // Capture GetLastError before the impersonation guard reverts.
+            security::check(success)
+        };
+        let created = match creation_context {
+            CreationContext::Process => launch(),
+            CreationContext::Role => {
+                ensure!(
+                    capabilities.is_some(),
+                    "role creation context requires an AppContainer"
+                );
+                let token = token
+                    .as_ref()
+                    .context("role creation context requires its owned token")?;
+                crate::persona::as_user(token, launch)
             }
         };
-        security::check(success).with_context(|| {
+        created.with_context(|| {
             format!(
-                "native suspended process creation failed (appcontainer={})",
-                capabilities.is_some()
+                "native suspended process creation failed (appcontainer={},role_context={})",
+                capabilities.is_some(),
+                matches!(creation_context, CreationContext::Role)
             )
         })?;
         let process = OwnedProcess {
@@ -961,7 +1007,14 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None, None, None, Start::InspectSuspended)?;
+        .create(
+            None,
+            None,
+            None,
+            None,
+            Start::InspectSuspended,
+            CreationContext::Process,
+        )?;
         assert!(!child.exited());
         assert_eq!(child.job().active_processes()?, 1);
         child.stop(Duration::from_secs(10))?;
@@ -995,7 +1048,14 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None, None, None, Start::Execute)?;
+        .create(
+            None,
+            None,
+            None,
+            None,
+            Start::Execute,
+            CreationContext::Process,
+        )?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let leaf_path = temporary.path().join("leaf.pid");
         while !leaf_path.exists() && std::time::Instant::now() < deadline {
@@ -1047,7 +1107,14 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None, None, None, Start::Execute)?;
+        .create(
+            None,
+            None,
+            None,
+            None,
+            Start::Execute,
+            CreationContext::Process,
+        )?;
         let leaf_path = temporary.path().join("leaf.pid");
         let deadline = Instant::now() + Duration::from_secs(10);
         while (!leaf_path.exists() || !fixture.exited()) && Instant::now() < deadline {

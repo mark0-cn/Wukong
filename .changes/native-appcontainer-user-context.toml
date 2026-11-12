@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Use the owned role's synchronous user context for per-user AppContainer process creation, returning to System before checking or resuming the child. Reject nested impersonation and preserve native errors across reversion. Dedicated installed-environment qualification remains pending."
+zh_CN = "创建每用户 AppContainer 进程时使用自有角色的同步用户上下文，在检查或恢复子进程前返回 System 身份；拒绝嵌套身份模拟，并在恢复身份时保留原生错误。仍待完成真实安装环境资格检查。"

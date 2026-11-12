@@ -11,14 +11,14 @@ use std::{
     ptr::{null, null_mut},
 };
 use windows_sys::Win32::{
-    Foundation::{ERROR_NOT_ALL_ASSIGNED, GetLastError, HANDLE},
+    Foundation::{ERROR_NO_TOKEN, ERROR_NOT_ALL_ASSIGNED, GetLastError, HANDLE},
     Security::{
         AdjustTokenPrivileges, FreeSid, ImpersonateLoggedOnUser,
         Isolation::{CreateAppContainerProfile, DeleteAppContainerProfile},
         LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, PSID, RevertToSelf, SE_PRIVILEGE_ENABLED,
         TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY,
     },
-    System::Threading::{GetCurrentProcess, OpenProcessToken},
+    System::Threading::{GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken},
     UI::Shell::{LoadUserProfileW, PROFILEINFOW, UnloadUserProfile},
 };
 
@@ -106,8 +106,24 @@ impl Drop for ProfilePrivileges {
         }
     }
 }
-fn as_user<T>(token: &Handle, action: impl FnOnce() -> Result<T>) -> Result<T> {
+/// Synchronous OS setup only. Always revert before callers inspect handles or await.
+pub(crate) fn as_user<T>(token: &Handle, action: impl FnOnce() -> Result<T>) -> Result<T> {
     security::require_system()?;
+    in_user_context(token, action)
+}
+fn in_user_context<T>(token: &Handle, action: impl FnOnce() -> Result<T>) -> Result<T> {
+    // RevertToSelf restores the process identity, not a previous thread token.
+    // Refuse nested scopes rather than silently destroying caller impersonation.
+    let mut previous = null_mut();
+    if unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut previous) } != 0 {
+        let _previous = Handle(previous);
+        anyhow::bail!("owned user context refuses existing thread impersonation");
+    }
+    let error = std::io::Error::last_os_error();
+    ensure!(
+        error.raw_os_error() == Some(ERROR_NO_TOKEN as i32),
+        "cannot inspect existing thread impersonation: {error}"
+    );
     security::check(unsafe { ImpersonateLoggedOnUser(token.0) })?;
     struct Revert;
     impl Drop for Revert {
@@ -232,5 +248,82 @@ impl Drop for Persona {
                 FreeSid(self.sid);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::{
+        Foundation::SetLastError,
+        Security::{TOKEN_DUPLICATE, TOKEN_IMPERSONATE},
+    };
+
+    fn thread_sid() -> Result<Option<String>> {
+        let mut token = null_mut();
+        if unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) } == 0 {
+            let error = std::io::Error::last_os_error();
+            ensure!(
+                error.raw_os_error() == Some(ERROR_NO_TOKEN as i32),
+                "thread token query failed: {error}"
+            );
+            return Ok(None);
+        }
+        Ok(Some(security::token_user_sid(&Handle(token))?))
+    }
+
+    #[test]
+    fn own_identity_context_reverts_errors_and_unwind_and_refuses_nesting() -> Result<()> {
+        // Impersonate only this trusted test process's own identity on a fresh
+        // thread. No account, profile, desktop or global policy is created.
+        std::thread::spawn(|| -> Result<()> {
+            assert_eq!(thread_sid()?, None);
+            let mut token = null_mut();
+            security::check(unsafe {
+                OpenProcessToken(
+                    GetCurrentProcess(),
+                    TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_IMPERSONATE,
+                    &mut token,
+                )
+            })?;
+            let token = Handle(token);
+            let expected = security::current_user_sid()?;
+            ensure!(
+                security::token_user_sid(&token)? == expected,
+                "fixture token identity changed"
+            );
+            in_user_context(&token, || {
+                assert_eq!(thread_sid()?, Some(expected.clone()));
+                assert!(in_user_context(&token, || Ok(())).is_err());
+                assert_eq!(thread_sid()?, Some(expected.clone()));
+                Ok(())
+            })?;
+            assert_eq!(thread_sid()?, None);
+            let error = in_user_context(&token, || {
+                unsafe {
+                    SetLastError(2);
+                }
+                security::check(0)
+            })
+            .unwrap_err();
+            assert_eq!(
+                error
+                    .downcast_ref::<std::io::Error>()
+                    .and_then(std::io::Error::raw_os_error),
+                Some(2)
+            );
+            assert_eq!(thread_sid()?, None);
+            assert!(
+                std::panic::catch_unwind(|| {
+                    let _: Result<()> =
+                        in_user_context(&token, || panic!("trusted fixture unwind"));
+                })
+                .is_err()
+            );
+            assert_eq!(thread_sid()?, None);
+            Ok(())
+        })
+        .join()
+        .expect("identity fixture thread panicked")
     }
 }

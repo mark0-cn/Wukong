@@ -3,6 +3,25 @@
 use super::*;
 use serde_json::{Value, json};
 
+struct Case {
+    name: &'static str,
+    stripped: bool,
+    appcontainer: bool,
+    desktop: bool,
+    explicit_policy: bool,
+    context: CreationContext,
+}
+impl Case {
+    const ORDINARY: Self = Self {
+        name: "ordinary_role",
+        stripped: false,
+        appcontainer: true,
+        desktop: true,
+        explicit_policy: true,
+        context: CreationContext::Role,
+    };
+}
+
 pub(super) fn inspect(spawn: &Spawn<'_>, persona: &crate::persona::Persona) -> Result<Value> {
     security::require_system()?;
     ensure!(
@@ -14,21 +33,37 @@ pub(super) fn inspect(spawn: &Spawn<'_>, persona: &crate::persona::Persona) -> R
         "creation controls accept only the sealed native isolation self-test"
     );
     let mut reports = Vec::new();
-    for (name, stripped, appcontainer, desktop, explicit_policy) in [
-        ("ordinary_role", false, true, true, true),
-        ("stripped_source", true, true, true, true),
-        ("no_appcontainer", false, false, true, true),
-        ("default_desktop", false, true, false, true),
-        ("default_object_policy", false, true, true, false),
+    for case in [
+        Case::ORDINARY,
+        Case {
+            name: "system_creation_context",
+            context: CreationContext::Process,
+            ..Case::ORDINARY
+        },
+        Case {
+            name: "stripped_source",
+            stripped: true,
+            ..Case::ORDINARY
+        },
+        Case {
+            name: "no_appcontainer",
+            appcontainer: false,
+            context: CreationContext::Process,
+            ..Case::ORDINARY
+        },
+        Case {
+            name: "default_desktop",
+            desktop: false,
+            ..Case::ORDINARY
+        },
+        Case {
+            name: "default_object_policy",
+            explicit_policy: false,
+            ..Case::ORDINARY
+        },
     ] {
-        let result = control(
-            spawn,
-            persona,
-            stripped,
-            appcontainer,
-            desktop,
-            explicit_policy,
-        );
+        let name = case.name;
+        let result = control(spawn, persona, case);
         match result {
             Ok(()) => reports.push(json!({"case":name,"creation_and_drain_passed":true,"never_resumed":true,"job_empty":true})),
             Err(error) => {
@@ -42,15 +77,8 @@ pub(super) fn inspect(spawn: &Spawn<'_>, persona: &crate::persona::Persona) -> R
         json!({"scope":"sealed_selftest_suspended_creation_only","execution_fallback":false,"cases":reports}),
     )
 }
-fn control(
-    spawn: &Spawn<'_>,
-    persona: &crate::persona::Persona,
-    stripped: bool,
-    appcontainer: bool,
-    desktop: bool,
-    explicit_policy: bool,
-) -> Result<()> {
-    let token = if stripped {
+fn control(spawn: &Spawn<'_>, persona: &crate::persona::Persona, case: Case) -> Result<()> {
+    let token = if case.stripped {
         without_privileges(persona.token())?
     } else {
         let mut token = null_mut();
@@ -67,17 +95,20 @@ fn control(
         })?;
         Handle(token)
     };
-    let desktop = desktop
+    let desktop = case
+        .desktop
         .then(|| Desktop::sandbox(&persona.sid_text()?, persona.logon_sid()))
         .transpose()?;
     let capabilities =
-        appcontainer.then_some(windows_sys::Win32::Security::SECURITY_CAPABILITIES {
-            AppContainerSid: persona.sid(),
-            Capabilities: null_mut(),
-            CapabilityCount: 0,
-            Reserved: 0,
-        });
-    let policy = explicit_policy
+        case.appcontainer
+            .then_some(windows_sys::Win32::Security::SECURITY_CAPABILITIES {
+                AppContainerSid: persona.sid(),
+                Capabilities: null_mut(),
+                CapabilityCount: 0,
+                Reserved: 0,
+            });
+    let policy = case
+        .explicit_policy
         .then(|| crate::process_access::Policy::owned(persona, None))
         .transpose()?;
     let process = spawn.create(
@@ -86,6 +117,7 @@ fn control(
         capabilities,
         policy,
         Start::InspectSuspended,
+        case.context,
     )?;
     let drained: Result<()> = (|| {
         process.stop(Duration::from_secs(10))?;
