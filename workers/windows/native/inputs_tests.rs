@@ -33,6 +33,177 @@ fn fixture() -> Result<(tempfile::TempDir, Inputs)> {
     Ok((directory, inputs))
 }
 
+fn reference(put: &Put) -> Result<Reference> {
+    let d = &put.declaration;
+    Ok(Reference {
+        path: d.path.clone(),
+        id: digest(d)?,
+        sha256: d.sha256.clone(),
+        size: d.size,
+        executable: d.executable,
+    })
+}
+
+#[test]
+fn native_resource_ingestion_requires_a_completed_receipt_and_pins_the_verified_handle()
+-> Result<()> {
+    use std::io::Read;
+    let (_directory, inputs) = fixture()?;
+    let put = put(owner(), b"only-controller-admitted-bytes")?;
+    let reference = reference(&put)?;
+    inputs.prepare(&put)?;
+    assert!(
+        inputs
+            .acquire(&owner(), &reference, Purpose::Execute)
+            .is_err()
+    );
+    inputs.complete(&put, &mut reply(&put))?;
+    let mut input = inputs.acquire(&owner(), &reference, Purpose::Execute)?;
+    assert_eq!(input.reference(), &reference);
+    let blob = inputs
+        .directory(&put.declaration)?
+        .join(format!("{}.data", digest(&put.declaration.path)?));
+    assert!(fs::OpenOptions::new().write(true).open(&blob).is_err());
+    assert!(fs::rename(&blob, blob.with_extension("renamed")).is_err());
+    // An ordinary read-only retry may still validate the immutable source.
+    inputs.complete(&put, &mut reply(&put))?;
+    let mut bytes = Vec::new();
+    input.read_to_end(&mut bytes)?;
+    assert_eq!(bytes, b"only-controller-admitted-bytes");
+    drop(input);
+    let _writer = fs::OpenOptions::new().write(true).open(&blob)?;
+    Ok(())
+}
+
+#[test]
+fn resource_input_selectors_cannot_change_owner_content_or_executable_policy() -> Result<()> {
+    let (_directory, inputs) = fixture()?;
+    let mut put = put(owner(), b"data-only-input")?;
+    put.declaration.executable = false;
+    inputs.prepare(&put)?;
+    inputs.complete(&put, &mut reply(&put))?;
+    let expected = reference(&put)?;
+    assert!(
+        inputs
+            .acquire(&owner(), &expected, Purpose::Inspect)
+            .is_ok()
+    );
+    assert!(
+        inputs
+            .acquire(&owner(), &expected, Purpose::Execute)
+            .is_err()
+    );
+    for changed in [
+        Reference {
+            id: "f".repeat(64),
+            ..expected.clone()
+        },
+        Reference {
+            sha256: "e".repeat(64),
+            ..expected.clone()
+        },
+        Reference {
+            size: expected.size + 1,
+            ..expected.clone()
+        },
+        Reference {
+            executable: true,
+            ..expected.clone()
+        },
+        Reference {
+            path: "files/../metadata/authority.json".into(),
+            ..expected.clone()
+        },
+        Reference {
+            path: "C:/Windows/System32/config/SAM".into(),
+            ..expected.clone()
+        },
+        Reference {
+            path: "files/NUL".into(),
+            ..expected.clone()
+        },
+    ] {
+        assert!(
+            inputs
+                .acquire(&owner(), &changed, Purpose::Inspect)
+                .is_err()
+        );
+    }
+    for changed in [
+        Owner {
+            run_id: "another-run".into(),
+            ..owner()
+        },
+        Owner {
+            owner_id: "another-controller".into(),
+            ..owner()
+        },
+        Owner {
+            epoch: 2,
+            ..owner()
+        },
+        Owner {
+            identity: Identity {
+                boot_id: format!("windows:{}:41", "b".repeat(32)),
+                ..owner().identity
+            },
+            ..owner()
+        },
+    ] {
+        assert!(
+            inputs
+                .acquire(&changed, &expected, Purpose::Inspect)
+                .is_err()
+        );
+        assert!(!inputs.root.join(digest(&changed)?).exists());
+    }
+    Ok(())
+}
+
+#[test]
+fn resource_input_acquisition_rechecks_private_bytes_and_rejects_links() -> Result<()> {
+    let (directory, inputs) = fixture()?;
+    let put = put(owner(), b"original-native-input")?;
+    inputs.prepare(&put)?;
+    inputs.complete(&put, &mut reply(&put))?;
+    let reference = reference(&put)?;
+    let blob = inputs
+        .directory(&put.declaration)?
+        .join(format!("{}.data", digest(&put.declaration.path)?));
+    let alias = directory.path().join("second-link");
+    fs::hard_link(&blob, &alias)?;
+    assert!(
+        inputs
+            .acquire(&owner(), &reference, Purpose::Execute)
+            .is_err()
+    );
+    fs::remove_file(&alias)?;
+    fs::write(&blob, b"modified-native-input")?;
+    assert!(
+        inputs
+            .acquire(&owner(), &reference, Purpose::Execute)
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn ordinary_processes_cannot_use_the_system_resource_input_entry() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let put = put(owner(), b"inert")?;
+    let error = crate::resource_input::open(
+        &root.path().join("absent-metadata"),
+        &owner(),
+        &reference(&put)?,
+        Purpose::Execute,
+    )
+    .err()
+    .context("ordinary token entered System input API")?;
+    assert!(error.to_string().contains("System"));
+    assert_eq!(fs::read_dir(root.path())?.count(), 0);
+    Ok(())
+}
+
 #[test]
 fn direct_sdk_publication_handles_members_beyond_the_legacy_windows_path_limit() -> Result<()> {
     let root = tempfile::tempdir()?;

@@ -1,0 +1,3 @@
+kind = "security"
+en = "Keep verified Windows upload bytes locked against write or replacement while publishing their native receipt. Native resource execution remains disabled while ownership integration is unfinished."
+zh_CN = "发布 Windows 上传的原生回执期间，持续锁定已验证字节，阻止写入或替换；归属接入完成前仍禁用原生资源执行。"

@@ -2,6 +2,7 @@
 //! No source path supplied by the worker is ever opened with System authority.
 use crate::{
     lease_proxy::Identity,
+    resource_input::{AdmittedInput, Purpose, Reference},
     security::{self, AclPolicy},
 };
 use anyhow::{Context, Result, ensure};
@@ -11,7 +12,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::Write,
+    io::{Seek, Write},
     os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
     path::{Path, PathBuf},
 };
@@ -153,6 +154,9 @@ impl Inputs {
         )?)?)
     }
     fn check_blob(&self, path: &Path, declaration: &Declaration) -> Result<()> {
+        self.open_blob(path, declaration).map(drop)
+    }
+    fn open_blob(&self, path: &Path, declaration: &Declaration) -> Result<fs::File> {
         self.policy.verify(path, false)?;
         let mut file = fs::OpenOptions::new()
             .read(true)
@@ -178,7 +182,47 @@ impl Inputs {
             count == declaration.size && hex::encode(hash.finalize()) == declaration.sha256,
             "native input content differs"
         );
-        Ok(())
+        file.rewind()?;
+        Ok(file)
+    }
+    pub(crate) fn acquire(
+        &self,
+        owner: &Owner,
+        reference: &Reference,
+        purpose: Purpose,
+    ) -> Result<AdmittedInput> {
+        let logical = reference
+            .path
+            .strip_prefix("files/")
+            .context("native input needs a staged logical path")?;
+        wukong_worker_package::validate_path(logical)?;
+        self.policy.verify(&self.root, true)?;
+        let directory = self.root.join(digest(owner)?);
+        self.policy.verify(&directory, true)?;
+        let key = digest(&reference.path)?;
+        let declaration = self.read_record(&directory.join(format!("{key}.declaration.json")))?;
+        ensure!(
+            declaration.schema == 1
+                && declaration.owner == *owner
+                && owner.epoch > 0
+                && declaration.path == reference.path
+                && declaration.size <= 16 * 1024 * 1024 * 1024
+                && declaration.size == reference.size
+                && declaration.sha256 == reference.sha256
+                && declaration.executable == reference.executable
+                && digest(&declaration)? == reference.id,
+            "native input reference differs from controller admission"
+        );
+        ensure!(
+            !matches!(purpose, Purpose::Execute) || declaration.executable,
+            "native input was not admitted as executable"
+        );
+        ensure!(
+            self.read_record(&directory.join(format!("{key}.receipt.json")))? == declaration,
+            "native input has no matching completed receipt"
+        );
+        let file = self.open_blob(&directory.join(format!("{key}.data")), &declaration)?;
+        Ok(AdmittedInput::new(file, reference.clone()))
     }
     /// Prepare before forwarding. Bytes are immutable, but there is no admitted
     /// receipt until the corresponding worker result is checked and settled.
@@ -234,7 +278,9 @@ impl Inputs {
             self.read_record(&directory.join(format!("{key}.declaration.json")))? == *declaration,
             "native input declaration changed"
         );
-        self.check_blob(&directory.join(format!("{key}.data")), declaration)?;
+        // Keep the exact verified data handle reserved through receipt
+        // publication, just as native resource ingestion retains it while copying.
+        let _source = self.open_blob(&directory.join(format!("{key}.data")), declaration)?;
         let receipt = directory.join(format!("{key}.receipt.json"));
         if receipt.exists() {
             ensure!(

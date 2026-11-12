@@ -32,6 +32,8 @@ pub mod recovery;
 #[cfg(windows)]
 pub mod resource_host;
 #[cfg(windows)]
+pub mod resource_input;
+#[cfg(windows)]
 pub mod resource_journal;
 #[cfg(windows)]
 pub mod security;

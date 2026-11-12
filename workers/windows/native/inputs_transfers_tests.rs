@@ -56,6 +56,18 @@ fn chunk(inputs: &Inputs, owner: Owner, id: &str, offset: u64, data: &[u8]) -> R
 fn resumable_native_bytes_reconcile_both_offsets_and_commit_exact_fenced_proof() -> Result<()> {
     let (directory, inputs) = fixture()?;
     let transfer = begin(&inputs, owner(), b"abcdef")?;
+    let reference = Reference {
+        path: transfer.declaration.path.clone(),
+        id: digest(&transfer.declaration)?,
+        sha256: transfer.declaration.sha256.clone(),
+        size: transfer.declaration.size,
+        executable: transfer.declaration.executable,
+    };
+    assert!(
+        inputs
+            .acquire(&owner(), &reference, Purpose::Execute)
+            .is_err()
+    );
     // Generated independently by the real Python TransferService fixture.
     assert_eq!(
         transfer.transfer_id,
@@ -102,6 +114,12 @@ fn resumable_native_bytes_reconcile_both_offsets_and_commit_exact_fenced_proof()
     let mut result = status(&committed, 6, true)["artifact"].clone();
     inputs.complete_transfer(&committed, &mut result)?;
     assert_eq!(result["native_input"]["epoch"], 1);
+    {
+        let mut source = inputs.acquire(&owner(), &reference, Purpose::Execute)?;
+        let mut bytes = Vec::new();
+        source.read_to_end(&mut bytes)?;
+        assert_eq!(bytes, b"abcdef");
+    }
     let repeated = prepare(
         &inputs,
         owner(),
