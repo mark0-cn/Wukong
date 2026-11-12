@@ -127,7 +127,7 @@ SCM 服务登记及固定原生子进程启动采用相同的本地路径规范�
 
 回环探针使用现有固定版本的 socket2 库保留其实际绑定的源端口，报告观察结果，不将超时直接认定为拒绝。System 在子进程执行前后检查同一个监听器，并拒绝出现意外已接受连接。明确的 Windows 权限拒绝可以直接通过网络检查；超时还必须匹配 Windows SDK WFP 分类丢弃事件，核对已签封原生应用的 SDK 标识、精确回环套接字地址及端口、System 监听器身份和探针时间窗口。取回的执行过滤器必须是 `AppContainerLoopback`，采用阻止动作，并与事件的 IPv4 入站接收/接受层一致。回环丢弃事件保留 System 监听器身份，同时报告出站数据包方向（`FWP_DIRECTION_OUT`、`0x3901`）；2026-11-13 在专用 VM 中通过 Windows SDK 观察到了该值。接收/接受过滤层需独立核对，不能据此推定数据包方向。最终 WFP 回执包含 `event_direction = "outbound"`。[Windows 丢弃事件约定](https://learn.microsoft.com/zh-cn/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_net_event_classify_drop2)定义了该方向编码。只读枚举每个快照最多读取 1,024 个同应用事件，最多查询五个快照；不会启用事件收集或修改防火墙策略。证据缺失、收集禁用或无法确认时，资格检查失败。最终 schema3 回执保留独立核对的网络证据；真实受限 SDK 资格检查仍须专用 VM 验收。
 
-受限探针失败时，在现有有界日志中区分套接字创建、源地址绑定/查询、临时文件操作及持有根目录的资格检查。操作位置说明保留底层 Windows 错误，不改变验收条件。DbgEng 路径失败还会标明元数据检查失败的具体路径组件。
+受限探针失败时，在现有有界日志中区分套接字创建、源地址绑定/查询、临时文件操作及持有根目录的资格检查。操作位置说明保留底层 Windows 错误，不改变验收条件。DbgEng 路径失败会保留检查的路径和 Windows SDK 状态。
 
 临时资源根目录通过仅继承条目，把 `DELETE` 只授予各资源 AppContainer 和登录 SID 的后代文件与目录。根目录保留读、写、执行权限，不授予 `DELETE` 或 `FILE_DELETE_CHILD`；其受保护的私有保护文件不会继承这两项删除授权。现有描述符校验器单独核对精确的后代专用条目，普通策略仍拒绝此类条目。进程和文件系统授权夹具复用同一个 Windows Authz 辅助模块。专用 VM 回归验证真实 NTFS 继承、原先缺失删除权限的策略、其他资源拒绝、根目录及保护文件拒绝，以及回收。请在专用 Windows 测试 VM 中运行：
 
@@ -136,5 +136,7 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --lib inherited_d
 ```
 
 这项回归不在普通宿主检查中执行。2026-11-13，开发宿主拒绝打开已授予 AppContainer 权限的夹具目录，而同一个测试程序在专用 Windows 10 1803 VM 中通过。该文件系统检查不证明已完成安装后服务或生命周期资格验收。
+
+DbgEng 使用 Windows SDK 校验已有本地路径，不再查询每个祖先目录的元数据。`QueryDosDeviceW` 提供当前本地磁盘卷映射；`NtCreateFile` 使用 `OBJ_DONT_REPARSE`，以读取属性和同步权限打开已有对象，拒绝末级或中间组件的重解析点。先解析 DOS 盘符链接，可避免把普通盘符路径误判为对象管理器重解析。网络、替代盘符或不支持的设备映射均拒绝；Unicode、绝对路径及别名检查保留。该过程沿用子进程已有权限和遍历特权，不修改全局 ACL，也不恢复特权。开发调试器辅助程序与打包后的辅助程序共享该模块。回归夹具使用仅测试依赖的 `junction` 库创建真实末级和中间 junction。2026-11-13 在 Windows 10 1803 中进行的只读 SDK 检查成功打开普通磁盘路径，并拒绝两种 junction；真实受限 DbgEng 资格验收仍须完成。参见 SDK 的[对象属性约定](https://learn.microsoft.com/zh-cn/windows/win32/api/ntdef/ns-ntdef-_object_attributes)和 [DOS 设备查询约定](https://learn.microsoft.com/zh-cn/windows/win32/api/fileapi/nf-fileapi-querydosdevicew)。
 
 AppContainer 特权策略遵循 Windows 文档中的目录遍历例外：仅保留 `SeChangeNotifyPrivilege`，它跳过祖先目录遍历检查，不授予最终对象读写或目录列举权限。普通元数据 worker 保持现有零特权策略。沙箱令牌回读会拒绝缺失、禁用或任何额外特权（包括 `SeDebugPrivilege`），capability 数仍须为零。不通过修改机器全局目录 ACL 来补偿加载器拒绝。资格检查回执使用 schema3 和明确的特权名称数组，仍要求真实哨兵/网络拒绝、自有 DbgEng 附加及静止清理。安装后的运行仍须专用验收；这项策略修正不会启用生产执行。参见微软的[受限令牌约定](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)、[文件访问指引](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)及 [WFP 事件枚举约定](https://learn.microsoft.com/en-us/windows/win32/api/fwpmu/nf-fwpmu-fwpmneteventenum2)。
