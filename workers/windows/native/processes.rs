@@ -554,7 +554,6 @@ enum Start {
 enum CreationContext {
     Process,
     Role,
-    RoleChildEnvironment,
     RoleProfileEnvironment,
 }
 #[derive(Debug)]
@@ -690,10 +689,7 @@ impl Spawn<'_> {
         let mut argv = vec![executable.into_os_string()];
         argv.extend_from_slice(self.arguments);
         let mut command = command_line(&argv)?;
-        let profile = if matches!(
-            creation_context,
-            CreationContext::RoleChildEnvironment | CreationContext::RoleProfileEnvironment
-        ) {
+        let profile = if matches!(creation_context, CreationContext::RoleProfileEnvironment) {
             Some(crate::environment::role_paths(token.as_ref().context(
                 "profile environment requires an owned role token",
             )?)?)
@@ -780,9 +776,7 @@ impl Spawn<'_> {
         };
         let created = match creation_context {
             CreationContext::Process => launch(),
-            CreationContext::Role
-            | CreationContext::RoleChildEnvironment
-            | CreationContext::RoleProfileEnvironment => {
+            CreationContext::Role | CreationContext::RoleProfileEnvironment => {
                 ensure!(
                     capabilities.is_some(),
                     "role creation context requires an AppContainer"
@@ -790,16 +784,7 @@ impl Spawn<'_> {
                 let token = token
                     .as_ref()
                     .context("role creation context requires its owned token")?;
-                if matches!(creation_context, CreationContext::RoleProfileEnvironment) {
-                    crate::environment::with_role_paths(
-                        profile
-                            .as_ref()
-                            .context("missing role profile environment")?,
-                        || crate::persona::as_user(token, launch),
-                    )
-                } else {
-                    crate::persona::as_user(token, launch)
-                }
+                crate::persona::as_user(token, launch)
             }
         };
         created.with_context(|| {
@@ -820,11 +805,20 @@ impl Spawn<'_> {
         let prepared: Result<()> = (|| {
             if let Some(policy) = &descriptor {
                 policy
-                    .verify(process.process.0)
+                    .seal(process.process.0)
                     .context("verify suspended resource process policy")?;
                 policy
-                    .verify(thread.0)
+                    .seal(thread.0)
                     .context("verify suspended resource thread policy")?;
+            }
+            #[cfg(test)]
+            if self
+                .environment
+                .get("WUKONG_NATIVE_SEAL_LABELS")
+                .is_some_and(|value| value == "1")
+            {
+                crate::process_access::seal_low_integrity(process.process.0)?;
+                crate::process_access::seal_low_integrity(thread.0)?;
             }
             if let Some(capabilities) = capabilities.as_ref() {
                 seal_sandbox_token(&process, capabilities.AppContainerSid)?;
@@ -1020,6 +1014,7 @@ mod tests {
             }
         }
         values.insert("WUKONG_NATIVE_JOB_FIXTURE".into(), "privileges".into());
+        values.insert("WUKONG_NATIVE_SEAL_LABELS".into(), "1".into());
         let log = File::create(temporary.path().join("fixture.log"))?;
         let input = File::open("NUL")?;
         let executable = std::env::current_exe()?;

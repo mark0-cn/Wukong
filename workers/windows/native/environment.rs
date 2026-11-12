@@ -8,9 +8,7 @@ use std::{
     path::{Path, PathBuf},
     ptr::null_mut,
 };
-use windows_sys::Win32::System::Environment::{
-    CreateEnvironmentBlock, DestroyEnvironmentBlock, SetEnvironmentVariableW,
-};
+use windows_sys::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
 use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath};
 
 pub(crate) fn program_data() -> Result<PathBuf> {
@@ -110,59 +108,6 @@ fn validate_role_paths(values: BTreeMap<String, OsString>) -> Result<BTreeMap<St
     Ok(values)
 }
 
-struct RoleScope(Vec<(Vec<u16>, Option<Vec<u16>>)>);
-impl RoleScope {
-    fn enter(values: &BTreeMap<String, OsString>) -> Result<Self> {
-        validate_role_paths(values.clone())?;
-        let mut scope = Self(Vec::new());
-        for (name, value) in values {
-            let previous = std::env::var_os(name)
-                .map(|value| security::wide(&value))
-                .transpose()?;
-            let name = security::wide(std::ffi::OsStr::new(name))?;
-            let value = security::wide(value)?;
-            scope.0.push((name, previous));
-            security::check(unsafe {
-                SetEnvironmentVariableW(scope.0.last().unwrap().0.as_ptr(), value.as_ptr())
-            })?;
-        }
-        Ok(scope)
-    }
-}
-impl Drop for RoleScope {
-    fn drop(&mut self) {
-        for (name, value) in self.0.iter().rev() {
-            if unsafe {
-                SetEnvironmentVariableW(
-                    name.as_ptr(),
-                    value.as_ref().map_or(std::ptr::null(), |v| v.as_ptr()),
-                )
-            } == 0
-            {
-                std::process::abort();
-            }
-        }
-    }
-}
-
-/// Windows lowbox setup can consult the creator's profile environment. This
-/// process-wide scope is confined to the fixed synchronous resource host, never
-/// the concurrently serving SCM process, and restores every previous value.
-pub(crate) fn with_role_paths<T>(
-    values: &BTreeMap<String, OsString>,
-    action: impl FnOnce() -> Result<T>,
-) -> Result<T> {
-    security::require_system()?;
-    ensure!(
-        std::env::args_os()
-            .nth(1)
-            .is_some_and(|arg| arg == "resource-selftest"),
-        "role environment mutation requires the fixed resource host"
-    );
-    let _scope = RoleScope::enter(values)?;
-    action()
-}
-
 fn system_with_policy(root: &Path, private: &AclPolicy) -> Result<BTreeMap<String, OsString>> {
     let system = PathBuf::from(std::env::var_os("SystemRoot").context("missing Windows root")?);
     security::no_links(&system)?;
@@ -260,7 +205,7 @@ mod tests {
         )
     }
     #[test]
-    fn profile_environment_is_filtered_and_restored_in_a_fresh_child() -> Result<()> {
+    fn profile_environment_is_filtered_without_mutating_a_fresh_parent() -> Result<()> {
         fixed_environment_child(
             "environment::tests::role_environment_scope_fixture_entry",
             "WUKONG_ROLE_ENVIRONMENT_PROBE",
@@ -290,44 +235,9 @@ mod tests {
         );
         let before: Vec<_> = ROLE_PATHS.iter().map(std::env::var_os).collect();
         assert!(before.iter().all(Option::is_none));
-        let observed = || -> Result<()> {
-            for name in ROLE_PATHS {
-                assert_eq!(std::env::var_os(name).as_ref(), Some(&values[name]));
-            }
-            Ok(())
-        };
-        {
-            let _scope = RoleScope::enter(&values)?;
-            observed()?;
-        }
-        assert_eq!(
-            ROLE_PATHS.iter().map(std::env::var_os).collect::<Vec<_>>(),
-            before
-        );
-        let failure: Result<()> = (|| {
-            let _scope = RoleScope::enter(&values)?;
-            observed()?;
-            anyhow::bail!("trusted scope error")
-        })();
-        assert!(failure.is_err());
-        assert_eq!(
-            ROLE_PATHS.iter().map(std::env::var_os).collect::<Vec<_>>(),
-            before
-        );
-        assert!(
-            std::panic::catch_unwind(|| {
-                let _scope = RoleScope::enter(&values).unwrap();
-                panic!("trusted scope unwind");
-            })
-            .is_err()
-        );
-        assert_eq!(
-            ROLE_PATHS.iter().map(std::env::var_os).collect::<Vec<_>>(),
-            before
-        );
         let mut unexpected = values.clone();
         unexpected.insert("PATH".into(), "unexpected-controller-path".into());
-        assert!(RoleScope::enter(&unexpected).is_err());
+        assert!(validate_role_paths(unexpected).is_err());
         Ok(())
     }
     fn fixed_environment_child(entry: &str, marker: &str) -> Result<()> {

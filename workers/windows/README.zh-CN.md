@@ -117,7 +117,7 @@ SCM 服务登记及固定原生子进程启动采用相同的本地路径规范�
 
 创建每用户 AppContainer 进程时，也会进入自有角色的同步身份模拟作用域，与 profile 设置保持一致；在检查或恢复挂起子进程前，先恢复 System 身份。已有线程身份模拟时拒绝进入，避免嵌套作用域抹除调用者身份。原生创建错误在恢复身份前捕获。可信的同身份线程测试覆盖成功返回、拒绝嵌套、保留操作系统错误及 panic 展开，不创建账户或 profile。固定自检失败时，还保留始终挂起的 System 上下文创建对照。仍须完成真实专用环境资格检查；这些线程测试不能证明 AppContainer 可以启动。参见微软的[每用户 AppContainer profile 约定](https://learn.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-createappcontainerprofile)及[进程创建约定](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessasuserw)。
 
-自有角色 profile 加载后，资源宿主通过禁用继承的 Windows `CreateEnvironmentBlock` 获取 `APPDATA`、`LOCALAPPDATA` 和 `USERPROFILE`。仅保留这三个已有、无链接的本地目录，不复制账户 PATH 或任意其他变量。它们补充子进程环境，并且仅在固定同步 `resource-selftest` 宿主内临时提供创建者的 profile 上下文。成功返回、失败及异常展开都会在后续工作前恢复每个原值；并发 SCM 服务禁止使用此作用域。全新进程测试从缺少这些变量的环境启动，解析当前可信测试身份的真实 profile 路径，检查筛选与恢复，不创建账户或 profile。始终挂起的创建对照区分缺少 profile 路径、仅子进程路径以及创建者和子进程路径。仍须完成真实 AppContainer 资格检查，不提供执行或就绪降级。
+自有角色 profile 加载后，资源宿主通过禁用继承的 Windows `CreateEnvironmentBlock` 获取 `APPDATA`、`LOCALAPPDATA` 和 `USERPROFILE`。仅将这三个已有、无链接的本地目录补充至子进程环境，不复制账户 PATH 或任意其他变量，也不修改创建者环境。全新进程测试从缺少这些变量的环境启动，解析当前可信测试身份的真实 profile 路径并检查筛选，不创建账户或 profile。真实安装中的始终挂起对照表明，仅补充子进程 profile 路径即可创建进程，缺少这些路径时返回错误203。随后父进程核对挂起进程和线程的所有者及 DACL，通过持有句柄使用 `LABEL_SECURITY_INFORMATION` 设置低完整性 no-write-up 标签，并在任何指令恢复前回读完整的预期权限。真实本地挂起子进程测试检查两种对象的标签，清空 Job，且不执行夹具代码。仍须完成真实运行资格检查，不提供执行或就绪降级。
 
 当前开发检查覆盖真实本地管道身份及拒绝路径、无执行能力的受保护暂存、签名恢复准入，以及真实后代进程的原生 Job 归属和统一终止。不会在宿主创建账户、服务或防火墙规则。首次离线 VM 尝试在普通账户校验处停止，尚未创建服务或防火墙规则；完整安装仍待验证。SSH 连通、生命周期恢复/更新/回滚，以及目标隔离 broker 仍须完成实现或验收。生产目标执行保持禁用；该引导程序不证明 Windows 生产支持已经完成。
 

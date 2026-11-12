@@ -15,7 +15,7 @@ use windows_sys::Win32::{
     Foundation::{HANDLE, LocalFree},
     Security::{
         ACE_HEADER,
-        Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT},
+        Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT, SetSecurityInfo},
         DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION,
         OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
         SYSTEM_MANDATORY_LABEL_ACE,
@@ -26,6 +26,72 @@ use windows_sys::Win32::{
 pub(crate) struct Policy {
     descriptor: SecurityDescriptor,
     grants: BTreeMap<String, u32>,
+}
+struct Descriptor(PSECURITY_DESCRIPTOR);
+impl Descriptor {
+    fn read(handle: HANDLE) -> Result<Self> {
+        let mut descriptor = null_mut();
+        let status = unsafe {
+            GetSecurityInfo(
+                handle,
+                SE_KERNEL_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        ensure!(
+            status == 0,
+            "cannot inspect initial resource object authority: {status}"
+        );
+        Ok(Self(descriptor))
+    }
+}
+impl Drop for Descriptor {
+    fn drop(&mut self) {
+        unsafe {
+            LocalFree(self.0);
+        }
+    }
+}
+
+/// Windows assigns process/thread labels during creation. Apply this explicit
+/// label through the held suspended-child handle, then read it back, while the
+/// existing owner/DACL policy remains unchanged.
+pub(crate) fn seal_low_integrity(handle: HANDLE) -> Result<()> {
+    let descriptor = SecurityDescriptor::from_sddl("S:(ML;;NW;;;LW)")?;
+    let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
+    security::check(unsafe {
+        GetSecurityDescriptorSacl(
+            descriptor.attributes().lpSecurityDescriptor,
+            &mut present,
+            &mut sacl,
+            &mut defaulted,
+        )
+    })?;
+    ensure!(
+        present != 0 && !sacl.is_null(),
+        "missing low-integrity label"
+    );
+    let status = unsafe {
+        SetSecurityInfo(
+            handle,
+            SE_KERNEL_OBJECT,
+            LABEL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            sacl,
+        )
+    };
+    ensure!(
+        status == 0,
+        "cannot seal owned suspended object label: {status}"
+    );
+    verify_integrity_label(Descriptor::read(handle)?.0)
 }
 impl Policy {
     pub fn owned(persona: &Persona, debugger: Option<&Persona>) -> Result<Self> {
@@ -73,62 +139,46 @@ impl Policy {
         self.descriptor.attributes()
     }
     pub fn verify(&self, handle: HANDLE) -> Result<()> {
-        let mut descriptor = null_mut();
-        let status = unsafe {
-            GetSecurityInfo(
-                handle,
-                SE_KERNEL_OBJECT,
-                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                &mut descriptor,
-            )
-        };
-        ensure!(
-            status == 0,
-            "cannot inspect initial resource object authority: {status}"
-        );
-        struct Local(PSECURITY_DESCRIPTOR);
-        impl Drop for Local {
-            fn drop(&mut self) {
-                unsafe {
-                    LocalFree(self.0);
-                }
-            }
-        }
-        let descriptor = Local(descriptor);
-        self.verify_descriptor(descriptor.0)
+        self.verify_descriptor(Descriptor::read(handle)?.0)
+    }
+    pub fn seal(&self, handle: HANDLE) -> Result<()> {
+        security::verify_descriptor(Descriptor::read(handle)?.0, "S-1-5-18", &self.grants, false)?;
+        seal_low_integrity(handle)?;
+        self.verify(handle)
     }
     fn verify_descriptor(&self, descriptor: PSECURITY_DESCRIPTOR) -> Result<()> {
         security::verify_descriptor(descriptor, "S-1-5-18", &self.grants, false)?;
-        let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
-        security::check(unsafe {
-            GetSecurityDescriptorSacl(descriptor, &mut present, &mut sacl, &mut defaulted)
-        })
-        .context("inspect resource object DACL/label")?;
-        ensure!(
-            present != 0 && !sacl.is_null() && unsafe { (*sacl).AceCount } == 1,
-            "resource object integrity label is ambiguous"
-        );
-        let mut ace = null_mut();
-        security::check(unsafe { GetAce(sacl, 0, &mut ace) })?;
-        let header = unsafe { &*ace.cast::<ACE_HEADER>() };
-        ensure!(
-            header.AceType == 0x11
-                && header.AceFlags == 0
-                && header.AceSize as usize >= size_of::<SYSTEM_MANDATORY_LABEL_ACE>(),
-            "resource object integrity ACE differs"
-        );
-        let label = unsafe { &*ace.cast::<SYSTEM_MANDATORY_LABEL_ACE>() };
-        ensure!(
-            label.Mask == 1
-                && security::sid_text(addr_of!(label.SidStart).cast_mut().cast())? == "S-1-16-4096",
-            "resource object is not low/no-write-up"
-        );
-        Ok(())
+        verify_integrity_label(descriptor)
     }
+}
+
+fn verify_integrity_label(descriptor: PSECURITY_DESCRIPTOR) -> Result<()> {
+    let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
+    security::check(unsafe {
+        GetSecurityDescriptorSacl(descriptor, &mut present, &mut sacl, &mut defaulted)
+    })
+    .context("inspect resource object DACL/label")?;
+    ensure!(
+        present != 0 && !sacl.is_null() && unsafe { (*sacl).AceCount } == 1,
+        "resource object integrity label is ambiguous"
+    );
+    let mut ace = null_mut();
+    security::check(unsafe { GetAce(sacl, 0, &mut ace) })?;
+    let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+    ensure!(
+        header.AceType == 0x11
+            && header.AceFlags == 0
+            && header.AceSize as usize >= size_of::<SYSTEM_MANDATORY_LABEL_ACE>(),
+        "resource object integrity ACE differs"
+    );
+    let label = unsafe { &*ace.cast::<SYSTEM_MANDATORY_LABEL_ACE>() };
+    let sid = security::sid_text(addr_of!(label.SidStart).cast_mut().cast())?;
+    ensure!(
+        label.Mask == 1 && sid == "S-1-16-4096",
+        "resource object is not low/no-write-up (mask={},sid={sid})",
+        label.Mask
+    );
+    Ok(())
 }
 
 #[cfg(test)]

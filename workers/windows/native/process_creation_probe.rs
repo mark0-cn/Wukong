@@ -41,11 +41,6 @@ pub(super) fn inspect(spawn: &Spawn<'_>, persona: &crate::persona::Persona) -> R
             ..Case::ORDINARY
         },
         Case {
-            name: "child_profile_environment_only",
-            context: CreationContext::RoleChildEnvironment,
-            ..Case::ORDINARY
-        },
-        Case {
             name: "system_creation_context",
             context: CreationContext::Process,
             ..Case::ORDINARY
