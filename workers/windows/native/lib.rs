@@ -23,6 +23,8 @@ mod persona;
 #[cfg(windows)]
 pub mod pipe_transport;
 #[cfg(windows)]
+mod process_access;
+#[cfg(windows)]
 pub mod processes;
 #[cfg(windows)]
 pub mod recovery;

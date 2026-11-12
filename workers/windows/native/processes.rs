@@ -573,11 +573,13 @@ impl Spawn<'_> {
             CapabilityCount: 0,
             Reserved: 0,
         };
-        let descriptor = debugger
-            .map(|peer| sandbox_process_policy(persona, peer))
-            .transpose()?;
-        let mut process =
-            self.create(Some(token), Some(desktop), Some(capabilities), descriptor)?;
+        let descriptor = crate::process_access::Policy::owned(persona, debugger)?;
+        let mut process = self.create(
+            Some(token),
+            Some(desktop),
+            Some(capabilities),
+            Some(descriptor),
+        )?;
         process._directory = Some(directory);
         Ok(process)
     }
@@ -586,7 +588,7 @@ impl Spawn<'_> {
         token: Option<Handle>,
         mut desktop: Option<Desktop>,
         mut capabilities: Option<windows_sys::Win32::Security::SECURITY_CAPABILITIES>,
-        descriptor: Option<SecurityDescriptor>,
+        descriptor: Option<crate::process_access::Policy>,
     ) -> Result<OwnedProcess> {
         security::no_links(self.executable)?;
         security::no_links(self.directory)?;
@@ -637,7 +639,9 @@ impl Spawn<'_> {
             | EXTENDED_STARTUPINFO_PRESENT
             | CREATE_NO_WINDOW;
         let mut information = PROCESS_INFORMATION::default();
-        let object_attributes = descriptor.as_ref().map(SecurityDescriptor::attributes);
+        let object_attributes = descriptor
+            .as_ref()
+            .map(crate::process_access::Policy::attributes);
         let object_attributes = object_attributes.as_ref().map_or(null(), |value| value);
         let success = unsafe {
             match token.as_ref() {
@@ -677,6 +681,14 @@ impl Spawn<'_> {
             _directory: None,
         };
         let thread = Handle(information.hThread);
+        if let Some(policy) = &descriptor {
+            policy
+                .verify(process.process.0)
+                .context("verify suspended resource process policy")?;
+            policy
+                .verify(thread.0)
+                .context("verify suspended resource thread policy")?;
+        }
         if let Some(capabilities) = capabilities.as_ref() {
             seal_sandbox_token(&process, capabilities.AppContainerSid)?;
         }
@@ -686,28 +698,6 @@ impl Spawn<'_> {
         );
         Ok(process)
     }
-}
-
-fn sandbox_process_policy(
-    target: &crate::persona::Persona,
-    debugger: &crate::persona::Persona,
-) -> Result<SecurityDescriptor> {
-    let target_sid = target.sid_text()?;
-    let debugger_sid = debugger.sid_text()?;
-    ensure!(
-        target_sid != debugger_sid && target.logon_sid() != debugger.logon_sid(),
-        "debugger and target must have independent resource identities"
-    );
-    // DebugActiveProcess requires PROCESS_ALL_ACCESS. Grant only these two
-    // resource personas, never their account SID or all AppContainers. Low IL
-    // permits the no-privilege debugger to exercise those explicit object rights.
-    SecurityDescriptor::from_sddl(&format!(
-        "O:SYD:P(A;;GA;;;SY)(A;;GA;;;{})(A;;GA;;;{})(A;;GA;;;{})(A;;GA;;;{})S:(ML;;NW;;;LW)",
-        target.logon_sid(),
-        target_sid,
-        debugger.logon_sid(),
-        debugger_sid
-    ))
 }
 
 #[cfg(test)]
