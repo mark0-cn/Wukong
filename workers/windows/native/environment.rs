@@ -8,6 +8,9 @@ use std::{
     path::{Path, PathBuf},
     ptr::null_mut,
 };
+use windows_sys::Win32::System::Environment::{
+    CreateEnvironmentBlock, DestroyEnvironmentBlock, SetEnvironmentVariableW,
+};
 use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath};
 
 pub(crate) fn program_data() -> Result<PathBuf> {
@@ -41,6 +44,123 @@ pub(crate) fn program_data() -> Result<PathBuf> {
 
 pub(crate) fn system(root: &Path) -> Result<BTreeMap<String, OsString>> {
     system_with_policy(root, &AclPolicy::private_vm())
+}
+
+const ROLE_PATHS: [&str; 3] = ["APPDATA", "LOCALAPPDATA", "USERPROFILE"];
+
+/// Snapshot only OS-provided profile locations; never inherit a controller or
+/// account PATH, arbitrary user variables, or model credentials.
+pub(crate) fn role_paths(token: &security::Handle) -> Result<BTreeMap<String, OsString>> {
+    use std::os::windows::ffi::OsStringExt;
+    let mut block = null_mut();
+    security::check(unsafe { CreateEnvironmentBlock(&mut block, token.0, 0) })
+        .context("resolve owned role environment")?;
+    struct Block(*mut std::ffi::c_void);
+    impl Drop for Block {
+        fn drop(&mut self) {
+            unsafe {
+                DestroyEnvironmentBlock(self.0);
+            }
+        }
+    }
+    let block = Block(block);
+    ensure!(!block.0.is_null(), "role environment is missing");
+    let mut values = BTreeMap::new();
+    let mut start = 0;
+    for end in 0..65536 {
+        if unsafe { *block.0.cast::<u16>().add(end) } != 0 {
+            continue;
+        }
+        if end == start {
+            return validate_role_paths(values);
+        }
+        let entry = OsString::from_wide(unsafe {
+            std::slice::from_raw_parts(block.0.cast::<u16>().add(start), end - start)
+        });
+        if let Some((name, value)) = entry.to_str().and_then(|value| value.split_once('=')) {
+            let name = name.to_ascii_uppercase();
+            if ROLE_PATHS.contains(&name.as_str()) {
+                ensure!(
+                    values.insert(name, value.into()).is_none(),
+                    "duplicate role environment path"
+                );
+            }
+        }
+        start = end + 1;
+    }
+    anyhow::bail!("role environment exceeds inspection limit")
+}
+
+fn validate_role_paths(values: BTreeMap<String, OsString>) -> Result<BTreeMap<String, OsString>> {
+    ensure!(
+        values.len() == ROLE_PATHS.len()
+            && ROLE_PATHS.iter().all(|name| values.contains_key(*name)),
+        "role environment lacks required profile paths"
+    );
+    for value in values.values() {
+        let path = Path::new(value);
+        security::no_links(path)?;
+        ensure!(
+            path.is_dir()
+                && matches!(path.components().next(), Some(std::path::Component::Prefix(prefix))
+            if matches!(prefix.kind(), std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_))),
+            "role profile path must be an existing local directory"
+        );
+    }
+    Ok(values)
+}
+
+struct RoleScope(Vec<(Vec<u16>, Option<Vec<u16>>)>);
+impl RoleScope {
+    fn enter(values: &BTreeMap<String, OsString>) -> Result<Self> {
+        validate_role_paths(values.clone())?;
+        let mut scope = Self(Vec::new());
+        for (name, value) in values {
+            let previous = std::env::var_os(name)
+                .map(|value| security::wide(&value))
+                .transpose()?;
+            let name = security::wide(std::ffi::OsStr::new(name))?;
+            let value = security::wide(value)?;
+            scope.0.push((name, previous));
+            security::check(unsafe {
+                SetEnvironmentVariableW(scope.0.last().unwrap().0.as_ptr(), value.as_ptr())
+            })?;
+        }
+        Ok(scope)
+    }
+}
+impl Drop for RoleScope {
+    fn drop(&mut self) {
+        for (name, value) in self.0.iter().rev() {
+            if unsafe {
+                SetEnvironmentVariableW(
+                    name.as_ptr(),
+                    value.as_ref().map_or(std::ptr::null(), |v| v.as_ptr()),
+                )
+            } == 0
+            {
+                std::process::abort();
+            }
+        }
+    }
+}
+
+/// Windows lowbox setup can consult the creator's profile environment. This
+/// process-wide scope is confined to the fixed synchronous resource host, never
+/// the concurrently serving SCM process, and restores every previous value.
+pub(crate) fn with_role_paths<T>(
+    values: &BTreeMap<String, OsString>,
+    action: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    security::require_system()?;
+    ensure!(
+        std::env::args_os()
+            .nth(1)
+            .is_some_and(|arg| arg == "resource-selftest"),
+        "role environment mutation requires the fixed resource host"
+    );
+    let _scope = RoleScope::enter(values)?;
+    action()
 }
 
 fn system_with_policy(root: &Path, private: &AclPolicy) -> Result<BTreeMap<String, OsString>> {
@@ -134,6 +254,83 @@ mod tests {
     }
     #[test]
     fn fixed_environment_supports_known_folder_resolution_in_a_fresh_child() -> Result<()> {
+        fixed_environment_child(
+            "environment::tests::known_folder_lookup_fixture_entry",
+            "WUKONG_KNOWN_FOLDER_PROBE",
+        )
+    }
+    #[test]
+    fn profile_environment_is_filtered_and_restored_in_a_fresh_child() -> Result<()> {
+        fixed_environment_child(
+            "environment::tests::role_environment_scope_fixture_entry",
+            "WUKONG_ROLE_ENVIRONMENT_PROBE",
+        )
+    }
+    #[test]
+    fn role_environment_scope_fixture_entry() -> Result<()> {
+        if std::env::var_os("WUKONG_ROLE_ENVIRONMENT_PROBE").is_none() {
+            return Ok(());
+        }
+        use windows_sys::Win32::{
+            Security::{TOKEN_DUPLICATE, TOKEN_QUERY},
+            System::Threading::{GetCurrentProcess, OpenProcessToken},
+        };
+        let mut token = null_mut();
+        security::check(unsafe {
+            OpenProcessToken(
+                GetCurrentProcess(),
+                TOKEN_QUERY | TOKEN_DUPLICATE,
+                &mut token,
+            )
+        })?;
+        let values = role_paths(&security::Handle(token))?;
+        assert_eq!(
+            values.keys().map(String::as_str).collect::<Vec<_>>(),
+            ROLE_PATHS
+        );
+        let before: Vec<_> = ROLE_PATHS.iter().map(std::env::var_os).collect();
+        assert!(before.iter().all(Option::is_none));
+        let observed = || -> Result<()> {
+            for name in ROLE_PATHS {
+                assert_eq!(std::env::var_os(name).as_ref(), Some(&values[name]));
+            }
+            Ok(())
+        };
+        {
+            let _scope = RoleScope::enter(&values)?;
+            observed()?;
+        }
+        assert_eq!(
+            ROLE_PATHS.iter().map(std::env::var_os).collect::<Vec<_>>(),
+            before
+        );
+        let failure: Result<()> = (|| {
+            let _scope = RoleScope::enter(&values)?;
+            observed()?;
+            anyhow::bail!("trusted scope error")
+        })();
+        assert!(failure.is_err());
+        assert_eq!(
+            ROLE_PATHS.iter().map(std::env::var_os).collect::<Vec<_>>(),
+            before
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let _scope = RoleScope::enter(&values).unwrap();
+                panic!("trusted scope unwind");
+            })
+            .is_err()
+        );
+        assert_eq!(
+            ROLE_PATHS.iter().map(std::env::var_os).collect::<Vec<_>>(),
+            before
+        );
+        let mut unexpected = values.clone();
+        unexpected.insert("PATH".into(), "unexpected-controller-path".into());
+        assert!(RoleScope::enter(&unexpected).is_err());
+        Ok(())
+    }
+    fn fixed_environment_child(entry: &str, marker: &str) -> Result<()> {
         // A fresh process prevents the caller's full environment or Shell cache
         // from hiding a missing SYSTEMDRIVE. No accounts/profiles are changed.
         let temporary = tempfile::tempdir()?;
@@ -141,18 +338,14 @@ mod tests {
         private.create_directory(&temporary.path().join("metadata"))?;
         private.create_directory(&temporary.path().join("metadata/system-tmp"))?;
         let mut environment = system_with_policy(temporary.path(), &private)?;
-        environment.insert("WUKONG_KNOWN_FOLDER_PROBE".into(), "1".into());
+        environment.insert(marker.into(), "1".into());
         let log_path = temporary.path().join("known-folder.log");
         let log = std::fs::File::create(&log_path)?;
         let input = std::fs::File::open("NUL")?;
         let executable = std::env::current_exe()?;
         let child = crate::processes::Spawn {
             executable: &executable,
-            arguments: &[
-                "--exact".into(),
-                "environment::tests::known_folder_lookup_fixture_entry".into(),
-                "--nocapture".into(),
-            ],
+            arguments: &["--exact".into(), entry.into(), "--nocapture".into()],
             directory: temporary.path(),
             environment: &environment,
             log: &log,

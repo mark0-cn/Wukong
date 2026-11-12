@@ -554,6 +554,8 @@ enum Start {
 enum CreationContext {
     Process,
     Role,
+    RoleChildEnvironment,
+    RoleProfileEnvironment,
 }
 #[derive(Debug)]
 struct DrainFailure(anyhow::Error);
@@ -662,7 +664,7 @@ impl Spawn<'_> {
             Some(capabilities),
             Some(descriptor),
             Start::Execute,
-            CreationContext::Role,
+            CreationContext::RoleProfileEnvironment,
         )?;
         process._directory = Some(directory);
         Ok(process)
@@ -688,7 +690,21 @@ impl Spawn<'_> {
         let mut argv = vec![executable.into_os_string()];
         argv.extend_from_slice(self.arguments);
         let mut command = command_line(&argv)?;
-        let environment = environment(self.environment)?;
+        let profile = if matches!(
+            creation_context,
+            CreationContext::RoleChildEnvironment | CreationContext::RoleProfileEnvironment
+        ) {
+            Some(crate::environment::role_paths(token.as_ref().context(
+                "profile environment requires an owned role token",
+            )?)?)
+        } else {
+            None
+        };
+        let mut child_environment = self.environment.clone();
+        if let Some(profile) = &profile {
+            child_environment.extend(profile.clone());
+        }
+        let environment = environment(&child_environment)?;
         let job = Job::new()?;
         let (log, input) = (inheritable(self.log)?, inheritable(self.input)?);
         let mut handles = [log.0, input.0];
@@ -764,7 +780,9 @@ impl Spawn<'_> {
         };
         let created = match creation_context {
             CreationContext::Process => launch(),
-            CreationContext::Role => {
+            CreationContext::Role
+            | CreationContext::RoleChildEnvironment
+            | CreationContext::RoleProfileEnvironment => {
                 ensure!(
                     capabilities.is_some(),
                     "role creation context requires an AppContainer"
@@ -772,14 +790,23 @@ impl Spawn<'_> {
                 let token = token
                     .as_ref()
                     .context("role creation context requires its owned token")?;
-                crate::persona::as_user(token, launch)
+                if matches!(creation_context, CreationContext::RoleProfileEnvironment) {
+                    crate::environment::with_role_paths(
+                        profile
+                            .as_ref()
+                            .context("missing role profile environment")?,
+                        || crate::persona::as_user(token, launch),
+                    )
+                } else {
+                    crate::persona::as_user(token, launch)
+                }
             }
         };
         created.with_context(|| {
             format!(
                 "native suspended process creation failed (appcontainer={},role_context={})",
                 capabilities.is_some(),
-                matches!(creation_context, CreationContext::Role)
+                !matches!(creation_context, CreationContext::Process)
             )
         })?;
         let process = OwnedProcess {

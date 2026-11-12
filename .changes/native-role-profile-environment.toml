@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Supply only Windows-resolved APPDATA, LOCALAPPDATA and USERPROFILE for owned AppContainer creation. A fixed synchronous resource host restores the creator environment after each call; the child keeps only filtered profile paths. Fresh-process checks cover filtering and restoration without installing anything. Dedicated AppContainer qualification remains pending."
+zh_CN = "为自有 AppContainer 创建过程提供经过 Windows 解析的 APPDATA、LOCALAPPDATA 和 USERPROFILE。固定同步资源宿主在每次调用后恢复创建者环境，子进程仅获得筛选后的 profile 路径。全新进程检查覆盖筛选和恢复，不安装任何组件；仍待完成真实 AppContainer 资格检查。"

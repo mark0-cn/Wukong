@@ -18,7 +18,7 @@ impl Case {
         appcontainer: true,
         desktop: true,
         explicit_policy: true,
-        context: CreationContext::Role,
+        context: CreationContext::RoleProfileEnvironment,
     };
 }
 
@@ -35,6 +35,16 @@ pub(super) fn inspect(spawn: &Spawn<'_>, persona: &crate::persona::Persona) -> R
     let mut reports = Vec::new();
     for case in [
         Case::ORDINARY,
+        Case {
+            name: "without_profile_environment",
+            context: CreationContext::Role,
+            ..Case::ORDINARY
+        },
+        Case {
+            name: "child_profile_environment_only",
+            context: CreationContext::RoleChildEnvironment,
+            ..Case::ORDINARY
+        },
         Case {
             name: "system_creation_context",
             context: CreationContext::Process,
