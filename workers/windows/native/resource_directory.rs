@@ -10,8 +10,8 @@ use windows_sys::Win32::{
         GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION, SYSTEM_MANDATORY_LABEL_ACE,
     },
     Storage::FileSystem::{
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_SHARE_READ,
-        READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+        DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
     },
 };
 
@@ -51,8 +51,17 @@ impl ResourceDirectory {
             app.into(),
             FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
         );
-        let descriptor =
-            SecurityDescriptor::from_sddl(&format!("{}S:(ML;OICI;NW;;;LW)", policy.sddl(true)))?;
+        // DELETE applies only to descendants. Neither the root nor its private,
+        // protected guard gains DELETE/DELETE_CHILD through these entries.
+        let children: std::collections::BTreeMap<String, u32> =
+            [(app.into(), DELETE), (logon.into(), DELETE)]
+                .into_iter()
+                .collect();
+        let mut sddl = policy.sddl(true);
+        for (sid, mask) in &children {
+            sddl.push_str(&format!("(A;OICIIO;0x{mask:08x};;;{sid})"));
+        }
+        let descriptor = SecurityDescriptor::from_sddl(&format!("{sddl}S:(ML;OICI;NW;;;LW)"))?;
         let (mut dacl, mut sacl) = (null_mut(), null_mut());
         let (mut present, mut defaulted) = (0, 0);
         check(unsafe {
@@ -84,10 +93,14 @@ impl ResourceDirectory {
             original,
             guard: std::sync::Mutex::new(Some(guard)),
         };
-        result.verify(&policy)?;
+        result.verify(&policy, &children)?;
         Ok(result)
     }
-    fn verify(&self, policy: &AclPolicy) -> Result<()> {
+    fn verify(
+        &self,
+        policy: &AclPolicy,
+        children: &std::collections::BTreeMap<String, u32>,
+    ) -> Result<()> {
         let mut actual = null_mut();
         let status = unsafe {
             GetSecurityInfo(
@@ -106,7 +119,7 @@ impl ResourceDirectory {
             "cannot inspect held sandbox directory policy: {status}"
         );
         let actual = Local(actual);
-        verify_descriptor(actual.0, &policy.owner, &policy.grants, true)?;
+        verify_descriptor_with_children(actual.0, &policy.owner, &policy.grants, true, children)?;
         let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
         check(unsafe {
             GetSecurityDescriptorSacl(actual.0, &mut present, &mut sacl, &mut defaulted)
@@ -262,6 +275,151 @@ pub(crate) fn probe_root(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn inert_app_sid(name: &str) -> Result<String> {
+        let name = wide(std::ffi::OsStr::new(name))?;
+        let mut app = null_mut();
+        let hr = unsafe {
+            windows_sys::Win32::Security::Isolation::DeriveAppContainerSidFromAppContainerName(
+                name.as_ptr(),
+                &mut app,
+            )
+        };
+        ensure!(hr >= 0, "cannot derive an inert SID");
+        struct Free(PSID);
+        impl Drop for Free {
+            fn drop(&mut self) {
+                unsafe {
+                    windows_sys::Win32::Security::FreeSid(self.0);
+                }
+            }
+        }
+        let app = Free(app);
+        sid_text(app.0)
+    }
+    #[test]
+    #[ignore = "dedicated Windows VM: actual AppContainer filesystem ACL inheritance"]
+    fn inherited_delete_permits_owned_children_but_not_root_guard_or_other_resources() -> Result<()>
+    {
+        use windows_sys::Win32::Storage::FileSystem::FILE_DELETE_CHILD;
+        let app = inert_app_sid("Wukong-inert-deletion-test")?;
+        const OTHER: &str = "S-1-15-2-201-202-203-204-205-206-207";
+        let temporary = tempfile::tempdir()?;
+        let mut original = null_mut();
+        check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut original) })?;
+        let token = Handle(original);
+        let logon = token_logon_sid(&token)?;
+        let descriptor = |path: &Path| -> Result<SecurityDescriptor> {
+            let file = fs::OpenOptions::new()
+                .access_mode(READ_CONTROL)
+                .share_mode(FILE_SHARE_READ)
+                .open(path)?;
+            SecurityDescriptor::from_object(file.as_raw_handle(), SE_FILE_OBJECT)
+        };
+        // The former read/write/execute grant permits data I/O but cannot
+        // delete an inherited file. Test actual NTFS inheritance through Authz.
+        let mut legacy = AclPolicy::current_user()?;
+        for sid in [app.as_str(), logon.as_str()] {
+            legacy.grants.insert(
+                sid.into(),
+                FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
+            );
+        }
+        let old_root = temporary.path().join("legacy");
+        AclPolicy::current_user()?.create_directory(&old_root)?;
+        legacy.apply(&old_root, true)?;
+        let old_child = old_root.join("probe.bin");
+        fs::write(&old_child, b"old")?;
+        let old = descriptor(&old_child)?;
+        assert!(test_authz::allows(&old, &token, &app, FILE_GENERIC_READ)?);
+        assert!(!test_authz::allows(&old, &token, &app, DELETE)?);
+
+        let directory = ResourceDirectory::with_policy(
+            &temporary.path().join("resource"),
+            &app,
+            &logon,
+            AclPolicy::current_user()?,
+        )?;
+        let child = directory.path().join("probe.bin");
+        fs::write(&child, b"owned")?;
+        let child_descriptor = descriptor(&child)?;
+        assert!(test_authz::allows(&child_descriptor, &token, &app, DELETE)?);
+        assert!(!test_authz::allows(
+            &child_descriptor,
+            &token,
+            OTHER,
+            DELETE
+        )?);
+        let root =
+            SecurityDescriptor::from_object(directory.handle.as_raw_handle(), SE_FILE_OBJECT)?;
+        assert!(!test_authz::allows(&root, &token, &app, DELETE)?);
+        assert!(!test_authz::allows(&root, &token, &app, FILE_DELETE_CHILD)?);
+        let guard = {
+            let held = directory.guard.lock().unwrap();
+            SecurityDescriptor::from_object(held.as_ref().unwrap().as_raw_handle(), SE_FILE_OBJECT)?
+        };
+        assert!(!test_authz::allows(&guard, &token, &app, DELETE)?);
+        probe_root(directory.path())?;
+        directory.reclaim()?;
+        assert!(!test_authz::allows(
+            &descriptor(&child)?,
+            &token,
+            &app,
+            DELETE
+        )?);
+        fs::remove_file(child)?;
+        let path = directory.path().to_owned();
+        drop(directory);
+        fs::remove_dir(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn root_verification_requires_exact_inherit_only_delete_entries() -> Result<()> {
+        let mut policy = AclPolicy::private_vm();
+        let app = "S-1-15-2-101-102-103-104-105-106-107";
+        let logon = "S-1-5-5-200-300";
+        for sid in [app, logon] {
+            policy.grants.insert(
+                sid.into(),
+                FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
+            );
+        }
+        let children = [(app.into(), DELETE), (logon.into(), DELETE)]
+            .into_iter()
+            .collect();
+        let entries = format!("(A;OICIIO;0x00010000;;;{app})(A;OICIIO;0x00010000;;;{logon})");
+        let sddl = format!("{}{entries}", policy.sddl(true));
+        let descriptor = SecurityDescriptor::from_sddl(&sddl)?;
+        verify_descriptor_with_children(
+            descriptor.0.0,
+            &policy.owner,
+            &policy.grants,
+            true,
+            &children,
+        )?;
+        assert!(verify_descriptor(descriptor.0.0, &policy.owner, &policy.grants, true).is_err());
+        for changed in [
+            sddl.replace("OICIIO", "OICI"),
+            sddl.replace("OICIIO", "OIIO"),
+            sddl.replace("0x00010000", "0x00000040"),
+            sddl.replace("D:P", "D:"),
+            format!("{sddl}(A;OICIIO;0x00010000;;;{app})"),
+        ] {
+            let changed = SecurityDescriptor::from_sddl(&changed)?;
+            assert!(
+                verify_descriptor_with_children(
+                    changed.0.0,
+                    &policy.owner,
+                    &policy.grants,
+                    true,
+                    &children
+                )
+                .is_err()
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn shared_write_denial_qualifies_the_guarded_root_probe() -> Result<()> {
         use windows_sys::Win32::Storage::FileSystem::{
@@ -328,25 +486,7 @@ mod tests {
         check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
         let token = Handle(token);
         let logon = token_logon_sid(&token)?;
-        let name = wide(std::ffi::OsStr::new("Wukong-inert-directory-test"))?;
-        let mut app = null_mut();
-        let hr = unsafe {
-            windows_sys::Win32::Security::Isolation::DeriveAppContainerSidFromAppContainerName(
-                name.as_ptr(),
-                &mut app,
-            )
-        };
-        ensure!(hr >= 0, "cannot derive an inert SID");
-        struct Free(PSID);
-        impl Drop for Free {
-            fn drop(&mut self) {
-                unsafe {
-                    windows_sys::Win32::Security::FreeSid(self.0);
-                }
-            }
-        }
-        let app = Free(app);
-        let app = sid_text(app.0)?;
+        let app = inert_app_sid("Wukong-inert-directory-test")?;
         let directory = ResourceDirectory::with_policy(
             &root.path().join("scratch"),
             &app,

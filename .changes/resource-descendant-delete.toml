@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow sandbox resources to delete their own scratch descendants while preserving root and private-guard deletion restrictions, with exact ACL verification and a dedicated Windows VM regression."
+zh_CN = "允许沙箱资源删除自身临时目录的后代文件与目录，保留根目录和私有保护文件的删除限制，并增加精确 ACL 校验和专用 Windows VM 回归。"

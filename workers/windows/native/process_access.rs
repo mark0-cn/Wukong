@@ -169,19 +169,8 @@ pub(crate) fn verify_integrity_label(descriptor: PSECURITY_DESCRIPTOR) -> Result
 mod tests {
     use super::*;
     use crate::security::Handle;
-    use std::{ffi::OsStr, ptr::null};
     use windows_sys::Win32::{
-        Foundation::LocalFree,
-        Security::{
-            Authorization::{
-                AUTHZ_ACCESS_REPLY, AUTHZ_ACCESS_REQUEST, AUTHZ_CLIENT_CONTEXT_HANDLE,
-                AUTHZ_RESOURCE_MANAGER_HANDLE, AUTHZ_RM_FLAG_NO_AUDIT, AuthzAccessCheck,
-                AuthzAddSidsToContext, AuthzFreeContext, AuthzFreeResourceManager,
-                AuthzInitializeContextFromToken, AuthzInitializeResourceManager,
-                ConvertStringSidToSidW,
-            },
-            SID_AND_ATTRIBUTES, TOKEN_QUERY,
-        },
+        Security::TOKEN_QUERY,
         System::Threading::{GetCurrentProcess, OpenProcessToken, THREAD_ALL_ACCESS},
     };
     const APP_A: &str = "S-1-15-2-101-102-103-104-105-106-107";
@@ -189,99 +178,12 @@ mod tests {
     const APP_C: &str = "S-1-15-2-301-302-303-304-305-306-307";
 
     fn allowed(policy: &Policy, original: &Handle, restriction: &str) -> Result<bool> {
-        let text = security::wide(OsStr::new(restriction))?;
-        let mut sid = null_mut();
-        security::check(unsafe { ConvertStringSidToSidW(text.as_ptr(), &mut sid) })
-            .context("parse inert resource restriction")?;
-        struct Sid(*mut std::ffi::c_void);
-        impl Drop for Sid {
-            fn drop(&mut self) {
-                unsafe {
-                    LocalFree(self.0);
-                }
-            }
-        }
-        let sid = Sid(sid);
-        let restriction = SID_AND_ATTRIBUTES {
-            Sid: sid.0,
-            Attributes: 4,
-        };
-        struct Manager(AUTHZ_RESOURCE_MANAGER_HANDLE);
-        impl Drop for Manager {
-            fn drop(&mut self) {
-                if !self.0.is_null() {
-                    unsafe {
-                        AuthzFreeResourceManager(self.0);
-                    }
-                }
-            }
-        }
-        struct Context(AUTHZ_CLIENT_CONTEXT_HANDLE);
-        impl Drop for Context {
-            fn drop(&mut self) {
-                if !self.0.is_null() {
-                    unsafe {
-                        AuthzFreeContext(self.0);
-                    }
-                }
-            }
-        }
-        let mut manager = Manager(null_mut());
-        security::check(unsafe {
-            AuthzInitializeResourceManager(
-                AUTHZ_RM_FLAG_NO_AUDIT,
-                None,
-                None,
-                None,
-                null(),
-                &mut manager.0,
-            )
-        })
-        .context("create inert authorization manager")?;
-        let mut initial = Context(null_mut());
-        security::check(unsafe {
-            AuthzInitializeContextFromToken(
-                0,
-                original.0,
-                manager.0,
-                null(),
-                Default::default(),
-                null(),
-                &mut initial.0,
-            )
-        })
-        .context("copy fixture token into authorization context")?;
-        let mut restricted = Context(null_mut());
-        security::check(unsafe {
-            AuthzAddSidsToContext(initial.0, null(), 0, &restriction, 1, &mut restricted.0)
-        })
-        .context("add inert restricted authorization identity")?;
-        let request = AUTHZ_ACCESS_REQUEST {
-            DesiredAccess: PROCESS_ALL_ACCESS,
-            ..Default::default()
-        };
-        let (mut granted, mut error) = (0, 0);
-        let mut reply = AUTHZ_ACCESS_REPLY {
-            ResultListLength: 1,
-            GrantedAccessMask: &mut granted,
-            Error: &mut error,
-            ..Default::default()
-        };
-        security::check(unsafe {
-            AuthzAccessCheck(
-                0,
-                restricted.0,
-                &request,
-                null_mut(),
-                policy.attributes().lpSecurityDescriptor,
-                null(),
-                0,
-                &mut reply,
-                null_mut(),
-            )
-        })
-        .context("check resource process authorization")?;
-        Ok(error == 0 && granted == PROCESS_ALL_ACCESS)
+        security::test_authz::allows(
+            &policy.descriptor,
+            original,
+            restriction,
+            PROCESS_ALL_ACCESS,
+        )
     }
 
     #[test]

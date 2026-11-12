@@ -129,4 +129,12 @@ SCM 服务登记及固定原生子进程启动采用相同的本地路径规范�
 
 受限探针失败时，在现有有界日志中区分套接字创建、源地址绑定/查询、临时文件操作及持有根目录的资格检查。操作位置说明保留底层 Windows 错误，不改变验收条件。
 
+临时资源根目录通过仅继承条目，把 `DELETE` 只授予各资源 AppContainer 和登录 SID 的后代文件与目录。根目录保留读、写、执行权限，不授予 `DELETE` 或 `FILE_DELETE_CHILD`；其受保护的私有保护文件不会继承这两项删除授权。现有描述符校验器单独核对精确的后代专用条目，普通策略仍拒绝此类条目。进程和文件系统授权夹具复用同一个 Windows Authz 辅助模块。专用 VM 回归验证真实 NTFS 继承、原先缺失删除权限的策略、其他资源拒绝、根目录及保护文件拒绝，以及回收。请在专用 Windows 测试 VM 中运行：
+
+```powershell
+cargo test --locked --manifest-path workers/windows/Cargo.toml --lib inherited_delete_permits_owned_children_but_not_root_guard_or_other_resources -- --ignored
+```
+
+这项回归不在普通宿主检查中执行。2026-11-13，开发宿主拒绝打开已授予 AppContainer 权限的夹具目录，而同一个测试程序在专用 Windows 10 1803 VM 中通过。该文件系统检查不证明已完成安装后服务或生命周期资格验收。
+
 AppContainer 特权策略遵循 Windows 文档中的目录遍历例外：仅保留 `SeChangeNotifyPrivilege`，它跳过祖先目录遍历检查，不授予最终对象读写或目录列举权限。普通元数据 worker 保持现有零特权策略。沙箱令牌回读会拒绝缺失、禁用或任何额外特权（包括 `SeDebugPrivilege`），capability 数仍须为零。不通过修改机器全局目录 ACL 来补偿加载器拒绝。资格检查回执使用 schema3 和明确的特权名称数组，仍要求真实哨兵/网络拒绝、自有 DbgEng 附加及静止清理。安装后的运行仍须专用验收；这项策略修正不会启用生产执行。参见微软的[受限令牌约定](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)、[文件访问指引](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)及 [WFP 事件枚举约定](https://learn.microsoft.com/en-us/windows/win32/api/fwpmu/nf-fwpmu-fwpmneteventenum2)。
