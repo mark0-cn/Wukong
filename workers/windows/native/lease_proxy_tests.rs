@@ -432,3 +432,83 @@ async fn native_upload_serialization_does_not_block_lease_renewal() -> Result<()
     assert_eq!(result["result"]["native_input"]["epoch"], lease["epoch"]);
     Ok(())
 }
+
+async fn existing_transfer_upstream(bytes: Vec<u8>) -> Result<Vec<u8>> {
+    use sha2::Digest;
+    let value: Value = serde_json::from_slice(&bytes)?;
+    assert_eq!(value["params"]["_lease"]["token"], "d".repeat(32));
+    let id = "ec079f90e8f713f84af33c720050e56fc06ed0612efbb33cb37be05feb593331";
+    let artifact = json!({"path":"files/targets/sample.bin","sha256":hex::encode(sha2::Sha256::digest(b"abcdef")),"size":6});
+    let result = match value["method"].as_str().unwrap() {
+        "file.upload.begin" => json!({"transfer_id":id,"chunk_bytes":1048576}),
+        "file.upload.status" | "file.upload.write" => {
+            json!({"transfer_id":id,"offset":6,"complete":true,"artifact":artifact})
+        }
+        "file.upload.commit" => artifact,
+        _ => anyhow::bail!("unexpected fixture method"),
+    };
+    encode(&json!({"jsonrpc":"2.0","id":value["id"],"result":result}))
+}
+
+#[tokio::test]
+async fn fenced_resumable_rpc_never_treats_an_existing_worker_file_as_native_input() -> Result<()> {
+    use sha2::Digest;
+    let (_directory, proxy) = fixture()?;
+    let mut previous = Value::Null;
+    for run in ["first", "second"] {
+        let lease = call(&proxy, &acquire(run, "controller")).await?["result"].clone();
+        let make = |method, mut params: Value| {
+            params["_binding"] = serde_json::to_value(identity()).unwrap();
+            params["_lease"] = lease.clone();
+            request(method, params)
+        };
+        let begin = make(
+            "file.upload.begin",
+            json!({"path":"targets/sample.bin","size":6,
+            "sha256":hex::encode(sha2::Sha256::digest(b"abcdef")),"executable":true}),
+        );
+        let result: Value = serde_json::from_slice(
+            &proxy
+                .call(&encode(&begin)?, existing_transfer_upstream)
+                .await?,
+        )?;
+        let id = result["result"]["transfer_id"].clone();
+        let status = make("file.upload.status", json!({"transfer_id":id}));
+        let observation: Value = serde_json::from_slice(
+            &proxy
+                .call(&encode(&status)?, existing_transfer_upstream)
+                .await?,
+        )?;
+        assert_eq!(observation["result"]["offset"], 0);
+        assert_eq!(observation["result"]["complete"], false);
+        for (offset, data) in [(0, "YWJj"), (3, "ZGVm")] {
+            let write = make(
+                "file.upload.write",
+                json!({"transfer_id":id,"offset":offset,"data_base64":data}),
+            );
+            let observation: Value = serde_json::from_slice(
+                &proxy
+                    .call(&encode(&write)?, existing_transfer_upstream)
+                    .await?,
+            )?;
+            assert_eq!(observation["result"]["offset"], offset + 3);
+            assert_eq!(observation["result"]["complete"], false);
+        }
+        let commit = make("file.upload.commit", json!({"transfer_id":id}));
+        let observation: Value = serde_json::from_slice(
+            &proxy
+                .call(&encode(&commit)?, existing_transfer_upstream)
+                .await?,
+        )?;
+        let proof = &observation["result"]["native_input"];
+        assert_eq!(proof["run_id"], run);
+        assert_eq!(proof["epoch"], lease["epoch"]);
+        assert_ne!(proof["id"], previous);
+        previous = proof["id"].clone();
+        assert_eq!(
+            call(&proxy, &release(&lease)).await?["result"]["released"],
+            true
+        );
+    }
+    Ok(())
+}

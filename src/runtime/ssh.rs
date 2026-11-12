@@ -347,6 +347,51 @@ mod tests {
             read["data_base64"] == "AAECAw==" && read["sha256"] == artifact["sha256"],
             "installed transfer identity mismatch"
         );
+        let begin = bound
+            .call(
+                "file.upload.begin",
+                json!({"path":"hosted-chunked.bin",
+            "sha256":artifact["sha256"],"size":4,"executable":true,
+            "request_id":"hosted-chunked-begin"}),
+            )
+            .await?;
+        let transfer = begin["transfer_id"]
+            .as_str()
+            .context("installed transfer has no ID")?;
+        let status = bound
+            .call("file.upload.status", json!({"transfer_id":transfer}))
+            .await?;
+        ensure!(
+            status["offset"] == 0 && status["complete"] == false,
+            "another native fence reused worker bytes without controller provenance"
+        );
+        for (offset, data) in [(0, "AAE="), (2, "AgM=")] {
+            let next = bound
+                .call(
+                    "file.upload.write",
+                    json!({"transfer_id":transfer,"offset":offset,
+                "data_base64":data,"request_id":format!("hosted-chunked-{}-{offset}",first.epoch)}),
+                )
+                .await?;
+            ensure!(
+                next["offset"] == offset + 2,
+                "native and worker chunk acknowledgements differ"
+            );
+        }
+        let commit = json!({"transfer_id":transfer,"request_id":"hosted-chunked-commit"});
+        let chunked = bound.call("file.upload.commit", commit.clone()).await?;
+        ensure!(
+            chunked["native_input"]["identity"] == doctor["identity"]
+                && chunked["native_input"]["epoch"] == first.epoch
+                && chunked["native_input"]["sha256"] == artifact["sha256"]
+                && chunked["native_input"]["size"] == 4
+                && chunked["native_input"]["executable"] == true,
+            "installed resumable upload has no exact native input provenance"
+        );
+        ensure!(
+            bound.call("file.upload.commit", commit).await? == chunked,
+            "native resumable upload proof changed on retry"
+        );
         client
             .call("environment.lease.release", json!({"lease":first}))
             .await?;
@@ -375,6 +420,7 @@ mod tests {
             "first_epoch":first.epoch,"last_epoch":second.epoch,"artifact_sha256":artifact["sha256"],
             "native_broker":doctor["native_broker"],
             "native_input":artifact["native_input"],
+            "native_resumable_input":chunked["native_input"],
             "production_isolation_verified":false});
         use std::io::Write;
         fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&report)?)?;

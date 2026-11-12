@@ -2,7 +2,7 @@
 //! receipt ledger, but cannot issue or reset the controller's outer lease.
 use crate::{
     accounts, deployment,
-    inputs::{Inputs, Owner, Put},
+    inputs::{Inputs, Owner},
     security::AclPolicy,
 };
 use anyhow::{Context, Result, ensure};
@@ -338,14 +338,21 @@ impl LeaseProxy {
             return self.release(request, upstream).await;
         }
         let mut admission = self.admit(request["params"].as_object_mut().unwrap())?;
-        let input = if method == "file.put" {
-            match Put::parse(
+        // Serialize input publication independently of lease controls: hashing
+        // or a slow worker upload must never prevent heartbeat renewal.
+        let inputs = if Inputs::handles(&method) {
+            Some(self.inputs.lock().await)
+        } else {
+            None
+        };
+        let input = if let Some(inputs) = &inputs {
+            match inputs.prepare_rpc(
                 admission.owner.clone(),
+                &method,
                 request["params"].as_object().unwrap(),
             ) {
                 Ok(input) => Some(input),
                 Err(error) => {
-                    // Nothing was forwarded; rejecting input is a settled result.
                     admission.completed = true;
                     return Err(error);
                 }
@@ -353,26 +360,13 @@ impl LeaseProxy {
         } else {
             None
         };
-        // Serialize input publication independently of lease controls: hashing
-        // or a slow worker upload must never prevent heartbeat renewal.
-        let inputs = if input.is_some() {
-            Some(self.inputs.lock().await)
-        } else {
-            None
-        };
-        if let (Some(put), Some(inputs)) = (&input, &inputs)
-            && let Err(error) = inputs.prepare(put)
-        {
-            admission.completed = true;
-            return Err(error);
-        }
         let reply = upstream(encode(request)?).await?;
         // A structured error is also a settled RPC outcome. Transport failures,
         // malformed replies and dropped futures remain uncertain.
         let mut checked = owned_reply(request, &reply)?;
         if let (Some(put), Some(inputs)) = (&input, &inputs) {
             if checked.get("error").is_none() {
-                inputs.complete(put, &mut checked["result"])?;
+                inputs.complete_rpc(put, &mut checked["result"])?;
             }
             admission.completed = true;
             return encode(&checked);

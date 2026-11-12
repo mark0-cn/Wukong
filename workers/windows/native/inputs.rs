@@ -22,7 +22,14 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 const MAX_PUT: usize = 32 * 1024 * 1024;
 const MAX_MEMBERS: usize = 16_384;
-const MAX_SCOPE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_SCOPE_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+
+#[path = "inputs_transfers.rs"]
+mod transfers;
+pub(crate) enum Pending {
+    Put(Put),
+    Transfer(transfers::Transfer),
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,6 +94,38 @@ pub(crate) struct Inputs {
     policy: AclPolicy,
 }
 impl Inputs {
+    pub fn handles(method: &str) -> bool {
+        matches!(
+            method,
+            "file.put"
+                | "file.upload.begin"
+                | "file.upload.write"
+                | "file.upload.status"
+                | "file.upload.commit"
+        )
+    }
+    pub fn prepare_rpc(
+        &self,
+        owner: Owner,
+        method: &str,
+        params: &serde_json::Map<String, Value>,
+    ) -> Result<Pending> {
+        if method == "file.put" {
+            let put = Put::parse(owner, params)?;
+            self.prepare(&put)?;
+            Ok(Pending::Put(put))
+        } else {
+            Ok(Pending::Transfer(
+                self.prepare_transfer(owner, method, params)?,
+            ))
+        }
+    }
+    pub fn complete_rpc(&self, pending: &Pending, result: &mut Value) -> Result<()> {
+        match pending {
+            Pending::Put(put) => self.complete(put, result),
+            Pending::Transfer(transfer) => self.complete_transfer(transfer, result),
+        }
+    }
     pub fn open(metadata: &Path, policy: AclPolicy) -> Result<Self> {
         policy.verify(metadata, true)?;
         let root = metadata.join("native-inputs");
@@ -154,42 +193,14 @@ impl Inputs {
         let blob = directory.join(format!("{key}.data"));
         let receipt = directory.join(format!("{key}.receipt.json"));
         let bytes = serde_json::to_vec(&put.declaration)?;
-        {
-            // Count every member, including interrupted temporary writes. No
-            // unbounded directory scan or ignored orphan can bypass the budget.
-            let mut count = 0usize;
-            let mut size = 0u64;
-            for entry in fs::read_dir(&directory)? {
-                count += 1;
-                ensure!(count <= MAX_MEMBERS, "native input member budget exhausted");
-                let path = entry?.path();
-                self.policy.verify(&path, false)?;
-                size = size
-                    .checked_add(fs::symlink_metadata(path)?.len())
-                    .context("native input budget overflow")?;
-                ensure!(
-                    size <= MAX_SCOPE_BYTES,
-                    "native input byte budget exhausted"
-                );
-            }
-            for (path, length) in [
+        self.reserve(
+            &directory,
+            &[
                 (&record, bytes.len() as u64),
                 (&blob, put.declaration.size),
                 (&receipt, bytes.len() as u64),
-            ] {
-                if !path.exists() {
-                    count += 1;
-                    size = size
-                        .checked_add(length)
-                        .context("native input budget overflow")?;
-                }
-            }
-            ensure!(count <= MAX_MEMBERS, "native input member budget exhausted");
-            ensure!(
-                size <= MAX_SCOPE_BYTES,
-                "native input byte budget exhausted"
-            );
-        }
+            ],
+        )?;
         if !record.exists() {
             self.publish(&record, &bytes)?;
         }
@@ -201,7 +212,9 @@ impl Inputs {
     /// Only a valid successful worker reply can expose this proof. A lost,
     /// malformed or conflicting reply leaves the native lease uncertain.
     pub fn complete(&self, put: &Put, result: &mut Value) -> Result<()> {
-        let declaration = &put.declaration;
+        self.finish(&put.declaration, result)
+    }
+    fn finish(&self, declaration: &Declaration, result: &mut Value) -> Result<()> {
         ensure!(
             result.is_object()
                 && result["path"] == declaration.path
@@ -227,12 +240,51 @@ impl Inputs {
                 "native input receipt changed"
             );
         } else {
+            self.reserve(
+                &directory,
+                &[(&receipt, serde_json::to_vec(declaration)?.len() as u64)],
+            )?;
             self.publish(&receipt, &serde_json::to_vec(declaration)?)?;
         }
         result["native_input"] = serde_json::json!({"schema":1,"id":digest(declaration)?,
             "identity":declaration.owner.identity,"run_id":declaration.owner.run_id,
             "owner_id":declaration.owner.owner_id,"epoch":declaration.owner.epoch,
             "sha256":declaration.sha256,"size":declaration.size,"executable":declaration.executable});
+        Ok(())
+    }
+    fn reserve(&self, directory: &Path, pending: &[(&Path, u64)]) -> Result<()> {
+        // Include interrupted temporary files and every proposed physical byte.
+        let mut count = 0usize;
+        let mut size = 0u64;
+        for entry in fs::read_dir(directory)? {
+            count += 1;
+            ensure!(count <= MAX_MEMBERS, "native input member budget exhausted");
+            let path = entry?.path();
+            self.policy.verify(&path, false)?;
+            size = size
+                .checked_add(fs::symlink_metadata(path)?.len())
+                .context("native input budget overflow")?;
+            ensure!(
+                size <= MAX_SCOPE_BYTES,
+                "native input byte budget exhausted"
+            );
+        }
+        for (path, length) in pending {
+            let actual = if path.exists() {
+                fs::symlink_metadata(path)?.len()
+            } else {
+                count += 1;
+                0
+            };
+            size = size
+                .checked_add(length.saturating_sub(actual))
+                .context("native input budget overflow")?;
+        }
+        ensure!(count <= MAX_MEMBERS, "native input member budget exhausted");
+        ensure!(
+            size <= MAX_SCOPE_BYTES,
+            "native input byte budget exhausted"
+        );
         Ok(())
     }
     fn publish(&self, path: &Path, bytes: &[u8]) -> Result<()> {
