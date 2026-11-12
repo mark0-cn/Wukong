@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Identify the exact filesystem component when a contained debugger path check fails, preserving the Windows error and existing permission checks."
+zh_CN = "受限调试器路径检查失败时标明具体文件系统组件，保留 Windows 错误和现有权限检查。"

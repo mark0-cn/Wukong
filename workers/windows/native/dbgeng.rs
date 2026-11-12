@@ -119,7 +119,12 @@ fn local_path(path: &Path) -> Result<PathBuf> {
         "DbgEng requires an absolute local path without relative aliases"
     );
     for current in path.ancestors().filter(|p| !p.as_os_str().is_empty()) {
-        let metadata = std::fs::symlink_metadata(current)?;
+        let metadata = std::fs::symlink_metadata(current).with_context(|| {
+            format!(
+                "inspect local debugger path component {}",
+                current.display()
+            )
+        })?;
         ensure!(
             !metadata.file_type().is_symlink() && metadata.file_attributes() & 0x400 == 0,
             "DbgEng paths cannot contain links or reparse points"
