@@ -331,11 +331,47 @@ fn seal_sandbox_token(
         unsafe { *capabilities.as_ptr().cast::<u32>() } == 0,
         "created AppContainer token has capabilities"
     );
-    remove_token_privileges(&token)
+    seal_token_privileges(&token, true)
 }
 
-fn remove_token_privileges(token: &Handle) -> Result<()> {
+fn traverse_privilege() -> Result<windows_sys::Win32::Foundation::LUID> {
+    use windows_sys::Win32::Security::{LookupPrivilegeValueW, SE_CHANGE_NOTIFY_NAME};
+    let mut luid = windows_sys::Win32::Foundation::LUID::default();
+    security::check(unsafe { LookupPrivilegeValueW(null(), SE_CHANGE_NOTIFY_NAME, &mut luid) })?;
+    Ok(luid)
+}
+fn same_privilege(
+    a: &windows_sys::Win32::Foundation::LUID,
+    b: &windows_sys::Win32::Foundation::LUID,
+) -> bool {
+    a.LowPart == b.LowPart && a.HighPart == b.HighPart
+}
+/// Verify the exact OS privilege identity, not just its count. This privilege
+/// bypasses ancestor traversal; final object read/write/execute ACLs still apply.
+pub(crate) fn verify_sandbox_privileges(token: &Handle) -> Result<()> {
+    use windows_sys::Win32::Security::SE_PRIVILEGE_ENABLED;
+    let mut privileges = TOKEN_PRIVILEGES::default();
+    let mut bytes = 0;
+    security::check(unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenPrivileges,
+            (&mut privileges as *mut TOKEN_PRIVILEGES).cast(),
+            size_of::<TOKEN_PRIVILEGES>() as u32,
+            &mut bytes,
+        )
+    })?;
+    ensure!(
+        privileges.PrivilegeCount == 1
+            && same_privilege(&privileges.Privileges[0].Luid, &traverse_privilege()?)
+            && privileges.Privileges[0].Attributes & SE_PRIVILEGE_ENABLED != 0,
+        "sandbox token must retain only enabled SeChangeNotifyPrivilege"
+    );
+    Ok(())
+}
+fn seal_token_privileges(token: &Handle, retain_traverse: bool) -> Result<()> {
     use windows_sys::Win32::Security::{AdjustTokenPrivileges, SE_PRIVILEGE_REMOVED};
+    let traverse = retain_traverse.then(traverse_privilege).transpose()?;
     let mut bytes = 0;
     unsafe {
         GetTokenInformation(token.0, TokenPrivileges, null_mut(), 0, &mut bytes);
@@ -363,14 +399,32 @@ fn remove_token_privileges(token: &Handle) -> Result<()> {
             "truncated created token privilege list"
         );
         let privileges = unsafe { &mut *data.as_mut_ptr().cast::<TOKEN_PRIVILEGES>() };
-        for entry in unsafe {
+        let entries = unsafe {
             std::slice::from_raw_parts_mut(privileges.Privileges.as_mut_ptr(), count as usize)
-        } {
-            entry.Attributes = SE_PRIVILEGE_REMOVED;
+        };
+        ensure!(
+            !retain_traverse
+                || entries.iter().any(|entry| traverse
+                    .as_ref()
+                    .is_some_and(|luid| same_privilege(&entry.Luid, luid))),
+            "sandbox source lacks SeChangeNotifyPrivilege"
+        );
+        for entry in entries {
+            entry.Attributes = if traverse
+                .as_ref()
+                .is_some_and(|luid| same_privilege(&entry.Luid, luid))
+            {
+                windows_sys::Win32::Security::SE_PRIVILEGE_ENABLED
+            } else {
+                SE_PRIVILEGE_REMOVED
+            };
         }
         security::check(unsafe {
             AdjustTokenPrivileges(token.0, 0, privileges, 0, null_mut(), null_mut())
         })?;
+    }
+    if retain_traverse {
+        return verify_sandbox_privileges(token);
     }
     let mut remaining = TOKEN_PRIVILEGES::default();
     security::check(unsafe {
@@ -649,7 +703,8 @@ impl Spawn<'_> {
         security::require_system()?;
         // Windows prepares the lowbox namespace/profile using this ordinary
         // role token. It remains parent-only; the actual child is suspended,
-        // checked and stripped of every privilege before its first instruction.
+        // checked and stripped of every privilege except Windows' ordinary
+        // traverse-check bypass before its first instruction.
         let mut token = null_mut();
         security::check(unsafe {
             DuplicateHandle(
@@ -854,11 +909,7 @@ impl Spawn<'_> {
                 }
             }
             #[cfg(test)]
-            if self
-                .environment
-                .get("WUKONG_NATIVE_SEAL_PRIVILEGES")
-                .is_some_and(|value| value == "1")
-            {
+            if let Some(policy) = self.environment.get("WUKONG_NATIVE_SEAL_PRIVILEGES") {
                 let mut token = null_mut();
                 security::check(unsafe {
                     OpenProcessToken(
@@ -868,7 +919,7 @@ impl Spawn<'_> {
                         &mut token,
                     )
                 })?;
-                remove_token_privileges(&Handle(token))?;
+                seal_token_privileges(&Handle(token), policy == "traverse")?;
             }
             if matches!(start, Start::Execute) {
                 ensure!(
@@ -920,7 +971,14 @@ mod tests {
                 )
             })
             .unwrap();
-            let count = privilege_count(&Handle(token)).unwrap();
+            let token = Handle(token);
+            let count = privilege_count(&token).unwrap();
+            if count > 0 {
+                verify_sandbox_privileges(&token).unwrap();
+            } else {
+                assert!(verify_sandbox_privileges(&token).is_err());
+            }
+            traversal_fixture(count == 1).unwrap();
             std::fs::write(
                 std::env::current_dir()
                     .unwrap()
@@ -951,6 +1009,63 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_secs(30));
         }
     }
+    fn traversal_fixture(retained: bool) -> Result<()> {
+        use windows_sys::Win32::Security::{
+            DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SetFileSecurityW,
+        };
+        fn set(path: &Path, sddl: &str) -> Result<()> {
+            let descriptor = SecurityDescriptor::from_sddl(sddl)?;
+            let encoded = security::wide(path.as_os_str())?;
+            security::check(unsafe {
+                SetFileSecurityW(
+                    encoded.as_ptr(),
+                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                    descriptor.attributes().lpSecurityDescriptor,
+                )
+            })
+            .with_context(|| format!("set owned traversal fixture DACL: {}", path.display()))
+        }
+        let directory = std::env::current_dir()?.join("traverse-fixture");
+        std::fs::create_dir(&directory).context("create inert traversal fixture directory")?;
+        let readable = directory.join("readable.bin");
+        let private = directory.join("private.bin");
+        std::fs::write(&readable, b"readable")?;
+        std::fs::write(&private, b"private")?;
+        let sid = security::current_user_sid()?;
+        let full = format!("D:P(A;;FA;;;SY)(A;;FA;;;{sid})");
+        set(&readable, &full)?;
+        set(&private, "D:P(A;;FA;;;SY)")?;
+        set(&directory, &format!("D:P(A;;FA;;;SY)(A;;RCWDWO;;;{sid})"))?;
+        let result = (|| -> Result<()> {
+            if retained {
+                ensure!(
+                    std::fs::read(&readable)? == b"readable",
+                    "traverse fixture content differs"
+                );
+            } else {
+                ensure!(
+                    std::fs::read(&readable)
+                        .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied),
+                    "zero-privilege fixture bypassed a closed ancestor"
+                );
+            }
+            ensure!(
+                std::fs::read(&private)
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied),
+                "traverse privilege bypassed final file read policy"
+            );
+            ensure!(
+                std::fs::read_dir(&directory)
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::PermissionDenied),
+                "traverse privilege granted directory enumeration"
+            );
+            Ok(())
+        })();
+        // Restore only this fixed fixture's own entries before reporting errors.
+        set(&directory, &full)?;
+        set(&private, &full)?;
+        result
+    }
     fn privilege_count(token: &Handle) -> Result<u32> {
         let mut size = 0;
         unsafe {
@@ -971,6 +1086,13 @@ mod tests {
     }
     #[test]
     fn suspended_child_privileges_are_removed_without_changing_its_parent() -> Result<()> {
+        sealed_privilege_fixture("1", 0)
+    }
+    #[test]
+    fn suspended_sandbox_retains_only_traverse_without_changing_its_parent() -> Result<()> {
+        sealed_privilege_fixture("traverse", 1)
+    }
+    fn sealed_privilege_fixture(policy: &str, expected: u32) -> Result<()> {
         let temporary = tempfile::tempdir()?;
         let mut parent = null_mut();
         security::check(unsafe {
@@ -996,7 +1118,7 @@ mod tests {
             }
         }
         values.insert("WUKONG_NATIVE_JOB_FIXTURE".into(), "privileges".into());
-        values.insert("WUKONG_NATIVE_SEAL_PRIVILEGES".into(), "1".into());
+        values.insert("WUKONG_NATIVE_SEAL_PRIVILEGES".into(), policy.into());
         let log_path = temporary.path().join("fixture.log");
         let log = File::create(&log_path)?;
         let input = File::open("NUL")?;
@@ -1029,7 +1151,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(temporary.path().join("observed-privileges.txt"))?,
-            "0"
+            expected.to_string()
         );
         assert_eq!(privilege_count(&parent)?, before);
         Ok(())

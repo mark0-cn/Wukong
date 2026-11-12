@@ -129,7 +129,7 @@ pub(super) fn check(
         json!({"passed":true,"architecture":architecture,"engine":"dbgeng",
         "target_appcontainer_sid":target_sid,"debugger_appcontainer_sid":debugger_sid,
         "target_logon_sid":target_persona.logon_sid(),"debugger_logon_sid":debugger_persona.logon_sid(),
-        "privileges":0,"capabilities":0,"debug_privilege_enabled":false,
+        "privileges":["SeChangeNotifyPrivilege"],"capabilities":0,"debug_privilege_enabled":false,
         "owned_attach":true,"registers_observed":true,"target_module_observed":true,
         "jobs_empty":true,"profiles_removed":true,"scratch_removed":true}),
     )
@@ -204,7 +204,7 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
         ensure!(
             debugger["architecture"] == architecture
                 && debugger["engine"] == "dbgeng"
-                && debugger["privileges"] == 0
+                && debugger["privileges"] == json!(["SeChangeNotifyPrivilege"])
                 && debugger["capabilities"] == 0
                 && debugger["debug_privilege_enabled"] == false,
             "contained DbgEng identity or privilege report differs"

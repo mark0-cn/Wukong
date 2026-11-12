@@ -22,7 +22,7 @@ use std::{
 use windows_sys::Win32::{
     Security::{
         GetTokenInformation, TOKEN_QUERY, TokenAppContainerSid, TokenCapabilities,
-        TokenIsAppContainer, TokenPrivileges,
+        TokenIsAppContainer,
     },
     System::{
         Registry::RegDisablePredefinedCacheEx,
@@ -64,13 +64,12 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
         unsafe { *app.as_ptr().cast::<u32>() } == 1,
         "resource probe is not an AppContainer"
     );
-    for class in [TokenPrivileges, TokenCapabilities] {
-        let data = token_data(&token, class)?;
-        ensure!(
-            unsafe { *data.as_ptr().cast::<u32>() } == 0,
-            "resource token retained privileges or capabilities"
-        );
-    }
+    crate::processes::verify_sandbox_privileges(&token)?;
+    let capabilities = token_data(&token, TokenCapabilities)?;
+    ensure!(
+        unsafe { *capabilities.as_ptr().cast::<u32>() } == 0,
+        "resource token retained capabilities"
+    );
     let info = token_data(&token, TokenAppContainerSid)?;
     let sid =
         security::sid_text(unsafe { *info.as_ptr().cast::<windows_sys::Win32::Security::PSID>() })?;
@@ -97,7 +96,7 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
     fs::remove_file(&scratch)?;
     security::probe_resource_root(&std::env::current_dir()?)?;
     Ok(
-        json!({"passed":true,"appcontainer_sid":sid,"logon_sid":security::token_logon_sid(&token)?,"privileges":0,"capabilities":0,
+        json!({"passed":true,"appcontainer_sid":sid,"logon_sid":security::token_logon_sid(&token)?,"privileges":["SeChangeNotifyPrivilege"],"capabilities":0,
         "metadata_denied":true,"worker_data_denied":true,"loopback_denied":true,"scratch_writable":true,"root_guard_denied":true}),
     )
 }
@@ -167,7 +166,7 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
         )?);
     }
     Ok(
-        json!({"schema":1,"passed":true,"scope":"owned_appcontainer_trusted_probes",
+        json!({"schema":2,"passed":true,"scope":"owned_appcontainer_trusted_probes",
         "manifest_sha256":manifest.sha256(),"personas":reports,"dbgeng":debuggers,"production_execution":false}),
     )
 }
@@ -356,7 +355,7 @@ pub(crate) async fn qualify(
 }
 fn validate_resource_report(value: &Value, manifest: &str) -> Result<()> {
     ensure!(
-        value["schema"] == 1
+        value["schema"] == 2
             && value["passed"] == true
             && value["scope"] == "owned_appcontainer_trusted_probes"
             && value["manifest_sha256"] == manifest
@@ -376,7 +375,7 @@ fn validate_resource_report(value: &Value, manifest: &str) -> Result<()> {
                 && persona["passed"] == true
                 && persona["profile_removed"] == true
                 && persona["scratch_removed"] == true
-                && persona["privileges"] == 0
+                && persona["privileges"] == json!(["SeChangeNotifyPrivilege"])
                 && persona["capabilities"] == 0
                 && persona["metadata_denied"] == true
                 && persona["worker_data_denied"] == true
