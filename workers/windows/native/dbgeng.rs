@@ -90,26 +90,43 @@ fn integer(value: &Value, key: &str, default: u64, max: u64) -> Result<u64> {
 }
 
 fn local_path(path: &Path) -> Result<PathBuf> {
-    let path = std::fs::canonicalize(path)?;
-    let name = path.to_string_lossy();
+    use std::os::windows::fs::MetadataExt;
+    // Normalized-name queries require a privilege removed from the ordinary
+    // worker token. Keep the verified absolute identity and inspect every
+    // component instead of restoring privileges or following reparse points.
+    let name = path
+        .to_str()
+        .context("DbgEng paths must be Unicode")?
+        .replace('/', "\\");
+    let drive = name.strip_prefix(r"\\?\").unwrap_or(&name);
     ensure!(
-        !name.starts_with(r"\\?\UNC\")
-            && (!name.starts_with(r"\\") || name.starts_with(r"\\?\"))
-            && !name.contains(';'),
-        "only local filesystem paths are permitted"
+        drive.as_bytes().get(1) == Some(&b':')
+            && drive.as_bytes()[0].is_ascii_alphabetic()
+            && !drive.contains([';', '\0'])
+            && !drive
+                .split('\\')
+                .skip(1)
+                .any(|part| part.ends_with('.') || part.ends_with(' ') || part.contains(':')),
+        "DbgEng requires an unambiguous local drive path"
     );
+    let path = PathBuf::from(drive);
+    ensure!(
+        path.is_absolute()
+            && !path.components().any(|component| matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::CurDir
+            )),
+        "DbgEng requires an absolute local path without relative aliases"
+    );
+    for current in path.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+        let metadata = std::fs::symlink_metadata(current)?;
+        ensure!(
+            !metadata.file_type().is_symlink() && metadata.file_attributes() & 0x400 == 0,
+            "DbgEng paths cannot contain links or reparse points"
+        );
+    }
     // DbgEng treats even a local \\?\ drive path as a network path when network
     // access is disabled. Convert only unambiguous drive paths, preserving identity.
-    if let Some(drive) = name.strip_prefix(r"\\?\") {
-        ensure!(
-            drive.as_bytes().get(1) == Some(&b':')
-                && !drive
-                    .split('\\')
-                    .any(|part| part.ends_with('.') || part.ends_with(' ')),
-            "DbgEng requires an unambiguous local drive path"
-        );
-        return Ok(PathBuf::from(drive));
-    }
     Ok(path)
 }
 
@@ -744,4 +761,30 @@ pub fn serve() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+    #[test]
+    fn dbgeng_local_paths_preserve_existing_files_and_reject_networks_and_aliases() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("known fixture.bin");
+        std::fs::write(&path, b"inert-known-fixture")?;
+        assert_eq!(local_path(&path)?, path);
+        assert_eq!(
+            local_path(Path::new(&path.to_string_lossy().replace('\\', "/")))?,
+            path
+        );
+        for invalid in [
+            r"\\server\share\file",
+            r"C:\file:stream",
+            r"relative\file",
+            r"C:\dir.\file",
+            r"C:\dir\..\file",
+        ] {
+            assert!(local_path(Path::new(invalid)).is_err());
+        }
+        Ok(())
+    }
 }

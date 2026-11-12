@@ -18,10 +18,31 @@ MAX_FRAME = 1024 * 1024
 MAX_TRANSCRIPT = 8 * 1024 * 1024
 
 
+def local_path(value):
+    path = Path(value)
+    if os.name != "nt":
+        return path.resolve(strict=True)
+    # Windows normalized-name queries fail with ERROR_ACCESS_DENIED after every
+    # token privilege is removed, even when ordinary file access succeeds.
+    # Sealed code paths need an existing, link-free local identity, not an OS
+    # normalized-name query or a restored traverse privilege.
+    drive = path.drive.removeprefix("\\\\?\\")
+    if not path.is_absolute() or len(drive) != 2 or not drive[0].isascii() or not drive[0].isalpha() or drive[1] != ":":
+        raise ValueError("DbgEng requires an absolute local drive path")
+    for part in path.parts[1:]:
+        if part in {".", ".."} or part.endswith((".", " ")) or any(c in part for c in (":", ";", "\0")):
+            raise ValueError("DbgEng path contains an ambiguous component")
+    for current in [path, *path.parents]:
+        metadata = current.lstat()
+        if current.is_symlink() or getattr(metadata, "st_file_attributes", 0) & 0x400:
+            raise ValueError("DbgEng paths cannot contain links or reparse points")
+    return path
+
+
 def profile(root):
     configuration = load_json(Path(root) / "windows.backend.json")
-    helper = Path(configuration["helper"]).resolve(strict=True)
-    directory = Path(configuration["engine_dir"]).resolve(strict=True)
+    helper = local_path(configuration["helper"])
+    directory = local_path(configuration["engine_dir"])
     engine = directory / "dbgeng.dll"
     if not helper.is_file() or sha256_file(helper) != configuration["helper_sha256"]:
         raise ValueError("DbgEng helper content identity does not match its installed profile")
