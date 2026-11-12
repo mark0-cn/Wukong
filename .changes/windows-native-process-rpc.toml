@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Connect limited standalone Windows process jobs and their original output artifacts through the existing authenticated SSH lease and native resource journal. Keep incomplete cleanup blocking new resources and leave complete production capability advertisement disabled pending the remaining execution and recovery paths."
+zh_CN = "将有限的独立 Windows 进程任务及原始输出产物接入已有认证 SSH 租约和原生资源账本。清理未完成时继续阻止新资源；其余执行与恢复通路完成前，完整生产能力声明继续禁用。"

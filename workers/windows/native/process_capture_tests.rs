@@ -55,7 +55,8 @@ fn native_stdio_fixture_entry() -> Result<()> {
             }
         }
         "leaf" => {
-            std::fs::write("leaf.pid", std::process::id().to_string())?;
+            std::fs::write("leaf.pending", std::process::id().to_string())?;
+            std::fs::rename("leaf.pending", "leaf.pid")?;
             thread::sleep(Duration::from_secs(30));
         }
         "wait" => thread::sleep(Duration::from_secs(30)),

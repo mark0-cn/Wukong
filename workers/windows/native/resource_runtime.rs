@@ -1,0 +1,467 @@
+//! One owned native process resource. This uses the existing controller fence,
+//! SQLite effects and suspended Job launcher, not a second worker scheduler.
+use crate::{
+    deployment::{self, Deployment},
+    inputs::{Inputs, Owner},
+    processes::{Spawn, SystemHost},
+    resource_input::Purpose,
+    resource_journal::{Cleanup, Journal, Outcome, Phase, Reservation, ResourceKind},
+    resource_process::Request,
+    security::{self, AclPolicy},
+};
+use anyhow::{Context, Result, ensure};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Specification {
+    argv: Vec<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default = "default_cwd")]
+    cwd: String,
+    #[serde(default = "default_timeout")]
+    timeout_secs: u64,
+    #[serde(default = "default_output")]
+    output_limit: usize,
+}
+
+fn default_cwd() -> String {
+    ".".into()
+}
+fn default_timeout() -> u64 {
+    30
+}
+fn default_output() -> usize {
+    1024 * 1024
+}
+
+struct Running {
+    request: Request,
+    host: SystemHost,
+    deadline: Instant,
+    failed: Option<String>,
+}
+pub(crate) struct Runtime {
+    root: PathBuf,
+    executable: PathBuf,
+    installation: String,
+    running: Option<Running>,
+}
+impl Runtime {
+    pub(crate) fn open(
+        root: &Path,
+        deployment: &Deployment,
+        manifest: &wukong_worker_package::VerifiedManifest,
+    ) -> Result<Self> {
+        security::require_system()?;
+        let root = root.canonicalize()?;
+        let private = AclPolicy::private_vm();
+        for name in ["resource-requests", "resource-results"] {
+            let directory = root.join("metadata").join(name);
+            if !directory.exists() {
+                private.create_directory(&directory)?;
+            }
+            private.verify(&directory, true)?;
+        }
+        Ok(Self {
+            executable: deployment
+                .package(&root)
+                .join(&manifest.manifest().entrypoints.worker),
+            root,
+            installation: deployment.installation_id.clone(),
+            running: None,
+        })
+    }
+    pub(crate) fn handles(method: &str, params: &Map<String, Value>) -> bool {
+        matches!(
+            method,
+            "job.start" | "job.status" | "job.cancel" | "job.artifacts"
+        ) || matches!(method, "file.get" | "file.stat" | "file.read")
+            && params
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.starts_with("native-results/"))
+    }
+    pub(crate) fn call(
+        &mut self,
+        journal: &mut Journal,
+        inputs: Option<&Inputs>,
+        owner: &Owner,
+        method: &str,
+        params: &Map<String, Value>,
+    ) -> Result<Value> {
+        self.poll(journal)?;
+        if method == "job.start" {
+            return self.start(
+                journal,
+                inputs.context("native start input store is missing")?,
+                owner,
+                params,
+            );
+        }
+        if method.starts_with("file.") {
+            return self.read_artifact(journal, owner, method, params);
+        }
+        let id = params
+            .get("job_id")
+            .and_then(Value::as_str)
+            .context("native job_id is required")?;
+        let record = journal.resource(owner, id)?;
+        ensure!(
+            record.kind == ResourceKind::Process,
+            "native resource is not a process job"
+        );
+        if method == "job.cancel" && record.phase != Phase::Closed {
+            self.cancel(id)?;
+        }
+        if method == "job.artifacts" {
+            if record.phase != Phase::Closed {
+                return Ok(json!([]));
+            }
+            return Ok(json!([
+                self.artifact(id, "stdout")?,
+                self.artifact(id, "stderr")?,
+                self.artifact(id, "receipt")?
+            ]));
+        }
+        self.status(journal, owner, id)
+    }
+    fn start(
+        &mut self,
+        journal: &mut Journal,
+        inputs: &Inputs,
+        owner: &Owner,
+        params: &Map<String, Value>,
+    ) -> Result<Value> {
+        let request_id = params
+            .get("request_id")
+            .and_then(Value::as_str)
+            .context("native process start requires a stable request_id")?;
+        if let Some(call) = params.get("call_id") {
+            ensure!(
+                call.as_str() == Some(request_id),
+                "native call_id and request_id differ"
+            );
+        }
+        let mut specification = params.clone();
+        for name in ["request_id", "call_id", "_binding", "_lease"] {
+            specification.remove(name);
+        }
+        // Null optional fields mean the same thing as omitted defaults.
+        specification.retain(|_, value| !value.is_null());
+        let spec: Specification = serde_json::from_value(Value::Object(specification))?;
+        ensure!(
+            spec.cwd == "." && !spec.argv.is_empty(),
+            "native process requires argv and private cwd '.'"
+        );
+        let specification = serde_json::to_value(&spec)?;
+        if let Some(existing) =
+            journal.lookup_start(owner, request_id, ResourceKind::Process, &specification)?
+        {
+            return self.reserved_status(journal, owner, existing);
+        }
+        let program = inputs.reference(owner, &spec.argv[0], Purpose::Execute)?;
+        let mut request = Request {
+            schema: 1,
+            resource_id: "0".repeat(32),
+            owner: owner.clone(),
+            program,
+            arguments: spec.argv[1..].into(),
+            input: None,
+            environment: spec.env,
+            timeout_secs: spec.timeout_secs,
+            output_limit: spec.output_limit,
+            processes: 16,
+            memory_bytes: 1024 * 1024 * 1024,
+        };
+        request.validate()?;
+        ensure!(self.running.is_none(), "native host remains owned");
+        let reserved =
+            journal.reserve_start(owner, request_id, ResourceKind::Process, &specification)?;
+        let Reservation::Reserved {
+            effect, resource, ..
+        } = reserved
+        else {
+            return self.reserved_status(journal, owner, reserved);
+        };
+        request.resource_id = resource.clone();
+        let ticket = journal.begin(&effect)?;
+        let private = AclPolicy::private_vm();
+        let path = self.request_path(&resource, "json");
+        deployment::write_new_json(&path, &request, &private)?;
+        let log = private.create_file(&self.request_path(&resource, "log"))?;
+        let input = fs::File::open("NUL")?;
+        let environment = crate::environment::system(&self.root)?;
+        let host = Spawn {
+            executable: &self.executable,
+            arguments: &[
+                "resource-execute".into(),
+                self.installation.clone().into(),
+                self.root.join("metadata/deployment.json").into_os_string(),
+                path.into_os_string(),
+            ],
+            directory: &self.root,
+            environment: &environment,
+            log: &log,
+            input: &input,
+        }
+        .system_host()?;
+        let value = json!({"job_id":resource,"kind":"process","state":"running","call_id":request_id,"native_host_pid":host.pid(),"production_execution":false});
+        self.running = Some(Running {
+            deadline: Instant::now() + Duration::from_secs(request.timeout_secs + 120),
+            request,
+            host,
+            failed: None,
+        });
+        journal.complete(
+            &ticket,
+            &Outcome::Result {
+                value: value.clone(),
+            },
+        )?;
+        Ok(value)
+    }
+    fn reserved_status(
+        &self,
+        journal: &Journal,
+        owner: &Owner,
+        reserved: Reservation,
+    ) -> Result<Value> {
+        match reserved {
+            Reservation::Completed { resource, .. }
+            | Reservation::Pending { resource, .. }
+            | Reservation::Reserved { resource, .. } => self.status(journal, owner, &resource),
+        }
+    }
+    fn status(&self, journal: &Journal, owner: &Owner, id: &str) -> Result<Value> {
+        let record = journal.resource(owner, id)?;
+        if record.phase == Phase::Closed {
+            let path = self.result_path(id, "status.json");
+            AclPolicy::private_vm().verify(&path, false)?;
+            let status: Value = serde_json::from_slice(&deployment::read_bytes(&path, 65536)?)?;
+            ensure!(
+                status["job_id"] == id
+                    && status["native_owner"] == serde_json::to_value(record.owner)?,
+                "native terminal status binding differs"
+            );
+            return Ok(status);
+        }
+        if let Some(running) = self
+            .running
+            .as_ref()
+            .filter(|running| running.request.resource_id == id)
+        {
+            return Ok(
+                json!({"job_id":id,"kind":"process","state":if running.failed.is_some() {"lost"} else {"running"},"native_host_pid":running.host.pid(),"error":running.failed,"cleanup_pending":running.failed.is_some(),"production_execution":false}),
+            );
+        }
+        Ok(
+            json!({"job_id":id,"kind":"process","state":"lost","cleanup_pending":true,"error":"native host ownership was interrupted; cleanup reconciliation is required","production_execution":false}),
+        )
+    }
+    pub(crate) fn cancel_active(&self) -> Result<()> {
+        if let Some(running) = &self.running {
+            self.cancel(&running.request.resource_id)?;
+        }
+        Ok(())
+    }
+    fn cancel(&self, id: &str) -> Result<()> {
+        let path = self.request_path(id, "cancel");
+        let private = AclPolicy::private_vm();
+        if path.exists() {
+            private.verify(&path, false)?;
+        } else {
+            deployment::write_new_json(&path, &json!({"resource_id":id}), &private)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn poll(&mut self, journal: &mut Journal) -> Result<()> {
+        let Some(running) = &self.running else {
+            return Ok(());
+        };
+        if running.failed.is_some() {
+            return Ok(());
+        }
+        if !running.host.exited() && Instant::now() < running.deadline {
+            return Ok(());
+        }
+        let result = self.settle(journal);
+        if let Err(error) = result {
+            // Keep both held controls and the journal blocker. A log or exited
+            // leader does not establish scratch/profile cleanup.
+            self.running.as_mut().unwrap().failed =
+                Some(format!("{error:#}").chars().take(2048).collect());
+        }
+        Ok(())
+    }
+    fn settle(&mut self, journal: &mut Journal) -> Result<()> {
+        let running = self.running.as_ref().context("native host vanished")?;
+        ensure!(
+            running.host.stop(Duration::from_secs(10))? == 0,
+            "native host failed or exceeded preparation deadline; cleanup remains unconfirmed"
+        );
+        let id = &running.request.resource_id;
+        let private = AclPolicy::private_vm();
+        let path = self.result_path(id, "json");
+        private.verify(&path, false)?;
+        let bytes = deployment::read_bytes(&path, 12 * 1024 * 1024)?;
+        let result: Value = serde_json::from_slice(&bytes)?;
+        ensure!(
+            result["schema"] == 1
+                && result["scope"] == "native_process_host"
+                && result["resource_id"] == *id
+                && result["owner"] == serde_json::to_value(&running.request.owner)?
+                && result["program"] == serde_json::to_value(&running.request.program)?
+                && result["jobs_empty"] == true
+                && result["profiles_removed"] == true
+                && result["scratch_removed"] == true,
+            "native result or cleanup binding differs"
+        );
+        let mut streams = Vec::new();
+        for name in ["stdout", "stderr"] {
+            let data = STANDARD.decode(
+                result[format!("{name}_base64")]
+                    .as_str()
+                    .context("native binary output is missing")?,
+            )?;
+            ensure!(
+                result[format!("{name}_sha256")] == hex::encode(Sha256::digest(&data)),
+                "native stream content hash differs"
+            );
+            streams.push(data);
+        }
+        ensure!(
+            streams.iter().map(Vec::len).sum::<usize>() <= running.request.output_limit,
+            "native output exceeds the admitted bound"
+        );
+        use std::io::Write;
+        for (name, data) in ["stdout", "stderr"].into_iter().zip(&streams) {
+            let mut file = private.create_file(&self.result_path(id, name))?;
+            file.write_all(data)?;
+            file.sync_all()?;
+        }
+        let reason = result["stop_reason"]
+            .as_str()
+            .context("native stop reason is absent")?;
+        let exit = result["exit_code"]
+            .as_u64()
+            .context("native exit is absent")?;
+        let state = match reason {
+            "exited" => {
+                if exit == 0 {
+                    "completed"
+                } else {
+                    "failed"
+                }
+            }
+            "cancelled" => "cancelled",
+            "deadline" => "timed_out",
+            "output_limit" | "io_failure" => "failed",
+            _ => anyhow::bail!("invalid native stop reason"),
+        };
+        fn tail(bytes: &[u8]) -> String {
+            String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(4096)..]).into()
+        }
+        let value = json!({"job_id":id,"kind":"process","state":state,"native_owner":running.request.owner,"stdout":tail(&streams[0]),"stderr":tail(&streams[1]),"result":{"exit_code":exit,"stop_reason":reason,"stdout_sha256":result["stdout_sha256"],"stderr_sha256":result["stderr_sha256"],"stdin_written":result["stdin_written"],"stdin_complete":result["stdin_complete"],"stdin_error":result["stdin_error"],"native_receipt_sha256":hex::encode(Sha256::digest(&bytes)),"jobs_empty":true,"profiles_removed":true,"scratch_removed":true},"production_execution":false});
+        deployment::write_new_json(&self.result_path(id, "status.json"), &value, &private)?;
+        journal.start_closing(id)?;
+        journal.close(
+            id,
+            Cleanup {
+                jobs_empty: true,
+                profiles_removed: true,
+                scratch_removed: true,
+            },
+        )?;
+        self.running = None;
+        Ok(())
+    }
+    fn request_path(&self, id: &str, suffix: &str) -> PathBuf {
+        self.root
+            .join("metadata/resource-requests")
+            .join(format!("{id}.{suffix}"))
+    }
+    fn result_path(&self, id: &str, suffix: &str) -> PathBuf {
+        self.root
+            .join("metadata/resource-results")
+            .join(format!("{id}.{suffix}"))
+    }
+    fn artifact(&self, id: &str, name: &str) -> Result<Value> {
+        let suffix = if name == "receipt" { "json" } else { name };
+        let path = self.result_path(id, suffix);
+        AclPolicy::private_vm().verify(&path, false)?;
+        let data = deployment::read_bytes(&path, 12 * 1024 * 1024)?;
+        Ok(
+            json!({"path":format!("native-results/{id}/{name}"),"size":data.len(),"sha256":hex::encode(Sha256::digest(&data))}),
+        )
+    }
+    fn read_artifact(
+        &self,
+        journal: &Journal,
+        owner: &Owner,
+        method: &str,
+        params: &Map<String, Value>,
+    ) -> Result<Value> {
+        let path = params["path"]
+            .as_str()
+            .context("native artifact selector is required")?;
+        let parts: Vec<_> = path.split('/').collect();
+        ensure!(
+            parts.len() == 3
+                && parts[0] == "native-results"
+                && matches!(parts[2], "stdout" | "stderr" | "receipt"),
+            "invalid native artifact selector"
+        );
+        let record = journal.resource(owner, parts[1])?;
+        ensure!(
+            record.phase == Phase::Closed,
+            "native artifacts require completed cleanup"
+        );
+        let mut artifact = self.artifact(parts[1], parts[2])?;
+        if method == "file.stat" {
+            return Ok(artifact);
+        }
+        let suffix = if parts[2] == "receipt" {
+            "json"
+        } else {
+            parts[2]
+        };
+        let data = deployment::read_bytes(&self.result_path(parts[1], suffix), 12 * 1024 * 1024)?;
+        if method == "file.get" {
+            artifact["data_base64"] = json!(STANDARD.encode(data));
+            return Ok(artifact);
+        }
+        let integer = |key: &str, default: u64| -> Result<usize> {
+            Ok(usize::try_from(match params.get(key) {
+                None => default,
+                Some(value) => value
+                    .as_u64()
+                    .context("native read offset/limit must be an unsigned integer")?,
+            })?)
+        };
+        let offset = integer("offset", 0)?;
+        let maximum = integer("max_bytes", 1024 * 1024)?;
+        ensure!(
+            offset <= data.len() && (1..=1024 * 1024).contains(&maximum),
+            "native read range exceeds bounds"
+        );
+        let chunk = &data[offset..data.len().min(offset.saturating_add(maximum))];
+        Ok(
+            json!({"path":path,"offset":offset,"size":data.len(),"data_base64":STANDARD.encode(chunk),"chunk_sha256":hex::encode(Sha256::digest(chunk))}),
+        )
+    }
+}
+
+#[cfg(test)]
+#[path = "resource_runtime_tests.rs"]
+mod tests;

@@ -204,13 +204,20 @@ impl CapturedProcess {
         &self.process
     }
     pub fn wait(self, timeout: Duration, cancelled: &AtomicBool) -> Result<CaptureResult> {
+        self.wait_with_cancel(timeout, || Ok(cancelled.load(Ordering::Acquire)))
+    }
+    pub(crate) fn wait_with_cancel(
+        self,
+        timeout: Duration,
+        mut cancelled: impl FnMut() -> Result<bool>,
+    ) -> Result<CaptureResult> {
         ensure!(
             !timeout.is_zero() && timeout <= Duration::from_secs(86400),
             "invalid native capture deadline"
         );
         let deadline = Instant::now() + timeout;
         let reason = loop {
-            if cancelled.load(Ordering::Acquire) {
+            if cancelled()? {
                 break StopReason::Cancelled;
             }
             if self.budget.failed.load(Ordering::Acquire) {

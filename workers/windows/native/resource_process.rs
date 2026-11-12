@@ -19,7 +19,6 @@ use std::{
     io::{Read, Write},
     os::windows::fs::OpenOptionsExt,
     path::Path,
-    sync::atomic::AtomicBool,
     time::Duration,
 };
 use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ};
@@ -221,10 +220,12 @@ pub fn execute(
     )?;
     let appcontainer = persona.sid_text()?;
     let logon = persona.logon_sid().to_owned();
-    let result = process.wait(
-        Duration::from_secs(request.timeout_secs),
-        &AtomicBool::new(false),
-    )?;
+    let cancel = root
+        .join("metadata/resource-requests")
+        .join(format!("{}.cancel", request.resource_id));
+    let result = process.wait_with_cancel(Duration::from_secs(request.timeout_secs), || {
+        Ok(cancel.try_exists()?)
+    })?;
     drop(held);
     persona.close()?;
     private.verify(&scratch, true)?;
@@ -234,6 +235,21 @@ pub fn execute(
     // junctions. A restrictive descendant still makes cleanup fail closed.
     fs::remove_dir_all(&scratch)?;
     finish(&request, result, appcontainer, logon)
+}
+
+/// Publish full binary-output evidence only after successful owned cleanup.
+/// The service reads this protected slot; target output never reaches its log.
+pub fn run(installation: &str, configuration: &Path, request: &Path) -> Result<serde_json::Value> {
+    let value = execute(installation, configuration, request)?;
+    let (_, root) = deployment::load(configuration)?;
+    let directory = root.join("metadata/resource-results");
+    let policy = AclPolicy::private_vm();
+    policy.verify(&directory, true)?;
+    let id = value["resource_id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("native host result has no identity"))?;
+    deployment::write_new_json(&directory.join(format!("{id}.json")), &value, &policy)?;
+    Ok(serde_json::json!({"resource_id":id,"settled":true}))
 }
 
 fn stage_program(

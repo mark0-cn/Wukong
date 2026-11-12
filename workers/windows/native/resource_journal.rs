@@ -419,6 +419,26 @@ impl Journal {
             phase: Phase::Preparing,
         })
     }
+    /// Read a stable start effect before resolving inputs under a renewed
+    /// controller fence. A cached receipt never grants permission to relaunch.
+    pub fn lookup_start(
+        &self,
+        owner: &Owner,
+        request: &str,
+        kind: ResourceKind,
+        specification: &Value,
+    ) -> Result<Option<Reservation>> {
+        self.owner(owner)?;
+        bounded_identifier(request, 256)?;
+        let payload = bounded_json(
+            &serde_json::json!({"operation":"start","kind":kind,"specification":specification}),
+        )?;
+        existing(
+            &self.connection,
+            &effect_id(owner, request)?,
+            &digest(&("native.resource.specification.v1", &payload))?,
+        )
+    }
     pub fn begin(&mut self, effect: &str) -> Result<Ticket> {
         let nonce = hex::encode(crate::accounts::random_bytes::<16>()?);
         let transaction = self
@@ -625,7 +645,7 @@ fn check_run(transaction: &Transaction<'_>, run: &str, binding: &str) -> Result<
     Ok(())
 }
 fn existing(
-    transaction: &Transaction<'_>,
+    transaction: &Connection,
     effect: &str,
     fingerprint: &str,
 ) -> Result<Option<Reservation>> {

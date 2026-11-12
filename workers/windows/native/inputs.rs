@@ -224,6 +224,41 @@ impl Inputs {
         let file = self.open_blob(&directory.join(format!("{key}.data")), &declaration)?;
         Ok(AdmittedInput::new(file, reference.clone()))
     }
+    /// Resolve only a completed logical input in the already admitted owner
+    /// scope. The System child still verifies and retains the actual bytes.
+    pub(crate) fn reference(
+        &self,
+        owner: &Owner,
+        path: &str,
+        purpose: Purpose,
+    ) -> Result<Reference> {
+        let logical = path
+            .strip_prefix("files/")
+            .context("native program must be a staged files/... path")?;
+        wukong_worker_package::validate_path(logical)?;
+        let directory = self.root.join(digest(owner)?);
+        self.policy.verify(&directory, true)?;
+        let key = digest(&path)?;
+        let declaration = self.read_record(&directory.join(format!("{key}.declaration.json")))?;
+        ensure!(
+            declaration.owner == *owner
+                && declaration.path == path
+                && declaration.schema == 1
+                && (!matches!(purpose, Purpose::Execute) || declaration.executable),
+            "native logical input differs from admitted owner or execution policy"
+        );
+        ensure!(
+            self.read_record(&directory.join(format!("{key}.receipt.json")))? == declaration,
+            "native logical input is not completed"
+        );
+        Ok(Reference {
+            path: path.into(),
+            id: digest(&declaration)?,
+            sha256: declaration.sha256,
+            size: declaration.size,
+            executable: declaration.executable,
+        })
+    }
     /// Prepare before forwarding. Bytes are immutable, but there is no admitted
     /// receipt until the corresponding worker result is checked and settled.
     pub fn prepare(&self, put: &Put) -> Result<()> {

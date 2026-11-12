@@ -4,6 +4,7 @@ use crate::{
     accounts, deployment,
     inputs::{Inputs, Owner},
     resource_journal::Journal,
+    resource_runtime::Runtime,
     security::AclPolicy,
 };
 use anyhow::{Context, Result, ensure};
@@ -190,6 +191,7 @@ pub(crate) struct LeaseProxy {
     state: Arc<Mutex<State>>,
     inputs: tokio::sync::Mutex<Inputs>,
     controls: tokio::sync::Mutex<()>,
+    runtime: Mutex<Option<Runtime>>,
     started: Instant,
 }
 struct Admission {
@@ -232,8 +234,41 @@ impl LeaseProxy {
             })),
             inputs: tokio::sync::Mutex::new(Inputs::open(metadata, policy)?),
             controls: tokio::sync::Mutex::new(()),
+            runtime: Mutex::new(None),
             started: Instant::now(),
         })
+    }
+    pub(crate) fn open_resources(
+        &self,
+        root: &Path,
+        deployment: &deployment::Deployment,
+        manifest: &wukong_worker_package::VerifiedManifest,
+    ) -> Result<()> {
+        let mut runtime = self.runtime.lock().expect("native runtime mutex poisoned");
+        ensure!(runtime.is_none(), "native resource runtime is already open");
+        *runtime = Some(Runtime::open(root, deployment, manifest)?);
+        Ok(())
+    }
+    pub(crate) fn poll_resources(&self) -> Result<bool> {
+        let mut state = self.state.lock().expect("native lease mutex poisoned");
+        let mut runtime = self.runtime.lock().expect("native runtime mutex poisoned");
+        if let Some(runtime) = &mut *runtime {
+            if state
+                .current
+                .as_ref()
+                .is_some_and(|current| current.deadline <= Instant::now())
+            {
+                runtime.cancel_active()?;
+            }
+            runtime.poll(&mut state.resources)?;
+        }
+        state.resources.idle()
+    }
+    pub(crate) fn cancel_resources(&self) -> Result<()> {
+        if let Some(runtime) = &*self.runtime.lock().expect("native runtime mutex poisoned") {
+            runtime.cancel_active()?;
+        }
+        Ok(())
     }
     fn binding(&self, params: &Map<String, Value>) -> Result<()> {
         let binding: Identity = serde_json::from_value(
@@ -340,14 +375,44 @@ impl LeaseProxy {
         if method == "environment.lease.release" {
             return self.release(request, upstream).await;
         }
+        let outer_lease = request["params"]["_lease"].clone();
         let mut admission = self.admit(request["params"].as_object_mut().unwrap())?;
+        let native_resource = Runtime::handles(&method, request["params"].as_object().unwrap())
+            && self
+                .runtime
+                .lock()
+                .expect("native runtime mutex poisoned")
+                .is_some();
         // Serialize input publication independently of lease controls: hashing
         // or a slow worker upload must never prevent heartbeat renewal.
-        let inputs = if Inputs::handles(&method) {
+        let inputs = if Inputs::handles(&method) || native_resource && method == "job.start" {
             Some(self.inputs.lock().await)
         } else {
             None
         };
+        if native_resource {
+            let result = (|| {
+                let mut state = self.state.lock().expect("native lease mutex poisoned");
+                // An input publication can hold the independent input lock
+                // past expiry. Recheck before any native start side effect.
+                self.validate(&state, &outer_lease)?;
+                let mut runtime = self.runtime.lock().expect("native runtime mutex poisoned");
+                runtime
+                    .as_mut()
+                    .context("native resource runtime vanished")?
+                    .call(
+                        &mut state.resources,
+                        inputs.as_deref(),
+                        &admission.owner,
+                        &method,
+                        request["params"].as_object().unwrap(),
+                    )
+            })();
+            // The journal, not a discarded RPC future, retains an unfinished
+            // native side effect and its cleanup blocker.
+            admission.completed = true;
+            return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":result?}));
+        }
         let input = if let Some(inputs) = &inputs {
             match inputs.prepare_rpc(
                 admission.owner.clone(),

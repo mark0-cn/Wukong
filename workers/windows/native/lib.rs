@@ -40,6 +40,8 @@ pub mod resource_journal;
 #[cfg(windows)]
 pub mod resource_process;
 #[cfg(windows)]
+mod resource_runtime;
+#[cfg(windows)]
 pub mod security;
 #[cfg(windows)]
 pub mod service;

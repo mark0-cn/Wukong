@@ -9,7 +9,7 @@ fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
     #[cfg(windows)]
     if args.len() == 5 && args[1] == "resource-execute" {
-        let result = wukong_windows_worker::resource_process::execute(
+        let result = wukong_windows_worker::resource_process::run(
             args[2]
                 .to_str()
                 .context("invalid native process installation")?,

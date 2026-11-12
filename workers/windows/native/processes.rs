@@ -135,10 +135,13 @@ impl Job {
         security::check(unsafe { TerminateJobObject(self.0.0, 1) })
     }
     pub fn active_processes(&self) -> Result<u32> {
+        Self::active_handle(self.0.0)
+    }
+    fn active_handle(handle: HANDLE) -> Result<u32> {
         let mut information = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
         security::check(unsafe {
             QueryInformationJobObject(
-                self.0.0,
+                handle,
                 JobObjectBasicAccountingInformation,
                 (&mut information as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
                 size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
@@ -150,13 +153,16 @@ impl Job {
     /// A signaled leader is insufficient: detached descendants can outlive it.
     /// Keep the owned Job handle until Windows confirms every member exited.
     pub fn terminate_and_wait(&self, timeout: Duration) -> Result<()> {
-        if self.active_processes()? == 0 {
+        Self::drain_handle(self.0.0, timeout)
+    }
+    fn drain_handle(handle: HANDLE, timeout: Duration) -> Result<()> {
+        if Self::active_handle(handle)? == 0 {
             return Ok(());
         }
-        self.terminate()?;
+        security::check(unsafe { TerminateJobObject(handle, 1) })?;
         let deadline = Instant::now() + timeout;
         loop {
-            if self.active_processes()? == 0 {
+            if Self::active_handle(handle)? == 0 {
                 return Ok(());
             }
             ensure!(
@@ -549,6 +555,7 @@ pub struct OwnedProcess {
     _desktop: Option<Desktop>,
     _directory: Option<security::ResourceDirectory>,
     launch_diagnostics: Option<serde_json::Value>,
+    stop_on_drop: bool,
 }
 impl OwnedProcess {
     pub(crate) fn launch_diagnostics(&self) -> Option<&serde_json::Value> {
@@ -594,6 +601,76 @@ impl Drop for OwnedProcess {
     fn drop(&mut self) {
         // Error/unwind fallback only. Successful lifecycle gates call stop()
         // explicitly and propagate failure rather than treating Drop as proof.
+        if self.stop_on_drop {
+            let _ = self.stop(Duration::from_secs(10));
+        }
+    }
+}
+
+/// Only a trusted System host without a private desktop/scratch may transfer
+/// control into the asynchronous service. OwnedHandle supplies Send/Sync; no
+/// thread-affine desktop or raw-handle wrapper crosses that boundary.
+pub(crate) struct SystemHost {
+    process: OwnedHandle,
+    job: OwnedHandle,
+    pid: u32,
+}
+impl SystemHost {
+    fn take(mut source: OwnedProcess) -> Result<Self> {
+        ensure!(
+            source._desktop.is_none() && source._directory.is_none(),
+            "resource persona cannot transfer to the service"
+        );
+        fn duplicate(handle: HANDLE) -> Result<OwnedHandle> {
+            let mut copy = null_mut();
+            security::check(unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    handle,
+                    GetCurrentProcess(),
+                    &mut copy,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            })?;
+            Ok(unsafe { OwnedHandle::from_raw_handle(copy) })
+        }
+        let result = Self {
+            process: duplicate(source.process.0)?,
+            job: duplicate(source.job.0.0)?,
+            pid: source.pid,
+        };
+        // Both controls are now retained by the destination. Closing the source
+        // duplicates must not terminate the Job during this ownership transfer.
+        source.stop_on_drop = false;
+        Ok(result)
+    }
+    pub(crate) fn pid(&self) -> u32 {
+        self.pid
+    }
+    pub(crate) fn exited(&self) -> bool {
+        unsafe { WaitForSingleObject(self.process.as_raw_handle(), 0) == WAIT_OBJECT_0 }
+    }
+    pub(crate) fn stop(&self, timeout: Duration) -> Result<u32> {
+        let deadline = Instant::now() + timeout;
+        Job::drain_handle(self.job.as_raw_handle(), timeout)?;
+        let remaining = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .min((u32::MAX - 1) as u128) as u32;
+        ensure!(
+            unsafe { WaitForSingleObject(self.process.as_raw_handle(), remaining) }
+                == WAIT_OBJECT_0,
+            "native System host did not signal after Job drain"
+        );
+        let mut code = 0;
+        security::check(unsafe { GetExitCodeProcess(self.process.as_raw_handle(), &mut code) })?;
+        Ok(code)
+    }
+}
+impl Drop for SystemHost {
+    fn drop(&mut self) {
         let _ = self.stop(Duration::from_secs(10));
     }
 }
@@ -693,6 +770,9 @@ impl Spawn<'_> {
             Start::Execute,
             CreationContext::Process,
         )
+    }
+    pub(crate) fn system_host(&self) -> Result<SystemHost> {
+        SystemHost::take(self.system()?)
     }
     /// Resource-host thread only: private station setup is process-wide.
     pub(crate) fn sandbox(
@@ -910,6 +990,7 @@ impl Spawn<'_> {
             _desktop: desktop,
             _directory: None,
             launch_diagnostics: None,
+            stop_on_drop: true,
         };
         let thread = Handle(information.hThread);
         let prepared: Result<()> = (|| {
@@ -997,6 +1078,46 @@ impl Spawn<'_> {
 mod tests {
     use super::*;
     #[test]
+    fn owned_system_host_control_transfers_without_killing_and_drains_on_another_thread()
+    -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let executable = std::env::current_exe()?;
+        let log = File::create(root.path().join("host.log"))?;
+        let input = File::open("NUL")?;
+        let mut environment = BTreeMap::new();
+        environment.insert("SystemRoot".into(), std::env::var_os("SystemRoot").unwrap());
+        environment.insert("WUKONG_NATIVE_JOB_FIXTURE".into(), "parent".into());
+        let source = Spawn {
+            executable: &executable,
+            arguments: &[
+                "--exact".into(),
+                "processes::tests::native_job_fixture_entry".into(),
+                "--nocapture".into(),
+            ],
+            directory: root.path(),
+            environment: &environment,
+            log: &log,
+            input: &input,
+        }
+        .inert_fixture()?;
+        let host = SystemHost::take(source)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !root.path().join("leaf.pid").exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid: u32 = std::fs::read_to_string(root.path().join("leaf.pid"))?.parse()?;
+        let leaf = Handle(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) });
+        ensure!(
+            !leaf.0.is_null() && !host.exited(),
+            "transfer killed the owned host or lost its descendant"
+        );
+        std::thread::spawn(move || host.stop(Duration::from_secs(10)))
+            .join()
+            .unwrap()?;
+        assert_eq!(unsafe { WaitForSingleObject(leaf.0, 1000) }, WAIT_OBJECT_0);
+        Ok(())
+    }
+    #[test]
     fn native_job_fixture_entry() {
         let Some(mode) = std::env::var_os("WUKONG_NATIVE_JOB_FIXTURE") else {
             return;
@@ -1042,10 +1163,11 @@ mod tests {
             let _ = child.wait();
         } else {
             std::fs::write(
-                std::env::current_dir().unwrap().join("leaf.pid"),
+                std::env::current_dir().unwrap().join("leaf.pending"),
                 std::process::id().to_string(),
             )
             .unwrap();
+            std::fs::rename("leaf.pending", "leaf.pid").unwrap();
             std::thread::sleep(std::time::Duration::from_secs(30));
         }
     }

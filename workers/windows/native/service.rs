@@ -474,6 +474,7 @@ async fn run(context: &ContextState) -> Result<()> {
     let mut broker_listener =
         pipe_transport::broker_server(&context.installation, &broker_sid, true)?;
     let leases = Arc::new(LeaseProxy::open(identity, &root.join("metadata"))?);
+    leases.open_resources(&root, &deployment, &manifest)?;
     let sid = deployment.account(Role::Management)?.sid.clone();
     let mut listener = pipe_transport::server(&context.installation, &sid, true)?;
     let ssh = spawn_ssh(&root, &package, &manifest)?;
@@ -504,6 +505,7 @@ async fn run(context: &ContextState) -> Result<()> {
                 tasks.spawn(serve_client(accepted,sid.clone(),endpoint.clone(),leases.clone(),permit));
             },
             _=tokio::time::sleep(Duration::from_millis(250))=>{
+                leases.poll_resources()?;
                 if STOP.load(Ordering::Acquire) {break;}
                 ensure!(!worker.exited(),"Python worker epoch exited; all owned descendants will be killed before SCM restart");
                 ensure!(!ssh.exited(),"packaged SSH daemon exited");
@@ -513,6 +515,15 @@ async fn run(context: &ContextState) -> Result<()> {
     }
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
+    leases.cancel_resources()?;
+    let resource_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while !leases.poll_resources()? {
+        ensure!(
+            tokio::time::Instant::now() < resource_deadline,
+            "native resource cleanup remains pending during service stop"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     ssh.stop(Duration::from_secs(10))?;
     report(SERVICE_STOP_PENDING, 0)?;
     worker.stop(Duration::from_secs(10))?;

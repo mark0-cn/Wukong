@@ -45,6 +45,53 @@ fn reference(put: &Put) -> Result<Reference> {
 }
 
 #[test]
+fn native_logical_lookup_needs_completed_exact_owner_and_execution_policy() -> Result<()> {
+    let (_root, inputs) = fixture()?;
+    let put = put(owner(), b"admitted-bytes")?;
+    inputs.prepare(&put)?;
+    assert!(
+        inputs
+            .reference(&owner(), &put.declaration.path, Purpose::Execute)
+            .is_err()
+    );
+    inputs.complete(&put, &mut reply(&put))?;
+    assert_eq!(
+        inputs.reference(&owner(), &put.declaration.path, Purpose::Execute)?,
+        reference(&put)?
+    );
+    let mut changed = owner();
+    changed.epoch += 1;
+    assert!(
+        inputs
+            .reference(&changed, &put.declaration.path, Purpose::Execute)
+            .is_err()
+    );
+    for path in [
+        "C:/Windows/System32/cmd.exe",
+        "files/../outside.exe",
+        "files/other.exe",
+    ] {
+        assert!(inputs.reference(&owner(), path, Purpose::Execute).is_err());
+    }
+    let mut data = put.declaration.clone();
+    data.path = "files/data.bin".into();
+    data.executable = false;
+    let data = Put {
+        declaration: data,
+        data: put.data.clone(),
+    };
+    inputs.prepare(&data)?;
+    inputs.complete(&data, &mut reply(&data))?;
+    assert!(
+        inputs
+            .reference(&owner(), &data.declaration.path, Purpose::Execute)
+            .is_err()
+    );
+    inputs.reference(&owner(), &data.declaration.path, Purpose::Inspect)?;
+    Ok(())
+}
+
+#[test]
 fn native_resource_ingestion_requires_a_completed_receipt_and_pins_the_verified_handle()
 -> Result<()> {
     use std::io::Read;
