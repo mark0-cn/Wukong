@@ -10,7 +10,10 @@ use std::{
     ffi::{OsStr, OsString},
     fs::File,
     mem::size_of,
-    os::windows::{ffi::OsStrExt, io::AsRawHandle},
+    os::windows::{
+        ffi::OsStrExt,
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    },
     path::Path,
     ptr::{null, null_mut},
     time::{Duration, Instant},
@@ -18,11 +21,45 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, WAIT_OBJECT_0},
     Security::{CreateRestrictedToken, GetTokenInformation, TOKEN_PRIVILEGES, TokenPrivileges},
-    System::{JobObjects::*, StationsAndDesktops::*, Threading::*},
+    System::{
+        JobObjects::*, StationsAndDesktops::*, SystemServices::JOB_OBJECT_QUERY, Threading::*,
+    },
 };
 
 pub struct Job(Handle);
+/// A noninheritable, query-only duplicate usable by authenticated broker tasks.
+/// It never authorizes assignment, termination or policy changes.
+pub(crate) struct JobObserver(OwnedHandle);
+impl JobObserver {
+    pub(crate) fn contains(&self, pid: u32) -> Result<bool> {
+        let process = Handle(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) });
+        ensure!(
+            !process.0.is_null(),
+            "cannot inspect native broker caller process"
+        );
+        let mut contained = 0;
+        security::check(unsafe {
+            IsProcessInJob(process.0, self.0.as_raw_handle(), &mut contained)
+        })?;
+        Ok(contained != 0)
+    }
+}
 impl Job {
+    pub(crate) fn observer(&self) -> Result<JobObserver> {
+        let mut handle = null_mut();
+        security::check(unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                self.0.0,
+                GetCurrentProcess(),
+                &mut handle,
+                JOB_OBJECT_QUERY,
+                0,
+                0,
+            )
+        })?;
+        Ok(JobObserver(unsafe { OwnedHandle::from_raw_handle(handle) }))
+    }
     pub fn new() -> Result<Self> {
         let handle = unsafe { CreateJobObjectW(null(), null()) };
         ensure!(
@@ -358,6 +395,14 @@ pub struct Spawn<'a> {
     pub input: &'a File,
 }
 impl Spawn<'_> {
+    #[cfg(test)]
+    pub(crate) fn inert_fixture(&self) -> Result<OwnedProcess> {
+        ensure!(
+            self.executable == std::env::current_exe()?,
+            "native fixture must execute this test binary"
+        );
+        self.create(None, None)
+    }
     pub fn worker(&self, installation: &str, account: &Account) -> Result<OwnedProcess> {
         security::require_system()?;
         let token = without_privileges(&account.logon(installation)?)?;

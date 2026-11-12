@@ -5,6 +5,8 @@ pub mod accounts;
 #[cfg(windows)]
 mod authority;
 #[cfg(windows)]
+pub mod broker;
+#[cfg(windows)]
 pub mod deployment;
 #[cfg(windows)]
 mod environment;

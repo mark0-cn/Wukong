@@ -66,6 +66,20 @@ fn main() -> Result<()> {
         );
     }
     #[cfg(windows)]
+    if args.len() == 4 && args[1] == "broker-health" {
+        let installation = args[2].to_str().context("invalid broker installation ID")?;
+        let parent = args[3]
+            .to_str()
+            .context("invalid broker parent PID")?
+            .parse::<u32>()?;
+        let reply = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(wukong_windows_worker::broker::health(installation, parent))?;
+        println!("{reply}");
+        return Ok(());
+    }
+    #[cfg(windows)]
     if args.len() == 3 && args[1] == "relay" {
         let installation = args[2].to_str().context("invalid installation ID")?;
         return tokio::runtime::Builder::new_current_thread()

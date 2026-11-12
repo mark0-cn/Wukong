@@ -285,6 +285,14 @@ mod tests {
             doctor["capabilities"]["native_target_execution"] == false,
             "unaccepted production execution must remain unavailable"
         );
+        ensure!(
+            doctor["native_broker"]["available"] == true
+                && doctor["native_broker"]["identity"] == doctor["identity"]
+                && doctor["native_broker"]["production_execution"] == false
+                && doctor["native_broker"]["scope"] == "native_broker_channel_only",
+            "installed metadata worker cannot authenticate its native broker: {}",
+            doctor["native_broker"]
+        );
         let acquire = json!({"run_id":"hosted-installation-check","owner_id":"controller-fixture"});
         let first: EnvironmentLease = serde_json::from_value(
             client
@@ -354,6 +362,7 @@ mod tests {
         let report: Value = json!({"passed":true,"scope":"hosted_native_service_and_controller_ssh",
             "identity":client.identity(),"daemon_id":ping["daemon_id"],"daemon_pid":ping["daemon_pid"],
             "first_epoch":first.epoch,"last_epoch":second.epoch,"artifact_sha256":artifact["sha256"],
+            "native_broker":doctor["native_broker"],
             "production_isolation_verified":false});
         use std::io::Write;
         fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&report)?)?;

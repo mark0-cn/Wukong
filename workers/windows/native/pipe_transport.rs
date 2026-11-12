@@ -55,8 +55,17 @@ pub fn service_name(installation: &str) -> Result<String> {
     );
     Ok(format!("WukongWorker-{installation}"))
 }
-fn pipe_name(installation: &str) -> Result<String> {
-    Ok(format!(r"\\.\pipe\{}", service_name(installation)?))
+#[derive(Clone, Copy)]
+pub(crate) enum Channel {
+    Relay,
+    Broker,
+}
+fn pipe_name(installation: &str, channel: Channel) -> Result<String> {
+    let service = service_name(installation)?;
+    Ok(match channel {
+        Channel::Relay => format!(r"\\.\pipe\{service}"),
+        Channel::Broker => format!(r"\\.\pipe\{service}-Broker"),
+    })
 }
 
 pub fn server(installation: &str, management_sid: &str, first: bool) -> Result<NamedPipeServer> {
@@ -64,11 +73,31 @@ pub fn server(installation: &str, management_sid: &str, first: bool) -> Result<N
     security::validate_account_sid(management_sid)?;
     create_server(
         installation,
+        Channel::Relay,
         &format!("D:P(A;;GA;;;SY)(A;;0x{CLIENT_ACCESS:08x};;;{management_sid})"),
         first,
     )
 }
-fn create_server(installation: &str, sddl: &str, first: bool) -> Result<NamedPipeServer> {
+pub(crate) fn broker_server(
+    installation: &str,
+    worker_sid: &str,
+    first: bool,
+) -> Result<NamedPipeServer> {
+    security::require_system()?;
+    security::validate_account_sid(worker_sid)?;
+    create_server(
+        installation,
+        Channel::Broker,
+        &format!("D:P(A;;GA;;;SY)(A;;0x{CLIENT_ACCESS:08x};;;{worker_sid})"),
+        first,
+    )
+}
+fn create_server(
+    installation: &str,
+    channel: Channel,
+    sddl: &str,
+    first: bool,
+) -> Result<NamedPipeServer> {
     let descriptor = SecurityDescriptor::from_sddl(sddl)?;
     let mut attributes = descriptor.attributes();
     let result = unsafe {
@@ -77,7 +106,7 @@ fn create_server(installation: &str, sddl: &str, first: bool) -> Result<NamedPip
             .reject_remote_clients(true)
             .max_instances(16)
             .create_with_security_attributes_raw(
-                pipe_name(installation)?,
+                pipe_name(installation, channel)?,
                 (&mut attributes as *mut windows_sys::Win32::Security::SECURITY_ATTRIBUTES).cast(),
             )
     }?;
@@ -88,6 +117,14 @@ fn create_server(installation: &str, sddl: &str, first: bool) -> Result<NamedPip
 /// dispatching it. Never await with an impersonated thread token.
 pub fn authenticate_client(server: &NamedPipeServer, management_sid: &str) -> Result<()> {
     security::validate_account_sid(management_sid)?;
+    let sid = client_sid(server)?;
+    ensure!(
+        sid == management_sid || sid == "S-1-5-18",
+        "native pipe caller is not the enrolled management account"
+    );
+    Ok(())
+}
+pub(crate) fn client_sid(server: &NamedPipeServer) -> Result<String> {
     security::check(unsafe { ImpersonateNamedPipeClient(server.as_raw_handle()) })?;
     struct Revert;
     impl Drop for Revert {
@@ -102,15 +139,11 @@ pub fn authenticate_client(server: &NamedPipeServer, management_sid: &str) -> Re
     security::check(unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) })?;
     let sid = security::token_user_sid(&Handle(token))?;
     drop(guard);
-    ensure!(
-        sid == management_sid || sid == "S-1-5-18",
-        "native pipe caller is not the enrolled management account"
-    );
-    Ok(())
+    Ok(sid)
 }
 
-fn open_client(installation: &str) -> Result<NamedPipeClient> {
-    let encoded = security::wide(OsStr::new(&pipe_name(installation)?))?;
+fn open_client(installation: &str, channel: Channel) -> Result<NamedPipeClient> {
+    let encoded = security::wide(OsStr::new(&pipe_name(installation, channel)?))?;
     let handle = unsafe {
         CreateFileW(
             encoded.as_ptr(),
@@ -174,7 +207,7 @@ pub async fn connect(installation: &str) -> Result<NamedPipeClient> {
     let expected = running_service_pid(installation)?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     let client = loop {
-        match open_client(installation) {
+        match open_client(installation, Channel::Relay) {
             Ok(client) => break client,
             Err(error)
                 if error
@@ -197,17 +230,67 @@ pub async fn connect(installation: &str) -> Result<NamedPipeClient> {
     Ok(client)
 }
 
+/// The expected PID is handed to the ordinary worker by its System parent,
+/// before spawning it. No request can choose a different server identity.
+pub(crate) async fn connect_broker(installation: &str, expected: u32) -> Result<NamedPipeClient> {
+    ensure!(expected > 0, "missing native broker parent PID");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let client = loop {
+        match open_client(installation, Channel::Broker) {
+            Ok(client) => break client,
+            Err(error)
+                if error
+                    .downcast_ref::<io::Error>()
+                    .and_then(io::Error::raw_os_error)
+                    == Some(ERROR_PIPE_BUSY as i32)
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    let mut actual = 0;
+    security::check(unsafe { GetNamedPipeServerProcessId(client.as_raw_handle(), &mut actual) })?;
+    ensure!(
+        actual == expected,
+        "native broker does not match the trusted service parent PID"
+    );
+    Ok(client)
+}
+
+#[cfg(test)]
+pub(crate) fn broker_fixture_server(installation: &str, sid: &str) -> Result<NamedPipeServer> {
+    security::validate_account_sid(sid)?;
+    create_server(
+        installation,
+        Channel::Broker,
+        &format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)"),
+        true,
+    )
+}
+
 pub async fn read_frame(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Option<Vec<u8>>> {
+    read_bounded_frame(reader, MAX_FRAME).await
+}
+pub(crate) async fn read_bounded_frame(
+    reader: &mut (impl AsyncBufRead + Unpin),
+    maximum: usize,
+) -> Result<Option<Vec<u8>>> {
+    ensure!(
+        maximum > 0 && maximum <= MAX_FRAME,
+        "invalid native frame limit"
+    );
     let mut bytes = Vec::new();
     let size = reader
-        .take(MAX_FRAME as u64 + 1)
+        .take(maximum as u64 + 1)
         .read_until(b'\n', &mut bytes)
         .await?;
     if size == 0 {
         return Ok(None);
     }
     ensure!(
-        size <= MAX_FRAME && bytes.last() == Some(&b'\n'),
+        size <= maximum && bytes.last() == Some(&b'\n'),
         "native RPC frame is oversized or incomplete"
     );
     Ok(Some(bytes))
@@ -235,8 +318,13 @@ mod tests {
         let (_, random) = wukong_worker_package::Signer::generate()?;
         let id = hex::encode(&sha2::Sha256::digest(random.as_ref())[..16]);
         let sid = security::current_user_sid()?;
-        let server = create_server(&id, &format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)"), true)?;
-        let client = open_client(&id)?;
+        let server = create_server(
+            &id,
+            Channel::Relay,
+            &format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)"),
+            true,
+        )?;
+        let client = open_client(&id, Channel::Relay)?;
         server.connect().await?;
         let (read, mut write) = tokio::io::split(client);
         write_frame(&mut write, b"{\"fixture\":true}\n").await?;

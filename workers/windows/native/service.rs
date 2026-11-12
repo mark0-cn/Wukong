@@ -195,7 +195,26 @@ fn spawn_worker(
     manifest: &wukong_worker_package::VerifiedManifest,
 ) -> Result<OwnedProcess> {
     let entry = &manifest.manifest().entrypoints;
-    let environment = deployment::worker_environment(root, package)?;
+    let mut environment = deployment::worker_environment(root, package)?;
+    environment.insert(
+        "WUKONG_NATIVE_BROKER_CLIENT".into(),
+        package.join(&entry.worker).into_os_string(),
+    );
+    environment.insert(
+        "WUKONG_NATIVE_BROKER_CLIENT_SHA256".into(),
+        manifest.manifest().files[&entry.worker]
+            .sha256
+            .clone()
+            .into(),
+    );
+    environment.insert(
+        "WUKONG_NATIVE_BROKER_INSTALLATION".into(),
+        deployment.installation_id.clone().into(),
+    );
+    environment.insert(
+        "WUKONG_NATIVE_BROKER_PARENT_PID".into(),
+        std::process::id().to_string().into(),
+    );
     let path = root.join("data/daemon-native.log");
     security::no_links(&path)?;
     let log = fs::OpenOptions::new()
@@ -433,6 +452,14 @@ async fn run(context: &ContextState) -> Result<()> {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
+    let broker_sid = deployment.account(Role::Worker)?.sid.clone();
+    let broker = Arc::new(crate::broker::Broker::new(
+        identity.clone(),
+        broker_sid.clone(),
+        worker.job().observer()?,
+    )?);
+    let mut broker_listener =
+        pipe_transport::broker_server(&context.installation, &broker_sid, true)?;
     let leases = Arc::new(LeaseProxy::open(identity, &root.join("metadata"))?);
     let sid = deployment.account(Role::Management)?.sid.clone();
     let mut listener = pipe_transport::server(&context.installation, &sid, true)?;
@@ -444,9 +471,18 @@ async fn run(context: &ContextState) -> Result<()> {
     );
     report(SERVICE_RUNNING, 0)?;
     let semaphore = Arc::new(Semaphore::new(15));
+    let broker_semaphore = Arc::new(Semaphore::new(4));
     let mut tasks = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
+            result=broker_listener.connect(), if broker_semaphore.available_permits()>0 => {
+                result?;
+                let permit=broker_semaphore.clone().acquire_owned().await?;
+                let next=pipe_transport::broker_server(&context.installation,&broker_sid,false)?;
+                let accepted=std::mem::replace(&mut broker_listener,next);
+                let broker=broker.clone();
+                tasks.spawn(async move { let _permit=permit; broker.serve(accepted).await });
+            },
             result=listener.connect(), if semaphore.available_permits()>0 => {
                 result?;
                 let permit=semaphore.clone().acquire_owned().await?;

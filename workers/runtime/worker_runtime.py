@@ -68,7 +68,9 @@ class Runtime:
             return {"protocol": PROTOCOL, "identity":self.identity.value, "daemon_id":self.identity.daemon_id,
                     "daemon_pid": os.getpid(), "state_dir": str(self.root)}
         if method == "doctor":
+            from worker_native_broker import doctor as native_broker_doctor
             return {**doctor(self.root,self.trusted,self.isolated),'identity':self.identity.value,'daemon_id':self.identity.daemon_id,
+                    'native_broker':native_broker_doctor(self.identity.value) if os.name=='nt' and not self.trusted else {'available':False,'reason':'not an installed metadata worker'},
                     'exclusive_run_lease':os.name=='nt' and not self.trusted}
         if method == "ghidra.query":
             from ghidra_backend import query
