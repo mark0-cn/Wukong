@@ -92,25 +92,10 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
         "resource scratch differs"
     );
     fs::remove_file(&scratch)?;
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-            FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_DATA,
-        };
-        let attempt = fs::OpenOptions::new()
-            .access_mode(FILE_WRITE_DATA)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(std::env::current_dir()?);
-        ensure!(
-            matches!(attempt,Err(error) if error.raw_os_error()==Some(32)),
-            "resource root mutation was not blocked by the held directory handle"
-        );
-    }
+    security::probe_resource_root(&std::env::current_dir()?)?;
     Ok(
         json!({"passed":true,"appcontainer_sid":sid,"logon_sid":security::token_logon_sid(&token)?,"privileges":0,"capabilities":0,
-        "metadata_denied":true,"worker_data_denied":true,"loopback_denied":true,"scratch_writable":true,"root_mutation_denied":true}),
+        "metadata_denied":true,"worker_data_denied":true,"loopback_denied":true,"scratch_writable":true,"root_guard_denied":true}),
     )
 }
 
@@ -348,7 +333,7 @@ fn validate_resource_report(value: &Value, manifest: &str) -> Result<()> {
                 && persona["worker_data_denied"] == true
                 && persona["loopback_denied"] == true
                 && persona["scratch_writable"] == true
-                && persona["root_mutation_denied"] == true,
+                && persona["root_guard_denied"] == true,
             "resource qualification did not prove the required restrictions"
         );
         security::validate_app_sid(

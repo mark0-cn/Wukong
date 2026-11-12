@@ -1,0 +1,3 @@
+kind = "security"
+en = "Protect native sandbox roots with an unshared private guard and verify actual reparse/deletion denial. Directory data-write sharing is no longer treated as an immutability guarantee."
+zh_CN = "以不可共享的私有保护文件保护原生沙箱目录根，并核验真实重解析修改及删除拒绝；不再将目录数据写入共享视为不可变性保证。"

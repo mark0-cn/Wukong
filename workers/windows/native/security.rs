@@ -157,6 +157,7 @@ pub(crate) fn token_logon_sid(token: &Handle) -> Result<String> {
 #[path = "resource_directory.rs"]
 mod resource_directory;
 pub(crate) use resource_directory::ResourceDirectory;
+pub(crate) use resource_directory::probe_root as probe_resource_root;
 
 pub fn check(value: i32) -> Result<()> {
     if value == 0 {

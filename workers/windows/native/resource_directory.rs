@@ -1,5 +1,7 @@
 //! Hold the directory's authority before granting a sandbox access. The handle
-//! is noninheritable and denies write/delete sharing for its entire lifetime.
+//! is noninheritable and denies delete sharing for its entire lifetime.
+//! Directory data-write sharing is not an immutability boundary. An undeletable
+//! private guard keeps the root nonempty, preventing a junction on that root.
 use super::*;
 use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
 use windows_sys::Win32::{
@@ -17,7 +19,9 @@ pub(crate) struct ResourceDirectory {
     path: PathBuf,
     handle: fs::File,
     original: AclPolicy,
+    guard: std::sync::Mutex<Option<fs::File>>,
 }
+const ROOT_GUARD: &str = ".wukong-root-guard";
 impl ResourceDirectory {
     pub fn create(path: &Path, app: &str, logon: &str) -> Result<Self> {
         security_system()?;
@@ -34,6 +38,9 @@ impl ResourceDirectory {
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(&path)?;
         let original = policy.clone();
+        // Create before granting sandbox access. The protected file ACL and its
+        // unshared handle deny deletion independently of directory write sharing.
+        let guard = policy.create_file(&path.join(ROOT_GUARD))?;
         policy.grants.insert(
             logon.into(),
             FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
@@ -73,6 +80,7 @@ impl ResourceDirectory {
             path,
             handle,
             original,
+            guard: std::sync::Mutex::new(Some(guard)),
         };
         result.verify(&policy)?;
         Ok(result)
@@ -161,7 +169,20 @@ impl ResourceDirectory {
         };
         ensure!(status == 0, "cannot inspect reclaimed directory: {status}");
         let actual = Local(actual);
-        verify_descriptor(actual.0, &self.original.owner, &self.original.grants, true)
+        verify_descriptor(actual.0, &self.original.owner, &self.original.grants, true)?;
+        ensure!(
+            self.handle.metadata()?.file_attributes() & 0x400 == 0,
+            "held sandbox root became a reparse point"
+        );
+        let mut guard = self
+            .guard
+            .lock()
+            .map_err(|_| anyhow::anyhow!("resource guard lock poisoned"))?;
+        if let Some(file) = guard.take() {
+            drop(file);
+            fs::remove_file(self.path.join(ROOT_GUARD))?;
+        }
+        Ok(())
     }
 }
 impl Drop for ResourceDirectory {
@@ -171,6 +192,71 @@ impl Drop for ResourceDirectory {
 }
 fn security_system() -> Result<()> {
     super::require_system()
+}
+
+/// Fixed lowbox probe, with no caller-selected destination. The well-formed
+/// mount-point request points only at this same task-owned directory.
+pub(crate) fn probe_root(path: &Path) -> Result<()> {
+    use windows_sys::Win32::{
+        Storage::FileSystem::{DELETE, FILE_SHARE_DELETE, FILE_SHARE_WRITE, FILE_WRITE_DATA},
+        System::IO::DeviceIoControl,
+    };
+    let options = || {
+        let mut options = fs::OpenOptions::new();
+        options
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+        options
+    };
+    ensure!(
+        matches!(options().access_mode(DELETE).open(path.join(ROOT_GUARD)),
+        Err(error) if matches!(error.raw_os_error(), Some(5 | 32))),
+        "sandbox root guard deletion was not denied"
+    );
+    match options().access_mode(FILE_WRITE_DATA).open(path) {
+        Err(error) if error.raw_os_error() == Some(5) => return Ok(()),
+        Err(error) => return Err(error.into()),
+        Ok(directory) => {
+            let text = path.to_string_lossy();
+            let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+            let substitute: Vec<u16> = format!(r"\??\{text}").encode_utf16().collect();
+            ensure!(
+                substitute.len() < 16000,
+                "root probe path exceeds reparse limit"
+            );
+            let length = (substitute.len() * 2) as u16;
+            let mut buffer = Vec::new();
+            buffer.extend(0xa0000003u32.to_le_bytes());
+            buffer.extend((length + 12).to_le_bytes());
+            buffer.extend(0u16.to_le_bytes());
+            for value in [0, length, length + 2, 0] {
+                buffer.extend(value.to_le_bytes());
+            }
+            for value in substitute {
+                buffer.extend(value.to_le_bytes());
+            }
+            buffer.extend([0u8; 4]);
+            let mut returned = 0;
+            let result = unsafe {
+                DeviceIoControl(
+                    directory.as_raw_handle(),
+                    0x900a4,
+                    buffer.as_ptr().cast(),
+                    buffer.len() as u32,
+                    null_mut(),
+                    0,
+                    &mut returned,
+                    null_mut(),
+                )
+            };
+            let error = std::io::Error::last_os_error();
+            ensure!(
+                result == 0 && matches!(error.raw_os_error(), Some(5 | 32 | 145 | 1314)),
+                "sandbox root reparse mutation was not denied: {error}"
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -212,14 +298,16 @@ mod tests {
         assert!(directory.path().is_dir());
         assert!(validate_app_sid("S-1-15-2-1").is_err());
         assert!(validate_logon_sid("S-1-5-18").is_err());
-        // Another directory write/delete handle cannot mutate the held root.
+        // Directory writes may be admitted on Windows. Delete sharing and the
+        // nonempty, unshared guard are the distinct protections actually tested.
         assert!(
             fs::OpenOptions::new()
-                .access_mode(windows_sys::Win32::Storage::FileSystem::FILE_WRITE_DATA)
+                .access_mode(windows_sys::Win32::Storage::FileSystem::DELETE)
                 .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
                 .open(directory.path())
                 .is_err()
         );
+        probe_root(directory.path())?;
         Ok(())
     }
 }
