@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Resolve the resource host's fixed Windows environment before registry-cache and user-profile changes, then reuse that System snapshot with only per-resource temporary paths. Known-folder failures now retain their HRESULT."
+zh_CN = "在修改注册表缓存及用户 profile 前解析资源宿主的固定 Windows 环境，随后复用该 System 快照，仅替换各资源的临时路径；已知文件夹解析失败时保留 HRESULT。"

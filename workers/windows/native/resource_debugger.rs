@@ -10,6 +10,7 @@ pub(super) fn check(
     resources: &Path,
     manifest: &VerifiedManifest,
     architecture: &str,
+    system_environment: &std::collections::BTreeMap<String, std::ffi::OsString>,
 ) -> Result<Value> {
     ensure!(
         matches!(architecture, "x64" | "x86"),
@@ -47,7 +48,7 @@ pub(super) fn check(
         .join(format!("resource-target-{target_nonce}.log"));
     let target_log = private.create_file(&target_log_path)?;
     let input = fs::File::open("NUL")?;
-    let target_environment = scratch_environment(root, &target_path)?;
+    let target_environment = scratch_environment(system_environment, &target_path);
     let target = Spawn {
         executable: &package.join(&probe_member),
         arguments: &[],
@@ -81,7 +82,7 @@ pub(super) fn check(
         .join("metadata")
         .join(format!("resource-debugger-{debugger_nonce}.log"));
     let log = private.create_file(&log_path)?;
-    let debugger_environment = scratch_environment(root, &debugger_path)?;
+    let debugger_environment = scratch_environment(system_environment, &debugger_path);
     let engine = package.join(&manifest.manifest().entrypoints.dbgeng_library);
     let symbols = package.join(format!("runtime/selftest/{architecture}"));
     let helper = Spawn {

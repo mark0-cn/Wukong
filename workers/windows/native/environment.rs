@@ -15,7 +15,8 @@ pub(crate) fn program_data() -> Result<PathBuf> {
     let result = unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, 0, null_mut(), &mut path) };
     ensure!(
         result >= 0 && !path.is_null(),
-        "cannot resolve Windows ProgramData"
+        "cannot resolve Windows ProgramData (HRESULT 0x{:08x})",
+        result as u32
     );
     struct Memory(*mut u16);
     impl Drop for Memory {

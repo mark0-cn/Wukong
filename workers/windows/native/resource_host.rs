@@ -114,6 +114,9 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
     let manifest = deployment.verify(&root)?;
     let package = deployment.package(&root);
     deployment::verify_running_binary(&package, &manifest)?;
+    // Resolve fixed Windows locations once under the fresh System context,
+    // before changing predefined registry caching or loading role profiles.
+    let system_environment = environment::system(&root)?;
     let status = unsafe { RegDisablePredefinedCacheEx() };
     ensure!(
         status == 0,
@@ -145,6 +148,7 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
             &metadata,
             port,
             role,
+            &system_environment,
         )?);
     }
     ensure!(
@@ -159,6 +163,7 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
             &resources,
             &manifest,
             architecture,
+            &system_environment,
         )?);
     }
     Ok(
@@ -173,6 +178,7 @@ fn check_persona(
     metadata: &Path,
     port: u16,
     role: Role,
+    system_environment: &std::collections::BTreeMap<String, std::ffi::OsString>,
 ) -> Result<Value> {
     let private = AclPolicy::private_vm();
     let (mut persona, nonce) = create_persona(deployment, root, role)?;
@@ -192,7 +198,7 @@ fn check_persona(
         .join(format!("resource-probe-{nonce}.log"));
     let log = private.create_file(&log_path)?;
     let input = fs::File::open("NUL")?;
-    let environment = scratch_environment(root, &scratch_path)?;
+    let environment = scratch_environment(system_environment, &scratch_path);
     let executable = std::env::current_exe()?;
     let process = Spawn {
         executable: &executable,
@@ -257,14 +263,14 @@ fn create_persona(deployment: &Deployment, root: &Path, role: Role) -> Result<(P
     Ok((persona, nonce))
 }
 fn scratch_environment(
-    root: &Path,
+    system_environment: &std::collections::BTreeMap<String, std::ffi::OsString>,
     scratch: &Path,
-) -> Result<std::collections::BTreeMap<String, std::ffi::OsString>> {
-    let mut environment = environment::system(root)?;
+) -> std::collections::BTreeMap<String, std::ffi::OsString> {
+    let mut environment = system_environment.clone();
     for key in ["TEMP", "TMP"] {
         environment.insert(key.into(), scratch.as_os_str().to_owned());
     }
-    Ok(environment)
+    environment
 }
 fn wait(process: &crate::processes::OwnedProcess, timeout: Duration) -> Result<()> {
     let deadline = Instant::now() + timeout;
