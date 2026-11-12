@@ -10,8 +10,8 @@ use windows_sys::Win32::{
         GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION, SYSTEM_MANDATORY_LABEL_ACE,
     },
     Storage::FileSystem::{
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_WRITE, FILE_SHARE_READ, READ_CONTROL, WRITE_DAC,
-        WRITE_OWNER,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY, FILE_SHARE_READ,
+        READ_CONTROL, WRITE_DAC, WRITE_OWNER,
     },
 };
 
@@ -33,7 +33,9 @@ impl ResourceDirectory {
         policy.create_directory(path)?;
         let path = path.canonicalize()?;
         let handle = fs::OpenOptions::new()
-            .access_mode(READ_CONTROL | WRITE_DAC | WRITE_OWNER)
+            // A security-metadata-only handle does not establish data/delete
+            // sharing. Directory list access makes the held share reservation real.
+            .access_mode(FILE_LIST_DIRECTORY | READ_CONTROL | WRITE_DAC | WRITE_OWNER)
             .share_mode(FILE_SHARE_READ)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(&path)?;
@@ -260,6 +262,39 @@ pub(crate) fn probe_root(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn directory_list_access_establishes_the_delete_share_reservation() -> Result<()> {
+        use windows_sys::Win32::Storage::FileSystem::{
+            DELETE, FILE_SHARE_DELETE, FILE_SHARE_WRITE,
+        };
+        let temporary = tempfile::tempdir()?;
+        let root = temporary.path().join("control");
+        fs::create_dir(&root)?;
+        let authority = |access| {
+            fs::OpenOptions::new()
+                .access_mode(access)
+                .share_mode(FILE_SHARE_READ)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(&root)
+        };
+        let deletion = || {
+            fs::OpenOptions::new()
+                .access_mode(DELETE)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(&root)
+        };
+        let metadata = authority(READ_CONTROL | WRITE_DAC | WRITE_OWNER)?;
+        // Regression control: share flags on a metadata-only handle do not
+        // prevent this open, even though FILE_SHARE_DELETE was omitted.
+        drop(deletion()?);
+        drop(metadata);
+        let held = authority(FILE_LIST_DIRECTORY | READ_CONTROL | WRITE_DAC | WRITE_OWNER)?;
+        assert!(matches!(deletion(), Err(error) if error.raw_os_error()==Some(32)));
+        drop(held);
+        drop(deletion()?);
+        Ok(())
+    }
     #[test]
     fn held_resource_directory_has_exact_principals_and_low_label_without_profile_creation()
     -> Result<()> {

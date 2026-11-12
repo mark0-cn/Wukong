@@ -1,0 +1,3 @@
+kind = "security"
+en = "Hold sandbox directories with list access as well as security authority, so Windows actually records their delete-share reservation. A real temporary-directory control distinguishes this from ineffective metadata-only handles."
+zh_CN = "持有沙箱目录时同时申请列举权限与安全管理权限，确保 Windows 实际记录删除共享限制；真实临时目录对照测试区分其与无效的纯元数据句柄。"
