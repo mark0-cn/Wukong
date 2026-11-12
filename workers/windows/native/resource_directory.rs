@@ -185,11 +185,9 @@ impl ResourceDirectory {
         Ok(())
     }
 }
-impl Drop for ResourceDirectory {
-    fn drop(&mut self) {
-        let _ = self.reclaim();
-    }
-}
+// Dropping handles alone must not remove the private guard or change the DACL:
+// an unsuccessful Job drain cannot prove the sandbox stopped. Only an explicit
+// reclaim after quiescence removes it; failed resources remain for repair.
 fn security_system() -> Result<()> {
     super::require_system()
 }
@@ -308,6 +306,10 @@ mod tests {
                 .is_err()
         );
         probe_root(directory.path())?;
+        directory.reclaim()?;
+        let scratch = directory.path().to_owned();
+        drop(directory);
+        fs::remove_dir(scratch)?;
         Ok(())
     }
 }
