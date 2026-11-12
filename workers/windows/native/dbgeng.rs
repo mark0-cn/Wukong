@@ -105,11 +105,17 @@ pub struct Engine {
     invalidated: bool,
     debug_privilege: bool,
     engine_path: PathBuf,
+    path_context: Option<paths::PathContext>,
 }
 
 impl Engine {
-    fn new(directory: &Path, symbol_directory: &Path) -> Result<Self> {
-        let directory = local_path(directory).context("resolve local DbgEng directory")?;
+    fn new(
+        directory: &Path,
+        symbol_directory: &Path,
+        path_context: Option<paths::PathContext>,
+    ) -> Result<Self> {
+        let directory = local_path(directory, path_context.as_ref())
+            .context("resolve local DbgEng directory")?;
         let engine_path = directory.join("dbgeng.dll");
         let encoded = wide(&engine_path.to_string_lossy())?;
         // The helper process owns this module for its entire lifetime. Do not unload
@@ -145,8 +151,8 @@ impl Engine {
             log: output.clone(),
         }
         .into();
-        let symbols_path =
-            local_path(symbol_directory).context("resolve local DbgEng symbol directory")?;
+        let symbols_path = local_path(symbol_directory, path_context.as_ref())
+            .context("resolve local DbgEng symbol directory")?;
         let encoded_symbols = wide(&symbols_path.to_string_lossy())?;
         unsafe {
             client
@@ -187,6 +193,7 @@ impl Engine {
             invalidated: false,
             debug_privilege: false,
             engine_path,
+            path_context,
         })
     }
 
@@ -253,7 +260,8 @@ impl Engine {
         let timeout = integer(params, "timeout_secs", 30, 60)?.max(1) as u32 * 1000;
         match text(params, "mode")? {
             "dump" => {
-                let path = local_path(Path::new(text(params, "dump")?))?;
+                let path =
+                    local_path(Path::new(text(params, "dump")?), self.path_context.as_ref())?;
                 let encoded = wide(&path.to_string_lossy())?;
                 unsafe {
                     self.client.OpenDumpFileWide(PCWSTR(encoded.as_ptr()), 0)?;
@@ -674,11 +682,17 @@ fn state_name(state: u32) -> &'static str {
 pub fn serve() -> Result<()> {
     let arguments: Vec<_> = std::env::args_os().collect();
     ensure!(
-        arguments.len() == 3,
-        "usage: wukong-dbgeng <engine-directory> <local-symbol-directory>"
+        arguments.len() == 3 || (arguments.len() == 4 && arguments[3] == "--native-path-context"),
+        "usage: wukong-dbgeng <engine-directory> <local-symbol-directory> [--native-path-context]"
     );
-    let mut engine = Engine::new(Path::new(&arguments[1]), Path::new(&arguments[2]))?;
-    let mut input = std::io::stdin().lock();
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let context = if arguments.len() == 4 {
+        Some(paths::read_context(&mut input)?)
+    } else {
+        None
+    };
+    let mut engine = Engine::new(Path::new(&arguments[1]), Path::new(&arguments[2]), context)?;
     let mut output = std::io::stdout().lock();
     loop {
         let mut line = Vec::new();

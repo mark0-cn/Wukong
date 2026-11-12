@@ -3,6 +3,26 @@
 use super::*;
 use std::io::Write;
 use wukong_worker_package::VerifiedManifest;
+#[path = "debugger_path_context.rs"]
+mod path_context;
+
+fn directory_identity(path: &Path) -> Result<path_context::DirectoryIdentity> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, SYNCHRONIZE,
+    };
+    security::no_links(path)?;
+    let file = fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let name = path
+        .to_str()
+        .context("native debugger directory is not Unicode")?;
+    path_context::DirectoryIdentity::observe(&file, name.strip_prefix(r"\\?\").unwrap_or(name))
+}
 
 pub(super) fn check(
     deployment: &Deployment,
@@ -66,11 +86,26 @@ pub(super) fn check(
         json!({"id":4,"operation":"inspect","kind":"modules","limit":64}),
         json!({"id":5,"operation":"close"}),
     ];
+    let engine = package.join(&manifest.manifest().entrypoints.dbgeng_library);
+    let engine_directory = engine.parent().context("missing sealed engine directory")?;
+    let symbols = package.join(format!("runtime/selftest/{architecture}"));
+    let paths = path_context::PathContext {
+        schema: 1,
+        engine: directory_identity(engine_directory)?,
+        symbols: directory_identity(&symbols)?,
+    };
+    let path_header = serde_json::to_vec(&paths)?;
+    ensure!(
+        path_header.len() < path_context::MAX_CONTEXT_BYTES,
+        "native debugger path context exceeds its frame bound"
+    );
     let request_path = root
         .join("metadata")
         .join(format!("resource-debugger-{debugger_nonce}.jsonl"));
     {
         let mut file = private.create_file(&request_path)?;
+        file.write_all(&path_header)?;
+        file.write_all(b"\n")?;
         for request in requests {
             serde_json::to_writer(&mut file, &request)?;
             file.write_all(b"\n")?;
@@ -83,8 +118,6 @@ pub(super) fn check(
         .join(format!("resource-debugger-{debugger_nonce}.log"));
     let log = private.create_file(&log_path)?;
     let debugger_environment = scratch_environment(system_environment, &debugger_path);
-    let engine = package.join(&manifest.manifest().entrypoints.dbgeng_library);
-    let symbols = package.join(format!("runtime/selftest/{architecture}"));
     let helper = Spawn {
         executable: &package.join(&manifest.manifest().entrypoints.dbgeng_helper),
         arguments: &[
@@ -94,6 +127,7 @@ pub(super) fn check(
                 .as_os_str()
                 .to_owned(),
             symbols.as_os_str().to_owned(),
+            "--native-path-context".into(),
         ],
         directory: &debugger_path,
         environment: &debugger_environment,

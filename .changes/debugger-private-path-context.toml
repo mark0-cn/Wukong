@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Pass sealed debugger directory identities through an inherited System/administrator-private input file, sharing SDK observations and exact ACL verification while rejecting forged headers and undeclared paths without increasing AppContainer permissions."
+zh_CN = "通过继承的 System/管理员私有输入文件传递已签封调试器目录身份，共享 SDK 观察及精确 ACL 校验，在不提高 AppContainer 权限的情况下拒绝伪造头和未声明路径。"

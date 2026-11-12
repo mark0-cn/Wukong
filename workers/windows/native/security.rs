@@ -1,6 +1,9 @@
+#[path = "security_descriptor.rs"]
+mod descriptor;
 use anyhow::{Context, Result, ensure};
+pub use descriptor::check;
+pub(crate) use descriptor::{Local, sid_text, verify_descriptor, verify_descriptor_with_children};
 use std::{
-    ffi::c_void,
     fs,
     mem::size_of,
     os::windows::{ffi::OsStrExt, fs::MetadataExt, io::FromRawHandle},
@@ -8,17 +11,16 @@ use std::{
     ptr::{addr_of, null_mut},
 };
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, LocalFree},
+    Foundation::{CloseHandle, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE},
     Security::{
-        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL,
+        ACE_HEADER, ACL,
         Authorization::{
-            ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-            ConvertStringSidToSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
+            GetNamedSecurityInfoW, SE_FILE_OBJECT,
         },
-        CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorControl,
-        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation,
-        INHERIT_ONLY_ACE, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-        PSID, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorDacl, GetTokenInformation,
+        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY,
+        TOKEN_USER, TokenUser,
     },
     Storage::FileSystem::{
         CREATE_NEW, CreateDirectoryW, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_NORMAL,
@@ -37,17 +39,6 @@ impl Drop for Handle {
         }
     }
 }
-struct Local(*mut c_void);
-impl Drop for Local {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                LocalFree(self.0);
-            }
-        }
-    }
-}
-
 pub(crate) struct SecurityDescriptor(Local);
 impl SecurityDescriptor {
     pub(crate) fn from_object(
@@ -187,13 +178,6 @@ mod resource_directory;
 pub(crate) use resource_directory::ResourceDirectory;
 pub(crate) use resource_directory::probe_root as probe_resource_root;
 
-pub fn check(value: i32) -> Result<()> {
-    if value == 0 {
-        Err(std::io::Error::last_os_error().into())
-    } else {
-        Ok(())
-    }
-}
 pub fn wide(value: &std::ffi::OsStr) -> Result<Vec<u16>> {
     let mut result: Vec<_> = value.encode_wide().collect();
     ensure!(
@@ -225,20 +209,6 @@ pub fn no_links(path: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-pub(crate) fn sid_text(sid: PSID) -> Result<String> {
-    ensure!(!sid.is_null(), "native identity has no SID");
-    let mut text = null_mut();
-    check(unsafe { ConvertSidToStringSidW(sid, &mut text) })?;
-    let _memory = Local(text.cast());
-    let mut length = 0;
-    while length < 256 && unsafe { *text.add(length) } != 0 {
-        length += 1;
-    }
-    ensure!(length < 256, "unbounded native SID");
-    Ok(String::from_utf16(unsafe {
-        std::slice::from_raw_parts(text, length)
-    })?)
 }
 pub fn current_user_sid() -> Result<String> {
     let mut token = null_mut();
@@ -463,88 +433,6 @@ impl AclPolicy {
         let _memory = Local(descriptor);
         verify_descriptor(descriptor, &self.owner, &self.grants, true)
     }
-}
-
-/// Exact owner/principal/mask checks shared by files and the owned SCM object.
-/// Service objects have no directory inheritance; file callers require the
-/// protected-DACL bit in addition to rejecting inherited/conditional ACEs.
-pub(crate) fn verify_descriptor(
-    descriptor: PSECURITY_DESCRIPTOR,
-    owner: &str,
-    grants: &std::collections::BTreeMap<String, u32>,
-    protected: bool,
-) -> Result<()> {
-    verify_descriptor_with_children(descriptor, owner, grants, protected, &Default::default())
-}
-
-/// Inherit-only grants are separate from rights effective on this object.
-/// Ordinary file/service policies pass no such entries and continue rejecting
-/// them. Resource roots declare their exact descendant-only deletion grants.
-pub(crate) fn verify_descriptor_with_children(
-    descriptor: PSECURITY_DESCRIPTOR,
-    owner: &str,
-    grants: &std::collections::BTreeMap<String, u32>,
-    protected: bool,
-    children: &std::collections::BTreeMap<String, u32>,
-) -> Result<()> {
-    let mut actual_owner = null_mut();
-    let mut defaulted = 0;
-    check(unsafe { GetSecurityDescriptorOwner(descriptor, &mut actual_owner, &mut defaulted) })?;
-    ensure!(sid_text(actual_owner)? == owner, "unexpected native owner");
-    let mut acl = null_mut();
-    let mut present = 0;
-    check(unsafe {
-        GetSecurityDescriptorDacl(descriptor, &mut present, &mut acl, &mut defaulted)
-    })?;
-    ensure!(
-        present != 0 && !acl.is_null(),
-        "native private object has a null ACL"
-    );
-    let (mut control, mut revision) = (0, 0);
-    check(unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) })?;
-    ensure!(
-        (!protected || control & SE_DACL_PROTECTED != 0)
-            && unsafe { (*acl).AceCount as usize } == grants.len() + children.len(),
-        "native ACL is unprotected or has unexpected principals"
-    );
-    let mut actual = std::collections::BTreeMap::new();
-    let mut actual_children = std::collections::BTreeMap::new();
-    for index in 0..unsafe { (*acl).AceCount } {
-        let mut ace = null_mut();
-        check(unsafe { GetAce(acl, index as u32, &mut ace) })?;
-        let header = unsafe { &*ace.cast::<ACE_HEADER>() };
-        ensure!(
-            header.AceType == 0 && header.AceSize as usize >= size_of::<ACCESS_ALLOWED_ACE>(),
-            "invalid native ACL entry"
-        );
-        let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
-        let sid = sid_text(addr_of!(allowed.SidStart).cast_mut().cast())?;
-        if header.AceFlags & INHERIT_ONLY_ACE as u8 != 0 {
-            ensure!(
-                header.AceFlags
-                    == (INHERIT_ONLY_ACE | OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8,
-                "invalid native inherit-only ACL flags"
-            );
-            ensure!(
-                actual_children.insert(sid, allowed.Mask).is_none(),
-                "duplicate native descendant ACL principal"
-            );
-        } else {
-            ensure!(
-                header.AceFlags & 0x18 == 0,
-                "invalid native ACL inheritance"
-            );
-            ensure!(
-                actual.insert(sid, allowed.Mask).is_none(),
-                "duplicate native ACL principal"
-            );
-        }
-    }
-    ensure!(
-        &actual == grants && &actual_children == children,
-        "native ACL permissions differ from policy"
-    );
-    Ok(())
 }
 
 #[cfg(test)]

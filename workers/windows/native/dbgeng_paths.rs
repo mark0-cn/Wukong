@@ -1,12 +1,16 @@
-//! Local debugger paths need final-object access, not metadata access to every
-//! ancestor. Let Windows reject reparses during the actual open instead.
+#[path = "debugger_path_context.rs"]
+mod context;
+#[path = "security_descriptor.rs"]
+mod descriptor;
 use anyhow::{Context, Result, ensure};
+pub(super) use context::PathContext;
+use context::{opened_name, same_name};
 use std::{
     fs::File,
     mem::size_of,
     os::windows::{
         fs::{MetadataExt, OpenOptionsExt},
-        io::{AsRawHandle, FromRawHandle},
+        io::FromRawHandle,
     },
     path::{Path, PathBuf},
     ptr::{null, null_mut},
@@ -20,18 +24,77 @@ use windows_sys::{
         Foundation::{
             OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE, RtlNtStatusToDosError, UNICODE_STRING,
         },
-        Globalization::{CSTR_EQUAL, CompareStringOrdinal},
         Storage::FileSystem::{
             FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-            FILE_NAME_OPENED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-            FILE_SHARE_WRITE, GetFinalPathNameByHandleW, SYNCHRONIZE, VOLUME_NAME_DOS,
-            VOLUME_NAME_NT,
+            FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            SYNCHRONIZE, VOLUME_NAME_NT,
         },
         System::IO::IO_STATUS_BLOCK,
     },
 };
 
-pub(super) fn local_path(path: &Path) -> Result<PathBuf> {
+pub(super) fn read_context(input: &mut std::io::StdinLock<'_>) -> Result<PathContext> {
+    use std::{
+        io::{BufRead, Read},
+        os::windows::io::AsRawHandle,
+    };
+    verify_context_authority(input.as_raw_handle())?;
+    let mut line = Vec::new();
+    let count = input
+        .by_ref()
+        .take((context::MAX_CONTEXT_BYTES + 1) as u64)
+        .read_until(b'\n', &mut line)?;
+    ensure!(
+        count <= context::MAX_CONTEXT_BYTES && line.last() == Some(&b'\n'),
+        "native debugger context exceeds its frame bound"
+    );
+    let context: PathContext = serde_json::from_slice(&line)?;
+    ensure!(context.schema == 1, "unsupported native debugger context");
+    Ok(context)
+}
+
+fn verify_context_authority(handle: std::os::windows::io::RawHandle) -> Result<()> {
+    use windows_sys::Win32::{
+        Security::{
+            Authorization::{GetSecurityInfo, SE_FILE_OBJECT},
+            DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+        },
+        Storage::FileSystem::{FILE_ALL_ACCESS, FILE_TYPE_DISK, GetFileType},
+    };
+    ensure!(
+        unsafe { GetFileType(handle) } == FILE_TYPE_DISK,
+        "native debugger context requires an inherited private file"
+    );
+    let mut actual = null_mut();
+    let status = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut actual,
+        )
+    };
+    let actual = descriptor::Local(actual);
+    ensure!(
+        status == 0,
+        "cannot inspect native debugger context authority: {status}"
+    );
+    let grants = [
+        ("S-1-5-18".into(), FILE_ALL_ACCESS),
+        ("S-1-5-32-544".into(), FILE_ALL_ACCESS),
+    ]
+    .into_iter()
+    .collect();
+    descriptor::verify_descriptor(actual.0, "S-1-5-32-544", &grants, true)
+        .context("native debugger context is not System/administrator-private")?;
+    Ok(())
+}
+
+pub(super) fn local_path(path: &Path, bootstrap: Option<&PathContext>) -> Result<PathBuf> {
     let name = path
         .to_str()
         .context("DbgEng paths must be Unicode")?
@@ -74,12 +137,25 @@ pub(super) fn local_path(path: &Path) -> Result<PathBuf> {
     );
     let native =
         opened_name(&opened, VOLUME_NAME_NT).context("read opened debugger NT identity")?;
-    let dos =
-        opened_name(&opened, VOLUME_NAME_DOS).context("read opened debugger drive identity")?;
-    ensure!(
-        same_name(dos.strip_prefix(r"\\?\").unwrap_or(&dos), drive)?,
-        "opened debugger drive identity differs from the requested path"
-    );
+    if let Some(context) = bootstrap {
+        let selected = if same_name(&context.engine.dos, drive)? {
+            &context.engine
+        } else if same_name(&context.symbols.dos, drive)? {
+            &context.symbols
+        } else {
+            anyhow::bail!("private debugger context does not authorize the requested path");
+        };
+        ensure!(
+            same_name(&native, &selected.native)?,
+            "private debugger NT path identity differs"
+        );
+    } else {
+        let identity = context::DirectoryIdentity::observe(&opened, drive)?;
+        ensure!(
+            same_name(&native, &identity.native)?,
+            "opened debugger NT identity changed"
+        );
+    }
     let prefix = r"\Device\HarddiskVolume";
     let suffix = native
         .strip_prefix(prefix)
@@ -157,61 +233,60 @@ pub(super) fn local_path(path: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn opened_name(file: &File, volume: u32) -> Result<String> {
-    let mut buffer = vec![0u16; 32768];
-    let count = unsafe {
-        GetFinalPathNameByHandleW(
-            file.as_raw_handle(),
-            buffer.as_mut_ptr(),
-            buffer.len() as u32,
-            FILE_NAME_OPENED | volume,
-        )
-    } as usize;
-    if count == 0 {
-        return Err(std::io::Error::last_os_error()).context("query opened debugger path name");
-    }
-    ensure!(
-        count < buffer.len(),
-        "opened debugger path exceeds the name bound"
-    );
-    String::from_utf16(&buffer[..count]).context("opened debugger path is not Unicode")
-}
-
-fn same_name(a: &str, b: &str) -> Result<bool> {
-    let a: Vec<u16> = a.encode_utf16().collect();
-    let b: Vec<u16> = b.encode_utf16().collect();
-    ensure!(
-        a.len() <= 32767 && b.len() <= 32767,
-        "debugger identity exceeds the name bound"
-    );
-    let result =
-        unsafe { CompareStringOrdinal(a.as_ptr(), a.len() as i32, b.as_ptr(), b.len() as i32, 1) };
-    if result == 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("compare opened debugger path identity");
-    }
-    Ok(result == CSTR_EQUAL)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::windows::io::AsRawHandle;
+    #[test]
+    fn native_context_rejects_ordinary_files_and_pipes_before_reading_a_header() -> Result<()> {
+        let file = tempfile::tempfile()?;
+        let error = verify_context_authority(file.as_raw_handle())
+            .err()
+            .unwrap();
+        assert!(format!("{error:#}").contains("not System/administrator-private"));
+        let (reader, _writer) = std::io::pipe()?;
+        let error = verify_context_authority(reader.as_raw_handle())
+            .err()
+            .unwrap();
+        assert!(format!("{error:#}").contains("requires an inherited private file"));
+        Ok(())
+    }
+
+    #[test]
+    fn native_context_binds_both_the_requested_and_actual_nt_path() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let path = temporary.path().join("known.bin");
+        std::fs::write(&path, b"inert fixture")?;
+        let file = File::open(&path)?;
+        let mut context = PathContext {
+            schema: 1,
+            engine: context::DirectoryIdentity::observe(&file, path.to_str().unwrap())?,
+            symbols: context::DirectoryIdentity::observe(&file, path.to_str().unwrap())?,
+        };
+        assert_eq!(local_path(&path, Some(&context))?, path);
+        context.engine.native.push_str("-different-object");
+        assert!(local_path(&path, Some(&context)).is_err());
+        let other = temporary.path().join("other.bin");
+        std::fs::write(&other, b"inert different fixture")?;
+        assert!(local_path(&other, Some(&context)).is_err());
+        Ok(())
+    }
     #[test]
     fn local_paths_preserve_existing_files_and_reject_networks_and_aliases() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("known 中文 fixture.bin");
         std::fs::write(&path, b"inert-known-fixture")?;
-        assert_eq!(local_path(&path)?, path);
+        assert_eq!(local_path(&path, None)?, path);
         assert_eq!(
-            local_path(Path::new(&path.to_string_lossy().replace('\\', "/")))?,
+            local_path(Path::new(&path.to_string_lossy().replace('\\', "/")), None)?,
             path
         );
         assert_eq!(
-            local_path(Path::new(&format!(r"\\?\{}", path.display())))?,
+            local_path(Path::new(&format!(r"\\?\{}", path.display())), None)?,
             path
         );
         let missing = directory.path().join("missing.bin");
-        assert!(local_path(&missing).is_err());
+        assert!(local_path(&missing, None).is_err());
         assert!(!missing.exists());
         for invalid in [
             r"\\server\share\file",
@@ -220,7 +295,7 @@ mod tests {
             r"C:\dir.\file",
             r"C:\dir\..\file",
         ] {
-            assert!(local_path(Path::new(invalid)).is_err());
+            assert!(local_path(Path::new(invalid), None).is_err());
         }
         Ok(())
     }
@@ -233,9 +308,9 @@ mod tests {
         std::fs::write(target.join("known.bin"), b"inert-known-fixture")?;
         let link = directory.path().join("linked");
         junction::create(&target, &link)?;
-        assert!(local_path(&target).is_ok());
-        assert!(local_path(&link).is_err());
-        assert!(local_path(&link.join("known.bin")).is_err());
+        assert!(local_path(&target, None).is_ok());
+        assert!(local_path(&link, None).is_err());
+        assert!(local_path(&link.join("known.bin"), None).is_err());
         junction::delete(link)?;
         Ok(())
     }
