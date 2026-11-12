@@ -46,11 +46,22 @@ pub(crate) fn system(root: &Path) -> Result<BTreeMap<String, OsString>> {
 fn system_with_policy(root: &Path, private: &AclPolicy) -> Result<BTreeMap<String, OsString>> {
     let system = PathBuf::from(std::env::var_os("SystemRoot").context("missing Windows root")?);
     security::no_links(&system)?;
+    let drive = match system.components().next() {
+        Some(std::path::Component::Prefix(prefix)) => match prefix.kind() {
+            std::path::Prefix::Disk(drive) | std::path::Prefix::VerbatimDisk(drive) => drive,
+            _ => anyhow::bail!("Windows root must use a local drive"),
+        },
+        _ => anyhow::bail!("Windows root must use an absolute local drive"),
+    };
     let temporary = root.join("metadata/system-tmp");
     private.verify(&temporary, true)?;
     let path = std::env::join_paths([system.join("System32"), system.clone()])?;
     Ok([
         ("SYSTEMROOT".into(), system.clone().into_os_string()),
+        (
+            "SYSTEMDRIVE".into(),
+            format!("{}:", char::from(drive)).into(),
+        ),
         ("WINDIR".into(), system.clone().into_os_string()),
         ("PROGRAMDATA".into(), program_data()?.into_os_string()),
         (
@@ -84,6 +95,7 @@ mod tests {
                 "COMSPEC",
                 "PATH",
                 "PROGRAMDATA",
+                "SYSTEMDRIVE",
                 "SYSTEMROOT",
                 "TEMP",
                 "TMP",
@@ -108,6 +120,59 @@ mod tests {
         assert!(system_with_policy(root, &private).is_err());
         // Restore the fixture ACL before its ordinary-user temporary cleanup.
         private.apply(&scratch, true)?;
+        Ok(())
+    }
+    #[test]
+    fn known_folder_lookup_fixture_entry() -> Result<()> {
+        if std::env::var_os("WUKONG_KNOWN_FOLDER_PROBE").is_some() {
+            ensure!(
+                program_data()?.is_absolute(),
+                "missing known folder in fresh child"
+            );
+        }
+        Ok(())
+    }
+    #[test]
+    fn fixed_environment_supports_known_folder_resolution_in_a_fresh_child() -> Result<()> {
+        // A fresh process prevents the caller's full environment or Shell cache
+        // from hiding a missing SYSTEMDRIVE. No accounts/profiles are changed.
+        let temporary = tempfile::tempdir()?;
+        let private = AclPolicy::current_user()?;
+        private.create_directory(&temporary.path().join("metadata"))?;
+        private.create_directory(&temporary.path().join("metadata/system-tmp"))?;
+        let mut environment = system_with_policy(temporary.path(), &private)?;
+        environment.insert("WUKONG_KNOWN_FOLDER_PROBE".into(), "1".into());
+        let log_path = temporary.path().join("known-folder.log");
+        let log = std::fs::File::create(&log_path)?;
+        let input = std::fs::File::open("NUL")?;
+        let executable = std::env::current_exe()?;
+        let child = crate::processes::Spawn {
+            executable: &executable,
+            arguments: &[
+                "--exact".into(),
+                "environment::tests::known_folder_lookup_fixture_entry".into(),
+                "--nocapture".into(),
+            ],
+            directory: temporary.path(),
+            environment: &environment,
+            log: &log,
+            input: &input,
+        }
+        .inert_fixture()?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !child.exited() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let code = child.exit_code()?;
+        child.stop(std::time::Duration::from_secs(10))?;
+        drop(child);
+        drop(log);
+        let output = crate::deployment::read_bytes(&log_path, 8192)?;
+        ensure!(
+            code == Some(0),
+            "fresh fixed-environment known-folder lookup failed: {}",
+            String::from_utf8_lossy(&output)
+        );
         Ok(())
     }
 }

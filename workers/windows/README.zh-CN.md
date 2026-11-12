@@ -79,7 +79,7 @@ python -m scripts.worker.bundle --package ABSOLUTE_PACKAGE --enrollment ABSOLUTE
 
 创建服务前，固定的主机密钥生成及 SSH 配置检查将诊断保存在仅 System/管理员可访问的 `metadata/install-tool-ssh-keygen.log` 和 `metadata/install-tool-sshd.log`。错误会标明失败的程序；SSH 语法检查输出详细诊断，但不监听连接。托管夹具仅将这两个固定日志各自最后 4 KiB 纳入公开报告，不包含私钥或其他元数据。
 
-提权安装工具与 System SSH daemon 使用固定的七变量 Windows 环境：`SYSTEMROOT`、`WINDIR`、`PROGRAMDATA`、`COMSPEC`、`PATH`、`TEMP` 和 `TMP`。路径从 Windows 位置派生，程序查找仅限 Windows 目录和 System32。其临时目录为受保护的 `metadata/system-tmp`，在启动及激活前验证。普通 worker 继续使用独立的 `data/tmp`；不会将控制端/provider 的整个环境复制给提权子进程。
+提权安装工具与 System SSH daemon 使用固定的八变量 Windows 环境：`SYSTEMROOT`、`SYSTEMDRIVE`、`WINDIR`、`PROGRAMDATA`、`COMSPEC`、`PATH`、`TEMP` 和 `TMP`。`SYSTEMDRIVE` 从已验证的 Windows 根路径盘符推导；即使已有 `PROGRAMDATA`，默认已知文件夹展开仍需要它。通过受 Job 约束的全新测试进程，以这个精确环境检查路径解析，排除继承变量及预热 Shell 缓存的影响。路径从 Windows 位置派生，程序查找仅限 Windows 目录和 System32。其临时目录为受保护的 `metadata/system-tmp`，在启动及激活前验证。普通 worker 继续使用独立的 `data/tmp`；不会将控制端/provider 的整个环境复制给提权子进程。
 
 若 SSH 语法检查发生访问违例，独立托管夹具还会比较最小环境与固定的 Windows 运行环境，再使用签封 SDK 中的 CDB，仅检查出错指令指针、不含参数的调用栈和模块身份。探测保留已有程序网络阻断规则，并使用空的本地符号目录，不创建内存转储。报告不包含完整寄存器显示、私钥字节或指定调试区段外的输出；有界诊断输出不代表安装成功。
 
