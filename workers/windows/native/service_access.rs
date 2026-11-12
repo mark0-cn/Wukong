@@ -188,7 +188,9 @@ mod tests {
         security::check(unsafe {
             CreateRestrictedToken(
                 original.0,
-                0,
+                // Test ordinary-account ACL rights, without an administrator's
+                // enabled SeTakeOwnershipPrivilege bypassing WRITE_OWNER.
+                windows_sys::Win32::Security::DISABLE_MAX_PRIVILEGE,
                 1,
                 &disabled,
                 0,

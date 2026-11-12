@@ -30,6 +30,8 @@ python3 /opt/wukong/tests/run.py ghidra --state /state/ghidra-acceptance
 
 测试状态目录应为本轮独占目录；真实后端要求见 [worker 说明](../runtime/README.zh-CN.md)。
 
+Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特权和管理员组，以检查普通账户的 DACL 权限，避免 `SeTakeOwnershipPrivilege` 授予 `WRITE_OWNER`。它不修改父进程令牌或已安装服务的策略。此夹具于 2026-11-13 在用户提供的 Windows 10 VM 上通过。
+
 `integration --static-fixture` 使用静态链接夹具验证调试器和重放适配器，不验证动态加载器及库身份。Docker 运行需要可执行的 `/tmp`、ptrace 和文档要求的隔离能力。
 
 Windows 上已有 MSVC 和 Debugging Tools 时，先运行 `cargo build --locked --bin wukong-dbgeng`，然后运行：
