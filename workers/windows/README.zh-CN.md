@@ -125,4 +125,6 @@ SCM 服务登记及固定原生子进程启动采用相同的本地路径规范�
 
 仅对固定的已签封隔离探针，父进程会在 Resume 前通过实际封存的子进程令牌记录有界启动访问观察：Windows SDK 模块枚举提供当前已签封程序及其已加载依赖，读取/执行及祖先目录遍历打开在现有同步身份模拟守卫内进行。通过父进程持有句柄，使用共用安全描述符所有权封装回读私有窗口站和桌面标签。最多保留八项拒绝，仅在探针失败时输出。这些观察不证明加载器访问过某个具体路径，也不改变特权、ACL、就绪或执行准入。本地测试枚举并打开当前进程的真实模块，无需解析 PE；真实受限令牌观察仍须专用安装验收。
 
+回环探针会区分已经建立的连接与无法确认拒绝原因的连接错误。无法确认时，在现有有界探针日志中保留 Rust I/O 错误类型和原始 Windows 错误码。只有明确的权限拒绝才通过网络检查；超时及其他错误仍使资格检查失败。System 侧的可达性对照使用同一个自有监听器。
+
 AppContainer 特权策略遵循 Windows 文档中的目录遍历例外：仅保留 `SeChangeNotifyPrivilege`，它跳过祖先目录遍历检查，不授予最终对象读写或目录列举权限。普通元数据 worker 保持现有零特权策略。沙箱令牌回读会拒绝缺失、禁用或任何额外特权（包括 `SeDebugPrivilege`），capability 数仍须为零。不通过修改机器全局目录 ACL 来补偿加载器拒绝。资格检查回执使用 schema2 和明确的特权名称数组，仍要求真实哨兵/网络拒绝、自有 DbgEng 附加及静止清理。安装后的运行仍须专用验收；这项策略修正不会启用生产执行。参见微软的[受限令牌约定](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)及[文件访问指引](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)。

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Distinguish successful AppContainer loopback connections from inconclusive network errors and retain the original Windows error code without relaxing isolation qualification."
+zh_CN = "区分 AppContainer 回环连接成功与无法确认拒绝原因的网络错误，保留原始 Windows 错误码，同时保持隔离资格检查要求。"

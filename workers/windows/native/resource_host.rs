@@ -85,7 +85,15 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
     }
     match TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(2)) {
         Err(error) if error.kind() == ErrorKind::PermissionDenied => {}
-        _ => anyhow::bail!("AppContainer loopback connection was not denied by policy"),
+        Err(error) => anyhow::bail!(
+            "AppContainer loopback denial was inconclusive (kind={:?}, win32={:?}): {error}",
+            error.kind(),
+            error.raw_os_error()
+        ),
+        Ok(stream) => {
+            drop(stream);
+            anyhow::bail!("AppContainer unexpectedly connected to the owned loopback listener");
+        }
     }
     let scratch = std::env::current_dir()?.join("writable-probe.bin");
     fs::write(&scratch, b"owned-low-scratch")?;
