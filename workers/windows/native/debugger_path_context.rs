@@ -24,11 +24,13 @@ pub struct PathContext {
 }
 impl DirectoryIdentity {
     pub fn observe(file: &File, requested: &str) -> Result<Self> {
+        let requested = requested.replace('/', "\\");
+        let requested = requested.strip_prefix(r"\\?\").unwrap_or(&requested);
         let dos = opened_name(file, VOLUME_NAME_DOS)?;
         let dos = dos.strip_prefix(r"\\?\").unwrap_or(&dos);
         ensure!(
             same_name(dos, requested)?,
-            "opened debugger drive identity differs from the requested path"
+            "opened debugger drive identity differs (requested={requested}, actual={dos})"
         );
         Ok(Self {
             dos: dos.into(),

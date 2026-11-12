@@ -21,7 +21,7 @@ fn directory_identity(path: &Path) -> Result<path_context::DirectoryIdentity> {
     let name = path
         .to_str()
         .context("native debugger directory is not Unicode")?;
-    path_context::DirectoryIdentity::observe(&file, name.strip_prefix(r"\\?\").unwrap_or(name))
+    path_context::DirectoryIdentity::observe(&file, name)
 }
 
 pub(super) fn check(

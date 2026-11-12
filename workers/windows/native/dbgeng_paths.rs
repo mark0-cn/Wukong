@@ -260,8 +260,14 @@ mod tests {
         let file = File::open(&path)?;
         let mut context = PathContext {
             schema: 1,
-            engine: context::DirectoryIdentity::observe(&file, path.to_str().unwrap())?,
-            symbols: context::DirectoryIdentity::observe(&file, path.to_str().unwrap())?,
+            engine: context::DirectoryIdentity::observe(
+                &file,
+                &path.to_string_lossy().replace('\\', "/"),
+            )?,
+            symbols: context::DirectoryIdentity::observe(
+                &file,
+                &format!(r"\\?\{}", path.display()),
+            )?,
         };
         assert_eq!(local_path(&path, Some(&context))?, path);
         context.engine.native.push_str("-different-object");
