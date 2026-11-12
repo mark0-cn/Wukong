@@ -87,7 +87,7 @@ if($Mode -eq 'Isolation'){
     $receipt=Join-Path $ownedRoot ('metadata\isolation-selftest-'+$fixture.manifest_sha256+'.json')
     if((Get-Item -LiteralPath $receipt).Length -gt 8192){throw 'Resource receipt exceeds bound'}
     $value=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
-    if($value.schema -ne 1 -or -not $value.passed -or $value.scope -cne 'owned_appcontainer_trusted_probes' -or $value.manifest_sha256 -cne $fixture.manifest_sha256 -or $value.production_execution){throw 'Resource receipt differs'}
+    if($value.schema -ne 1 -or -not $value.passed -or $value.scope -cne 'owned_appcontainer_trusted_probes' -or $value.manifest_sha256 -cne $fixture.manifest_sha256 -or $value.production_execution -or @($value.dbgeng).Count -ne 2){throw 'Resource receipt differs'}
     $value | ConvertTo-Json -Depth 6 -Compress
     exit 0
 }

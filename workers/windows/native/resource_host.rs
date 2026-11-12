@@ -30,6 +30,9 @@ use windows_sys::Win32::{
     },
 };
 
+#[path = "resource_debugger.rs"]
+mod debugger;
+
 fn token_data(
     token: &Handle,
     class: windows_sys::Win32::Security::TOKEN_INFORMATION_CLASS,
@@ -148,9 +151,19 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
         reports[0]["appcontainer_sid"] != reports[1]["appcontainer_sid"],
         "resource roles reused an AppContainer identity"
     );
+    let mut debuggers = Vec::new();
+    for architecture in ["x64", "x86"] {
+        debuggers.push(debugger::check(
+            &deployment,
+            &root,
+            &resources,
+            &manifest,
+            architecture,
+        )?);
+    }
     Ok(
         json!({"schema":1,"passed":true,"scope":"owned_appcontainer_trusted_probes",
-        "manifest_sha256":manifest.sha256(),"personas":reports,"production_execution":false}),
+        "manifest_sha256":manifest.sha256(),"personas":reports,"dbgeng":debuggers,"production_execution":false}),
     )
 }
 fn check_persona(
@@ -162,22 +175,7 @@ fn check_persona(
     role: Role,
 ) -> Result<Value> {
     let private = AclPolicy::private_vm();
-    let nonce = hex::encode(accounts::random_bytes::<24>()?);
-    let name = format!("Wukong-{nonce}");
-    let intent = root
-        .join("metadata")
-        .join(format!("resource-profile-{nonce}.json"));
-    deployment::write_new_json(
-        &intent,
-        &json!({"schema":1,"installation_id":deployment.installation_id,
-        "role":role,"account_sid":deployment.account(role)?.sid,"profile_name":name}),
-        &private,
-    )?;
-    let mut persona = Persona::create(
-        &deployment.installation_id,
-        deployment.account(role)?,
-        &name,
-    )?;
+    let (mut persona, nonce) = create_persona(deployment, root, role)?;
     let sid = persona.sid_text()?;
     let scratch =
         security::ResourceDirectory::create(&resources.join(&nonce), &sid, persona.logon_sid())?;
@@ -194,10 +192,7 @@ fn check_persona(
         .join(format!("resource-probe-{nonce}.log"));
     let log = private.create_file(&log_path)?;
     let input = fs::File::open("NUL")?;
-    let mut environment = environment::system(root)?;
-    for key in ["TEMP", "TMP"] {
-        environment.insert(key.into(), scratch_path.as_os_str().to_owned());
-    }
+    let environment = scratch_environment(root, &scratch_path)?;
     let executable = std::env::current_exe()?;
     let process = Spawn {
         executable: &executable,
@@ -214,10 +209,7 @@ fn check_persona(
         input: &input,
     }
     .sandbox(&persona, scratch)?;
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while !process.exited() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    wait(&process, Duration::from_secs(15))?;
     let code = process.exit_code()?;
     process.stop(Duration::from_secs(10))?;
     drop(process);
@@ -243,6 +235,44 @@ fn check_persona(
     report["scratch_removed"] = Value::Bool(true);
     fs::remove_file(&worker_sentinel)?;
     Ok(report)
+}
+
+fn create_persona(deployment: &Deployment, root: &Path, role: Role) -> Result<(Persona, String)> {
+    let nonce = hex::encode(accounts::random_bytes::<24>()?);
+    let name = format!("Wukong-{nonce}");
+    let intent = root
+        .join("metadata")
+        .join(format!("resource-profile-{nonce}.json"));
+    deployment::write_new_json(
+        &intent,
+        &json!({"schema":1,"installation_id":deployment.installation_id,
+        "role":role,"account_sid":deployment.account(role)?.sid,"profile_name":name}),
+        &AclPolicy::private_vm(),
+    )?;
+    let persona = Persona::create(
+        &deployment.installation_id,
+        deployment.account(role)?,
+        &name,
+    )?;
+    Ok((persona, nonce))
+}
+fn scratch_environment(
+    root: &Path,
+    scratch: &Path,
+) -> Result<std::collections::BTreeMap<String, std::ffi::OsString>> {
+    let mut environment = environment::system(root)?;
+    for key in ["TEMP", "TMP"] {
+        environment.insert(key.into(), scratch.as_os_str().to_owned());
+    }
+    Ok(environment)
+}
+fn wait(process: &crate::processes::OwnedProcess, timeout: Duration) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    while !process.exited() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    ensure!(process.exited(), "owned resource probe exceeded deadline");
+    Ok(())
 }
 
 pub(crate) async fn qualify(
@@ -351,6 +381,7 @@ fn validate_resource_report(value: &Value, manifest: &str) -> Result<()> {
         personas[0]["appcontainer_sid"] != personas[1]["appcontainer_sid"],
         "resource qualification reused an AppContainer SID"
     );
+    debugger::validate_report(value)?;
     Ok(())
 }
 

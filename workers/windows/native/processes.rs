@@ -526,25 +526,43 @@ impl Spawn<'_> {
             self.executable == std::env::current_exe()?,
             "native fixture must execute this test binary"
         );
-        self.create(None, None, None)
+        self.create(None, None, None, None)
     }
     pub fn worker(&self, installation: &str, account: &Account) -> Result<OwnedProcess> {
         security::require_system()?;
         let token = without_privileges(&account.logon(installation)?)?;
         let desktop = Desktop::new(&account.sid)?;
-        self.create(Some(token), Some(desktop), None)
+        self.create(Some(token), Some(desktop), None, None)
     }
     /// Fixed trusted executables such as the packaged SSH daemon. This is never
     /// a target execution API and must not be reachable from analysis requests.
     pub(crate) fn system(&self) -> Result<OwnedProcess> {
         security::require_system()?;
-        self.create(None, None, None)
+        self.create(None, None, None, None)
     }
     /// Resource-host thread only: private station setup is process-wide.
     pub(crate) fn sandbox(
         &self,
         persona: &crate::persona::Persona,
         directory: security::ResourceDirectory,
+    ) -> Result<OwnedProcess> {
+        self.sandbox_peer(persona, directory, None)
+    }
+    /// Only the fixed resource host can pair its target with its independently
+    /// created debugger persona. No caller-supplied SID or PID enters this path.
+    pub(crate) fn sandbox_debug_target(
+        &self,
+        target: &crate::persona::Persona,
+        directory: security::ResourceDirectory,
+        debugger: &crate::persona::Persona,
+    ) -> Result<OwnedProcess> {
+        self.sandbox_peer(target, directory, Some(debugger))
+    }
+    fn sandbox_peer(
+        &self,
+        persona: &crate::persona::Persona,
+        directory: security::ResourceDirectory,
+        debugger: Option<&crate::persona::Persona>,
     ) -> Result<OwnedProcess> {
         security::require_system()?;
         let token = without_privileges(persona.token())?;
@@ -555,7 +573,11 @@ impl Spawn<'_> {
             CapabilityCount: 0,
             Reserved: 0,
         };
-        let mut process = self.create(Some(token), Some(desktop), Some(capabilities))?;
+        let descriptor = debugger
+            .map(|peer| sandbox_process_policy(persona, peer))
+            .transpose()?;
+        let mut process =
+            self.create(Some(token), Some(desktop), Some(capabilities), descriptor)?;
         process._directory = Some(directory);
         Ok(process)
     }
@@ -564,6 +586,7 @@ impl Spawn<'_> {
         token: Option<Handle>,
         mut desktop: Option<Desktop>,
         mut capabilities: Option<windows_sys::Win32::Security::SECURITY_CAPABILITIES>,
+        descriptor: Option<SecurityDescriptor>,
     ) -> Result<OwnedProcess> {
         security::no_links(self.executable)?;
         security::no_links(self.directory)?;
@@ -614,14 +637,16 @@ impl Spawn<'_> {
             | EXTENDED_STARTUPINFO_PRESENT
             | CREATE_NO_WINDOW;
         let mut information = PROCESS_INFORMATION::default();
+        let object_attributes = descriptor.as_ref().map(SecurityDescriptor::attributes);
+        let object_attributes = object_attributes.as_ref().map_or(null(), |value| value);
         let success = unsafe {
             match token.as_ref() {
                 Some(token) => CreateProcessAsUserW(
                     token.0,
                     app.as_ptr(),
                     command.as_mut_ptr(),
-                    null(),
-                    null(),
+                    object_attributes,
+                    object_attributes,
                     1,
                     flags,
                     environment.as_ptr().cast(),
@@ -632,8 +657,8 @@ impl Spawn<'_> {
                 None => CreateProcessW(
                     app.as_ptr(),
                     command.as_mut_ptr(),
-                    null(),
-                    null(),
+                    object_attributes,
+                    object_attributes,
                     1,
                     flags,
                     environment.as_ptr().cast(),
@@ -661,6 +686,28 @@ impl Spawn<'_> {
         );
         Ok(process)
     }
+}
+
+fn sandbox_process_policy(
+    target: &crate::persona::Persona,
+    debugger: &crate::persona::Persona,
+) -> Result<SecurityDescriptor> {
+    let target_sid = target.sid_text()?;
+    let debugger_sid = debugger.sid_text()?;
+    ensure!(
+        target_sid != debugger_sid && target.logon_sid() != debugger.logon_sid(),
+        "debugger and target must have independent resource identities"
+    );
+    // DebugActiveProcess requires PROCESS_ALL_ACCESS. Grant only these two
+    // resource personas, never their account SID or all AppContainers. Low IL
+    // permits the no-privilege debugger to exercise those explicit object rights.
+    SecurityDescriptor::from_sddl(&format!(
+        "O:SYD:P(A;;GA;;;SY)(A;;GA;;;{})(A;;GA;;;{})(A;;GA;;;{})(A;;GA;;;{})S:(ML;;NW;;;LW)",
+        target.logon_sid(),
+        target_sid,
+        debugger.logon_sid(),
+        debugger_sid
+    ))
 }
 
 #[cfg(test)]
@@ -720,7 +767,7 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None, None)?;
+        .create(None, None, None, None)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let leaf_path = temporary.path().join("leaf.pid");
         while !leaf_path.exists() && std::time::Instant::now() < deadline {
@@ -772,7 +819,7 @@ mod tests {
             log: &log,
             input: &input,
         }
-        .create(None, None, None)?;
+        .create(None, None, None, None)?;
         let leaf_path = temporary.path().join("leaf.pid");
         let deadline = Instant::now() + Duration::from_secs(10);
         while (!leaf_path.exists() || !fixture.exited()) && Instant::now() < deadline {

@@ -88,6 +88,7 @@ def diagnostics(installed):
     selected += sorted(metadata.glob('selftest-*.log'))[-2:]
     selected += sorted(metadata.glob('isolation-host-*.log'))[-2:]
     selected += sorted(metadata.glob('resource-probe-*.log'))[-2:]
+    selected += sorted(metadata.glob('resource-debugger-*.log'))[-2:]
     result = {}
     for path in selected:
         if path.is_file() and not path.is_symlink():
@@ -230,7 +231,8 @@ def main():
         report['native_isolation'] = control('Isolation')
         if (report['native_isolation'].get('passed') is not True
                 or report['native_isolation'].get('production_execution') is not False
-                or len(report['native_isolation'].get('personas', [])) != 2):
+                or len(report['native_isolation'].get('personas', [])) != 2
+                or [item.get('architecture') for item in report['native_isolation'].get('dbgeng', [])] != ['x64', 'x86']):
             raise RuntimeError('Native resource qualification did not pass')
         connection = json.loads((installed / 'connection.json').read_text(encoding='utf-8'))
         host = connection['host_key']
