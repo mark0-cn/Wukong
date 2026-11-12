@@ -29,6 +29,8 @@ Use directories owned exclusively by this test run. See [worker requirements](..
 
 The native Windows service-access fixture disables the copied administrator token's maximum privileges as well as its administrator group. This tests ordinary-account DACL rights without `SeTakeOwnershipPrivilege` granting `WRITE_OWNER`; it changes neither the parent token nor the installed service policy. The fixture passed on the provided Windows 10 VM on 2026-11-13.
 
+Bootstrap PE format fixtures run directly through `object` in the standalone Rust library's `pe_imports` tests, covering normal/delay imports, both architectures, malformed directories and unsafe library names. Python automation separately checks the inspector's response binding, CRT refusal, timeouts and pre-execution hash verification; mocked observations are not PE format acceptance. The native format tests passed on the provided offline Windows 10 VM on 2026-11-13, and the real controller utility reproduced all three bootstrap and both compiled-probe import inventories locally.
+
 `integration --static-fixture` exercises the debugger/replay adapter with a statically linked fixture; it does not validate dynamic loader/library identity. Docker execution needs executable `/tmp`, ptrace and the documented isolation capabilities.
 
 On Windows with MSVC and an existing Debugging Tools installation, build `cargo build --locked --bin wukong-dbgeng`, then run:

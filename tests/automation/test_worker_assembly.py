@@ -69,7 +69,8 @@ class AssemblyChecks(unittest.TestCase):
                 value = copy.deepcopy(original)
                 value.update(change)
                 metadata.write_text(json.dumps(value))
-                with patch("scripts.worker.assemble.identity", return_value=source):
+                with patch("scripts.worker.assemble.identity", return_value=source), \
+                        patch("scripts.worker.assemble.require_static_crt", return_value=["kernel32.dll"]):
                     if change:
                         with self.assertRaises(ValueError):
                             native_build(root)
@@ -79,6 +80,12 @@ class AssemblyChecks(unittest.TestCase):
             (binaries / BINARIES[0]).write_bytes(fixture("ADVAPI32.dll"))
             with patch("scripts.worker.assemble.identity", return_value=source), self.assertRaises(ValueError):
                 native_build(root)
+            (binaries / BINARIES[0]).write_bytes(fixture("KERNEL32.dll"))
+            (binaries / "wukong-package.exe").write_bytes(b"changed inspector")
+            with patch("scripts.worker.assemble.identity", return_value=source), \
+                    patch("scripts.worker.assemble.require_static_crt") as inspect, self.assertRaises(ValueError):
+                native_build(root)
+            inspect.assert_not_called()
 
     def test_manifest_index_assigns_originals_licenses_sources_and_runtime(self):
         entries = {"originals/payload.zip": "original_installer", "licenses/native/LICENSE": "license",

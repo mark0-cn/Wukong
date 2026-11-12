@@ -30,7 +30,7 @@ python -m scripts.worker.build_native
 cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
 ```
 
-构建入口使用已提交的独立锁文件，并显式设置静态 CRT。默认输出位于 `target/windows-worker-native`。写入 `native-build.json` 前检查普通和延迟加载的 PE 导入，拒绝依赖外部 Visual C++/Universal CRT 库。该检查适用于引导程序自身；离线工具包仍须单独包含第三方工具的全部依赖及原始安装载荷。构建不会执行安装、服务注册或分析目标。
+构建入口使用已提交的独立锁文件，并显式设置静态 CRT。默认输出位于 `target/windows-worker-native`。写入 `native-build.json` 前，调用刚构建的控制端工具的 `inspect-pe` 命令：已有 `object` 库读取普通和延迟加载的 PE 导入，Python 应用拒绝外部 Visual C++/Universal CRT 的策略。不再包含 Python PE 解析器，也无需额外下载包。组装时先验证每个原生二进制的哈希，包含检查器自身，再运行工具并与构建清单中的导入比较。检查仍限制为 64 MiB 映像、96 个节、64 KiB 导入目录和 256 字节内终止的 DLL 名，显式指定 x64/x86 架构，延迟描述符只允许 RVA 寻址。该检查适用于引导程序自身；离线工具包仍须单独包含第三方工具的全部依赖及原始安装载荷。控制端工具不进入 VM 运行载荷。构建不会执行安装、服务注册或分析目标。
 
 实现依据 [Rust CRT 链接约定](https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes)与微软 [PE 格式](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)。Windows CI 对独立 crate 进行格式与代码检查、构建引导程序并验证导入；自动化测试还拒绝动态 CRT、非法库名与格式错误的普通或延迟导入表。
 

@@ -35,9 +35,14 @@ def native_build(directory):
     for name in BINARIES:
         path = regular(binaries / name)
         expected = metadata["files"][name]
-        if (path.stat().st_size != expected["size"] or sha256(path) != expected["sha256"]
-                or require_static_crt(path) != expected["imported_libraries"]):
+        if path.stat().st_size != expected["size"] or sha256(path) != expected["sha256"]:
             raise ValueError("Native build binary no longer matches metadata: " + name)
+    # Authenticate all recorded binary hashes before executing the controller's
+    # just-built inspector, including that inspector's own static-CRT check.
+    inspector = binaries / "wukong-package.exe"
+    for name in BINARIES:
+        if require_static_crt(binaries / name, inspector=inspector) != metadata["files"][name]["imported_libraries"]:
+            raise ValueError("Native build binary imports no longer match metadata: " + name)
     probes = metadata.get("selftests", {})
     if probes.get("schema") != 1 or set(probes.get("architectures", {})) != {"x64", "x86"}:
         raise ValueError("Native build is missing offline self-test fixtures")
@@ -48,7 +53,7 @@ def native_build(directory):
             raise ValueError("Self-test fixture does not match the pinned source")
         if (sha256(regular(directory / probe["binary"])) != probe["binary_sha256"]
                 or sha256(regular(directory / probe["pdb"])) != probe["pdb_sha256"]
-                or require_static_crt(directory / probe["binary"], architecture) != probe["imported_libraries"]):
+                or require_static_crt(directory / probe["binary"], architecture, inspector) != probe["imported_libraries"]):
             raise ValueError("Offline self-test fixture was changed")
     return binaries, metadata
 

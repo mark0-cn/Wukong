@@ -32,7 +32,7 @@ def compiler_environment(architecture):
     return environment
 
 
-def build(output):
+def build(output, inspector=None):
     output = no_links(output)
     source = regular(ROOT / "workers/windows/fixtures/probe.c")
     artifacts = {}
@@ -48,5 +48,5 @@ def build(output):
             cwd=directory, env=environment, check=True)
         artifacts[architecture] = {"binary": target.relative_to(output).as_posix(), "binary_sha256": sha256(target),
             "pdb": pdb.relative_to(output).as_posix(), "pdb_sha256": sha256(pdb),
-            "imported_libraries": require_static_crt(target, architecture), "source_sha256": sha256(source)}
+            "imported_libraries": require_static_crt(target, architecture, inspector), "source_sha256": sha256(source)}
     return {"schema": 1, "architectures": artifacts}

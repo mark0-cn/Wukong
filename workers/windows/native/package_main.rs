@@ -34,6 +34,17 @@ fn read_draft(path: &Path, maximum: usize) -> Result<Vec<u8>> {
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
     match (args.get(1).and_then(|value| value.to_str()), args.len()) {
+        (Some("inspect-pe"), 4) => {
+            let architecture = args[3].to_str().context("invalid PE architecture")?;
+            let imports = wukong_windows_worker::pe_imports::imported_libraries(
+                Path::new(&args[2]),
+                architecture,
+            )?;
+            println!(
+                "{}",
+                json!({"schema":1,"architecture":architecture,"imported_libraries":imports,"source":"object_pe"})
+            );
+        }
         (Some("key"), 3) => {
             let signer = load_controller_signer(Path::new(&args[2]))?;
             println!(
@@ -103,7 +114,7 @@ fn main() -> Result<()> {
             );
         }
         _ => bail!(
-            "usage: wukong-package key <absolute-controller-key-directory> | seal <package-directory> <external-manifest-draft> <absolute-controller-key-directory> <controller-version> | enroll <package-directory> <external-enrollment-draft> <absolute-controller-key-directory> <new-absolute-enrollment-output> <controller-version>"
+            "usage: wukong-package inspect-pe <bootstrap-image> <x64|x86> | key <absolute-controller-key-directory> | seal <package-directory> <external-manifest-draft> <absolute-controller-key-directory> <controller-version> | enroll <package-directory> <external-enrollment-draft> <absolute-controller-key-directory> <new-absolute-enrollment-output> <controller-version>"
         ),
     }
     Ok(())

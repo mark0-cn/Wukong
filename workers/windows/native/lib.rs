@@ -18,6 +18,7 @@ mod inputs;
 pub mod installer;
 #[cfg(windows)]
 mod lease_proxy;
+pub mod pe_imports;
 #[cfg(windows)]
 mod persona;
 #[cfg(windows)]

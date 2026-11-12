@@ -32,11 +32,12 @@ def build(output, check_only=False):
     subprocess.run([cargo, "build", "--locked", "--release", "--target", "x86_64-pc-windows-msvc",
                     "--target-dir", str(output)], cwd=source, env=environment, check=True)
     files = {}
+    inspector = output / "x86_64-pc-windows-msvc/release/wukong-package.exe"
     for name in ["wukong-dbgeng.exe", "wukong-worker.exe", "wukong-package.exe"]:
         binary = output / "x86_64-pc-windows-msvc/release" / name
         files[name] = {"sha256": sha256(binary), "size": binary.stat().st_size,
-                       "imported_libraries": require_static_crt(binary)}
-    probes = build_probes(output)
+                       "imported_libraries": require_static_crt(binary, inspector=inspector)}
+    probes = build_probes(output, inspector=inspector)
     if source_identity != identity():
         raise ValueError("Worker source changed during native build")
     metadata = {"schema": 1, "platform": "windows-amd64", "static_crt_checked": True, "files": files, "selftests": probes, **source_identity}
