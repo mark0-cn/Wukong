@@ -83,8 +83,11 @@ pub(super) fn check(
         json!({"id":1,"operation":"doctor"}),
         json!({"id":2,"operation":"open","mode":"attach","pid":target.pid(),"architecture":architecture,"timeout_secs":20}),
         json!({"id":3,"operation":"inspect","kind":"registers","limit":8}),
-        json!({"id":4,"operation":"inspect","kind":"modules","limit":64}),
-        json!({"id":5,"operation":"close"}),
+        json!({"id":4,"operation":"control","action":"breakpoint_add","symbol":"wukong_probe!fixture_step"}),
+        json!({"id":5,"operation":"control","action":"continue","timeout_secs":5}),
+        json!({"id":6,"operation":"inspect","kind":"modules","limit":64}),
+        json!({"id":7,"operation":"inspect","kind":"stack","limit":8}),
+        json!({"id":8,"operation":"close"}),
     ];
     let engine = package.join(&manifest.manifest().entrypoints.dbgeng_library);
     let engine_directory = engine.parent().context("missing sealed engine directory")?;
@@ -165,6 +168,7 @@ pub(super) fn check(
         "target_logon_sid":target_persona.logon_sid(),"debugger_logon_sid":debugger_persona.logon_sid(),
         "privileges":["SeChangeNotifyPrivilege"],"capabilities":0,"debug_privilege_enabled":false,
         "owned_attach":true,"registers_observed":true,"target_module_observed":true,
+        "symbols_loaded":true,"symbol_breakpoint_hit":true,"stack_symbol_observed":true,
         "jobs_empty":true,"profiles_removed":true,"scratch_removed":true}),
     )
 }
@@ -176,7 +180,7 @@ fn validate_replies(bytes: &[u8], architecture: &str) -> Result<()> {
         .map(serde_json::from_slice)
         .collect::<std::result::Result<_, _>>()?;
     ensure!(
-        replies.len() == 5,
+        replies.len() == 8,
         "contained DbgEng reply count differs: {}",
         String::from_utf8_lossy(&bytes[..bytes.len().min(4096)])
     );
@@ -209,18 +213,44 @@ fn validate_replies(bytes: &[u8], architecture: &str) -> Result<()> {
         "contained debugger observed no registers"
     );
     ensure!(
-        replies[3]["result"]["data"]["modules"]
+        replies[5]["result"]["data"]["modules"]
             .as_array()
-            .is_some_and(|modules| modules.iter().any(|module| module["image"]
-                .as_str()
-                .is_some_and(|image| image
+            .is_some_and(|modules| modules.iter().any(|module| module["symbol_type"]
+                == windows::Win32::System::Diagnostics::Debug::Extensions::DEBUG_SYMTYPE_PDB
+                && module["image"].as_str().is_some_and(|image| image
                     .rsplit(['\\', '/'])
                     .next()
                     .is_some_and(|name| name.eq_ignore_ascii_case("wukong-probe.exe"))))),
-        "contained debugger did not observe the sealed target module"
+        "contained debugger did not load the sealed target's PDB symbols"
     );
     ensure!(
-        replies[4]["result"]["state"] == "closed",
+        replies[3]["result"]["action"] == "breakpoint_add"
+            && replies[3]["result"]["address"]
+                .as_u64()
+                .is_some_and(|address| address != 0)
+            && replies[4]["result"]["state"]["execution_state"] == "stopped"
+            && replies[4]["result"]["state"]["interruption"].is_null()
+            && replies[4]["result"]["event"]["type"]
+                == windows::Win32::System::Diagnostics::Debug::Extensions::DEBUG_EVENT_BREAKPOINT
+            && replies[3]["result"]["breakpoint_id"].as_str().is_some()
+            && replies[4]["result"]["event"]["breakpoint_id"]
+                == replies[3]["result"]["breakpoint_id"],
+        "contained debugger did not stop at its symbol breakpoint"
+    );
+    ensure!(
+        replies[6]["result"]["data"]["frames"]
+            .as_array()
+            .is_some_and(|frames| frames
+                .first()
+                .is_some_and(|frame| frame["instruction_offset"]
+                    == replies[3]["result"]["address"]
+                    && frame["symbol"]["name"]
+                        .as_str()
+                        .is_some_and(|name| name.contains("!fixture_step")))),
+        "contained debugger stack did not observe the fixture symbol"
+    );
+    ensure!(
+        replies[7]["result"]["state"] == "closed",
         "contained debugger did not close"
     );
     Ok(())
@@ -248,6 +278,9 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
             "owned_attach",
             "registers_observed",
             "target_module_observed",
+            "symbols_loaded",
+            "symbol_breakpoint_hit",
+            "stack_symbol_observed",
             "jobs_empty",
             "profiles_removed",
             "scratch_removed",
@@ -287,8 +320,11 @@ mod tests {
             json!({"id":2,"result":{"mode":"live","debuggee_class":2,"architecture":0x8664,
                 "debug_privilege_enabled":false,"state":{"execution_state":"stopped"}},"output_truncated":false}),
             json!({"id":3,"result":{"data":{"registers":[{"name":"rip"}]}},"output_truncated":false}),
-            json!({"id":4,"result":{"data":{"modules":[{"image":"C:\\sealed\\wukong-probe.exe"}]}},"output_truncated":false}),
-            json!({"id":5,"result":{"state":"closed"},"output_truncated":false}),
+            json!({"id":4,"result":{"action":"breakpoint_add","address":0x140001000u64,"breakpoint_id":"0"},"output_truncated":false}),
+            json!({"id":5,"result":{"state":{"execution_state":"stopped","interruption":null},"event":{"type":1,"breakpoint_id":"0"}},"output_truncated":false}),
+            json!({"id":6,"result":{"data":{"modules":[{"image":"C:\\sealed\\wukong-probe.exe","symbol_type":3}]}},"output_truncated":false}),
+            json!({"id":7,"result":{"data":{"frames":[{"instruction_offset":0x140001000u64,"symbol":{"name":"wukong_probe!fixture_step"}}]}},"output_truncated":false}),
+            json!({"id":8,"result":{"state":"closed"},"output_truncated":false}),
         ]
     }
     fn encode(replies: &[Value]) -> Vec<u8> {
@@ -318,7 +354,22 @@ mod tests {
             assert!(validate_replies(&encode(&replies), "x64").is_err());
         }
         let mut replies = transcript();
-        replies[3]["result"]["data"]["modules"][0]["image"] = json!("C:\\other.exe");
+        replies[5]["result"]["data"]["modules"][0]["image"] = json!("C:\\other.exe");
+        assert!(validate_replies(&encode(&replies), "x64").is_err());
+        let mut replies = transcript();
+        replies[5]["result"]["data"]["modules"][0]["symbol_type"] = json!(5);
+        assert!(validate_replies(&encode(&replies), "x64").is_err());
+        let mut replies = transcript();
+        replies[4]["result"]["state"]["interruption"] = json!("deadline");
+        assert!(validate_replies(&encode(&replies), "x64").is_err());
+        let mut replies = transcript();
+        replies[4]["result"]["event"]["breakpoint_id"] = json!("1");
+        assert!(validate_replies(&encode(&replies), "x64").is_err());
+        let mut replies = transcript();
+        replies[6]["result"]["data"]["frames"][0]["instruction_offset"] = json!(0x140001001u64);
+        assert!(validate_replies(&encode(&replies), "x64").is_err());
+        let mut replies = transcript();
+        replies[6]["result"]["data"]["frames"] = json!([]);
         assert!(validate_replies(&encode(&replies), "x64").is_err());
         let mut replies = transcript();
         replies[2]["error"] = json!("access denied");

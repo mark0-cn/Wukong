@@ -10,6 +10,10 @@
 
 当前服务每次启动都会生成全新的 128 位资格检查 ID，在 worker/SSH 就绪前运行已签封的 System 资源宿主；同一次系统启动中的服务重启也须重新运行。schema4 隔离回执绑定该 ID 与精确清单，缺失或旧 ID 无法通过验证。每份回执以 `metadata/isolation-selftest-MANIFEST-QUALIFICATION.json` 新建，保留此前证据而不覆盖。历史上仅绑定清单的回执不会跳过探针。此实现复用已有进程/Job 资格检查路径，不另写系统启动身份实现。普通依赖自检的缓存单独保留；重新进行资源检查不代表生产执行、生命周期恢复或系统重启验收成功。专用验收入口要求服务重启后出现新的资格回执；该改动尚未重跑专用验收。
 
+经过认证的原生调试上下文还要求辅助程序的实际令牌属于零 capability 的 AppContainer，且仅保留已启用的 `SeChangeNotifyPrivilege`；在读取元数据前及加载引擎前分别检查。挂起子进程准入、固定探针和辅助程序复用 `native/token_policy.rs` 中的 SDK 检查。普通令牌不能仅凭上下文数据选择此策略。在该受限模式中，网络边界由操作系统的 AppContainer 网络隔离提供；省略 DbgEng 的 `DISALLOW_NETWORK_PATHS` DOS 盘符推断，因为它在 Windows 10 VM 中将已签封的本地缓存判为不可用。普通辅助程序模式仍保留该标志。两种模式都保留无链接的本地盘符路径、显式符号缓存、精确符号匹配，禁用环境、生产者和映像目录符号搜索及 SymSrv 自动检测，清空源码路径并禁止 shell 命令。参见微软的 [AppContainer 网络隔离](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation#network-isolation)及[引擎选项约定](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/debug-engopt-xxx)。
+
+固定的受限资格检查现要求 x64、x86 会话均加载真正的 PDB（`DEBUG_SYMTYPE_PDB`），从 `wukong_probe!fixture_step` 解析断点，并出现非超时停止，其 SDK 断点事件须匹配该断点 ID，栈顶帧须位于断点地址且含该符号。SDK 断点事件在原始字节之外还保留类型化的断点 ID。仅导出符号、其他停止/事件/地址或缺失的栈均不能通过启动验收。不准入任意来源、辅助程序、PID 或调试器命令。这些加强后的门槛仍待专用 VM 验证；此前 `008d805` 的通过结果仍仅覆盖当时较弱的附加、寄存器与模块检查。
+
 在仓库根目录的 x64 MSVC Native Tools shell 中运行：
 
 ```powershell

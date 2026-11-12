@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Require genuine PDB symbols and a verified symbol-breakpoint stop during Windows contained debugger qualification. Share the exact AppContainer token policy across admission and the helper while retaining local-only symbol sources; production execution remains disabled."
+zh_CN = "Windows 受限调试器资格检查须加载真正的 PDB，并验证符号断点的停止结果；准入与辅助程序共享精确的 AppContainer 令牌策略，继续限制本地符号来源，生产执行保持禁用。"

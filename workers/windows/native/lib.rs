@@ -40,3 +40,5 @@ mod service_access;
 pub mod setup_ui;
 #[cfg(windows)]
 pub mod staging;
+#[cfg(windows)]
+mod token_policy;

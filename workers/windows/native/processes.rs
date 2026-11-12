@@ -3,6 +3,7 @@
 use crate::{
     accounts::Account,
     security::{self, Handle, SecurityDescriptor},
+    token_policy::{same_privilege, traverse_privilege},
 };
 use anyhow::{Context, Result, ensure};
 use std::{
@@ -262,7 +263,6 @@ fn seal_sandbox_token(
 ) -> Result<()> {
     use windows_sys::Win32::Security::{
         TOKEN_ADJUST_PRIVILEGES, TOKEN_APPCONTAINER_INFORMATION, TOKEN_QUERY, TokenAppContainerSid,
-        TokenCapabilities, TokenIsAppContainer,
     };
     let mut token = null_mut();
     security::check(unsafe {
@@ -273,21 +273,8 @@ fn seal_sandbox_token(
         )
     })?;
     let token = Handle(token);
-    let mut actual = 0u32;
+    crate::token_policy::verify_network_isolation(token.0)?;
     let mut bytes = 0;
-    security::check(unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenIsAppContainer,
-            (&mut actual as *mut u32).cast(),
-            size_of::<u32>() as u32,
-            &mut bytes,
-        )
-    })?;
-    ensure!(
-        actual == 1,
-        "native target was not created in its AppContainer"
-    );
     unsafe {
         GetTokenInformation(token.0, TokenAppContainerSid, null_mut(), 0, &mut bytes);
     }
@@ -310,64 +297,11 @@ fn seal_sandbox_token(
         security::sid_text(app.TokenAppContainer)? == security::sid_text(expected_sid)?,
         "native target AppContainer SID changed"
     );
-    unsafe {
-        GetTokenInformation(token.0, TokenCapabilities, null_mut(), 0, &mut bytes);
-    }
-    ensure!(
-        bytes >= size_of::<u32>() as u32 && bytes < 65536,
-        "invalid created token capability data"
-    );
-    let mut capabilities = vec![0usize; (bytes as usize).div_ceil(size_of::<usize>())];
-    security::check(unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenCapabilities,
-            capabilities.as_mut_ptr().cast(),
-            bytes,
-            &mut bytes,
-        )
-    })?;
-    ensure!(
-        unsafe { *capabilities.as_ptr().cast::<u32>() } == 0,
-        "created AppContainer token has capabilities"
-    );
     seal_token_privileges(&token, true)
 }
 
-fn traverse_privilege() -> Result<windows_sys::Win32::Foundation::LUID> {
-    use windows_sys::Win32::Security::{LookupPrivilegeValueW, SE_CHANGE_NOTIFY_NAME};
-    let mut luid = windows_sys::Win32::Foundation::LUID::default();
-    security::check(unsafe { LookupPrivilegeValueW(null(), SE_CHANGE_NOTIFY_NAME, &mut luid) })?;
-    Ok(luid)
-}
-fn same_privilege(
-    a: &windows_sys::Win32::Foundation::LUID,
-    b: &windows_sys::Win32::Foundation::LUID,
-) -> bool {
-    a.LowPart == b.LowPart && a.HighPart == b.HighPart
-}
-/// Verify the exact OS privilege identity, not just its count. This privilege
-/// bypasses ancestor traversal; final object read/write/execute ACLs still apply.
 pub(crate) fn verify_sandbox_privileges(token: &Handle) -> Result<()> {
-    use windows_sys::Win32::Security::SE_PRIVILEGE_ENABLED;
-    let mut privileges = TOKEN_PRIVILEGES::default();
-    let mut bytes = 0;
-    security::check(unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenPrivileges,
-            (&mut privileges as *mut TOKEN_PRIVILEGES).cast(),
-            size_of::<TOKEN_PRIVILEGES>() as u32,
-            &mut bytes,
-        )
-    })?;
-    ensure!(
-        privileges.PrivilegeCount == 1
-            && same_privilege(&privileges.Privileges[0].Luid, &traverse_privilege()?)
-            && privileges.Privileges[0].Attributes & SE_PRIVILEGE_ENABLED != 0,
-        "sandbox token must retain only enabled SeChangeNotifyPrivilege"
-    );
-    Ok(())
+    crate::token_policy::verify_privileges(token.0)
 }
 fn seal_token_privileges(token: &Handle, retain_traverse: bool) -> Result<()> {
     use windows_sys::Win32::Security::{AdjustTokenPrivileges, SE_PRIVILEGE_REMOVED};

@@ -20,10 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 use windows_sys::Win32::{
-    Security::{
-        GetTokenInformation, TOKEN_QUERY, TokenAppContainerSid, TokenCapabilities,
-        TokenIsAppContainer,
-    },
+    Security::{GetTokenInformation, TOKEN_QUERY, TokenAppContainerSid},
     System::{
         Registry::RegDisablePredefinedCacheEx,
         Threading::{GetCurrentProcess, OpenProcessToken},
@@ -61,17 +58,8 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
     let mut token = null_mut();
     security::check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
     let token = Handle(token);
-    let app = token_data(&token, TokenIsAppContainer)?;
-    ensure!(
-        unsafe { *app.as_ptr().cast::<u32>() } == 1,
-        "resource probe is not an AppContainer"
-    );
+    crate::token_policy::verify_network_isolation(token.0)?;
     crate::processes::verify_sandbox_privileges(&token)?;
-    let capabilities = token_data(&token, TokenCapabilities)?;
-    ensure!(
-        unsafe { *capabilities.as_ptr().cast::<u32>() } == 0,
-        "resource token retained capabilities"
-    );
     let info = token_data(&token, TokenAppContainerSid)?;
     let sid =
         security::sid_text(unsafe { *info.as_ptr().cast::<windows_sys::Win32::Security::PSID>() })?;

@@ -22,7 +22,12 @@ use windows::{
             SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
         },
         System::{
-            Diagnostics::Debug::Extensions::*,
+            Diagnostics::Debug::{
+                Extensions::*, SYMOPT_DEFERRED_LOADS, SYMOPT_DISABLE_SYMSRV_AUTODETECT,
+                SYMOPT_EXACT_SYMBOLS, SYMOPT_FAIL_CRITICAL_ERRORS, SYMOPT_IGNORE_CVREC,
+                SYMOPT_IGNORE_IMAGEDIR, SYMOPT_IGNORE_NT_SYMPATH, SYMOPT_NO_IMAGE_SEARCH,
+                SYMOPT_NO_PROMPTS,
+            },
             LibraryLoader::{
                 GetProcAddress, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
                 LoadLibraryExW,
@@ -37,6 +42,8 @@ use windows::{
 mod identity;
 #[path = "dbgeng_paths.rs"]
 mod paths;
+#[path = "token_policy.rs"]
+mod token_policy;
 use paths::local_path;
 
 const MAX_REQUEST: u64 = 1024 * 1024;
@@ -117,6 +124,9 @@ impl Engine {
         symbol_directory: &Path,
         path_context: Option<paths::PathContext>,
     ) -> Result<Self> {
+        if path_context.is_some() {
+            verify_contained_token()?;
+        }
         let directory = local_path(directory, path_context.as_ref())
             .context("resolve local DbgEng directory")?;
         let engine_path = directory.join("dbgeng.dll");
@@ -163,8 +173,17 @@ impl Engine {
                 .context("set DbgEng output callback")?;
             control
                 .AddEngineOptions(
-                    DEBUG_ENGOPT_DISALLOW_NETWORK_PATHS
-                        | DEBUG_ENGOPT_DISALLOW_SHELL_COMMANDS
+                    // Under the authenticated native path context, the exact
+                    // zero-capability AppContainer token supplies OS network
+                    // isolation. DbgEng's DOS-drive classifier denies even sealed
+                    // local paths there. Keep that additional heuristic in the
+                    // ordinary helper, and retain local-path/source restrictions
+                    // and shell denial in both modes.
+                    (if path_context.is_none() {
+                        DEBUG_ENGOPT_DISALLOW_NETWORK_PATHS
+                    } else {
+                        0
+                    }) | DEBUG_ENGOPT_DISALLOW_SHELL_COMMANDS
                         | DEBUG_ENGOPT_DISABLESQM
                         | DEBUG_ENGOPT_INITIAL_BREAK,
                 )
@@ -177,7 +196,15 @@ impl Engine {
             // restricted debugger mode and prevents live user-mode attachment.
             symbols
                 .SetSymbolOptions(
-                    0x200 | 0x80000 | 0x400 | 0x4 | 0x80 | 0x1000 | 0x20000 | 0x200000 | 0x2000000,
+                    SYMOPT_FAIL_CRITICAL_ERRORS
+                        | SYMOPT_NO_PROMPTS
+                        | SYMOPT_EXACT_SYMBOLS
+                        | SYMOPT_DEFERRED_LOADS
+                        | SYMOPT_IGNORE_CVREC
+                        | SYMOPT_IGNORE_NT_SYMPATH
+                        | SYMOPT_NO_IMAGE_SEARCH
+                        | SYMOPT_IGNORE_IMAGEDIR
+                        | SYMOPT_DISABLE_SYMSRV_AUTODETECT,
                 )
                 .context("set local-only DbgEng symbol options")?;
             symbols
@@ -347,6 +374,9 @@ impl Engine {
         };
         match result {
             Ok(()) => json!({"type":kind,"process_id":pid,"thread_id":tid,
+                "breakpoint_id":if kind == DEBUG_EVENT_BREAKPOINT && used as usize >= std::mem::size_of::<DEBUG_LAST_EVENT_INFO_BREAKPOINT>() {
+                    Some(unsafe {std::ptr::read_unaligned(detail.as_ptr().cast::<DEBUG_LAST_EVENT_INFO_BREAKPOINT>())}.Id.to_string())
+                } else {None},
                 "description":utf16(&description),"extra_base64":BASE64.encode(&detail[..(used as usize).min(detail.len())])}),
             Err(error) => json!({"available":false,"error":error.to_string()}),
         }
@@ -638,6 +668,15 @@ unsafe fn signal_interrupt(pointer: usize, flags: u32) {
     let _ = unsafe { ((*table).SetInterrupt)(raw, flags) };
 }
 
+fn verify_contained_token() -> Result<()> {
+    use std::os::windows::io::{FromRawHandle, OwnedHandle};
+    let mut token = HANDLE::default();
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }?;
+    let _held_token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+    token_policy::verify_network_isolation(token.0)?;
+    token_policy::verify_privileges(token.0)
+}
+
 fn enable_debug_privilege() -> bool {
     // Enable an already-granted privilege in this short-lived helper only. This
     // never grants a user right or changes the parent/controller's token.
@@ -697,6 +736,11 @@ pub fn serve() -> Result<()> {
     } else {
         None
     };
+    if context.is_some() {
+        // No native-context metadata parsing or engine loading under System or
+        // an ordinary token, even if the inherited context file is authentic.
+        verify_contained_token()?;
+    }
     // DbgHelp is single-threaded. Perform file-index observations on this owning
     // thread before creating DbgEng and its internal symbol-handler threads.
     let mut engine: Option<Engine> = None;
@@ -785,4 +829,24 @@ pub fn serve() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_path_context_never_substitutes_for_a_contained_token() -> Result<()> {
+        let context: paths::PathContext = serde_json::from_value(json!({"schema":1,
+            "engine":{"dos":"C:\\sealed", "native":"\\Device\\HarddiskVolume1\\sealed"},
+            "symbols":{"dos":"C:\\symbols", "native":"\\Device\\HarddiskVolume1\\symbols"}}))?;
+        let error = Engine::new(
+            Path::new("C:\\absent-engine"),
+            Path::new("C:\\absent-symbols"),
+            Some(context),
+        )
+        .err()
+        .context("ordinary token selected the contained engine policy")?;
+        assert!(error.to_string().contains("AppContainer"));
+        Ok(())
+    }
 }
