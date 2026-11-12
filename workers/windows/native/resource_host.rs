@@ -14,7 +14,7 @@ use std::{
     fs,
     io::ErrorKind,
     mem::size_of,
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     path::Path,
     ptr::null_mut,
     time::{Duration, Instant},
@@ -32,6 +32,8 @@ use windows_sys::Win32::{
 
 #[path = "resource_debugger.rs"]
 mod debugger;
+#[path = "resource_network.rs"]
+mod network;
 
 fn token_data(
     token: &Handle,
@@ -83,18 +85,7 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
             _ => anyhow::bail!("resource could open a private sentinel or denial was inconclusive"),
         }
     }
-    match TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(2)) {
-        Err(error) if error.kind() == ErrorKind::PermissionDenied => {}
-        Err(error) => anyhow::bail!(
-            "AppContainer loopback denial was inconclusive (kind={:?}, win32={:?}): {error}",
-            error.kind(),
-            error.raw_os_error()
-        ),
-        Ok(stream) => {
-            drop(stream);
-            anyhow::bail!("AppContainer unexpectedly connected to the owned loopback listener");
-        }
-    }
+    let network_observation = network::observe(port)?;
     let scratch = std::env::current_dir()?.join("writable-probe.bin");
     fs::write(&scratch, b"owned-low-scratch")?;
     ensure!(
@@ -104,8 +95,8 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
     fs::remove_file(&scratch)?;
     security::probe_resource_root(&std::env::current_dir()?)?;
     Ok(
-        json!({"passed":true,"appcontainer_sid":sid,"logon_sid":security::token_logon_sid(&token)?,"privileges":["SeChangeNotifyPrivilege"],"capabilities":0,
-        "metadata_denied":true,"worker_data_denied":true,"loopback_denied":true,"scratch_writable":true,"root_guard_denied":true}),
+        json!({"probe_completed":true,"appcontainer_sid":sid,"logon_sid":security::token_logon_sid(&token)?,"privileges":["SeChangeNotifyPrivilege"],"capabilities":0,
+        "metadata_denied":true,"worker_data_denied":true,"network_observation":network_observation,"scratch_writable":true,"root_guard_denied":true}),
     )
 }
 
@@ -138,14 +129,7 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
     let metadata = root.join("metadata/authority.json");
     AclPolicy::private_vm().verify(&metadata, false)?;
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
-    let port = listener.local_addr()?.port();
-    // Demonstrate the exact listener is reachable before using access denied
-    // as evidence. The probe never sends traffic outside this local listener.
-    drop(TcpStream::connect_timeout(
-        &([127, 0, 0, 1], port).into(),
-        Duration::from_secs(2),
-    )?);
-    drop(listener.accept()?);
+    listener.set_nonblocking(true)?;
     let mut reports = Vec::new();
     for role in [Role::Target, Role::Debugger] {
         reports.push(check_persona(
@@ -153,7 +137,7 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
             &root,
             &resources,
             &metadata,
-            port,
+            &listener,
             role,
             &system_environment,
         )?);
@@ -174,7 +158,7 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
         )?);
     }
     Ok(
-        json!({"schema":2,"passed":true,"scope":"owned_appcontainer_trusted_probes",
+        json!({"schema":3,"passed":true,"scope":"owned_appcontainer_trusted_probes",
         "manifest_sha256":manifest.sha256(),"personas":reports,"dbgeng":debuggers,"production_execution":false}),
     )
 }
@@ -183,7 +167,7 @@ fn check_persona(
     root: &Path,
     resources: &Path,
     metadata: &Path,
-    port: u16,
+    listener: &TcpListener,
     role: Role,
     system_environment: &std::collections::BTreeMap<String, std::ffi::OsString>,
 ) -> Result<Value> {
@@ -207,6 +191,9 @@ fn check_persona(
     let input = fs::File::open("NUL")?;
     let environment = scratch_environment(system_environment, &scratch_path);
     let executable = std::env::current_exe()?;
+    let port = listener.local_addr()?.port();
+    network::reachable(listener)?;
+    let capture = network::Capture::start(&executable, port)?;
     let spawn = Spawn {
         executable: &executable,
         arguments: &[
@@ -249,11 +236,19 @@ fn check_persona(
     let mut report: Value =
         serde_json::from_slice(&bytes).context("invalid resource probe report")?;
     ensure!(
-        report["passed"] == true
+        report["probe_completed"] == true
             && report["appcontainer_sid"] == sid
             && report["logon_sid"] == persona.logon_sid(),
         "resource probe identity differs"
     );
+    network::reachable(listener)?;
+    let observation: network::Observation =
+        serde_json::from_value(report["network_observation"].clone())?;
+    let evidence = capture.verify(&observation)?;
+    network::validate_evidence(&evidence)?;
+    report["network_evidence"] = evidence;
+    report["loopback_denied"] = Value::Bool(true);
+    report["passed"] = Value::Bool(true);
     persona.close()?;
     fs::remove_dir(&scratch_path)?;
     report["role"] = serde_json::to_value(role)?;
@@ -363,7 +358,7 @@ pub(crate) async fn qualify(
 }
 fn validate_resource_report(value: &Value, manifest: &str) -> Result<()> {
     ensure!(
-        value["schema"] == 2
+        value["schema"] == 3
             && value["passed"] == true
             && value["scope"] == "owned_appcontainer_trusted_probes"
             && value["manifest_sha256"] == manifest
@@ -402,6 +397,7 @@ fn validate_resource_report(value: &Value, manifest: &str) -> Result<()> {
                 .as_str()
                 .context("resource qualification has no logon SID")?,
         )?;
+        network::validate_evidence(&persona["network_evidence"])?;
     }
     ensure!(
         personas[0]["appcontainer_sid"] != personas[1]["appcontainer_sid"],
