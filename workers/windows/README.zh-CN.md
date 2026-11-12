@@ -2,7 +2,9 @@
 
 [English](README.md) · 简体中文
 
-启动资格检查还在每个 target/debugger AppContainer 中包含固定的自身 DACL 对抗探针。检查真实令牌为零能力且仅保留遍历特权后，密封子进程通过自身进程和线程伪句柄，将两者的 DACL 替换为 Everyone/完全访问，并读回验证。随后对仍存活的 System 资源宿主分别请求十种进程权限和九种线程权限，覆盖内存访问、句柄复制、线程创建/上下文/令牌修改、终止及安全修改；只有 `ERROR_ACCESS_DENIED` 才能通过。不对其他进程实际行使任何取得的权限。System 父进程将报告中的 PID/TID 与自己的当前身份核对。私有文件、scratch/guard 及关联网络检查在自身 DACL 修改之后执行，随后沿用已有 Job/profile/scratch 清理。这验证可变自身 DACL 下的指定边界，不证明进程 ACL 不可变或完整对抗隔离。[伪句柄约定](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocess)和[安全 API](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo)说明了 SDK 机制。此更强门槛的真实 VM 资格验证仍待执行；生产执行继续禁用。
+启动资格检查还在每个 target/debugger AppContainer 中包含固定的自身 DACL 对抗探针。检查真实令牌为零能力且仅保留遍历特权后，密封子进程通过自身进程和线程伪句柄，将两者的 DACL 替换为 Everyone/完全访问，并读回验证。随后对仍存活的 System 资源宿主分别请求十种进程权限和九种线程权限，覆盖内存访问、句柄复制、线程创建/上下文/令牌修改、终止及安全修改；只有 `ERROR_ACCESS_DENIED` 才能通过。不对其他进程实际行使任何取得的权限。System 父进程将报告中的 PID/TID 与自己的当前身份核对。私有文件、scratch/guard 及关联网络检查在自身 DACL 修改之后执行，随后沿用已有 Job/profile/scratch 清理。这验证可变自身 DACL 下的指定边界，不证明进程 ACL 不可变或完整对抗隔离。[伪句柄约定](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocess)和[安全 API](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo)说明了 SDK 机制。生产执行继续禁用。
+
+2026-11-13，用户提供的离线 Windows 10 VM 在源码 `f44a562` 的全新安装及服务重启中通过此自身 DACL 门槛。两种角色都实际替换 DACL、取得全部 19 项逐项访问拒绝，并通过随后的私有文件/根目录/网络检查和清理；隔离 x64/x86 PDB 资格检查也通过。回执 SHA256 分别为 `881323e912abee09d15786097480fb5350e8dad932550d189b208d01c4dd623a` 和 `5b5dfb8b73ed30028719bd800ba74a3860f09ce0ae3c8de8e01ac1d61859f4f0`。全部 13 份原始回执、宿主/探针/调试器日志及公开连接记录，经独立固定指纹 SFTP 传回并核对大小/SHA256。真实控制器 SSH 验收在重启前后均通过，租约 epoch 为 1–4，不可变/分块输入均取得原生证明。VM 没有默认路由，安装 ISO 已卸载，之前已通过验收的服务均保留。此结果不证明全部对抗场景、通用资源执行或完整离线维护生命周期通过。
 
 `native/resource_input.rs` 为原生资源准备提供内部 System 侧输入读取入口。原生调用方必须先验证当前租约并提供其归属；序列化引用仅用于选择输入。查询使用已有私有哈希存储，核对声明/已完成回执、精确的归属/run/epoch/worker 绑定、内容 ID、SHA256、大小及可执行策略。它不打开 worker 提供的操作系统源路径，也不创建缺失的归属目录。执行准备会拒绝仅作为数据上传的输入。返回的读取器持续持有同一个已验证的单链接、无重解析文件句柄，直到完成字节读取并销毁读取器前均禁止写入/删除共享。上传完成也会持续持有该句柄直到发布原生回执。这复用已有输入哈希/ACL 检查，不是执行 RPC；原生启动/恢复接入仍待完成。
 
