@@ -2,6 +2,10 @@
 
 [English](README.md) · 简体中文
 
+服务现在会打开独立的 System/管理员私有资源账本 `metadata/native-resources/resources.sqlite`，复用控制器已有的 `rusqlite`/内置 SQLite 库，以及 worker 的绑定、归属和哈希类型。全同步事务限制同时只有一个活动资源，每个资源只有一个待定变更。稳定请求身份包含 worker 安装/启动/包绑定及 run，控制器和租约变化仅作为审计数据。相同 ID 的参数变化会被拒绝；已完成或已中断的副作用不会重新开始。中断的启动在数据库重新打开后仍保持待定。若原始结果未知，关闭仅记录 `uncertain_closed`，不会报告成功。
+
+独占写入锁及持有的禁止删除共享数据库句柄阻止并发接管和替换。有界数据库使用 SQLite 回滚恢复、受保护文件及规范化 Windows 路径，不引入另一套文件系统事务引擎。活动或不确定的账本记录阻止原生租约释放和过期接管，服务重启后也一样；续租仍可执行。用户提供的 Windows 10 VM 上，无目标执行测试覆盖真实终止 SQLite 写入进程后热回滚日志的恢复、长路径、重放身份、陈旧完成结果及两种租约屏障。清理标志仅为内部业务前提，不是独立的操作系统证据。资源创建、原生归属恢复及所有执行 RPC 接入仍未完成；broker 仍仅支持健康检查，并报告 `production_execution = false`。
+
 独立 Cargo 包构建 worker 组件，不链接桌面控制器、WebView 或模型客户端。`native/dbgeng.rs` 与控制器仓库的开发辅助程序共享。组件包版本独立于应用发布版本；交付的 worker 身份还绑定实际源码及二进制内容与运行时协议。
 
 辅助程序复用已有的 `object` 库读取 x86/x64 PE 元数据，使用显式配置的 SDK 中 `dbghelp.dll` 的[文件索引 API](https://learn.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symsrvgetfileindexinfow)读取 GUID PDB 身份，并使用 DbgEng 的[模块信息 API](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/dbgeng/nf-dbgeng-idebugadvanced3-getsymbolinformationwide)观察实时进程与 dump 的 CodeView。Python 负责对应关系策略，不再另写 PE、minidump 或 MSF 解析器。文件索引调用在辅助程序的所属线程上、DbgEng 初始化前完成；初始化后拒绝再次索引文件，初始化失败则终止辅助程序。持有的文件句柄不共享写入或删除权限，并以 SHA256 绑定观察结果。PE 检查接受不超过 256 MiB 的普通文件，限制为 96 个节、128 个调试条目及一条不超过 64 KiB 的 CodeView 记录；PDB 以流式方式哈希，最大 4 GiB。模块对应关系要求完整的已加载模块列表，最多 256 项。

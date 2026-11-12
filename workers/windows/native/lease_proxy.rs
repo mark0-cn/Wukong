@@ -3,6 +3,7 @@
 use crate::{
     accounts, deployment,
     inputs::{Inputs, Owner},
+    resource_journal::Journal,
     security::AclPolicy,
 };
 use anyhow::{Context, Result, ensure};
@@ -41,7 +42,7 @@ fn require(condition: bool, kind: &'static str, message: &'static str) -> Result
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Identity {
+pub struct Identity {
     pub protocol: u32,
     pub installation_id: String,
     pub boot_id: String,
@@ -178,6 +179,7 @@ struct Current {
 }
 struct State {
     epochs: Epochs,
+    resources: Journal,
     current: Option<Current>,
     inflight: usize,
     uncertain: bool,
@@ -219,9 +221,10 @@ impl LeaseProxy {
     }
     fn with_policy(identity: Identity, metadata: &Path, policy: AclPolicy) -> Result<Self> {
         Ok(Self {
-            identity,
+            identity: identity.clone(),
             state: Arc::new(Mutex::new(State {
                 epochs: Epochs::open(metadata, policy.clone())?,
+                resources: Journal::with_policy(metadata, identity, policy.clone())?,
                 current: None,
                 inflight: 0,
                 uncertain: false,
@@ -409,9 +412,9 @@ impl LeaseProxy {
                 (true, current.lease.epoch)
             } else {
                 require(
-                    state.inflight == 0 && !state.uncertain,
+                    state.inflight == 0 && !state.uncertain && state.resources.idle()?,
                     "conflict",
-                    "previous native requests remain active or uncertain; reconcile the worker epoch first",
+                    "previous native requests or resources remain active or uncertain; reconcile ownership first",
                 )?;
                 state.transition = true;
                 (false, 0)
@@ -496,9 +499,9 @@ impl LeaseProxy {
             let epoch = current.lease.epoch;
             params.insert("lease".into(), current.inner.clone());
             require(
-                state.inflight == 0 && !state.uncertain,
+                state.inflight == 0 && !state.uncertain && state.resources.idle()?,
                 "conflict",
-                "native requests remain active or uncertain",
+                "native requests or resources remain active or uncertain",
             )?;
             state.transition = true;
             epoch

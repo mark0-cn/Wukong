@@ -25,6 +25,102 @@ fn acquire(run: &str, owner: &str) -> Value {
         json!({"run_id":run,"owner_id":owner,"_binding":identity()}),
     )
 }
+
+#[tokio::test]
+async fn native_resource_state_blocks_release_and_expired_takeover_but_not_renewal() -> Result<()> {
+    use crate::resource_journal::{Cleanup, Reservation, ResourceKind};
+    let (_root, proxy) = fixture()?;
+    let first = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
+    let resource = {
+        let mut state = proxy.state.lock().unwrap();
+        let actor = Owner {
+            identity: identity(),
+            run_id: "run".into(),
+            owner_id: "controller".into(),
+            epoch: first["epoch"].as_u64().unwrap(),
+        };
+        match state.resources.reserve_start(
+            &actor,
+            "start",
+            ResourceKind::Process,
+            &json!({"trusted_fixture":true}),
+        )? {
+            Reservation::Reserved { resource, .. } => resource,
+            _ => anyhow::bail!("missing native resource reservation"),
+        }
+    };
+    let release = request(
+        "environment.lease.release",
+        json!({"_binding":identity(),"lease":first}),
+    );
+    assert_eq!(
+        call(&proxy, &release).await?["error"]["data"]["kind"],
+        "conflict"
+    );
+    assert_eq!(
+        call(&proxy, &acquire("run", "controller")).await?["result"]["epoch"],
+        first["epoch"]
+    );
+    proxy
+        .state
+        .lock()
+        .unwrap()
+        .current
+        .as_mut()
+        .unwrap()
+        .deadline = Instant::now() - Duration::from_secs(1);
+    assert_eq!(
+        call(&proxy, &acquire("next", "successor")).await?["error"]["data"]["kind"],
+        "conflict"
+    );
+    {
+        let mut state = proxy.state.lock().unwrap();
+        state.resources.start_closing(&resource)?;
+        state.resources.close(
+            &resource,
+            Cleanup {
+                jobs_empty: true,
+                profiles_removed: true,
+                scratch_removed: true,
+            },
+        )?;
+    }
+    assert!(
+        call(&proxy, &acquire("next", "successor")).await?["result"]["epoch"]
+            .as_u64()
+            .unwrap()
+            > first["epoch"].as_u64().unwrap()
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn persisted_native_resource_state_still_blocks_takeover_after_proxy_reopen() -> Result<()> {
+    use crate::resource_journal::ResourceKind;
+    let (root, proxy) = fixture()?;
+    let lease = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
+    {
+        let mut state = proxy.state.lock().unwrap();
+        state.resources.reserve_start(
+            &Owner {
+                identity: identity(),
+                run_id: "run".into(),
+                owner_id: "controller".into(),
+                epoch: lease["epoch"].as_u64().unwrap(),
+            },
+            "reserved-before-crash",
+            ResourceKind::Debugger,
+            &json!({"trusted_fixture":true}),
+        )?;
+    }
+    drop(proxy);
+    let proxy = LeaseProxy::with_policy(identity(), root.path(), AclPolicy::current_user()?)?;
+    assert_eq!(
+        call(&proxy, &acquire("next", "successor")).await?["error"]["data"]["kind"],
+        "conflict"
+    );
+    Ok(())
+}
 async fn upstream(bytes: Vec<u8>) -> Result<Vec<u8>> {
     let value: Value = serde_json::from_slice(&bytes)?;
     let result = match value["method"].as_str().unwrap() {

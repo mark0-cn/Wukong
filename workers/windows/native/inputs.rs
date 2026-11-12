@@ -33,7 +33,7 @@ pub(crate) enum Pending {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Owner {
+pub struct Owner {
     pub identity: Identity,
     pub run_id: String,
     pub owner_id: String,
@@ -309,7 +309,7 @@ impl Inputs {
         self.policy.verify(path, false)
     }
 }
-fn digest(value: &impl Serialize) -> Result<String> {
+pub(crate) fn digest(value: &impl Serialize) -> Result<String> {
     Ok(hex::encode(Sha256::digest(serde_json::to_vec(value)?)))
 }
 
