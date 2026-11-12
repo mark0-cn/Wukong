@@ -6,7 +6,7 @@ use crate::{
     deployment::{self, Deployment},
     environment, pipe_transport, processes,
     security::{self, AclPolicy},
-    staging,
+    service_access, staging,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,7 @@ use std::{
 };
 use windows_sys::Win32::{
     Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation},
+    Storage::FileSystem::{READ_CONTROL, WRITE_DAC, WRITE_OWNER},
     System::{
         Services::*,
         Threading::{GetCurrentProcess, OpenProcessToken},
@@ -205,7 +206,7 @@ fn register_service(
             manager.0,
             name.as_ptr(),
             name.as_ptr(),
-            SERVICE_START | SERVICE_QUERY_STATUS,
+            SERVICE_START | SERVICE_QUERY_STATUS | READ_CONTROL | WRITE_DAC | WRITE_OWNER,
             SERVICE_WIN32_OWN_PROCESS,
             SERVICE_AUTO_START,
             SERVICE_ERROR_NORMAL,
@@ -223,6 +224,8 @@ fn register_service(
         std::io::Error::last_os_error()
     );
     let service = Service(handle);
+    service_access::apply(service.0, &deployment.account(Role::Management)?.sid)
+        .context("set owned service status-only relay access")?;
     security::check(unsafe { StartServiceW(service.0, 0, null()) })?;
     let deadline = Instant::now() + Duration::from_secs(240);
     loop {

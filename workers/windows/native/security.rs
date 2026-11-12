@@ -15,9 +15,10 @@ use windows_sys::Win32::{
             ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
             ConvertStringSidToSidW, GetNamedSecurityInfoW, SE_FILE_OBJECT,
         },
-        DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorControl, GetTokenInformation,
-        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
-        SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
+        GetSecurityDescriptorOwner, GetTokenInformation, OWNER_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, TOKEN_QUERY,
+        TOKEN_USER, TokenUser,
     },
     Storage::FileSystem::{
         CREATE_NEW, CreateDirectoryW, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_NORMAL,
@@ -361,40 +362,62 @@ impl AclPolicy {
         };
         ensure!(status == 0, "cannot inspect native permissions: {status}");
         let _memory = Local(descriptor);
-        let owner = sid_text(owner)?;
-        ensure!(owner == self.owner, "unexpected native owner");
-        ensure!(!acl.is_null(), "native private object has a null ACL");
-        let (mut control, mut revision) = (0, 0);
-        check(unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) })?;
-        ensure!(
-            control & SE_DACL_PROTECTED != 0
-                && unsafe { (*acl).AceCount as usize } == self.grants.len(),
-            "native ACL is unprotected or has unexpected principals"
-        );
-        let mut actual = std::collections::BTreeMap::new();
-        for index in 0..unsafe { (*acl).AceCount } {
-            let mut ace = null_mut();
-            check(unsafe { GetAce(acl, index as u32, &mut ace) })?;
-            let header = unsafe { &*ace.cast::<ACE_HEADER>() };
-            ensure!(
-                header.AceType == 0
-                    && header.AceSize as usize >= size_of::<ACCESS_ALLOWED_ACE>()
-                    && header.AceFlags & 0x18 == 0,
-                "invalid native ACL entry"
-            );
-            let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
-            let sid = sid_text(addr_of!(allowed.SidStart).cast_mut().cast())?;
-            ensure!(
-                actual.insert(sid, allowed.Mask).is_none(),
-                "duplicate native ACL principal"
-            );
-        }
-        ensure!(
-            actual == self.grants,
-            "native ACL permissions differ from policy"
-        );
-        Ok(())
+        verify_descriptor(descriptor, &self.owner, &self.grants, true)
     }
+}
+
+/// Exact owner/principal/mask checks shared by files and the owned SCM object.
+/// Service objects have no directory inheritance; file callers require the
+/// protected-DACL bit in addition to rejecting inherited/conditional ACEs.
+pub(crate) fn verify_descriptor(
+    descriptor: PSECURITY_DESCRIPTOR,
+    owner: &str,
+    grants: &std::collections::BTreeMap<String, u32>,
+    protected: bool,
+) -> Result<()> {
+    let mut actual_owner = null_mut();
+    let mut defaulted = 0;
+    check(unsafe { GetSecurityDescriptorOwner(descriptor, &mut actual_owner, &mut defaulted) })?;
+    ensure!(sid_text(actual_owner)? == owner, "unexpected native owner");
+    let mut acl = null_mut();
+    let mut present = 0;
+    check(unsafe {
+        GetSecurityDescriptorDacl(descriptor, &mut present, &mut acl, &mut defaulted)
+    })?;
+    ensure!(
+        present != 0 && !acl.is_null(),
+        "native private object has a null ACL"
+    );
+    let (mut control, mut revision) = (0, 0);
+    check(unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) })?;
+    ensure!(
+        (!protected || control & SE_DACL_PROTECTED != 0)
+            && unsafe { (*acl).AceCount as usize } == grants.len(),
+        "native ACL is unprotected or has unexpected principals"
+    );
+    let mut actual = std::collections::BTreeMap::new();
+    for index in 0..unsafe { (*acl).AceCount } {
+        let mut ace = null_mut();
+        check(unsafe { GetAce(acl, index as u32, &mut ace) })?;
+        let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+        ensure!(
+            header.AceType == 0
+                && header.AceSize as usize >= size_of::<ACCESS_ALLOWED_ACE>()
+                && header.AceFlags & 0x18 == 0,
+            "invalid native ACL entry"
+        );
+        let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+        let sid = sid_text(addr_of!(allowed.SidStart).cast_mut().cast())?;
+        ensure!(
+            actual.insert(sid, allowed.Mask).is_none(),
+            "duplicate native ACL principal"
+        );
+    }
+    ensure!(
+        &actual == grants,
+        "native ACL permissions differ from policy"
+    );
+    Ok(())
 }
 
 pub fn absolute_new_path(path: &Path) -> Result<PathBuf> {

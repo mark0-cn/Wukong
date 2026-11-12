@@ -383,6 +383,10 @@ async fn run(context: &ContextState) -> Result<()> {
         "SCM service installation differs from protected state"
     );
     let manifest = deployment.verify(&root)?;
+    crate::service_access::verify_registered(
+        &deployment.installation_id,
+        &deployment.account(Role::Management)?.sid,
+    )?;
     let package = deployment.package(&root);
     deployment::verify_running_binary(&package, &manifest)?;
     let binding: Value =

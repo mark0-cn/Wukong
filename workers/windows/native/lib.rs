@@ -25,6 +25,8 @@ pub mod security;
 #[cfg(windows)]
 pub mod service;
 #[cfg(windows)]
+mod service_access;
+#[cfg(windows)]
 pub mod setup_ui;
 #[cfg(windows)]
 pub mod staging;
