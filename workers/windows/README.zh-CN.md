@@ -16,7 +16,16 @@ cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
 
 实现依据 [Rust CRT 链接约定](https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes)与微软 [PE 格式](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)。Windows CI 对独立 crate 进行格式与代码检查、构建引导程序并验证导入；自动化测试还拒绝动态 CRT、非法库名与格式错误的普通或延迟导入表。
 
-原生库可将已验证载荷暂存到新建目录，显式设置受保护的 Windows ACL，对复制的每个文件计算哈希、排他创建文件，并再次校验完整目标目录。VM 策略区分 System/管理员元数据与可读的可执行内容。源介质和暂存父目录必须防止其他进程并发写入；仅检查链接不足以安全收集目标可写目录中的文件。失败暂存仍由调用方持有，用于事务恢复。该模块不激活版本，也不创建服务或账号。其 Windows CI 测试仅使用无执行能力的签名文件及仅当前用户可访问的临时目录，验证权限，并拒绝额外写入者、源文件变更、相对根目录及覆盖写入，不在开发宿主安装任何软件。
+原生库可将已验证载荷暂存到新建目录，显式设置受保护的 Windows ACL。源文件须为单链接普通文件，打开时不跟随末级重解析点，也不共享写入或删除权限；在创建可读目标文件前，先通过持有的句柄核对签名清单中的大小及哈希，随后对复制内容计算哈希，并再次校验完整目标目录。清单与公钥字节来自已验证的内存身份；在暂存前，通过持有句柄有界读取的签名须与该清单匹配。VM 策略区分 System/管理员元数据与可读的可执行内容。源介质和暂存父目录仍须防止其他进程并发写入；这些检查不提供从目标可写目录进行通用提权收集的能力。失败暂存仍由调用方持有，用于事务恢复。该模块不激活版本，也不创建服务或账号。普通 Windows CI 测试仅使用无执行能力的签名文件及仅当前用户可访问的临时目录，验证真实共享冲突、重命名拒绝、硬链接拒绝、权限，以及源文件变更、相对根目录和覆盖写入的拒绝路径，不在开发宿主安装任何软件。
+
+显式只读介质夹具可以将签封载荷复制到新临时目录并再次校验，不执行载荷，也不注册系统资源。仅以只读方式挂载指定 ISO，并独立选择其公钥；替换下列占位值。测试自身不挂载或卸载介质，也不执行 VM 安装验收。
+
+```powershell
+$env:WUKONG_STAGE_TEST_SOURCE = 'X:\payload'
+$env:WUKONG_STAGE_TEST_PUBLIC_KEY = 'PINNED_CONTROLLER_PUBLIC_KEY_HEX'
+$env:WUKONG_STAGE_TEST_CONTROLLER_VERSION = 'CONTROLLER_VERSION'
+cargo test --locked --manifest-path workers/windows/Cargo.toml --lib stages_explicit_read_only_offline_media_without_execution -- --ignored
+```
 
 `wukong-worker.exe verify-package DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION` 使用共享[离线包约定](../package/README.zh-CN.md)。该只读命令校验独立信任、兼容性与文件精确内容。`verify-enrollment PACKAGE ENROLLMENT_DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION` 还会校验公开登记签名及其载荷绑定。两个校验命令均不安装或激活 worker。该程序与 `wukong-dbgeng.exe` 一起接受静态 CRT 检查。
 

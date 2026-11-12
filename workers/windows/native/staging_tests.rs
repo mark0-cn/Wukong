@@ -128,6 +128,73 @@ fn native_staging_creates_protected_exact_copies_without_overwrite_or_execution(
 }
 
 #[test]
+fn staging_checks_held_source_identity_before_publishing_and_excludes_other_writers() -> Result<()>
+{
+    let temporary = tempfile::tempdir()?;
+    let policy = AclPolicy::current_user()?;
+    let source = temporary.path().join("source.bin");
+    let target = temporary.path().join("published.bin");
+    let entry = FileEntry {
+        sha256: hex::encode(Sha256::digest(b"fixture")),
+        size: 7,
+        kind: PayloadKind::Data,
+    };
+    fs::write(&source, b"private")?;
+    assert!(copy_member(&source, &target, &entry, &policy).is_err());
+    assert!(
+        !target.exists(),
+        "unverified content must not be exposed before rejection"
+    );
+    fs::write(&source, b"fixture")?;
+    let writer = fs::OpenOptions::new().write(true).open(&source)?;
+    assert!(copy_member(&source, &target, &entry, &policy).is_err());
+    assert!(!target.exists());
+    drop(writer);
+    let held = source_file(&source)?;
+    assert!(fs::OpenOptions::new().write(true).open(&source).is_err());
+    assert!(fs::rename(&source, temporary.path().join("moved.bin")).is_err());
+    drop(held);
+    let alias = temporary.path().join("source-alias.bin");
+    fs::hard_link(&source, &alias)?;
+    assert!(copy_member(&source, &target, &entry, &policy).is_err());
+    assert!(!target.exists());
+    fs::remove_file(alias)?;
+    copy_member(&source, &target, &entry, &policy)?;
+    assert_eq!(fs::read(target)?, b"fixture");
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires explicitly pinned, mounted read-only offline payload media; copies without execution"]
+fn stages_explicit_read_only_offline_media_without_execution() -> Result<()> {
+    let source = std::env::var_os("WUKONG_STAGE_TEST_SOURCE")
+        .context("set WUKONG_STAGE_TEST_SOURCE to the mounted sealed payload")?;
+    let source = std::path::PathBuf::from(source);
+    let key = PublicKey::from_hex(&std::env::var("WUKONG_STAGE_TEST_PUBLIC_KEY")?)?;
+    let version = std::env::var("WUKONG_STAGE_TEST_CONTROLLER_VERSION")?;
+    ensure!(
+        fs::metadata(source.join("manifest.json"))?
+            .permissions()
+            .readonly(),
+        "explicit media fixture must be read-only"
+    );
+    let temporary = tempfile::tempdir()?;
+    let destination = temporary.path().join("stage");
+    let verified = stage_payload(
+        &source,
+        &destination,
+        &key,
+        &Compatibility {
+            runtime_protocol: 2,
+            controller_version: &version,
+        },
+        &AclPolicy::current_user()?,
+    )?;
+    verified.verify_tree(&destination)?;
+    Ok(())
+}
+
+#[test]
 fn native_permissions_reject_extra_writers_and_relative_roots() -> Result<()> {
     use std::{os::windows::process::CommandExt, process::Command};
     let temporary = tempfile::tempdir()?;

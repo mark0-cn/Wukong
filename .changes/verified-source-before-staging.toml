@@ -1,0 +1,3 @@
+kind = "security"
+en = "Verify each offline payload member through a held, non-write-shared source handle before creating its readable staged copy. Refuse hardlinked or reparse-point files and retain verified manifest identities in memory. Source and staging parents still require protection from concurrent writers."
+zh_CN = "通过持有且不共享写入权限的源句柄，先校验每个离线载荷成员，再创建可读的暂存副本。拒绝硬链接或重解析点文件，并在内存中保留已验证的清单身份。源目录和暂存父目录仍须防止并发写入。"
