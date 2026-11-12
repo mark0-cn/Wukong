@@ -28,6 +28,15 @@ fn acquire(run: &str, owner: &str) -> Value {
 async fn upstream(bytes: Vec<u8>) -> Result<Vec<u8>> {
     let value: Value = serde_json::from_slice(&bytes)?;
     let result = match value["method"].as_str().unwrap() {
+        "file.put" => {
+            use base64::Engine;
+            use sha2::Digest;
+            assert_eq!(value["params"]["_lease"]["token"], "d".repeat(32));
+            let data = base64::engine::general_purpose::STANDARD
+                .decode(value["params"]["data_base64"].as_str().unwrap())?;
+            json!({"path":format!("files/{}",value["params"]["path"].as_str().unwrap()),
+                "sha256":hex::encode(sha2::Sha256::digest(&data)),"size":data.len()})
+        }
         "environment.lease.acquire" => json!({"epoch":900,"run_id":value["params"]["run_id"],
             "owner_id":value["params"]["owner_id"],"boot_id":identity().boot_id,"token":"d".repeat(32),"expires_at":9999.0}),
         "environment.lease.release" => {
@@ -54,7 +63,7 @@ fn release(lease: &Value) -> Value {
 }
 fn effect(lease: &Value) -> Value {
     request(
-        "file.put",
+        "job.status",
         json!({"request_id":"stable","_lease":lease,"_binding":identity()}),
     )
 }
@@ -301,5 +310,125 @@ async fn delayed_renewal_cannot_resurrect_an_expired_outer_fence() -> Result<()>
     let next = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
     assert_eq!(next["epoch"], 2);
     assert_ne!(next["token"], first["token"]);
+    Ok(())
+}
+
+fn put_request(lease: &Value) -> Value {
+    request(
+        "file.put",
+        json!({"request_id":"native-upload","path":"targets/sample.bin",
+        "data_base64":"AAECAw==","executable":true,"_lease":lease,"_binding":identity()}),
+    )
+}
+
+#[tokio::test]
+async fn only_fenced_controller_bytes_receive_stable_native_input_proof() -> Result<()> {
+    let (directory, proxy) = fixture()?;
+    let lease = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
+    let original = call(&proxy, &put_request(&lease)).await?;
+    let proof = &original["result"]["native_input"];
+    assert_eq!(proof["epoch"], lease["epoch"]);
+    assert_eq!(proof["run_id"], "run");
+    assert_eq!(proof["owner_id"], "controller");
+    assert_eq!(proof["identity"], serde_json::to_value(identity())?);
+    assert_eq!(proof["executable"], true);
+    assert_eq!(call(&proxy, &put_request(&lease)).await?, original);
+    call(&proxy, &release(&lease)).await?;
+    let forwarded = AtomicUsize::new(0);
+    let rejected: Value = serde_json::from_slice(
+        &proxy
+            .call(&encode(&put_request(&lease))?, |bytes| {
+                forwarded.fetch_add(1, Ordering::SeqCst);
+                upstream(bytes)
+            })
+            .await?,
+    )?;
+    assert_eq!(rejected["error"]["data"]["kind"], "lease_lost");
+    assert_eq!(forwarded.load(Ordering::SeqCst), 0);
+    drop(proxy);
+    let next = LeaseProxy::with_policy(identity(), directory.path(), AclPolicy::current_user()?)?;
+    let successor = call(&next, &acquire("run", "controller")).await?["result"].clone();
+    let new = call(&next, &put_request(&successor)).await?;
+    assert_ne!(new["result"]["native_input"]["id"], proof["id"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejected_uploads_settle_before_forwarding_but_bad_success_receipts_block_idle()
+-> Result<()> {
+    let (_directory, proxy) = fixture()?;
+    let lease = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
+    for path in ["../metadata/authority.json", "NUL"] {
+        let mut invalid = put_request(&lease);
+        invalid["params"]["path"] = json!(path);
+        let reply = proxy
+            .call(&encode(&invalid)?, |_| async {
+                panic!("invalid upload reached worker")
+            })
+            .await?;
+        assert!(
+            serde_json::from_slice::<Value>(&reply)?
+                .get("error")
+                .is_some()
+        );
+        assert!(!proxy.state.lock().unwrap().uncertain);
+    }
+    let reply = proxy
+        .call(&encode(&put_request(&lease))?, |bytes| async move {
+            let request: Value = serde_json::from_slice(&bytes)?;
+            encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":{
+            "path":"files/targets/sample.bin","sha256":"f".repeat(64),"size":4}}))
+        })
+        .await?;
+    assert!(
+        serde_json::from_slice::<Value>(&reply)?
+            .get("error")
+            .is_some()
+    );
+    assert!(proxy.state.lock().unwrap().uncertain);
+    assert_eq!(
+        call(&proxy, &release(&lease)).await?["error"]["data"]["kind"],
+        "conflict"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_upload_serialization_does_not_block_lease_renewal() -> Result<()> {
+    let (_directory, proxy) = fixture()?;
+    let proxy = Arc::new(proxy);
+    let lease = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let finish = Arc::new(tokio::sync::Notify::new());
+    let p = proxy.clone();
+    let e = entered.clone();
+    let f = finish.clone();
+    let req = put_request(&lease);
+    let task = tokio::spawn(async move {
+        p.call(&encode(&req)?, |bytes| {
+            let e = e.clone();
+            let f = f.clone();
+            async move {
+                e.notify_one();
+                f.notified().await;
+                upstream(bytes).await
+            }
+        })
+        .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), entered.notified()).await?;
+    let renewed = tokio::time::timeout(
+        Duration::from_secs(2),
+        call(&proxy, &acquire("run", "controller")),
+    )
+    .await??;
+    assert_eq!(renewed["result"]["token"], lease["token"]);
+    assert_eq!(
+        call(&proxy, &release(&lease)).await?["error"]["data"]["kind"],
+        "conflict"
+    );
+    finish.notify_one();
+    let result: Value = serde_json::from_slice(&task.await??)?;
+    assert_eq!(result["result"]["native_input"]["epoch"], lease["epoch"]);
     Ok(())
 }

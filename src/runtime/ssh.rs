@@ -326,6 +326,17 @@ mod tests {
         let put = json!({"path":"hosted-smoke.bin","data_base64":"AAECAw==","request_id":"hosted-stable-upload"});
         let artifact = bound.call("file.put", put.clone()).await?;
         ensure!(
+            artifact["native_input"]["schema"] == 1
+                && artifact["native_input"]["identity"] == doctor["identity"]
+                && artifact["native_input"]["run_id"] == first.run_id
+                && artifact["native_input"]["owner_id"] == first.owner_id
+                && artifact["native_input"]["epoch"] == first.epoch
+                && artifact["native_input"]["sha256"] == artifact["sha256"]
+                && artifact["native_input"]["size"] == artifact["size"]
+                && artifact["native_input"]["executable"] == false,
+            "installed upload has no matching native controller-byte provenance"
+        );
+        ensure!(
             bound.call("file.put", put.clone()).await? == artifact,
             "immutable upload receipt changed"
         );
@@ -363,6 +374,7 @@ mod tests {
             "identity":client.identity(),"daemon_id":ping["daemon_id"],"daemon_pid":ping["daemon_pid"],
             "first_epoch":first.epoch,"last_epoch":second.epoch,"artifact_sha256":artifact["sha256"],
             "native_broker":doctor["native_broker"],
+            "native_input":artifact["native_input"],
             "production_isolation_verified":false});
         use std::io::Write;
         fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&report)?)?;

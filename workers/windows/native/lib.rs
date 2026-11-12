@@ -13,6 +13,8 @@ mod environment;
 #[cfg(windows)]
 pub mod firewall;
 #[cfg(windows)]
+mod inputs;
+#[cfg(windows)]
 pub mod installer;
 #[cfg(windows)]
 mod lease_proxy;

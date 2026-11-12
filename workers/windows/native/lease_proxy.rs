@@ -1,6 +1,10 @@
 //! Service-owned admission fences. Python retains its own resource checks and
 //! receipt ledger, but cannot issue or reset the controller's outer lease.
-use crate::{accounts, deployment, security::AclPolicy};
+use crate::{
+    accounts, deployment,
+    inputs::{Inputs, Owner, Put},
+    security::AclPolicy,
+};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -182,11 +186,13 @@ struct State {
 pub(crate) struct LeaseProxy {
     identity: Identity,
     state: Arc<Mutex<State>>,
+    inputs: tokio::sync::Mutex<Inputs>,
     controls: tokio::sync::Mutex<()>,
     started: Instant,
 }
 struct Admission {
     state: Arc<Mutex<State>>,
+    owner: Owner,
     completed: bool,
 }
 impl Drop for Admission {
@@ -215,12 +221,13 @@ impl LeaseProxy {
         Ok(Self {
             identity,
             state: Arc::new(Mutex::new(State {
-                epochs: Epochs::open(metadata, policy)?,
+                epochs: Epochs::open(metadata, policy.clone())?,
                 current: None,
                 inflight: 0,
                 uncertain: false,
                 transition: false,
             })),
+            inputs: tokio::sync::Mutex::new(Inputs::open(metadata, policy)?),
             controls: tokio::sync::Mutex::new(()),
             started: Instant::now(),
         })
@@ -264,10 +271,17 @@ impl LeaseProxy {
             &state,
             params.get("_lease").context("missing native lease")?,
         )?;
+        let owner = Owner {
+            identity: self.identity.clone(),
+            run_id: current.lease.run_id.clone(),
+            owner_id: current.lease.owner_id.clone(),
+            epoch: current.lease.epoch,
+        };
         params.insert("_lease".into(), current.inner.clone());
         state.inflight += 1;
         Ok(Admission {
             state: self.state.clone(),
+            owner,
             completed: false,
         })
     }
@@ -324,10 +338,45 @@ impl LeaseProxy {
             return self.release(request, upstream).await;
         }
         let mut admission = self.admit(request["params"].as_object_mut().unwrap())?;
+        let input = if method == "file.put" {
+            match Put::parse(
+                admission.owner.clone(),
+                request["params"].as_object().unwrap(),
+            ) {
+                Ok(input) => Some(input),
+                Err(error) => {
+                    // Nothing was forwarded; rejecting input is a settled result.
+                    admission.completed = true;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        // Serialize input publication independently of lease controls: hashing
+        // or a slow worker upload must never prevent heartbeat renewal.
+        let inputs = if input.is_some() {
+            Some(self.inputs.lock().await)
+        } else {
+            None
+        };
+        if let (Some(put), Some(inputs)) = (&input, &inputs)
+            && let Err(error) = inputs.prepare(put)
+        {
+            admission.completed = true;
+            return Err(error);
+        }
         let reply = upstream(encode(request)?).await?;
         // A structured error is also a settled RPC outcome. Transport failures,
         // malformed replies and dropped futures remain uncertain.
-        owned_reply(request, &reply)?;
+        let mut checked = owned_reply(request, &reply)?;
+        if let (Some(put), Some(inputs)) = (&input, &inputs) {
+            if checked.get("error").is_none() {
+                inputs.complete(put, &mut checked["result"])?;
+            }
+            admission.completed = true;
+            return encode(&checked);
+        }
         admission.completed = true;
         Ok(reply)
     }

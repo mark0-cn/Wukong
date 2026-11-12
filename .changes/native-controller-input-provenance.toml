@@ -1,0 +1,3 @@
+kind = "security"
+en = "Keep a System-protected copy and run-bound provenance for small Windows controller uploads. Verify the worker's result before admitting the copy; resumable uploads and production target execution remain outside this admission path."
+zh_CN = "为 Windows 控制器的小文件上传保留 System 保护的副本及绑定 run 的来源凭据，核对 worker 返回结果后才准入副本；该路径尚不覆盖断点续传和生产目标执行。"
