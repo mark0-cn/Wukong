@@ -15,7 +15,7 @@ use std::{
     io::ErrorKind,
     mem::size_of,
     net::TcpListener,
-    path::Path,
+    path::{Path, PathBuf},
     ptr::null_mut,
     time::{Duration, Instant},
 };
@@ -102,17 +102,16 @@ pub fn probe(
     )
 }
 
-/// Internal startup qualification; it executes only this sealed binary's fixed
-/// probe branch. It is not a model target execution API or production gate.
-pub fn selftest(installation: &str, configuration: &Path, qualification: &str) -> Result<Value> {
+pub(crate) struct Host {
+    pub deployment: Deployment,
+    pub root: PathBuf,
+    pub manifest: wukong_worker_package::VerifiedManifest,
+    pub resources: PathBuf,
+    pub environment: std::collections::BTreeMap<String, std::ffi::OsString>,
+}
+/// Shared, synchronous setup in a fresh System child, before any I/O threads.
+pub(crate) fn open(installation: &str, configuration: &Path) -> Result<Host> {
     security::require_system()?;
-    ensure!(
-        qualification.len() == 32
-            && qualification
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
-        "invalid resource qualification identity"
-    );
     let (deployment, root) = deployment::load(configuration)?;
     ensure!(
         deployment.installation_id == installation,
@@ -135,6 +134,32 @@ pub fn selftest(installation: &str, configuration: &Path, qualification: &str) -
         public.create_directory(&resources)?;
     }
     public.verify(&resources, true)?;
+    Ok(Host {
+        deployment,
+        root,
+        manifest,
+        resources,
+        environment: system_environment,
+    })
+}
+/// Internal startup qualification; it executes only this sealed binary's fixed
+/// probe branch. It is not a model target execution API or production gate.
+pub fn selftest(installation: &str, configuration: &Path, qualification: &str) -> Result<Value> {
+    security::require_system()?;
+    ensure!(
+        qualification.len() == 32
+            && qualification
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+        "invalid resource qualification identity"
+    );
+    let Host {
+        deployment,
+        root,
+        manifest,
+        resources,
+        environment: system_environment,
+    } = open(installation, configuration)?;
     let metadata = root.join("metadata/authority.json");
     AclPolicy::private_vm().verify(&metadata, false)?;
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
@@ -280,6 +305,22 @@ fn check_persona(
 
 fn create_persona(deployment: &Deployment, root: &Path, role: Role) -> Result<(Persona, String)> {
     let nonce = hex::encode(accounts::random_bytes::<24>()?);
+    create_persona_named(deployment, root, role, &nonce, None)
+}
+pub(crate) fn create_persona_named(
+    deployment: &Deployment,
+    root: &Path,
+    role: Role,
+    nonce: &str,
+    resource: Option<&str>,
+) -> Result<(Persona, String)> {
+    ensure!(
+        nonce.len() == 48
+            && nonce
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+        "invalid owned profile nonce"
+    );
     let name = format!("Wukong-{nonce}");
     let intent = root
         .join("metadata")
@@ -287,7 +328,7 @@ fn create_persona(deployment: &Deployment, root: &Path, role: Role) -> Result<(P
     deployment::write_new_json(
         &intent,
         &json!({"schema":1,"installation_id":deployment.installation_id,
-        "role":role,"account_sid":deployment.account(role)?.sid,"profile_name":name}),
+        "role":role,"account_sid":deployment.account(role)?.sid,"profile_name":name,"resource_id":resource}),
         &AclPolicy::private_vm(),
     )?;
     let persona = Persona::create(
@@ -295,9 +336,9 @@ fn create_persona(deployment: &Deployment, root: &Path, role: Role) -> Result<(P
         deployment.account(role)?,
         &name,
     )?;
-    Ok((persona, nonce))
+    Ok((persona, nonce.into()))
 }
-fn scratch_environment(
+pub(crate) fn scratch_environment(
     system_environment: &std::collections::BTreeMap<String, std::ffi::OsString>,
     scratch: &Path,
 ) -> std::collections::BTreeMap<String, std::ffi::OsString> {

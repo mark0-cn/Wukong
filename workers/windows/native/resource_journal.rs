@@ -586,7 +586,7 @@ fn regular(file: &fs::File, maximum: u64) -> Result<()> {
     );
     Ok(())
 }
-fn bounded_identifier(value: &str, maximum: usize) -> Result<()> {
+pub(crate) fn bounded_identifier(value: &str, maximum: usize) -> Result<()> {
     ensure!(
         !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control),
         "invalid native resource identifier"

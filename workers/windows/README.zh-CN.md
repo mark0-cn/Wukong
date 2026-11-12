@@ -2,6 +2,10 @@
 
 [English](README.md) · 简体中文
 
+`native/resource_process.rs` 现已实现内部 `resource-execute` System 宿主，与启动资格检查共享签名部署验证、固定环境准备及 profile 创建。请求必须位于精确受保护的 `metadata/resource-requests/RESOURCE.json` 槽位，绑定当前安装/包、控制器归属及已准入的可执行输入引用。输入在 persona 创建前验证；映像从持续持有的原生输入读取器复制，保留逻辑 `files/...` 布局，并获得受保护的只读/执行策略和禁止写入/删除共享的句柄。profile 意图在创建前记录资源 ID。宿主通过已有的挂起创建、Job 归属 AppContainer 通路启动零能力目标，成功排空后关闭 persona 并删除已接管的 scratch。清理错误仍作为错误；目标创建的限制访问后代不会被误报为已删除。控制器隔离令牌/账本调度、准备阶段中断、宿主故障恢复及完整执行 RPC 接入仍待完成。普通管理/metadata 令牌无法进入此仅 System 可用的入口。其已安装 VM 正向执行验收尚未完成。
+
+`native/process_capture.rs` 复用标准库匿名管道及安全句柄归属转换，分别处理二进制 stdin/stdout/stderr。读取线程在同步 profile/私有窗口站准备后才启动。两条输出流合计保留 1 KiB–8 MiB；超限、截止时间或取消会先停止并排空同一个 Job，再汇合 I/O，stdin 另行报告实际写入字节及完成/错误。流式分析启动在第一条指令前配置并读回 Job 总内存（16 MiB–4 GiB）、进程数（1–64）及低于正常的优先级。成功停止还等待所持主进程对象发出退出信号：终止收尾时 Job 活动进程计数可能更早归零。用户提供的 Windows 10 VM 已通过可信自编译夹具检查，覆盖二进制流分离、输出洪泛、内存/进程限制强制、取消/截止时间，以及持有输出写端的后代。此夹具不能替代仍待完成的 System 宿主/AppContainer 及控制器接入验收。
+
 内部资源账本现在还可为活动资源保留带类型的调试控制和交互写入副作用。它检查资源类型及 run/worker 绑定，串行化待定变更，保留稳定请求指纹，并拒绝关闭中或已关闭资源的新工作。已完成的变更可再次读取，但不会重新开始；中断的变更在数据库重新打开后仍保持待定，仅在归属运行时提供清理确认后成为 `uncertain_closed`。恢复可读取原始启动副作用、归属、类型、规格及阶段，包含旧系统启动留下的未完成意图。启动意图缺失/歧义或载荷指纹变化时拒绝继续。这些记录描述持久意图，不是操作系统存活或清理的观察证据。原生运行时使用前仍须验证当前控制器租约；执行 RPC 接入仍待完成。
 
 启动资格检查还在每个 target/debugger AppContainer 中包含固定的自身 DACL 对抗探针。检查真实令牌为零能力且仅保留遍历特权后，密封子进程通过自身进程和线程伪句柄，将两者的 DACL 替换为 Everyone/完全访问，并读回验证。随后对仍存活的 System 资源宿主分别请求十种进程权限和九种线程权限，覆盖内存访问、句柄复制、线程创建/上下文/令牌修改、终止及安全修改；只有 `ERROR_ACCESS_DENIED` 才能通过。不对其他进程实际行使任何取得的权限。System 父进程将报告中的 PID/TID 与自己的当前身份核对。私有文件、scratch/guard 及关联网络检查在自身 DACL 修改之后执行，随后沿用已有 Job/profile/scratch 清理。这验证可变自身 DACL 下的指定边界，不证明进程 ACL 不可变或完整对抗隔离。[伪句柄约定](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocess)和[安全 API](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo)说明了 SDK 机制。生产执行继续禁用。

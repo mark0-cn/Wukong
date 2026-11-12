@@ -26,6 +26,8 @@ pub mod pipe_transport;
 #[cfg(windows)]
 mod process_access;
 #[cfg(windows)]
+pub mod process_capture;
+#[cfg(windows)]
 pub mod processes;
 #[cfg(windows)]
 pub mod recovery;
@@ -35,6 +37,8 @@ pub mod resource_host;
 pub mod resource_input;
 #[cfg(windows)]
 pub mod resource_journal;
+#[cfg(windows)]
+pub mod resource_process;
 #[cfg(windows)]
 pub mod security;
 #[cfg(windows)]

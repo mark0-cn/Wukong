@@ -28,6 +28,25 @@ use windows_sys::Win32::{
 };
 
 pub struct Job(Handle);
+/// Aggregate limits for one native analysis resource, before child creation.
+#[derive(Clone, Copy, Debug)]
+pub struct ResourceLimits {
+    processes: u32,
+    memory: usize,
+}
+impl ResourceLimits {
+    pub fn new(processes: u32, memory_bytes: u64) -> Result<Self> {
+        ensure!(
+            (1..=64).contains(&processes)
+                && (16 * 1024 * 1024..=4 * 1024 * 1024 * 1024).contains(&memory_bytes),
+            "native resource limits exceed supported bounds"
+        );
+        Ok(Self {
+            processes,
+            memory: usize::try_from(memory_bytes)?,
+        })
+    }
+}
 /// A noninheritable, query-only duplicate usable by authenticated broker tasks.
 /// It never authorizes assignment, termination or policy changes.
 pub(crate) struct JobObserver(OwnedHandle);
@@ -62,6 +81,9 @@ impl Job {
         Ok(JobObserver(unsafe { OwnedHandle::from_raw_handle(handle) }))
     }
     pub fn new() -> Result<Self> {
+        Self::configured(None)
+    }
+    fn configured(resource: Option<ResourceLimits>) -> Result<Self> {
         let handle = unsafe { CreateJobObjectW(null(), null()) };
         ensure!(
             !handle.is_null(),
@@ -72,6 +94,14 @@ impl Job {
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags =
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+        if let Some(resource) = resource {
+            limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+                | JOB_OBJECT_LIMIT_JOB_MEMORY
+                | JOB_OBJECT_LIMIT_PRIORITY_CLASS;
+            limits.BasicLimitInformation.ActiveProcessLimit = resource.processes;
+            limits.BasicLimitInformation.PriorityClass = BELOW_NORMAL_PRIORITY_CLASS;
+            limits.JobMemoryLimit = resource.memory;
+        }
         security::check(unsafe {
             SetInformationJobObject(
                 job.0.0,
@@ -80,6 +110,25 @@ impl Job {
                 size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
             )
         })?;
+        if let Some(resource) = resource {
+            let mut actual = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            security::check(unsafe {
+                QueryInformationJobObject(
+                    job.0.0,
+                    JobObjectExtendedLimitInformation,
+                    (&mut actual as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                    null_mut(),
+                )
+            })?;
+            ensure!(
+                actual.BasicLimitInformation.LimitFlags == limits.BasicLimitInformation.LimitFlags
+                    && actual.BasicLimitInformation.ActiveProcessLimit == resource.processes
+                    && actual.BasicLimitInformation.PriorityClass == BELOW_NORMAL_PRIORITY_CLASS
+                    && actual.JobMemoryLimit == resource.memory,
+                "native resource Job limits differ after SDK readback"
+            );
+        }
         Ok(job)
     }
     pub fn terminate(&self) -> Result<()> {
@@ -523,7 +572,18 @@ impl OwnedProcess {
         &self.job
     }
     pub fn stop(&self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
         self.job.terminate_and_wait(timeout)?;
+        // ActiveProcesses can reach zero before process-object rundown signals
+        // the held leader. Wait before reading its final exit or reclaiming.
+        let remaining = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .min((u32::MAX - 1) as u128) as u32;
+        ensure!(
+            unsafe { WaitForSingleObject(self.process.0, remaining) } == WAIT_OBJECT_0,
+            "owned native process did not signal after Job drain"
+        );
         if let Some(directory) = &self._directory {
             directory.reclaim()?;
         }
@@ -546,8 +606,13 @@ pub struct Spawn<'a> {
     pub log: &'a File,
     pub input: &'a File,
 }
-enum Start {
+#[derive(Clone, Copy)]
+enum Start<'a> {
     Execute,
+    Streamed {
+        error: &'a File,
+        limits: ResourceLimits,
+    },
     InspectSuspended,
 }
 #[derive(Clone, Copy)]
@@ -584,6 +649,25 @@ impl Spawn<'_> {
             CreationContext::Process,
         )
     }
+    #[cfg(test)]
+    pub(crate) fn inert_streamed_fixture(
+        &self,
+        error: &File,
+        limits: ResourceLimits,
+    ) -> Result<OwnedProcess> {
+        ensure!(
+            self.executable == std::env::current_exe()?,
+            "native fixture must execute this test binary"
+        );
+        self.create(
+            None,
+            None,
+            None,
+            None,
+            Start::Streamed { error, limits },
+            CreationContext::Process,
+        )
+    }
     pub fn worker(&self, installation: &str, account: &Account) -> Result<OwnedProcess> {
         security::require_system()?;
         let token = without_privileges(&account.logon(installation)?)?;
@@ -616,7 +700,17 @@ impl Spawn<'_> {
         persona: &crate::persona::Persona,
         directory: security::ResourceDirectory,
     ) -> Result<OwnedProcess> {
-        self.sandbox_peer(persona, directory, None)
+        self.sandbox_peer(persona, directory, None, Start::Execute)
+    }
+    /// Native resource host only; I/O readers start after private station setup.
+    pub(crate) fn sandbox_streamed(
+        &self,
+        persona: &crate::persona::Persona,
+        directory: security::ResourceDirectory,
+        error: &File,
+        limits: ResourceLimits,
+    ) -> Result<OwnedProcess> {
+        self.sandbox_peer(persona, directory, None, Start::Streamed { error, limits })
     }
     /// Only the fixed resource host can pair its target with its independently
     /// created debugger persona. No caller-supplied SID or PID enters this path.
@@ -626,13 +720,14 @@ impl Spawn<'_> {
         directory: security::ResourceDirectory,
         debugger: &crate::persona::Persona,
     ) -> Result<OwnedProcess> {
-        self.sandbox_peer(target, directory, Some(debugger))
+        self.sandbox_peer(target, directory, Some(debugger), Start::Execute)
     }
     fn sandbox_peer(
         &self,
         persona: &crate::persona::Persona,
         directory: security::ResourceDirectory,
         debugger: Option<&crate::persona::Persona>,
+        start: Start<'_>,
     ) -> Result<OwnedProcess> {
         security::require_system()?;
         // Windows prepares the lowbox namespace/profile using this ordinary
@@ -665,7 +760,7 @@ impl Spawn<'_> {
             Some(desktop),
             Some(capabilities),
             Some(descriptor),
-            Start::Execute,
+            start,
             CreationContext::RoleProfileEnvironment,
         )?;
         process._directory = Some(directory);
@@ -677,7 +772,7 @@ impl Spawn<'_> {
         mut desktop: Option<Desktop>,
         mut capabilities: Option<windows_sys::Win32::Security::SECURITY_CAPABILITIES>,
         descriptor: Option<crate::process_access::Policy>,
-        start: Start,
+        start: Start<'_>,
         creation_context: CreationContext,
     ) -> Result<OwnedProcess> {
         security::no_links(self.executable)?;
@@ -704,9 +799,20 @@ impl Spawn<'_> {
             child_environment.extend(profile.clone());
         }
         let environment = environment(&child_environment)?;
-        let job = Job::new()?;
+        let resource_limits = match start {
+            Start::Streamed { limits, .. } => Some(limits),
+            _ => None,
+        };
+        let job = Job::configured(resource_limits)?;
         let (log, input) = (inheritable(self.log)?, inheritable(self.input)?);
-        let mut handles = [log.0, input.0];
+        let error = match start {
+            Start::Streamed { error, .. } => Some(inheritable(error)?),
+            _ => None,
+        };
+        let mut handles = vec![log.0, input.0];
+        if let Some(error) = &error {
+            handles.push(error.0);
+        }
         let mut jobs = [job.0.0];
         let mut attributes = Attributes::new(if capabilities.is_some() { 3 } else { 2 })?;
         attributes.set_handles(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &mut handles)?;
@@ -730,7 +836,7 @@ impl Spawn<'_> {
         startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
         startup.StartupInfo.hStdInput = input.0;
         startup.StartupInfo.hStdOutput = log.0;
-        startup.StartupInfo.hStdError = log.0;
+        startup.StartupInfo.hStdError = error.as_ref().map_or(log.0, |error| error.0);
         if let Some(desktop) = desktop.as_mut() {
             startup.StartupInfo.lpDesktop = desktop.name.as_mut_ptr();
         }
@@ -855,7 +961,7 @@ impl Spawn<'_> {
                 })?;
                 seal_token_privileges(&Handle(token), policy == "traverse")?;
             }
-            if matches!(start, Start::Execute) {
+            if !matches!(start, Start::InspectSuspended) {
                 ensure!(
                     unsafe { ResumeThread(thread.0) } != u32::MAX,
                     "cannot resume owned native child"
