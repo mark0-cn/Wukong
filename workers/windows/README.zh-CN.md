@@ -41,7 +41,7 @@ python -m scripts.worker.layout --cache target/windows-offline-cache --output ta
 
 输出包含已预展开 wheel 的私有嵌入式 Python、Python worker 源码、OpenSSH 和完整 SDK 调试器文件树。Python 忽略用户和注册表路径，仅加载随包库及 worker 目录；VM 无须 pip。归档路径拒绝链接、目录穿越、别名与覆盖写入。缓存和暂存目录应仅供控制端访问：这些检查本身不提供并发写入隔离。失败输出保留用于诊断，不能复用。该命令生成**未签名的控制端展开目录**。普通控制端展开检查与可信样例不代表干净 Windows VM 的依赖覆盖。
 
-组装并签名新的完整载荷前，先提交 worker 改动，再从该干净提交重新构建。组装器要求源码提交与目录哈希匹配，并核对已锁定的原生构建元数据、实际二进制哈希和静态 CRT 导入。包内包含原生二进制及其依赖许可文本、Rust 标准库版权声明和全部原始第三方载荷。不会下载缺失文件。
+组装并签名新的完整载荷前，先提交 worker 改动，再从该干净提交重新构建。组装器要求源码提交与目录哈希匹配，并核对已锁定的原生构建元数据、实际二进制哈希和静态 CRT 导入。包内包含原生二进制及其依赖许可文本、Rust 标准库版权声明和全部原始第三方载荷。原生声明收集保留原始 `LICENSE`、`COPYING`、`NOTICE`、`UNLICENSE`、`COPYRIGHT` 文件及显式声明的许可证文件；以 `COPYRIGHT` 文件分发的完整许可证文本会原样保留。不会下载缺失文件。
 
 ```powershell
 $keys = Join-Path $PWD 'target/controller-signing'

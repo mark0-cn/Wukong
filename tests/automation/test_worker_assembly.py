@@ -7,12 +7,41 @@ import unittest
 from unittest.mock import patch
 
 from scripts.worker.assemble import BINARIES, file_index, native_build
+from scripts.worker.notices import collect
 from scripts._lib.checksums import sha256
 from scripts._lib.repository import ROOT
 from tests.automation.test_worker_pe import fixture
 
 
 class AssemblyChecks(unittest.TestCase):
+    def test_native_notices_preserve_license_text_shipped_as_copyright(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dependency = root / "dependency"
+            dependency.mkdir()
+            original = b"MIT fixture license\r\nCopyright (c) fixture author\r\n"
+            (dependency / "COPYRIGHT").write_bytes(original)
+            sysroot = root / "rust"
+            library = sysroot / "share/doc/rust/COPYRIGHT-library.html"
+            library.parent.mkdir(parents=True)
+            library.write_bytes(b"<p>Rust fixture notice</p>")
+            package = dict(name="fixture", version="1.2.3", source="registry+fixture", license="MIT",
+                           manifest_path=str(dependency / "Cargo.toml"))
+            output = root / "notices"
+            with patch("scripts.worker.notices.subprocess.check_output", side_effect=[
+                json.dumps(dict(packages=[package])).encode(), str(sysroot), "rustc fixture",
+            ]) as commands:
+                paths = collect(output)
+            command = commands.call_args_list[0].args[0]
+            self.assertIn("--offline", command)
+            self.assertIn("--locked", command)
+            copied = output / "fixture-1.2.3/COPYRIGHT"
+            self.assertIn(copied, paths)
+            self.assertEqual(copied.read_bytes(), original)
+            record = json.loads((output / "native-notices.json").read_text(encoding="utf-8"))
+            self.assertEqual(record["packages"], [dict(name="fixture", version="1.2.3", license="MIT",
+                                                    files=["fixture-1.2.3/COPYRIGHT"])])
+
     def test_native_provenance_refuses_dirty_stale_or_changed_binaries(self):
         source = dict(source_revision="a" * 40, source_tree_sha256="b" * 64, source_dirty=False)
         with tempfile.TemporaryDirectory() as temporary:

@@ -17,7 +17,7 @@ def collect(output):
     for package in metadata["packages"]:
         root = Path(package["manifest_path"]).parent
         candidates = [path for path in root.iterdir() if path.is_file()
-                      and path.name.lower().startswith(("license", "copying", "notice", "unlicense"))]
+                      and path.name.lower().startswith(("license", "copying", "notice", "unlicense", "copyright"))]
         if package.get("license_file"):
             candidates.append(root / package["license_file"])
         if package["source"] is None and root in {ROOT / "workers/windows", ROOT / "workers/package"}:
