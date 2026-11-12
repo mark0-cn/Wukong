@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Resolve debugger volume identities from already opened object handles, cross-check NT and DOS names and retain kernel no-reparse validation without requiring AppContainer access to the DOS-device namespace."
+zh_CN = "从已打开对象句柄解析调试器卷身份，交叉核对 NT 与 DOS 名称并保留内核禁止重解析校验，不再要求 AppContainer 访问 DOS 设备命名空间。"

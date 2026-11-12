@@ -4,7 +4,10 @@ use anyhow::{Context, Result, ensure};
 use std::{
     fs::File,
     mem::size_of,
-    os::windows::{fs::MetadataExt, io::FromRawHandle},
+    os::windows::{
+        fs::{MetadataExt, OpenOptionsExt},
+        io::{AsRawHandle, FromRawHandle},
+    },
     path::{Path, PathBuf},
     ptr::{null, null_mut},
 };
@@ -17,9 +20,12 @@ use windows_sys::{
         Foundation::{
             OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE, RtlNtStatusToDosError, UNICODE_STRING,
         },
+        Globalization::{CSTR_EQUAL, CompareStringOrdinal},
         Storage::FileSystem::{
-            FILE_ATTRIBUTE_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-            FILE_SHARE_WRITE, QueryDosDeviceW, SYNCHRONIZE,
+            FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_NAME_OPENED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+            FILE_SHARE_WRITE, GetFinalPathNameByHandleW, SYNCHRONIZE, VOLUME_NAME_DOS,
+            VOLUME_NAME_NT,
         },
         System::IO::IO_STATUS_BLOCK,
     },
@@ -51,39 +57,42 @@ pub(super) fn local_path(path: &Path) -> Result<PathBuf> {
         "DbgEng requires an absolute local path without relative aliases"
     );
 
-    // A DOS drive letter is itself an Object Manager link. Passing it directly
-    // with OBJ_DONT_REPARSE rejects even ordinary files on Windows 10.
-    // Query the current mapping through the SDK, accepting only a local disk
-    // volume, then have NtCreateFile refuse every filesystem reparse in one open.
-    let device_name: Vec<u16> = drive[..2].encode_utf16().chain(Some(0)).collect();
-    let mut mapping = vec![0u16; 32768];
-    let count = unsafe {
-        QueryDosDeviceW(
-            device_name.as_ptr(),
-            mapping.as_mut_ptr(),
-            mapping.len() as u32,
-        )
-    } as usize;
-    if count == 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("resolve local debugger drive mapping");
-    }
+    // AppContainers cannot query the DOS-device namespace. Resolve only an
+    // already accessible object: FILE_NAME_OPENED avoids normalized-name
+    // queries that require metadata access to closed ancestors. Reject a
+    // different DOS identity, and retain the original drive-relative suffix
+    // for the independent kernel no-reparse open below.
+    let opened = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(&path)
+        .context("open local debugger path attributes")?;
     ensure!(
-        count <= mapping.len(),
-        "invalid debugger drive mapping length"
+        opened.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0,
+        "DbgEng paths cannot contain links or reparse points"
     );
-    let end = mapping[..count]
-        .iter()
-        .position(|value| *value == 0)
-        .context("unterminated debugger drive mapping")?;
-    // QueryDosDevice returns the current mapping first; subsequent strings are
-    // undeleted prior mappings, not alternatives to try after a rejected open.
-    let mapping = String::from_utf16(&mapping[..end])?;
+    let native =
+        opened_name(&opened, VOLUME_NAME_NT).context("read opened debugger NT identity")?;
+    let dos =
+        opened_name(&opened, VOLUME_NAME_DOS).context("read opened debugger drive identity")?;
     ensure!(
-        mapping
-            .strip_prefix(r"\Device\HarddiskVolume")
-            .is_some_and(|suffix| !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())),
-        "DbgEng requires a local disk-volume mapping without device aliases"
+        same_name(dos.strip_prefix(r"\\?\").unwrap_or(&dos), drive)?,
+        "opened debugger drive identity differs from the requested path"
+    );
+    let prefix = r"\Device\HarddiskVolume";
+    let suffix = native
+        .strip_prefix(prefix)
+        .context("DbgEng requires a local disk-volume identity")?;
+    let end = suffix.find('\\').unwrap_or(suffix.len());
+    ensure!(
+        end > 0 && suffix[..end].bytes().all(|b| b.is_ascii_digit()),
+        "DbgEng requires a local disk-volume identity without device aliases"
+    );
+    let mapping = &native[..prefix.len() + end];
+    ensure!(
+        same_name(&native, &format!("{mapping}{}", &drive[2..]))?,
+        "opened debugger NT identity differs from the original drive-relative path"
     );
     let mut encoded: Vec<u16> = format!("{mapping}{}", &drive[2..])
         .encode_utf16()
@@ -146,6 +155,42 @@ pub(super) fn local_path(path: &Path) -> Result<PathBuf> {
     // DbgEng treats a \\?\ drive path as network access when that is disabled.
     // Preserve the verified drive spelling for its local-only loader.
     Ok(path)
+}
+
+fn opened_name(file: &File, volume: u32) -> Result<String> {
+    let mut buffer = vec![0u16; 32768];
+    let count = unsafe {
+        GetFinalPathNameByHandleW(
+            file.as_raw_handle(),
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            FILE_NAME_OPENED | volume,
+        )
+    } as usize;
+    if count == 0 {
+        return Err(std::io::Error::last_os_error()).context("query opened debugger path name");
+    }
+    ensure!(
+        count < buffer.len(),
+        "opened debugger path exceeds the name bound"
+    );
+    String::from_utf16(&buffer[..count]).context("opened debugger path is not Unicode")
+}
+
+fn same_name(a: &str, b: &str) -> Result<bool> {
+    let a: Vec<u16> = a.encode_utf16().collect();
+    let b: Vec<u16> = b.encode_utf16().collect();
+    ensure!(
+        a.len() <= 32767 && b.len() <= 32767,
+        "debugger identity exceeds the name bound"
+    );
+    let result =
+        unsafe { CompareStringOrdinal(a.as_ptr(), a.len() as i32, b.as_ptr(), b.len() as i32, 1) };
+    if result == 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("compare opened debugger path identity");
+    }
+    Ok(result == CSTR_EQUAL)
 }
 
 #[cfg(test)]
