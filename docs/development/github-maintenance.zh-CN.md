@@ -67,6 +67,8 @@ PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待�
 
 Windows 原生 worker 安装验收需要显式选择：手动运行 CI 时启用 `windows_worker_acceptance`，或在推送待验收修订前给 PR 加上 `windows-worker-acceptance` 标签。仅修改标签不会启动 CI。此选项强制完整组件检查，并在原生编译后运行独立托管夹具；所选运行启动后移除标签，避免之后无关修订重复安装。夹具拒绝开发宿主和自托管机器，仅上传公开报告。按 worker 程序阻断外网会保留 CI agent 联网，不能替代最终的 Windows VM 整机断网验收。它不发布 Release，也不证明生产目标隔离或卸载已经完成；参见[原生组件指南](../../workers/windows/README.zh-CN.md)。
 
+原生编译及选中的安装验收使用显式的未取消条件，因此此前无关测试失败不会阻止获取这项独立证据。安装仍要求原生构建和检查步骤通过；取消、原生构建失败或未选择夹具时均不安装。只有夹具实际运行并得到成功或失败结果后才上传报告。此前的失败仍使 Windows 作业及最终 CI 门禁失败；没有步骤使用错误后继续通过设置。参见 GitHub 的[状态检查表达式规则](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)。
+
 PR 使用 `scripts/ci/ci_scope.py` 选择检查：仅 README/docs Markdown 及配套翻译核对记录改动执行轻量检查；文档配对、链接与核对记录始终在 changes job 检查；
 `ui/` 增加前端检查；`workers/runtime/`、`workers/tests/`、`fixtures/`、`evals/` 增加 Linux 测试。
 Rust、公共脚本、锁文件、工作流、未知路径或版本准备 PR 都执行全量检查。

@@ -136,7 +136,8 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Standalone Windows worker bootstrap
-        if: needs.changes.outputs.rust == 'true'
+        id: worker_native
+        if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
         run: |
           $locator = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
           $installation = & $locator -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -167,12 +168,13 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Dedicated hosted Windows worker installation acceptance
-        if: inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance')
+        id: worker_acceptance
+        if: ${{ !cancelled() && steps.worker_native.outcome == 'success' && (inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance')) }}
         run: |
           python tests/acceptance/check_windows_worker.py --confirm-hosted-runner --report target/windows-worker-acceptance/report.json
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Preserve public native installation report
-        if: always() && (inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance'))
+        if: always() && (steps.worker_acceptance.outcome == 'success' || steps.worker_acceptance.outcome == 'failure')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-worker-installation-report
