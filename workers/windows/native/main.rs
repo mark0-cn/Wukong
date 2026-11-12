@@ -18,12 +18,20 @@ fn main() -> Result<()> {
         return Ok(());
     }
     #[cfg(windows)]
-    if args.len() == 6 && args[1] == "isolation-probe" {
+    if args.len() == 8 && args[1] == "isolation-probe" {
         let report = wukong_windows_worker::resource_host::probe(
             Path::new(&args[2]),
             Path::new(&args[3]),
             args[4].to_str().context("invalid probe port")?.parse()?,
             args[5].to_str().context("invalid probe SID")?,
+            args[6]
+                .to_str()
+                .context("invalid fixed host PID")?
+                .parse()?,
+            args[7]
+                .to_str()
+                .context("invalid fixed host TID")?
+                .parse()?,
         )?;
         println!("{report}");
         return Ok(());

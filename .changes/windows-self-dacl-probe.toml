@@ -1,0 +1,3 @@
+kind = "security"
+en = "Require Windows worker startup probes to verify protected process/thread, private-file and network boundaries after the sandbox changes its own process and thread DACLs. General resource execution remains disabled until native admission and ownership are complete."
+zh_CN = "Windows worker 启动探针须在隔离进程修改自身进程和线程 DACL 后，验证受保护进程/线程、私有文件及网络边界；原生准入和归属接入完成前继续禁用通用资源执行。"

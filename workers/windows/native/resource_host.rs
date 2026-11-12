@@ -27,6 +27,8 @@ use windows_sys::Win32::{
     },
 };
 
+#[path = "resource_adversary.rs"]
+mod adversary;
 #[path = "resource_debugger.rs"]
 mod debugger;
 #[path = "resource_network.rs"]
@@ -52,7 +54,14 @@ fn token_data(
 }
 /// Inert sealed development probe. It cannot select a program, change an
 /// account/profile, open a network outside loopback, or read sentinel contents.
-pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> Result<Value> {
+pub fn probe(
+    metadata: &Path,
+    worker: &Path,
+    port: u16,
+    expected_sid: &str,
+    host_process: u32,
+    host_thread: u32,
+) -> Result<Value> {
     security::validate_app_sid(expected_sid)?;
     ensure!(port > 0, "missing owned probe listener");
     let mut token = null_mut();
@@ -67,6 +76,7 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
         sid == expected_sid,
         "resource AppContainer identity differs"
     );
+    let authority = adversary::check(host_process, host_thread)?;
     for path in [metadata, worker] {
         match fs::File::open(path) {
             Err(error) if error.kind() == ErrorKind::PermissionDenied => {}
@@ -88,7 +98,7 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
         .context("qualify held resource root")?;
     Ok(
         json!({"probe_completed":true,"appcontainer_sid":sid,"logon_sid":security::token_logon_sid(&token)?,"privileges":["SeChangeNotifyPrivilege"],"capabilities":0,
-        "metadata_denied":true,"worker_data_denied":true,"network_observation":network_observation,"scratch_writable":true,"root_guard_denied":true}),
+        "authority_after_self_dacl":authority,"metadata_denied":true,"worker_data_denied":true,"network_observation":network_observation,"scratch_writable":true,"root_guard_denied":true}),
     )
 }
 
@@ -201,6 +211,10 @@ fn check_persona(
             worker_sentinel.as_os_str().to_owned(),
             port.to_string().into(),
             sid.clone().into(),
+            std::process::id().to_string().into(),
+            unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() }
+                .to_string()
+                .into(),
         ],
         directory: &scratch_path,
         environment: &environment,
@@ -234,11 +248,18 @@ fn check_persona(
     );
     let mut report: Value =
         serde_json::from_slice(&bytes).context("invalid resource probe report")?;
+    adversary::validate(&report["authority_after_self_dacl"])?;
     ensure!(
         report["probe_completed"] == true
             && report["appcontainer_sid"] == sid
             && report["logon_sid"] == persona.logon_sid(),
         "resource probe identity differs"
+    );
+    ensure!(
+        report["authority_after_self_dacl"]["protected_process_id"] == std::process::id()
+            && report["authority_after_self_dacl"]["protected_thread_id"]
+                == unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() },
+        "adversarial probe did not use this live System host"
     );
     network::reachable(listener)?;
     let observation: network::Observation =
@@ -371,6 +392,7 @@ fn validate_resource_report(value: &Value, manifest: &str, qualification: &str) 
         "resource qualification role count differs"
     );
     for (persona, role) in personas.iter().zip(["target", "debugger"]) {
+        adversary::validate(&persona["authority_after_self_dacl"])?;
         ensure!(
             persona["role"] == role
                 && persona["passed"] == true

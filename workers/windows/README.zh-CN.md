@@ -2,6 +2,8 @@
 
 [English](README.md) · 简体中文
 
+启动资格检查还在每个 target/debugger AppContainer 中包含固定的自身 DACL 对抗探针。检查真实令牌为零能力且仅保留遍历特权后，密封子进程通过自身进程和线程伪句柄，将两者的 DACL 替换为 Everyone/完全访问，并读回验证。随后对仍存活的 System 资源宿主分别请求十种进程权限和九种线程权限，覆盖内存访问、句柄复制、线程创建/上下文/令牌修改、终止及安全修改；只有 `ERROR_ACCESS_DENIED` 才能通过。不对其他进程实际行使任何取得的权限。System 父进程将报告中的 PID/TID 与自己的当前身份核对。私有文件、scratch/guard 及关联网络检查在自身 DACL 修改之后执行，随后沿用已有 Job/profile/scratch 清理。这验证可变自身 DACL 下的指定边界，不证明进程 ACL 不可变或完整对抗隔离。[伪句柄约定](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocess)和[安全 API](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo)说明了 SDK 机制。此更强门槛的真实 VM 资格验证仍待执行；生产执行继续禁用。
+
 `native/resource_input.rs` 为原生资源准备提供内部 System 侧输入读取入口。原生调用方必须先验证当前租约并提供其归属；序列化引用仅用于选择输入。查询使用已有私有哈希存储，核对声明/已完成回执、精确的归属/run/epoch/worker 绑定、内容 ID、SHA256、大小及可执行策略。它不打开 worker 提供的操作系统源路径，也不创建缺失的归属目录。执行准备会拒绝仅作为数据上传的输入。返回的读取器持续持有同一个已验证的单链接、无重解析文件句柄，直到完成字节读取并销毁读取器前均禁止写入/删除共享。上传完成也会持续持有该句柄直到发布原生回执。这复用已有输入哈希/ACL 检查，不是执行 RPC；原生启动/恢复接入仍待完成。
 
 2026-11-13，用户提供的离线 Windows 10 VM 在源码 `51d04dc`、清单 `2e63de639cb4461050ae4dc1632185f89b62f5fb60f2ce7be08d9a8e66f411ea` 上通过全新安装，包含由 System 服务创建私有 SQLite 资源账本及持有独占写锁。真实固定指纹 SSH 控制器验收在服务重启前后均通过，租约 epoch 为 1–4，不可变/分块上传均取得原生来源证明。两次启动均通过隔离 x64/x86 PDB、断点、栈及清理资格检查；回执 SHA256 分别为 `bd10cb180efcf80309650790d6a3d0decff4a3206f3b8cea55a9fb556cca3884` 和 `07b4568f5bddccd6fa66b0368898f9638ea5a5de785c0c5385990392d860f145`。全部九份原始公开回执/转录通过独立固定指纹 SFTP 传回，并核对字节数及 SHA256。VM 没有默认路由，随后已卸载安装 ISO。此结果证明该源码的安装、启动及控制器传输；资源执行和完整离线维护仍未完成。
