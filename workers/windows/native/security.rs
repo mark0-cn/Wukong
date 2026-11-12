@@ -50,6 +50,34 @@ impl Drop for Local {
 
 pub(crate) struct SecurityDescriptor(Local);
 impl SecurityDescriptor {
+    pub(crate) fn from_object(
+        handle: HANDLE,
+        kind: windows_sys::Win32::Security::Authorization::SE_OBJECT_TYPE,
+    ) -> Result<Self> {
+        use windows_sys::Win32::Security::{
+            Authorization::GetSecurityInfo, LABEL_SECURITY_INFORMATION,
+        };
+        let mut descriptor = null_mut();
+        let status = unsafe {
+            GetSecurityInfo(
+                handle,
+                kind,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        let result = Self(Local(descriptor));
+        ensure!(
+            status == 0,
+            "cannot inspect owned object security: {status}"
+        );
+        ensure!(!descriptor.is_null(), "owned object security is missing");
+        Ok(result)
+    }
     pub(crate) fn from_sddl(sddl: &str) -> Result<Self> {
         ensure!(
             sddl.len() <= 4096,

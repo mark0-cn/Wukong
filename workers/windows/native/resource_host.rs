@@ -228,14 +228,16 @@ fn check_persona(
     };
     wait(&process, Duration::from_secs(15))?;
     let code = process.exit_code()?;
+    let launch_diagnostics = process.launch_diagnostics().cloned();
     process.stop(Duration::from_secs(10))?;
     drop(process);
     drop(log);
     let bytes = deployment::read_bytes(&log_path, 4096)?;
     ensure!(
         code == Some(0),
-        "owned {role:?} AppContainer probe failed (exit {code:?}): {}",
-        String::from_utf8_lossy(&bytes)
+        "owned {role:?} AppContainer probe failed (exit {code:?}): {}; launch diagnostics: {}",
+        String::from_utf8_lossy(&bytes),
+        launch_diagnostics.unwrap_or(Value::Null)
     );
     let mut report: Value =
         serde_json::from_slice(&bytes).context("invalid resource probe report")?;

@@ -12,13 +12,12 @@ use std::{
     ptr::{addr_of, null_mut},
 };
 use windows_sys::Win32::{
-    Foundation::{HANDLE, LocalFree},
+    Foundation::HANDLE,
     Security::{
         ACE_HEADER,
-        Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT, SetSecurityInfo},
-        DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION,
-        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
-        SYSTEM_MANDATORY_LABEL_ACE,
+        Authorization::{SE_KERNEL_OBJECT, SetSecurityInfo},
+        GetAce, GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+        SECURITY_ATTRIBUTES, SYSTEM_MANDATORY_LABEL_ACE,
     },
     System::Threading::PROCESS_ALL_ACCESS,
 };
@@ -26,36 +25,6 @@ use windows_sys::Win32::{
 pub(crate) struct Policy {
     descriptor: SecurityDescriptor,
     grants: BTreeMap<String, u32>,
-}
-struct Descriptor(PSECURITY_DESCRIPTOR);
-impl Descriptor {
-    fn read(handle: HANDLE) -> Result<Self> {
-        let mut descriptor = null_mut();
-        let status = unsafe {
-            GetSecurityInfo(
-                handle,
-                SE_KERNEL_OBJECT,
-                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION,
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                &mut descriptor,
-            )
-        };
-        ensure!(
-            status == 0,
-            "cannot inspect initial resource object authority: {status}"
-        );
-        Ok(Self(descriptor))
-    }
-}
-impl Drop for Descriptor {
-    fn drop(&mut self) {
-        unsafe {
-            LocalFree(self.0);
-        }
-    }
 }
 
 /// Windows assigns process/thread labels during creation. Apply this explicit
@@ -91,7 +60,11 @@ pub(crate) fn seal_low_integrity(handle: HANDLE) -> Result<()> {
         status == 0,
         "cannot seal owned suspended object label: {status}"
     );
-    verify_integrity_label(Descriptor::read(handle)?.0)
+    verify_integrity_label(
+        SecurityDescriptor::from_object(handle, SE_KERNEL_OBJECT)?
+            .attributes()
+            .lpSecurityDescriptor,
+    )
 }
 impl Policy {
     pub fn owned(persona: &Persona, debugger: Option<&Persona>) -> Result<Self> {
@@ -139,10 +112,21 @@ impl Policy {
         self.descriptor.attributes()
     }
     pub fn verify(&self, handle: HANDLE) -> Result<()> {
-        self.verify_descriptor(Descriptor::read(handle)?.0)
+        self.verify_descriptor(
+            SecurityDescriptor::from_object(handle, SE_KERNEL_OBJECT)?
+                .attributes()
+                .lpSecurityDescriptor,
+        )
     }
     pub fn seal(&self, handle: HANDLE) -> Result<()> {
-        security::verify_descriptor(Descriptor::read(handle)?.0, "S-1-5-18", &self.grants, false)?;
+        security::verify_descriptor(
+            SecurityDescriptor::from_object(handle, SE_KERNEL_OBJECT)?
+                .attributes()
+                .lpSecurityDescriptor,
+            "S-1-5-18",
+            &self.grants,
+            false,
+        )?;
         seal_low_integrity(handle)?;
         self.verify(handle)
     }
@@ -152,7 +136,7 @@ impl Policy {
     }
 }
 
-fn verify_integrity_label(descriptor: PSECURITY_DESCRIPTOR) -> Result<()> {
+pub(crate) fn verify_integrity_label(descriptor: PSECURITY_DESCRIPTOR) -> Result<()> {
     let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
     security::check(unsafe {
         GetSecurityDescriptorSacl(descriptor, &mut present, &mut sacl, &mut defaulted)
@@ -187,6 +171,7 @@ mod tests {
     use crate::security::Handle;
     use std::{ffi::OsStr, ptr::null};
     use windows_sys::Win32::{
+        Foundation::LocalFree,
         Security::{
             Authorization::{
                 AUTHZ_ACCESS_REPLY, AUTHZ_ACCESS_REQUEST, AUTHZ_CLIENT_CONTEXT_HANDLE,

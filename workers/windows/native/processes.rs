@@ -174,8 +174,16 @@ impl Desktop {
         let previous = unsafe { GetProcessWindowStation() };
         security::check(unsafe { SetProcessWindowStation(station) })?;
         let desktop_name = security::wide(OsStr::new("worker"))?;
-        result.desktop =
-            unsafe { CreateDesktopW(desktop_name.as_ptr(), null(), null(), 0, 0x1ff, &attributes) };
+        result.desktop = unsafe {
+            CreateDesktopW(
+                desktop_name.as_ptr(),
+                null(),
+                null(),
+                0,
+                0x000f01ff,
+                &attributes,
+            )
+        };
         let failure = std::io::Error::last_os_error();
         if unsafe { SetProcessWindowStation(previous) } == 0 {
             std::process::abort();
@@ -503,8 +511,12 @@ pub struct OwnedProcess {
     job: Job,
     _desktop: Option<Desktop>,
     _directory: Option<security::ResourceDirectory>,
+    launch_diagnostics: Option<serde_json::Value>,
 }
 impl OwnedProcess {
+    pub(crate) fn launch_diagnostics(&self) -> Option<&serde_json::Value> {
+        self.launch_diagnostics.as_ref()
+    }
     pub fn pid(&self) -> u32 {
         self.pid
     }
@@ -566,6 +578,8 @@ impl std::fmt::Display for DrainFailure {
 impl std::error::Error for DrainFailure {}
 #[path = "process_creation_probe.rs"]
 mod creation_probe;
+#[path = "process_launch_probe.rs"]
+mod launch_probe;
 impl Spawn<'_> {
     #[cfg(test)]
     pub(crate) fn inert_fixture(&self) -> Result<OwnedProcess> {
@@ -794,12 +808,13 @@ impl Spawn<'_> {
                 !matches!(creation_context, CreationContext::Process)
             )
         })?;
-        let process = OwnedProcess {
+        let mut process = OwnedProcess {
             process: Handle(information.hProcess),
             pid: information.dwProcessId,
             job,
             _desktop: desktop,
             _directory: None,
+            launch_diagnostics: None,
         };
         let thread = Handle(information.hThread);
         let prepared: Result<()> = (|| {
@@ -822,6 +837,21 @@ impl Spawn<'_> {
             }
             if let Some(capabilities) = capabilities.as_ref() {
                 seal_sandbox_token(&process, capabilities.AppContainerSid)?;
+                if matches!(start, Start::Execute)
+                    && self.executable == std::env::current_exe()?
+                    && self
+                        .arguments
+                        .first()
+                        .is_some_and(|value| value == "isolation-probe")
+                {
+                    process.launch_diagnostics = Some(
+                        match launch_probe::inspect(&process, self.directory, &child_environment) {
+                            Ok(value) => value,
+                            Err(error) => serde_json::json!({"diagnostic_error":
+                            format!("{error:#}").chars().take(256).collect::<String>()}),
+                        },
+                    );
+                }
             }
             #[cfg(test)]
             if self
