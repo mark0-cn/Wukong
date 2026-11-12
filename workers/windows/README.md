@@ -14,6 +14,8 @@ The authenticated native debugger context additionally requires the helper's act
 
 The fixed contained qualification now requires an actual PDB (`DEBUG_SYMTYPE_PDB`), a breakpoint resolved from `wukong_probe!fixture_step`, a non-deadline stop whose SDK breakpoint event matches that ID, and a top stack frame at the breakpoint address with that symbol, in both x64 and x86 sessions. SDK breakpoint events retain their typed breakpoint ID alongside original bytes. Export-only symbols, another stop/event/address or a missing stack fail startup. No arbitrary source, helper, PID or debugger command is admitted. The provided offline Windows 10 VM passed these stronger gates at `7b6c4c0` during initial installation, service restart and OS reboot. The earlier `008d805` result remains limited to its older attachment/register/module gate.
 
+Native input publication canonicalizes the already verified private metadata root and preserves its verbatim Windows spelling in direct SDK calls. Immutable and chunked input members may therefore exceed the legacy 260-character path limit on guests without long-path opt-in. The dedicated Windows 10 VM regression uses a deliberately long private root and verifies successful publication and original content provenance. No global long-path setting or broader directory permission is required.
+
 From an x64 MSVC Native Tools shell at the repository root:
 
 ```powershell

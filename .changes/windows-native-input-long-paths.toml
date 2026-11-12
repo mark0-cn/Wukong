@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Publish Windows worker inputs correctly when hashed private paths exceed the legacy Windows path limit, including offline VMs without global long-path opt-in."
+zh_CN = "修复 Windows worker 私有哈希路径超过旧版路径长度限制时的输入发布，支持未启用全局长路径选项的离线 VM。"

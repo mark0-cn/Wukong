@@ -128,7 +128,9 @@ impl Inputs {
     }
     pub fn open(metadata: &Path, policy: AclPolicy) -> Result<Self> {
         policy.verify(metadata, true)?;
-        let root = metadata.join("native-inputs");
+        // Keep Windows' verified verbatim absolute spelling for direct SDK
+        // publication calls, including on guests without long-path opt-in.
+        let root = metadata.canonicalize()?.join("native-inputs");
         if !root.exists() {
             policy.create_directory(&root)?;
         }

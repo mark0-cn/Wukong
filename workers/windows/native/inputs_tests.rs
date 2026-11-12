@@ -32,6 +32,30 @@ fn fixture() -> Result<(tempfile::TempDir, Inputs)> {
     let inputs = Inputs::open(directory.path(), policy)?;
     Ok((directory, inputs))
 }
+
+#[test]
+fn direct_sdk_publication_handles_members_beyond_the_legacy_windows_path_limit() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let policy = AclPolicy::current_user()?;
+    policy.apply(root.path(), true)?;
+    let metadata = root
+        .path()
+        .join(format!("long-metadata-{}", "x".repeat(100)));
+    policy.create_directory(&metadata)?;
+    let inputs = Inputs::open(&metadata, policy)?;
+    let put = put(owner(), b"known long-path fixture")?;
+    let directory = inputs.directory(&put.declaration)?;
+    let member = directory.join(format!(
+        "{}.declaration.json",
+        digest(&put.declaration.path)?
+    ));
+    assert!(member.to_string_lossy().len() > 260);
+    inputs.prepare(&put)?;
+    let mut result = reply(&put);
+    inputs.complete(&put, &mut result)?;
+    assert_eq!(result["native_input"]["sha256"], result["sha256"]);
+    Ok(())
+}
 #[test]
 fn native_bytes_and_receipts_are_bound_to_the_controller_owner_and_survive_reopen() -> Result<()> {
     let (directory, inputs) = fixture()?;
