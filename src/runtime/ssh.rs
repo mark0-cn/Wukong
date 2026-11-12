@@ -224,22 +224,34 @@ fn client_path(path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// Invoked only by the explicitly selected disposable Windows CI fixture.
-    /// This exercises the real controller transport, never target execution.
+    /// The installer fixture retains its hosted-machine isolation checks.
     #[tokio::test]
     #[ignore = "requires an installed worker on a dedicated GitHub-hosted Windows runner"]
     async fn installed_windows_worker_controller_acceptance() -> Result<()> {
+        installed_controller_acceptance("WUKONG_INSTALLED_WORKER_TEST", true).await
+    }
+
+    /// Only the controller runs locally; the enrolled remote VM is already installed.
+    #[tokio::test]
+    #[ignore = "requires an explicitly enrolled dedicated remote Windows test VM"]
+    async fn remote_installed_windows_worker_controller_acceptance() -> Result<()> {
+        installed_controller_acceptance("WUKONG_REMOTE_WORKER_TEST", false).await
+    }
+
+    async fn installed_controller_acceptance(profile_variable: &str, hosted: bool) -> Result<()> {
         use crate::runtime::{
             RuntimeClient, RuntimeConfig,
             protocol::{EnvironmentLease, WorkerError, WorkerErrorKind},
         };
         use serde_json::{Value, json};
-        ensure!(
-            cfg!(windows)
-                && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
-                && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted"),
-            "installed-worker acceptance requires an isolated hosted Windows runner"
-        );
+        if hosted {
+            ensure!(
+                cfg!(windows)
+                    && std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true")
+                    && std::env::var("RUNNER_ENVIRONMENT").as_deref() == Ok("github-hosted"),
+                "installed-worker acceptance requires an isolated hosted Windows runner"
+            );
+        }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Profile {
@@ -249,8 +261,7 @@ mod tests {
             minimum_epoch: u64,
         }
         let path = PathBuf::from(
-            std::env::var_os("WUKONG_INSTALLED_WORKER_TEST")
-                .context("missing dedicated acceptance profile")?,
+            std::env::var_os(profile_variable).context("missing dedicated acceptance profile")?,
         );
         let mut bytes = Vec::new();
         fs::File::open(path)?
@@ -262,18 +273,24 @@ mod tests {
             .config
             .ssh_host
             .as_deref()
-            .context("missing hosted management address")?
+            .context("missing worker management address")?
             .parse()?;
         ensure!(
             !address.is_loopback()
                 && !address.is_unspecified()
                 && !address.is_multicast()
                 && profile.config.managed_ssh.is_some(),
-            "hosted acceptance requires an enrolled local IPv4 worker"
+            "installed-worker acceptance requires an enrolled non-loopback IPv4 worker"
         );
-        // Prove this is an address assigned to the dedicated test machine,
-        // rather than allowing the fixture to connect to another installation.
-        drop(std::net::UdpSocket::bind((address, 0))?);
+        if hosted {
+            // The installer fixture must address its own dedicated test machine.
+            drop(std::net::UdpSocket::bind((address, 0))?);
+        } else {
+            ensure!(
+                address.is_private(),
+                "remote VM acceptance requires an enrolled private IPv4 address"
+            );
+        }
         let client = RuntimeClient::connect(profile.config).await?;
         ensure!(
             client.identity().package_sha256 == profile.manifest_sha256,
@@ -415,7 +432,12 @@ mod tests {
         client
             .call("environment.lease.release", json!({"lease":second}))
             .await?;
-        let report: Value = json!({"passed":true,"scope":"hosted_native_service_and_controller_ssh",
+        let scope = if hosted {
+            "hosted_native_service_and_controller_ssh"
+        } else {
+            "enrolled_remote_vm_and_controller_ssh"
+        };
+        let report: Value = json!({"passed":true,"scope":scope,
             "identity":client.identity(),"daemon_id":ping["daemon_id"],"daemon_pid":ping["daemon_pid"],
             "first_epoch":first.epoch,"last_epoch":second.epoch,"artifact_sha256":artifact["sha256"],
             "native_broker":doctor["native_broker"],

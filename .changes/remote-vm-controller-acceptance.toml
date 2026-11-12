@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Reuse installed-worker controller acceptance against an explicitly enrolled private remote VM, retaining hosted-installer isolation guards and recording dedicated Windows 10 offline bootstrap and pinned SSH qualification limits."
+zh_CN = "复用已安装 worker 的控制端验收，支持显式登记的私有远程 VM，保留托管安装隔离检查，并记录专用 Windows 10 离线引导和固定主机公钥 SSH 验证的范围限制。"
