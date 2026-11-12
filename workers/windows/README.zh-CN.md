@@ -2,6 +2,8 @@
 
 [English](README.md) · 简体中文
 
+内部资源账本现在还可为活动资源保留带类型的调试控制和交互写入副作用。它检查资源类型及 run/worker 绑定，串行化待定变更，保留稳定请求指纹，并拒绝关闭中或已关闭资源的新工作。已完成的变更可再次读取，但不会重新开始；中断的变更在数据库重新打开后仍保持待定，仅在归属运行时提供清理确认后成为 `uncertain_closed`。恢复可读取原始启动副作用、归属、类型、规格及阶段，包含旧系统启动留下的未完成意图。启动意图缺失/歧义或载荷指纹变化时拒绝继续。这些记录描述持久意图，不是操作系统存活或清理的观察证据。原生运行时使用前仍须验证当前控制器租约；执行 RPC 接入仍待完成。
+
 启动资格检查还在每个 target/debugger AppContainer 中包含固定的自身 DACL 对抗探针。检查真实令牌为零能力且仅保留遍历特权后，密封子进程通过自身进程和线程伪句柄，将两者的 DACL 替换为 Everyone/完全访问，并读回验证。随后对仍存活的 System 资源宿主分别请求十种进程权限和九种线程权限，覆盖内存访问、句柄复制、线程创建/上下文/令牌修改、终止及安全修改；只有 `ERROR_ACCESS_DENIED` 才能通过。不对其他进程实际行使任何取得的权限。System 父进程将报告中的 PID/TID 与自己的当前身份核对。私有文件、scratch/guard 及关联网络检查在自身 DACL 修改之后执行，随后沿用已有 Job/profile/scratch 清理。这验证可变自身 DACL 下的指定边界，不证明进程 ACL 不可变或完整对抗隔离。[伪句柄约定](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocess)和[安全 API](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo)说明了 SDK 机制。生产执行继续禁用。
 
 2026-11-13，用户提供的离线 Windows 10 VM 在源码 `f44a562` 的全新安装及服务重启中通过此自身 DACL 门槛。两种角色都实际替换 DACL、取得全部 19 项逐项访问拒绝，并通过随后的私有文件/根目录/网络检查和清理；隔离 x64/x86 PDB 资格检查也通过。回执 SHA256 分别为 `881323e912abee09d15786097480fb5350e8dad932550d189b208d01c4dd623a` 和 `5b5dfb8b73ed30028719bd800ba74a3860f09ce0ae3c8de8e01ac1d61859f4f0`。全部 13 份原始回执、宿主/探针/调试器日志及公开连接记录，经独立固定指纹 SFTP 传回并核对大小/SHA256。真实控制器 SSH 验收在重启前后均通过，租约 epoch 为 1–4，不可变/分块输入均取得原生证明。VM 没有默认路由，安装 ISO 已卸载，之前已通过验收的服务均保留。此结果不证明全部对抗场景、通用资源执行或完整离线维护生命周期通过。

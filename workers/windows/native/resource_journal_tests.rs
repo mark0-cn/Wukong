@@ -42,6 +42,239 @@ fn cleanup() -> Cleanup {
     }
 }
 
+fn complete_start(journal: &mut Journal) -> Result<(String, String)> {
+    let (effect, resource) = reserve(journal, &owner(), "start")?;
+    let ticket = journal.begin(&effect)?;
+    journal.complete(
+        &ticket,
+        &Outcome::Result {
+            value: json!({"session_id":resource}),
+        },
+    )?;
+    Ok((effect, resource))
+}
+fn mutation(journal: &mut Journal, request: &str, resource: &str) -> Result<Reservation> {
+    journal.reserve_mutation(
+        &owner(),
+        request,
+        resource,
+        MutationKind::DebugControl,
+        &json!({"action":"continue"}),
+    )
+}
+fn reserved_effect(reservation: Reservation) -> Result<String> {
+    match reservation {
+        Reservation::Reserved { effect, .. } => Ok(effect),
+        _ => anyhow::bail!("expected a reserved fixture effect"),
+    }
+}
+
+#[test]
+fn recovery_view_preserves_original_intent_and_owner_without_reopening_old_boot_work() -> Result<()>
+{
+    let (root, policy, mut journal) = fixture()?;
+    assert!(journal.active()?.is_none());
+    let (effect, resource) = reserve(&mut journal, &owner(), "start")?;
+    let initial = journal.active()?.context("missing preparing intent")?;
+    assert_eq!(
+        initial,
+        ResourceRecord {
+            id: resource.clone(),
+            phase: Phase::Preparing,
+            start_effect: effect.clone(),
+            owner: owner(),
+            kind: ResourceKind::Debugger,
+            specification: json!({"target_sha256":"d".repeat(64),"args":[]})
+        }
+    );
+    let ticket = journal.begin(&effect)?;
+    journal.complete(
+        &ticket,
+        &Outcome::Result {
+            value: json!({"session_id":resource}),
+        },
+    )?;
+    assert_eq!(journal.active()?.unwrap().phase, Phase::Live);
+    journal.start_closing(&resource)?;
+    drop(journal);
+    let mut current = owner();
+    current.identity.boot_id = format!("windows:{}:41", "b".repeat(32));
+    let mut journal = Journal::with_policy(root.path(), current.identity.clone(), policy)?;
+    let persisted = journal.active()?.context("lost old-boot resource intent")?;
+    assert_eq!(persisted.phase, Phase::Closing);
+    assert_eq!(persisted.owner, initial.owner);
+    assert_eq!(persisted.specification, initial.specification);
+    assert!(journal.resource(&current, &resource).is_err());
+    assert!(!journal.idle()?);
+    journal.close(&resource, cleanup())?;
+    assert!(journal.active()?.is_none());
+    Ok(())
+}
+
+#[test]
+fn live_mutations_are_serialized_and_cached_across_completion_and_resource_close() -> Result<()> {
+    let (_root, _policy, mut journal) = fixture()?;
+    let (_, resource) = complete_start(&mut journal)?;
+    let first = reserved_effect(mutation(&mut journal, "continue-1", &resource)?)?;
+    assert!(mutation(&mut journal, "continue-2", &resource).is_err());
+    let ticket = journal.begin(&first)?;
+    assert!(journal.begin(&first).is_err());
+    assert!(mutation(&mut journal, "continue-2", &resource).is_err());
+    let result = Outcome::Result {
+        value: json!({"state":"stopped"}),
+    };
+    journal.complete(&ticket, &result)?;
+    assert_eq!(
+        mutation(&mut journal, "continue-1", &resource)?,
+        Reservation::Completed {
+            effect: first.clone(),
+            resource: resource.clone(),
+            phase: Phase::Live,
+            outcome: result.clone()
+        }
+    );
+    assert!(
+        journal
+            .reserve_mutation(
+                &owner(),
+                "continue-1",
+                &resource,
+                MutationKind::DebugControl,
+                &json!({"action":"step"})
+            )
+            .is_err()
+    );
+    let second = reserved_effect(mutation(&mut journal, "continue-2", &resource)?)?;
+    let ticket = journal.begin(&second)?;
+    journal.complete(&ticket, &result)?;
+    assert!(
+        journal
+            .reserve_mutation(
+                &Owner {
+                    run_id: "other-run".into(),
+                    ..owner()
+                },
+                "stolen",
+                &resource,
+                MutationKind::DebugControl,
+                &json!({})
+            )
+            .is_err()
+    );
+    journal.start_closing(&resource)?;
+    assert!(mutation(&mut journal, "after-closing", &resource).is_err());
+    journal.close(&resource, cleanup())?;
+    assert_eq!(
+        mutation(&mut journal, "continue-1", &resource)?,
+        Reservation::Completed {
+            effect: first,
+            resource: resource.clone(),
+            phase: Phase::Closed,
+            outcome: result
+        }
+    );
+    assert!(mutation(&mut journal, "after-close", &resource).is_err());
+    assert!(journal.idle()?);
+    Ok(())
+}
+
+#[test]
+fn interrupted_live_mutation_remains_pending_until_cleanup_and_rejects_old_tickets() -> Result<()> {
+    let (root, policy, mut journal) = fixture()?;
+    let (_, resource) = complete_start(&mut journal)?;
+    let effect = reserved_effect(mutation(&mut journal, "continue", &resource)?)?;
+    let ticket = journal.begin(&effect)?;
+    drop(journal);
+    let mut journal = Journal::with_policy(root.path(), owner().identity, policy)?;
+    assert_eq!(
+        mutation(&mut journal, "continue", &resource)?,
+        Reservation::Pending {
+            effect: effect.clone(),
+            resource: resource.clone(),
+            phase: Phase::Live
+        }
+    );
+    assert!(journal.begin(&effect).is_err());
+    assert!(mutation(&mut journal, "another", &resource).is_err());
+    assert!(
+        journal
+            .complete(
+                &ticket,
+                &Outcome::Result {
+                    value: json!("late")
+                }
+            )
+            .is_err()
+    );
+    assert_eq!(journal.active()?.unwrap().id, resource);
+    journal.start_closing(&resource)?;
+    journal.close(&resource, cleanup())?;
+    assert_eq!(
+        mutation(&mut journal, "continue", &resource)?,
+        Reservation::Completed {
+            effect,
+            resource,
+            phase: Phase::Closed,
+            outcome: Outcome::UncertainClosed
+        }
+    );
+    assert!(journal.active()?.is_none());
+    Ok(())
+}
+
+#[test]
+fn mutation_kind_and_recovery_intent_fingerprint_are_not_schema_only_checks() -> Result<()> {
+    let (_root, _policy, mut journal) = fixture()?;
+    let resource = match journal.reserve_start(
+        &owner(),
+        "interactive",
+        ResourceKind::Interactive,
+        &json!({"args":[]}),
+    )? {
+        Reservation::Reserved {
+            effect, resource, ..
+        } => {
+            let ticket = journal.begin(&effect)?;
+            journal.complete(&ticket, &Outcome::Result { value: json!({}) })?;
+            resource
+        }
+        _ => unreachable!(),
+    };
+    assert!(mutation(&mut journal, "wrong-kind", &resource).is_err());
+    let effect = reserved_effect(journal.reserve_mutation(
+        &owner(),
+        "write",
+        &resource,
+        MutationKind::InteractiveWrite,
+        &json!({"data_base64":"YQ=="}),
+    )?)?;
+    let ticket = journal.begin(&effect)?;
+    journal.complete(
+        &ticket,
+        &Outcome::Result {
+            value: json!({"written":1}),
+        },
+    )?;
+    journal.connection.execute("UPDATE effects SET payload=json_set(payload,'$.specification','changed') WHERE json_extract(payload,'$.operation')='start'",[])?;
+    assert!(
+        journal
+            .active()
+            .unwrap_err()
+            .to_string()
+            .contains("fingerprint")
+    );
+    journal.connection.execute("UPDATE effects SET payload=json_set(payload,'$.operation','missing') WHERE json_extract(payload,'$.operation')='start'",[])?;
+    assert!(
+        journal
+            .active()
+            .unwrap_err()
+            .to_string()
+            .contains("recoverable")
+    );
+    assert!(!journal.idle()?);
+    Ok(())
+}
+
 #[test]
 fn protected_database_and_reopen_support_paths_beyond_the_legacy_windows_limit() -> Result<()> {
     let root = tempfile::tempdir()?;

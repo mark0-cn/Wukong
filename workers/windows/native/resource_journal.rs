@@ -51,6 +51,32 @@ pub enum ResourceKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum MutationKind {
+    DebugControl,
+    InteractiveWrite,
+}
+
+/// Persisted intent for native recovery, not evidence that its OS objects exist.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResourceRecord {
+    pub id: String,
+    pub phase: Phase,
+    pub start_effect: String,
+    pub owner: Owner,
+    pub kind: ResourceKind,
+    pub specification: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StartPayload {
+    operation: String,
+    kind: ResourceKind,
+    specification: Value,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Phase {
     Preparing,
     Live,
@@ -254,6 +280,89 @@ impl Journal {
     pub fn idle(&self) -> Result<bool> {
         Ok(self.connection.query_row("SELECT NOT EXISTS(SELECT 1 FROM resources WHERE phase<>'closed') AND NOT EXISTS(SELECT 1 FROM effects WHERE state<>'completed')",[],|row|row.get(0))?)
     }
+    /// System recovery can observe old bindings, but must reconcile their OS
+    /// resources before close(); observation never reopens or authorizes work.
+    pub fn active(&self) -> Result<Option<ResourceRecord>> {
+        let record = resource_record(&self.connection, None)?;
+        ensure!(
+            record.is_some() || self.idle()?,
+            "native resource state lacks a recoverable start intent"
+        );
+        Ok(record)
+    }
+    pub fn resource(&self, owner: &Owner, id: &str) -> Result<ResourceRecord> {
+        self.owner(owner)?;
+        let record =
+            resource_record(&self.connection, Some(id))?.context("native resource is absent")?;
+        ensure!(
+            record.owner.identity == owner.identity && record.owner.run_id == owner.run_id,
+            "native resource belongs to another worker binding or run"
+        );
+        Ok(record)
+    }
+    pub fn reserve_mutation(
+        &mut self,
+        owner: &Owner,
+        request: &str,
+        resource: &str,
+        kind: MutationKind,
+        specification: &Value,
+    ) -> Result<Reservation> {
+        let record = self.resource(owner, resource)?;
+        ensure!(
+            matches!(
+                (record.kind, kind),
+                (ResourceKind::Debugger, MutationKind::DebugControl)
+                    | (ResourceKind::Interactive, MutationKind::InteractiveWrite)
+            ),
+            "native mutation does not match the resource kind"
+        );
+        bounded_identifier(request, 256)?;
+        let payload = bounded_json(
+            &serde_json::json!({"operation":"mutation","resource":resource,"kind":kind,"specification":specification}),
+        )?;
+        let effect = effect_id(owner, request)?;
+        let fingerprint = digest(&("native.resource.specification.v1", &payload))?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        check_run(
+            &transaction,
+            &owner.run_id,
+            &serde_json::to_string(&owner.identity)?,
+        )?;
+        if let Some(existing) = existing(&transaction, &effect, &fingerprint)? {
+            return Ok(existing);
+        }
+        ensure!(
+            record.phase == Phase::Live,
+            "native resource is not live for a new mutation"
+        );
+        ensure!(
+            transaction.query_row(
+                "SELECT NOT EXISTS(SELECT 1 FROM effects WHERE resource=?1 AND state<>'completed')",
+                [resource],
+                |row| row.get::<_, bool>(0)
+            )?,
+            "native resource already has an active or uncertain mutation"
+        );
+        ensure!(
+            transaction.query_row("SELECT count(*) FROM effects", [], |row| row
+                .get::<_, i64>(0))?
+                < MAX_EFFECTS,
+            "native resource effect budget exhausted"
+        );
+        transaction.execute(
+            "INSERT INTO effects VALUES(?1,?2,?3,?4,?5,'reserved',NULL,NULL)",
+            params![effect, resource, fingerprint, payload, bounded_json(owner)?],
+        )?;
+        transaction.commit()?;
+        Ok(Reservation::Reserved {
+            effect,
+            resource: resource.into(),
+            phase: Phase::Live,
+        })
+    }
     pub fn reserve_start(
         &mut self,
         owner: &Owner,
@@ -315,7 +424,7 @@ impl Journal {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (resource, actor): (String,String) = transaction.query_row("SELECT e.resource,e.actor FROM effects e JOIN resources r ON r.id=e.resource WHERE e.id=?1 AND e.state='reserved' AND r.phase='preparing'",[effect],|row|Ok((row.get(0)?,row.get(1)?)))
+        let (resource, actor): (String,String) = transaction.query_row("SELECT e.resource,e.actor FROM effects e JOIN resources r ON r.id=e.resource WHERE e.id=?1 AND e.state='reserved' AND r.phase IN ('preparing','live')",[effect],|row|Ok((row.get(0)?,row.get(1)?)))
             .context("native effect already started or settled; reconcile instead of replaying")?;
         ensure!(
             serde_json::from_str::<Owner>(&actor)?.identity == self.binding,
@@ -411,6 +520,59 @@ impl Journal {
         transaction.commit()?;
         Ok(())
     }
+}
+
+fn resource_record(connection: &Connection, id: Option<&str>) -> Result<Option<ResourceRecord>> {
+    struct StoredStart {
+        id: String,
+        phase: String,
+        run: String,
+        start_effect: String,
+        actor: String,
+        payload: String,
+        fingerprint: String,
+        count: i64,
+    }
+    let row: Option<StoredStart> = connection.query_row(
+        "SELECT r.id,r.phase,r.run_id,e.id,e.actor,e.payload,e.fingerprint,count(*) OVER () FROM resources r JOIN effects e ON e.resource=r.id
+         WHERE ((?1 IS NULL AND r.phase<>'closed') OR r.id=?1) AND json_extract(e.payload,'$.operation')='start'",
+        [id],|row|Ok(StoredStart{id:row.get(0)?,phase:row.get(1)?,run:row.get(2)?,start_effect:row.get(3)?,actor:row.get(4)?,payload:row.get(5)?,fingerprint:row.get(6)?,count:row.get(7)?})).optional()?;
+    let Some(StoredStart {
+        id,
+        phase,
+        run,
+        start_effect,
+        actor,
+        payload,
+        fingerprint,
+        count,
+    }) = row
+    else {
+        return Ok(None);
+    };
+    ensure!(count == 1, "native resource has ambiguous start intents");
+    ensure!(
+        actor.len() <= MAX_JSON && payload.len() <= MAX_JSON,
+        "native resource intent exceeds record bounds"
+    );
+    ensure!(
+        digest(&("native.resource.specification.v1", &payload))? == fingerprint,
+        "native resource start fingerprint differs"
+    );
+    let owner: Owner = serde_json::from_str(&actor)?;
+    let payload: StartPayload = serde_json::from_str(&payload)?;
+    ensure!(
+        owner.run_id == run && payload.operation == "start",
+        "native resource intent scope differs"
+    );
+    Ok(Some(ResourceRecord {
+        id,
+        phase: Phase::read(&phase)?,
+        start_effect,
+        owner,
+        kind: payload.kind,
+        specification: payload.specification,
+    }))
 }
 
 fn regular(file: &fs::File, maximum: u64) -> Result<()> {
