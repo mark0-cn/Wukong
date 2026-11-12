@@ -8,10 +8,11 @@ fn main() -> Result<()> {
     ensure!(cfg!(windows), "native Windows worker requires Windows");
     let args: Vec<_> = std::env::args_os().collect();
     #[cfg(windows)]
-    if args.len() == 4 && args[1] == "resource-selftest" {
+    if args.len() == 5 && args[1] == "resource-selftest" {
         let report = wukong_windows_worker::resource_host::selftest(
             args[2].to_str().context("invalid resource installation")?,
             Path::new(&args[3]),
+            args[4].to_str().context("invalid qualification identity")?,
         )?;
         println!("{report}");
         return Ok(());

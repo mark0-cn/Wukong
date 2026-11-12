@@ -83,11 +83,19 @@ if($Mode -eq 'Block'){
 if(-not (Test-Path -LiteralPath $marker)){throw 'No cold preflight proof; refusing resource cleanup or restart'}
 $proof=Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
 if($proof.installation_id -ne $fixture.installation_id){throw 'Fixture ownership proof changed'}
-if($Mode -eq 'Isolation'){
-    $receipt=Join-Path $ownedRoot ('metadata\isolation-selftest-'+$fixture.manifest_sha256+'.json')
-    if((Get-Item -LiteralPath $receipt).Length -gt 8192){throw 'Resource receipt exceeds bound'}
+function Read-ResourceReceipt([string]$receipt){
+    $file=Get-Item -LiteralPath $receipt
+    if($file.Length -gt 8192 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Resource receipt exceeds bound or is a reparse point'}
     $value=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
-    if($value.schema -ne 3 -or -not $value.passed -or $value.scope -cne 'owned_appcontainer_trusted_probes' -or $value.manifest_sha256 -cne $fixture.manifest_sha256 -or $value.production_execution -or @($value.dbgeng).Count -ne 2){throw 'Resource receipt differs'}
+    if($value.schema -ne 4 -or -not $value.passed -or $value.scope -cne 'owned_appcontainer_trusted_probes' -or $value.manifest_sha256 -cne $fixture.manifest_sha256 -or $value.production_execution -or @($value.dbgeng).Count -ne 2 -or $value.qualification_id -cnotmatch '^[0-9a-f]{32}$'){throw 'Resource receipt differs'}
+    if($file.Name -cne ('isolation-selftest-'+$fixture.manifest_sha256+'-'+$value.qualification_id+'.json')){throw 'Resource receipt identity differs from its file'}
+    return $value
+}
+$receiptPattern='isolation-selftest-'+$fixture.manifest_sha256+'-*.json'
+if($Mode -eq 'Isolation'){
+    $receipts=@(Get-ChildItem -LiteralPath (Join-Path $ownedRoot 'metadata') -Filter $receiptPattern -File)
+    if($receipts.Count -ne 1){throw 'Initial startup requires one fresh resource qualification'}
+    $value=Read-ResourceReceipt $receipts[0].FullName
     $value | ConvertTo-Json -Depth 6 -Compress
     exit 0
 }
@@ -104,9 +112,13 @@ if($service){
 if($Mode -eq 'Restart'){
     if(-not $service){throw 'Installed fixture service disappeared'}
     if(Test-Path -LiteralPath (Join-Path $ownedRoot 'metadata/last-service-error.txt')){throw 'Native service recorded a lifecycle failure'}
+    $before=@(Get-ChildItem -LiteralPath (Join-Path $ownedRoot 'metadata') -Filter $receiptPattern -File | Select-Object -ExpandProperty Name)
     $service.Start()
     $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running,[TimeSpan]::FromSeconds(210))
-    @{restarted=$true;scope='owned_native_service'} | ConvertTo-Json -Compress
+    $fresh=@(Get-ChildItem -LiteralPath (Join-Path $ownedRoot 'metadata') -Filter $receiptPattern -File | Where-Object {$_.Name -cnotin $before})
+    if($fresh.Count -ne 1){throw 'Service restart did not perform one fresh resource qualification'}
+    $qualification=Read-ResourceReceipt $fresh[0].FullName
+    @{restarted=$true;scope='owned_native_service';qualification_id=$qualification.qualification_id;fresh_isolation_qualification=$true} | ConvertTo-Json -Compress
     exit 0
 }
 if($service){

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Run Windows resource isolation qualification on every service start and retain a new manifest-bound receipt. A previous successful check no longer skips current OS policy checks; production execution remains disabled."
+zh_CN = "Windows 服务每次启动都会重新检查资源隔离，并保留新生成、绑定清单的回执；先前的成功结果不能跳过当前系统策略检查，生产执行保持禁用。"

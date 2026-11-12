@@ -106,8 +106,15 @@ pub fn probe(metadata: &Path, worker: &Path, port: u16, expected_sid: &str) -> R
 
 /// Internal startup qualification; it executes only this sealed binary's fixed
 /// probe branch. It is not a model target execution API or production gate.
-pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
+pub fn selftest(installation: &str, configuration: &Path, qualification: &str) -> Result<Value> {
     security::require_system()?;
+    ensure!(
+        qualification.len() == 32
+            && qualification
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+        "invalid resource qualification identity"
+    );
     let (deployment, root) = deployment::load(configuration)?;
     ensure!(
         deployment.installation_id == installation,
@@ -162,8 +169,8 @@ pub fn selftest(installation: &str, configuration: &Path) -> Result<Value> {
         )?);
     }
     Ok(
-        json!({"schema":3,"passed":true,"scope":"owned_appcontainer_trusted_probes",
-        "manifest_sha256":manifest.sha256(),"personas":reports,"dbgeng":debuggers,"production_execution":false}),
+        json!({"schema":4,"passed":true,"scope":"owned_appcontainer_trusted_probes",
+        "qualification_id":qualification,"manifest_sha256":manifest.sha256(),"personas":reports,"dbgeng":debuggers,"production_execution":false}),
     )
 }
 fn check_persona(
@@ -308,19 +315,16 @@ pub(crate) async fn qualify(
     mut tick: impl FnMut() -> Result<()>,
 ) -> Result<()> {
     let private = AclPolicy::private_vm();
-    let receipt = root
-        .join("metadata")
-        .join(format!("isolation-selftest-{}.json", manifest.sha256()));
-    if receipt.exists() {
-        private.verify(&receipt, false)?;
-        let value: Value = serde_json::from_slice(&deployment::read_bytes(&receipt, 8192)?)?;
-        validate_resource_report(&value, manifest.sha256())?;
-        return Ok(());
-    }
-    let log_path = root.join("metadata").join(format!(
-        "isolation-host-{}.log",
-        hex::encode(crate::accounts::random_bytes::<16>()?)
+    // Each service epoch must observe current OS policy. A prior manifest-bound
+    // success is history, never evidence of this process's startup qualification.
+    let qualification = hex::encode(crate::accounts::random_bytes::<16>()?);
+    let receipt = root.join("metadata").join(format!(
+        "isolation-selftest-{}-{qualification}.json",
+        manifest.sha256()
     ));
+    let log_path = root
+        .join("metadata")
+        .join(format!("isolation-host-{qualification}.log"));
     let log = private.create_file(&log_path)?;
     let input = fs::File::open("NUL")?;
     let environment = crate::environment::system(root)?;
@@ -330,6 +334,7 @@ pub(crate) async fn qualify(
             "resource-selftest".into(),
             deployment.installation_id.clone().into(),
             root.join("metadata/deployment.json").into_os_string(),
+            qualification.clone().into(),
         ],
         directory: root,
         environment: &environment,
@@ -357,15 +362,16 @@ pub(crate) async fn qualify(
         String::from_utf8_lossy(&bytes)
     );
     let value: Value = serde_json::from_slice(&bytes)?;
-    validate_resource_report(&value, manifest.sha256())?;
+    validate_resource_report(&value, manifest.sha256(), &qualification)?;
     deployment::write_new_json(&receipt, &value, &private)
 }
-fn validate_resource_report(value: &Value, manifest: &str) -> Result<()> {
+fn validate_resource_report(value: &Value, manifest: &str, qualification: &str) -> Result<()> {
     ensure!(
-        value["schema"] == 3
+        value["schema"] == 4
             && value["passed"] == true
             && value["scope"] == "owned_appcontainer_trusted_probes"
             && value["manifest_sha256"] == manifest
+            && value["qualification_id"] == qualification
             && value["production_execution"] == false,
         "resource qualification receipt differs"
     );
@@ -421,10 +427,44 @@ mod tests {
             "inert unit tests must not run as System"
         );
         let root = tempfile::tempdir()?;
-        let error =
-            selftest(&"a".repeat(32), &root.path().join("not-a-deployment.json")).unwrap_err();
+        let error = selftest(
+            &"a".repeat(32),
+            &root.path().join("not-a-deployment.json"),
+            &"b".repeat(32),
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("System"));
         assert_eq!(fs::read_dir(root.path())?.count(), 0);
         Ok(())
+    }
+
+    #[test]
+    fn a_manifest_only_or_previous_service_qualification_never_admits_current_startup() {
+        let manifest = "a".repeat(64);
+        let current = "b".repeat(32);
+        let previous = "c".repeat(32);
+        let mut report = json!({"schema":3,"passed":true,"scope":"owned_appcontainer_trusted_probes",
+            "manifest_sha256":manifest,"production_execution":false});
+        assert!(
+            validate_resource_report(&report, &manifest, &current)
+                .unwrap_err()
+                .to_string()
+                .contains("receipt differs")
+        );
+        report["schema"] = json!(4);
+        report["qualification_id"] = json!(previous);
+        assert!(
+            validate_resource_report(&report, &manifest, &current)
+                .unwrap_err()
+                .to_string()
+                .contains("receipt differs")
+        );
+        report["qualification_id"] = json!(current);
+        assert!(
+            validate_resource_report(&report, &manifest, &current)
+                .unwrap_err()
+                .to_string()
+                .contains("no personas")
+        );
     }
 }
