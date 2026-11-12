@@ -8,11 +8,11 @@
 
 对应关系比较映射大小、时间戳、双方均提供的校验和及支持的 RSDS GUID/age；同名模块冲突或候选不唯一时失败。缺少 CodeView 时明确记录 `module_metadata_only` 缺口。匹配始终记录 `byte_identity_verified = false`：模块元数据不证明可执行字节相同。符号只能来自配置缓存目录下的简单、非设备文件名；忽略内嵌的生产者目录、符号服务器及环境路径。存在的 PDB 必须符合预期 GUID/age 和内容哈希；缺失符号保持明确状态。SDK 文件索引身份与符号成功加载分别记录，改名为 `.pdb` 的映像会被拒绝。[可信调试器夹具](../tests/README.zh-CN.md)覆盖两种架构，保留原生格式拒绝结果和原始转录。这些检查不证明受限进程已加载 PDB、旧式完整用户态 dump 已通过、有效内核 dump 已被拒绝，或尚未完成的生产 broker 可用。
 
-当前服务每次启动都会生成全新的 128 位资格检查 ID，在 worker/SSH 就绪前运行已签封的 System 资源宿主；同一次系统启动中的服务重启也须重新运行。schema4 隔离回执绑定该 ID 与精确清单，缺失或旧 ID 无法通过验证。每份回执以 `metadata/isolation-selftest-MANIFEST-QUALIFICATION.json` 新建，保留此前证据而不覆盖。历史上仅绑定清单的回执不会跳过探针。此实现复用已有进程/Job 资格检查路径，不另写系统启动身份实现。普通依赖自检的缓存单独保留；重新进行资源检查不代表生产执行、生命周期恢复或系统重启验收成功。专用验收入口要求服务重启后出现新的资格回执；该改动尚未重跑专用验收。
+当前服务每次启动都会生成全新的 128 位资格检查 ID，在 worker/SSH 就绪前运行已签封的 System 资源宿主；同一次系统启动中的服务重启也须重新运行。schema4 隔离回执绑定该 ID 与精确清单，缺失或旧 ID 无法通过验证。每份回执以 `metadata/isolation-selftest-MANIFEST-QUALIFICATION.json` 新建，保留此前证据而不覆盖。历史上仅绑定清单的回执不会跳过探针。此实现复用已有进程/Job 资格检查路径，不另写系统启动身份实现。普通依赖自检的缓存单独保留；重新进行资源检查不代表生产执行、生命周期恢复或系统重启验收成功。专用验收入口要求服务重启后出现新的资格回执。用户提供的 VM 已在 `7b6c4c0` 通过该检查和系统重启资格检查；未重跑托管 runner 夹具。
 
 经过认证的原生调试上下文还要求辅助程序的实际令牌属于零 capability 的 AppContainer，且仅保留已启用的 `SeChangeNotifyPrivilege`；在读取元数据前及加载引擎前分别检查。挂起子进程准入、固定探针和辅助程序复用 `native/token_policy.rs` 中的 SDK 检查。普通令牌不能仅凭上下文数据选择此策略。在该受限模式中，网络边界由操作系统的 AppContainer 网络隔离提供；省略 DbgEng 的 `DISALLOW_NETWORK_PATHS` DOS 盘符推断，因为它在 Windows 10 VM 中将已签封的本地缓存判为不可用。普通辅助程序模式仍保留该标志。两种模式都保留无链接的本地盘符路径、显式符号缓存、精确符号匹配，禁用环境、生产者和映像目录符号搜索及 SymSrv 自动检测，清空源码路径并禁止 shell 命令。参见微软的 [AppContainer 网络隔离](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation#network-isolation)及[引擎选项约定](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/debug-engopt-xxx)。
 
-固定的受限资格检查现要求 x64、x86 会话均加载真正的 PDB（`DEBUG_SYMTYPE_PDB`），从 `wukong_probe!fixture_step` 解析断点，并出现非超时停止，其 SDK 断点事件须匹配该断点 ID，栈顶帧须位于断点地址且含该符号。SDK 断点事件在原始字节之外还保留类型化的断点 ID。仅导出符号、其他停止/事件/地址或缺失的栈均不能通过启动验收。不准入任意来源、辅助程序、PID 或调试器命令。这些加强后的门槛仍待专用 VM 验证；此前 `008d805` 的通过结果仍仅覆盖当时较弱的附加、寄存器与模块检查。
+固定的受限资格检查现要求 x64、x86 会话均加载真正的 PDB（`DEBUG_SYMTYPE_PDB`），从 `wukong_probe!fixture_step` 解析断点，并出现非超时停止，其 SDK 断点事件须匹配该断点 ID，栈顶帧须位于断点地址且含该符号。SDK 断点事件在原始字节之外还保留类型化的断点 ID。仅导出符号、其他停止/事件/地址或缺失的栈均不能通过启动验收。不准入任意来源、辅助程序、PID 或调试器命令。用户提供的离线 Windows 10 VM 已在 `7b6c4c0` 的首次安装、服务重启及系统重启中通过这些加强后的门槛；此前 `008d805` 的通过结果仍仅覆盖当时较弱的附加、寄存器与模块检查。
 
 在仓库根目录的 x64 MSVC Native Tools shell 中运行：
 
@@ -129,7 +129,7 @@ SCM 服务登记及固定原生子进程启动采用相同的本地路径规范�
 
 自有角色 profile 加载后，资源宿主通过禁用继承的 Windows `CreateEnvironmentBlock` 获取 `APPDATA`、`LOCALAPPDATA` 和 `USERPROFILE`。仅将这三个已有、无链接的本地目录补充至子进程环境，不复制账户 PATH 或任意其他变量，也不修改创建者环境。全新进程测试从缺少这些变量的环境启动，解析当前可信测试身份的真实 profile 路径并检查筛选，不创建账户或 profile。真实安装中的始终挂起对照表明，仅补充子进程 profile 路径即可创建进程，缺少这些路径时返回错误203。随后父进程核对挂起进程和线程的所有者及 DACL，通过持有句柄使用 `LABEL_SECURITY_INFORMATION` 设置低完整性 no-write-up 标签，并在任何指令恢复前回读完整的预期权限。真实本地挂起子进程测试检查两种对象的标签，清空 Job，且不执行夹具代码。仍须完成真实运行资格检查，不提供执行或就绪降级。
 
-2026-11-13，开发提交 `008d805` 在提供的 Windows 10 1803/build17134 VM 中完成了全新签名离线安装，VM 没有 IPv4 或 IPv6 默认路由，服务进入 Running。与清单绑定的 schema3 回执确认：target/debugger 使用不同 AppContainer、零 capability、仅保留 `SeChangeNotifyPrivilege`，私有数据及根保护文件访问被拒绝，临时目录已清理，两个回环阻止事件均由 SDK 关联 WFP 证据验证。独立受限的 x64/x86 DbgEng 辅助程序附加到各自持有的目标，在没有 `SeDebugPrivilege` 的情况下观察寄存器和模块，随后关闭、排空 Job 并删除 profile/临时目录。回执 SHA256 为 `c7ae98f29cec3f261c5806b2ae1630d2e9a217bb4a3d26a818544f83f297f7f0`，绑定清单 `4671bc0501df1022b05898fb66b349d8bc43e3c373b69abbcbf1c5a861b84b39`。这是可信夹具资格验证，不证明对抗性资源准入或生产执行。受限转录仍提示绝对本地符号路径不可用；该门槛证明附加及寄存器/模块观察，不证明 PDB 加载、符号断点或完整控制/重放。该版本按清单缓存回执。当前服务代码改为每次启动重新验收；这一改动的独立服务重启及系统重启验收仍待完成。生产执行保持禁用；原生资源所有权与全部执行路径、完整离线生命周期及重启验收仍未完成。
+2026-11-13，开发提交 `008d805` 在提供的 Windows 10 1803/build17134 VM 中完成了全新签名离线安装，VM 没有 IPv4 或 IPv6 默认路由，服务进入 Running。与清单绑定的 schema3 回执确认：target/debugger 使用不同 AppContainer、零 capability、仅保留 `SeChangeNotifyPrivilege`，私有数据及根保护文件访问被拒绝，临时目录已清理，两个回环阻止事件均由 SDK 关联 WFP 证据验证。独立受限的 x64/x86 DbgEng 辅助程序附加到各自持有的目标，在没有 `SeDebugPrivilege` 的情况下观察寄存器和模块，随后关闭、排空 Job 并删除 profile/临时目录。回执 SHA256 为 `c7ae98f29cec3f261c5806b2ae1630d2e9a217bb4a3d26a818544f83f297f7f0`，绑定清单 `4671bc0501df1022b05898fb66b349d8bc43e3c373b69abbcbf1c5a861b84b39`。这是可信夹具资格验证，不证明对抗性资源准入或生产执行。受限转录仍提示绝对本地符号路径不可用；该门槛证明附加及寄存器/模块观察，不证明 PDB 加载、符号断点或完整控制/重放。该版本按清单缓存回执。当前每次启动重新验收的实现已在用户提供的 VM 上以 `7b6c4c0` 通过服务重启及系统重启检查，证据见下文。生产执行保持禁用；原生资源所有权与全部执行路径及完整离线生命周期仍未完成。较新的固定系统重启结果见下文。
 
 可选的托管安装验收使用 `tests/acceptance/check_windows_worker.py` 及其 PowerShell 辅助脚本。两者都会在系统级副作用前拒绝开发宿主或自托管环境。夹具先作为控制端获取资源，使用仅留在控制端的临时密钥签封介质，再阻断介质和安装路径内随包程序访问外部地址，保留同一测试机已分配地址的管理连接和 CI agent 的连接。它验证真实原生安装器、普通账户自检、Rust 控制端固定 SSH 传输、不可变文件传输、陈旧令牌拒绝，以及服务重启后递增的 epoch。仅上传有界公开报告。清理前核对精确服务路径、账户归属注释、防火墙说明和安装意图，再删除夹具资源；剩余临时 LSA 密钥随一次性 VM 回收。这并非生产卸载、整台 VM 断网、Windows 10 VM 或目标隔离验收。配置流水线不代表实际运行通过，须查看真实报告与最终结果。
 
@@ -151,7 +151,7 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --lib inherited_d
 
 固定受限调试器资格检查使用经身份校验的路径上下文头，因为 Windows 10 AppContainer 能查询已打开对象的 NT 名称，却不能查询 DOS 盘符名称。System 在确认路径无链接后，通过共享 SDK 身份函数观察已签封的引擎和符号目录；共享函数在 Windows 序数比较前统一路径分隔符及 verbatim 盘符前缀，包括使用正斜杠的清单成员路径。随后将最多 8 KiB 的 schema1 上下文写入现有私有输入文件的固定请求之前。`--native-path-context` 仅接受继承的磁盘文件句柄：必须通过与安装及资源策略共用的描述符校验器，核对管理员所有者、受保护 DACL，以及精确的 System/管理员完全访问授权。普通文件和管道会在读取头之前被拒绝。辅助程序将请求目录及其实际已打开 NT 身份与上下文绑定，保留原始盘符相对后缀，并独立执行内核禁止重解析打开。未声明的路径会被拒绝；该上下文目前仅覆盖固定引擎和符号目录。普通辅助程序调用保留独立的 NT/DOS 身份查询。SDK 观察及描述符检查共享实现。单元及普通 VM 回归覆盖伪造输入拒绝、不匹配或未声明路径，以及真实 junction；上文提交 `008d805` 的提供 VM 结果仅验证这项固定交接和附加夹具；生产资源准入仍未完成。
 
-AppContainer 特权策略遵循 Windows 文档中的目录遍历例外：仅保留 `SeChangeNotifyPrivilege`，它跳过祖先目录遍历检查，不授予最终对象读写或目录列举权限。普通元数据 worker 保持现有零特权策略。沙箱令牌回读会拒绝缺失、禁用或任何额外特权（包括 `SeDebugPrivilege`），capability 数仍须为零。不通过修改机器全局目录 ACL 来补偿加载器拒绝。资格检查回执使用 schema4，带有本次启动的资格检查 ID 和明确的特权名称数组，仍要求真实哨兵/网络拒绝、自有 DbgEng 附加及静止清理。安装后的运行仍须专用验收；这项策略修正不会启用生产执行。参见微软的[受限令牌约定](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)、[文件访问指引](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)及 [WFP 事件枚举约定](https://learn.microsoft.com/en-us/windows/win32/api/fwpmu/nf-fwpmu-fwpmneteventenum2)。
+AppContainer 特权策略遵循 Windows 文档中的目录遍历例外：仅保留 `SeChangeNotifyPrivilege`，它跳过祖先目录遍历检查，不授予最终对象读写或目录列举权限。普通元数据 worker 保持现有零特权策略。沙箱令牌回读会拒绝缺失、禁用或任何额外特权（包括 `SeDebugPrivilege`），capability 数仍须为零。不通过修改机器全局目录 ACL 来补偿加载器拒绝。资格检查回执使用 schema4，带有本次启动的资格检查 ID 和明确的特权名称数组，仍要求真实哨兵/网络拒绝、自有 DbgEng 附加及静止清理。其他安装环境仍须专用验收；该策略不会启用生产执行。参见微软的[受限令牌约定](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)、[文件访问指引](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)及 [WFP 事件枚举约定](https://learn.microsoft.com/en-us/windows/win32/api/fwpmu/nf-fwpmu-fwpmneteventenum2)。
 
 仅在控制端运行的远程验收入口复用托管夹具的传输、原生输入来源和租约检查，连接已安装并登记的专用 VM。将 `WUKONG_REMOTE_WORKER_TEST` 指向 JSON 配置，字段包括 `config`（固定主机公钥的 managed-SSH `RuntimeConfig`）、新的 `output` 路径、预期 `manifest_sha256` 和 `minimum_epoch`。远程入口要求私有、非回环 IPv4 地址及 managed 登记，不会在控制端安装或删除任何软件。托管安装入口继续保留 GitHub-hosted 和地址必须分配给本机的检查。
 
@@ -161,3 +161,13 @@ cargo test --locked --lib remote_installed_windows_worker_controller_acceptance 
 ```
 
 2026-11-13，同一台提供 VM 及上文软件包通过了真实控制端检查：产品 SSH 主机公钥固定、原生 broker 身份匹配、带原生来源证明的不可变及可恢复上传、读回、重试一致性、其他控制端冲突拒绝、递增 epoch 和过期租约拒绝。该检查不执行目标，也不证明更新、卸载或重启恢复。
+
+2026-11-13，用户提供的离线 Windows 10 VM 完成了源码 `7b6c4c088521229b3805ca3fa13365fe40911804` 的资格检查，清单为 `eb97dbe0f70b0032c5db19999fd2bcf6d04a9c6bed8851179135797a02e8ac27`。静态 worker/辅助程序的 SHA256 分别为 `88883b84b8227b254ad414e386e711adeba91aff7c4683172e153ec82334ba17` 与 `d101f4682441c71e6cdecd0a7ab82ce86a353db977549b95c9d2deda8e2399a2`。全新安装、服务重启和系统重启各自生成独立的 schema4 回执，重新运行 x64/x86 受限 PDB 断点与栈检查，保留两个已由 SDK 关联的网络拒绝事件、哨兵/根保护限制及静止清理结果。VM 没有 IPv4/IPv6 默认路由。13 份原始回执、转录及连接文件均通过独立固定指纹的管理 SSH 回传，并核对了原始字节哈希。
+
+| 启动阶段 | 资格检查 ID | 原始回执 SHA256 |
+| --- | --- | --- |
+| 首次安装 | `8ca136f6dbd16c288096b8a46ba1072e` | `0d2cea3995b62dfe2c3c0a414a4c617c65bcb7bfce02e30c8b78216d15454663` |
+| 服务重启 | `3af6fd23c9a78ba1492e32975c72a517` | `71318df77775a63ac3d4053db6b39c20d167169dcd7c5a7c2736e2bb85240d6d` |
+| 系统重启 | `760b3297ebd339a4cdb4c2df754fcb4f` | `7e73ed952c0b563196eda252e704136aff9198f355fa279cd740e4e47f76177f` |
+
+真实控制器在首次安装及服务重启后通过验收，持久租约 epoch 分别增长至 2、4。独立的协调重启夹具保留了重启前的实际控制器传输：下一次读取失败，重连在写入前拒绝旧绑定；新控制器在成功读取已有夹具的同时确认写入哨兵不存在。启动配置项 GUID 保持为 `b79fde1663b711ef984cccad5e43e22f`，loader 序号从 4 变为 5；安装/包身份不变，租约 epoch 从 5 增至 6。管理 SSH 与原生服务自动启动，两份旧回执及产品主机身份均保持不变。重启报告 SHA256 为 `7ef998ac30a418097f5e2f7aebae03561e506c509d09b4526c478c6167068158`，入口见[协调夹具](../tests/README.zh-CN.md)。这些结果覆盖固定可信资源及控制器绑定，不证明对抗性执行准入、普通分析资源恢复、更新/修复/回滚/卸载、旧式完整用户态 dump 或有效内核 dump 拒绝。生产执行仍禁用；上述检查未使用托管 CI，也未发布版本。
