@@ -6,6 +6,13 @@
 
 默认忽略的 Rust 夹具 `remote_installed_windows_worker_process_acceptance` 使用真实控制器，以及已独立固定指纹并安装好的 Windows VM。将 `WUKONG_REMOTE_WORKER_PROCESS_TEST` 指向 JSON 配置，包含托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output` 路径和 `probes`：必须恰含 `x64`/`x86`，各自提供该包 `runtime/selftest/` 目录中可信自编译 `wukong-probe.exe` 的绝对 `path` 及 SHA256 `sha256`。夹具通过准入输入协议上传字节；VM 无需编译器或下载包。检查 echo、截止时间、取消、单资源/租约屏障、稳定启动重试、原始/分块输出哈希和陈旧隔离令牌。报告保留原始回执/输出字节，不含租约令牌或私钥。这仅为有限原生进程验收；生产能力声明仍为 false。
 
+对于带新版可信探针的 schema-2 工具包，`cleanup_adversary: true` 会另行在两种架构运行只读文件/受保护空 DACL 清理用例；旧探针包应省略该项。默认忽略的 `remote_native_interrupted_process_acceptance` 使用 `WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST`：托管 SSH `config`、预期 `manifest_sha256`、固定哈希的可信 `probe`（`path`/`sha256`）、`fault`（`preparation`、`host` 或 `service`），以及全新的绝对 `ready`、`resume`、`output` 路径。准备用例在启动前发布 `ready`，便于独立操作方持有原生输入的独占句柄；宿主/服务用例在启动后发布，由操作方终止前核对真实归属进程身份和目标就绪。服务用例还由操作方持续持有仅查询的守护 Job 句柄，迫使恢复通路重新打开并排空真实对象。独立观察操作/恢复后，才由操作方创建 `resume`。夹具自身不终止进程、不注册任务；检查绑定的未知结果清理、不可变恢复字节、不重放启动、陈旧服务隔离令牌，以及后续准入成功。协调文件仅为信号，不是操作系统证据。此新增故障套件在具体 VM 运行通过前不算验收完成；先前已完成结果恢复不覆盖这些用例。
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST = (Resolve-Path .\remote-process-fault-profile.json)
+cargo test --locked --lib remote_native_interrupted_process_acceptance -- --ignored --nocapture
+```
+
 ```powershell
 $env:WUKONG_REMOTE_WORKER_PROCESS_TEST = (Resolve-Path .\remote-process-profile.json)
 cargo test --locked --lib remote_installed_windows_worker_process_acceptance -- --ignored --nocapture

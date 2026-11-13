@@ -19,9 +19,9 @@ use std::{
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Probe {
-    path: PathBuf,
-    sha256: String,
+pub(super) struct Probe {
+    pub(super) path: PathBuf,
+    pub(super) sha256: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,6 +30,8 @@ struct Profile {
     output: PathBuf,
     manifest_sha256: String,
     probes: BTreeMap<String, Probe>,
+    #[serde(default)]
+    cleanup_adversary: bool,
 }
 
 #[derive(Deserialize)]
@@ -130,7 +132,7 @@ async fn remote_native_completed_process_recovery_acceptance() -> Result<()> {
     Ok(())
 }
 
-async fn terminal(client: &RuntimeClient, id: &str) -> Result<Value> {
+pub(super) async fn terminal(client: &RuntimeClient, id: &str) -> Result<Value> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(35);
     loop {
         let value = client.call("job.status", json!({"job_id":id})).await?;
@@ -345,7 +347,28 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
             cancelled["state"] == "cancelled" && cancelled["result"]["jobs_empty"] == true,
             "native cancellation did not clean up: {cancelled}"
         );
-        evidence.push(json!({"architecture":architecture,"input":uploaded,"echo":status,"originals":originals,"deadline":timed_out,"cancelled":cancelled}));
+        let cleanup = if profile.cleanup_adversary {
+            let started = bound.call("job.start", json!({"argv":[uploaded["path"],"--cleanup-adversary"],"timeout_secs":10,"request_id":format!("cleanup-{architecture}")})).await?;
+            let result = terminal(
+                &bound,
+                started["job_id"]
+                    .as_str()
+                    .context("cleanup job is absent")?,
+            )
+            .await?;
+            ensure!(
+                result["state"] == "completed"
+                    && result["stdout"] == "wukong-cleanup-adversary\n"
+                    && result["result"]["jobs_empty"] == true
+                    && result["result"]["profiles_removed"] == true
+                    && result["result"]["scratch_removed"] == true,
+                "native restrictive/readonly cleanup failed: {result}"
+            );
+            result
+        } else {
+            Value::Null
+        };
+        evidence.push(json!({"architecture":architecture,"input":uploaded,"echo":status,"originals":originals,"deadline":timed_out,"cancelled":cancelled,"cleanup_adversary":cleanup}));
         final_start = request;
         final_id = id.to_owned();
     }

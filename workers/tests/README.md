@@ -6,6 +6,13 @@ English · [简体中文](README.zh-CN.md)
 
 The ignored Rust fixture `remote_installed_windows_worker_process_acceptance` uses the real controller and an independently pinned, installed Windows VM. Set `WUKONG_REMOTE_WORKER_PROCESS_TEST` to a JSON profile with managed-SSH `config`, expected `manifest_sha256`, a new absolute `output` path and `probes`: exactly `x64`/`x86`, each containing the absolute `path` and SHA256 `sha256` of the trusted self-built `wukong-probe.exe` from that package's `runtime/selftest/` tree. It uploads the bytes through the admitted input protocol; no VM compiler or package download is needed. It checks echo, deadlines, cancellation, one-resource/lease barriers, stable start replay, raw/chunked output hashes and stale fences. The report retains original receipt/output bytes without lease tokens or private keys. This is limited native process acceptance; production capability advertisement remains false.
 
+For schema-2 packages with the updated trusted probe, `cleanup_adversary: true` additionally runs the readonly-file/protected-empty-DACL cleanup case in both architectures. Omit it for older probe packages. The ignored `remote_native_interrupted_process_acceptance` uses `WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST`: managed-SSH `config`, expected `manifest_sha256`, one pinned trusted `probe` (`path`/`sha256`), `fault` (`preparation`, `host` or `service`) and new absolute `ready`, `resume`, `output` paths. Preparation publishes `ready` before start so the independent operator can retain an exclusive native-input handle; host/service publishes it after start so the operator can verify actual owned process identity and target readiness before termination. For the service case, the operator also retains a query-only guardian Job handle, forcing recovery to reopen and drain the actual object. Only after the action/recovery is independently observed does the operator create `resume`. The fixture performs no termination or task registration itself; it checks bound unknown-outcome cleanup, immutable recovery bytes, no start replay, stale service fences and successful admission afterward. Coordination files are signals, not OS evidence. This new fault suite remains unqualified until its concrete VM runs pass; earlier completed-result recovery does not cover these cases.
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST = (Resolve-Path .\remote-process-fault-profile.json)
+cargo test --locked --lib remote_native_interrupted_process_acceptance -- --ignored --nocapture
+```
+
 ```powershell
 $env:WUKONG_REMOTE_WORKER_PROCESS_TEST = (Resolve-Path .\remote-process-profile.json)
 cargo test --locked --lib remote_installed_windows_worker_process_acceptance -- --ignored --nocapture

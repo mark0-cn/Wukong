@@ -225,6 +225,9 @@ fn client_path(path: &Path) -> Result<String> {
 #[path = "ssh_process_acceptance.rs"]
 mod process_acceptance;
 #[cfg(test)]
+#[path = "ssh_process_fault_acceptance.rs"]
+mod process_fault_acceptance;
+#[cfg(test)]
 mod tests {
     use super::*;
     /// The installer fixture retains its hosted-machine isolation checks.
