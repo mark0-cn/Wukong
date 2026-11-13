@@ -555,6 +555,7 @@ fn environment(values: &BTreeMap<String, OsString>) -> Result<Vec<u16>> {
 
 pub struct OwnedProcess {
     process: Handle,
+    initial_thread: Option<Handle>,
     pid: u32,
     job: Job,
     _desktop: Option<Desktop>,
@@ -563,6 +564,37 @@ pub struct OwnedProcess {
     stop_on_drop: bool,
 }
 impl OwnedProcess {
+    /// Release only our CREATE_SUSPENDED count, after Windows has attached a
+    /// debugger to this held process. A pending debug event still freezes it.
+    pub(crate) fn release_debug_start(&mut self) -> Result<bool> {
+        let thread = self
+            .initial_thread
+            .as_ref()
+            .context("native debug target has no held initial suspension")?;
+        ensure!(
+            !self.exited(),
+            "native debug target exited before attachment"
+        );
+        let mut attached = 0;
+        security::check(unsafe {
+            windows_sys::Win32::System::Diagnostics::Debug::CheckRemoteDebuggerPresent(
+                self.process.0,
+                &mut attached,
+            )
+        })?;
+        if attached == 0 {
+            return Ok(false);
+        }
+        let previous = unsafe { ResumeThread(thread.0) };
+        // Even a failed/mismatched release cannot be replayed. The resource
+        // owner must close its Job and preserve the uncertain outcome.
+        self.initial_thread.take();
+        ensure!(
+            previous == 1,
+            "owned initial suspend count changed: {previous}"
+        );
+        Ok(true)
+    }
     pub(crate) fn launch_diagnostics(&self) -> Option<&serde_json::Value> {
         self.launch_diagnostics.as_ref()
     }
@@ -623,7 +655,9 @@ pub(crate) struct SystemHost {
 impl SystemHost {
     fn take(mut source: OwnedProcess) -> Result<Self> {
         ensure!(
-            source._desktop.is_none() && source._directory.is_none(),
+            source._desktop.is_none()
+                && source._directory.is_none()
+                && source.initial_thread.is_none(),
             "resource persona cannot transfer to the service"
         );
         fn duplicate(handle: HANDLE) -> Result<OwnedHandle> {
@@ -691,6 +725,7 @@ pub struct Spawn<'a> {
 #[derive(Clone, Copy)]
 enum Start<'a> {
     Execute,
+    AwaitDebugger,
     ResourceHost {
         installation: &'a str,
         resource: &'a str,
@@ -824,7 +859,7 @@ impl Spawn<'_> {
         directory: security::ResourceDirectory,
         debugger: &crate::persona::Persona,
     ) -> Result<OwnedProcess> {
-        self.sandbox_peer(target, directory, Some(debugger), Start::Execute)
+        self.sandbox_peer(target, directory, Some(debugger), Start::AwaitDebugger)
     }
     fn sandbox_peer(
         &self,
@@ -1015,6 +1050,7 @@ impl Spawn<'_> {
         })?;
         let mut process = OwnedProcess {
             process: Handle(information.hProcess),
+            initial_thread: None,
             pid: information.dwProcessId,
             job,
             _desktop: desktop,
@@ -1072,7 +1108,7 @@ impl Spawn<'_> {
                 })?;
                 seal_token_privileges(&Handle(token), policy == "traverse")?;
             }
-            if !matches!(start, Start::InspectSuspended) {
+            if !matches!(start, Start::InspectSuspended | Start::AwaitDebugger) {
                 ensure!(
                     unsafe { ResumeThread(thread.0) } != u32::MAX,
                     "cannot resume owned native child"
@@ -1088,6 +1124,9 @@ impl Spawn<'_> {
                 .into());
             }
             return Err(error);
+        }
+        if matches!(start, Start::AwaitDebugger) {
+            process.initial_thread = Some(thread);
         }
         Ok(process)
     }
@@ -1107,6 +1146,45 @@ impl Spawn<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn debug_target_cannot_run_or_transfer_before_os_attachment() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let executable = std::env::current_exe()?;
+        let log = File::create(root.path().join("held.log"))?;
+        let input = File::open("NUL")?;
+        let environment = BTreeMap::from([
+            ("SystemRoot".into(), std::env::var_os("SystemRoot").unwrap()),
+            ("WUKONG_NATIVE_JOB_FIXTURE".into(), "leaf".into()),
+        ]);
+        let mut target = Spawn {
+            executable: &executable,
+            arguments: &[
+                "--exact".into(),
+                "processes::tests::native_job_fixture_entry".into(),
+                "--nocapture".into(),
+            ],
+            directory: root.path(),
+            environment: &environment,
+            log: &log,
+            input: &input,
+        }
+        .create(
+            None,
+            None,
+            None,
+            None,
+            Start::AwaitDebugger,
+            CreationContext::Process,
+        )?;
+        assert!(!target.release_debug_start()?);
+        assert!(target.initial_thread.is_some());
+        assert!(!target.exited());
+        assert!(!root.path().join("leaf.pid").exists());
+        assert!(SystemHost::take(target).is_err());
+        assert!(!root.path().join("leaf.pid").exists());
+        Ok(())
+    }
+
     #[test]
     fn owned_system_host_control_transfers_without_killing_and_drains_on_another_thread()
     -> Result<()> {

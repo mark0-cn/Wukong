@@ -56,9 +56,9 @@ pub(super) fn check(
     )?;
     let input = fs::File::open("NUL")?;
     let target_environment = scratch_environment(system_environment, &target_path);
-    let target = Spawn {
+    let mut target = Spawn {
         executable: &package.join(&probe_member),
-        arguments: &[],
+        arguments: &["--debug-once".into()],
         directory: &target_path,
         environment: &target_environment,
         log: &target_log,
@@ -109,7 +109,7 @@ pub(super) fn check(
         let reader = tokio::fs::File::from_std(fs::File::from(OwnedHandle::from(reader)));
         let writer = tokio::fs::File::from_std(fs::File::from(OwnedHandle::from(writer)));
         let mut client = Client::connect(reader, writer, transcript).await?;
-        let result = probe(&mut client, target.pid(), &symbols, architecture).await;
+        let result = probe(&mut client, &mut target, &symbols, architecture).await;
         let closed = client.close().await;
         result?;
         closed
@@ -134,16 +134,20 @@ pub(super) fn check(
         "target_appcontainer_sid":target_sid,"debugger_appcontainer_sid":debugger_sid,
         "target_logon_sid":target_persona.logon_sid(),"debugger_logon_sid":debugger_persona.logon_sid(),
         "privileges":["SeChangeNotifyPrivilege"],"capabilities":0,"debug_privilege_enabled":false,
-        "owned_attach":true,"registers_observed":true,"target_module_observed":true,
+        "owned_attach":true,"pre_execution_attach":true,"single_pass_target":true,
+        "registers_observed":true,"target_module_observed":true,
         "symbols_loaded":true,"symbol_breakpoint_hit":true,"stack_symbol_observed":true,
         "jobs_empty":true,"profiles_removed":true,"scratch_removed":true}),
     )
 }
 
-async fn probe(client: &mut Client, pid: u32, symbols: &Path, architecture: &str) -> Result<()> {
-    let opened = client
-        .structured("attach_process", json!({"pid":pid}))
-        .await?;
+async fn probe(
+    client: &mut Client,
+    target: &mut crate::processes::OwnedProcess,
+    symbols: &Path,
+    architecture: &str,
+) -> Result<()> {
+    let opened = client.attach_owned(target).await?;
     let session = opened["session_id"]
         .as_str()
         .context("MCP debugger omitted its session handle")?;
@@ -225,6 +229,8 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
         for key in [
             "passed",
             "owned_attach",
+            "pre_execution_attach",
+            "single_pass_target",
             "registers_observed",
             "target_module_observed",
             "symbols_loaded",

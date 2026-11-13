@@ -42,6 +42,10 @@ static BOOL create_owned_cleanup_directory(void) {
     return CreateDirectoryW(L"deny-tree", &attributes);
 }
 int wmain(int argc, wchar_t **argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--debug-once") == 0) {
+        fixture_value = fixture_step(fixture_value);
+        return 0;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--copy-stdin") == 0) return copy_input(GetStdHandle(STD_INPUT_HANDLE));
     if ((argc == 3 && wcscmp(argv[1], L"--launch-stdin") == 0) ||
         (argc == 4 && wcscmp(argv[1], L"--launch-argv") == 0)) {

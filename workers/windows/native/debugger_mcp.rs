@@ -26,6 +26,41 @@ pub(crate) struct Client {
 }
 
 impl Client {
+    /// Attach through the external tool while retaining the target's initial
+    /// suspension. DbgEng can wait for loader/break-in events, so release that
+    /// suspension after SDK attachment is observable, before awaiting the MCP
+    /// result. The held process handle, not a model-provided PID, is authority.
+    pub(crate) async fn attach_owned(
+        &mut self,
+        target: &mut crate::processes::OwnedProcess,
+    ) -> Result<Value> {
+        let (opened, resumed) = {
+            let attaching = self.structured("attach_process", json!({"pid":target.pid()}));
+            tokio::pin!(attaching);
+            let release = async {
+                while !target.release_debug_start()? {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Ok::<_, anyhow::Error>(())
+            };
+            tokio::select! {
+                biased;
+                result = &mut attaching => (result?, false),
+                result = release => {
+                    result?;
+                    (attaching.await?, true)
+                }
+            }
+        };
+        if !resumed {
+            ensure!(
+                target.release_debug_start()?,
+                "external debugger returned without an OS attachment"
+            );
+        }
+        Ok(opened)
+    }
+
     pub(crate) async fn connect(
         read: impl AsyncRead + Unpin + Send + 'static,
         write: impl AsyncWrite + Unpin + Send + 'static,
