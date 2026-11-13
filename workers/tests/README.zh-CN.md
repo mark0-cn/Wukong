@@ -4,6 +4,8 @@
 
 [English](README.md) · 简体中文
 
+进程配置可选的 `argument_files: true` 需要带 `--read-argument` 的新版可信探针。它以无执行权限上传二进制数据，拒绝缺失准入的参数，将同一逻辑数据路径传入两次，核对原始输出字节/哈希，并要求原生回执恰好保留一个文件引用。容器内探针必须实际读到文件，且写入和 `FILE_EXECUTE` 打开均得到 `ERROR_ACCESS_DENIED`。该用例仍待已安装 VM 资格验收；普通暂存映像单元检查不能替代它。
+
 默认忽略的 Rust 夹具 `remote_installed_windows_worker_process_acceptance` 使用真实控制器，以及已独立固定指纹并安装好的 Windows VM。将 `WUKONG_REMOTE_WORKER_PROCESS_TEST` 指向 JSON 配置，包含托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output` 路径和 `probes`：必须恰含 `x64`/`x86`，各自提供该包 `runtime/selftest/` 目录中可信自编译 `wukong-probe.exe` 的绝对 `path` 及 SHA256 `sha256`。夹具通过准入输入协议上传字节；VM 无需编译器或下载包。检查 echo、截止时间、取消、单资源/租约屏障、稳定启动重试、原始/分块输出哈希和陈旧隔离令牌。报告保留原始回执/输出字节，不含租约令牌或私钥。这仅为有限原生进程验收；生产能力声明仍为 false。
 
 对于带新版可信探针的 schema-2 工具包，`cleanup_adversary: true` 会另行在两种架构运行只读文件/受保护空 DACL 清理用例；旧探针应省略该项。也可固定独立构建的可信探针进行测试，无需替换已安装的签名 worker，但必须记录两者源码身份。上传路径/request ID 包含探针哈希，保留先前不可变输入。清理探针先向实际用户及 AppContainer SID 授予自身新目录的完整权限，保留 `READ_CONTROL | WRITE_DAC` 句柄，再通过 SDK 设置并读回受保护空 DACL。ACL 准备失败不算限制访问清理通过。

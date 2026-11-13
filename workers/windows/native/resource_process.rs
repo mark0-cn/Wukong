@@ -12,16 +12,7 @@ use crate::{
 };
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    ffi::OsString,
-    fs,
-    io::{Read, Write},
-    os::windows::fs::OpenOptionsExt,
-    path::Path,
-    time::Duration,
-};
-use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ};
+use std::{collections::BTreeMap, ffi::OsString, io::Read, path::Path, time::Duration};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -30,6 +21,8 @@ pub struct Request {
     pub resource_id: String,
     pub owner: Owner,
     pub program: Reference,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub argument_files: Vec<Reference>,
     pub arguments: Vec<String>,
     pub input: Option<Reference>,
     pub environment: BTreeMap<String, String>,
@@ -88,6 +81,7 @@ impl Request {
                     <= 16384,
             "invalid native process argv or executable policy"
         );
+        crate::resource_image::validate(&self.program, &self.argument_files, &self.arguments)?;
         ensure!(
             (1..=86400).contains(&self.timeout_secs)
                 && (1024..=8 * 1024 * 1024).contains(&self.output_limit),
@@ -120,6 +114,10 @@ impl Request {
             );
         }
         ResourceLimits::new(self.processes, self.memory_bytes)?;
+        ensure!(
+            serde_json::to_vec(self)?.len() <= 65536,
+            "native process request exceeds protected record bound"
+        );
         Ok(())
     }
 }
@@ -171,11 +169,11 @@ pub fn execute(
     let public = deployment.code_policy()?;
     let metadata = root.join("metadata");
     // Reject incomplete/mismatched inputs before creating a persona or scratch.
-    let program = resource_input::open(
+    let sources = crate::resource_image::acquire(
         &metadata,
         &request.owner,
         &request.program,
-        Purpose::Execute,
+        &request.argument_files,
     )?;
     let input = request
         .input
@@ -210,22 +208,7 @@ pub fn execute(
     // Keep controller logical paths valid in the private working directory.
     // acquire() already checked this portable relative files/... spelling.
     let executable = scratch.join(&request.program.path);
-    let relative = Path::new(&request.program.path);
-    let mut parents: Vec<_> = relative
-        .parent()
-        .into_iter()
-        .flat_map(Path::ancestors)
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .collect();
-    parents.reverse();
-    for parent in parents {
-        let path = scratch.join(parent);
-        if !path.exists() {
-            public.create_directory(&path)?;
-        }
-        public.verify(&path, true)?;
-    }
-    let held = stage_program(program, &executable, &request.program, public)?;
+    let held = crate::resource_image::stage(&scratch, sources, &public)?;
     if cancel.try_exists()? {
         let app = persona.sid_text()?;
         let logon = persona.logon_sid().to_owned();
@@ -290,28 +273,6 @@ pub fn run(installation: &str, configuration: &Path, request: &Path) -> Result<s
     Ok(serde_json::json!({"resource_id":id,"settled":true}))
 }
 
-fn stage_program(
-    mut source: resource_input::AdmittedInput,
-    destination: &Path,
-    reference: &Reference,
-    policy: AclPolicy,
-) -> Result<fs::File> {
-    let private = AclPolicy::private_vm();
-    let mut file = private.create_file(destination)?;
-    ensure!(
-        std::io::copy(&mut source, &mut file)? == reference.size,
-        "native staged executable length differs"
-    );
-    file.flush()?;
-    file.sync_all()?;
-    drop(file);
-    policy.apply(destination, false)?;
-    Ok(fs::OpenOptions::new()
-        .read(true)
-        .share_mode(FILE_SHARE_READ)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(destination)?)
-}
 fn not_started(request: &Request) -> CaptureResult {
     CaptureResult {
         pid: 0,
@@ -345,7 +306,7 @@ fn finish(
         crate::process_capture::StopReason::Cancelled => "cancelled",
     };
     Ok(
-        serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,
+        serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,"argument_files":request.argument_files,
         "pid":result.pid,"execution_started":result.pid != 0,"exit_code":result.exit_code,"stop_reason":reason,"appcontainer_sid":appcontainer,"logon_sid":logon,
         "stdout_base64":base64::engine::general_purpose::STANDARD.encode(&result.stdout),"stderr_base64":base64::engine::general_purpose::STANDARD.encode(&result.stderr),
         "stdout_sha256":hex::encode(Sha256::digest(&result.stdout)),"stderr_sha256":hex::encode(Sha256::digest(&result.stderr)),
@@ -357,6 +318,7 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     fn request() -> Request {
         Request {
             schema: SCHEMA,
@@ -380,6 +342,7 @@ mod tests {
                 executable: true,
             },
             arguments: vec!["--echo".into()],
+            argument_files: Vec::new(),
             input: None,
             environment: BTreeMap::new(),
             timeout_secs: 5,
@@ -427,6 +390,11 @@ mod tests {
             .environment
             .insert("ASAN_OPTIONS".into(), "abort_on_error=1".into());
         allowed.validate()?;
+        let mut oversized = request();
+        oversized.environment = (0..64)
+            .map(|index| (format!("AFL_{index}"), "x".repeat(4096)))
+            .collect();
+        assert!(oversized.validate().is_err());
         Ok(())
     }
 }

@@ -32,6 +32,8 @@ struct Profile {
     probes: BTreeMap<String, Probe>,
     #[serde(default)]
     cleanup_adversary: bool,
+    #[serde(default)]
+    argument_files: bool,
 }
 
 #[derive(Deserialize)]
@@ -368,7 +370,66 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
         } else {
             Value::Null
         };
-        evidence.push(json!({"architecture":architecture,"input":uploaded,"echo":status,"originals":originals,"deadline":timed_out,"cancelled":cancelled,"cleanup_adversary":cleanup}));
+        let arguments = if profile.argument_files {
+            let bytes = b"native argument\x00\xff\r\n";
+            let hash = hex::encode(Sha256::digest(bytes));
+            let input = bound.call("file.put", json!({"path":format!("process-arguments/{hash}/input.bin"),"data_base64":STANDARD.encode(bytes),"executable":false,"request_id":format!("argument-data-{hash}")})).await?;
+            let rejected = bound.call("job.start", json!({"argv":[uploaded["path"],"--read-argument","files/not-admitted-data.bin","files/not-admitted-data.bin"],"timeout_secs":5,"request_id":format!("missing-argument-{architecture}")})).await;
+            ensure!(
+                rejected.is_err(),
+                "unadmitted argument file reached native execution"
+            );
+            let started = bound.call("job.start", json!({"argv":[uploaded["path"],"--read-argument",input["path"],input["path"]],"timeout_secs":5,"request_id":format!("argument-{architecture}")})).await?;
+            let id = started["job_id"]
+                .as_str()
+                .context("argument-file job is absent")?;
+            let status = terminal(&bound, id).await?;
+            ensure!(
+                status["state"] == "completed",
+                "native argument-file probe failed: {status}"
+            );
+            let output = bound
+                .call(
+                    "file.get",
+                    json!({"path":format!("native-results/{id}/stdout")}),
+                )
+                .await?;
+            ensure!(
+                output["sha256"] == hash
+                    && STANDARD.decode(
+                        output["data_base64"]
+                            .as_str()
+                            .context("argument output absent")?
+                    )? == bytes,
+                "native argument-file bytes changed"
+            );
+            let receipt = bound
+                .call(
+                    "file.get",
+                    json!({"path":format!("native-results/{id}/receipt")}),
+                )
+                .await?;
+            let proof: Value = serde_json::from_slice(
+                &STANDARD.decode(
+                    receipt["data_base64"]
+                        .as_str()
+                        .context("argument receipt absent")?,
+                )?,
+            )?;
+            ensure!(
+                proof["argument_files"]
+                    .as_array()
+                    .is_some_and(|files| files.len() == 1
+                        && files[0]["path"] == input["path"]
+                        && files[0]["sha256"] == hash
+                        && files[0]["executable"] == false),
+                "duplicate argument references or data execution policy changed"
+            );
+            json!({"input":input,"status":status,"output":output,"receipt":receipt})
+        } else {
+            Value::Null
+        };
+        evidence.push(json!({"architecture":architecture,"input":uploaded,"echo":status,"originals":originals,"deadline":timed_out,"cancelled":cancelled,"cleanup_adversary":cleanup,"argument_files":arguments}));
         final_start = request;
         final_id = id.to_owned();
     }

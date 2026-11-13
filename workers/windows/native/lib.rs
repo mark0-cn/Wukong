@@ -36,6 +36,8 @@ mod resource_cleanup;
 #[cfg(windows)]
 pub mod resource_host;
 #[cfg(windows)]
+mod resource_image;
+#[cfg(windows)]
 pub mod resource_input;
 #[cfg(windows)]
 pub mod resource_journal;

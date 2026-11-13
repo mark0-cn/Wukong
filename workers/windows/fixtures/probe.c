@@ -60,6 +60,26 @@ int wmain(int argc, wchar_t **argv) {
         const char message[] = "wukong-worker-selftest\n";
         return WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), message, (DWORD)(sizeof(message)-1), &written, NULL) && written == (DWORD)(sizeof(message)-1) ? 0 : 5;
     }
+    if (argc == 4 && wcscmp(argv[1], L"--read-argument") == 0) {
+        if (wcscmp(argv[2], argv[3]) != 0) return 30;
+        const DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+        HANDLE denied = CreateFileW(argv[2], GENERIC_WRITE, share, NULL, OPEN_EXISTING, 0, NULL);
+        if (denied != INVALID_HANDLE_VALUE) { CloseHandle(denied); return 31; }
+        if (GetLastError() != ERROR_ACCESS_DENIED) return 32;
+        denied = CreateFileW(argv[2], FILE_EXECUTE, share, NULL, OPEN_EXISTING, 0, NULL);
+        if (denied != INVALID_HANDLE_VALUE) { CloseHandle(denied); return 33; }
+        if (GetLastError() != ERROR_ACCESS_DENIED) return 34;
+        HANDLE file = CreateFileW(argv[2], GENERIC_READ, share, NULL, OPEN_EXISTING, 0, NULL);
+        if (file == INVALID_HANDLE_VALUE) return 35;
+        BYTE buffer[4096]; DWORD count = 0, written = 0;
+        for (;;) {
+            if (!ReadFile(file, buffer, sizeof(buffer), &count, NULL)) { CloseHandle(file); return 36; }
+            if (!count) break;
+            if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, count, &written, NULL) || written != count) { CloseHandle(file); return 37; }
+        }
+        CloseHandle(file);
+        return 0;
+    }
     if (argc == 3 && wcscmp(argv[1], L"--replay") == 0) {
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
         HANDLE file = CreateFileW(argv[2], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);

@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Keep admitted file arguments at their original logical paths in isolated Windows process jobs. Data uploads remain readable without gaining file execution permission; original references remain in the native receipt. Complete Windows production isolation remains pending."
+zh_CN = "隔离 Windows 进程任务中的已准入文件参数保留原逻辑路径。数据上传保持可读，不获得文件执行权限；原始引用保留在原生回执中。完整 Windows 生产隔离仍待完成。"

@@ -179,7 +179,16 @@ impl Runtime {
         specification.retain(|_, value| !value.is_null());
         let spec: Specification = serde_json::from_value(Value::Object(specification))?;
         ensure!(
-            spec.cwd == "." && !spec.argv.is_empty(),
+            spec.cwd == "."
+                && !spec.argv.is_empty()
+                && spec.argv.len() <= 129
+                && spec.argv.iter().all(|a| !a.contains('\0'))
+                && spec
+                    .argv
+                    .iter()
+                    .map(|a| a.encode_utf16().count())
+                    .sum::<usize>()
+                    <= 16384,
             "native process requires argv and private cwd '.'"
         );
         let specification =
@@ -190,11 +199,22 @@ impl Runtime {
             return self.reserved_status(journal, owner, existing);
         }
         let program = inputs.reference(owner, &spec.argv[0], Purpose::Execute)?;
+        let mut argument_files = BTreeMap::new();
+        for path in &spec.argv[1..] {
+            if path.starts_with("files/")
+                && path != &program.path
+                && !argument_files.contains_key(path)
+            {
+                let reference = inputs.reference(owner, path, Purpose::Inspect)?;
+                argument_files.insert(path.clone(), reference);
+            }
+        }
         let mut request = Request {
             schema: crate::resource_process::SCHEMA,
             resource_id: "0".repeat(32),
             owner: owner.clone(),
             program,
+            argument_files: argument_files.into_values().collect(),
             arguments: spec.argv[1..].into(),
             input: None,
             environment: spec.env,
@@ -350,6 +370,11 @@ impl Runtime {
                 && result["resource_id"] == *id
                 && result["owner"] == serde_json::to_value(&request.owner)?
                 && result["program"] == serde_json::to_value(&request.program)?
+                && result
+                    .get("argument_files")
+                    .cloned()
+                    .unwrap_or_else(|| json!([]))
+                    == serde_json::to_value(&request.argument_files)?
                 && result["jobs_empty"] == true
                 && result["profiles_removed"] == true
                 && result["scratch_removed"] == true,

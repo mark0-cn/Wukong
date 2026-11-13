@@ -369,6 +369,17 @@ impl AclPolicy {
         );
         result
     }
+    /// Preserve the code policy's readers without granting execution of data
+    /// uploads. System/administrator control is unchanged.
+    pub(crate) fn read_only_data(&self) -> Self {
+        let mut policy = self.clone();
+        for (sid, rights) in &mut policy.grants {
+            if sid != "S-1-5-18" && sid != "S-1-5-32-544" {
+                *rights &= !windows_sys::Win32::Storage::FileSystem::FILE_EXECUTE;
+            }
+        }
+        policy
+    }
     pub fn with_account(mut self, sid: &str, writable: bool) -> Result<Self> {
         validate_account_sid(sid)?;
         self.grants.insert(
