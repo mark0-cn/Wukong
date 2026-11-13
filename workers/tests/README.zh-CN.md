@@ -91,6 +91,10 @@ Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特
 
 夹具现在还通过 `debug.inspect` 查询正常及恢复终态，检查恢复结果仍为未知，并通过 `native-results/<id>/receipt` 读取原始恢复回执。这些新增断言要求更新的已安装 worker；上述 `4edc290` 结果不覆盖它们。
 
+### 托管调试器中断验收
+
+`ssh_debugger_fault_acceptance.rs` 复用密封探针上传、RPC 记录、协调文件及恢复后 echo 夹具。`WUKONG_REMOTE_WORKER_DEBUGGER_FAULT_TEST` 选择本机配置，包含固定指纹的 `config`、`manifest_sha256`、含 `program`/`pdb` 的单个 `probe`、`fault`（`cancel`、`host`、`service_stop` 或 `service_kill`），以及新的绝对 `ready`、`resume`、`output` 路径。运行 `cargo test --locked --lib remote_native_interrupted_debugger_acceptance -- --ignored --nocapture`。夹具在可信探针的 `wmain` 断点处删除断点，再发出固定跳出操作；因该夹具无限循环，操作将保持等待。独立 VM 操作者必须在允许所选故障前验证原始受保护请求、所属进程及账本中的待定变更。取消模式在观察完成后发布恢复标记；其他模式在独立故障操作完成后发布。由于单条传输串行处理请求，`cancel` 使用携带相同租约的第二条已认证控制器连接。测试要求原始结果保持未知、确认清理、回执哈希匹配、拒绝启动/控制重放，以及新的 echo 执行成功。服务重启必须增加租约 epoch 并拒绝旧凭据。构建/Clippy 检查不证明这些真实故障验收；目前尚未声明已安装中断结果。
+
 ### 外部 WinDbg MCP 验收
 
 `tests/windbg_mcp.rs` 通过现有 `McpRegistry`（Rig/rmcp）驱动真实外部调试器。它默认忽略，要求专用 VM 已具有仓库的可信 x64/x86 `wukong-probe` 程序、匹配的 PDB 和已生成的 dump。配置固定身份的 SSH stdio 命令，或在该 VM 内使用本地命令；测试不会安装软件或运行未知目标。

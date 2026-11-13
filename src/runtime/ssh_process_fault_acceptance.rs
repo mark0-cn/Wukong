@@ -44,15 +44,21 @@ struct Profile {
     resume: PathBuf,
     output: PathBuf,
 }
-fn publish(path: &Path, value: &Value) -> Result<()> {
+pub(super) fn publish(path: &Path, value: &Value) -> Result<()> {
     let mut file = fs::File::create_new(path)?;
     file.write_all(&serde_json::to_vec_pretty(value)?)?;
     file.sync_all()?;
     Ok(())
 }
 async fn resume(path: &Path, fault: Fault) -> Result<()> {
-    let deadline = tokio::time::Instant::now()
-        + Duration::from_secs(if fault == Fault::OsBoot { 360 } else { 180 });
+    wait_for_resume(
+        path,
+        Duration::from_secs(if fault == Fault::OsBoot { 360 } else { 180 }),
+    )
+    .await
+}
+pub(super) async fn wait_for_resume(path: &Path, timeout: Duration) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + timeout;
     while !path.try_exists()? {
         ensure!(
             tokio::time::Instant::now() < deadline,
@@ -62,7 +68,11 @@ async fn resume(path: &Path, fault: Fault) -> Result<()> {
     }
     Ok(())
 }
-async fn echo_after_recovery(client: &RuntimeClient, bytes: &[u8], sha256: &str) -> Result<Value> {
+pub(super) async fn echo_after_recovery(
+    client: &RuntimeClient,
+    bytes: &[u8],
+    sha256: &str,
+) -> Result<Value> {
     let next = client.call("file.put", json!({"path":format!("fault/{sha256}/after-recovery.exe"),"data_base64":STANDARD.encode(bytes),"executable":true,"request_id":format!("after-upload-{sha256}")})).await?;
     let next = client
         .call(

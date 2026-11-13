@@ -19,9 +19,9 @@ use std::{
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Architecture {
-    program: Probe,
-    pdb: Probe,
+pub(super) struct Architecture {
+    pub program: Probe,
+    pub pdb: Probe,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,10 +31,10 @@ struct Profile {
     probes: BTreeMap<String, Architecture>,
     output: PathBuf,
 }
-struct Calls<'a> {
-    client: &'a RuntimeClient,
-    log: fs::File,
-    count: u64,
+pub(super) struct Calls<'a> {
+    pub client: &'a RuntimeClient,
+    pub log: fs::File,
+    pub count: u64,
 }
 impl Calls<'_> {
     async fn rejected_start(&mut self, request: Value) -> Result<Value> {
@@ -127,7 +127,7 @@ impl Calls<'_> {
         );
         Ok(json!({"resource":closed,"error":error,"state":state,"receipt":artifact,"proof":proof}))
     }
-    async fn call(&mut self, method: &str, params: Value) -> Result<Value> {
+    pub(super) async fn call(&mut self, method: &str, params: Value) -> Result<Value> {
         self.count += 1;
         let result = self.client.call(method, params.clone()).await;
         let record = match &result {
@@ -140,7 +140,7 @@ impl Calls<'_> {
         self.log.sync_all()?;
         result
     }
-    async fn inspect(&mut self, id: &str, kind: &str) -> Result<Value> {
+    pub(super) async fn inspect(&mut self, id: &str, kind: &str) -> Result<Value> {
         let value = self
             .call("debug.inspect", json!({"session_id":id,"kind":kind}))
             .await?;
@@ -150,7 +150,12 @@ impl Calls<'_> {
         );
         Ok(value)
     }
-    async fn control(&mut self, id: &str, action: &str, mut params: Value) -> Result<Value> {
+    pub(super) async fn control(
+        &mut self,
+        id: &str,
+        action: &str,
+        mut params: Value,
+    ) -> Result<Value> {
         params["session_id"] = json!(id);
         params["action"] = json!(action);
         params["request_id"] = json!(format!("control-{}", self.count + 1));
@@ -161,7 +166,7 @@ impl Calls<'_> {
         );
         Ok(value)
     }
-    async fn stopped(&mut self, id: &str) -> Result<Value> {
+    pub(super) async fn stopped(&mut self, id: &str) -> Result<Value> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
         loop {
             let state = self.inspect(id, "state").await?;
@@ -292,6 +297,37 @@ impl Calls<'_> {
     }
 }
 
+pub(super) async fn launch_fixture(
+    client: &RuntimeClient,
+    base: &str,
+    program: &Probe,
+    pdb: &Probe,
+    timeout: u64,
+) -> Result<Value> {
+    upload(
+        client,
+        &format!("{base}/wukong-probe.exe"),
+        &bytes(program)?,
+        true,
+    )
+    .await?;
+    upload(
+        client,
+        &format!("{base}/wukong-probe.pdb"),
+        &bytes(pdb)?,
+        false,
+    )
+    .await?;
+    let manifest = json!({"schema_version":1,"challenge_id":"trusted-native-debugger","base":format!("files/{base}"),"target":"wukong-probe.exe","files":{"wukong-probe.exe":program.sha256,"wukong-probe.pdb":pdb.sha256},"args":[],"cwd":"work","input_mode":"stdin_pipe","env":{},"timeout_secs":timeout,"service":{"mode":"offline"},"loader":null,"library_path":null,"runtime_confirmed":false});
+    upload(
+        client,
+        &format!("{base}/launch.json"),
+        &serde_json::to_vec(&manifest)?,
+        false,
+    )
+    .await
+}
+
 #[tokio::test]
 #[ignore = "requires the enrolled dedicated Windows VM and signed package x64/x86 EXE/PDB fixtures"]
 async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
@@ -343,55 +379,13 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
         );
         let wrong = &profile.probes[if architecture == "x64" { "x86" } else { "x64" }].pdb;
         let bad_base = format!("debugger/wrong-pdb/{}", fixtures.program.sha256);
-        upload(
-            &bound,
-            &format!("{bad_base}/wukong-probe.exe"),
-            &bytes(&fixtures.program)?,
-            true,
-        )
-        .await?;
-        upload(
-            &bound,
-            &format!("{bad_base}/wukong-probe.pdb"),
-            &bytes(wrong)?,
-            false,
-        )
-        .await?;
-        let bad_manifest = json!({"schema_version":1,"challenge_id":"trusted-native-debugger","base":format!("files/{bad_base}"),"target":"wukong-probe.exe","files":{"wukong-probe.exe":fixtures.program.sha256,"wukong-probe.pdb":wrong.sha256},"args":[],"cwd":"work","input_mode":"stdin_pipe","env":{},"timeout_secs":90,"service":{"mode":"offline"},"loader":null,"library_path":null,"runtime_confirmed":false});
-        let bad_launch = upload(
-            &bound,
-            &format!("{bad_base}/launch.json"),
-            &serde_json::to_vec(&bad_manifest)?,
-            false,
-        )
-        .await?;
+        let bad_launch = launch_fixture(&bound, &bad_base, &fixtures.program, wrong, 90).await?;
         let rejected = calls
             .rejected_start(json!({"mode":"launch","engine":"dbgeng",
             "launch_spec":bad_launch["path"],"request_id":format!("wrong-pdb-{architecture}")}))
             .await?;
         let base = format!("debugger/{}", fixtures.program.sha256);
-        upload(
-            &bound,
-            &format!("{base}/wukong-probe.exe"),
-            &bytes(&fixtures.program)?,
-            true,
-        )
-        .await?;
-        upload(
-            &bound,
-            &format!("{base}/wukong-probe.pdb"),
-            &bytes(&fixtures.pdb)?,
-            false,
-        )
-        .await?;
-        let manifest = json!({"schema_version":1,"challenge_id":"trusted-native-debugger","base":format!("files/{base}"),"target":"wukong-probe.exe","files":{"wukong-probe.exe":fixtures.program.sha256,"wukong-probe.pdb":fixtures.pdb.sha256},"args":[],"cwd":"work","input_mode":"stdin_pipe","env":{},"timeout_secs":90,"service":{"mode":"offline"},"loader":null,"library_path":null,"runtime_confirmed":false});
-        let launch = upload(
-            &bound,
-            &format!("{base}/launch.json"),
-            &serde_json::to_vec(&manifest)?,
-            false,
-        )
-        .await?;
+        let launch = launch_fixture(&bound, &base, &fixtures.program, &fixtures.pdb, 90).await?;
         let request = json!({"mode":"launch","engine":"dbgeng","launch_spec":launch["path"],"request_id":format!("debugger-start-{architecture}")});
         let started = calls.call("debug.start", request.clone()).await?;
         let id = started["session_id"]
