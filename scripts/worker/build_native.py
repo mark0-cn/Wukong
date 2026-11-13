@@ -12,6 +12,7 @@ from scripts._lib.versioning import write_json
 from scripts.worker.pe import require_static_crt
 from scripts.worker.source_identity import identity
 from scripts.worker.build_probes import build as build_probes
+from scripts.worker.build_debugger import build as build_debugger
 
 
 def build(output, check_only=False):
@@ -38,9 +39,10 @@ def build(output, check_only=False):
         files[name] = {"sha256": sha256(binary), "size": binary.stat().st_size,
                        "imported_libraries": require_static_crt(binary, inspector=inspector)}
     probes = build_probes(output, inspector=inspector)
+    debugger = build_debugger(ROOT / "target/windows-offline-cache", output)
     if source_identity != identity():
         raise ValueError("Worker source changed during native build")
-    metadata = {"schema": 1, "platform": "windows-amd64", "static_crt_checked": True, "files": files, "selftests": probes, **source_identity}
+    metadata = {"schema": 1, "platform": "windows-amd64", "static_crt_checked": True, "files": files, "selftests": probes, "debugger": debugger, **source_identity}
     write_json(output / "native-build.json", metadata)
     return metadata
 

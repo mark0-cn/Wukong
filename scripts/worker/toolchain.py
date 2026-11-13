@@ -108,9 +108,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache", type=Path, required=True)
     parser.add_argument("--download", action="store_true", help="Allow downloads on the controller")
+    parser.add_argument("--component", choices=sorted(COMPONENTS), help="Prepare only one component for a controller build")
     args = parser.parse_args()
     try:
-        result = acquire(args.cache, load_lock(), args.download)
+        lock = load_lock()
+        if args.component:
+            lock["assets"] = [item for item in lock["assets"] if item["component"] == args.component]
+        result = acquire(args.cache, lock, args.download)
         print(json.dumps(dict(result, toolchain_lock_sha256=sha256(LOCK))))
     except (OSError, ValueError, KeyError) as error:
         parser.exit(1, f"Offline toolchain preparation failed: {error}\n")

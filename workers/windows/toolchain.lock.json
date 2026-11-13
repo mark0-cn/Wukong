@@ -19,7 +19,7 @@
       "channel": "stable"
     },
     "windbg_mcp": {
-      "version": "0.24.0",
+      "version": "0.24.0+wukong.pipe-stdin.1",
       "channel": "stable"
     }
   },
@@ -481,10 +481,10 @@
     },
     {
       "component": "windbg_mcp",
-      "path": "windbg-mcp-v0.24.0-windows-x64.zip",
-      "url": "https://github.com/glslang/windbg-mcp/releases/download/v0.24.0/windbg-mcp-v0.24.0-windows-x64.zip",
-      "size": 12708638,
-      "sha256": "f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34"
+      "path": "windbg-mcp-source-91fba928.zip",
+      "url": "https://github.com/glslang/windbg-mcp/archive/91fba9283c5f9f9bb94cd7f9b04c0aa4f7885e8c.zip",
+      "size": 9644369,
+      "sha256": "0250b197c8b2e25ef371a4f252f76fc05bb6c01a2c8c3227a0cc908e2301baad"
     },
     {
       "component": "worker_python_dependencies",

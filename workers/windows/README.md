@@ -56,7 +56,9 @@ An exclusive writer and held no-delete database handle prevent concurrent adopti
 
 The standalone Cargo package builds worker components without linking the desktop controller, WebView or model clients. Debugging uses the pinned upstream `windbg-mcp` executable and official rmcp client. The custom DbgEng helper, wire protocol and Python session implementation have been removed. Delivered identity binds actual source/binary contents and the runtime protocol.
 
-The offline lock pins [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0), its original release archive and MIT license. The x64 server handles x64 and WOW64 targets beside the pinned SDK engine. Its adjacent `vcruntime140.dll` comes from the already pinned Python payload; Windows 10 supplies the system UCRT. The VM needs no compiler or package download. Legacy manifests remain readable for maintenance, but the new backend never executes their helper; new packages select only the external MCP entry point.
+The offline lock pins the original source archive of [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0), revision `91fba9283c5f9f9bb94cd7f9b04c0aa4f7885e8c`. The controller builds its unchanged locked dependencies with one [stdin compatibility patch](patches/windbg-mcp-pipe-stdin.patch): engine children receive EOF from a closed pipe instead of opening `NUL`. The provided Windows 10 VM rejected the unmodified tool's `NUL` access inside AppContainer after a successful MCP handshake. The patch changes neither MCP nor debugger logic and requires no device-ACL change. Native build metadata binds the source archive, patch, executable and dependency license hashes; assembly rechecks them and ships the original source, patch and licenses. The patched contained-debugger qualification is still pending.
+
+The x64 server handles native x64 and WOW64 analysis beside the pinned SDK engine; 32-bit .NET SOS is not included. Its adjacent `vcruntime140.dll` comes from the already pinned Python payload; Windows 10 supplies the system UCRT. The VM needs no compiler or package download. Legacy manifests remain readable for maintenance, but the new backend never executes their helper; new packages select only the external MCP entry point.
 
 The existing controller Rig/rmcp client passed dedicated-VM dump/live acceptance for both architectures; see [external debugger acceptance](../tests/README.md#external-windbg-mcp-acceptance). The native host reuses rmcp with 2 MiB frames, 40-second call deadlines and an 8 MiB protected JSONL transcript. Timeouts leave outcomes uncertain and trigger owned-process cleanup, never automatic mutation replay. Module/PDB observations come from the external tool; text-only thread results remain raw evidence. General native debugger admission, complete image correspondence and negative dump/symbol qualification remain unfinished. The Python metadata worker does not advertise or start WinDbg sessions.
 
@@ -72,6 +74,7 @@ From an x64 MSVC Native Tools shell at the repository root:
 
 ```powershell
 python -m scripts.worker.build_native --check
+python -m scripts.worker.toolchain --cache target/windows-offline-cache --component windbg_mcp --download
 python -m scripts.worker.build_native
 cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
 ```

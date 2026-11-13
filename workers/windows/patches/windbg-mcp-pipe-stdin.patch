@@ -1,0 +1,24 @@
+diff --git a/src/engine.rs b/src/engine.rs
+index 02ae875..8a526cf 100644
+--- a/src/engine.rs
++++ b/src/engine.rs
+@@ -5590,6 +5590,10 @@ fn spawn_worker(
+ ) -> std::io::Result<(Child, Channel)> {
+     let (their_requests, our_requests) = std::io::pipe()?;
+     let (our_messages, their_messages) = std::io::pipe()?;
++    // AppContainer can deny NUL. An already-closed pipe has the same EOF
++    // behavior without opening a device or inheriting the MCP input stream.
++    let (empty_input, empty_writer) = std::io::pipe()?;
++    drop(empty_writer);
+
+     let _one_spawn_at_a_time = spawn_guard();
+     isolate_host_stdio()?;
+@@ -5629,7 +5633,7 @@ fn spawn_worker(
+         // Emphatically **not** inherited: this server's stdin is the MCP transport, and a worker
+         // holding it could consume the client's requests. Nothing of ours is read from it either
+         // — the protocol has its own channel — so there is nothing for it to be.
+-        .stdin(Stdio::null())
++        .stdin(Stdio::from(empty_input))
+         // Piped and drained into the log (`log_stray_output`). This is where an extension DLL
+         // that prints to the console lands, and it is now only a log: nothing of the protocol
+         // comes this way.

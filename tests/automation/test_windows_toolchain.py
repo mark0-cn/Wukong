@@ -23,7 +23,7 @@ class OfflineAssets(unittest.TestCase):
         self.assertEqual(len(lock["assets"]), 50)
         debugger = [item for item in lock["assets"] if item["component"] == "windbg_mcp"]
         self.assertEqual(len(debugger), 1)
-        self.assertEqual(debugger[0]["sha256"], "f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34")
+        self.assertEqual(debugger[0]["sha256"], "0250b197c8b2e25ef371a4f252f76fc05bb6c01a2c8c3227a0cc908e2301baad")
         sdk = [item for item in lock["assets"] if item["path"].startswith("sdk/")]
         self.assertEqual(len(sdk), 43)
         self.assertEqual(sum(item["path"].endswith(".cab") for item in sdk), 40)

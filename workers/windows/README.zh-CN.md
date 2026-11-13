@@ -56,7 +56,9 @@
 
 独立 Cargo 包构建 worker 组件，不链接桌面控制器、WebView 或模型客户端。调试使用固定版本的上游 `windbg-mcp` 程序和官方 rmcp 客户端。自写 DbgEng 辅助程序、通信协议及 Python 会话实现已删除。交付身份绑定实际源码、二进制内容和运行时协议。
 
-离线锁固定 [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0)、原始发布压缩包及 MIT 许可证。x64 服务与固定 SDK 引擎相邻放置，支持 x64 和 WOW64 目标。相邻的 `vcruntime140.dll` 来自已固定的 Python 载荷；系统 UCRT 由 Windows 10 提供。VM 无需编译器或下载软件包。旧清单仍可读取以支持维护，但新后端不会执行旧辅助程序；新包仅选择外部 MCP 入口。
+离线锁固定 [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0) 的原始源码压缩包，修订为 `91fba9283c5f9f9bb94cd7f9b04c0aa4f7885e8c`。控制器沿用上游锁定依赖构建，仅应用一份[标准输入兼容补丁](patches/windbg-mcp-pipe-stdin.patch)：引擎子进程从写端已关闭的管道接收 EOF，不再打开 `NUL`。提供的 Windows 10 VM 已实测原版工具在 MCP 握手成功后，被 AppContainer 拒绝访问 `NUL`。补丁不改变 MCP 或调试逻辑，也不修改设备 ACL。原生构建元数据绑定源码压缩包、补丁、可执行文件和依赖许可证的哈希；组装时重新检查，并携带原始源码、补丁和许可证。补丁版受限调试资格验证仍待完成。
+
+x64 服务与固定 SDK 引擎相邻放置，支持原生 x64 和 WOW64 分析；不包含 32 位 .NET SOS。相邻的 `vcruntime140.dll` 来自已固定的 Python 载荷；系统 UCRT 由 Windows 10 提供。VM 无需编译器或下载软件包。旧清单仍可读取以支持维护，但新后端不会执行旧辅助程序；新包仅选择外部 MCP 入口。
 
 现有控制端 Rig/rmcp 客户端已通过两种架构的专用 VM dump/live 验收，参见[外部调试器验收](../tests/README.zh-CN.md#外部-windbg-mcp-验收)。原生宿主复用 rmcp，帧上限为 2 MiB、单次调用期限为 40 秒、受保护 JSONL 记录上限为 8 MiB。超时保留结果不确定状态并触发所属进程清理，绝不自动重放变更。模块/PDB 观察来自外部工具；仅返回文本的线程结果保留为原始证据。通用原生调试准入、完整映像对应关系及 dump/符号负向验收仍未完成。Python 元数据 worker 不宣称或启动 WinDbg 会话。
 
@@ -72,6 +74,7 @@
 
 ```powershell
 python -m scripts.worker.build_native --check
+python -m scripts.worker.toolchain --cache target/windows-offline-cache --component windbg_mcp --download
 python -m scripts.worker.build_native
 cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
 ```

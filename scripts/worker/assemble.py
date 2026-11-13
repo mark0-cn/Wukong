@@ -15,6 +15,7 @@ from scripts.worker.paths import member, no_links, regular, unique_paths
 from scripts.worker.pe import require_static_crt
 from scripts.worker.source_identity import identity
 from scripts.worker.toolchain import load_lock
+from scripts.worker.build_debugger import BINARY as DEBUGGER_BINARY, validate as validate_debugger
 
 BINARIES = ["wukong-worker.exe", "wukong-package.exe"]
 
@@ -92,11 +93,23 @@ def file_index(root):
 
 def assemble(cache, output, native, keys):
     binaries, native_metadata = native_build(native)
+    validate_debugger(native, native_metadata.get("debugger"))
     output, keys = no_links(output), no_links(keys)
     if not keys.is_absolute() or keys == output or output in keys.parents:
         raise ValueError("Controller key storage must stay outside the package")
     before = identity()
     prepare(cache, output)
+    shutil.copyfile(native / DEBUGGER_BINARY, output / "runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe")
+    debugger_notices = []
+    for name in native_metadata["debugger"]["files"]:
+        if name != DEBUGGER_BINARY:
+            is_patch = name.startswith("debugger/patches/")
+            destination = (output / "source-patches" / Path(name).name if is_patch else
+                           output / "licenses/windbg-mcp-build" / Path(name).relative_to("debugger/licenses"))
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(native / name, destination)
+            if not is_patch:
+                debugger_notices.append(destination)
     target = output / "runtime/native"
     target.mkdir()
     for name in ["wukong-worker.exe"]:
@@ -110,7 +123,7 @@ def assemble(cache, output, native, keys):
             target=output/'runtime'/probe['dependency']['binary']
             shutil.copyfile(native/probe['dependency']['binary'],target)
     shutil.copyfile(native / "native-build.json", output / "native-build.json")
-    notices = collect(output / "licenses/native")
+    notices = collect(output / "licenses/native") + debugger_notices
     lock = load_lock()
     license_paths = {"python": ["runtime/python/LICENSE.txt"], "openssh": ["runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"],
                      "debugging_tools": ["licenses/debugging-tools.rtf"],

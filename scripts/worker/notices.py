@@ -8,11 +8,11 @@ from scripts._lib.repository import ROOT
 from scripts.worker.paths import member, no_links, regular
 
 
-def collect(output):
+def collect(output, manifest=None, supplemental=None):
     output = no_links(output)
     output.mkdir()
     metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--offline", "--locked", "--format-version", "1",
-        "--filter-platform", "x86_64-pc-windows-msvc", "--manifest-path", str(ROOT / "workers/windows/Cargo.toml")], cwd=ROOT))
+        "--filter-platform", "x86_64-pc-windows-msvc", "--manifest-path", str(manifest or ROOT / "workers/windows/Cargo.toml")], cwd=ROOT))
     records = []
     for package in metadata["packages"]:
         root = Path(package["manifest_path"]).parent
@@ -20,6 +20,10 @@ def collect(output):
                       and path.name.lower().startswith(("license", "copying", "notice", "unlicense", "copyright"))]
         if package.get("license_file"):
             candidates.append(root / package["license_file"])
+        if not candidates and supplemental:
+            supplement = supplemental.get((package["name"], package["version"]))
+            if supplement:
+                candidates.append(supplement)
         if package["source"] is None and root in {ROOT / "workers/windows", ROOT / "workers/package"}:
             candidates.append(ROOT / "LICENSE")
         if not package.get("license") or not candidates:

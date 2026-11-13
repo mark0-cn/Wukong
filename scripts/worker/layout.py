@@ -166,14 +166,13 @@ def prepare(cache, output, lock_path=LOCK):
                            runtime / "sdk", scratch / "sdk-files")
         debugger_asset = next(item for item in lock["assets"] if item["component"] == "windbg_mcp")
         debugger = scratch / "windbg-mcp"
-        unpack_zip(cache / debugger_asset["path"], debugger)
-        # The x64 server handles both x64 and WOW64 targets. Its adjacent engine
-        # and CRT are pinned payloads, not dependencies of the guest machine.
+        from scripts.worker.build_debugger import PREFIX
+        unpack_zip(cache / debugger_asset["path"], debugger, prefix=PREFIX)
+        # Assembly adds the source-built MCP server. Its adjacent CRT is a
+        # pinned payload, not a dependency of the guest machine.
         engine = runtime / "sdk/Windows Kits/10/Debuggers/x64"
-        for source, name in [(debugger / "windbg-mcp.exe", "windbg-mcp.exe"),
-                             (runtime / "python/vcruntime140.dll", "vcruntime140.dll")]:
-            with regular(source).open("rb") as incoming, (engine / name).open("xb") as outgoing:
-                shutil.copyfileobj(incoming, outgoing)
+        with regular(runtime / "python/vcruntime140.dll").open("rb") as incoming, (engine / "vcruntime140.dll").open("xb") as outgoing:
+            shutil.copyfileobj(incoming, outgoing)
         shutil.copyfile(regular(debugger / "LICENSE"), licenses / "windbg-mcp-LICENSE")
         shutil.copyfile(regular(lock_path), output / "toolchain.lock.json")
         index = {"schema": 1, "scope": "unsigned_controller_layout", "toolchain_lock_sha256": sha256(lock_path),
