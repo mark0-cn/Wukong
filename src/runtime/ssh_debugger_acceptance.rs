@@ -37,7 +37,7 @@ pub(super) struct Calls<'a> {
     pub count: u64,
 }
 impl Calls<'_> {
-    async fn rejected_start(&mut self, request: Value) -> Result<Value> {
+    pub(super) async fn rejected_start(&mut self, request: Value) -> Result<Value> {
         let before = self.call("resource.list", json!({"limit":64})).await?;
         let prior: Vec<_> = before["resources"]
             .as_array()
@@ -53,7 +53,7 @@ impl Calls<'_> {
                     "request_id":format!("unexpected-close-{}",self.count)}),
                 )
                 .await?;
-                anyhow::bail!("mismatched PDB unexpectedly started a debugger");
+                anyhow::bail!("mismatched debugger input unexpectedly started a session");
             }
             Err(error) => format!("{error:#}"),
         };

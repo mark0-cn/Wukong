@@ -109,6 +109,8 @@ Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特
 
 ### 外部 WinDbg MCP 验收
 
+显式启用的 `runtime::ssh::dump_acceptance::remote_installed_windows_worker_dump_acceptance` 夹具通过 `WUKONG_REMOTE_WORKER_DUMP_TEST` 读取固定哈希的 x64/x86 探针 EXE/PDB/minidump 引用及已登记 VM 连接。它检查 dump 身份对应、架构不匹配后的恢复、内存/寄存器/栈检查、全部类型化控制操作均被拒绝且不占用请求 ID、不执行目标的清理回执，以及完整上游工具日志。生成可信夹具转储时使用明确的环境变量白名单；绝不传输继承了控制器凭据的完整内存快照。编译及本机 SDK/ACL 测试不能替代该已安装验收。
+
 `tests/windbg_mcp.rs` 通过现有 `McpRegistry`（Rig/rmcp）驱动真实外部调试器。它默认忽略，要求专用 VM 已具有仓库的可信 x64/x86 `wukong-probe` 程序、匹配的 PDB 和已生成的 dump。配置固定身份的 SSH stdio 命令，或在该 VM 内使用本地命令；测试不会安装软件或运行未知目标。
 
 将 `WUKONG_WINDBG_MCP_ACCEPTANCE` 指向包含以下字段的机器本地 JSON 文件：

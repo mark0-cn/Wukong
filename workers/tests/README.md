@@ -106,6 +106,8 @@ Both cases retained unknown original outcomes, verified recovery receipt binding
 
 ### External WinDbg MCP acceptance
 
+The opt-in `runtime::ssh::dump_acceptance::remote_installed_windows_worker_dump_acceptance` fixture uses `WUKONG_REMOTE_WORKER_DUMP_TEST` with pinned x64/x86 probe EXE/PDB/minidump references and the enrolled VM connection. It checks admitted dump identity, mismatched-architecture recovery, memory/register/stack inspection, refusal of every typed control action without consuming its request ID, non-execution cleanup receipts and the complete upstream tool transcript. Generate trusted fixture dumps with an explicit environment allowlist; never transfer a full-memory capture that inherited controller credentials. Compilation and local SDK/ACL tests do not replace this installed acceptance.
+
 `tests/windbg_mcp.rs` drives a real external debugger through the existing `McpRegistry` (Rig/rmcp). It is ignored by default and requires a dedicated VM with the repository's trusted x64/x86 `wukong-probe` executables, matching PDBs and generated dumps. Configure a pinned SSH stdio command or a local command inside that VM; this test does not install software or run unknown targets.
 
 Set `WUKONG_WINDBG_MCP_ACCEPTANCE` to a machine-local JSON file with these fields:

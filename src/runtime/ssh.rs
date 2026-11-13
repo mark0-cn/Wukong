@@ -228,6 +228,9 @@ mod debugger_acceptance;
 #[path = "ssh_debugger_fault_acceptance.rs"]
 mod debugger_fault_acceptance;
 #[cfg(test)]
+#[path = "ssh_dump_acceptance.rs"]
+mod dump_acceptance;
+#[cfg(test)]
 #[path = "ssh_inventory_acceptance.rs"]
 mod inventory_acceptance;
 #[cfg(test)]
