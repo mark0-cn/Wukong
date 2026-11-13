@@ -112,7 +112,10 @@ impl Subscription {
                 },
             },
             FWPM_FILTER_CONDITION0 {
-                fieldKey: FWPM_CONDITION_IP_REMOTE_PORT,
+                // AppContainerLoopback is enforced at receive/accept: the
+                // listener is localPort, and the probe is remotePort, matching
+                // the existing Record adapter's independently observed tuple.
+                fieldKey: FWPM_CONDITION_IP_LOCAL_PORT,
                 matchType: FWP_MATCH_EQUAL,
                 conditionValue: FWP_CONDITION_VALUE0 {
                     r#type: FWP_UINT16,
