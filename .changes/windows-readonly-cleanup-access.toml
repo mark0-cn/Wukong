@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Reclaim readonly native Windows scratch files using security and attribute metadata access instead of generic data-write access. Preserve hard-link and reparse-point boundaries while supporting the provided older Windows 10 VM."
+zh_CN = "通过安全及属性元数据访问代替通用数据写入权限，清理原生 Windows scratch 中的只读文件。在支持所提供旧版 Windows 10 VM 的同时，保留硬链接及重解析点边界。"

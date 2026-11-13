@@ -14,11 +14,11 @@ use std::{
     time::{Duration, Instant},
 };
 use windows_sys::Win32::{
-    Foundation::{GENERIC_READ, GENERIC_WRITE},
+    Foundation::GENERIC_READ,
     Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
         FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
-        GetFileInformationByHandle, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+        FILE_WRITE_ATTRIBUTES, GetFileInformationByHandle, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
     },
 };
 
@@ -52,7 +52,9 @@ fn remove_with_policy(path: &Path, policy: &AclPolicy) -> Result<()> {
     Ok(())
 }
 fn access() -> u32 {
-    GENERIC_READ | GENERIC_WRITE | READ_CONTROL | WRITE_DAC | WRITE_OWNER
+    // Older Windows rejects data-write access to READONLY files even in backup
+    // mode. Metadata rights suffice; GENERIC_READ preserves backup intent.
+    GENERIC_READ | READ_CONTROL | WRITE_DAC | WRITE_OWNER | FILE_WRITE_ATTRIBUTES
 }
 struct Budget {
     remaining: usize,
@@ -67,6 +69,7 @@ fn contents(directory: &Dir, policy: &AclPolicy, budget: &mut Budget, depth: usi
         );
         budget.remaining -= 1;
         let entry = entry?;
+        let name = entry.file_name();
         let mut options = OpenOptions::new();
         options
             .access_mode(access())
@@ -74,14 +77,14 @@ fn contents(directory: &Dir, policy: &AclPolicy, budget: &mut Budget, depth: usi
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .maybe_dir(true)
             .follow(FollowSymlinks::No);
-        let held = match entry.open_with(&options) {
+        let held = match directory.open_with(&name, &options) {
             Ok(file) => file.into_std(),
             Err(open_error) => {
                 // Links are never opened through their destination. Removing
                 // an entry relative to its held parent cannot change outside
                 // ACLs; a nonempty/inaccessible directory still fails closed.
-                if entry.remove_file().is_err() {
-                    entry.remove_dir().map_err(|remove_error| anyhow::anyhow!("owned cleanup open failed: {open_error}; entry removal failed: {remove_error}"))?;
+                if directory.remove_file(&name).is_err() {
+                    directory.remove_dir(&name).map_err(|remove_error| anyhow::anyhow!("owned cleanup open failed: {open_error}; entry removal failed: {remove_error}"))?;
                 }
                 continue;
             }
@@ -115,9 +118,9 @@ fn contents(directory: &Dir, policy: &AclPolicy, budget: &mut Budget, depth: usi
         }
         drop(held);
         if is_directory {
-            entry.remove_dir()?;
+            directory.remove_dir(&name)?;
         } else {
-            entry.remove_file()?;
+            directory.remove_file(&name)?;
         }
     }
     Ok(())
@@ -126,6 +129,112 @@ fn contents(directory: &Dir, policy: &AclPolicy, budget: &mut Budget, depth: usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "dedicated VM System fixture: reclaim only a pinned packaged cleanup-adversary resource"]
+    fn reclaim_pinned_cleanup_fixture_as_system() -> Result<()> {
+        security::require_system()?;
+        let directory = std::env::current_dir()?;
+        let private = AclPolicy::private_vm();
+        private.verify(&directory, true)?;
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Config {
+            installation_id: String,
+            resource_id: String,
+            manifest_sha256: String,
+        }
+        let path = directory.join("fixture-reclaim.json");
+        private.verify(&path, false)?;
+        let config: Config = serde_json::from_slice(&crate::deployment::read_bytes(&path, 4096)?)?;
+        crate::processes::resource_job::name(&config.installation_id, &config.resource_id)?;
+        let root = crate::environment::program_data()?
+            .join("WukongWorkers")
+            .join(&config.installation_id);
+        let (deployment, actual_root) =
+            crate::deployment::load(&root.join("metadata/deployment.json"))?;
+        ensure!(
+            actual_root.canonicalize()? == root.canonicalize()?,
+            "fixture installation root differs"
+        );
+        let manifest = deployment.verify(&root)?;
+        ensure!(
+            manifest.sha256() == config.manifest_sha256,
+            "fixture signed payload differs"
+        );
+        // Exclude a live journal writer for the whole assisted fixture cleanup.
+        let _writer = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(root.join("metadata/native-resources/writer.lock"))?;
+        let path = root
+            .join("metadata/resource-requests")
+            .join(format!("{}.json", config.resource_id));
+        private.verify(&path, false)?;
+        let request: crate::resource_process::Request =
+            serde_json::from_slice(&crate::deployment::read_bytes(&path, 65536)?)?;
+        request.validate()?;
+        ensure!(
+            request.resource_id == config.resource_id
+                && request.owner.identity.installation_id == config.installation_id
+                && request.owner.identity.package_sha256 == config.manifest_sha256
+                && request.program.path == "files/process/x64.exe"
+                && request.program.sha256
+                    == manifest.manifest().files["runtime/selftest/x64/wukong-probe.exe"].sha256
+                && request.arguments == ["--cleanup-adversary"],
+            "assisted cleanup accepts only the known signed readonly/ACL fixture"
+        );
+        let found = crate::processes::resource_job::drain(
+            &config.installation_id,
+            &config.resource_id,
+            Duration::from_secs(15),
+        )?;
+        let nonce = crate::resource_process::nonce(&config.installation_id, &config.resource_id)?;
+        let path = root
+            .join("metadata")
+            .join(format!("resource-scratch-{nonce}.json"));
+        private.verify(&path, false)?;
+        let intent: crate::resource_process::ScratchIntent =
+            serde_json::from_slice(&crate::deployment::read_bytes(&path, 8192)?)?;
+        ensure!(
+            intent.schema == crate::resource_process::SCHEMA
+                && intent.resource_id == config.resource_id
+                && intent.installation_id == config.installation_id,
+            "assisted fixture scratch ownership differs"
+        );
+        let scratch = root.join("resources").join(nonce);
+        deployment
+            .code_policy()?
+            .verify(&root.join("resources"), true)?;
+        security::ResourceDirectory::recover(
+            &scratch,
+            &intent.appcontainer_sid,
+            &intent.logon_sid,
+        )?;
+        ensure!(!scratch.try_exists()?, "assisted fixture scratch remains");
+        crate::deployment::publish_json(
+            &directory.join("fixture-reclaimed.json"),
+            &serde_json::json!({"scope":"assisted_known_cleanup_fixture","installation_id":config.installation_id,"resource_id":config.resource_id,"manifest_sha256":config.manifest_sha256,"guardian_found":found,"scratch_removed":true,"production_recovery_qualification":false}),
+            &private,
+        )?;
+        Ok(())
+    }
+    #[test]
+    fn cleanup_can_open_readonly_data_without_requesting_data_write_access() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let policy = AclPolicy::current_user()?;
+        policy.apply(root.path(), true)?;
+        let scratch = root.path().join("readonly-scratch");
+        policy.create_directory(&scratch)?;
+        let data = scratch.join("readonly.bin");
+        fs::write(&data, b"readonly-owned-fixture")?;
+        let mut permissions = fs::metadata(&data)?.permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&data, permissions)?;
+        remove_with_policy(&scratch, &policy)?;
+        assert!(!scratch.exists());
+        Ok(())
+    }
     #[test]
     fn capability_cleanup_unlinks_hardlinks_and_junctions_without_modifying_outside_identity()
     -> Result<()> {
