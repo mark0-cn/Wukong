@@ -39,6 +39,7 @@ tokio = { version = "1.54", features = ["fs", "io-util", "io-std", "net", "macro
 wukong-worker-package = { path = "../package" }
 
 [target.'cfg(windows)'.dependencies]
+backon = { version = "1.6", default-features = false, features = ["std"] }
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -58,3 +59,4 @@ strip = true
 
 [target.'cfg(windows)'.dev-dependencies]
 junction = { version = "2.1", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_System_Memory"] }

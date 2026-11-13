@@ -1,10 +1,12 @@
 //! Owned scratch cleanup after independently draining its resource Job.
 //! cap-std owns handle-relative traversal/removal, Windows SDK owns ACLs.
 use crate::security::{self, AclPolicy};
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
+use backon::{BlockingRetryable, ExponentialBuilder};
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt, OpenOptionsMaybeDirExt};
 use cap_std::fs::{Dir, OpenOptions, OpenOptionsExt};
 use std::{
+    ffi::OsStr,
     fs,
     os::windows::{
         fs::{MetadataExt, OpenOptionsExt as _},
@@ -121,18 +123,135 @@ fn contents(directory: &Dir, policy: &AclPolicy, budget: &mut Budget, depth: usi
             }
         }
         drop(held);
-        if is_directory {
-            directory.remove_dir(&name)?;
-        } else {
-            directory.remove_file(&name)?;
-        }
+        remove_entry(directory, &name, is_directory, budget.deadline)?;
     }
     Ok(())
+}
+
+/// Windows can still refuse deletion while an image mapping or external read
+/// handle is being released. Repeat only removal, after reclamation and Job
+/// drain; never repeat execution, ACL changes or tree traversal here.
+fn remove_entry(
+    directory: &Dir,
+    name: &OsStr,
+    is_directory: bool,
+    deadline: Instant,
+) -> Result<()> {
+    (|| {
+        if is_directory {
+            directory.remove_dir(name)
+        } else {
+            directory.remove_file(name)
+        }
+    })
+    .retry(
+        ExponentialBuilder::default()
+            .with_min_delay(Duration::from_millis(20))
+            .with_max_delay(Duration::from_millis(200))
+            .with_max_times(8)
+            .with_total_delay(Some(deadline.saturating_duration_since(Instant::now()))),
+    )
+    .when(|error| matches!(error.raw_os_error(), Some(5 | 32)) && Instant::now() < deadline)
+    .sleep(move |delay: Duration| {
+        std::thread::sleep(delay.min(deadline.saturating_duration_since(Instant::now())));
+    })
+    .notify(|error, delay| {
+        eprintln!("owned scratch removal pending for {name:?}: {error}; wait {delay:?}");
+    })
+    .call()
+    .with_context(|| format!("remove owned scratch entry {name:?}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hold_image_mapping(
+        path: &Path,
+        ready: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    ) -> Result<()> {
+        use windows_sys::Win32::System::Memory::{
+            CreateFileMappingW, FILE_MAP_READ, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
+            PAGE_READONLY, SEC_IMAGE, UnmapViewOfFile,
+        };
+        struct View(MEMORY_MAPPED_VIEW_ADDRESS);
+        impl Drop for View {
+            fn drop(&mut self) {
+                unsafe { UnmapViewOfFile(self.0) };
+            }
+        }
+        // Map a copy of this trusted test executable as an image, without
+        // executing it. Windows refuses deleting a live image section with 5.
+        let file = fs::File::open(path)?;
+        let section = security::Handle(unsafe {
+            CreateFileMappingW(
+                file.as_raw_handle(),
+                std::ptr::null(),
+                PAGE_READONLY | SEC_IMAGE,
+                0,
+                0,
+                std::ptr::null(),
+            )
+        });
+        ensure!(!section.0.is_null(), "cannot create trusted image mapping");
+        let view = View(unsafe { MapViewOfFile(section.0, FILE_MAP_READ, 0, 0, 0) });
+        ensure!(!view.0.Value.is_null(), "cannot map trusted image view");
+        ready.send(())?;
+        release.recv_timeout(Duration::from_secs(10))?;
+        drop(view);
+        Ok(())
+    }
+
+    #[test]
+    fn cleanup_waits_for_a_real_image_mapping_to_be_released() -> Result<()> {
+        image_mapping_cleanup(false)
+    }
+
+    #[test]
+    fn cleanup_preserves_failure_while_an_image_mapping_remains() -> Result<()> {
+        image_mapping_cleanup(true)
+    }
+
+    fn image_mapping_cleanup(keep_mapping: bool) -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let policy = AclPolicy::current_user()?;
+        policy.apply(root.path(), true)?;
+        let scratch = root.path().join("image-scratch");
+        policy.create_directory(&scratch)?;
+        let path = scratch.join("trusted-test.exe");
+        fs::copy(std::env::current_exe()?, &path)?;
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        std::thread::scope(|scope| -> Result<()> {
+            let holder = scope.spawn(|| hold_image_mapping(&path, ready_tx, release_rx));
+            ready_rx.recv_timeout(Duration::from_secs(5))?;
+            assert_eq!(fs::remove_file(&path).unwrap_err().raw_os_error(), Some(5));
+            if keep_mapping {
+                let error = remove_with_policy(&scratch, &policy).unwrap_err();
+                assert_eq!(
+                    error
+                        .downcast_ref::<std::io::Error>()
+                        .and_then(std::io::Error::raw_os_error),
+                    Some(5)
+                );
+                assert!(path.is_file());
+                release_tx.send(())?;
+                holder.join().expect("image holder panicked")?;
+                remove_with_policy(&scratch, &policy)?;
+            } else {
+                scope.spawn(move || {
+                    std::thread::sleep(Duration::from_millis(200));
+                    release_tx.send(())
+                });
+                remove_with_policy(&scratch, &policy)?;
+                holder.join().expect("image holder panicked")?;
+            }
+            assert!(!scratch.exists());
+            Ok(())
+        })
+    }
+
     #[test]
     #[ignore = "dedicated VM System fixture: reclaim only a pinned packaged cleanup-adversary resource"]
     fn reclaim_pinned_cleanup_fixture_as_system() -> Result<()> {
