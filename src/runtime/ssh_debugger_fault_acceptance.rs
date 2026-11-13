@@ -2,7 +2,8 @@
 //! fault. No PID or service mutation is exposed through a controller tool.
 use super::{
     debugger_acceptance::{Architecture, Calls, launch_fixture},
-    launch_acceptance::{bytes, original},
+    launch_acceptance::{bytes, original, upload},
+    process_acceptance::Probe,
     process_fault_acceptance::{echo_after_recovery, publish, wait_for_resume},
     tests::{enrolled_fixture_address, read_fixture_profile},
 };
@@ -38,6 +39,8 @@ struct Profile {
     config: RuntimeConfig,
     manifest_sha256: String,
     probe: Architecture,
+    #[serde(default)]
+    dump: Option<Probe>,
     fault: Fault,
     ready: PathBuf,
     resume: PathBuf,
@@ -111,6 +114,10 @@ async fn terminal(client: &RuntimeClient, id: &str) -> Result<Value> {
 async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
     let profile: Profile = read_fixture_profile("WUKONG_REMOTE_WORKER_DEBUGGER_FAULT_TEST")?;
     enrolled_fixture_address(&profile.config, false)?;
+    ensure!(
+        profile.dump.is_none() || profile.fault != Fault::Cancel,
+        "idle dump interruption requires independent host/service termination"
+    );
     for path in [&profile.ready, &profile.resume, &profile.output] {
         ensure!(
             path.is_absolute() && !path.try_exists()?,
@@ -154,7 +161,11 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         &profile.probe.program,
         &profile.probe.pdb,
         120,
-        &["--debug-wait"],
+        if profile.dump.is_some() {
+            &[]
+        } else {
+            &["--debug-wait"]
+        },
     )
     .await?;
     let mut calls = Calls {
@@ -162,12 +173,28 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         log: fs::File::create_new(profile.output.with_extension("jsonl"))?,
         count: 0,
     };
-    let request = json!({"mode":"launch","engine":"dbgeng","launch_spec":launch["path"],"request_id":"fault-start"});
+    let mut request = json!({"mode":"launch","engine":"dbgeng","launch_spec":launch["path"],"request_id":"fault-start"});
+    if let Some(dump) = &profile.dump {
+        let staged = upload(
+            &bound,
+            &format!(
+                "debugger-fault/{}/snapshot.dmp",
+                profile.probe.program.sha256
+            ),
+            &bytes(dump)?,
+            false,
+        )
+        .await?;
+        request["mode"] = json!("dump");
+        request["dump"] = staged["path"].clone();
+    }
     let started = calls.call("debug.start", request.clone()).await?;
     let id = started["session_id"]
         .as_str()
         .context("fault debugger absent")?;
-    if let Err(error) = enter_wait(&mut calls, id).await {
+    if profile.dump.is_none()
+        && let Err(error) = enter_wait(&mut calls, id).await
+    {
         calls
             .call(
                 "debug.close",
@@ -181,34 +208,38 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
     // Each completed preparation is retained; only an independently observed
     // still-started mutation authorizes a fault.
     let mut preparation = Vec::new();
-    let (control, pending) = loop {
-        let control = json!({"session_id":id,"action":"next","timeout_secs":60,
+    let (control, pending) = if profile.dump.is_some() {
+        (None, None)
+    } else {
+        loop {
+            let control = json!({"session_id":id,"action":"next","timeout_secs":60,
             "request_id":format!("fault-step-{}",preparation.len())});
-        let mut pending = Box::pin(bound.call("debug.control", control.clone()));
-        let Ok(result) = tokio::time::timeout(Duration::from_millis(600), &mut pending).await
-        else {
-            break (control, pending);
-        };
-        drop(pending);
-        let accepted = result
-            .as_ref()
-            .is_ok_and(|value| value["response"]["isError"] != true);
-        if !accepted || preparation.len() >= 16 {
-            calls
-                .call(
-                    "debug.close",
-                    json!({"session_id":id,"request_id":"early-control-close"}),
-                )
-                .await?;
-            anyhow::bail!("trusted wait was not reached: {result:?}");
+            let mut pending = Box::pin(bound.call("debug.control", control.clone()));
+            let Ok(result) = tokio::time::timeout(Duration::from_millis(600), &mut pending).await
+            else {
+                break (Some(control), Some(pending));
+            };
+            drop(pending);
+            let accepted = result
+                .as_ref()
+                .is_ok_and(|value| value["response"]["isError"] != true);
+            if !accepted || preparation.len() >= 16 {
+                calls
+                    .call(
+                        "debug.close",
+                        json!({"session_id":id,"request_id":"early-control-close"}),
+                    )
+                    .await?;
+                anyhow::bail!("trusted wait was not reached: {result:?}");
+            }
+            preparation.push(json!({"params":control,"result":result?}));
         }
-        preparation.push(json!({"params":control,"result":result?}));
     };
     publish(
         &profile.ready,
         &json!({"scope":"dedicated_native_debugger_fault_ready","fault":profile.fault,
         "identity":client.identity(),"run_id":run,"owner_id":"debugger-fault-controller",
-        "started":started,"launch":launch,"preparation":preparation,"pending_control":control,"probe_sha256":profile.probe.program.sha256}),
+        "started":started,"launch":launch,"preparation":preparation,"pending_control":control,"probe_sha256":profile.probe.program.sha256,"dump_sha256":profile.dump.as_ref().map(|dump| &dump.sha256)}),
     )?;
     wait_for_resume(&profile.resume, Duration::from_secs(180)).await?;
     let cancellation = if profile.fault == Fault::Cancel {
@@ -231,11 +262,16 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
     } else {
         None
     };
-    let failed = tokio::time::timeout(Duration::from_secs(45), pending)
-        .await
-        .context("interrupted control did not return")?
-        .err()
-        .context("interrupted control manufactured success")?;
+    let failed = if let Some(pending) = pending {
+        let failed = tokio::time::timeout(Duration::from_secs(45), pending)
+            .await
+            .context("interrupted control did not return")?
+            .err()
+            .context("interrupted control manufactured success")?;
+        Some(format!("{failed:#}"))
+    } else {
+        None
+    };
     let active = if profile.fault.restarts_service() {
         let fresh = RuntimeClient::connect(profile.config.clone()).await?;
         ensure!(
@@ -257,7 +293,10 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         "fault lease epoch differs"
     );
     if profile.fault.restarts_service() {
-        let stale = bound
+        // Validate the old fence over the authenticated replacement transport.
+        // An idle dump has no pending call to observe the old socket closing.
+        let stale = active
+            .with_lease(lease.clone())
             .call("debug.start", request.clone())
             .await
             .err()
@@ -282,13 +321,15 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         rebound.call("debug.start", request).await.is_err(),
         "interrupted start replayed"
     );
-    ensure!(
-        rebound
-            .call("debug.control", control.clone())
-            .await
-            .is_err(),
-        "interrupted control replayed or fabricated completion"
-    );
+    if let Some(control) = &control {
+        ensure!(
+            rebound
+                .call("debug.control", control.clone())
+                .await
+                .is_err(),
+            "interrupted control replayed or fabricated completion"
+        );
+    }
     let (artifact, content) = original(&rebound, &format!("native-results/{id}/receipt")).await?;
     let proof: Value = serde_json::from_slice(&content)?;
     ensure!(
@@ -312,7 +353,7 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         &json!({"passed":true,"scope":"interrupted_native_debugger_vm","fault":profile.fault,
         "identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"started":started,
         "preparation":preparation,"pending_control":control,
-        "interrupted_control_error":format!("{failed:#}"),"cancellation":cancellation,"terminal":status,
+        "interrupted_control_error":failed,"read_only":profile.dump.is_some(),"cancellation":cancellation,"terminal":status,
         "recovery_artifact":artifact,"recovery_receipt":proof,"after_recovery":after,"production_execution":false}),
     )?;
     Ok(())
