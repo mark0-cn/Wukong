@@ -25,6 +25,9 @@ path = "native/package_main.rs"
 
 [dependencies]
 anyhow = "1"
+futures-util = { version = "0.3", features = ["sink"] }
+prost = "0.14"
+tokio-util = { version = "0.7", features = ["codec"] }
 base64 = "0.22"
 hex = "0.4"
 serde_json = "1"
@@ -47,6 +50,10 @@ windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_Fil
 
 [dev-dependencies]
 tempfile = "3"
+
+[build-dependencies]
+prost-build = "0.14"
+protox = "0.10"
 
 [profile.release]
 lto = "thin"

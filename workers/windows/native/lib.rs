@@ -6,6 +6,8 @@ pub mod accounts;
 mod authority;
 #[cfg(windows)]
 pub mod broker;
+#[cfg(any(windows, test))]
+mod broker_wire;
 #[cfg(windows)]
 pub mod deployment;
 #[cfg(windows)]

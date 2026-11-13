@@ -41,14 +41,7 @@ fn require(condition: bool, kind: &'static str, message: &'static str) -> Result
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct Identity {
-    pub protocol: u32,
-    pub installation_id: String,
-    pub boot_id: String,
-    pub package_sha256: String,
-}
+pub use crate::broker_wire::Identity;
 impl Identity {
     pub fn from_readiness(value: Value, installation: &str, package: &str) -> Result<Self> {
         let identity: Self = serde_json::from_value(value)?;

@@ -1,32 +1,13 @@
 //! System-owned worker IPC. Health establishes the transport boundary only;
 //! target execution remains disabled until native resource operations exist.
+use crate::broker_wire::{self, Health, HealthRequest, Request, SCHEMA, request::Operation};
 use crate::{lease_proxy::Identity, pipe_transport, processes::JobObserver, security};
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
+use futures_util::{SinkExt, StreamExt};
+use prost::{Message, bytes::Bytes};
 use std::{os::windows::io::AsRawHandle, time::Duration};
-use tokio::{io::BufReader, net::windows::named_pipe::NamedPipeServer};
+use tokio::net::windows::named_pipe::NamedPipeServer;
 use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
-
-const FRAME_LIMIT: usize = 4096;
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Request {
-    schema: u32,
-    operation: Operation,
-}
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Operation {
-    Health,
-}
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Health {
-    schema: u32,
-    identity: Identity,
-    production_execution: bool,
-    scope: String,
-}
 
 pub(crate) struct Broker {
     identity: Identity,
@@ -63,28 +44,28 @@ impl Broker {
     }
     pub(crate) async fn serve(&self, server: NamedPipeServer) -> Result<()> {
         tokio::time::timeout(Duration::from_secs(3), async {
-            let mut stream = BufReader::new(server);
-            let frame = pipe_transport::read_bounded_frame(&mut stream, FRAME_LIMIT)
-                .await?
+            let mut stream = broker_wire::framed(server);
+            let frame = stream
+                .next()
+                .await
+                .transpose()?
                 .context("native broker closed before a request")?;
             self.authenticate(stream.get_ref())?;
-            let request: Request = serde_json::from_slice(&frame)?;
-            ensure!(request.schema == 1, "unsupported native broker schema");
-            let reply = match request.operation {
-                Operation::Health => Health {
-                    schema: 1,
-                    identity: self.identity.clone(),
+            let request = Request::decode(frame)?;
+            ensure!(request.schema == SCHEMA, "unsupported native broker schema");
+            let reply = match request
+                .operation
+                .context("missing native broker operation")?
+            {
+                Operation::Health(_) => Health {
+                    schema: SCHEMA,
+                    identity: Some(self.identity.clone()),
                     production_execution: false,
                     scope: "native_broker_channel_only".into(),
                 },
             };
-            let mut bytes = serde_json::to_vec(&reply)?;
-            bytes.push(b'\n');
-            ensure!(
-                bytes.len() <= FRAME_LIMIT,
-                "native broker response exceeds limit"
-            );
-            pipe_transport::write_frame(stream.get_mut(), &bytes).await
+            stream.send(Bytes::from(reply.encode_to_vec())).await?;
+            Ok(())
         })
         .await
         .context("native broker frame deadline exceeded")?
@@ -96,24 +77,37 @@ impl Broker {
 pub async fn health(installation: &str, parent_pid: u32) -> Result<serde_json::Value> {
     tokio::time::timeout(Duration::from_secs(3), async {
         let mut client =
-            BufReader::new(pipe_transport::connect_broker(installation, parent_pid).await?);
-        pipe_transport::write_frame(
-            client.get_mut(),
-            b"{\"schema\":1,\"operation\":\"health\"}\n",
-        )
-        .await?;
-        let frame = pipe_transport::read_bounded_frame(&mut client, FRAME_LIMIT)
-            .await?
+            broker_wire::framed(pipe_transport::connect_broker(installation, parent_pid).await?);
+        client
+            .send(Bytes::from(
+                Request {
+                    schema: SCHEMA,
+                    operation: Some(Operation::Health(HealthRequest {})),
+                }
+                .encode_to_vec(),
+            ))
+            .await?;
+        let frame = client
+            .next()
+            .await
+            .transpose()?
             .context("native broker closed without a response")?;
-        let reply: Health = serde_json::from_slice(&frame)?;
+        let reply = Health::decode(frame)?;
+        let identity = reply
+            .identity
+            .as_ref()
+            .context("missing native broker identity")?;
         ensure!(
-            reply.schema == 1
-                && reply.identity.installation_id == installation
+            reply.schema == SCHEMA
+                && identity.installation_id == installation
                 && !reply.production_execution
                 && reply.scope == "native_broker_channel_only",
             "native broker health identity or scope changed"
         );
-        Ok(serde_json::to_value(reply)?)
+        let mut value = serde_json::to_value(reply)?;
+        // The CLI projection is independent of the internal wire version.
+        value["schema"] = 1.into();
+        Ok(value)
     })
     .await
     .context("native broker health deadline exceeded")?

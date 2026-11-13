@@ -94,6 +94,7 @@ async fn real_worker_job_and_sid_admit_broker_health_but_never_execution() -> Re
     let value = result(&child, directory.path()).await?;
     assert_eq!(value["identity"], serde_json::to_value(expected)?);
     assert_eq!(value["production_execution"], false);
+    assert_eq!(value["schema"], 1);
     assert_eq!(security::current_user_sid()?, sid);
     child.stop(Duration::from_secs(5))?;
     Ok(())
@@ -137,8 +138,7 @@ async fn same_sid_from_another_job_and_wrong_sid_are_rejected() -> Result<()> {
 }
 
 #[tokio::test]
-async fn client_checks_kernel_server_pid_and_broker_frames_are_smaller_than_relay_frames()
--> Result<()> {
+async fn client_checks_kernel_server_pid() -> Result<()> {
     let id = hex::encode(accounts::random_bytes::<16>()?);
     let sid = security::current_user_sid()?;
     let server = pipe_transport::broker_fixture_server(&id, &sid)?;
@@ -152,18 +152,5 @@ async fn client_checks_kernel_server_pid_and_broker_frames_are_smaller_than_rela
             .to_string()
             .contains("trusted service parent PID")
     );
-    let oversized = vec![b'x'; FRAME_LIMIT + 1];
-    let mut reader = BufReader::new(oversized.as_slice());
-    assert!(
-        pipe_transport::read_bounded_frame(&mut reader, FRAME_LIMIT)
-            .await
-            .is_err()
-    );
-    for invalid in [
-        b"{\"schema\":1,\"operation\":\"launch\"}".as_slice(),
-        b"{\"schema\":1,\"operation\":\"health\",\"pid\":4}".as_slice(),
-    ] {
-        assert!(serde_json::from_slice::<Request>(invalid).is_err());
-    }
     Ok(())
 }

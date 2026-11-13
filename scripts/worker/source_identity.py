@@ -13,7 +13,7 @@ def identity():
     digest = hashlib.sha256()
     for directory in SOURCES:
         for path in sorted((ROOT / directory).rglob("*")):
-            if path.suffix not in {".py", ".rs", ".c", ".h", ".toml", ".lock", ".json", ".txt"} or not path.is_file():
+            if path.suffix not in {".py", ".rs", ".proto", ".c", ".h", ".toml", ".lock", ".json", ".txt"} or not path.is_file():
                 continue
             if "__pycache__" in path.parts or "target" in path.relative_to(ROOT).parts:
                 continue

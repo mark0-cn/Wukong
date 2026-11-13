@@ -1,0 +1,26 @@
+syntax = "proto3";
+package wukong.broker.v2;
+
+// Internal service/worker channel; both endpoints ship in one signed package.
+message Request {
+  uint32 schema = 1;
+  oneof operation {
+    HealthRequest health = 2;
+  }
+}
+
+message HealthRequest {}
+
+message Identity {
+  uint32 protocol = 1;
+  string installation_id = 2;
+  string boot_id = 3;
+  string package_sha256 = 4;
+}
+
+message Health {
+  uint32 schema = 1;
+  Identity identity = 2;
+  bool production_execution = 3;
+  string scope = 4;
+}
