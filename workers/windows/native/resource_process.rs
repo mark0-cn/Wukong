@@ -176,7 +176,6 @@ pub fn execute(
             String::new(),
         );
     }
-    let public = deployment.code_policy()?;
     let metadata = root.join("metadata");
     if let Some(launch) = &request.launch {
         let document = crate::resource_launch::Document::read(resource_input::open(
@@ -220,6 +219,9 @@ pub fn execute(
         &nonce,
         Some(&request.resource_id),
     )?;
+    let image_policy = private
+        .clone()
+        .with_resource_code(&persona.sid_text()?, persona.logon_sid())?;
     deployment::publish_json(
         &metadata.join(format!("resource-scratch-{nonce}.json")),
         &ScratchIntent {
@@ -249,7 +251,7 @@ pub fn execute(
                 &launch.cwd,
                 &persona.sid_text()?,
                 persona.logon_sid(),
-                &public,
+                &image_policy,
             )
         })
         .transpose()?;
@@ -258,7 +260,7 @@ pub fn execute(
         .map(|directory| directory.path())
         .unwrap_or(&scratch)
         .to_owned();
-    let held = crate::resource_image::stage(&scratch, sources, &public, working.as_ref())?;
+    let held = crate::resource_image::stage(&scratch, sources, &image_policy, working.as_ref())?;
     if cancel.try_exists()? {
         let app = persona.sid_text()?;
         let logon = persona.logon_sid().to_owned();

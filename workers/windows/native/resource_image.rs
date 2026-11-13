@@ -238,8 +238,48 @@ mod tests {
     }
     #[test]
     fn staged_image_retains_paths_readonly_data_and_no_write_delete_sharing() -> Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Security::{
+                Authorization::SE_FILE_OBJECT, CreateRestrictedToken, DISABLE_MAX_PRIVILEGE,
+                TOKEN_DUPLICATE, TOKEN_QUERY,
+            },
+            Storage::FileSystem::{
+                DELETE, FILE_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, WRITE_DAC, WRITE_OWNER,
+            },
+            System::Threading::{GetCurrentProcess, OpenProcessToken},
+        };
         let temp = tempfile::tempdir()?;
         let private = AclPolicy::current_user()?;
+        let mut token = std::ptr::null_mut();
+        security::check(unsafe {
+            OpenProcessToken(
+                GetCurrentProcess(),
+                TOKEN_QUERY | TOKEN_DUPLICATE,
+                &mut token,
+            )
+        })?;
+        let original = security::Handle(token);
+        let mut token = std::ptr::null_mut();
+        // Administrator test runners can have SeTakeOwnershipPrivilege enabled.
+        // Model ordinary sandbox DACL access, not that privilege's bypass.
+        security::check(unsafe {
+            CreateRestrictedToken(
+                original.0,
+                DISABLE_MAX_PRIVILEGE,
+                0,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                &mut token,
+            )
+        })?;
+        let token = security::Handle(token);
+        let logon = security::token_logon_sid(&token)?;
+        const APP: &str = "S-1-15-2-101-102-103-104-105-106-107";
+        let image_policy = private.clone().with_resource_code(APP, &logon)?;
         private.apply(temp.path(), true)?;
         let scratch = temp.path().join("image");
         private.create_directory(&scratch)?;
@@ -259,7 +299,7 @@ mod tests {
                 reference.clone(),
             ));
         }
-        let handles = stage_with_policy(&scratch, sources, &private, &private, None)?;
+        let handles = stage_with_policy(&scratch, sources, &image_policy, &private, None)?;
         assert_eq!(handles.len(), 2);
         for reference in &references {
             let path = scratch.join(&reference.path);
@@ -274,11 +314,46 @@ mod tests {
             );
             assert_eq!(fs::remove_file(&path).unwrap_err().raw_os_error(), Some(32));
             let expected = if reference.executable {
-                private.clone()
+                image_policy.clone()
             } else {
-                private.read_only_data()
+                image_policy.read_only_data()
             };
             expected.verify(&path, false)?;
+            let file = fs::File::open(&path)?;
+            let descriptor =
+                security::SecurityDescriptor::from_object(file.as_raw_handle(), SE_FILE_OBJECT)?;
+            for sid in [APP, &logon] {
+                assert!(security::test_authz::allows(
+                    &descriptor,
+                    &token,
+                    sid,
+                    FILE_GENERIC_READ
+                )?);
+                assert_eq!(
+                    security::test_authz::allows(&descriptor, &token, sid, FILE_EXECUTE)?,
+                    reference.executable
+                );
+                for desired in [FILE_GENERIC_WRITE, DELETE, WRITE_DAC, WRITE_OWNER] {
+                    assert!(
+                        !security::test_authz::allows(&descriptor, &token, sid, desired)?,
+                        "{sid} unexpectedly received {desired:#x} for {}",
+                        reference.path
+                    );
+                }
+            }
+            for other in [
+                "S-1-15-2-201-202-203-204-205-206-207",
+                "S-1-5-5-201-202",
+                "S-1-5-32-545", // All ordinary users must not read target data.
+                "S-1-15-2-1",   // Nor every AppContainer on the VM.
+            ] {
+                assert!(!security::test_authz::allows(
+                    &descriptor,
+                    &token,
+                    other,
+                    FILE_GENERIC_READ
+                )?);
+            }
         }
         drop(handles);
         fs::remove_dir_all(&scratch)?;

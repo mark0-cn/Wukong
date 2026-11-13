@@ -369,6 +369,17 @@ impl AclPolicy {
         );
         result
     }
+    /// Immutable resource inputs are not shared package code. Grant both
+    /// halves of the sandbox's access check without Users/All Applications.
+    pub(crate) fn with_resource_code(mut self, app: &str, logon: &str) -> Result<Self> {
+        validate_app_sid(app)?;
+        validate_logon_sid(logon)?;
+        for sid in [app, logon] {
+            self.grants
+                .insert(sid.into(), FILE_GENERIC_READ | FILE_GENERIC_EXECUTE);
+        }
+        Ok(self)
+    }
     /// Preserve the code policy's readers without granting execution of data
     /// uploads. System/administrator control is unchanged.
     pub(crate) fn read_only_data(&self) -> Self {
