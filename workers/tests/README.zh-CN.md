@@ -79,6 +79,23 @@ python3 /opt/wukong/tests/run.py ghidra --state /state/ghidra-acceptance
 
 Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特权和管理员组，以检查普通账户的 DACL 权限，避免 `SeTakeOwnershipPrivilege` 授予 `WRITE_OWNER`。它不修改父进程令牌或已安装服务的策略。此夹具于 2026-11-13 在用户提供的 Windows 10 VM 上通过。
 
+### 外部 WinDbg MCP 验收
+
+`tests/windbg_mcp.rs` 通过现有 `McpRegistry`（Rig/rmcp）驱动真实外部调试器。它默认忽略，要求专用 VM 已具有仓库的可信 x64/x86 `wukong-probe` 程序、匹配的 PDB 和已生成的 dump。配置固定身份的 SSH stdio 命令，或在该 VM 内使用本地命令；测试不会安装软件或运行未知目标。
+
+将 `WUKONG_WINDBG_MCP_ACCEPTANCE` 指向包含以下字段的机器本地 JSON 文件：
+
+- `server`：现有 `McpServerConfig` 的 `name`、`command`、`args`、`env` 和 `timeout_seconds` 字段。使用 `name: "windbg"`、已验证的 `windbg-mcp.exe`、`--tools session,inspect,exec,crash` 参数和 45 秒超时。使用打包的 Win32-OpenSSH 时，在环境变量白名单中包含 `"PROGRAMDATA"`。SSH 须固定主机密钥并禁用转发。
+- `fixtures`：按 x64、x86 顺序提供两个对象，各自包含 `architecture`、`target`、`dump` 和 `symbols`。路径均为 VM 内绝对路径；`symbols` 为保存相应夹具 PDB 的本地目录。
+- `transcript`：控制端全新的绝对路径，保存原始 MCP JSONL 证据；不覆盖已有输出。
+
+```powershell
+$env:WUKONG_WINDBG_MCP_ACCEPTANCE = (Resolve-Path .\windbg-mcp-acceptance.json).Path
+cargo test --locked --test windbg_mcp -- --ignored --nocapture
+```
+
+此验收于 2026-11-13 在用户提供的离线 Windows 10 VM 上通过，使用 [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0)（压缩包 SHA256 为 `f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34`）和已封存的 Debugging Tools 引擎。覆盖两种架构的 dump、实时启动、本地符号、`wmain` 断点、寄存器、16 字节指令内存、模块、调用栈、反汇编、单步、释放及最终空会话列表：共 51 次 MCP 调用，无工具错误。对 WOW64 额外加载器断点进行显式有界处理。线程列表文本作为原始证据保留，不宣称是结构化线程清单。这些结果证明客户端与后端互通，不证明托管 AppContainer 隔离、跨任务所有权、重启恢复或旧适配器已完整替换。
+
 引导程序 PE 格式夹具在独立 Rust 库的 `pe_imports` 测试中直接调用 `object`，覆盖普通/延迟导入、两种架构、畸形目录及不安全库名。Python 自动化另行检查检查器响应绑定、CRT 拒绝、超时和执行前哈希验证；模拟观察数据不是 PE 格式验收。原生格式测试于 2026-11-13 在用户提供的离线 Windows 10 VM 上通过；真实控制端工具在本机重现了全部三个引导程序和两种编译探针的导入清单。
 
 `integration --static-fixture` 使用静态链接夹具验证调试器和重放适配器，不验证动态加载器及库身份。Docker 运行需要可执行的 `/tmp`、ptrace 和文档要求的隔离能力。

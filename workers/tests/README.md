@@ -76,6 +76,23 @@ The `launch` suite builds a trusted C fixture and exercises both stdin and argv-
 
 The native Windows service-access fixture disables the copied administrator token's maximum privileges as well as its administrator group. This tests ordinary-account DACL rights without `SeTakeOwnershipPrivilege` granting `WRITE_OWNER`; it changes neither the parent token nor the installed service policy. The fixture passed on the provided Windows 10 VM on 2026-11-13.
 
+### External WinDbg MCP acceptance
+
+`tests/windbg_mcp.rs` drives a real external debugger through the existing `McpRegistry` (Rig/rmcp). It is ignored by default and requires a dedicated VM with the repository's trusted x64/x86 `wukong-probe` executables, matching PDBs and generated dumps. Configure a pinned SSH stdio command or a local command inside that VM; this test does not install software or run unknown targets.
+
+Set `WUKONG_WINDBG_MCP_ACCEPTANCE` to a machine-local JSON file with these fields:
+
+- `server`: the existing `McpServerConfig` fields `name`, `command`, `args`, `env` and `timeout_seconds`. Use `name: "windbg"`, the verified `windbg-mcp.exe` with `--tools session,inspect,exec,crash`, and a 45-second timeout. For packaged Win32-OpenSSH, include `"PROGRAMDATA"` in the environment allowlist. SSH must pin the host key and disable forwarding.
+- `fixtures`: two objects, in x64 then x86 order, each containing `architecture`, `target`, `dump` and `symbols`. Paths are absolute paths in the VM; `symbols` is the local directory holding that fixture's PDB.
+- `transcript`: a new absolute path on the controller for the raw MCP JSONL evidence. Existing output is never overwritten.
+
+```powershell
+$env:WUKONG_WINDBG_MCP_ACCEPTANCE = (Resolve-Path .\windbg-mcp-acceptance.json).Path
+cargo test --locked --test windbg_mcp -- --ignored --nocapture
+```
+
+On 2026-11-13 this passed on the provided offline Windows 10 VM with [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0), archive SHA256 `f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34`, and the sealed Debugging Tools engine. It covered both architectures' dumps and live launches, local symbols, the `wmain` breakpoint, registers, 16 instruction bytes, modules, backtraces, disassembly, single stepping, release and an empty final session list: 51 MCP calls, no tool errors. WOW64's extra loader breakpoint is bounded explicitly. Thread-list text is retained as raw evidence; it is not claimed to be a structured thread inventory. These results establish client/backend interoperability, not managed AppContainer isolation, cross-task ownership, reboot recovery or complete replacement of the legacy adapter.
+
 Bootstrap PE format fixtures run directly through `object` in the standalone Rust library's `pe_imports` tests, covering normal/delay imports, both architectures, malformed directories and unsafe library names. Python automation separately checks the inspector's response binding, CRT refusal, timeouts and pre-execution hash verification; mocked observations are not PE format acceptance. The native format tests passed on the provided offline Windows 10 VM on 2026-11-13, and the real controller utility reproduced all three bootstrap and both compiled-probe import inventories locally.
 
 `integration --static-fixture` exercises the debugger/replay adapter with a statically linked fixture; it does not validate dynamic loader/library identity. Docker execution needs executable `/tmp`, ptrace and the documented isolation capabilities.
