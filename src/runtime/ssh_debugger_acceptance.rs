@@ -273,14 +273,31 @@ impl Calls<'_> {
         self.control(id, "next", json!({})).await?;
         self.control(id, "breakpoint_remove", json!({"breakpoint_id":bp_id}))
             .await?;
-        self.control(id, "continue", json!({"timeout_secs":10}))
-            .await?;
-        self.control(id, "interrupt", json!({})).await?;
-        let interrupted = self.stopped(id).await?;
-        ensure!(
-            interrupted["stop"]["interrupted"] == true,
-            "owned break-in did not stop the run"
-        );
+        let mut interrupt_attempts = Vec::new();
+        let mut interrupted = None;
+        // A pending native/WOW64 break-in can win the race before our request.
+        // Reconcile its completed run handle before a new, bounded fixture run.
+        for _ in 0..3 {
+            self.control(id, "continue", json!({"timeout_secs":10}))
+                .await?;
+            let request = self.control(id, "interrupt", json!({})).await?;
+            let stop = self.stopped(id).await?;
+            ensure!(
+                stop["stop"]["target_gone"] == false,
+                "interrupt fixture exited"
+            );
+            interrupt_attempts.push(json!({"request":request,"stop":stop}));
+            if stop["stop"]["interrupted"] == true {
+                interrupted = Some(stop);
+                break;
+            }
+            ensure!(
+                request["response"]["structuredContent"]["requested"] == false
+                    && stop["stop"]["timed_out"] == false,
+                "owned break-in did not stop its running handle"
+            );
+        }
+        let interrupted = interrupted.context("fixture never reached an interruptible run")?;
         let old_path = registers["transcript"]
             .as_str()
             .context("transcript missing")?;
@@ -292,7 +309,7 @@ impl Calls<'_> {
             "live prefix changed after append"
         );
         Ok(
-            json!({"breakpoint":breakpoint,"registers":registers,"stack":stack,"interrupted":interrupted,"prefix":first}),
+            json!({"breakpoint":breakpoint,"registers":registers,"stack":stack,"interrupted":interrupted,"interrupt_attempts":interrupt_attempts,"prefix":first}),
         )
     }
 }
