@@ -73,7 +73,8 @@ async fn inspect_dump(calls: &mut Calls<'_>, id: &str, architecture: &str) -> Re
         let error = calls
             .call("debug.control", arguments)
             .await
-            .expect_err("dump control was accepted");
+            .err()
+            .context("dump control was accepted")?;
         let error = format!("{error:#}");
         ensure!(
             error.contains("dump sessions permit inspection and close only"),
