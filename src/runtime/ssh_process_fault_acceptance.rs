@@ -40,10 +40,18 @@ struct Profile {
     launch_spec: bool,
     #[serde(default)]
     resource_inventory: bool,
+    #[serde(default)]
+    python: bool,
     ready: PathBuf,
     resume: PathBuf,
     output: PathBuf,
 }
+
+const PYTHON_SOURCE: &str = r#"import pathlib, subprocess, sys
+child = subprocess.Popen([sys.argv[1], '--fault-ready'])
+pathlib.Path('python-ready.marker').write_bytes(b'wukong-owned-python-ready\n')
+child.wait()
+"#;
 pub(super) fn publish(path: &Path, value: &Value) -> Result<()> {
     let mut file = fs::File::create_new(path)?;
     file.write_all(&serde_json::to_vec_pretty(value)?)?;
@@ -120,6 +128,13 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
         profile.fault != Fault::OsBoot || profile.resource_inventory,
         "OS-boot acceptance requires native resource discovery"
     );
+    ensure!(
+        !profile.python
+            || (matches!(profile.fault, Fault::Host | Fault::Service)
+                && !profile.launch_spec
+                && profile.resource_inventory),
+        "Python fault acceptance requires host/service interruption with resource discovery"
+    );
     for path in [&profile.ready, &profile.resume, &profile.output] {
         ensure!(
             path.is_absolute() && !path.try_exists()?,
@@ -166,7 +181,14 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     } else {
         None
     };
-    let request = if let Some(launch) = &launch {
+    let method = if profile.python {
+        "py.run"
+    } else {
+        "job.start"
+    };
+    let request = if profile.python {
+        json!({"source":PYTHON_SOURCE,"target":uploaded["path"],"timeout_secs":120,"request_id":"interrupted-start","call_id":"interrupted-start"})
+    } else if let Some(launch) = &launch {
         json!({"launch_spec":launch["path"],"request_id":"interrupted-start","call_id":"interrupted-start"})
     } else {
         json!({"argv":[uploaded["path"],"--fault-ready"],"timeout_secs":120,"request_id":"interrupted-start","call_id":"interrupted-start"})
@@ -178,14 +200,14 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
         )?;
         resume(&profile.resume, profile.fault).await?;
     }
-    let started = bound.call("job.start", request.clone()).await?;
+    let started = bound.call(method, request.clone()).await?;
     let id = started["job_id"]
         .as_str()
         .context("interrupted resource ID is absent")?;
     if profile.fault != Fault::Preparation {
         publish(
             &profile.ready,
-            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"launch":launch,"job":started}),
+            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"launch":launch,"method":method,"request":request,"job":started}),
         )?;
         resume(&profile.resume, profile.fault).await?;
     }
@@ -293,9 +315,6 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
         return Ok(());
     }
     let active = if profile.fault == Fault::Service {
-        // Only a read is used to consume the dead transport. The mutating
-        // stale start below is not retried and must reach the live lease gate.
-        let _ = bound.call("job.status", json!({"job_id":id})).await;
         let fresh = RuntimeClient::connect(profile.config.clone()).await?;
         ensure!(
             fresh.identity() == client.identity(),
@@ -312,8 +331,11 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             current.epoch > lease.epoch,
             "service fault reused a native lease epoch"
         );
-        let stale = bound
-            .call("job.start", request.clone())
+        // Keep the old fence on a live transport, so LeaseLost proves worker
+        // admission rather than merely observing the original SSH disconnect.
+        let stale = active
+            .with_lease(lease.clone())
+            .call(method, request.clone())
             .await
             .err()
             .context("old service fence reached a native start")?;
@@ -340,11 +362,28 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
         status["result"]["outcome"] == "unknown" && status["result"].get("exit_code").is_none(),
         "interrupted execution manufactured a result"
     );
-    let cached = rebound.call("job.start", request.clone()).await?;
+    let cached = rebound.call(method, request.clone()).await?;
     ensure!(
         cached == status,
         "interrupted start was relaunched or its result changed"
     );
+    if profile.python {
+        let mut changed = request.clone();
+        changed["source"] = json!(format!("{PYTHON_SOURCE}\nprint('must not execute')\n"));
+        let rejected = rebound
+            .call(method, changed)
+            .await
+            .err()
+            .context("interrupted Python ID accepted different source")?;
+        ensure!(
+            rejected.downcast_ref::<WorkerError>().is_some(),
+            "changed Python source failed outside worker admission: {rejected:#}"
+        );
+        ensure!(
+            rebound.call("job.status", json!({"job_id":id})).await? == status,
+            "source conflict changed the interrupted resource"
+        );
+    }
     let artifacts = rebound.call("job.artifacts", json!({"job_id":id})).await?;
     let artifacts = artifacts.as_array().context("recovery artifacts missing")?;
     ensure!(
@@ -389,7 +428,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     client.close().await?;
     publish(
         &profile.output,
-        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"launch":launch,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
+        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"launch":launch,"method":method,"python_source_conflict_rejected":profile.python,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
     )?;
     Ok(())
 }
