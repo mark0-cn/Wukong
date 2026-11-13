@@ -54,6 +54,8 @@ pub mod resource_recovery;
 #[cfg(windows)]
 mod resource_runtime;
 #[cfg(windows)]
+mod resource_target;
+#[cfg(windows)]
 pub mod security;
 #[cfg(windows)]
 pub mod service;

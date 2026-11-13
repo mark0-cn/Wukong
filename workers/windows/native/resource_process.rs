@@ -1,18 +1,17 @@
 //! One System child per native execution resource. Controller admission owns
 //! the fence and journal; this host accepts only its protected fixed request.
 use crate::{
-    accounts::Role,
     deployment,
     inputs::digest,
     process_capture::{CaptureResult, PreparedIo},
-    processes::{ResourceLimits, Spawn},
-    resource_input::{self, Purpose, Reference},
+    processes::ResourceLimits,
+    resource_input::Reference,
     resource_journal::{Binding, Owner},
     security::{self, AclPolicy},
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, ffi::OsString, io::Read, path::Path, time::Duration};
+use std::{collections::BTreeMap, io::Read, path::Path, time::Duration};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -141,13 +140,8 @@ pub fn execute(
     request_path: &Path,
 ) -> Result<serde_json::Value> {
     security::require_system()?;
-    let crate::resource_host::Host {
-        deployment,
-        root,
-        manifest,
-        resources,
-        environment: system_environment,
-    } = crate::resource_host::open(installation, configuration)?;
+    let host = crate::resource_host::open(installation, configuration)?;
+    let root = &host.root;
     let private = AclPolicy::private_vm();
     private.verify(request_path, false)?;
     let request: Request = serde_json::from_slice(&deployment::read_bytes(request_path, 65536)?)?;
@@ -161,7 +155,7 @@ pub fn execute(
     );
     ensure!(
         request.owner.identity.installation_id == installation
-            && request.owner.identity.package_sha256 == manifest.sha256(),
+            && request.owner.identity.package_sha256 == host.manifest.sha256(),
         "native process request belongs to another signed deployment"
     );
     crate::processes::resource_job::require_membership(installation, &request.resource_id)?;
@@ -176,167 +170,24 @@ pub fn execute(
             String::new(),
         );
     }
-    let metadata = root.join("metadata");
-    if let Some(launch) = &request.launch {
-        let document = crate::resource_launch::Document::read(resource_input::open(
-            &metadata,
-            &request.owner,
-            &launch.manifest,
-            Purpose::Inspect,
-        )?)?;
-        launch.verify(
-            &request.program,
-            request.input.as_ref(),
-            document,
-            &request.arguments,
-            &request.environment,
-            request.timeout_secs,
-        )?;
-    }
-    let image_files = if let Some(launch) = &request.launch {
-        launch.image_files(&request.program, request.input.as_ref())?
-    } else {
-        request.argument_files.clone()
-    };
-    // Reject incomplete/mismatched inputs before creating a persona or scratch.
-    let sources =
-        crate::resource_image::acquire(&metadata, &request.owner, &request.program, &image_files)?;
-    let input = request
-        .input
-        .as_ref()
-        .filter(|_| {
-            request.launch.as_ref().is_none_or(|launch| {
-                launch.input_mode == crate::resource_launch::InputMode::StdinPipe
-            })
-        })
-        .map(|input| resource_input::open(&metadata, &request.owner, input, Purpose::Inspect))
-        .transpose()?;
-    let nonce = nonce(installation, &request.resource_id)?;
-    let (mut persona, _) = crate::resource_host::create_persona_named(
-        &deployment,
-        &root,
-        Role::Target,
-        &nonce,
-        Some(&request.resource_id),
-    )?;
-    let image_policy = private
-        .clone()
-        .with_resource_code(&persona.sid_text()?, persona.logon_sid())?;
-    deployment::publish_json(
-        &metadata.join(format!("resource-scratch-{nonce}.json")),
-        &ScratchIntent {
-            schema: SCHEMA,
-            installation_id: installation.into(),
-            resource_id: request.resource_id.clone(),
-            appcontainer_sid: persona.sid_text()?,
-            logon_sid: persona.logon_sid().into(),
-        },
-        &private,
-    )?;
-    let directory = security::ResourceDirectory::create(
-        &resources.join(&nonce),
-        &persona.sid_text()?,
-        persona.logon_sid(),
-    )?;
-    let scratch = directory.path().to_owned();
-    // Keep controller logical paths valid in the private working directory.
-    // acquire() already checked this portable relative files/... spelling.
-    let executable = scratch.join(&request.program.path);
-    let working = request
-        .launch
-        .as_ref()
-        .map(|launch| {
-            crate::resource_image::working_directory(
-                &scratch,
-                &launch.cwd,
-                &persona.sid_text()?,
-                persona.logon_sid(),
-                &image_policy,
-            )
-        })
-        .transpose()?;
-    let cwd = working
-        .as_ref()
-        .map(|directory| directory.path())
-        .unwrap_or(&scratch)
-        .to_owned();
-    let held = crate::resource_image::stage(&scratch, sources, &image_policy, working.as_ref())?;
+    let mut target = crate::resource_target::Prepared::open(&host, &request)?;
+    let appcontainer = target.persona.sid_text()?;
+    let logon = target.persona.logon_sid().to_owned();
     if cancel.try_exists()? {
-        let app = persona.sid_text()?;
-        let logon = persona.logon_sid().to_owned();
-        drop(held);
-        if let Some(working) = working {
-            working.reclaim()?;
-            drop(working);
-        }
-        directory.reclaim()?;
-        drop(directory);
-        persona.close()?;
-        crate::resource_cleanup::remove_reclaimed(&scratch)?;
-        return finish(&request, not_started(&request), app, logon);
+        target.close()?;
+        return finish(&request, not_started(&request), appcontainer, logon);
     }
-    let mut child_environment =
-        crate::resource_host::scratch_environment(&system_environment, &scratch);
-    child_environment.extend(
-        request
-            .environment
-            .iter()
-            .map(|(key, value)| (key.clone(), OsString::from(value))),
-    );
-    let arguments: Vec<_> = request
-        .arguments
-        .iter()
-        .map(|argument| {
-            if argument == "@@"
-                && request.launch.as_ref().is_some_and(|launch| {
-                    launch.input_mode == crate::resource_launch::InputMode::ArgvFile
-                })
-            {
-                Ok(scratch
-                    .join(
-                        &request
-                            .input
-                            .as_ref()
-                            .context("argv_file input disappeared")?
-                            .path,
-                    )
-                    .into_os_string())
-            } else {
-                Ok(OsString::from(argument))
-            }
-        })
-        .collect::<Result<_>>()?;
     let limits = ResourceLimits::new(request.processes, request.memory_bytes)?;
-    let process = PreparedIo::new(request.output_limit)?.launch(
-        input.map(|input| Box::new(input) as Box<dyn Read + Send>),
-        |io| {
-            Spawn {
-                executable: &executable,
-                arguments: &arguments,
-                directory: &cwd,
-                environment: &child_environment,
-                log: io.output(),
-                input: io.input(),
-            }
-            .sandbox_streamed(&persona, directory, io.error(), limits)
-        },
-    )?;
-    let appcontainer = persona.sid_text()?;
-    let logon = persona.logon_sid().to_owned();
+    let input = target
+        .input
+        .take()
+        .map(|input| Box::new(input) as Box<dyn Read + Send>);
+    let process =
+        PreparedIo::new(request.output_limit)?.launch(input, |io| target.launch(io, limits))?;
     let result = process.wait_with_cancel(Duration::from_secs(request.timeout_secs), || {
         Ok(cancel.try_exists()?)
     })?;
-    drop(held);
-    if let Some(working) = working {
-        working.reclaim()?;
-        drop(working);
-    }
-    persona.close()?;
-    private.verify(&scratch, true)?;
-    security::no_links(&scratch)?;
-    // cap-std owns handle-relative cleanup; only single-link, non-reparse
-    // objects may have their ACL/readonly attributes repaired.
-    crate::resource_cleanup::remove_reclaimed(&scratch)?;
+    target.close()?;
     finish(&request, result, appcontainer, logon)
 }
 
