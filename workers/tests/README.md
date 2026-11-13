@@ -88,10 +88,19 @@ Set `WUKONG_WINDBG_MCP_ACCEPTANCE` to a machine-local JSON file with these field
 
 ```powershell
 $env:WUKONG_WINDBG_MCP_ACCEPTANCE = (Resolve-Path .\windbg-mcp-acceptance.json).Path
-cargo test --locked --test windbg_mcp -- --ignored --nocapture
+cargo test --locked --test windbg_mcp existing_rig_client_drives_external_windbg_mcp -- --ignored --nocapture
 ```
 
 On 2026-11-13 this passed on the provided offline Windows 10 VM with [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0), archive SHA256 `f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34`, and the sealed Debugging Tools engine. It covered both architectures' dumps and live launches, local symbols, the `wmain` breakpoint, registers, 16 instruction bytes, modules, backtraces, disassembly, single stepping, release and an empty final session list: 51 MCP calls, no tool errors. WOW64's extra loader breakpoint is bounded explicitly. Thread-list text is retained as raw evidence; it is not claimed to be a structured thread inventory. These results establish client/backend interoperability, not managed AppContainer isolation, cross-task ownership, reboot recovery or complete replacement of the legacy adapter.
+
+The separate `external_windbg_mcp_run_handles_are_bounded_and_fenced` fixture uses `WUKONG_WINDBG_MCP_RUN_ACCEPTANCE` with the same profile shape and a new transcript path; `dump` may be omitted. It launches only the sealed looping probes. It exercises upstream `continue_async`, `wait_for_stop` and `break_in`, including repeated stop reads, non-cancelling zero-duration polls, rejected stale run handles, repeated run-bound break-in and the engine's execution deadline. No replacement execution scheduler or console parser is involved.
+
+```powershell
+$env:WUKONG_WINDBG_MCP_RUN_ACCEPTANCE = (Resolve-Path .\windbg-mcp-runs.json).Path
+cargo test --locked --test windbg_mcp external_windbg_mcp_run_handles_are_bounded_and_fenced -- --ignored --nocapture
+```
+
+On 2026-11-13 this asynchronous fixture passed on the dedicated offline Windows 10 VM against the installed `10a6860` package, manifest `fd9af35aa002ca8c9393f54f8bb03de872c1fd074c0e691cf7fe2b9edebb5636`, using pinned WinDbg MCP 0.24.0 with the documented closed-stdin-pipe patch. Both x64 and x86 covered the assertions above. The 35-call transcript contains 33 successes and two expected stale-handle refusals; SHA256 is `f7709ce5aaa9722a90c74e6127b2fed61a39392f052836dde2078e21f1196c2f`. Both sessions reported released/worker-terminated without leaving a running target, and the final session list was empty. Independent before/after checks verified the tool and both EXE/PDB pairs, no remaining owned tool/target processes, running worker/management services and no VM default routes. This was direct Rig/rmcp interoperability using trusted fixtures, not managed native session admission or AppContainer acceptance. No installation or service restart was needed.
 
 Bootstrap PE format fixtures run directly through `object` in the standalone Rust library's `pe_imports` tests, covering normal/delay imports, both architectures, malformed directories and unsafe library names. Python automation separately checks the inspector's response binding, CRT refusal, timeouts and pre-execution hash verification; mocked observations are not PE format acceptance. The native format tests passed on the provided offline Windows 10 VM on 2026-11-13, and the real controller utility reproduced all three bootstrap and both compiled-probe import inventories locally.
 

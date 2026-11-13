@@ -91,10 +91,19 @@ Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特
 
 ```powershell
 $env:WUKONG_WINDBG_MCP_ACCEPTANCE = (Resolve-Path .\windbg-mcp-acceptance.json).Path
-cargo test --locked --test windbg_mcp -- --ignored --nocapture
+cargo test --locked --test windbg_mcp existing_rig_client_drives_external_windbg_mcp -- --ignored --nocapture
 ```
 
 此验收于 2026-11-13 在用户提供的离线 Windows 10 VM 上通过，使用 [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0)（压缩包 SHA256 为 `f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34`）和已封存的 Debugging Tools 引擎。覆盖两种架构的 dump、实时启动、本地符号、`wmain` 断点、寄存器、16 字节指令内存、模块、调用栈、反汇编、单步、释放及最终空会话列表：共 51 次 MCP 调用，无工具错误。对 WOW64 额外加载器断点进行显式有界处理。线程列表文本作为原始证据保留，不宣称是结构化线程清单。这些结果证明客户端与后端互通，不证明托管 AppContainer 隔离、跨任务所有权、重启恢复或旧适配器已完整替换。
+
+独立的 `external_windbg_mcp_run_handles_are_bounded_and_fenced` 夹具使用 `WUKONG_WINDBG_MCP_RUN_ACCEPTANCE`，配置结构相同，但须指定新的 transcript 路径；可以省略 `dump`。它仅启动已签封的循环探针，验证上游 `continue_async`、`wait_for_stop` 和 `break_in`：重复读取停止结果、不会取消运行的零时长轮询、旧运行句柄拒绝、按运行句柄重复中断，以及引擎执行期限。不引入替代执行调度器或控制台解析器。
+
+```powershell
+$env:WUKONG_WINDBG_MCP_RUN_ACCEPTANCE = (Resolve-Path .\windbg-mcp-runs.json).Path
+cargo test --locked --test windbg_mcp external_windbg_mcp_run_handles_are_bounded_and_fenced -- --ignored --nocapture
+```
+
+2026-11-13，该异步夹具在专用离线 Windows 10 VM 上通过，使用已安装的 `10a6860` 包（清单 `fd9af35aa002ca8c9393f54f8bb03de872c1fd074c0e691cf7fe2b9edebb5636`），后端为固定版本 WinDbg MCP 0.24.0 及已记录的关闭 stdin 管道补丁。x64 和 x86 均覆盖上述断言。35 次调用的原始记录包含 33 次成功和两次预期的旧句柄拒绝，SHA256 为 `f7709ce5aaa9722a90c74e6127b2fed61a39392f052836dde2078e21f1196c2f`。两个会话均报告已释放、引擎 worker 已终止且未留下运行目标，最终会话列表为空。独立的前后检查核对了工具和两组 EXE/PDB，确认所属工具/目标进程无残留、worker 与管理服务仍运行、VM 没有默认路由。这是使用可信夹具的直接 Rig/rmcp 互通验证，不是托管原生会话准入或 AppContainer 验收；无需安装或重启服务。
 
 引导程序 PE 格式夹具在独立 Rust 库的 `pe_imports` 测试中直接调用 `object`，覆盖普通/延迟导入、两种架构、畸形目录及不安全库名。Python 自动化另行检查检查器响应绑定、CRT 拒绝、超时和执行前哈希验证；模拟观察数据不是 PE 格式验收。原生格式测试于 2026-11-13 在用户提供的离线 Windows 10 VM 上通过；真实控制端工具在本机重现了全部三个引导程序和两种编译探针的导入清单。
 
