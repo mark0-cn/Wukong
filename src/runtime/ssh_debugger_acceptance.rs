@@ -37,6 +37,62 @@ struct Calls<'a> {
     count: u64,
 }
 impl Calls<'_> {
+    async fn rejected_start(&mut self, request: Value) -> Result<Value> {
+        let before = self.call("resource.list", json!({"limit":64})).await?;
+        let prior: Vec<_> = before["resources"]
+            .as_array()
+            .context("native inventory absent")?
+            .iter()
+            .map(|row| row["resource_id"].clone())
+            .collect();
+        let error = match self.call("debug.start", request.clone()).await {
+            Ok(started) => {
+                self.call(
+                    "debug.close",
+                    json!({"session_id":started["session_id"],
+                    "request_id":format!("unexpected-close-{}",self.count)}),
+                )
+                .await?;
+                anyhow::bail!("mismatched PDB unexpectedly started a debugger");
+            }
+            Err(error) => format!("{error:#}"),
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+        let closed = loop {
+            let listing = self.call("resource.list", json!({"limit":64})).await?;
+            let new: Vec<_> = listing["resources"]
+                .as_array()
+                .context("native inventory absent")?
+                .iter()
+                .filter(|row| !prior.contains(&row["resource_id"]))
+                .collect();
+            ensure!(
+                new.len() == 1,
+                "rejected start did not preserve exactly one original resource"
+            );
+            if new[0]["phase"] == "closed" {
+                break new[0].clone();
+            }
+            ensure!(
+                tokio::time::Instant::now() < deadline,
+                "rejected debugger did not finish owned recovery"
+            );
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        };
+        ensure!(
+            self.call("debug.start", request).await.is_err(),
+            "rejected start was replayed"
+        );
+        let after = self.call("resource.list", json!({"limit":64})).await?;
+        let rows = after["resources"]
+            .as_array()
+            .context("native inventory absent")?;
+        ensure!(
+            rows.len() == prior.len() + 1 && rows.contains(&closed),
+            "retry created or changed a rejected resource"
+        );
+        Ok(json!({"resource":closed,"error":error}))
+    }
     async fn call(&mut self, method: &str, params: Value) -> Result<Value> {
         self.count += 1;
         let result = self.client.call(method, params.clone()).await;
@@ -241,7 +297,7 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
         count: 0,
     };
     let mut cases = Vec::new();
-    for (architecture, fixtures) in profile.probes {
+    for (architecture, fixtures) in &profile.probes {
         let renewed: EnvironmentLease = serde_json::from_value(
             client
                 .call("environment.lease.acquire", acquire.clone())
@@ -251,6 +307,34 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
             renewed.epoch == lease.epoch,
             "renewal replaced the native fence"
         );
+        let wrong = &profile.probes[if architecture == "x64" { "x86" } else { "x64" }].pdb;
+        let bad_base = format!("debugger/wrong-pdb/{}", fixtures.program.sha256);
+        upload(
+            &bound,
+            &format!("{bad_base}/wukong-probe.exe"),
+            &bytes(&fixtures.program)?,
+            true,
+        )
+        .await?;
+        upload(
+            &bound,
+            &format!("{bad_base}/wukong-probe.pdb"),
+            &bytes(wrong)?,
+            false,
+        )
+        .await?;
+        let bad_manifest = json!({"schema_version":1,"challenge_id":"trusted-native-debugger","base":format!("files/{bad_base}"),"target":"wukong-probe.exe","files":{"wukong-probe.exe":fixtures.program.sha256,"wukong-probe.pdb":wrong.sha256},"args":[],"cwd":"work","input_mode":"stdin_pipe","env":{},"timeout_secs":90,"service":{"mode":"offline"},"loader":null,"library_path":null,"runtime_confirmed":false});
+        let bad_launch = upload(
+            &bound,
+            &format!("{bad_base}/launch.json"),
+            &serde_json::to_vec(&bad_manifest)?,
+            false,
+        )
+        .await?;
+        let rejected = calls
+            .rejected_start(json!({"mode":"launch","engine":"dbgeng",
+            "launch_spec":bad_launch["path"],"request_id":format!("wrong-pdb-{architecture}")}))
+            .await?;
         let base = format!("debugger/{}", fixtures.program.sha256);
         upload(
             &bound,
@@ -284,6 +368,14 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
             "native debugger opener differs"
         );
         let outcome = async {
+            let identity = &started["response"]["identity"];
+            ensure!(
+                identity["admitted"]["image"]["sha256"] == fixtures.program.sha256
+                    && identity["admitted"]["pdb"]["file"]["sha256"] == fixtures.pdb.sha256
+                    && identity["observed_module"]["symbols"] == "pdb"
+                    && identity["loaded_pdb_bytes_verified"] == false,
+                "debugger omitted admitted image/PDB correspondence or overstated byte identity"
+            );
             ensure!(
                 calls.call("debug.start", request.clone()).await? == started,
                 "duplicate start changed resource"
@@ -295,7 +387,7 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
                     .is_err(),
                 "live debugger did not block release"
             );
-            calls.exercise(id, &architecture).await
+            calls.exercise(id, architecture).await
         }
         .await;
         let close_request =
@@ -330,7 +422,12 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
                 .with_extension(format!("{architecture}.mcp.jsonl")),
         )?
         .write_all(&transcript)?;
-        cases.push(json!({"architecture":architecture,"started":started,"observations":observations,"closed":closed,"artifact":artifact}));
+        ensure!(
+            closed["response"]["cleanup"]["identity"]
+                == started["response"]["identity"]["admitted"],
+            "debugger cleanup lost admitted identity"
+        );
+        cases.push(json!({"architecture":architecture,"rejected_pdb":rejected,"started":started,"observations":observations,"closed":closed,"artifact":artifact}));
     }
     client
         .call("environment.lease.release", json!({"lease":lease}))

@@ -152,17 +152,28 @@ async fn serve(
                     let mut client = unopened
                         .take()
                         .context("native debugger was already opened")?;
-                    let opened = client.attach_owned(target.process_mut()).await?;
+                    let mut opened = client.attach_owned(target.process_mut()).await?;
                     let id = opened["session_id"]
                         .as_str()
                         .context("MCP opener omitted its session handle")?
                         .to_owned();
-                    client
-                        .call(
-                            "set_symbol_path",
-                            json!({"session_id":id,"path":prepared.symbols(),"append":false}),
-                        )
+                    let identity = prepared
+                        .identity
+                        .as_ref()
+                        .context("admitted debugger identity missing")?;
+                    let mut symbols =
+                        json!({"session_id":id,"path":prepared.symbols(),"append":false});
+                    if identity.has_symbols() {
+                        // Fixed tool argument: no embedded filename becomes a command.
+                        symbols["reload"] = json!("/f");
+                    }
+                    client.call("set_symbol_path", symbols).await?;
+                    let modules = client
+                        .structured("modules", json!({"session_id":id,"limit":2000}))
                         .await?;
+                    let observed = identity.observed(&modules)?;
+                    opened["identity"] = json!({"admitted":identity,"observed_module":observed,
+                        "correspondence":"pe_and_pdb_metadata","loaded_pdb_bytes_verified":false});
                     session = Some(Session::new(client, id));
                     Ok(opened)
                 }
@@ -349,6 +360,7 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         helper_stopped?;
         let captured = target_stopped?;
         let diagnostics = diagnostics.finish()?;
+        let identity = serde_json::to_value(&prepared.identity)?;
         prepared.close()?;
         debugger.close()?;
         private.verify(&debugger_path, true)?;
@@ -367,7 +379,7 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
             &captured.stderr,
         )?;
         let proof = json!({"schema":SCHEMA,"scope":"native_debugger_host","resource_id":id,
-        "owner":request.owner,"request_sha256":digest(&request)?,"outcome":if outcome.is_ok(){"closed"}else{"unknown"},
+        "owner":request.owner,"request_sha256":digest(&request)?,"identity":identity,"outcome":if outcome.is_ok(){"closed"}else{"unknown"},
         "stdout_sha256":hex::encode(Sha256::digest(&captured.stdout)),"stderr_sha256":hex::encode(Sha256::digest(&captured.stderr)),
         "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"production_execution":false});
         deployment::publish_json(

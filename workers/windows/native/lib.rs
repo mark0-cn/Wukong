@@ -68,6 +68,8 @@ mod session_commands;
 #[cfg(windows)]
 pub mod session_host;
 #[cfg(windows)]
+mod session_identity;
+#[cfg(windows)]
 mod session_runtime;
 #[cfg(windows)]
 mod session_wire;

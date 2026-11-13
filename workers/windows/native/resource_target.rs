@@ -20,6 +20,7 @@ pub(crate) struct Prepared {
     held: Vec<File>,
     pub input: Option<AdmittedInput>,
     pub persona: Persona,
+    pub identity: Option<crate::session_identity::Identity>,
     scratch: PathBuf,
     executable: PathBuf,
     cwd: PathBuf,
@@ -52,12 +53,15 @@ impl Prepared {
         } else {
             request.argument_files.clone()
         };
-        let sources = crate::resource_image::acquire(
+        let mut sources = crate::resource_image::acquire(
             &metadata,
             &request.owner,
             &request.program,
             &image_files,
         )?;
+        let identity = debugger
+            .map(|_| crate::session_identity::Identity::admit(&mut sources))
+            .transpose()?;
         let input = request
             .input
             .as_ref()
@@ -157,6 +161,7 @@ impl Prepared {
             .collect::<Result<_>>()?;
         Ok(Self {
             persona,
+            identity,
             input,
             directory: Some(directory),
             working,

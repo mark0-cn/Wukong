@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{self, Read},
+    io::{self, Read, Seek, SeekFrom},
     path::Path,
 };
 
@@ -31,6 +31,7 @@ pub enum Purpose {
 
 /// Owns the exact verified file handle, denying write/delete sharing until the
 /// native caller finishes copying its bytes. It exposes no arbitrary OS path.
+#[derive(Debug)]
 pub struct AdmittedInput {
     file: File,
     reference: Reference,
@@ -46,6 +47,11 @@ impl AdmittedInput {
 impl Read for AdmittedInput {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.file.read(buffer)
+    }
+}
+impl Seek for AdmittedInput {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.file.seek(position)
     }
 }
 
