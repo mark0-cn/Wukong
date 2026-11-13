@@ -173,18 +173,21 @@ struct Current {
 }
 struct State {
     epochs: Epochs,
-    resources: Journal,
     current: Option<Current>,
     inflight: usize,
     uncertain: bool,
     transition: bool,
+}
+struct Resources {
+    journal: Journal,
+    runtime: Option<Runtime>,
 }
 pub(crate) struct LeaseProxy {
     identity: Identity,
     state: Arc<Mutex<State>>,
     inputs: tokio::sync::Mutex<Inputs>,
     controls: tokio::sync::Mutex<()>,
-    runtime: Mutex<Option<Runtime>>,
+    resources: Mutex<Resources>,
     started: Instant,
 }
 struct Admission {
@@ -219,15 +222,17 @@ impl LeaseProxy {
             identity: identity.clone(),
             state: Arc::new(Mutex::new(State {
                 epochs: Epochs::open(metadata, policy.clone())?,
-                resources: Journal::with_policy(metadata, identity, policy.clone())?,
                 current: None,
                 inflight: 0,
                 uncertain: false,
                 transition: false,
             })),
+            resources: Mutex::new(Resources {
+                journal: Journal::with_policy(metadata, identity, policy.clone())?,
+                runtime: None,
+            }),
             inputs: tokio::sync::Mutex::new(Inputs::open(metadata, policy)?),
             controls: tokio::sync::Mutex::new(()),
-            runtime: Mutex::new(None),
             started: Instant::now(),
         })
     }
@@ -237,31 +242,60 @@ impl LeaseProxy {
         deployment: &deployment::Deployment,
         manifest: &wukong_worker_package::VerifiedManifest,
     ) -> Result<()> {
-        let mut runtime = self.runtime.lock().expect("native runtime mutex poisoned");
-        ensure!(runtime.is_none(), "native resource runtime is already open");
-        *runtime = Some(Runtime::open(root, deployment, manifest)?);
+        let mut resources = self
+            .resources
+            .lock()
+            .expect("native resource mutex poisoned");
+        ensure!(
+            resources.runtime.is_none(),
+            "native resource runtime is already open"
+        );
+        resources.runtime = Some(Runtime::open(root, deployment, manifest)?);
         Ok(())
     }
     pub(crate) fn poll_resources(&self) -> Result<bool> {
-        let mut state = self.state.lock().expect("native lease mutex poisoned");
-        let mut runtime = self.runtime.lock().expect("native runtime mutex poisoned");
-        if let Some(runtime) = &mut *runtime {
-            if state
-                .current
-                .as_ref()
-                .is_some_and(|current| current.deadline <= Instant::now())
-            {
+        let mut resources = self
+            .resources
+            .lock()
+            .expect("native resource mutex poisoned");
+        let expired = self
+            .state
+            .lock()
+            .expect("native lease mutex poisoned")
+            .current
+            .as_ref()
+            .is_some_and(|current| current.deadline <= Instant::now());
+        let Resources { journal, runtime } = &mut *resources;
+        if let Some(runtime) = runtime {
+            if expired {
                 runtime.cancel_active()?;
             }
-            runtime.poll(&mut state.resources)?;
+            runtime.poll(journal)?;
         }
-        state.resources.idle()
+        journal.idle()
     }
     pub(crate) fn cancel_resources(&self) -> Result<()> {
-        if let Some(runtime) = &*self.runtime.lock().expect("native runtime mutex poisoned") {
+        if let Some(runtime) = &self
+            .resources
+            .lock()
+            .expect("native resource mutex poisoned")
+            .runtime
+        {
             runtime.cancel_active()?;
         }
         Ok(())
+    }
+    // Called while holding the lease state. Never wait for resource work here:
+    // that work may need to recheck its admission after acquiring this lock.
+    // A busy resource host cannot establish the idle barrier for a transition.
+    fn resources_idle(&self) -> Result<bool> {
+        match self.resources.try_lock() {
+            Ok(resources) => resources.journal.idle(),
+            Err(std::sync::TryLockError::WouldBlock) => Ok(false),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                anyhow::bail!("native resource mutex poisoned")
+            }
+        }
     }
     fn binding(&self, params: &Map<String, Value>) -> Result<()> {
         let binding: Identity = serde_json::from_value(
@@ -372,9 +406,10 @@ impl LeaseProxy {
         let mut admission = self.admit(request["params"].as_object_mut().unwrap())?;
         let native_resource = Runtime::handles(&method, request["params"].as_object().unwrap())
             && self
-                .runtime
+                .resources
                 .lock()
-                .expect("native runtime mutex poisoned")
+                .expect("native resource mutex poisoned")
+                .runtime
                 .is_some();
         // Serialize input publication independently of lease controls: hashing
         // or a slow worker upload must never prevent heartbeat renewal.
@@ -385,16 +420,23 @@ impl LeaseProxy {
         };
         if native_resource {
             let result = (|| {
-                let mut state = self.state.lock().expect("native lease mutex poisoned");
+                let mut resources = self
+                    .resources
+                    .lock()
+                    .expect("native resource mutex poisoned");
                 // An input publication can hold the independent input lock
-                // past expiry. Recheck before any native start side effect.
-                self.validate(&state, &outer_lease)?;
-                let mut runtime = self.runtime.lock().expect("native runtime mutex poisoned");
+                // past expiry. Resource serialization can do the same. Recheck
+                // before native effects, but never hold lease state during I/O.
+                self.validate(
+                    &self.state.lock().expect("native lease mutex poisoned"),
+                    &outer_lease,
+                )?;
+                let Resources { journal, runtime } = &mut *resources;
                 runtime
                     .as_mut()
                     .context("native resource runtime vanished")?
                     .call(
-                        &mut state.resources,
+                        journal,
                         inputs.as_deref(),
                         &admission.owner,
                         &method,
@@ -470,7 +512,7 @@ impl LeaseProxy {
                 (true, current.lease.epoch)
             } else {
                 require(
-                    state.inflight == 0 && !state.uncertain && state.resources.idle()?,
+                    state.inflight == 0 && !state.uncertain && self.resources_idle()?,
                     "conflict",
                     "previous native requests or resources remain active or uncertain; reconcile ownership first",
                 )?;
@@ -557,7 +599,7 @@ impl LeaseProxy {
             let epoch = current.lease.epoch;
             params.insert("lease".into(), current.inner.clone());
             require(
-                state.inflight == 0 && !state.uncertain && state.resources.idle()?,
+                state.inflight == 0 && !state.uncertain && self.resources_idle()?,
                 "conflict",
                 "native requests or resources remain active or uncertain",
             )?;

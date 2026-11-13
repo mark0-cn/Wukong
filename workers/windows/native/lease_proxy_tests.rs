@@ -32,14 +32,14 @@ async fn native_resource_state_blocks_release_and_expired_takeover_but_not_renew
     let (_root, proxy) = fixture()?;
     let first = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
     let resource = {
-        let mut state = proxy.state.lock().unwrap();
+        let mut resources = proxy.resources.lock().unwrap();
         let actor = Owner {
             identity: identity(),
             run_id: "run".into(),
             owner_id: "controller".into(),
             epoch: first["epoch"].as_u64().unwrap(),
         };
-        match state.resources.reserve_start(
+        match resources.journal.reserve_start(
             &actor,
             "start",
             ResourceKind::Process,
@@ -74,9 +74,9 @@ async fn native_resource_state_blocks_release_and_expired_takeover_but_not_renew
         "conflict"
     );
     {
-        let mut state = proxy.state.lock().unwrap();
-        state.resources.start_closing(&resource)?;
-        state.resources.close(
+        let mut resources = proxy.resources.lock().unwrap();
+        resources.journal.start_closing(&resource)?;
+        resources.journal.close(
             &resource,
             Cleanup {
                 jobs_empty: true,
@@ -94,14 +94,68 @@ async fn native_resource_state_blocks_release_and_expired_takeover_but_not_renew
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn busy_native_resources_do_not_block_renewal_or_allow_idle_transitions() -> Result<()> {
+    let (_root, proxy) = fixture()?;
+    let proxy = Arc::new(proxy);
+    let first = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
+    let (ready, locked) = tokio::sync::oneshot::channel();
+    let (release, finish) = std::sync::mpsc::channel();
+    let busy = proxy.clone();
+    let resource = std::thread::spawn(move || {
+        let _resources = busy.resources.lock().unwrap();
+        ready.send(()).unwrap();
+        // The bound also releases the lock if a regression blocks the caller.
+        let _ = finish.recv_timeout(Duration::from_secs(5));
+    });
+    locked.await?;
+    let active = proxy.clone();
+    let expected_epoch = first["epoch"].clone();
+    let operations = tokio::spawn(async move {
+        let renewed = call(&active, &acquire("run", "controller")).await?;
+        assert_eq!(renewed["result"]["epoch"], expected_epoch);
+        let close = request(
+            "environment.lease.release",
+            json!({"_binding":identity(),"lease":first}),
+        );
+        assert_eq!(
+            call(&active, &close).await?["error"]["data"]["kind"],
+            "conflict"
+        );
+        active
+            .state
+            .lock()
+            .unwrap()
+            .current
+            .as_mut()
+            .unwrap()
+            .deadline = Instant::now() - Duration::from_secs(1);
+        assert_eq!(
+            call(&active, &acquire("next", "successor")).await?["error"]["data"]["kind"],
+            "conflict"
+        );
+        Ok::<_, anyhow::Error>(())
+    });
+    let result = tokio::time::timeout(Duration::from_secs(1), operations).await;
+    let _ = release.send(());
+    resource.join().unwrap();
+    result???;
+    assert!(
+        call(&proxy, &acquire("next", "successor")).await?["result"]["epoch"]
+            .as_u64()
+            .is_some_and(|epoch| epoch > 1)
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn persisted_native_resource_state_still_blocks_takeover_after_proxy_reopen() -> Result<()> {
     use crate::resource_journal::ResourceKind;
     let (root, proxy) = fixture()?;
     let lease = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
     {
-        let mut state = proxy.state.lock().unwrap();
-        state.resources.reserve_start(
+        let mut resources = proxy.resources.lock().unwrap();
+        resources.journal.reserve_start(
             &Owner {
                 identity: identity(),
                 run_id: "run".into(),
