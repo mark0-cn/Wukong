@@ -124,6 +124,23 @@ async fn remote_native_completed_process_recovery_acceptance() -> Result<()> {
                 && current["data_base64"] == receipt["data_base64"],
             "restart replaced original native receipt bytes"
         );
+        if let Some(arguments) = case.get("argument_files").filter(|value| !value.is_null()) {
+            let input = &arguments["input"]["path"];
+            let recovered = bound.call("job.start", json!({"argv":[case["input"]["path"],"--read-argument",input,input],"timeout_secs":5,"request_id":format!("argument-{architecture}")})).await?;
+            ensure!(
+                recovered == arguments["status"],
+                "restart replayed or changed an argument-file job"
+            );
+            let receipt = &arguments["receipt"];
+            let current = bound
+                .call("file.get", json!({"path":receipt["path"]}))
+                .await?;
+            ensure!(
+                current["sha256"] == receipt["sha256"]
+                    && current["data_base64"] == receipt["data_base64"],
+                "restart replaced argument-file receipt bytes"
+            );
+        }
         observed.push(cached);
     }
     client
