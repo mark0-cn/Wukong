@@ -20,7 +20,9 @@ class DebuggerBuildChecks(unittest.TestCase):
                 target.write_bytes(b"fixture")
                 files[name] = dict(size=7, sha256=hashlib.sha256(b"fixture").hexdigest())
             record = dict(**provenance, files=files)
-            with patch.object(build_debugger, "inputs", return_value=({}, provenance)):
+            with patch.object(build_debugger, "inputs", return_value=({}, provenance)), patch.dict(
+                build_debugger.SUPPLEMENTAL_LICENSES, {}, clear=True
+            ):
                 build_debugger.validate(root, record)
                 for key in provenance:
                     with self.subTest(key=key), self.assertRaisesRegex(ValueError, "pinned source"):

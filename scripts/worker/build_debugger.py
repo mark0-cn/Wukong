@@ -1,5 +1,6 @@
 """Build the pinned WinDbg MCP source with the reviewed AppContainer stdin patch."""
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -32,6 +33,19 @@ def build(cache, output):
     archive = validate_asset(cache, asset)
     output = no_links(output)
     output.mkdir(parents=True, exist_ok=True)
+    previous = output / "native-build.json"
+    if previous.is_file():
+        try:
+            with regular(previous).open("rb") as incoming:
+                raw = incoming.read(64 * 1024 + 1)
+            if len(raw) > 64 * 1024:
+                raise ValueError("Previous native build metadata is oversized")
+            cached = json.loads(raw).get("debugger")
+            validate(output, cached)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        else:
+            return cached
     environment = os.environ.copy()
     environment.pop("RUSTFLAGS", None)
     environment.pop("CARGO_ENCODED_RUSTFLAGS", None)
@@ -74,3 +88,7 @@ def validate(directory, record):
         path = regular(no_links(directory / name))
         if path.stat().st_size != expected["size"] or sha256(path) != expected["sha256"]:
             raise ValueError("Debugger build artifact changed: " + name)
+    for (name, version), source in SUPPLEMENTAL_LICENSES.items():
+        license_name = f"debugger/licenses/{name}-{version}/{source.name}"
+        if files.get(license_name, {}).get("sha256") != sha256(source):
+            raise ValueError("Debugger supplemental license changed: " + name)
