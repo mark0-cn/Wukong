@@ -111,9 +111,9 @@ pub(super) fn check(
         let mut client = Client::connect(reader, writer, transcript).await?;
         let result = probe(&mut client, &mut target, &symbols, architecture).await;
         let closed = client.close().await;
-        let loader_break = result?;
+        let initial_breaks = result?;
         closed?;
-        Ok::<_, anyhow::Error>(loader_break)
+        Ok::<_, anyhow::Error>(initial_breaks)
     });
     let helper_stopped = helper.stop(Duration::from_secs(10));
     let target_stopped = target.stop(Duration::from_secs(10));
@@ -129,14 +129,15 @@ pub(super) fn check(
     debugger_persona.close()?;
     fs::remove_dir(&target_path)?;
     fs::remove_dir(&debugger_path)?;
-    let loader_break = outcome?;
+    let initial_breaks = outcome?;
     Ok(
         json!({"passed":true,"architecture":architecture,"engine":"dbgeng","backend":"windbg_mcp",
         "target_appcontainer_sid":target_sid,"debugger_appcontainer_sid":debugger_sid,
         "target_logon_sid":target_persona.logon_sid(),"debugger_logon_sid":debugger_persona.logon_sid(),
         "privileges":["SeChangeNotifyPrivilege"],"capabilities":0,"debug_privilege_enabled":false,
         "owned_attach":true,"pre_execution_attach":true,"single_pass_target":true,
-        "wow64_loader_break_observed":loader_break,
+        "wow64_loader_break_observed":initial_breaks.wow64,
+        "native_initial_break_observed":initial_breaks.native,
         "registers_observed":true,"target_module_observed":true,
         "symbols_loaded":true,"symbol_breakpoint_hit":true,"stack_symbol_observed":true,
         "jobs_empty":true,"profiles_removed":true,"scratch_removed":true}),
@@ -148,7 +149,7 @@ async fn probe(
     target: &mut crate::processes::OwnedProcess,
     symbols: &Path,
     architecture: &str,
-) -> Result<bool> {
+) -> Result<InitialBreaks> {
     let opened = client.attach_owned(target).await?;
     let session = opened["session_id"]
         .as_str()
@@ -171,9 +172,8 @@ async fn probe(
             .as_str()
             .context("fixture breakpoint is unresolved")?;
         let mut stop = client.structured("go", route.clone()).await?;
-        let mut loader_break = false;
-        if architecture == "x86"
-            && stop["stopped_at"] != address
+        let mut initial_breaks = InitialBreaks::default();
+        while stop["stopped_at"] != address
             && stop["timed_out"] == false
             && stop["target_gone"] == false
             && stop["interrupted"] == false
@@ -185,12 +185,11 @@ async fn probe(
                 )
                 .await?;
             ensure!(
-                wow64_loader_break(&stop, &event),
-                "single-pass fixture stopped at an unexpected exception"
+                initial_breaks.observe(architecture, &stop, &event),
+                "single-pass fixture stopped at an unexpected or repeated exception"
             );
-            // This is only the sealed fixture's initial WOW64 notification,
-            // not a general debugger policy for continuing exceptions.
-            loader_break = true;
+            // At most one native break-in and one WOW64 loader notification,
+            // in either order. This policy belongs only to the sealed fixture.
             stop = client.structured("go", route.clone()).await?;
         }
         ensure!(
@@ -222,7 +221,7 @@ async fn probe(
                 && stack["frames"][0]["address"] == address,
             "contained backtrace does not match the fixture breakpoint"
         );
-        Ok(loader_break)
+        Ok(initial_breaks)
     }
     .await;
     let released = client.structured("end_session", route).await?;
@@ -233,13 +232,41 @@ async fn probe(
     result
 }
 
-fn wow64_loader_break(stop: &Value, event: &Value) -> bool {
-    let exception = &event["exception"];
-    exception["code"] == "0x4000001f"
-        && exception["first_chance"] == true
-        && exception["noncontinuable"] == false
-        && exception["address"].is_string()
-        && exception["address"] == stop["stopped_at"]
+#[derive(Default)]
+struct InitialBreaks {
+    native: bool,
+    wow64: bool,
+}
+
+impl InitialBreaks {
+    fn observe(&mut self, architecture: &str, stop: &Value, event: &Value) -> bool {
+        let exception = &event["exception"];
+        if event["status"] != "ok"
+            || event["stored_crash_context"] != false
+            || exception["first_chance"] != true
+            || exception["noncontinuable"] != false
+            || !exception["address"].is_string()
+            || exception["address"] != stop["stopped_at"]
+        {
+            return false;
+        }
+        let frame = &event["frames"][0];
+        let observed = if architecture == "x86" && exception["code"] == "0x4000001f" {
+            &mut self.wow64
+        } else if exception["code"] == "0x80000003"
+            && event["kind"] == "breakpoint"
+            && event["frames_from_stored_context"] == false
+            && frame["module"] == "ntdll"
+            && frame["symbol"] == "ntdll!DbgBreakPoint"
+            && frame["displacement"] == "0x0"
+            && frame["address"] == exception["address"]
+        {
+            &mut self.native
+        } else {
+            return false;
+        };
+        !std::mem::replace(observed, true)
+    }
 }
 
 pub(super) fn validate_report(value: &Value) -> Result<()> {
@@ -258,6 +285,7 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
                 && debugger["privileges"] == json!(["SeChangeNotifyPrivilege"])
                 && debugger["capabilities"] == 0
                 && debugger["debug_privilege_enabled"] == false
+                && debugger["native_initial_break_observed"].is_boolean()
                 && debugger["wow64_loader_break_observed"]
                     .as_bool()
                     .is_some_and(|observed| !observed || architecture == "x86"),
@@ -310,8 +338,12 @@ mod tests {
     #[test]
     fn fixture_continuation_refuses_other_faults_or_a_different_stop() {
         let stop = json!({"stopped_at":"0x00000000771e7d89"});
-        let event = json!({"exception":{"code":"0x4000001f","address":stop["stopped_at"],"first_chance":true,"noncontinuable":false}});
-        assert!(wow64_loader_break(&stop, &event));
+        let event = json!({"status":"ok","stored_crash_context":false,
+            "exception":{"code":"0x4000001f","address":stop["stopped_at"],"first_chance":true,"noncontinuable":false}});
+        let mut observed = InitialBreaks::default();
+        assert!(observed.observe("x86", &stop, &event));
+        assert!(!observed.observe("x86", &stop, &event));
+        assert!(!InitialBreaks::default().observe("x64", &stop, &event));
         for (field, value) in [
             ("code", json!("0xc0000005")),
             ("code", json!("0x80000003")),
@@ -322,8 +354,48 @@ mod tests {
         ] {
             let mut other = event.clone();
             other["exception"][field] = value;
-            assert!(!wow64_loader_break(&stop, &other));
+            assert!(!InitialBreaks::default().observe("x86", &stop, &other));
         }
-        assert!(!wow64_loader_break(&json!({}), &json!({})));
+        assert!(!InitialBreaks::default().observe("x86", &json!({}), &json!({})));
+    }
+
+    #[test]
+    fn fixture_native_break_requires_matching_live_ntdll_frame_and_is_not_replayed() {
+        let stop = json!({"stopped_at":"0x00007ffab334e370"});
+        let event = json!({"status":"ok","stored_crash_context":false,
+            "frames_from_stored_context":false,"kind":"breakpoint",
+            "exception":{"code":"0x80000003","address":stop["stopped_at"],"first_chance":true,"noncontinuable":false},
+            "frames":[{"address":stop["stopped_at"],"module":"ntdll","symbol":"ntdll!DbgBreakPoint","displacement":"0x0"}]});
+        let mut observed = InitialBreaks::default();
+        assert!(observed.observe("x86", &stop, &event));
+        assert!(!observed.observe("x86", &stop, &event));
+        for (pointer, value) in [
+            ("/status", json!("error")),
+            ("/stored_crash_context", json!(true)),
+            ("/frames_from_stored_context", json!(true)),
+            ("/kind", json!("unknown")),
+            ("/exception/first_chance", json!(false)),
+            ("/exception/noncontinuable", json!(true)),
+            ("/frames/0/symbol", json!("wukong_probe!fixture_step")),
+            ("/frames/0/module", json!("wukong_probe")),
+            ("/frames/0/displacement", json!("0x1")),
+            ("/frames/0/address", json!("0x0000000000000000")),
+            ("/frames", Value::Null),
+        ] {
+            let mut other = event.clone();
+            *other.pointer_mut(pointer).unwrap() = value;
+            assert!(!InitialBreaks::default().observe("x86", &stop, &other));
+        }
+        let wow64 = json!({"status":"ok","stored_crash_context":false,
+            "exception":{"code":"0x4000001f","address":stop["stopped_at"],"first_chance":true,"noncontinuable":false}});
+        for events in [[&event, &wow64], [&wow64, &event]] {
+            let mut observed = InitialBreaks::default();
+            for event in events {
+                assert!(observed.observe("x86", &stop, event));
+            }
+            assert!(observed.native && observed.wow64);
+            assert!(!observed.observe("x86", &stop, &event));
+            assert!(!observed.observe("x86", &stop, &wow64));
+        }
     }
 }
