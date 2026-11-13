@@ -213,7 +213,7 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
             bytes.len() <= 32 * 1024 * 1024 && hex::encode(Sha256::digest(&bytes)) == probe.sha256,
             "trusted {architecture} probe differs"
         );
-        let uploaded = bound.call("file.put", json!({"path":format!("process/{architecture}.exe"),"data_base64":STANDARD.encode(bytes),"executable":true,"request_id":format!("upload-{architecture}")})).await?;
+        let uploaded = bound.call("file.put", json!({"path":format!("process/{}/{architecture}.exe",probe.sha256),"data_base64":STANDARD.encode(bytes),"executable":true,"request_id":format!("upload-{}-{architecture}",probe.sha256)})).await?;
         ensure!(
             uploaded["sha256"] == probe.sha256 && uploaded["native_input"]["executable"] == true,
             "probe lacks native input provenance"

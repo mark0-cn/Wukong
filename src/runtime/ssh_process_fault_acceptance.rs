@@ -111,14 +111,14 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     )?;
     lease.validate(&run, "fault-controller-fixture", client.identity())?;
     let bound = client.with_lease(lease.clone());
-    let uploaded = bound.call("file.put", json!({"path":"fault/target.exe","data_base64":STANDARD.encode(&bytes),"executable":true,"request_id":"fault-upload"})).await?;
+    let uploaded = bound.call("file.put", json!({"path":format!("fault/{}/target.exe",profile.probe.sha256),"data_base64":STANDARD.encode(&bytes),"executable":true,"request_id":format!("fault-upload-{}",profile.probe.sha256)})).await?;
     ensure!(
         uploaded["sha256"] == profile.probe.sha256
             && uploaded["native_input"]["identity"] == serde_json::to_value(client.identity())?
             && uploaded["native_input"]["epoch"] == lease.epoch,
         "fault fixture lacks current native input provenance"
     );
-    let request = json!({"argv":[uploaded["path"]],"timeout_secs":90,"request_id":"interrupted-start","call_id":"interrupted-start"});
+    let request = json!({"argv":[uploaded["path"],"--fault-ready"],"timeout_secs":120,"request_id":"interrupted-start","call_id":"interrupted-start"});
     if profile.fault == Fault::Preparation {
         publish(
             &profile.ready,
@@ -216,7 +216,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             "service recovery did not reopen the externally retained guardian Job"
         );
     }
-    let next = rebound.call("file.put", json!({"path":"fault/after-recovery.exe","data_base64":STANDARD.encode(&bytes),"executable":true,"request_id":"after-upload"})).await?;
+    let next = rebound.call("file.put", json!({"path":format!("fault/{}/after-recovery.exe",profile.probe.sha256),"data_base64":STANDARD.encode(&bytes),"executable":true,"request_id":format!("after-upload-{}",profile.probe.sha256)})).await?;
     let next = rebound
         .call(
             "job.start",
