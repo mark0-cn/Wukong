@@ -68,13 +68,13 @@ x64 服务与固定 SDK 引擎相邻放置，支持原生 x64 和 WOW64 分析�
 
 父进程通过既有挂起子进程 AppContainer 启动器准入外部服务，要求零 capability 且仅启用 `SeChangeNotifyPrivilege`。独立隔离的目标仅向所属调试器身份授予访问权限。操作系统网络及进程/文件权限仍强制执行；不提升服务权限，也不接收模型选择的 PID、工具路径或符号路径。固定验收选择本地夹具符号目录，保留原始 MCP 结果和独立 stderr；这不证明上游全部引擎选项或通用符号搜索行为已通过认证。
 
-调试目标现保留初始 `CREATE_SUSPENDED` 线程句柄，直到 MCP 初始化完成。已有 Windows SDK 绑定通过所属进程句柄调用 `CheckRemoteDebuggerPresent`，确认附加后仅释放一次初始挂起计数。外部工具随后可完成加载器/初始断点等待；调试事件仍按 Windows 正常语义保持执行停止。未附加时绝不放行目标。DbgEng 在附加时可以增加自己的挂起计数：专用 VM 返回的先前计数为二，第一版门禁错误地拒绝了它。修正版仅释放自己持有的一次初始计数，保留调试器持有的计数；计数为零或 SDK 调用失败时结束资源而不重试。资格检查使用 `--debug-once`，仅调用一次目标符号便退出，不再依赖历史循环夹具。回执额外要求 `pre_execution_attach`、`single_pass_target`。本地回归证明附加前拒绝放行，并阻止将仍挂起的目标转交 System 宿主；此门禁的真实 x64/x86 隔离验收尚待完成。参见 SDK 的[附加契约](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-debugactiveprocess)和[线程恢复契约](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread)。
+调试目标现保留初始 `CREATE_SUSPENDED` 线程句柄，直到 MCP 初始化完成。已有 Windows SDK 绑定通过所属进程句柄调用 `CheckRemoteDebuggerPresent`，确认附加后仅释放一次初始挂起计数。外部工具随后可完成加载器/初始断点等待；调试事件仍按 Windows 正常语义保持执行停止。未附加时绝不放行目标。DbgEng 在附加时可以增加自己的挂起计数：专用 VM 返回的先前计数为二，第一版门禁错误地拒绝了它。修正版仅释放自己持有的一次初始计数，保留调试器持有的计数；计数为零或 SDK 调用失败时结束资源而不重试。资格检查使用 `--debug-once`，仅调用一次目标符号便退出，不再依赖历史循环夹具。回执额外要求 `pre_execution_attach`、`single_pass_target`。本地回归证明附加前拒绝放行，并阻止将仍挂起的目标转交 System 宿主。参见 SDK 的[附加契约](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-debugactiveprocess)和[线程恢复契约](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread)。
 
 固定隔离 MCP 验收要求 x64、x86 均解析 `wukong_probe!fixture_step` 断点，在其地址非超时停止，程序计数器与架构对应，目标模块加载 PDB 符号，栈顶帧对应同一地址和符号。随后释放会话、清空两个 Job、删除身份配置并回收 scratch。回执必须包含 `backend = "windbg_mcp"`，旧辅助程序回执不能证明新实现通过。专用 VM 已在 `1556c9a` 的首次启动、服务重启及系统重启中通过此替代实现。下文较早的 `7b6c4c0` 结果描述已删除的辅助程序。
 
 原生输入发布会规范化已经验证的私有元数据根目录，并在直接 SDK 调用中保留 Windows 长路径格式。因此，在未启用长路径选项的 VM 中，不可变输入和分块输入成员也可以超过旧的 260 字符路径限制。专用 Windows 10 VM 回归使用特意加长的私有根目录，验证发布成功及原始内容来源证明；无需修改全局长路径设置或扩大目录权限。
 
-挂起附加可能以不同顺序暴露原生附加断点和 WOW64 加载器通知。已保留的 VM 失败记录中，`c4f6164` 停在 `0x4000001f`，`8cc728b` 停在 `ntdll!DbgBreakPoint`（`0x80000003`）；两个实例均已清空所属资源，原始证据已核对哈希。固定资格检查复用上游 `exception_triage`，仅读取一帧并禁用栈扫描。对于刚观察到的停止地址，每种可继续的首次机会通知最多接受一次：WOW64 代码要求 x86 夹具，原生断点要求匹配当前 `ntdll!DbgBreakPoint` 栈帧且偏移为零。未知或重复异常、陈旧崩溃上下文、超时及中断均拒绝通过资格检查。此规则仅用于已签封夹具，没有新增控制台文本解析器。回执记录 `wow64_loader_break_observed` 和 `native_initial_break_observed`。此调整的隔离验收仍待完成。
+挂起附加可能以不同顺序暴露原生附加断点和 WOW64 加载器通知。已保留的 VM 失败记录中，`c4f6164` 停在 `0x4000001f`，`8cc728b` 停在 `ntdll!DbgBreakPoint`（`0x80000003`）；两个实例均已清空所属资源，原始证据已核对哈希。固定资格检查复用上游 `exception_triage`，仅读取一帧并禁用栈扫描。对于刚观察到的停止地址，每种可继续的首次机会通知最多接受一次：WOW64 代码要求 x86 夹具，原生断点要求匹配当前 `ntdll!DbgBreakPoint` 栈帧且偏移为零。未知或重复异常、陈旧崩溃上下文、超时及中断均拒绝通过资格检查。此规则仅用于已签封夹具，没有新增控制台文本解析器。回执记录 `wow64_loader_break_observed` 和 `native_initial_break_observed`。2026-11-13，专用离线 Windows 10 VM 已在 `f6cc228` 通过全新安装和服务重启。两次启动均命中仅执行一次的 x64/x86 夹具符号，寄存器与栈地址一致。第一次 x86 启动观察到两种已知通知，第二次仅观察到 WOW64 通知。38 次 MCP 调用全部成功，四个会话均已释放且引擎 worker 已终止，17 份原始文件通过固定主机密钥的 SFTP 复制并核对哈希。两份资格回执的 SHA256 为 `b8578d2636f6ab866e3cc9675d5406791b645d424aa5a5d21b7884e2ceaf90f0` 和 `0917813fb164755db85f9cfeccf5b889620637635f78be5cfb12e112c9015def`。scratch 为空，公开连接身份未变，管理 SSH 保持可用，测试 ISO 已卸载。这验证了挂起启动夹具门禁；通用调试会话准入仍未完成。
 
 在仓库根目录的 x64 MSVC Native Tools shell 中运行：
 
@@ -132,11 +132,9 @@ python -m scripts.worker.assemble --cache target/windows-offline-cache --output 
 ./target/windows-worker-package/runtime/python/python.exe -B ./target/windows-worker-package/runtime/worker/worker_selftest.py --package target/windows-worker-package --state target/windows-worker-selftest
 ```
 
-原生调用方须先建立工具包信任，并防止其他进程写入版本目录。该入口不是 worker RPC，也不替代签名校验。它在执行前检查随包探针哈希，无须网络即可测试 OpenSSH 密钥生成，并使用随包运行时检查 x64/x86 dump/live 调试及每种架构三次重放。固定 SSH 探针会额外接收所需的 Windows `ProgramData` 路径，不改变目标作业的环境变量过滤。临时测试 SSH 密钥会删除，日志及结果保存在签名目录之外。成功报告明确仅涵盖离线依赖和可信样例，不代表生产目标隔离或服务/SSH 安装。运行后应再次校验签名目录。
+原生调用方须先建立工具包信任，并防止其他进程写入版本目录。该入口不是 worker RPC，也不替代签名校验。它在执行前检查随包探针哈希，无须网络即可测试 OpenSSH 密钥生成，并使用随包运行时检查 x64/x86 可信执行、dump 生成及每种架构三次重放。固定 SSH 探针会额外接收所需的 Windows `ProgramData` 路径，不改变目标作业的环境变量过滤。临时测试 SSH 密钥会删除，日志及结果保存在签名目录之外。成功报告明确仅涵盖离线依赖和可信样例，不代表生产目标隔离或服务/SSH 安装。运行后应再次校验签名目录。
 
 调试组件使用外部 WinDbg MCP 工具。直接可信夹具互通与托管准入、离线 VM 安装分别验收。Python 依赖测试检查可信执行、dump 生成和重放；隔离调试器由原生启动资格检查负责。重放使用不同生产者/验证者 ID，每种架构执行三次全新进程与目录试验，检查目标/输入精确哈希及 `0xc0000005` 异常。这不证明利用影响。参见[跨平台约定](../../docs/design/cross-platform-environments.zh-CN.md)和[验收指南](../tests/README.zh-CN.md)。
-
-打开转储或附加进程后，辅助程序先核对引擎实际报告的调试对象类别，再允许检查。仅接受 Windows 用户态会话及用户态小型/完整转储。内核及其他类别会被拒绝；任何打开失败都会令辅助程序失效并关闭，避免继续使用部分打开的状态。样例套件为 x64/x86 记录实际观察到的用户态类别及限定值；当前验收仍不含真实内核转储拒绝样例。
 
 原生 VM 引导程序与 SCM 服务已有可调用的实现路径。从已签名完整载荷和匹配的签名登记生成新的公开安装介质：
 
@@ -166,7 +164,7 @@ python -m scripts.worker.bundle --package ABSOLUTE_PACKAGE --enrollment ABSOLUTE
 
 防火墙登记将签封程序解析为规范的 Windows 本地路径。失败会标明 COM 属性或登记步骤；登记错误包含公开的程序、端口、来源地址及配置文件范围设置。本地测试在未登记的规则对象上验证真实 COM 属性设置/读取和路径身份，不添加或修改任何宿主防火墙规则。实际登记仍需独立 VM 验收。
 
-SCM 服务登记及固定原生子进程启动采用相同的本地路径规范化，使服务归属比较与已验证程序保持一致。离线 DbgEng 探测失败时，会将有界的 helper 退出/加载原因保存在受保护自检日志中。这些诊断不会放宽普通账户权限，也不会将失败的自检视为就绪。
+SCM 服务登记及固定原生子进程启动采用相同的本地路径规范化，使服务归属比较与已验证程序保持一致。外部调试器失败时，在受保护资格检查日志中保留有界 MCP 结果和 stderr。这些诊断不会放宽普通账户权限，也不会将失败的自检视为就绪。
 
 Python 元数据 worker 使用既有的绝对本地盘符名称校验签封的 broker-health 程序，拒绝链接、重解析点及歧义组件。该检查由 `worker_windows_paths.py` 独立负责，不再属于调试器。真实 Windows 零特权令牌测试覆盖本地文件访问；普通访问校验不授予特权，也不恢复已删除的调试器路径协议。
 
@@ -178,13 +176,13 @@ Python 元数据 worker 使用既有的绝对本地盘符名称校验签封的 b
 
 元数据 worker 另有独立的本地 broker 通道。其管道仅允许 System 和本次安装的 worker SID，拒绝远程客户端，也不授予 worker 创建其他管道实例的权限。每次请求核对内核报告的调用者 SID 及其是否属于当前 worker Job；模拟身份在任何异步工作前结束。固定且经过哈希校验的原生客户端在写入前，将内核报告的服务端 PID 与 System 父进程提供的启动绑定比对。最多同时处理四个请求，每个连接仅接受一个 4 KiB 帧，期限为三秒。目前仅实现 `health`：`doctor.native_broker` 返回安装、启动及包身份，并明确返回 `production_execution = false`。本地可信子进程测试覆盖合法归属、同一 SID 的其他 Job、错误 SID、错误服务端 PID，以及超限或未知请求。托管的已安装 worker 验收要求通过 SSH 完成同一健康检查。该通道尚不创建目标或调试器资源，不准入执行，也不构成维护空闲屏障。
 
-内部 broker 通信契约定义在 `proto/broker.proto`。构建时由 `prost-build` 与纯 Rust 的 `protox` 编译器生成 Rust 消息；VM 不需要 protoc 或编译器。`tokio-util::codec::LengthDelimitedCodec` 负责四字节大端长度前缀、缓冲和 4 KiB 消息体上限。通信 schema 2 要求显式指定已知操作；缺失或未知操作、不兼容版本及格式错误的消息均拒绝处理。Protobuf 为前向兼容忽略未知字段，但不会因此授予额外操作。两个原生端点必须来自同一已验证软件包；旧 JSON 管道客户端将被拒绝。`broker-health` 命令行保留供 Python 使用的 schema-1 JSON 输出。控制端 SSH RPC 和 DbgEng helper RPC 仍使用各自的 JSON 协议，尚未迁移。源码身份包含 `.proto` 文件。本地协议及命名管道测试不代表这一通信修订已通过安装后 VM 验收。
+内部 broker 通信契约定义在 `proto/broker.proto`。构建时由 `prost-build` 与纯 Rust 的 `protox` 编译器生成 Rust 消息；VM 不需要 protoc 或编译器。`tokio-util::codec::LengthDelimitedCodec` 负责四字节大端长度前缀、缓冲和 4 KiB 消息体上限。通信 schema 2 要求显式指定已知操作；缺失或未知操作、不兼容版本及格式错误的消息均拒绝处理。Protobuf 为前向兼容忽略未知字段，但不会因此授予额外操作。两个原生端点必须来自同一已验证软件包；旧 JSON 管道客户端将被拒绝。`broker-health` 命令行保留供 Python 使用的 schema-1 JSON 输出。控制端 SSH RPC 保留已有 JSON 协议；外部 WinDbg 工具通过 rmcp 使用标准 MCP。源码身份包含 `.proto` 文件。本地协议及命名管道测试不代表这一通信修订已通过安装后 VM 验收。
 
 对于托管的 `file.put`，服务会将控制器传入内容解码后，另存一份至仅 System/管理员可访问的 `metadata/native-inputs/`。声明绑定安装、启动、包、run、控制器、原生租约 epoch、逻辑路径、精确哈希与大小，以及可执行策略。不会以 System 权限打开 worker 提供的源文件。这些上传操作的 Windows 路径采用工具包的可移植 ASCII 路径规则：最多 512 个字符，每个组件最多 200 个，不允许路径遍历、设备名称或含歧义的别名。单次内容仍限制为 32 MiB。每个归属范围限制为 16,384 个成员及 32 GiB，包含为声明、数据和凭据预留的空间；中断遗留的临时文件也计入两项预算。发布不会覆盖已有条目。仅在核对私有的单链接副本和声明后，才向匹配的成功 worker 结果附加 `native_input` 凭据；畸形、丢失或冲突的返回结果会让原生租约保持不确定状态。转发前的校验失败会直接收敛，不制造这种不确定性。同一隔离令牌内重试保留相同凭据，不同 run、控制器或 epoch 会取得独立身份。原生输入发布与租约续期分别串行化。断点续传也将控制器传入的数据块复制到该私有存储：每块最多 1 MiB，每次上传最多 16 GiB，原生归属范围包含元数据的预算为 32 GiB。状态返回原生端与 worker 进度中的较小值，以便向任一端补发中断的写入。重复块必须匹配，不允许缺块、声明变化或最终哈希不符。其他 run 或 epoch 中已存在的 worker 文件不能跳过原生端接收控制器字节的步骤。提交时，核对原生副本及匹配的 worker 文件结果后才发放凭据；同一隔离令牌内重试保留该凭据。原生传输 ID 与现有 Python 协议一致。资源创建及全部执行、调试和重放路径仍需原生准入后，才能启用生产执行。
 
 服务成功停止及离线自检验收前，会显式终止每个所属 Job，并最多等待 10 秒，直到其活动进程数降为零。主进程退出不能证明其后代也已退出。等待失败时不能返回生命周期成功或写入自检凭据；析构清理仅作为错误情况下的尽力回收。worker 和 SSH Job 回收期间，SCM 的 stop-pending 状态保留等待提示和进度检查点。本地可信夹具在主进程退出后保留活跃子进程，并验证 Job 屏障终止该子进程。这项检查验证进程归属，并非已安装服务或目标隔离验收。
 
-启动时还会在独立的 System 子进程 Job 中运行固定的原生资源探针。该宿主加载本次安装自有的目标与调试器用户 profile，并为每个角色创建不同的无 capability AppContainer。全新的 System 宿主会在修改注册表缓存或加载角色 profile 前解析固定 Windows 环境；子进程复用该快照，并使用各自的私有临时路径及经过筛选的自有角色 profile 路径。已知文件夹解析错误保留实际 HRESULT。只有这个单线程子进程会选择自身私有窗口站。目录及桌面权限同时包含独立的登录 SID 和 AppContainer SID；暂存目录与桌面对象设置低完整性标签。父进程先以目录列举和安全管理权限持有不可继承的暂存目录句柄，再授予沙箱访问权限；纯元数据句柄不会建立所需的共享限制。通过该句柄核对精确的安全描述符，并在整个生命周期内拒绝目录删除共享。目录数据写入共享不是不可变性保证。授予访问权限前，先创建仅 System/管理员可访问的保护文件，并持有不共享的文件句柄，使目录根始终非空，防止在其上设置挂载点重解析。首条指令执行前还会核对创建的 AppContainer 身份，并移除除已启用 `SeChangeNotifyPrivilege` 以外的全部特权。每个经过封装的探针必须证明仅保留该项特权且 capability 为零、不能读取元数据和 worker 哨兵文件、不能连接父进程已证明可达的回环监听端口、可以写入私有暂存目录，不能删除目录根的保护文件，也不能在目录根设置挂载点重解析。必须得到访问拒绝、共享冲突、特权拒绝或目录非空错误；请求格式错误不能作为通过证据。成功要求探针 Job 清空、通过持有句柄收回并删除暂存目录根、自有 AppContainer profile 删除，以及加载的用户 hive 卸载。只有显式确认 Job 清空后，才能收回目录根并移除私有保护文件；失败资源析构时保留保护文件，供后续修复处理。受保护的凭据绑定签名工具包。角色的用户 profile 目录保留至自有生命周期清理；托管验收只在删除账户前移除 SID 与本次安装自有账户匹配的用户 profile。后续固定门禁还会分别在目标 AppContainer 中启动经过封装的 x64/x86 测试目标，并在另一个调试器 AppContainer 中启动工具包内的 DbgEng helper。只有对应资源的登录 SID 和 AppContainer SID 获得目标进程及线程访问权限；对象完整性标签允许低完整性调试器使用这些显式权限。宿主传入自己仍持有的进程 PID，以及固定的本地引擎和符号路径。交互记录必须证明用户态附加已停止、架构正确、调试特权未启用、观察到寄存器和预期目标映像，随后 helper 关闭、Job 清空，以及 profile 和暂存目录清理完成。这些已有调用路径的可信夹具门禁仍需在专用环境中完成真实资格检查；它们不证明对抗性隔离或生产执行验收。资源准入和全部执行路径仍未完成。
+启动时还会在独立的 System 子进程 Job 中运行固定的原生资源探针。该宿主加载本次安装自有的目标与调试器用户 profile，并为每个角色创建不同的无 capability AppContainer。全新的 System 宿主会在修改注册表缓存或加载角色 profile 前解析固定 Windows 环境；子进程复用该快照，并使用各自的私有临时路径及经过筛选的自有角色 profile 路径。已知文件夹解析错误保留实际 HRESULT。只有这个单线程子进程会选择自身私有窗口站。目录及桌面权限同时包含独立的登录 SID 和 AppContainer SID；暂存目录与桌面对象设置低完整性标签。父进程先以目录列举和安全管理权限持有不可继承的暂存目录句柄，再授予沙箱访问权限；纯元数据句柄不会建立所需的共享限制。通过该句柄核对精确的安全描述符，并在整个生命周期内拒绝目录删除共享。目录数据写入共享不是不可变性保证。授予访问权限前，先创建仅 System/管理员可访问的保护文件，并持有不共享的文件句柄，使目录根始终非空，防止在其上设置挂载点重解析。首条指令执行前还会核对创建的 AppContainer 身份，并移除除已启用 `SeChangeNotifyPrivilege` 以外的全部特权。每个经过封装的探针必须证明仅保留该项特权且 capability 为零、不能读取元数据和 worker 哨兵文件、不能连接父进程已证明可达的回环监听端口、可以写入私有暂存目录，不能删除目录根的保护文件，也不能在目录根设置挂载点重解析。必须得到访问拒绝、共享冲突、特权拒绝或目录非空错误；请求格式错误不能作为通过证据。成功要求探针 Job 清空、通过持有句柄收回并删除暂存目录根、自有 AppContainer profile 删除，以及加载的用户 hive 卸载。只有显式确认 Job 清空后，才能收回目录根并移除私有保护文件；失败资源析构时保留保护文件，供后续修复处理。受保护的凭据绑定签名工具包。角色的用户 profile 目录保留至自有生命周期清理；托管验收只在删除账户前移除 SID 与本次安装自有账户匹配的用户 profile。后续固定门禁还会分别在目标 AppContainer 中启动经过封装的 x64/x86 测试目标，并在另一个调试器 AppContainer 中启动固定版本的外部 WinDbg MCP 服务。只有对应资源的登录 SID 和 AppContainer SID 获得目标进程及线程访问权限；对象完整性标签允许低完整性调试器使用这些显式权限。宿主传入自己仍持有的进程 PID，以及固定的本地引擎和符号路径。交互记录必须证明用户态附加已停止、架构正确、调试特权未启用、观察到寄存器和预期目标映像，随后 MCP 会话释放、Job 清空，以及 profile 和暂存目录清理完成。这些已有调用路径的可信夹具门禁仍需在专用环境中完成真实资格检查；它们不证明对抗性隔离或生产执行验收。资源准入和全部执行路径仍未完成。
 
 每个沙箱进程及其主线程都使用显式的 System 所有者安全描述符，仅包含 System、资源的登录 SID 和 AppContainer SID，以及确有需要时独立配对的调试器。首条指令恢复前，父进程通过持有的进程和线程句柄回读实际所有者、精确 DACL 和低完整性 no-write-up 标签。本地 Authz 夹具在不创建内核 AppContainer 的情况下，检查具体的受限 SID 上下文、其他资源拒绝和配对调试器准入；权限扩大的描述符、变更的所有者或错误标签均拒绝。运行中的进程可通过自身伪句柄修改自己的 DACL，因此这项初始对象策略不证明对抗性会话隔离。生产执行保持禁用。
 
@@ -211,10 +209,6 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --lib inherited_d
 ```
 
 这项回归不在普通宿主检查中执行。2026-11-13，开发宿主拒绝打开已授予 AppContainer 权限的夹具目录，而同一个测试程序在专用 Windows 10 1803 VM 中通过。该文件系统检查不证明已完成安装后服务或生命周期资格验收。
-
-普通辅助程序调用通过 Windows SDK 句柄查询校验已有本地路径，不再查询每个祖先目录的元数据，也不要求访问 DOS 设备命名空间。它先以属性读取权限打开请求对象，不跟随末级重解析点，再通过带 `FILE_NAME_OPENED` 的 `GetFinalPathNameByHandleW` 取得 NT 和 DOS 身份。Windows 序数比较必须确认其与请求的盘符路径及原始盘符相对后缀一致；不支持的卷身份、重定向路径和别名均拒绝。随后独立使用 `NtCreateFile` 和 `OBJ_DONT_REPARSE` 打开，拒绝末级或中间组件的重解析点。该过程沿用子进程已有权限和遍历特权，不修改全局 ACL，也不恢复特权。开发与打包后的辅助程序共享该模块。仅测试使用的 `junction` 夹具验证真实末级和中间 junction 拒绝。普通账号下的 SDK 测试不证明 AppContainer 访问能力：2026-11-13，专用 Windows 10 VM 中的受限辅助程序拒绝了 `QueryDosDeviceW`，因此不再要求调用该 API。普通检查不证明受限交接；上文记录了固定提供 VM 的验证结果。参见 SDK 的[已打开名称约定](https://learn.microsoft.com/zh-cn/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew)和[对象属性约定](https://learn.microsoft.com/zh-cn/windows/win32/api/ntdef/ns-ntdef-_object_attributes)。
-
-固定受限调试器资格检查使用经身份校验的路径上下文头，因为 Windows 10 AppContainer 能查询已打开对象的 NT 名称，却不能查询 DOS 盘符名称。System 在确认路径无链接后，通过共享 SDK 身份函数观察已签封的引擎和符号目录；共享函数在 Windows 序数比较前统一路径分隔符及 verbatim 盘符前缀，包括使用正斜杠的清单成员路径。随后将最多 8 KiB 的 schema1 上下文写入现有私有输入文件的固定请求之前。`--native-path-context` 仅接受继承的磁盘文件句柄：必须通过与安装及资源策略共用的描述符校验器，核对管理员所有者、受保护 DACL，以及精确的 System/管理员完全访问授权。普通文件和管道会在读取头之前被拒绝。辅助程序将请求目录及其实际已打开 NT 身份与上下文绑定，保留原始盘符相对后缀，并独立执行内核禁止重解析打开。未声明的路径会被拒绝；该上下文目前仅覆盖固定引擎和符号目录。普通辅助程序调用保留独立的 NT/DOS 身份查询。SDK 观察及描述符检查共享实现。单元及普通 VM 回归覆盖伪造输入拒绝、不匹配或未声明路径，以及真实 junction；上文提交 `008d805` 的提供 VM 结果仅验证这项固定交接和附加夹具；生产资源准入仍未完成。
 
 AppContainer 特权策略遵循 Windows 文档中的目录遍历例外：仅保留 `SeChangeNotifyPrivilege`，它跳过祖先目录遍历检查，不授予最终对象读写或目录列举权限。普通元数据 worker 保持现有零特权策略。沙箱令牌回读会拒绝缺失、禁用或任何额外特权（包括 `SeDebugPrivilege`），capability 数仍须为零。不通过修改机器全局目录 ACL 来补偿加载器拒绝。资格检查回执使用 schema4，带有本次启动的资格检查 ID 和明确的特权名称数组，仍要求真实哨兵/网络拒绝、自有 DbgEng 附加及静止清理。其他安装环境仍须专用验收；该策略不会启用生产执行。参见微软的[受限令牌约定](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)、[文件访问指引](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)及 [WFP 事件枚举约定](https://learn.microsoft.com/en-us/windows/win32/api/fwpmu/nf-fwpmu-fwpmneteventenum2)。
 

@@ -18,12 +18,12 @@
       "zh-CN": "04ef38f29d72fd0ea63c0106c81e86210272b0617def67218e6079dbbcf6d01d"
     },
     "docs/design/architecture.md": {
-      "en": "16439f278e760e2cb506e4e8760a1595c4e21d5d08e10292fe4ea29c88d575b6",
-      "zh-CN": "c794cc829189e8e946cb8242f5b8815554e4ef137a272b55ed7bfa307dbb27fa"
+      "en": "0370b0d69fab34e173af3b22315090a5c4302645b31c948d2f520b08793e4ae4",
+      "zh-CN": "068b050dcb94e1a4e1d235a2fb9465e3ef6e342f86b1e886746081853a22119d"
     },
     "docs/design/cross-platform-environments.md": {
-      "en": "8b8715ca989d45a0b3464f94ef6710cf1a561c889178576a118f2de9c67c0bac",
-      "zh-CN": "84c4da47622231dee55a3b99def86ff781e35ab8280cf25bfda17eb6838d5b32"
+      "en": "e99dd939888d8c80c73a8b73a78efed575de6a35e9eda1243c3da3fec92e77a3",
+      "zh-CN": "f4688d7cc2aa9c356de24284c2a0af95e8aeae58a02e08466b2945a2be477b7b"
     },
     "docs/design/implementation-contract.md": {
       "en": "34b958279e68476f2d62f42962102de8794a49a2ac12da61d5b8c84286698c2c",
@@ -146,16 +146,16 @@
       "zh-CN": "59dc668460832566d06d0126c126b1b2a26c8a4400bd43993a58dbdad71d98f2"
     },
     "workers/runtime/README.md": {
-      "en": "ee82c7b544840c7d7b18f5fb178269a1028717883fd5cf222246e00958db7cf2",
-      "zh-CN": "c81b2e650fd646123fcaafa485ea9aea5dd9e8ea132e74e6da4addbbd20d1ee8"
+      "en": "3e5c28f3d7fd8c99edbd1a7c4ad229dcc1249acd2d7cd8deb6a0a8938e6d8322",
+      "zh-CN": "3800cef91507024b9bd6617caff0602e97d3082c9035efba6efdf4f09cbf7d7a"
     },
     "workers/tests/README.md": {
-      "en": "98d6e4d5c6f45b34343b0ecdd782fd18d067ce78b6ce23c4a415a6e45846302b",
-      "zh-CN": "0e1a584ad6acb8009b807bd8376844e268fec62204e8d7765e9784f11be14869"
+      "en": "53e024e9ec7e55a0492fad1304d01e779f9bddaee6c637f7bf54a4a8e20a25fb",
+      "zh-CN": "1f4a0b226b82df7c39282bbff0bda2a26eadaf6387839f605f7e999db870b995"
     },
     "workers/windows/README.md": {
-      "en": "8f6a8c3c86b76e70b8a1987e268377939b01650b72112a127010d41467187036",
-      "zh-CN": "18e78d94a20e2b1d6e0456aef5a71d367d04d72542bca98a8c18cad6e7571d95"
+      "en": "b31b6d7ce14f3662333eb191aa56b97037d7952dfafcd60dff4e6a0fa819fb17",
+      "zh-CN": "c206a5c013ea27f3c766a149d07ac45ae470c939d41c0ce752fb3c2164548c9d"
     }
   }
 }
