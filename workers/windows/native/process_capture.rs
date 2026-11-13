@@ -120,6 +120,44 @@ struct Budget {
     exceeded: AtomicBool,
     failed: AtomicBool,
 }
+pub(crate) struct CaptureWatch(Arc<Budget>);
+impl CaptureWatch {
+    pub(crate) fn failed(&self) -> bool {
+        self.0.failed.load(Ordering::Acquire) || self.0.exceeded.load(Ordering::Acquire)
+    }
+}
+/// One diagnostic pipe, using the same bounded drain as target stdio.
+pub(crate) struct CapturedStream {
+    watch: CaptureWatch,
+    reader: JoinHandle<io::Result<Vec<u8>>>,
+}
+impl CapturedStream {
+    pub(crate) fn start(pipe: PipeReader, limit: usize) -> Result<Self> {
+        ensure!(
+            (1024..=8 * 1024 * 1024).contains(&limit),
+            "invalid diagnostic budget"
+        );
+        let budget = Arc::new(Budget {
+            remaining: AtomicUsize::new(limit),
+            exceeded: AtomicBool::new(false),
+            failed: AtomicBool::new(false),
+        });
+        Ok(Self {
+            reader: reader("native-diagnostics", pipe, budget.clone())?,
+            watch: CaptureWatch(budget),
+        })
+    }
+    pub(crate) fn watch(&self) -> &CaptureWatch {
+        &self.watch
+    }
+    /// Only join after the owning Job and all parent writers have closed.
+    pub(crate) fn finish(self) -> Result<Vec<u8>> {
+        self.reader
+            .join()
+            .map_err(|_| anyhow::anyhow!("native diagnostic reader panicked"))?
+            .map_err(Into::into)
+    }
+}
 fn reader(
     name: &str,
     mut pipe: PipeReader,
@@ -200,6 +238,12 @@ pub struct CapturedProcess {
     input: JoinHandle<InputDelivery>,
 }
 impl CapturedProcess {
+    pub(crate) fn process_mut(&mut self) -> &mut OwnedProcess {
+        &mut self.process
+    }
+    pub(crate) fn watch(&self) -> CaptureWatch {
+        CaptureWatch(self.budget.clone())
+    }
     pub fn process(&self) -> &OwnedProcess {
         &self.process
     }

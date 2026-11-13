@@ -62,6 +62,16 @@ pub mod service;
 #[cfg(windows)]
 mod service_access;
 #[cfg(windows)]
+mod session_artifacts;
+#[cfg(windows)]
+mod session_commands;
+#[cfg(windows)]
+pub mod session_host;
+#[cfg(windows)]
+mod session_runtime;
+#[cfg(windows)]
+mod session_wire;
+#[cfg(windows)]
 pub mod setup_ui;
 #[cfg(windows)]
 pub mod staging;

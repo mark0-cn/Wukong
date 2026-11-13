@@ -17,7 +17,7 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 const TIMEOUT: Duration = Duration::from_secs(40);
 const MAX_FRAME: usize = 2 * 1024 * 1024;
-const MAX_TRANSCRIPT: usize = 8 * 1024 * 1024;
+const MAX_TRANSCRIPT: usize = crate::session_artifacts::LIMIT;
 
 pub(crate) struct Client {
     service: RunningService<RoleClient, ClientConfig>,
@@ -92,6 +92,15 @@ impl Client {
     }
 
     pub(crate) async fn call(&mut self, name: &str, arguments: Value) -> Result<CallToolResult> {
+        let result = self.raw(name, arguments).await?;
+        ensure!(
+            result.is_error != Some(true),
+            "external debugger rejected {name}; inspect its MCP transcript"
+        );
+        Ok(result)
+    }
+
+    pub(crate) async fn raw(&mut self, name: &str, arguments: Value) -> Result<CallToolResult> {
         let mut request = CallToolRequestParams::new(name.to_owned());
         request.arguments = Some(
             arguments
@@ -110,12 +119,8 @@ impl Client {
         );
         self.transcript.write_all(&bytes)?;
         self.transcript.write_all(b"\n")?;
-        self.transcript.flush()?;
+        self.transcript.sync_all()?;
         self.retained += bytes.len() + 1;
-        ensure!(
-            result.is_error != Some(true),
-            "external debugger rejected {name}; inspect its MCP transcript"
-        );
         Ok(result)
     }
 

@@ -1,4 +1,21 @@
 use super::*;
+
+#[test]
+fn diagnostic_stream_retains_only_its_budget_and_signals_overflow() -> Result<()> {
+    let (read, mut write) = io::pipe()?;
+    let captured = CapturedStream::start(read, 1024)?;
+    let writer = thread::spawn(move || -> io::Result<()> { write.write_all(&vec![b'x'; 16384]) });
+    writer.join().unwrap()?;
+    for _ in 0..100 {
+        if captured.watch().failed() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(captured.watch().failed());
+    assert_eq!(captured.finish()?, vec![b'x'; 1024]);
+    Ok(())
+}
 use crate::processes::{ResourceLimits, Spawn};
 use std::{collections::BTreeMap, ffi::OsString, io::Cursor, path::Path};
 

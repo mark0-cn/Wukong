@@ -653,7 +653,45 @@ pub(crate) struct SystemHost {
     job: OwnedHandle,
     pid: u32,
 }
+/// A wait-only duplicate; it cannot terminate or inspect the host's memory.
+pub(crate) struct ExitSignal(OwnedHandle);
+impl ExitSignal {
+    pub(crate) async fn wait(&self) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = unsafe { WaitForSingleObject(self.0.as_raw_handle(), 0) };
+                if state == WAIT_OBJECT_0 {
+                    return Ok::<_, anyhow::Error>(());
+                }
+                ensure!(
+                    state == windows_sys::Win32::Foundation::WAIT_TIMEOUT,
+                    "native host wait failed: {}",
+                    std::io::Error::last_os_error()
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .context("native host replied before its exit could be confirmed")??;
+        Ok(())
+    }
+}
 impl SystemHost {
+    pub(crate) fn exit_signal(&self) -> Result<ExitSignal> {
+        let mut handle = null_mut();
+        security::check(unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                self.process.as_raw_handle(),
+                GetCurrentProcess(),
+                &mut handle,
+                PROCESS_SYNCHRONIZE,
+                0,
+                0,
+            )
+        })?;
+        Ok(ExitSignal(unsafe { OwnedHandle::from_raw_handle(handle) }))
+    }
     fn take(mut source: OwnedProcess) -> Result<Self> {
         ensure!(
             source._desktop.is_none()
@@ -726,10 +764,13 @@ pub struct Spawn<'a> {
 #[derive(Clone, Copy)]
 enum Start<'a> {
     Execute,
-    AwaitDebugger,
+    AwaitDebugger {
+        streams: Option<(&'a File, ResourceLimits)>,
+    },
     ResourceHost {
         installation: &'a str,
         resource: &'a str,
+        error: Option<&'a File>,
     },
     Streamed {
         error: &'a File,
@@ -817,6 +858,22 @@ impl Spawn<'_> {
         )
     }
     pub(crate) fn system_host(&self, installation: &str, resource: &str) -> Result<SystemHost> {
+        self.resource_host(installation, resource, None)
+    }
+    pub(crate) fn system_host_streamed(
+        &self,
+        installation: &str,
+        resource: &str,
+        error: &File,
+    ) -> Result<SystemHost> {
+        self.resource_host(installation, resource, Some(error))
+    }
+    fn resource_host(
+        &self,
+        installation: &str,
+        resource: &str,
+        error: Option<&File>,
+    ) -> Result<SystemHost> {
         security::require_system()?;
         SystemHost::take(self.create(
             None,
@@ -826,6 +883,7 @@ impl Spawn<'_> {
             Start::ResourceHost {
                 installation,
                 resource,
+                error,
             },
             CreationContext::Process,
         )?)
@@ -860,7 +918,29 @@ impl Spawn<'_> {
         directory: security::ResourceDirectory,
         debugger: &crate::persona::Persona,
     ) -> Result<OwnedProcess> {
-        self.sandbox_peer(target, directory, Some(debugger), Start::AwaitDebugger)
+        self.sandbox_peer(
+            target,
+            directory,
+            Some(debugger),
+            Start::AwaitDebugger { streams: None },
+        )
+    }
+    pub(crate) fn sandbox_debug_target_streamed(
+        &self,
+        target: &crate::persona::Persona,
+        directory: security::ResourceDirectory,
+        debugger: &crate::persona::Persona,
+        error: &File,
+        limits: ResourceLimits,
+    ) -> Result<OwnedProcess> {
+        self.sandbox_peer(
+            target,
+            directory,
+            Some(debugger),
+            Start::AwaitDebugger {
+                streams: Some((error, limits)),
+            },
+        )
     }
     fn sandbox_peer(
         &self,
@@ -940,19 +1020,29 @@ impl Spawn<'_> {
         }
         let environment = environment(&child_environment)?;
         let resource_limits = match start {
-            Start::Streamed { limits, .. } => Some(limits),
+            Start::Streamed { limits, .. }
+            | Start::AwaitDebugger {
+                streams: Some((_, limits)),
+            } => Some(limits),
             _ => None,
         };
         let job = match start {
             Start::ResourceHost {
                 installation,
                 resource,
+                ..
             } => Job::resource(installation, resource)?,
             _ => Job::configured(resource_limits)?,
         };
         let (log, input) = (inheritable(self.log)?, inheritable(self.input)?);
         let error = match start {
-            Start::Streamed { error, .. } => Some(inheritable(error)?),
+            Start::Streamed { error, .. }
+            | Start::AwaitDebugger {
+                streams: Some((error, _)),
+            }
+            | Start::ResourceHost {
+                error: Some(error), ..
+            } => Some(inheritable(error)?),
             _ => None,
         };
         let mut handles = vec![log.0, input.0];
@@ -1109,7 +1199,7 @@ impl Spawn<'_> {
                 })?;
                 seal_token_privileges(&Handle(token), policy == "traverse")?;
             }
-            if !matches!(start, Start::InspectSuspended | Start::AwaitDebugger) {
+            if !matches!(start, Start::InspectSuspended | Start::AwaitDebugger { .. }) {
                 ensure!(
                     unsafe { ResumeThread(thread.0) } != u32::MAX,
                     "cannot resume owned native child"
@@ -1126,7 +1216,7 @@ impl Spawn<'_> {
             }
             return Err(error);
         }
-        if matches!(start, Start::AwaitDebugger) {
+        if matches!(start, Start::AwaitDebugger { .. }) {
             process.initial_thread = Some(thread);
         }
         Ok(process)
@@ -1174,7 +1264,7 @@ mod tests {
             None,
             None,
             None,
-            Start::AwaitDebugger,
+            Start::AwaitDebugger { streams: None },
             CreationContext::Process,
         )?;
         assert!(!target.release_debug_start()?);

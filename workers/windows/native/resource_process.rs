@@ -170,7 +170,7 @@ pub fn execute(
             String::new(),
         );
     }
-    let mut target = crate::resource_target::Prepared::open(&host, &request)?;
+    let mut target = crate::resource_target::Prepared::open(&host, &request, None)?;
     let appcontainer = target.persona.sid_text()?;
     let logon = target.persona.logon_sid().to_owned();
     if cancel.try_exists()? {

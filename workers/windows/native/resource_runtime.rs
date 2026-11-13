@@ -1,4 +1,4 @@
-//! One owned native process resource. This uses the existing controller fence,
+//! Owned native resources use the existing controller fence,
 //! SQLite effects and suspended Job launcher, not a second worker scheduler.
 use crate::{
     deployment::{self, Deployment},
@@ -52,6 +52,113 @@ fn default_output() -> usize {
     1024 * 1024
 }
 
+impl Specification {
+    fn validate(&self) -> Result<()> {
+        ensure!(
+            self.cwd == "."
+                && (self.launch_spec.is_some() || !self.argv.is_empty())
+                && self.argv.len() <= 129
+                && self.argv.iter().all(|a| !a.contains('\0'))
+                && self
+                    .argv
+                    .iter()
+                    .map(|a| a.encode_utf16().count())
+                    .sum::<usize>()
+                    <= 16384,
+            "native process requires argv and private cwd '.'"
+        );
+        Ok(())
+    }
+    fn matches(&self, request: &Request) -> bool {
+        let launch = if let Some(launch) = &request.launch {
+            self.launch_spec.as_ref() == Some(&launch.manifest.path)
+                && self.argv.is_empty()
+                && self.env.is_empty()
+                && self
+                    .timeout_secs
+                    .is_none_or(|timeout| timeout == request.timeout_secs)
+        } else {
+            self.launch_spec.is_none()
+                && self.argv.first() == Some(&request.program.path)
+                && request.arguments == self.argv[1..]
+                && request.environment == self.env
+                && request.timeout_secs == self.timeout_secs.unwrap_or(default_timeout())
+        };
+        launch
+            && request.input.as_ref().map(|input| input.path.as_str()) == self.input.as_deref()
+            && request.output_limit == self.output_limit
+    }
+    fn prepare(&self, inputs: &Inputs, owner: &Owner) -> Result<Request> {
+        self.validate()?;
+        let input = self
+            .input
+            .as_deref()
+            .map(|path| inputs.reference(owner, path, Purpose::Inspect))
+            .transpose()?;
+        let (program, arguments, environment, timeout, launch) =
+            if let Some(path) = &self.launch_spec {
+                ensure!(
+                    self.argv.is_empty() && self.env.is_empty(),
+                    "LaunchSpec owns argv and environment"
+                );
+                let (manifest, resolved) = crate::resource_launch::prepare(inputs, owner, path)?;
+                ensure!(
+                    self.timeout_secs
+                        .is_none_or(|timeout| timeout == resolved.timeout_secs),
+                    "LaunchSpec owns its execution timeout"
+                );
+                let binding = crate::resource_launch::Binding {
+                    manifest,
+                    files: resolved.files,
+                    cwd: resolved.cwd,
+                    input_mode: resolved.input_mode,
+                };
+                (
+                    resolved.program,
+                    resolved.arguments,
+                    resolved.environment,
+                    resolved.timeout_secs,
+                    Some(binding),
+                )
+            } else {
+                (
+                    inputs.reference(owner, &self.argv[0], Purpose::Execute)?,
+                    self.argv[1..].to_vec(),
+                    self.env.clone(),
+                    self.timeout_secs.unwrap_or(default_timeout()),
+                    None,
+                )
+            };
+        let mut argument_files = BTreeMap::new();
+        for path in arguments.iter().filter(|_| launch.is_none()) {
+            if path.starts_with("files/")
+                && path != &program.path
+                && !argument_files.contains_key(path)
+            {
+                let reference = inputs.reference(owner, path, Purpose::Inspect)?;
+                argument_files.insert(path.clone(), reference);
+            }
+        }
+        let request = Request {
+            schema: crate::resource_process::SCHEMA,
+            resource_id: "0".repeat(32),
+            owner: owner.clone(),
+            program,
+            argument_files: argument_files.into_values().collect(),
+            launch,
+            arguments,
+            input,
+            environment,
+            timeout_secs: timeout,
+            output_limit: self.output_limit,
+            processes: 16,
+            memory_bytes: 1024 * 1024 * 1024,
+        };
+        request.validate()?;
+        Ok(request)
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Listing {
@@ -75,14 +182,18 @@ struct Recovering {
     host: SystemHost,
     deadline: Instant,
 }
+#[path = "resource_runtime_debugger.rs"]
+mod debugger;
 #[path = "resource_runtime_recovery.rs"]
 mod recovery;
+pub(crate) use debugger::Dispatch;
 pub(crate) struct Runtime {
     root: PathBuf,
     executable: PathBuf,
     installation: String,
     running: Option<Running>,
     recovery: Option<Recovering>,
+    debugger: Option<crate::session_runtime::Live>,
 }
 impl Runtime {
     pub(crate) fn open(
@@ -108,12 +219,17 @@ impl Runtime {
             installation: deployment.installation_id.clone(),
             running: None,
             recovery: None,
+            debugger: None,
         })
     }
     pub(crate) fn handles(method: &str, params: &Map<String, Value>) -> bool {
         matches!(
             method,
-            "job.start"
+            "debug.start"
+                | "debug.inspect"
+                | "debug.control"
+                | "debug.close"
+                | "job.start"
                 | "job.status"
                 | "job.cancel"
                 | "job.artifacts"
@@ -206,19 +322,7 @@ impl Runtime {
         if spec.launch_spec.is_none() && spec.timeout_secs.is_none() {
             spec.timeout_secs = Some(default_timeout());
         }
-        ensure!(
-            spec.cwd == "."
-                && (spec.launch_spec.is_some() || !spec.argv.is_empty())
-                && spec.argv.len() <= 129
-                && spec.argv.iter().all(|a| !a.contains('\0'))
-                && spec
-                    .argv
-                    .iter()
-                    .map(|a| a.encode_utf16().count())
-                    .sum::<usize>()
-                    <= 16384,
-            "native process requires argv and private cwd '.'"
-        );
+        spec.validate()?;
         let specification =
             json!({"native_process_schema":crate::resource_process::SCHEMA,"process":spec});
         if let Some(existing) =
@@ -226,72 +330,11 @@ impl Runtime {
         {
             return self.reserved_status(journal, owner, existing);
         }
-        let input = spec
-            .input
-            .as_deref()
-            .map(|path| inputs.reference(owner, path, Purpose::Inspect))
-            .transpose()?;
-        let (program, arguments, environment, timeout, launch) =
-            if let Some(path) = &spec.launch_spec {
-                ensure!(
-                    spec.argv.is_empty() && spec.env.is_empty(),
-                    "LaunchSpec owns argv and environment"
-                );
-                let (manifest, resolved) = crate::resource_launch::prepare(inputs, owner, path)?;
-                ensure!(
-                    spec.timeout_secs
-                        .is_none_or(|timeout| timeout == resolved.timeout_secs),
-                    "LaunchSpec owns its execution timeout"
-                );
-                let binding = crate::resource_launch::Binding {
-                    manifest,
-                    files: resolved.files,
-                    cwd: resolved.cwd,
-                    input_mode: resolved.input_mode,
-                };
-                (
-                    resolved.program,
-                    resolved.arguments,
-                    resolved.environment,
-                    resolved.timeout_secs,
-                    Some(binding),
-                )
-            } else {
-                (
-                    inputs.reference(owner, &spec.argv[0], Purpose::Execute)?,
-                    spec.argv[1..].to_vec(),
-                    spec.env,
-                    spec.timeout_secs.unwrap_or(default_timeout()),
-                    None,
-                )
-            };
-        let mut argument_files = BTreeMap::new();
-        for path in arguments.iter().filter(|_| launch.is_none()) {
-            if path.starts_with("files/")
-                && path != &program.path
-                && !argument_files.contains_key(path)
-            {
-                let reference = inputs.reference(owner, path, Purpose::Inspect)?;
-                argument_files.insert(path.clone(), reference);
-            }
-        }
-        let mut request = Request {
-            schema: crate::resource_process::SCHEMA,
-            resource_id: "0".repeat(32),
-            owner: owner.clone(),
-            program,
-            argument_files: argument_files.into_values().collect(),
-            launch,
-            arguments,
-            input,
-            environment,
-            timeout_secs: timeout,
-            output_limit: spec.output_limit,
-            processes: 16,
-            memory_bytes: 1024 * 1024 * 1024,
-        };
-        request.validate()?;
-        ensure!(self.running.is_none(), "native host remains owned");
+        let mut request = spec.prepare(inputs, owner)?;
+        ensure!(
+            self.running.is_none() && self.debugger.is_none(),
+            "native host remains owned"
+        );
         let reserved =
             journal.reserve_start(owner, request_id, ResourceKind::Process, &specification)?;
         let Reservation::Reserved {
@@ -417,6 +460,9 @@ impl Runtime {
         )
     }
     pub(crate) fn cancel_active(&self) -> Result<()> {
+        if let Some(debugger) = &self.debugger {
+            self.cancel(&debugger.request.resource_id)?;
+        }
         if let Some(running) = &self.running {
             self.cancel(&running.request.resource_id)?;
         }
@@ -435,6 +481,13 @@ impl Runtime {
     pub(crate) fn poll(&mut self, journal: &mut Journal) -> Result<()> {
         if self.recovery.is_some() {
             return self.poll_recovery(journal);
+        }
+        if let Some(debugger) = &self.debugger {
+            return if debugger.needs_recovery() {
+                self.recover(journal)
+            } else {
+                Ok(())
+            };
         }
         let Some(running) = &self.running else {
             return self.recover(journal);
@@ -593,20 +646,58 @@ impl Runtime {
             .context("native artifact selector is required")?;
         let parts: Vec<_> = path.split('/').collect();
         ensure!(
-            parts.len() == 3 && parts[0] == "native-results" && artifact_suffix(parts[2]).is_ok(),
+            parts.len() == 3 && parts[0] == "native-results",
             "invalid native artifact selector"
         );
         let record = journal.resource(owner, parts[1])?;
-        ensure!(
-            record.phase == Phase::Closed,
-            "native artifacts require completed cleanup"
-        );
-        let mut artifact = self.artifact(parts[1], parts[2])?;
+        let data = if let Some(sequence) = parts[2].strip_prefix("transcript-") {
+            ensure!(
+                record.kind == ResourceKind::Debugger,
+                "native transcript requires its debugger resource"
+            );
+            let parsed: u64 = sequence.parse()?;
+            ensure!(
+                parsed.to_string() == sequence,
+                "noncanonical native transcript sequence"
+            );
+            let request_path = self.request_path(parts[1], "debug.json");
+            AclPolicy::private_vm().verify(&request_path, false)?;
+            let request: Request =
+                serde_json::from_slice(&deployment::read_bytes(&request_path, 65536)?)?;
+            request.validate()?;
+            let spec: Specification =
+                serde_json::from_value(record.specification["process"].clone())?;
+            ensure!(
+                request.resource_id == record.id
+                    && request.owner == record.owner
+                    && spec.matches(&request),
+                "native debugger transcript request differs from its journal intent"
+            );
+            crate::session_artifacts::read(
+                &self.root,
+                parts[1],
+                parsed,
+                &crate::inputs::digest(&request)?,
+            )?
+        } else {
+            ensure!(
+                record.phase == Phase::Closed,
+                "native artifacts require completed cleanup"
+            );
+            let suffix = if parts[2] == "receipt" && record.kind == ResourceKind::Debugger {
+                "debug-result.json".into()
+            } else {
+                artifact_suffix(parts[2])?
+            };
+            let source = self.result_path(parts[1], &suffix);
+            AclPolicy::private_vm().verify(&source, false)?;
+            deployment::read_bytes(&source, 12 * 1024 * 1024)?
+        };
+        let mut artifact =
+            json!({"path":path,"size":data.len(),"sha256":hex::encode(Sha256::digest(&data))});
         if method == "file.stat" {
             return Ok(artifact);
         }
-        let suffix = artifact_suffix(parts[2])?;
-        let data = deployment::read_bytes(&self.result_path(parts[1], &suffix), 12 * 1024 * 1024)?;
         if method == "file.get" {
             artifact["data_base64"] = json!(STANDARD.encode(data));
             return Ok(artifact);

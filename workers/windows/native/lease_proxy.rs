@@ -4,7 +4,7 @@ use crate::{
     accounts, deployment,
     inputs::{Inputs, Owner},
     resource_journal::Journal,
-    resource_runtime::Runtime,
+    resource_runtime::{Dispatch, Runtime},
     security::AclPolicy,
 };
 use anyhow::{Context, Result, ensure};
@@ -401,7 +401,9 @@ impl LeaseProxy {
             && self.resources.lock().await.runtime.is_some();
         // Serialize input publication independently of lease controls: hashing
         // or a slow worker upload must never prevent heartbeat renewal.
-        let inputs = if Inputs::handles(&method) || native_resource && method == "job.start" {
+        let inputs = if Inputs::handles(&method)
+            || native_resource && matches!(method.as_str(), "job.start" | "debug.start")
+        {
             Some(self.inputs.lock().await)
         } else {
             None
@@ -420,7 +422,7 @@ impl LeaseProxy {
                 runtime
                     .as_mut()
                     .context("native resource runtime vanished")?
-                    .call(
+                    .prepare_rpc(
                         journal,
                         inputs.as_deref(),
                         &admission.owner,
@@ -431,7 +433,22 @@ impl LeaseProxy {
             // The journal, not a discarded RPC future, retains an unfinished
             // native side effect and its cleanup blocker.
             admission.completed = true;
-            return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":result?}));
+            let pending = match result? {
+                Dispatch::Ready(value) => {
+                    return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":value}));
+                }
+                Dispatch::Debug(pending) => pending,
+            };
+            drop(resources);
+            drop(inputs);
+            let completed = pending.exchange().await;
+            let mut resources = self.resources.lock().await;
+            let Resources { journal, runtime } = &mut *resources;
+            let value = runtime
+                .as_mut()
+                .context("native resource runtime vanished")?
+                .complete_debugger(journal, completed)?;
+            return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":value}));
         }
         let input = if let Some(inputs) = &inputs {
             match inputs.prepare_rpc(

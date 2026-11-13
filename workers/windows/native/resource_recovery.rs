@@ -33,10 +33,17 @@ impl Request {
         );
         resource_process::nonce(&record.owner.identity.installation_id, &record.id)?;
         ensure!(
-            record.kind == ResourceKind::Process
-                && record.phase != crate::resource_journal::Phase::Closed
-                && record.specification["native_process_schema"] == resource_process::SCHEMA
-                && record.specification["process"].is_object(),
+            record.phase != crate::resource_journal::Phase::Closed
+                && record.specification["process"].is_object()
+                && match record.kind {
+                    ResourceKind::Process =>
+                        record.specification["native_process_schema"] == resource_process::SCHEMA,
+                    ResourceKind::Debugger =>
+                        record.specification["native_debugger_schema"]
+                            == crate::session_host::SCHEMA
+                            && record.specification["debugger"].is_object(),
+                    _ => false,
+                },
             "unsupported native resource recovery contract"
         );
         Ok(())
@@ -65,47 +72,59 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
     );
     let found =
         crate::processes::resource_job::drain(installation, &record.id, Duration::from_secs(15))?;
-    let nonce = resource_process::nonce(installation, &record.id)?;
-    let metadata = root.join("metadata");
-    let profile_path = metadata.join(format!("resource-profile-{nonce}.json"));
-    let scratch_path = resources.join(&nonce);
-    let scratch_intent = metadata.join(format!("resource-scratch-{nonce}.json"));
-    if profile_path.try_exists()? {
-        private.verify(&profile_path, false)?;
-        let profile: Value = serde_json::from_slice(&deployment::read_bytes(&profile_path, 8192)?)?;
-        let name = format!("Wukong-{nonce}");
+    let mut personas = vec![(
+        Role::Target,
+        resource_process::nonce(installation, &record.id)?,
+    )];
+    if record.kind == ResourceKind::Debugger {
+        personas.push((
+            Role::Debugger,
+            crate::session_host::nonce(installation, &record.id)?,
+        ));
+    }
+    for (role, nonce) in personas {
+        let metadata = root.join("metadata");
+        let profile_path = metadata.join(format!("resource-profile-{nonce}.json"));
+        let scratch_path = resources.join(&nonce);
+        let scratch_intent = metadata.join(format!("resource-scratch-{nonce}.json"));
+        if profile_path.try_exists()? {
+            private.verify(&profile_path, false)?;
+            let profile: Value =
+                serde_json::from_slice(&deployment::read_bytes(&profile_path, 8192)?)?;
+            let name = format!("Wukong-{nonce}");
+            ensure!(
+                profile
+                    == json!({"schema":1,"installation_id":installation,"role":role,"account_sid":deployment.account(role)?.sid,"profile_name":name,"resource_id":record.id}),
+                "native recovery profile intent differs"
+            );
+            crate::persona::Persona::recover(installation, deployment.account(role)?, &name)?;
+        } else {
+            ensure!(
+                !scratch_path.try_exists()? && !scratch_intent.try_exists()?,
+                "scratch exists without its original profile intent"
+            );
+        }
+        if scratch_path.try_exists()? {
+            private.verify(&scratch_intent, false)?;
+            let scratch: ScratchIntent =
+                serde_json::from_slice(&deployment::read_bytes(&scratch_intent, 8192)?)?;
+            ensure!(
+                scratch.schema == resource_process::SCHEMA
+                    && scratch.installation_id == installation
+                    && scratch.resource_id == record.id,
+                "native recovery scratch intent differs"
+            );
+            security::ResourceDirectory::recover(
+                &scratch_path,
+                &scratch.appcontainer_sid,
+                &scratch.logon_sid,
+            )?;
+        }
         ensure!(
-            profile
-                == json!({"schema":1,"installation_id":installation,"role":Role::Target,"account_sid":deployment.account(Role::Target)?.sid,"profile_name":name,"resource_id":record.id}),
-            "native recovery profile intent differs"
-        );
-        crate::persona::Persona::recover(installation, deployment.account(Role::Target)?, &name)?;
-    } else {
-        ensure!(
-            !scratch_path.try_exists()? && !scratch_intent.try_exists()?,
-            "scratch exists without its original profile intent"
+            !scratch_path.try_exists()?,
+            "native recovery scratch remains"
         );
     }
-    if scratch_path.try_exists()? {
-        private.verify(&scratch_intent, false)?;
-        let scratch: ScratchIntent =
-            serde_json::from_slice(&deployment::read_bytes(&scratch_intent, 8192)?)?;
-        ensure!(
-            scratch.schema == resource_process::SCHEMA
-                && scratch.installation_id == installation
-                && scratch.resource_id == record.id,
-            "native recovery scratch intent differs"
-        );
-        security::ResourceDirectory::recover(
-            &scratch_path,
-            &scratch.appcontainer_sid,
-            &scratch.logon_sid,
-        )?;
-    }
-    ensure!(
-        !scratch_path.try_exists()?,
-        "native recovery scratch remains"
-    );
     let value = json!({"schema":resource_process::SCHEMA,"scope":"owned_resource_recovery","attempt":request.attempt,"resource_id":record.id,"record_sha256":digest(record)?,"owner":record.owner,"guardian_found":found,"jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"production_execution":false});
     deployment::publish_json(
         &root

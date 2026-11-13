@@ -25,6 +25,7 @@ fn interrupted_native_start_retry_reads_original_intent_before_new_input_scope()
         installation: owner().identity.installation_id,
         running: None,
         recovery: None,
+        debugger: None,
     };
     let params = json!({"argv":["files/known.exe"],"request_id":"stable"});
     let spec: Specification =
@@ -129,6 +130,7 @@ fn native_inventory_retains_pending_cleanup_without_publishing_start_specificati
         installation: owner().identity.installation_id,
         running: None,
         recovery: None,
+        debugger: None,
     };
     let successor = Owner {
         epoch: 2,
@@ -208,6 +210,7 @@ fn interrupted_launch_retry_never_reopens_a_new_owners_manifest_or_input() -> Re
         installation: owner().identity.installation_id,
         running: None,
         recovery: None,
+        debugger: None,
     };
     let params = json!({"launch_spec":"files/missing/launch.json","input":"files/missing/input.bin","request_id":"stable-launch"});
     let spec: Specification = serde_json::from_value(

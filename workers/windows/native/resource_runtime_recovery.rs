@@ -14,6 +14,12 @@ impl Runtime {
                 .is_none_or(|running| running.failed.is_some()),
             "cannot recover an executing native host"
         );
+        ensure!(
+            self.debugger
+                .as_ref()
+                .is_none_or(|debugger| debugger.needs_recovery()),
+            "cannot recover a live debugger host"
+        );
         let attempt = hex::encode(crate::accounts::random_bytes::<16>()?);
         let request = crate::resource_recovery::Request {
             schema: crate::resource_process::SCHEMA,
@@ -22,6 +28,7 @@ impl Runtime {
         };
         request.validate()?;
         drop(self.running.take());
+        drop(self.debugger.take());
         let path = self.request_path(&request.resource.id, &format!("recovery-{attempt}.json"));
         let policy = AclPolicy::private_vm();
         deployment::publish_json(&path, &request, &policy)?;
@@ -81,34 +88,19 @@ impl Runtime {
                 && result["scratch_removed"] == true,
             "native recovery proof binding or cleanup differs"
         );
-        if self.result_path(&record.id, "json").try_exists()? {
+        if record.kind == ResourceKind::Process
+            && self.result_path(&record.id, "json").try_exists()?
+        {
             let path = self.request_path(&record.id, "json");
             AclPolicy::private_vm().verify(&path, false)?;
             let request: Request = serde_json::from_slice(&deployment::read_bytes(&path, 65536)?)?;
             request.validate()?;
             let spec: Specification =
                 serde_json::from_value(record.specification["process"].clone())?;
-            let launch_matches = if let Some(launch) = &request.launch {
-                spec.launch_spec.as_ref() == Some(&launch.manifest.path)
-                    && spec.argv.is_empty()
-                    && spec.env.is_empty()
-                    && spec
-                        .timeout_secs
-                        .is_none_or(|timeout| timeout == request.timeout_secs)
-            } else {
-                spec.launch_spec.is_none()
-                    && spec.argv.first() == Some(&request.program.path)
-                    && request.arguments == spec.argv[1..]
-                    && request.environment == spec.env
-                    && request.timeout_secs == spec.timeout_secs.unwrap_or(default_timeout())
-            };
             ensure!(
-                launch_matches
+                spec.matches(&request)
                     && request.owner == record.owner
-                    && request.resource_id == record.id
-                    && request.input.as_ref().map(|input| input.path.as_str())
-                        == spec.input.as_deref()
-                    && request.output_limit == spec.output_limit,
+                    && request.resource_id == record.id,
                 "recovered result request differs from its journal intent"
             );
             self.finish_result(journal, &request)?;
@@ -130,14 +122,23 @@ impl Runtime {
             AclPolicy::private_vm().verify(&path, false)?;
             let prior: Value = serde_json::from_slice(&deployment::read_bytes(&path, 65536)?)?;
             ensure!(
-                prior["job_id"] == record.id
+                prior[if record.kind == ResourceKind::Debugger {
+                    "session_id"
+                } else {
+                    "job_id"
+                }] == record.id
                     && prior["native_owner"] == serde_json::to_value(&record.owner)?
                     && prior["state"] == "lost"
                     && prior["result"]["outcome"] == "unknown",
                 "previous interrupted status differs"
             );
         } else {
-            let value = json!({"job_id":record.id,"kind":"process","state":"lost","native_owner":record.owner,"cleanup_pending":false,"result":{"outcome":"unknown","jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"recovery_artifact":artifact,"recovery_receipt_sha256":hex::encode(Sha256::digest(receipt))},"production_execution":false});
+            let mut value = json!({"job_id":record.id,"kind":record.kind,"state":"lost","native_owner":record.owner,"cleanup_pending":false,"result":{"outcome":"unknown","jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"recovery_artifact":artifact,"recovery_receipt_sha256":hex::encode(Sha256::digest(receipt))},"production_execution":false});
+            if record.kind == ResourceKind::Debugger {
+                value.as_object_mut().unwrap().remove("job_id");
+                value["session_id"] = json!(record.id);
+                value["worker_session_id"] = json!(record.id);
+            }
             self.retain(&path, &serde_json::to_vec(&value)?)?;
         }
         journal.start_closing(&record.id)?;

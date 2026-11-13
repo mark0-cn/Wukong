@@ -29,7 +29,7 @@ pub(crate) struct Prepared {
 impl Prepared {
     /// The caller has already checked the protected request and guardian Job.
     /// Resolve all inputs before creating the target's persona or scratch.
-    pub(crate) fn open(host: &Host, request: &Request) -> Result<Self> {
+    pub(crate) fn open(host: &Host, request: &Request, debugger: Option<&Persona>) -> Result<Self> {
         let metadata = host.root.join("metadata");
         if let Some(launch) = &request.launch {
             let document = crate::resource_launch::Document::read(resource_input::open(
@@ -78,9 +78,13 @@ impl Prepared {
             Some(&request.resource_id),
         )?;
         let private = AclPolicy::private_vm();
-        let image_policy = private
+        let mut image_policy = private
             .clone()
             .with_resource_code(&persona.sid_text()?, persona.logon_sid())?;
+        if let Some(debugger) = debugger {
+            image_policy =
+                image_policy.with_resource_code(&debugger.sid_text()?, debugger.logon_sid())?;
+        }
         deployment::publish_json(
             &metadata.join(format!("resource-scratch-{nonce}.json")),
             &ScratchIntent {
@@ -170,16 +174,38 @@ impl Prepared {
         io: &PreparedIo,
         limits: ResourceLimits,
     ) -> Result<OwnedProcess> {
+        self.launch_with_debugger(io, limits, None)
+    }
+    pub(crate) fn launch_with_debugger(
+        &mut self,
+        io: &PreparedIo,
+        limits: ResourceLimits,
+        debugger: Option<&Persona>,
+    ) -> Result<OwnedProcess> {
         let directory = self.directory.take().context("target already launched")?;
-        Spawn {
+        let spawn = Spawn {
             executable: &self.executable,
             arguments: &self.arguments,
             directory: &self.cwd,
             environment: &self.environment,
             log: io.output(),
             input: io.input(),
+        };
+        match debugger {
+            Some(debugger) => spawn.sandbox_debug_target_streamed(
+                &self.persona,
+                directory,
+                debugger,
+                io.error(),
+                limits,
+            ),
+            None => spawn.sandbox_streamed(&self.persona, directory, io.error(), limits),
         }
-        .sandbox_streamed(&self.persona, directory, io.error(), limits)
+    }
+    pub(crate) fn symbols(&self) -> &std::path::Path {
+        self.executable
+            .parent()
+            .expect("admitted target has a parent")
     }
 
     /// Only after the owned process Job has drained (or before launch).

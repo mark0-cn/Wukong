@@ -8,6 +8,14 @@ fn main() -> Result<()> {
     ensure!(cfg!(windows), "native Windows worker requires Windows");
     let args: Vec<_> = std::env::args_os().collect();
     #[cfg(windows)]
+    if args.len() == 5 && args[1] == "resource-debugger" {
+        return wukong_windows_worker::session_host::run(
+            args[2].to_str().context("invalid debugger installation")?,
+            Path::new(&args[3]),
+            Path::new(&args[4]),
+        );
+    }
+    #[cfg(windows)]
     if args.len() == 5 && args[1] == "resource-recover" {
         let result = wukong_windows_worker::resource_recovery::run(
             args[2].to_str().context("invalid recovery installation")?,
