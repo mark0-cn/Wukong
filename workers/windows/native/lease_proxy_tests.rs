@@ -32,7 +32,7 @@ async fn native_resource_state_blocks_release_and_expired_takeover_but_not_renew
     let (_root, proxy) = fixture()?;
     let first = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
     let resource = {
-        let mut resources = proxy.resources.lock().unwrap();
+        let mut resources = proxy.resources.lock().await;
         let actor = Owner {
             identity: identity(),
             run_id: "run".into(),
@@ -74,7 +74,7 @@ async fn native_resource_state_blocks_release_and_expired_takeover_but_not_renew
         "conflict"
     );
     {
-        let mut resources = proxy.resources.lock().unwrap();
+        let mut resources = proxy.resources.lock().await;
         resources.journal.start_closing(&resource)?;
         resources.journal.close(
             &resource,
@@ -103,12 +103,20 @@ async fn busy_native_resources_do_not_block_renewal_or_allow_idle_transitions() 
     let (release, finish) = std::sync::mpsc::channel();
     let busy = proxy.clone();
     let resource = std::thread::spawn(move || {
-        let _resources = busy.resources.lock().unwrap();
+        let _resources = busy.resources.blocking_lock();
         ready.send(()).unwrap();
         // The bound also releases the lock if a regression blocks the caller.
         let _ = finish.recv_timeout(Duration::from_secs(5));
     });
     locked.await?;
+    // Contended RPCs must yield the executor, not occupy all service threads
+    // while waiting for the same native resource. Poll the real dispatch path.
+    let requests: Vec<_> = (0..4).map(|_| effect(&first)).collect();
+    let pending = futures_util::future::join_all(requests.iter().map(|value| call(&proxy, value)));
+    tokio::pin!(pending);
+    assert!(futures_util::poll!(&mut pending).is_pending());
+    assert_eq!(proxy.state.lock().unwrap().inflight, 4);
+    assert!(!proxy.poll_resources()?);
     let active = proxy.clone();
     let expected_epoch = first["epoch"].clone();
     let operations = tokio::spawn(async move {
@@ -140,6 +148,9 @@ async fn busy_native_resources_do_not_block_renewal_or_allow_idle_transitions() 
     let _ = release.send(());
     resource.join().unwrap();
     result???;
+    for result in pending.await {
+        result?;
+    }
     assert!(
         call(&proxy, &acquire("next", "successor")).await?["result"]["epoch"]
             .as_u64()
@@ -154,7 +165,7 @@ async fn persisted_native_resource_state_still_blocks_takeover_after_proxy_reope
     let (root, proxy) = fixture()?;
     let lease = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
     {
-        let mut resources = proxy.resources.lock().unwrap();
+        let mut resources = proxy.resources.lock().await;
         resources.journal.reserve_start(
             &Owner {
                 identity: identity(),

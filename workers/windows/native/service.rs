@@ -524,7 +524,7 @@ async fn run(context: &ContextState) -> Result<()> {
     }
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
-    leases.cancel_resources()?;
+    leases.cancel_resources().await?;
     let resource_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while !leases.poll_resources()? {
         ensure!(

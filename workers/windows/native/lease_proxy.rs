@@ -187,7 +187,7 @@ pub(crate) struct LeaseProxy {
     state: Arc<Mutex<State>>,
     inputs: tokio::sync::Mutex<Inputs>,
     controls: tokio::sync::Mutex<()>,
-    resources: Mutex<Resources>,
+    resources: tokio::sync::Mutex<Resources>,
     started: Instant,
 }
 struct Admission {
@@ -227,7 +227,7 @@ impl LeaseProxy {
                 uncertain: false,
                 transition: false,
             })),
-            resources: Mutex::new(Resources {
+            resources: tokio::sync::Mutex::new(Resources {
                 journal: Journal::with_policy(metadata, identity, policy.clone())?,
                 runtime: None,
             }),
@@ -244,8 +244,8 @@ impl LeaseProxy {
     ) -> Result<()> {
         let mut resources = self
             .resources
-            .lock()
-            .expect("native resource mutex poisoned");
+            .try_lock()
+            .context("native resource runtime is busy during initialization")?;
         ensure!(
             resources.runtime.is_none(),
             "native resource runtime is already open"
@@ -254,10 +254,11 @@ impl LeaseProxy {
         Ok(())
     }
     pub(crate) fn poll_resources(&self) -> Result<bool> {
-        let mut resources = self
-            .resources
-            .lock()
-            .expect("native resource mutex poisoned");
+        // A busy resource is not idle. The SCM loop must keep serving lease
+        // renewals and stop notifications instead of waiting on another RPC.
+        let Ok(mut resources) = self.resources.try_lock() else {
+            return Ok(false);
+        };
         let expired = self
             .state
             .lock()
@@ -274,13 +275,8 @@ impl LeaseProxy {
         }
         journal.idle()
     }
-    pub(crate) fn cancel_resources(&self) -> Result<()> {
-        if let Some(runtime) = &self
-            .resources
-            .lock()
-            .expect("native resource mutex poisoned")
-            .runtime
-        {
+    pub(crate) async fn cancel_resources(&self) -> Result<()> {
+        if let Some(runtime) = &self.resources.lock().await.runtime {
             runtime.cancel_active()?;
         }
         Ok(())
@@ -291,10 +287,7 @@ impl LeaseProxy {
     fn resources_idle(&self) -> Result<bool> {
         match self.resources.try_lock() {
             Ok(resources) => resources.journal.idle(),
-            Err(std::sync::TryLockError::WouldBlock) => Ok(false),
-            Err(std::sync::TryLockError::Poisoned(_)) => {
-                anyhow::bail!("native resource mutex poisoned")
-            }
+            Err(_) => Ok(false),
         }
     }
     fn binding(&self, params: &Map<String, Value>) -> Result<()> {
@@ -405,12 +398,7 @@ impl LeaseProxy {
         let outer_lease = request["params"]["_lease"].clone();
         let mut admission = self.admit(request["params"].as_object_mut().unwrap())?;
         let native_resource = Runtime::handles(&method, request["params"].as_object().unwrap())
-            && self
-                .resources
-                .lock()
-                .expect("native resource mutex poisoned")
-                .runtime
-                .is_some();
+            && self.resources.lock().await.runtime.is_some();
         // Serialize input publication independently of lease controls: hashing
         // or a slow worker upload must never prevent heartbeat renewal.
         let inputs = if Inputs::handles(&method) || native_resource && method == "job.start" {
@@ -419,11 +407,8 @@ impl LeaseProxy {
             None
         };
         if native_resource {
+            let mut resources = self.resources.lock().await;
             let result = (|| {
-                let mut resources = self
-                    .resources
-                    .lock()
-                    .expect("native resource mutex poisoned");
                 // An input publication can hold the independent input lock
                 // past expiry. Resource serialization can do the same. Recheck
                 // before native effects, but never hold lease state during I/O.
