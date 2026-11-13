@@ -123,6 +123,10 @@ Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特
 
 独立观察服务重启后，`remote_native_completed_python_recovery_acceptance` 通过 `WUKONG_REMOTE_WORKER_PYTHON_RECOVERY_TEST` 使用 `config`、以 `previous` 路径/SHA256 引用的原始报告，以及新的绝对 `output`。它要求租约 epoch 增加，并在不重新上传源码的情况下核对完全相同的原始状态及哈希绑定回执。两个测试默认忽略，通过 `cargo test --locked --lib TEST_NAME -- --ignored --nocapture` 运行，不执行安装或服务变更。必须记录真实且绑定源码的 VM 结果后，才可宣称已安装验收；中断/对抗覆盖及完整生产可用性仍是独立门槛。
 
+2026-11-14，源码 `d02d1db`、清单 `7b719e5b36785b722794d475c4db00c7f26672759c167641931cd8689955fac3` 在提供的 Windows 10 VM 上通过全新离线安装及全部五个 Python 用例。实际 CPython 执行保留固定二进制/源码哈希、Unicode/字面 argv、包内依赖导入、源码/目标写入拒绝，以及成功的可信子进程。语法错误、期限、输出超限及取消均记录对应终态并确认清理。独立观察服务重启后，epoch 2 返回五个作业完全相同的原始状态/回执，未重新准入或执行源码；初始 epoch 为 1。随后 x64/x86 进程回归通过八个 echo/期限/取消/参数文件资源，并检查作用域内资源发现。
+
+Python 执行、已完成恢复及进程回归报告的 SHA256 依次为 `c4dec24f927bd8d0f6ead9bda7313c1c8cd2065e732b3e36b8409bea09e63276`、`49243987a16a9ce040cc74d7f4a885df0e29c5f0dc237024bb3b7b0d067e7fc4`、`f2084a521422d577a5348c9fe9d30b4093899528a0217f783ff2770057f7d5df`。最终独立收集复制并核对 98 份启动/请求/结果原件，确认 13 个资源关闭、13 个副作用完成、两次启动资格检查通过、scratch 为空。两次启动保留 38 次成功的受限 MCP 调用，调试器会话均已释放。此前 19 个服务、新服务及管理 SSH 均保持运行，没有默认路由，公开连接身份未变，ISO 已卸载。这些结果仅验证列出的 Python 和进程用例，不覆盖 Python 宿主/服务中断、系统启动恢复、更广泛对抗隔离或完整生产执行。
+
 ### 外部 WinDbg MCP 验收
 
 显式启用的 `runtime::ssh::dump_acceptance::remote_installed_windows_worker_dump_acceptance` 夹具通过 `WUKONG_REMOTE_WORKER_DUMP_TEST` 读取固定哈希的 x64/x86 探针 EXE/PDB/minidump 引用及已登记 VM 连接。它检查 dump 身份对应、架构不匹配后的恢复、内存/寄存器/栈检查、全部类型化控制操作均被拒绝且不占用请求 ID、不执行目标的清理回执，以及完整上游工具日志。生成可信夹具转储时使用明确的环境变量白名单；绝不传输继承了控制器凭据的完整内存快照。编译及本机 SDK/ACL 测试不能替代该已安装验收。
