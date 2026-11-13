@@ -1,4 +1,6 @@
 """Cold daemon startup must outlast the bounded Windows identity query."""
+from concurrent.futures import ThreadPoolExecutor
+from filelock import FileLock
 from pathlib import Path
 import subprocess
 import sys
@@ -27,10 +29,11 @@ class DaemonStartupTests(unittest.TestCase):
             root = Path(temporary)
             script = root / "slow-daemon.py"
             script.write_text(
-                "import sys,time\n"
+                "import os,sys,time\n"
                 "from pathlib import Path\n"
                 f"sys.path.insert(0,{str(runtime)!r})\n"
                 "from worker_transport import serve\n"
+                "Path(sys.argv[sys.argv.index('--state')+1],'fixture.pid').write_text(str(os.getpid()))\n"
                 "time.sleep(6)\n"
                 "serve(Path(sys.argv[sys.argv.index('--state')+1]),True)\n",
                 encoding="utf-8",
@@ -44,13 +47,28 @@ class DaemonStartupTests(unittest.TestCase):
                     SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL),
                 ):
                     started = time.monotonic()
-                    endpoint = ensure_daemon(state, True)
+                    with ThreadPoolExecutor(max_workers=4) as callers:
+                        endpoints = list(callers.map(lambda _: ensure_daemon(state, True), range(4)))
+                    endpoint = endpoints[0]
+                    self.assertTrue(all(item == endpoint for item in endpoints))
                     self.assertGreaterEqual(time.monotonic() - started, 6)
                     self.assertEqual(ensure_daemon(state, True), endpoint)
                 self.assertEqual(len(children), 1)
-                self.assertEqual(endpoint["pid"], children[0].pid)
+                self.assertEqual(endpoint["pid"], int((state / "fixture.pid").read_text()))
                 self.assertIsNone(children[0].poll())
-                self.assertFalse((state / "startup.lock").exists())
+                duplicate = subprocess.run(
+                    [sys.executable, "-c",
+                     "import sys; from pathlib import Path; "
+                     f"sys.path.insert(0,{str(runtime)!r}); "
+                     "from worker_transport import serve; "
+                     f"serve(Path({str(state)!r}),True)"],
+                    capture_output=True, timeout=10,
+                )
+                self.assertNotEqual(duplicate.returncode, 0)
+                self.assertIn(b"filelock", duplicate.stderr)
+                self.assertEqual(ensure_daemon(state, True), endpoint)
+                with FileLock(state / "startup.guard", timeout=0):
+                    pass
             finally:
                 try:
                     if endpoint:
@@ -70,7 +88,8 @@ class DaemonStartupTests(unittest.TestCase):
             with patch("worker_transport.BRIDGE_PATH", script):
                 with self.assertRaisesRegex(ValueError, r"exited during startup \(19\).*fixture-startup-diagnostic"):
                     ensure_daemon(root, True)
-            self.assertFalse((root / "startup.lock").exists())
+            with FileLock(root / "startup.guard", timeout=0):
+                pass
 
 
 if __name__ == "__main__":

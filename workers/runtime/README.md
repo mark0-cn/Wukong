@@ -126,7 +126,7 @@ The controller uses jsonrpsee over bounded stdio frames. RPC errors preserve a
 healthy connection; malformed/oversized frames and timeouts close it. The next
 call reconnects, without automatically replaying the failed request.
 
-Relay-managed daemon startup allows 30 seconds for initialization, including the Windows boot-identity query. Readiness probes have a separate one-second response timeout; a child that exits before readiness reports its exit status and at most the final 2048 bytes of the local `daemon.log`.
+Relay-managed daemon startup uses the existing `filelock` dependency and a kernel-backed `startup.guard` lock. The lock is held through readiness; competing relays recheck the endpoint after acquiring it. The daemon independently holds `daemon.guard` throughout initialization and service, so a crashed starter cannot authorize a competing daemon. Process exit releases ownership without deleting a timestamp-based stale lock. All relays sharing a state directory must use the same worker deployment. Startup allows 30 seconds for initialization, including the Windows boot-identity query. Readiness probes have a separate one-second response timeout; a child that exits before readiness reports its exit status and at most the final 2048 bytes of the local `daemon.log`.
 
 | Method | Parameters / result |
 | --- | --- |

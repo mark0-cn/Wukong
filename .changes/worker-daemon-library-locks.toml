@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Use operating-system file locks for worker startup and daemon ownership, preventing concurrent relays or an interrupted starter from creating competing daemons."
+zh_CN = "worker 启动和守护进程归属改用操作系统文件锁，防止并发中继或启动者中断造成多个守护进程争用状态。"
