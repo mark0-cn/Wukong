@@ -18,7 +18,7 @@ use std::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_SHARE_READ, GetFileInformationByHandle, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    FILE_SHARE_READ, GetFileInformationByHandle,
 };
 
 const MAX_PUT: usize = 32 * 1024 * 1024;
@@ -371,23 +371,7 @@ impl Inputs {
         Ok(())
     }
     fn publish(&self, path: &Path, bytes: &[u8]) -> Result<()> {
-        let parent = path.parent().context("native input has no parent")?;
-        self.policy.verify(parent, true)?;
-        let temporary = parent.join(format!(
-            "{}.tmp",
-            hex::encode(crate::accounts::random_bytes::<16>()?)
-        ));
-        let mut file = self.policy.create_file(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        let from = security::wide(temporary.as_os_str())?;
-        let to = security::wide(path.as_os_str())?;
-        // No REPLACE_EXISTING: an existing declaration/blob/receipt is immutable.
-        security::check(unsafe {
-            MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH)
-        })?;
-        self.policy.verify(path, false)
+        self.policy.publish(path, bytes)
     }
 }
 pub(crate) fn digest(value: &impl Serialize) -> Result<String> {

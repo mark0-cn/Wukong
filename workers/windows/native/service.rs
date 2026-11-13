@@ -415,20 +415,6 @@ async fn run(context: &ContextState) -> Result<()> {
             == json!({"schema":1,"protocol":2,"installation_id":deployment.installation_id,"package_sha256":manifest.sha256()}),
         "native worker binding differs from active signed payload"
     );
-    offline_selftest(&root, &package, &deployment, &manifest).await?;
-    let mut checkpoint = tokio::time::Instant::now();
-    crate::resource_host::qualify(&root, &package, &deployment, &manifest, || {
-        ensure!(
-            !STOP.load(Ordering::Acquire),
-            "service stopped during resource qualification"
-        );
-        if checkpoint.elapsed() > Duration::from_secs(5) {
-            report(SERVICE_START_PENDING, 0)?;
-            checkpoint = tokio::time::Instant::now();
-        }
-        Ok(())
-    })
-    .await?;
     let worker = spawn_worker(&root, &package, &deployment, &manifest)?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
     let (endpoint, identity) = loop {
@@ -465,6 +451,31 @@ async fn run(context: &ContextState) -> Result<()> {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
+    let leases = Arc::new(LeaseProxy::open(identity.clone(), &root.join("metadata"))?);
+    leases.open_resources(&root, &deployment, &manifest)?;
+    let recovery_deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    while !leases.poll_resources()? {
+        ensure!(
+            !STOP.load(Ordering::Acquire) && tokio::time::Instant::now() < recovery_deadline,
+            "native startup resource recovery did not finish"
+        );
+        report(SERVICE_START_PENDING, 0)?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    offline_selftest(&root, &package, &deployment, &manifest).await?;
+    let mut checkpoint = tokio::time::Instant::now();
+    crate::resource_host::qualify(&root, &package, &deployment, &manifest, || {
+        ensure!(
+            !STOP.load(Ordering::Acquire),
+            "service stopped during resource qualification"
+        );
+        if checkpoint.elapsed() > Duration::from_secs(5) {
+            report(SERVICE_START_PENDING, 0)?;
+            checkpoint = tokio::time::Instant::now();
+        }
+        Ok(())
+    })
+    .await?;
     let broker_sid = deployment.account(Role::Worker)?.sid.clone();
     let broker = Arc::new(crate::broker::Broker::new(
         identity.clone(),
@@ -473,8 +484,6 @@ async fn run(context: &ContextState) -> Result<()> {
     )?);
     let mut broker_listener =
         pipe_transport::broker_server(&context.installation, &broker_sid, true)?;
-    let leases = Arc::new(LeaseProxy::open(identity, &root.join("metadata"))?);
-    leases.open_resources(&root, &deployment, &manifest)?;
     let sid = deployment.account(Role::Management)?.sid.clone();
     let mut listener = pipe_transport::server(&context.installation, &sid, true)?;
     let ssh = spawn_ssh(&root, &package, &manifest)?;

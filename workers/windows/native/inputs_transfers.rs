@@ -1,6 +1,7 @@
 //! Native provenance for the existing bounded resumable-upload protocol.
 use super::*;
 use std::io::{Read, Seek, SeekFrom};
+use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
 
 const CHUNK: u64 = 1024 * 1024;
 const MAX_TRANSFER: u64 = 16 * 1024 * 1024 * 1024;

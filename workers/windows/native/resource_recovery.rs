@@ -1,0 +1,136 @@
+//! Reconcile only a System-private resource intent; never execute its target.
+use crate::{
+    accounts::Role,
+    deployment,
+    inputs::digest,
+    resource_journal::{ResourceKind, ResourceRecord},
+    resource_process::{self, ScratchIntent},
+    security::{self, AclPolicy},
+};
+use anyhow::{Result, ensure};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::{path::Path, time::Duration};
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Request {
+    pub schema: u32,
+    pub attempt: String,
+    pub resource: ResourceRecord,
+}
+impl Request {
+    pub(crate) fn validate(&self) -> Result<()> {
+        let record = &self.resource;
+        ensure!(
+            self.schema == resource_process::SCHEMA
+                && self.attempt.len() == 32
+                && self
+                    .attempt
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+            "invalid native recovery attempt"
+        );
+        resource_process::nonce(&record.owner.identity.installation_id, &record.id)?;
+        ensure!(
+            record.kind == ResourceKind::Process
+                && record.phase != crate::resource_journal::Phase::Closed
+                && record.specification["native_process_schema"] == resource_process::SCHEMA
+                && record.specification["process"].is_object(),
+            "unsupported native resource recovery contract"
+        );
+        Ok(())
+    }
+}
+pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Result<Value> {
+    security::require_system()?;
+    let crate::resource_host::Host {
+        deployment,
+        root,
+        resources,
+        ..
+    } = crate::resource_host::open(installation, configuration)?;
+    let private = AclPolicy::private_vm();
+    private.verify(request_path, false)?;
+    let request: Request = serde_json::from_slice(&deployment::read_bytes(request_path, 65536)?)?;
+    request.validate()?;
+    let record = &request.resource;
+    let expected = root
+        .join("metadata/resource-requests")
+        .join(format!("{}.recovery-{}.json", record.id, request.attempt));
+    ensure!(
+        request_path.canonicalize()? == expected.canonicalize()?
+            && record.owner.identity.installation_id == installation,
+        "native recovery request slot or installation differs"
+    );
+    let found =
+        crate::processes::resource_job::drain(installation, &record.id, Duration::from_secs(15))?;
+    let nonce = resource_process::nonce(installation, &record.id)?;
+    let metadata = root.join("metadata");
+    let profile_path = metadata.join(format!("resource-profile-{nonce}.json"));
+    let scratch_path = resources.join(&nonce);
+    let scratch_intent = metadata.join(format!("resource-scratch-{nonce}.json"));
+    if profile_path.try_exists()? {
+        private.verify(&profile_path, false)?;
+        let profile: Value = serde_json::from_slice(&deployment::read_bytes(&profile_path, 8192)?)?;
+        let name = format!("Wukong-{nonce}");
+        ensure!(
+            profile
+                == json!({"schema":1,"installation_id":installation,"role":Role::Target,"account_sid":deployment.account(Role::Target)?.sid,"profile_name":name,"resource_id":record.id}),
+            "native recovery profile intent differs"
+        );
+        crate::persona::Persona::recover(installation, deployment.account(Role::Target)?, &name)?;
+    } else {
+        ensure!(
+            !scratch_path.try_exists()? && !scratch_intent.try_exists()?,
+            "scratch exists without its original profile intent"
+        );
+    }
+    if scratch_path.try_exists()? {
+        private.verify(&scratch_intent, false)?;
+        let scratch: ScratchIntent =
+            serde_json::from_slice(&deployment::read_bytes(&scratch_intent, 8192)?)?;
+        ensure!(
+            scratch.schema == resource_process::SCHEMA
+                && scratch.installation_id == installation
+                && scratch.resource_id == record.id,
+            "native recovery scratch intent differs"
+        );
+        security::ResourceDirectory::recover(
+            &scratch_path,
+            &scratch.appcontainer_sid,
+            &scratch.logon_sid,
+        )?;
+    }
+    ensure!(
+        !scratch_path.try_exists()?,
+        "native recovery scratch remains"
+    );
+    let value = json!({"schema":resource_process::SCHEMA,"scope":"owned_resource_recovery","attempt":request.attempt,"resource_id":record.id,"record_sha256":digest(record)?,"owner":record.owner,"guardian_found":found,"jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"production_execution":false});
+    deployment::publish_json(
+        &root
+            .join("metadata/resource-results")
+            .join(format!("{}.recovery-{}.json", record.id, request.attempt)),
+        &value,
+        &private,
+    )?;
+    Ok(json!({"resource_id":record.id,"reconciled":true}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn ordinary_tokens_cannot_reconcile_profiles_jobs_or_scratch() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let error = run(
+            &"a".repeat(32),
+            &root.path().join("missing"),
+            &root.path().join("missing-request"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("System"));
+        assert_eq!(std::fs::read_dir(root.path())?.count(), 0);
+        Ok(())
+    }
+}

@@ -23,6 +23,68 @@ pub(crate) struct ResourceDirectory {
 }
 const ROOT_GUARD: &str = ".wukong-root-guard";
 impl ResourceDirectory {
+    /// Reclaim a root from its protected scratch intent, after its named Job
+    /// has independently been drained. Never accept an RPC-supplied OS path.
+    pub(crate) fn recover(path: &Path, app: &str, logon: &str) -> Result<()> {
+        security_system()?;
+        validate_app_sid(app)?;
+        validate_logon_sid(logon)?;
+        no_links(path)?;
+        let handle = fs::OpenOptions::new()
+            .access_mode(FILE_LIST_DIRECTORY | READ_CONTROL | WRITE_DAC | WRITE_OWNER)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        ensure!(
+            handle.metadata()?.is_dir() && handle.metadata()?.file_attributes() & 0x400 == 0,
+            "recovery scratch root is redirected"
+        );
+        let original = AclPolicy::private_vm();
+        let mut sandbox = original.clone();
+        for sid in [app, logon] {
+            sandbox.grants.insert(
+                sid.into(),
+                FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE,
+            );
+        }
+        let children = [(app.into(), DELETE), (logon.into(), DELETE)].into();
+        let descriptor = SecurityDescriptor::from_object(handle.as_raw_handle(), SE_FILE_OBJECT)?;
+        let raw = descriptor.attributes().lpSecurityDescriptor;
+        ensure!(
+            verify_descriptor(raw, &original.owner, &original.grants, true).is_ok()
+                || verify_descriptor_with_children(
+                    raw,
+                    &original.owner,
+                    &sandbox.grants,
+                    true,
+                    &children
+                )
+                .is_ok(),
+            "recovery scratch root policy differs from its protected intent"
+        );
+        let guard_path = path.join(ROOT_GUARD);
+        let guard = if guard_path.try_exists()? {
+            original.verify(&guard_path, false)?;
+            Some(
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+                    .open(&guard_path)?,
+            )
+        } else {
+            None
+        };
+        let directory = Self {
+            path: path.into(),
+            handle,
+            original,
+            guard: std::sync::Mutex::new(guard),
+        };
+        directory.reclaim()?;
+        drop(directory);
+        crate::resource_cleanup::remove_reclaimed(path)
+    }
     pub fn create(path: &Path, app: &str, logon: &str) -> Result<Self> {
         security_system()?;
         Self::with_policy(path, app, logon, AclPolicy::private_vm())
@@ -150,7 +212,9 @@ impl ResourceDirectory {
     /// Call only after the owned Job is empty. Reclaim the root through the
     /// original handle, so cleanup never depends on a sandbox-controlled ACL.
     pub fn reclaim(&self) -> Result<()> {
-        let descriptor = self.original.descriptor(true)?;
+        // Reclaim this object only. Never propagate ACLs through an untrusted
+        // child tree; the handle-based cleaner seals each non-reparse object.
+        let descriptor = self.original.descriptor(false)?;
         let (mut present, mut defaulted) = (0, 0);
         let mut dacl = null_mut();
         check(unsafe {

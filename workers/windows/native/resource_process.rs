@@ -38,12 +38,26 @@ pub struct Request {
     pub processes: u32,
     pub memory_bytes: u64,
 }
+pub(crate) const SCHEMA: u32 = 2;
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ScratchIntent {
+    pub schema: u32,
+    pub installation_id: String,
+    pub resource_id: String,
+    pub appcontainer_sid: String,
+    pub logon_sid: String,
+}
+pub(crate) fn nonce(installation: &str, resource: &str) -> Result<String> {
+    crate::processes::resource_job::name(installation, resource)?;
+    Ok(digest(&("native.process.persona.v1", installation, resource))?[..48].to_owned())
+}
 impl Request {
     pub fn validate(&self) -> Result<()> {
         crate::resource_journal::bounded_identifier(&self.owner.run_id, 128)?;
         crate::resource_journal::bounded_identifier(&self.owner.owner_id, 128)?;
         ensure!(
-            self.schema == 1
+            self.schema == SCHEMA
                 && self.resource_id.len() == 32
                 && self
                     .resource_id
@@ -142,6 +156,18 @@ pub fn execute(
             && request.owner.identity.package_sha256 == manifest.sha256(),
         "native process request belongs to another signed deployment"
     );
+    crate::processes::resource_job::require_membership(installation, &request.resource_id)?;
+    let cancel = root
+        .join("metadata/resource-requests")
+        .join(format!("{}.cancel", request.resource_id));
+    if cancel.try_exists()? {
+        return finish(
+            &request,
+            not_started(&request),
+            String::new(),
+            String::new(),
+        );
+    }
     let public = deployment.code_policy()?;
     let metadata = root.join("metadata");
     // Reject incomplete/mismatched inputs before creating a persona or scratch.
@@ -156,18 +182,24 @@ pub fn execute(
         .as_ref()
         .map(|input| resource_input::open(&metadata, &request.owner, input, Purpose::Inspect))
         .transpose()?;
-    let nonce = digest(&(
-        "native.process.persona.v1",
-        installation,
-        &request.resource_id,
-    ))?[..48]
-        .to_owned();
+    let nonce = nonce(installation, &request.resource_id)?;
     let (mut persona, _) = crate::resource_host::create_persona_named(
         &deployment,
         &root,
         Role::Target,
         &nonce,
         Some(&request.resource_id),
+    )?;
+    deployment::publish_json(
+        &metadata.join(format!("resource-scratch-{nonce}.json")),
+        &ScratchIntent {
+            schema: SCHEMA,
+            installation_id: installation.into(),
+            resource_id: request.resource_id.clone(),
+            appcontainer_sid: persona.sid_text()?,
+            logon_sid: persona.logon_sid().into(),
+        },
+        &private,
     )?;
     let directory = security::ResourceDirectory::create(
         &resources.join(&nonce),
@@ -194,6 +226,16 @@ pub fn execute(
         public.verify(&path, true)?;
     }
     let held = stage_program(program, &executable, &request.program, public)?;
+    if cancel.try_exists()? {
+        let app = persona.sid_text()?;
+        let logon = persona.logon_sid().to_owned();
+        drop(held);
+        directory.reclaim()?;
+        drop(directory);
+        persona.close()?;
+        crate::resource_cleanup::remove_reclaimed(&scratch)?;
+        return finish(&request, not_started(&request), app, logon);
+    }
     let mut child_environment =
         crate::resource_host::scratch_environment(&system_environment, &scratch);
     child_environment.extend(
@@ -220,9 +262,6 @@ pub fn execute(
     )?;
     let appcontainer = persona.sid_text()?;
     let logon = persona.logon_sid().to_owned();
-    let cancel = root
-        .join("metadata/resource-requests")
-        .join(format!("{}.cancel", request.resource_id));
     let result = process.wait_with_cancel(Duration::from_secs(request.timeout_secs), || {
         Ok(cancel.try_exists()?)
     })?;
@@ -230,10 +269,9 @@ pub fn execute(
     persona.close()?;
     private.verify(&scratch, true)?;
     security::no_links(&scratch)?;
-    // Quiescence and held-root reclaim precede this call. Rust's Windows
-    // remover opens descendants relative to held directories without following
-    // junctions. A restrictive descendant still makes cleanup fail closed.
-    fs::remove_dir_all(&scratch)?;
+    // cap-std owns handle-relative cleanup; only single-link, non-reparse
+    // objects may have their ACL/readonly attributes repaired.
+    crate::resource_cleanup::remove_reclaimed(&scratch)?;
     finish(&request, result, appcontainer, logon)
 }
 
@@ -248,7 +286,7 @@ pub fn run(installation: &str, configuration: &Path, request: &Path) -> Result<s
     let id = value["resource_id"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("native host result has no identity"))?;
-    deployment::write_new_json(&directory.join(format!("{id}.json")), &value, &policy)?;
+    deployment::publish_json(&directory.join(format!("{id}.json")), &value, &policy)?;
     Ok(serde_json::json!({"resource_id":id,"settled":true}))
 }
 
@@ -274,6 +312,23 @@ fn stage_program(
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(destination)?)
 }
+fn not_started(request: &Request) -> CaptureResult {
+    CaptureResult {
+        pid: 0,
+        exit_code: 1,
+        reason: crate::process_capture::StopReason::Cancelled,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        input: crate::process_capture::InputDelivery {
+            written: 0,
+            completed: request.input.is_none(),
+            error: request
+                .input
+                .as_ref()
+                .map(|_| "cancelled before execution".into()),
+        },
+    }
+}
 fn finish(
     request: &Request,
     result: CaptureResult,
@@ -291,7 +346,7 @@ fn finish(
     };
     Ok(
         serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,
-        "pid":result.pid,"exit_code":result.exit_code,"stop_reason":reason,"appcontainer_sid":appcontainer,"logon_sid":logon,
+        "pid":result.pid,"execution_started":result.pid != 0,"exit_code":result.exit_code,"stop_reason":reason,"appcontainer_sid":appcontainer,"logon_sid":logon,
         "stdout_base64":base64::engine::general_purpose::STANDARD.encode(&result.stdout),"stderr_base64":base64::engine::general_purpose::STANDARD.encode(&result.stderr),
         "stdout_sha256":hex::encode(Sha256::digest(&result.stdout)),"stderr_sha256":hex::encode(Sha256::digest(&result.stderr)),
         "stdin_written":result.input.written,"stdin_complete":result.input.completed,"stdin_error":result.input.error,
@@ -304,7 +359,7 @@ mod tests {
     use super::*;
     fn request() -> Request {
         Request {
-            schema: 1,
+            schema: SCHEMA,
             resource_id: "a".repeat(32),
             owner: Owner {
                 identity: Binding {
@@ -351,7 +406,7 @@ mod tests {
     {
         request().validate()?;
         for (key, value) in [
-            ("schema", serde_json::json!(2)),
+            ("schema", serde_json::json!(3)),
             ("resource_id", serde_json::json!("../outside")),
             ("timeout_secs", serde_json::json!(0)),
             ("processes", serde_json::json!(65)),

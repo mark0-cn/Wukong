@@ -5,7 +5,9 @@ use crate::{
     inputs::{Inputs, Owner},
     processes::{Spawn, SystemHost},
     resource_input::Purpose,
-    resource_journal::{Cleanup, Journal, Outcome, Phase, Reservation, ResourceKind},
+    resource_journal::{
+        Cleanup, Journal, Outcome, Phase, Reservation, ResourceKind, ResourceRecord,
+    },
     resource_process::Request,
     security::{self, AclPolicy},
 };
@@ -51,11 +53,19 @@ struct Running {
     deadline: Instant,
     failed: Option<String>,
 }
+struct Recovering {
+    request: crate::resource_recovery::Request,
+    host: SystemHost,
+    deadline: Instant,
+}
+#[path = "resource_runtime_recovery.rs"]
+mod recovery;
 pub(crate) struct Runtime {
     root: PathBuf,
     executable: PathBuf,
     installation: String,
     running: Option<Running>,
+    recovery: Option<Recovering>,
 }
 impl Runtime {
     pub(crate) fn open(
@@ -80,6 +90,7 @@ impl Runtime {
             root,
             installation: deployment.installation_id.clone(),
             running: None,
+            recovery: None,
         })
     }
     pub(crate) fn handles(method: &str, params: &Map<String, Value>) -> bool {
@@ -128,6 +139,13 @@ impl Runtime {
             if record.phase != Phase::Closed {
                 return Ok(json!([]));
             }
+            let status = self.status(journal, owner, id)?;
+            if status["result"]["outcome"] == "unknown" {
+                let name = status["result"]["recovery_artifact"]
+                    .as_str()
+                    .context("native recovery artifact is absent")?;
+                return Ok(json!([self.artifact(id, name)?]));
+            }
             return Ok(json!([
                 self.artifact(id, "stdout")?,
                 self.artifact(id, "stderr")?,
@@ -164,7 +182,8 @@ impl Runtime {
             spec.cwd == "." && !spec.argv.is_empty(),
             "native process requires argv and private cwd '.'"
         );
-        let specification = serde_json::to_value(&spec)?;
+        let specification =
+            json!({"native_process_schema":crate::resource_process::SCHEMA,"process":spec});
         if let Some(existing) =
             journal.lookup_start(owner, request_id, ResourceKind::Process, &specification)?
         {
@@ -172,7 +191,7 @@ impl Runtime {
         }
         let program = inputs.reference(owner, &spec.argv[0], Purpose::Execute)?;
         let mut request = Request {
-            schema: 1,
+            schema: crate::resource_process::SCHEMA,
             resource_id: "0".repeat(32),
             owner: owner.clone(),
             program,
@@ -198,7 +217,7 @@ impl Runtime {
         let ticket = journal.begin(&effect)?;
         let private = AclPolicy::private_vm();
         let path = self.request_path(&resource, "json");
-        deployment::write_new_json(&path, &request, &private)?;
+        deployment::publish_json(&path, &request, &private)?;
         let log = private.create_file(&self.request_path(&resource, "log"))?;
         let input = fs::File::open("NUL")?;
         let environment = crate::environment::system(&self.root)?;
@@ -215,7 +234,7 @@ impl Runtime {
             log: &log,
             input: &input,
         }
-        .system_host()?;
+        .system_host(&self.installation, &resource)?;
         let value = json!({"job_id":resource,"kind":"process","state":"running","call_id":request_id,"native_host_pid":host.pid(),"production_execution":false});
         self.running = Some(Running {
             deadline: Instant::now() + Duration::from_secs(request.timeout_secs + 120),
@@ -281,16 +300,19 @@ impl Runtime {
         if path.exists() {
             private.verify(&path, false)?;
         } else {
-            deployment::write_new_json(&path, &json!({"resource_id":id}), &private)?;
+            deployment::publish_json(&path, &json!({"resource_id":id}), &private)?;
         }
         Ok(())
     }
     pub(crate) fn poll(&mut self, journal: &mut Journal) -> Result<()> {
+        if self.recovery.is_some() {
+            return self.poll_recovery(journal);
+        }
         let Some(running) = &self.running else {
-            return Ok(());
+            return self.recover(journal);
         };
         if running.failed.is_some() {
-            return Ok(());
+            return self.recover(journal);
         }
         if !running.host.exited() && Instant::now() < running.deadline {
             return Ok(());
@@ -310,7 +332,13 @@ impl Runtime {
             running.host.stop(Duration::from_secs(10))? == 0,
             "native host failed or exceeded preparation deadline; cleanup remains unconfirmed"
         );
-        let id = &running.request.resource_id;
+        let request = running.request.clone();
+        self.finish_result(journal, &request)?;
+        self.running = None;
+        Ok(())
+    }
+    fn finish_result(&self, journal: &mut Journal, request: &Request) -> Result<()> {
+        let id = &request.resource_id;
         let private = AclPolicy::private_vm();
         let path = self.result_path(id, "json");
         private.verify(&path, false)?;
@@ -320,8 +348,8 @@ impl Runtime {
             result["schema"] == 1
                 && result["scope"] == "native_process_host"
                 && result["resource_id"] == *id
-                && result["owner"] == serde_json::to_value(&running.request.owner)?
-                && result["program"] == serde_json::to_value(&running.request.program)?
+                && result["owner"] == serde_json::to_value(&request.owner)?
+                && result["program"] == serde_json::to_value(&request.program)?
                 && result["jobs_empty"] == true
                 && result["profiles_removed"] == true
                 && result["scratch_removed"] == true,
@@ -341,14 +369,11 @@ impl Runtime {
             streams.push(data);
         }
         ensure!(
-            streams.iter().map(Vec::len).sum::<usize>() <= running.request.output_limit,
+            streams.iter().map(Vec::len).sum::<usize>() <= request.output_limit,
             "native output exceeds the admitted bound"
         );
-        use std::io::Write;
         for (name, data) in ["stdout", "stderr"].into_iter().zip(&streams) {
-            let mut file = private.create_file(&self.result_path(id, name))?;
-            file.write_all(data)?;
-            file.sync_all()?;
+            self.retain(&self.result_path(id, name), data)?;
         }
         let reason = result["stop_reason"]
             .as_str()
@@ -372,8 +397,11 @@ impl Runtime {
         fn tail(bytes: &[u8]) -> String {
             String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(4096)..]).into()
         }
-        let value = json!({"job_id":id,"kind":"process","state":state,"native_owner":running.request.owner,"stdout":tail(&streams[0]),"stderr":tail(&streams[1]),"result":{"exit_code":exit,"stop_reason":reason,"stdout_sha256":result["stdout_sha256"],"stderr_sha256":result["stderr_sha256"],"stdin_written":result["stdin_written"],"stdin_complete":result["stdin_complete"],"stdin_error":result["stdin_error"],"native_receipt_sha256":hex::encode(Sha256::digest(&bytes)),"jobs_empty":true,"profiles_removed":true,"scratch_removed":true},"production_execution":false});
-        deployment::write_new_json(&self.result_path(id, "status.json"), &value, &private)?;
+        let value = json!({"job_id":id,"kind":"process","state":state,"native_owner":request.owner,"stdout":tail(&streams[0]),"stderr":tail(&streams[1]),"result":{"exit_code":exit,"stop_reason":reason,"stdout_sha256":result["stdout_sha256"],"stderr_sha256":result["stderr_sha256"],"stdin_written":result["stdin_written"],"stdin_complete":result["stdin_complete"],"stdin_error":result["stdin_error"],"native_receipt_sha256":hex::encode(Sha256::digest(&bytes)),"jobs_empty":true,"profiles_removed":true,"scratch_removed":true},"production_execution":false});
+        self.retain(
+            &self.result_path(id, "status.json"),
+            &serde_json::to_vec(&value)?,
+        )?;
         journal.start_closing(id)?;
         journal.close(
             id,
@@ -383,8 +411,20 @@ impl Runtime {
                 scratch_removed: true,
             },
         )?;
-        self.running = None;
         Ok(())
+    }
+    fn retain(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        let policy = AclPolicy::private_vm();
+        if path.try_exists()? {
+            policy.verify(path, false)?;
+            ensure!(
+                deployment::read_bytes(path, bytes.len() as u64)? == bytes,
+                "native published artifact cannot be replaced"
+            );
+            Ok(())
+        } else {
+            policy.publish(path, bytes)
+        }
     }
     fn request_path(&self, id: &str, suffix: &str) -> PathBuf {
         self.root
@@ -397,8 +437,8 @@ impl Runtime {
             .join(format!("{id}.{suffix}"))
     }
     fn artifact(&self, id: &str, name: &str) -> Result<Value> {
-        let suffix = if name == "receipt" { "json" } else { name };
-        let path = self.result_path(id, suffix);
+        let suffix = artifact_suffix(name)?;
+        let path = self.result_path(id, &suffix);
         AclPolicy::private_vm().verify(&path, false)?;
         let data = deployment::read_bytes(&path, 12 * 1024 * 1024)?;
         Ok(
@@ -417,9 +457,7 @@ impl Runtime {
             .context("native artifact selector is required")?;
         let parts: Vec<_> = path.split('/').collect();
         ensure!(
-            parts.len() == 3
-                && parts[0] == "native-results"
-                && matches!(parts[2], "stdout" | "stderr" | "receipt"),
+            parts.len() == 3 && parts[0] == "native-results" && artifact_suffix(parts[2]).is_ok(),
             "invalid native artifact selector"
         );
         let record = journal.resource(owner, parts[1])?;
@@ -431,12 +469,8 @@ impl Runtime {
         if method == "file.stat" {
             return Ok(artifact);
         }
-        let suffix = if parts[2] == "receipt" {
-            "json"
-        } else {
-            parts[2]
-        };
-        let data = deployment::read_bytes(&self.result_path(parts[1], suffix), 12 * 1024 * 1024)?;
+        let suffix = artifact_suffix(parts[2])?;
+        let data = deployment::read_bytes(&self.result_path(parts[1], &suffix), 12 * 1024 * 1024)?;
         if method == "file.get" {
             artifact["data_base64"] = json!(STANDARD.encode(data));
             return Ok(artifact);
@@ -459,6 +493,26 @@ impl Runtime {
         Ok(
             json!({"path":path,"offset":offset,"size":data.len(),"data_base64":STANDARD.encode(chunk),"chunk_sha256":hex::encode(Sha256::digest(chunk))}),
         )
+    }
+}
+
+fn artifact_suffix(name: &str) -> Result<String> {
+    match name {
+        "stdout" | "stderr" => Ok(name.into()),
+        "receipt" => Ok("json".into()),
+        _ => {
+            let attempt = name
+                .strip_prefix("recovery-")
+                .context("unknown native artifact kind")?;
+            ensure!(
+                attempt.len() == 32
+                    && attempt
+                        .bytes()
+                        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+                "invalid native recovery artifact identity"
+            );
+            Ok(format!("{name}.json"))
+        }
     }
 }
 

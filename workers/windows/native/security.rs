@@ -289,6 +289,63 @@ pub struct AclPolicy {
     grants: std::collections::BTreeMap<String, u32>,
 }
 impl AclPolicy {
+    /// Seal only the held object, without inheritable ACE propagation into an
+    /// untrusted tree. Callers must reject reparse points and shared file links.
+    pub(crate) fn apply_handle(&self, file: &fs::File) -> Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Security::{
+            Authorization::SetSecurityInfo, GetSecurityDescriptorOwner,
+            PROTECTED_DACL_SECURITY_INFORMATION,
+        };
+        let descriptor = self.descriptor(false)?;
+        let (mut owner, mut dacl, mut present, mut defaulted) = (null_mut(), null_mut(), 0, 0);
+        check(unsafe { GetSecurityDescriptorOwner(descriptor.0, &mut owner, &mut defaulted) })?;
+        check(unsafe {
+            GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted)
+        })?;
+        let status = unsafe {
+            SetSecurityInfo(
+                file.as_raw_handle(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION
+                    | DACL_SECURITY_INFORMATION
+                    | PROTECTED_DACL_SECURITY_INFORMATION,
+                owner,
+                null_mut(),
+                dacl,
+                null_mut(),
+            )
+        };
+        ensure!(status == 0, "cannot seal owned cleanup object: {status}");
+        verify_descriptor(
+            SecurityDescriptor::from_object(file.as_raw_handle(), SE_FILE_OBJECT)?
+                .attributes()
+                .lpSecurityDescriptor,
+            &self.owner,
+            &self.grants,
+            true,
+        )
+    }
+    /// Shared create-new publication for native inputs and resource records.
+    /// Never overwrite a published slot, including after a controller retry.
+    pub(crate) fn publish(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        use std::io::Write;
+        use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+        let parent = path.parent().context("native publication has no parent")?;
+        self.verify(parent, true)?;
+        let temporary = parent.join(format!(
+            "{}.tmp",
+            hex::encode(crate::accounts::random_bytes::<16>()?)
+        ));
+        let mut file = self.create_file(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        let from = wide(temporary.as_os_str())?;
+        let to = wide(path.as_os_str())?;
+        check(unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) })?;
+        self.verify(path, false)
+    }
     pub fn private_vm() -> Self {
         Self {
             owner: "S-1-5-32-544".into(),

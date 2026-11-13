@@ -177,6 +177,11 @@ pub fn write_new_json(path: &Path, value: &impl Serialize, policy: &AclPolicy) -
     drop(output);
     policy.verify(path, false)
 }
+pub(crate) fn publish_json(path: &Path, value: &impl Serialize, policy: &AclPolicy) -> Result<()> {
+    let mut bytes = serde_json::to_vec(value)?;
+    bytes.push(b'\n');
+    policy.publish(path, &bytes)
+}
 pub fn verify_running_binary(package: &Path, manifest: &VerifiedManifest) -> Result<()> {
     let executable = std::env::current_exe()?;
     let expected = package

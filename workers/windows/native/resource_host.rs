@@ -325,7 +325,7 @@ pub(crate) fn create_persona_named(
     let intent = root
         .join("metadata")
         .join(format!("resource-profile-{nonce}.json"));
-    deployment::write_new_json(
+    deployment::publish_json(
         &intent,
         &json!({"schema":1,"installation_id":deployment.installation_id,
         "role":role,"account_sid":deployment.account(role)?.sid,"profile_name":name,"resource_id":resource}),

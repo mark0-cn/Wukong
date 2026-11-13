@@ -24,6 +24,7 @@ fn interrupted_native_start_retry_reads_original_intent_before_new_input_scope()
         executable: root.path().join("never-execute"),
         installation: owner().identity.installation_id,
         running: None,
+        recovery: None,
     };
     let params = json!({"argv":["files/known.exe"],"request_id":"stable"});
     let spec: Specification = serde_json::from_value(json!({"argv":["files/known.exe"]}))?;
@@ -31,7 +32,7 @@ fn interrupted_native_start_retry_reads_original_intent_before_new_input_scope()
         &owner(),
         "stable",
         ResourceKind::Process,
-        &serde_json::to_value(spec)?,
+        &json!({"native_process_schema":crate::resource_process::SCHEMA,"process":spec}),
     )?;
     let Reservation::Reserved {
         effect, resource, ..

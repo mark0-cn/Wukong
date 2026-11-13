@@ -38,6 +38,8 @@ tokio = { version = "1.54", features = ["io-util", "io-std", "net", "macros", "p
 wukong-worker-package = { path = "../package" }
 
 [target.'cfg(windows)'.dependencies]
+cap-fs-ext = "4.0.3"
+cap-std = "4.0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 windows = { version = "0.62", features = ["Win32_System_Diagnostics_Debug_Extensions", "Win32_System_LibraryLoader", "Win32_Security", "Win32_System_Threading", "Win32_NetworkManagement_WindowsFirewall", "Win32_System_Com"] }
 windows-core = "0.62"

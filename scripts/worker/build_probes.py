@@ -44,7 +44,7 @@ def build(output, inspector=None):
         environment = compiler_environment(architecture)
         compiler = regular(Path(environment["VCTOOLSINSTALLDIR"]) / "bin/Hostx64" / architecture / "cl.exe")
         subprocess.run([str(compiler), "/nologo", "/W4", "/WX", "/Zi", "/Od", "/MT",
-            "/Fe:" + str(target), str(source), "dbghelp.lib", "/link", "/DEBUG", "/PDB:" + str(pdb)],
+            "/Fe:" + str(target), str(source), "dbghelp.lib", "advapi32.lib", "/link", "/DEBUG", "/PDB:" + str(pdb)],
             cwd=directory, env=environment, check=True)
         artifacts[architecture] = {"binary": target.relative_to(output).as_posix(), "binary_sha256": sha256(target),
             "pdb": pdb.relative_to(output).as_posix(), "pdb_sha256": sha256(pdb),

@@ -28,6 +28,8 @@ use windows_sys::Win32::{
 };
 
 pub struct Job(Handle);
+#[path = "resource_job.rs"]
+pub(crate) mod resource_job;
 /// Aggregate limits for one native analysis resource, before child creation.
 #[derive(Clone, Copy, Debug)]
 pub struct ResourceLimits {
@@ -90,7 +92,10 @@ impl Job {
             "cannot create native worker Job: {}",
             std::io::Error::last_os_error()
         );
-        let job = Self(Handle(handle));
+        Self(Handle(handle)).configure(resource)
+    }
+    fn configure(self, resource: Option<ResourceLimits>) -> Result<Self> {
+        let job = self;
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags =
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
@@ -686,6 +691,10 @@ pub struct Spawn<'a> {
 #[derive(Clone, Copy)]
 enum Start<'a> {
     Execute,
+    ResourceHost {
+        installation: &'a str,
+        resource: &'a str,
+    },
     Streamed {
         error: &'a File,
         limits: ResourceLimits,
@@ -771,7 +780,22 @@ impl Spawn<'_> {
             CreationContext::Process,
         )
     }
-    pub(crate) fn system_host(&self) -> Result<SystemHost> {
+    pub(crate) fn system_host(&self, installation: &str, resource: &str) -> Result<SystemHost> {
+        security::require_system()?;
+        SystemHost::take(self.create(
+            None,
+            None,
+            None,
+            None,
+            Start::ResourceHost {
+                installation,
+                resource,
+            },
+            CreationContext::Process,
+        )?)
+    }
+    /// A fresh trusted recovery child runs outside the Job it must terminate.
+    pub(crate) fn system_control(&self) -> Result<SystemHost> {
         SystemHost::take(self.system()?)
     }
     /// Resource-host thread only: private station setup is process-wide.
@@ -883,7 +907,13 @@ impl Spawn<'_> {
             Start::Streamed { limits, .. } => Some(limits),
             _ => None,
         };
-        let job = Job::configured(resource_limits)?;
+        let job = match start {
+            Start::ResourceHost {
+                installation,
+                resource,
+            } => Job::resource(installation, resource)?,
+            _ => Job::configured(resource_limits)?,
+        };
         let (log, input) = (inheritable(self.log)?, inheritable(self.input)?);
         let error = match start {
             Start::Streamed { error, .. } => Some(inheritable(error)?),

@@ -32,6 +32,8 @@ pub mod processes;
 #[cfg(windows)]
 pub mod recovery;
 #[cfg(windows)]
+mod resource_cleanup;
+#[cfg(windows)]
 pub mod resource_host;
 #[cfg(windows)]
 pub mod resource_input;
@@ -39,6 +41,8 @@ pub mod resource_input;
 pub mod resource_journal;
 #[cfg(windows)]
 pub mod resource_process;
+#[cfg(windows)]
+pub mod resource_recovery;
 #[cfg(windows)]
 mod resource_runtime;
 #[cfg(windows)]

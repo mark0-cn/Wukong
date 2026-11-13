@@ -57,7 +57,8 @@ pub enum MutationKind {
 }
 
 /// Persisted intent for native recovery, not evidence that its OS objects exist.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResourceRecord {
     pub id: String,
     pub phase: Phase,

@@ -149,6 +149,39 @@ pub(crate) struct Persona {
 }
 impl Persona {
     pub fn create(installation: &str, account: &Account, name: &str) -> Result<Self> {
+        let mut result = Self::load(installation, account, name)?;
+        let hr = as_user(&result.token, || {
+            Ok(unsafe {
+                CreateAppContainerProfile(
+                    result.name.as_ptr(),
+                    result.name.as_ptr(),
+                    result.name.as_ptr(),
+                    null(),
+                    0,
+                    &mut result.sid,
+                )
+            })
+        })?;
+        ensure!(
+            hr >= 0,
+            "create owned AppContainer profile failed: 0x{:08x}",
+            hr as u32
+        );
+        result.app_created = true;
+        security::validate_app_sid(&result.sid_text()?)?;
+        Ok(result)
+    }
+    /// Delete only a name authorized by a private installation/resource intent.
+    /// The SDK also succeeds if that per-user AppContainer never existed.
+    pub(crate) fn recover(installation: &str, account: &Account, name: &str) -> Result<()> {
+        let mut result = Self::load(installation, account, name)?;
+        result.app_created = true;
+        result.close()
+    }
+    pub(crate) fn cleanup_privileges() -> Result<impl Drop> {
+        ProfilePrivileges::enable()
+    }
+    fn load(installation: &str, account: &Account, name: &str) -> Result<Self> {
         security::require_system()?;
         ensure!(
             matches!(account.role, Role::Target | Role::Debugger),
@@ -177,34 +210,14 @@ impl Persona {
             security::check(unsafe { LoadUserProfileW(token.0, &mut info) })
                 .context("load owned resource user profile")?;
         }
-        let mut result = Self {
+        Ok(Self {
             token,
             logon,
             profile: info.hProfile,
             name,
             sid: null_mut(),
             app_created: false,
-        };
-        let hr = as_user(&result.token, || {
-            Ok(unsafe {
-                CreateAppContainerProfile(
-                    result.name.as_ptr(),
-                    result.name.as_ptr(),
-                    result.name.as_ptr(),
-                    null(),
-                    0,
-                    &mut result.sid,
-                )
-            })
-        })?;
-        ensure!(
-            hr >= 0,
-            "create owned AppContainer profile failed: 0x{:08x}",
-            hr as u32
-        );
-        result.app_created = true;
-        security::validate_app_sid(&result.sid_text()?)?;
-        Ok(result)
+        })
     }
     pub fn token(&self) -> &Handle {
         &self.token
