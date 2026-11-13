@@ -27,6 +27,7 @@ enum Fault {
     Preparation,
     Host,
     Service,
+    OsBoot,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,8 +50,9 @@ fn publish(path: &Path, value: &Value) -> Result<()> {
     file.sync_all()?;
     Ok(())
 }
-async fn resume(path: &Path) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+async fn resume(path: &Path, fault: Fault) -> Result<()> {
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_secs(if fault == Fault::OsBoot { 360 } else { 180 });
     while !path.try_exists()? {
         ensure!(
             tokio::time::Instant::now() < deadline,
@@ -59,6 +61,27 @@ async fn resume(path: &Path) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     Ok(())
+}
+async fn echo_after_recovery(client: &RuntimeClient, bytes: &[u8], sha256: &str) -> Result<Value> {
+    let next = client.call("file.put", json!({"path":format!("fault/{sha256}/after-recovery.exe"),"data_base64":STANDARD.encode(bytes),"executable":true,"request_id":format!("after-upload-{sha256}")})).await?;
+    let next = client
+        .call(
+            "job.start",
+            json!({"argv":[next["path"],"--echo"],"timeout_secs":5,"request_id":"after-recovery"}),
+        )
+        .await?;
+    let after = terminal(
+        client,
+        next["job_id"]
+            .as_str()
+            .context("post-recovery job is absent")?,
+    )
+    .await?;
+    ensure!(
+        after["state"] == "completed" && after["stdout"] == "wukong-worker-selftest\n",
+        "cleanup did not release native admission: {after}"
+    );
+    Ok(after)
 }
 async fn reconciled(client: &RuntimeClient, id: &str) -> Result<Value> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
@@ -79,10 +102,14 @@ async fn reconciled(client: &RuntimeClient, id: &str) -> Result<Value> {
 }
 
 #[tokio::test]
-#[ignore = "requires an enrolled dedicated Windows VM and independently injected preparation/host/service fault"]
+#[ignore = "requires an enrolled dedicated Windows VM and independently injected preparation/host/service/OS-boot fault"]
 async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     let profile: Profile = read_fixture_profile("WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST")?;
     enrolled_fixture_address(&profile.config, false)?;
+    ensure!(
+        profile.fault != Fault::OsBoot || profile.resource_inventory,
+        "OS-boot acceptance requires native resource discovery"
+    );
     for path in [&profile.ready, &profile.resume, &profile.output] {
         ensure!(
             path.is_absolute() && !path.try_exists()?,
@@ -139,7 +166,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             &profile.ready,
             &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"launch":launch}),
         )?;
-        resume(&profile.resume).await?;
+        resume(&profile.resume, profile.fault).await?;
     }
     let started = bound.call("job.start", request.clone()).await?;
     let id = started["job_id"]
@@ -150,7 +177,110 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             &profile.ready,
             &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"launch":launch,"job":started}),
         )?;
-        resume(&profile.resume).await?;
+        resume(&profile.resume, profile.fault).await?;
+    }
+    if profile.fault == Fault::OsBoot {
+        // The independent operator checks original cleanup evidence because a
+        // new OS binding must never adopt an old run, even for read-only lists.
+        ensure!(
+            bound
+                .call("job.status", json!({"job_id":id}))
+                .await
+                .is_err(),
+            "pre-reboot transport unexpectedly survived"
+        );
+        let rejected = bound
+            .call("job.start", request.clone())
+            .await
+            .err()
+            .context("old OS binding admitted an interrupted start")?;
+        ensure!(
+            rejected
+                .to_string()
+                .contains("identity changed; refusing execution"),
+            "old OS binding failed for an unrelated reason: {rejected:#}"
+        );
+        let fresh = RuntimeClient::connect(profile.config.clone()).await?;
+        let before = client.identity();
+        let after = fresh.identity();
+        ensure!(
+            before.installation_id == after.installation_id
+                && before.package_sha256 == after.package_sha256
+                && before.protocol == after.protocol
+                && before.boot_id != after.boot_id,
+            "OS reboot did not change only the boot identity"
+        );
+        let old_run: EnvironmentLease =
+            serde_json::from_value(fresh.call("environment.lease.acquire", acquire).await?)?;
+        ensure!(
+            old_run.epoch > lease.epoch,
+            "OS reboot reset the native fence"
+        );
+        let old_scope = fresh.with_lease(old_run.clone());
+        for method in ["job.list", "resource.list"] {
+            let denied = old_scope
+                .call(method, json!({}))
+                .await
+                .err()
+                .context("new boot adopted an old native run")?;
+            ensure!(
+                denied.downcast_ref::<WorkerError>().is_some()
+                    && denied.to_string().contains("native run binding changed"),
+                "old run failed for an unrelated reason: {denied:#}"
+            );
+        }
+        let denied = old_scope
+            .call("job.status", json!({"job_id":id}))
+            .await
+            .err()
+            .context("new boot exposed an old resource")?;
+        ensure!(
+            denied.downcast_ref::<WorkerError>().is_some()
+                && denied.to_string().contains("another worker binding or run"),
+            "old resource failed for an unrelated reason: {denied:#}"
+        );
+        fresh
+            .call("environment.lease.release", json!({"lease":old_run}))
+            .await?;
+        let current: EnvironmentLease = serde_json::from_value(fresh.call(
+            "environment.lease.acquire",
+            json!({"run_id":format!("{run}-after-boot"),"owner_id":"fault-controller-fixture"}),
+        ).await?)?;
+        ensure!(
+            current.epoch > old_run.epoch,
+            "new run reused its predecessor fence"
+        );
+        let rebound = fresh.with_lease(current.clone());
+        let initial = inventory(&rebound).await?;
+        ensure!(
+            initial == json!({"jobs":[],"resources":[]}),
+            "new boot run inherited resources"
+        );
+        let denied = rebound
+            .call("job.start", request.clone())
+            .await
+            .err()
+            .context("new boot reused input without new native admission")?;
+        ensure!(
+            denied.downcast_ref::<WorkerError>().is_some(),
+            "old input failed outside worker admission: {denied:#}"
+        );
+        let completed = echo_after_recovery(&rebound, &bytes, &profile.probe.sha256).await?;
+        let discovered = inventory(&rebound).await?;
+        ensure!(
+            discovered["jobs"] == json!([completed])
+                && discovered["resources"][0]["phase"] == "closed",
+            "post-boot native result inventory differs"
+        );
+        fresh
+            .call("environment.lease.release", json!({"lease":current}))
+            .await?;
+        fresh.close().await?;
+        publish(
+            &profile.output,
+            &json!({"passed":true,"scope":"interrupted_native_os_boot_vm","fault":profile.fault,"before":before,"after":after,"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"launch":launch,"request":request,"started":started,"old_run_discovery_rejected":true,"old_resource_lookup_rejected":true,"old_start_binding_rejected":true,"old_input_reuse_rejected":true,"after_recovery":completed,"inventory":discovered,"production_execution":false}),
+        )?;
+        return Ok(());
     }
     let active = if profile.fault == Fault::Service {
         // Only a read is used to consume the dead transport. The mutating
@@ -241,24 +371,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             "service recovery did not reopen the externally retained guardian Job"
         );
     }
-    let next = rebound.call("file.put", json!({"path":format!("fault/{}/after-recovery.exe",profile.probe.sha256),"data_base64":STANDARD.encode(&bytes),"executable":true,"request_id":format!("after-upload-{}",profile.probe.sha256)})).await?;
-    let next = rebound
-        .call(
-            "job.start",
-            json!({"argv":[next["path"],"--echo"],"timeout_secs":5,"request_id":"after-recovery"}),
-        )
-        .await?;
-    let after = terminal(
-        &rebound,
-        next["job_id"]
-            .as_str()
-            .context("post-recovery job is absent")?,
-    )
-    .await?;
-    ensure!(
-        after["state"] == "completed" && after["stdout"] == "wukong-worker-selftest\n",
-        "cleanup did not release native admission: {after}"
-    );
+    let after = echo_after_recovery(&rebound, &bytes, &profile.probe.sha256).await?;
     active
         .call("environment.lease.release", json!({"lease":current}))
         .await?;
