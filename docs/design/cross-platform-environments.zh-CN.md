@@ -54,7 +54,7 @@ worker 提供 `file.upload.begin`、`file.upload.status`、`file.upload.write`�
 
 `job_start` 接受已有 schema-1 `launch_spec`，可另提供已暂存的 `input`。调用时省略 argv、环境和 cwd 覆盖；显式超时须与清单一致。进程任务支持 `stdin_pipe` 和带 `@@` 的 `argv_file`，PTY 输入属于交互会话。原始进程任务也可接收已暂存的 stdin。在将这些新输入发给 worker 前，分派必须观察到 `launch_spec_jobs` 或 `process_stdin` 支持。
 
-Windows 从当前 owner 范围内已完成的原生输入回执解析清单及每个声明成员。新的 System 宿主在准备 persona 前，重读已准入清单并核对完整配置与受保护请求一致。成员保留逻辑布局及可执行/数据策略；单独受 guard 保护的可写 cwd 复用已有资源目录和清理机制。原生启动要求离线服务模式，拒绝 Linux loader/library 路径，最多允许 64 个声明成员及一个 argv 输入。清单和受保护请求各限 64 KiB；stdin 限 32 MiB，路径须符合清理深度限制。内部进程 schema 3 将完整请求哈希绑定到结果；旧版活动契约拒绝继续。查询缓存启动仍先于解析新输入。这条启动通路的已安装 VM 验收及其余执行通路尚待完成。
+Windows 从当前 owner 范围内已完成的原生输入回执解析清单及每个声明成员。新的 System 宿主在准备 persona 前，重读已准入清单并核对完整配置与受保护请求一致。成员保留逻辑布局及可执行/数据策略；单独受 guard 保护的可写 cwd 复用已有资源目录和清理机制。原生启动要求离线服务模式，拒绝 Linux loader/library 路径，最多允许 64 个声明成员及一个 argv 输入。清单和受保护请求各限 64 KiB；stdin 限 32 MiB，路径须符合清理深度限制。内部进程 schema 3 将完整请求哈希绑定到结果；旧版活动契约拒绝继续。查询缓存启动仍先于解析新输入。明确列出的可信进程启动及服务恢复在 `6e2bc91` 通过已安装 VM 验收；其余执行通路尚待完成。见[绑定源码的资格记录](../../workers/windows/README.zh-CN.md)。
 
 Linux 复用已有 LaunchSpec 解析器和 UID 隔离，将包括 cwd 外文件在内的完整声明布局暂存为密封执行文件及单独可写工作树。题目准备将 cwd 内普通文件记入清单；符号链接被拒绝，暂存仍限 1024 文件/32 MiB。文档规定的容器 capabilities、只读根目录和可执行 `/tmp` 仍为必要条件。
 

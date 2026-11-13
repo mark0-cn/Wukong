@@ -4,7 +4,7 @@
 
 [English](README.md) · 简体中文
 
-`remote_installed_windows_worker_launch_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_TEST`：托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output`，以及恰含 `x64`/`x86` 的 `probes`。每种架构提供 `program` 和 `dependency`，各含工具包 `runtime/selftest/` 目录中文件的绝对 `path` 与固定 `sha256`。可信探针加载同目录 `wukong-fixture.dll`，读取 cwd 外声明的 peer 文件，创建 cwd 文件，并将二进制 stdin/argv 输入复制到 stdout。控制器检查六个资源、改变清单/调用覆盖被拒绝、完整请求/回执身份、清理和已完成启动的稳定重试。VM 内不编译或下载。独立观察服务重启后，`remote_native_launch_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_RECOVERY_TEST`，包含 `config`、绝对 `previous`、其 `previous_sha256` 与全新的绝对 `output`；无需上传或执行，即可比较四个已完成 LaunchSpec 结果和原始回执。这些夹具的已安装 VM 验收尚待完成。
+`remote_installed_windows_worker_launch_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_TEST`：托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output`，以及恰含 `x64`/`x86` 的 `probes`。每种架构提供 `program` 和 `dependency`，各含工具包 `runtime/selftest/` 目录中文件的绝对 `path` 与固定 `sha256`。可信探针加载同目录 `wukong-fixture.dll`，读取 cwd 外声明的 peer 文件，创建 cwd 文件，并将二进制 stdin/argv 输入复制到 stdout。控制器检查六个资源、改变清单/调用覆盖被拒绝、完整请求/回执身份、清理和已完成启动的稳定重试。VM 内不编译或下载。独立观察服务重启后，`remote_native_launch_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_RECOVERY_TEST`，包含 `config`、绝对 `previous`、其 `previous_sha256` 与全新的绝对 `output`；无需上传或执行，即可比较四个已完成 LaunchSpec 结果和原始回执。这些夹具在源码 `6e2bc91` 的用户离线 VM 通过；见绑定源码的[资格记录](../windows/README.zh-CN.md)。
 
 ```powershell
 $env:WUKONG_REMOTE_WORKER_LAUNCH_TEST = (Resolve-Path .\remote-launch-profile.json)
@@ -21,7 +21,7 @@ cargo test --locked --lib remote_native_launch_recovery_acceptance -- --ignored 
 
 默认忽略的 `remote_native_interrupted_process_acceptance` 使用 `WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST`：托管 SSH `config`、预期 `manifest_sha256`、固定哈希的可信 `probe`（`path`/`sha256`）、`fault`（`preparation`、`host` 或 `service`），以及全新的绝对 `ready`、`resume`、`output` 路径。准备用例在启动前发布 `ready`，便于独立操作方持有原生输入的独占句柄；宿主/服务用例在启动后发布，由操作方终止前核对真实归属进程身份和目标就绪。新版探针使用 `--fault-ready` 在本次私有 scratch 写出固定标记；操作方核对映像哈希、父进程和标记字节，不以粗粒度 CPU 计数或等待时间推断执行。服务用例还由操作方持续持有仅查询的守护 Job 句柄，迫使恢复通路重新打开并排空真实对象。独立观察操作/恢复后，才由操作方创建 `resume`。
 
-故障配置可选的 `launch_spec: true` 通过同一探针及故障协议使用清单指定的 `work/nested` cwd。操作方须核对受保护启动绑定，并在该 cwd 内观察到标记后才注入故障。这个新增的已安装 VM 用例尚待完成。
+故障配置可选的 `launch_spec: true` 通过同一探针及故障协议使用清单指定的 `work/nested` cwd。操作方须核对受保护启动绑定，并在该 cwd 内观察到标记后才注入故障。这个新增服务中断用例也在 `6e2bc91` 的同一 VM 通过，包括独立仅查询守护 Job 观察及嵌套 scratch 清理。
 
 夹具自身不终止进程、不注册任务；检查绑定的未知结果清理、不可变恢复字节、不重放启动、陈旧服务隔离令牌，以及后续准入成功。协调文件仅为信号，不是操作系统证据。这三个具体故障用例于 2026-11-13 在用户提供的离线 VM 通过；源码/内容身份及限制见 [Windows 资格记录](../windows/README.zh-CN.md)。先前已完成结果恢复不覆盖这些用例。
 
