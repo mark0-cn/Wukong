@@ -3,6 +3,7 @@
 //! that two files have equal contents; the native references retain that hash.
 use crate::resource_input::{AdmittedInput, Reference};
 use anyhow::{Context, Result, ensure};
+use minidump::{Minidump, MinidumpModuleList, MinidumpSystemInfo, Module as _};
 use object::{
     LittleEndian as LE, Object,
     read::pe::{ImageNtHeaders, ImageOptionalHeader, PeFile},
@@ -15,12 +16,21 @@ use uuid::Uuid;
 const MAX_IMAGE: u64 = 64 * 1024 * 1024;
 const MAX_PDB_VIEW: usize = 8 * 1024 * 1024;
 const PDB_READ_BUDGET: usize = 32 * 1024 * 1024;
+pub(crate) const MAX_DUMP: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct Identity {
     image: Reference,
     pe: PeIdentity,
     pdb: Option<Symbols>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dump: Option<DumpIdentity>,
+}
+#[derive(Debug, Serialize)]
+struct DumpIdentity {
+    file: Reference,
+    module_base: u64,
+    modules: usize,
 }
 #[derive(Debug, Serialize)]
 struct PeIdentity {
@@ -202,7 +212,94 @@ impl Identity {
             image,
             pe,
             pdb: selected,
+            dump: None,
         })
+    }
+    pub(crate) fn admit_dump(&mut self, input: &mut AdmittedInput) -> Result<()> {
+        ensure!(
+            !input.reference().executable && input.reference().size <= MAX_DUMP,
+            "dump must be non-executable and at most 256 MiB"
+        );
+        let mut bytes = Vec::new();
+        (&mut *input).take(MAX_DUMP + 1).read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() as u64 == input.reference().size,
+            "admitted dump length differs"
+        );
+        self.verify_dump(&bytes, input.reference())?;
+        input.rewind()?;
+        Ok(())
+    }
+    fn verify_dump(&mut self, bytes: &[u8], file: &Reference) -> Result<()> {
+        let dump = Minidump::read(bytes).context("read dump through minidump")?;
+        ensure!(
+            dump.header.stream_count <= 128,
+            "dump stream count exceeds inspection bound"
+        );
+        for stream in dump.all_streams() {
+            dump.get_raw_stream(stream.stream_type)?;
+        }
+        let system = dump.get_stream::<MinidumpSystemInfo>()?;
+        let machine = match system.cpu {
+            minidump::system_info::Cpu::X86 => 0x014c,
+            minidump::system_info::Cpu::X86_64 => 0x8664,
+            _ => anyhow::bail!("dump requires x86 or x64 system information"),
+        };
+        ensure!(
+            system.os == minidump::system_info::Os::Windows && machine == self.pe.machine,
+            "dump OS or machine differs from the admitted Windows PE"
+        );
+        let modules = dump.get_stream::<MinidumpModuleList>()?;
+        let count = modules.iter().count();
+        ensure!(
+            (1..=2000).contains(&count),
+            "dump module count exceeds inspection bound"
+        );
+        let mut selected = modules.iter().filter(|module| {
+            basename(&module.name).eq_ignore_ascii_case(basename(&self.image.path))
+        });
+        let module = selected
+            .next()
+            .context("admitted image is absent from dump")?;
+        ensure!(
+            selected.next().is_none(),
+            "dump image correspondence is ambiguous"
+        );
+        ensure!(
+            module.raw.time_date_stamp == self.pe.timestamp
+                && module.raw.size_of_image == self.pe.size
+                && module.raw.checksum == self.pe.checksum,
+            "dump module differs from admitted PE metadata"
+        );
+        ensure!(
+            module.raw.base_of_image > 0
+                && module
+                    .raw
+                    .base_of_image
+                    .checked_add(u64::from(module.raw.size_of_image))
+                    .is_some_and(|end| end <= if machine == 0x14c { 1 << 32 } else { 1 << 47 }),
+            "dump target lies outside user address space"
+        );
+        match (&self.pe.codeview, &module.codeview_info) {
+            (Some(expected), Some(minidump::CodeView::Pdb70(_))) => {
+                let observed = module
+                    .debug_identifier()
+                    .context("dump RSDS identity is missing")?;
+                ensure!(
+                    observed.uuid().simple().to_string().to_ascii_uppercase() == expected.guid
+                        && observed.appendix() == expected.age,
+                    "dump CodeView GUID or age differs from admitted PE"
+                );
+            }
+            (None, None) => {}
+            _ => anyhow::bail!("dump CodeView kind differs from admitted PE"),
+        }
+        self.dump = Some(DumpIdentity {
+            file: file.clone(),
+            module_base: module.raw.base_of_image,
+            modules: count,
+        });
+        Ok(())
     }
     pub(crate) fn has_symbols(&self) -> bool {
         self.pdb.is_some()
@@ -210,6 +307,12 @@ impl Identity {
 
     pub(crate) fn verify_module(&self, value: &Value) -> Result<()> {
         let module: Module = serde_json::from_value(value.clone())?;
+        if let Some(dump) = &self.dump {
+            ensure!(
+                value["start"] == format!("{:#018x}", dump.module_base),
+                "external debugger module base differs from admitted dump"
+            );
+        }
         ensure!(
             basename(&module.image_name).eq_ignore_ascii_case(basename(&self.image.path))
                 && module.timestamp == self.pe.timestamp
@@ -332,6 +435,118 @@ mod tests {
                 false,
             )?,
         ])
+    }
+    #[test]
+    #[ignore = "trusted child used by the SDK minidump test"]
+    fn dump_child_fixture() -> Result<()> {
+        use std::io::Write;
+        println!("wukong-dump-child-ready");
+        std::io::stdout().flush()?;
+        let mut byte = [0];
+        std::io::stdin().read_exact(&mut byte)?;
+        Ok(())
+    }
+    #[test]
+    fn sdk_minidump_binds_image_symbols_and_rejects_mismatches() -> Result<()> {
+        use std::{
+            io::{BufRead, BufReader},
+            os::windows::io::AsRawHandle,
+            process::{Child, Command, Stdio},
+        };
+        use windows_sys::Win32::System::Diagnostics::Debug::{MiniDumpNormal, MiniDumpWriteDump};
+        struct OwnedChild(Child);
+        impl Drop for OwnedChild {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut child = OwnedChild(
+            Command::new(std::env::current_exe()?)
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "session_identity::tests::dump_child_fixture",
+                    "--nocapture",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?,
+        );
+        let mut output = BufReader::new(child.0.stdout.take().unwrap());
+        let mut ready = false;
+        for _ in 0..8 {
+            let mut line = String::new();
+            if output.read_line(&mut line)? == 0 {
+                break;
+            }
+            if line.trim() == "wukong-dump-child-ready" {
+                ready = true;
+                break;
+            }
+        }
+        ensure!(ready, "trusted dump fixture did not start");
+        let file = tempfile::NamedTempFile::new()?;
+        crate::security::check(unsafe {
+            MiniDumpWriteDump(
+                child.0.as_raw_handle(),
+                child.0.id(),
+                file.as_file().as_raw_handle(),
+                MiniDumpNormal,
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        })?;
+        child.0.stdin.take().unwrap().write_all(&[1])?;
+        ensure!(child.0.wait()?.success(), "trusted dump fixture failed");
+        let mut identity = Identity::admit(&mut fixture()?)?;
+        let mut input = admitted(file.path(), "files/fixture.dmp", false)?;
+        identity.admit_dump(&mut input)?;
+        assert_eq!(input.stream_position()?, 0);
+        let bound = identity.dump.as_ref().unwrap();
+        assert_eq!(&bound.file, input.reference());
+        assert!(bound.modules > 0);
+        let mut observed = module(&identity);
+        observed["start"] = json!(format!("{:#018x}", bound.module_base));
+        identity.verify_module(&observed)?;
+        observed["start"] = json!("0x0000000000000000");
+        assert!(identity.verify_module(&observed).is_err());
+        let bytes = fs::read(file.path())?;
+        let reference = input.reference().clone();
+        assert!(identity.verify_dump(&bytes[..4], &reference).is_err());
+        let mut truncated = tempfile::NamedTempFile::new()?;
+        truncated.write_all(&bytes[..bytes.len() / 2])?;
+        assert!(
+            identity
+                .admit_dump(&mut AdmittedInput::new(
+                    fs::File::open(truncated.path())?,
+                    reference.clone()
+                ))
+                .is_err()
+        );
+        identity.pe.timestamp ^= 1;
+        assert!(identity.verify_dump(&bytes, &reference).is_err());
+        identity.pe.timestamp ^= 1;
+        identity.pe.machine = 0x14c;
+        assert!(identity.verify_dump(&bytes, &reference).is_err());
+        identity.pe.machine = 0x8664;
+        identity.pe.codeview.as_mut().unwrap().guid = "0".repeat(32);
+        assert!(identity.verify_dump(&bytes, &reference).is_err());
+        let oversized = Reference {
+            size: MAX_DUMP + 1,
+            ..reference
+        };
+        assert!(
+            identity
+                .admit_dump(&mut AdmittedInput::new(
+                    fs::File::open(file.path())?,
+                    oversized
+                ))
+                .is_err()
+        );
+        Ok(())
     }
     fn module(identity: &Identity) -> Value {
         let cv = identity.pe.codeview.as_ref().unwrap();

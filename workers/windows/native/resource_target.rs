@@ -27,38 +27,38 @@ pub(crate) struct Prepared {
     arguments: Vec<OsString>,
     environment: BTreeMap<String, OsString>,
 }
+pub(crate) fn image_sources(host: &Host, request: &Request) -> Result<Vec<AdmittedInput>> {
+    let metadata = host.root.join("metadata");
+    if let Some(launch) = &request.launch {
+        let document = crate::resource_launch::Document::read(resource_input::open(
+            &metadata,
+            &request.owner,
+            &launch.manifest,
+            Purpose::Inspect,
+        )?)?;
+        launch.verify(
+            &request.program,
+            request.input.as_ref(),
+            document,
+            &request.arguments,
+            &request.environment,
+            request.timeout_secs,
+        )?;
+    }
+    let image_files = if let Some(launch) = &request.launch {
+        launch.image_files(&request.program, request.input.as_ref())?
+    } else {
+        request.argument_files.clone()
+    };
+    crate::resource_image::acquire(&metadata, &request.owner, &request.program, &image_files)
+}
+
 impl Prepared {
     /// The caller has already checked the protected request and guardian Job.
     /// Resolve all inputs before creating the target's persona or scratch.
     pub(crate) fn open(host: &Host, request: &Request, debugger: Option<&Persona>) -> Result<Self> {
         let metadata = host.root.join("metadata");
-        if let Some(launch) = &request.launch {
-            let document = crate::resource_launch::Document::read(resource_input::open(
-                &metadata,
-                &request.owner,
-                &launch.manifest,
-                Purpose::Inspect,
-            )?)?;
-            launch.verify(
-                &request.program,
-                request.input.as_ref(),
-                document,
-                &request.arguments,
-                &request.environment,
-                request.timeout_secs,
-            )?;
-        }
-        let image_files = if let Some(launch) = &request.launch {
-            launch.image_files(&request.program, request.input.as_ref())?
-        } else {
-            request.argument_files.clone()
-        };
-        let mut sources = crate::resource_image::acquire(
-            &metadata,
-            &request.owner,
-            &request.program,
-            &image_files,
-        )?;
+        let mut sources = image_sources(host, request)?;
         let identity = debugger
             .map(|_| crate::session_identity::Identity::admit(&mut sources))
             .transpose()?;
@@ -127,7 +127,7 @@ impl Prepared {
             .unwrap_or(&scratch)
             .to_owned();
         let held =
-            crate::resource_image::stage(&scratch, sources, &image_policy, working.as_ref())?;
+            crate::resource_image::stage(&scratch, sources, &image_policy, working.as_ref(), true)?;
         let mut environment =
             crate::resource_host::scratch_environment(&host.environment, &scratch);
         environment.extend(

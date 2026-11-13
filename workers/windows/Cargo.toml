@@ -34,6 +34,7 @@ zeroize = "1"
 socket2 = "0.6.5"
 object = { version = "0.40", default-features = false, features = ["read_core", "pe", "std"] }
 pdb = "0.8"
+minidump = "0.27"
 uuid = "1"
 tokio = { version = "1.54", features = ["fs", "io-util", "io-std", "net", "macros", "process", "rt-multi-thread", "sync", "time"] }
 wukong-worker-package = { path = "../package" }

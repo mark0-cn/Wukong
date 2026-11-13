@@ -1,17 +1,18 @@
-//! Fixed System child for one admitted live debugger. It owns both contained
-//! identities and their Jobs; neither a model PID nor a tool path is accepted.
+//! Fixed System child for one admitted live or dump debugger. It owns the
+//! contained identities and Jobs; model PIDs and tool paths are never authority.
 use crate::{
     accounts::Role,
     debugger_mcp::Client,
     deployment,
     inputs::digest,
-    process_capture::{CaptureWatch, CapturedProcess, CapturedStream, PreparedIo},
+    process_capture::{CaptureWatch, CapturedStream},
     processes::{OwnedProcess, ResourceLimits, Spawn},
-    resource_process::{Request as Target, ScratchIntent},
-    resource_target::Prepared,
+    resource_process::ScratchIntent,
     security::{self, AclPolicy},
     session_artifacts,
     session_commands::Session,
+    session_request::Request as Target,
+    session_target::Prepared,
     session_wire::{self, Channel, Reply, Request, reply::Outcome, request::Operation},
 };
 use anyhow::{Context, Result, ensure};
@@ -19,13 +20,12 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::Read,
     os::windows::io::OwnedHandle,
     path::Path,
     time::{Duration, Instant},
 };
 
-pub(crate) const SCHEMA: u32 = 1;
+pub(crate) const SCHEMA: u32 = 2;
 pub(crate) fn nonce(installation: &str, resource: &str) -> Result<String> {
     crate::processes::resource_job::name(installation, resource)?;
     Ok(digest(&("native.debugger.persona.v1", installation, resource))?[..48].into())
@@ -39,7 +39,7 @@ type Controller = Channel<tokio::io::Stdin, tokio::io::Stdout>;
 async fn watch(
     cancel: &Path,
     deadline: Instant,
-    output: &CaptureWatch,
+    output: Option<&CaptureWatch>,
     diagnostics: &CaptureWatch,
     helper: &OwnedProcess,
 ) -> Result<()> {
@@ -47,7 +47,7 @@ async fn watch(
         ensure!(!helper.exited(), "owned MCP server exited");
         ensure!(!cancel.try_exists()?, "native debugger was cancelled");
         ensure!(
-            !output.failed() && !diagnostics.failed(),
+            !output.is_some_and(CaptureWatch::failed) && !diagnostics.failed(),
             "native debugger target exceeded its output budget or lost its streams"
         );
         ensure!(
@@ -70,12 +70,13 @@ fn response(
     } else {
         result
     };
-    let value = json!({"session_id":target.resource_id,"worker_session_id":target.resource_id,
-        "native_owner":target.owner,"engine":"dbgeng","state":state,
+    let value = json!({"session_id":target.target.resource_id,"worker_session_id":target.target.resource_id,
+        "native_owner":target.target.owner,"engine":"dbgeng","state":state,
+        "mode":if target.read_only(){"dump"}else{"launch"},"read_only":target.read_only(),
         "transcript":transcript,"response":result,"production_execution":false});
     Ok(Reply {
         schema: session_wire::SCHEMA,
-        resource: target.resource_id.clone(),
+        resource: target.target.resource_id.clone(),
         sequence: request.sequence,
         request_sha256: digest(target)?,
         outcome: Some(Outcome::ResultJson(serde_json::to_vec(&value)?)),
@@ -83,7 +84,6 @@ fn response(
 }
 
 struct Serving<'a> {
-    prepared: &'a Prepared,
     request: &'a Target,
     root: &'a Path,
     cancel: &'a Path,
@@ -93,11 +93,10 @@ struct Serving<'a> {
 async fn serve(
     channel: &mut Controller,
     client: Client,
-    target: &mut CapturedProcess,
+    target: &mut Prepared,
     context: Serving<'_>,
 ) -> Result<End> {
     let Serving {
-        prepared,
         request,
         root,
         cancel,
@@ -105,7 +104,7 @@ async fn serve(
         diagnostics,
     } = context;
     let output = target.watch();
-    let deadline = Instant::now() + Duration::from_secs(request.timeout_secs);
+    let deadline = Instant::now() + Duration::from_secs(request.target.timeout_secs);
     let mut sequence = 0;
     // Only Open may use this unattached client. Later commands own a session.
     let mut unopened = Some(client);
@@ -114,11 +113,11 @@ async fn serve(
         ensure!(!helper.exited(), "owned MCP server exited");
         let next: Request = tokio::select! {
             next=channel.receive()=>next?.context("native controller channel closed")?,
-            stopped=watch(cancel,deadline,&output,diagnostics,helper)=>{stopped?;unreachable!()},
+            stopped=watch(cancel,deadline,output.as_ref(),diagnostics,helper)=>{stopped?;unreachable!()},
         };
         ensure!(
             next.schema == session_wire::SCHEMA
-                && next.resource == request.resource_id
+                && next.resource == request.target.resource_id
                 && next.sequence == sequence + 1
                 && next.sequence <= 4096,
             "native session request binding or sequence differs"
@@ -135,7 +134,7 @@ async fn serve(
                 .context("native debugger session is absent")?;
             let result = tokio::select! {
                 result=owned.close()=>result?,
-                stopped=watch(cancel,deadline,&output,diagnostics,helper)=>{stopped?;unreachable!()},
+                stopped=watch(cancel,deadline,output.as_ref(),diagnostics,helper)=>{stopped?;unreachable!()},
             };
             return Ok(End {
                 request: next,
@@ -152,17 +151,14 @@ async fn serve(
                     let mut client = unopened
                         .take()
                         .context("native debugger was already opened")?;
-                    let mut opened = client.attach_owned(target.process_mut()).await?;
+                    let mut opened = target.open(&mut client).await?;
                     let id = opened["session_id"]
                         .as_str()
                         .context("MCP opener omitted its session handle")?
                         .to_owned();
-                    let identity = prepared
-                        .identity
-                        .as_ref()
-                        .context("admitted debugger identity missing")?;
+                    let identity = target.identity()?;
                     let mut symbols =
-                        json!({"session_id":id,"path":prepared.symbols(),"append":false});
+                        json!({"session_id":id,"path":target.symbols(),"append":false});
                     if identity.has_symbols() {
                         // Fixed tool argument: no embedded filename becomes a command.
                         symbols["reload"] = json!("/f");
@@ -173,8 +169,8 @@ async fn serve(
                         .await?;
                     let observed = identity.observed(&modules)?;
                     opened["identity"] = json!({"admitted":identity,"observed_module":observed,
-                        "correspondence":"pe_and_pdb_metadata","loaded_pdb_bytes_verified":false});
-                    session = Some(Session::new(client, id));
+                        "correspondence":if request.read_only(){"pe_pdb_and_dump_metadata"}else{"pe_and_pdb_metadata"},"loaded_pdb_bytes_verified":false});
+                    session = Some(Session::new(client, id, request.read_only()));
                     Ok(opened)
                 }
                 Operation::Inspect(inspect) => {
@@ -208,10 +204,14 @@ async fn serve(
         };
         let result = tokio::select! {
             result=operation=>result?,
-            stopped=watch(cancel,deadline,&output,diagnostics,helper)=>{stopped?;unreachable!()},
+            stopped=watch(cancel,deadline,output.as_ref(),diagnostics,helper)=>{stopped?;unreachable!()},
         };
-        let transcript =
-            session_artifacts::snapshot(root, &request.resource_id, sequence, &digest(request)?)?;
+        let transcript = session_artifacts::snapshot(
+            root,
+            &request.target.resource_id,
+            sequence,
+            &digest(request)?,
+        )?;
         channel
             .send(&response(request, &next, result, "running", transcript)?)
             .await?;
@@ -225,15 +225,15 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
     private.verify(request_path, false)?;
     let request: Target = serde_json::from_slice(&deployment::read_bytes(request_path, 65536)?)?;
     request.validate()?;
-    let id = &request.resource_id;
+    let id = &request.target.resource_id;
     let root = &host.root;
     ensure!(
         root.join("metadata/resource-requests")
             .join(format!("{id}.debug.json"))
             .canonicalize()?
             == request_path.canonicalize()?
-            && request.owner.identity.installation_id == installation
-            && request.owner.identity.package_sha256 == host.manifest.sha256(),
+            && request.target.owner.identity.installation_id == installation
+            && request.target.owner.identity.package_sha256 == host.manifest.sha256(),
         "native debugger request slot or deployment differs"
     );
     crate::processes::resource_job::require_membership(installation, id)?;
@@ -271,7 +271,7 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         debugger.logon_sid(),
     )?;
     let debugger_path = debugger_directory.path().to_owned();
-    let mut prepared = Prepared::open(&host, &request, Some(&debugger))?;
+    let mut target = Prepared::prepare(&host, &request, &debugger, &debugger_path)?;
     let package = host.deployment.package(root);
     let executable = package.join(
         host.manifest
@@ -290,17 +290,24 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
     let transcript = session_artifacts::create(root, id)?;
     let mut environment =
         crate::resource_host::scratch_environment(&host.environment, &debugger_path);
-    environment.insert(
-        "_NT_SYMBOL_PATH".into(),
-        prepared.symbols().as_os_str().to_owned(),
-    );
-    environment.insert(
-        "_NT_ALT_SYMBOL_PATH".into(),
-        prepared.symbols().as_os_str().to_owned(),
-    );
+    for key in [
+        "_NT_SYMBOL_PATH",
+        "_NT_ALT_SYMBOL_PATH",
+        "_NT_EXECUTABLE_IMAGE_PATH",
+    ] {
+        environment.insert(key.into(), target.symbols().as_os_str().to_owned());
+    }
     let helper = Spawn {
         executable: &executable,
-        arguments: &["--tools".into(), "session,inspect,exec,crash".into()],
+        arguments: &[
+            "--tools".into(),
+            if request.read_only() {
+                "session,inspect,crash"
+            } else {
+                "session,inspect,exec,crash"
+            }
+            .into(),
+        ],
         directory: &debugger_path,
         environment: &environment,
         log: &output,
@@ -313,17 +320,7 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         ResourceLimits::new(4, 1024 * 1024 * 1024)?,
     )?;
     drop((input, output));
-    let input = prepared
-        .input
-        .take()
-        .map(|input| Box::new(input) as Box<dyn Read + Send>);
-    let mut target = PreparedIo::new(request.output_limit)?.launch(input, |io| {
-        prepared.launch_with_debugger(
-            io,
-            ResourceLimits::new(request.processes, request.memory_bytes)?,
-            Some(&debugger),
-        )
-    })?;
+    target.launch(&request, &debugger)?;
     drop(log);
     let diagnostics = CapturedStream::start(diagnostic_reader, 1024 * 1024)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -342,7 +339,6 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
             client,
             &mut target,
             Serving {
-                prepared: &prepared,
                 request: &request,
                 root,
                 cancel: &cancel,
@@ -353,15 +349,15 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         .await
     });
     let helper_stopped = helper.stop(Duration::from_secs(10));
-    let target_stopped = target.wait_with_cancel(Duration::from_secs(10), || Ok(true));
+    let target_stopped = target.stop();
     drop(helper);
     // Always shut down Tokio, even when cleanup or evidence publication fails.
     let sent = (|| -> Result<()> {
         helper_stopped?;
         let captured = target_stopped?;
         let diagnostics = diagnostics.finish()?;
-        let identity = serde_json::to_value(&prepared.identity)?;
-        prepared.close()?;
+        let identity = serde_json::to_value(target.identity()?)?;
+        target.close()?;
         debugger.close()?;
         private.verify(&debugger_path, true)?;
         crate::resource_cleanup::remove_reclaimed(&debugger_path)?;
@@ -370,18 +366,22 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
             &result_directory.join(format!("{id}.debug-stderr")),
             &diagnostics,
         )?;
-        private.publish(
-            &result_directory.join(format!("{id}.stdout")),
-            &captured.stdout,
-        )?;
-        private.publish(
-            &result_directory.join(format!("{id}.stderr")),
-            &captured.stderr,
-        )?;
-        let proof = json!({"schema":SCHEMA,"scope":"native_debugger_host","resource_id":id,
-        "owner":request.owner,"request_sha256":digest(&request)?,"identity":identity,"outcome":if outcome.is_ok(){"closed"}else{"unknown"},
-        "stdout_sha256":hex::encode(Sha256::digest(&captured.stdout)),"stderr_sha256":hex::encode(Sha256::digest(&captured.stderr)),
+        let mut proof = json!({"schema":SCHEMA,"scope":"native_debugger_host","resource_id":id,
+        "owner":request.target.owner,"request_sha256":digest(&request)?,"identity":identity,"outcome":if outcome.is_ok(){"closed"}else{"unknown"},
+        "target_executed":captured.is_some(),"read_only":request.read_only(),
         "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"production_execution":false});
+        if let Some(captured) = captured {
+            private.publish(
+                &result_directory.join(format!("{id}.stdout")),
+                &captured.stdout,
+            )?;
+            private.publish(
+                &result_directory.join(format!("{id}.stderr")),
+                &captured.stderr,
+            )?;
+            proof["stdout_sha256"] = json!(hex::encode(Sha256::digest(&captured.stdout)));
+            proof["stderr_sha256"] = json!(hex::encode(Sha256::digest(&captured.stderr)));
+        }
         deployment::publish_json(
             &result_directory.join(format!("{id}.debug-result.json")),
             &proof,

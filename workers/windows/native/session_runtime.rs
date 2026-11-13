@@ -4,8 +4,8 @@ use crate::{
     deployment,
     inputs::digest,
     processes::{ExitSignal, Spawn, SystemHost},
-    resource_process::Request as Target,
     security::AclPolicy,
+    session_request::Request as Target,
     session_wire::{self, Channel, Request, request::Operation},
 };
 use anyhow::{Context, Result, ensure};
@@ -64,8 +64,8 @@ impl Pending {
 impl Live {
     pub(crate) fn spawn(root: &Path, executable: &Path, request: Target) -> Result<Self> {
         request.validate()?;
-        let installation = &request.owner.identity.installation_id;
-        let id = &request.resource_id;
+        let installation = &request.target.owner.identity.installation_id;
+        let id = &request.target.resource_id;
         let private = AclPolicy::private_vm();
         let request_path = root
             .join("metadata/resource-requests")
@@ -111,6 +111,10 @@ impl Live {
     }
     pub(crate) fn prepare(&mut self, operation: Operation) -> Result<Pending> {
         ensure!(
+            !self.request.read_only() || !matches!(&operation, Operation::Control(_)),
+            "dump sessions permit inspection and close only"
+        );
+        ensure!(
             self.failed.is_none() && !self.cancel_requested && !self.host.exited(),
             "native debugger host is not live"
         );
@@ -131,7 +135,7 @@ impl Live {
             channel,
             request: Request {
                 schema: session_wire::SCHEMA,
-                resource: self.request.resource_id.clone(),
+                resource: self.request.target.resource_id.clone(),
                 sequence: self.sequence,
                 operation: Some(operation),
             },
@@ -142,7 +146,7 @@ impl Live {
     pub(crate) fn complete(&mut self, completed: Completed) -> Result<Value> {
         ensure!(
             self.channel.is_none()
-                && completed.request.resource == self.request.resource_id
+                && completed.request.resource == self.request.target.resource_id
                 && completed.request.sequence == self.sequence,
             "native debugger completion is stale"
         );
@@ -156,7 +160,7 @@ impl Live {
                 value["transcript"]
                     == format!(
                         "native-results/{}/transcript-{}",
-                        self.request.resource_id, self.sequence
+                        self.request.target.resource_id, self.sequence
                     ),
                 "native debugger transcript sequence differs"
             );

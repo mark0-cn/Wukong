@@ -463,7 +463,7 @@ impl Runtime {
         if let Some(id) = self
             .debugger
             .as_ref()
-            .map(|debugger| debugger.request.resource_id.clone())
+            .map(|debugger| debugger.request.target.resource_id.clone())
         {
             self.cancel(&id)?;
             self.debugger.as_mut().unwrap().request_cancel();
@@ -667,15 +667,24 @@ impl Runtime {
             );
             let request_path = self.request_path(parts[1], "debug.json");
             AclPolicy::private_vm().verify(&request_path, false)?;
-            let request: Request =
+            let request: crate::session_request::Request =
                 serde_json::from_slice(&deployment::read_bytes(&request_path, 65536)?)?;
             request.validate()?;
             let spec: Specification =
                 serde_json::from_value(record.specification["process"].clone())?;
             ensure!(
-                request.resource_id == record.id
-                    && request.owner == record.owner
-                    && spec.matches(&request),
+                request.target.resource_id == record.id
+                    && request.target.owner == record.owner
+                    && spec.matches(&request.target)
+                    && record.specification["native_debugger_schema"] == request.schema
+                    && record.specification["debugger"]["mode"]
+                        == if request.read_only() {
+                            "dump"
+                        } else {
+                            "launch"
+                        }
+                    && record.specification["debugger"]["dump"].as_str()
+                        == request.dump().map(|file| file.path.as_str()),
                 "native debugger transcript request differs from its journal intent"
             );
             crate::session_artifacts::read(

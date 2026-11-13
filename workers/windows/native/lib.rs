@@ -70,7 +70,11 @@ pub mod session_host;
 #[cfg(windows)]
 mod session_identity;
 #[cfg(windows)]
+mod session_request;
+#[cfg(windows)]
 mod session_runtime;
+#[cfg(windows)]
+mod session_target;
 #[cfg(windows)]
 mod session_wire;
 #[cfg(windows)]

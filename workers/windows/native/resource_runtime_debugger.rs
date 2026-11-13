@@ -134,6 +134,10 @@ impl Runtime {
                 Operation::Inspect(query)
             }
             "debug.control" => {
+                ensure!(
+                    record.specification["debugger"]["mode"] != "dump",
+                    "dump sessions permit inspection and close only"
+                );
                 let control: session_wire::Control =
                     serde_json::from_value(Value::Object(fields.clone()))?;
                 control.validate()?;
@@ -152,7 +156,7 @@ impl Runtime {
             && self
                 .debugger
                 .as_ref()
-                .is_some_and(|live| live.request.resource_id == id && live.busy())
+                .is_some_and(|live| live.request.target.resource_id == id && live.busy())
         {
             self.cancel(&id)?;
             self.debugger.as_mut().unwrap().request_cancel();
@@ -163,7 +167,7 @@ impl Runtime {
             !self
                 .debugger
                 .as_ref()
-                .is_some_and(|live| live.request.resource_id == id && live.busy()),
+                .is_some_and(|live| live.request.target.resource_id == id && live.busy()),
             "native debugger already has an in-flight exchange"
         );
         let ticket = if method == "debug.inspect" {
@@ -188,7 +192,7 @@ impl Runtime {
         let live = self
             .debugger
             .as_mut()
-            .filter(|live| live.request.resource_id == id)
+            .filter(|live| live.request.target.resource_id == id)
             .context("native debugger host ownership was interrupted")?;
         let exchange = match live.prepare(operation) {
             Ok(exchange) => exchange,
@@ -290,18 +294,22 @@ impl Runtime {
         let request_id = request_id(params)?;
         let start: Start = serde_json::from_value(Value::Object(clean(params)))?;
         ensure!(
-            start.mode == "launch"
+            matches!(start.mode.as_str(), "launch" | "dump")
                 && matches!(start.engine.as_str(), "auto" | "dbgeng")
-                && start.dump.is_none(),
-            "native debugger currently admits launch with auto/dbgeng only"
+                && (start.mode == "dump") == start.dump.is_some(),
+            "native debugger requires launch or dump with auto/dbgeng; only dump mode requires a dump"
         );
         ensure!(
             start.launch_spec.is_some() || start.target.is_some(),
-            "native debugger launch requires a target or LaunchSpec"
+            "native debugger requires a target or LaunchSpec"
         );
         ensure!(
             start.launch_spec.is_none() || start.target.is_none() && start.args.is_empty(),
             "LaunchSpec owns debugger target and arguments"
+        );
+        ensure!(
+            start.mode != "dump" || start.input.is_none() && start.args.is_empty(),
+            "dump inspection cannot supply execution arguments or stdin"
         );
         let spec = Specification {
             argv: start
@@ -337,17 +345,28 @@ impl Runtime {
             {
                 ensure!(
                     *phase == Phase::Live
-                        && self
-                            .debugger
-                            .as_ref()
-                            .is_some_and(|live| live.request.resource_id == *resource
-                                && !live.needs_recovery()),
+                        && self.debugger.as_ref().is_some_and(|live| live
+                            .request
+                            .target
+                            .resource_id
+                            == *resource
+                            && !live.needs_recovery()),
                     "native debugger start was completed but host ownership is unavailable; reconcile the original resource"
                 );
             }
             return cached(existing).map(Dispatch::Ready);
         }
-        let mut request = spec.prepare(inputs, owner)?;
+        let mut request = crate::session_request::Request {
+            schema: crate::session_host::SCHEMA,
+            target: spec.prepare(inputs, owner)?,
+            mode: match &start.dump {
+                Some(path) => crate::session_request::Mode::Dump {
+                    file: inputs.reference(owner, path, Purpose::Inspect)?,
+                },
+                None => crate::session_request::Mode::Launch,
+            },
+        };
+        request.validate()?;
         ensure!(
             self.running.is_none() && self.debugger.is_none() && self.recovery.is_none(),
             "native host remains owned"
@@ -360,7 +379,7 @@ impl Runtime {
         else {
             return cached(reserved).map(Dispatch::Ready);
         };
-        request.resource_id = resource.clone();
+        request.target.resource_id = resource.clone();
         let ticket = journal.begin(&effect)?;
         self.debugger = Some(session_runtime::Live::spawn(
             &self.root,
@@ -387,11 +406,11 @@ impl Runtime {
         let live = self
             .debugger
             .as_mut()
-            .filter(|live| live.request.resource_id == completed.resource)
+            .filter(|live| live.request.target.resource_id == completed.resource)
             .context("native debugger completion lost its original host; reconcile the journal")?;
         let result = (|| -> Result<Value> {
             let value = live.complete(completed.exchange)?;
-            let record = journal.resource(&live.request.owner, &completed.resource)?;
+            let record = journal.resource(&live.request.target.owner, &completed.resource)?;
             ensure!(
                 if completed.close {
                     record.phase == Phase::Closing
@@ -403,7 +422,7 @@ impl Runtime {
             ensure!(
                 value["session_id"] == completed.resource
                     && value["worker_session_id"] == completed.resource
-                    && value["native_owner"] == serde_json::to_value(&live.request.owner)?,
+                    && value["native_owner"] == serde_json::to_value(&live.request.target.owner)?,
                 "native debugger reply ownership differs"
             );
             ensure!(
@@ -422,9 +441,11 @@ impl Runtime {
                     proof == value["response"]["cleanup"]
                         && proof["schema"] == crate::session_host::SCHEMA
                         && proof["scope"] == "native_debugger_host"
-                        && proof["owner"] == serde_json::to_value(&live.request.owner)?
+                        && proof["owner"] == serde_json::to_value(&live.request.target.owner)?
                         && proof["resource_id"] == completed.resource
                         && proof["request_sha256"] == live.request_hash
+                        && proof["read_only"] == live.request.read_only()
+                        && proof["target_executed"] == !live.request.read_only()
                         && proof["outcome"] == "closed"
                         && proof["jobs_empty"] == true
                         && proof["profiles_removed"] == true

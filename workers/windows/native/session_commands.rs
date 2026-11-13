@@ -122,13 +122,15 @@ pub(crate) struct Session {
     client: Client,
     id: String,
     execution: Option<String>,
+    read_only: bool,
 }
 impl Session {
-    pub(crate) fn new(client: Client, id: String) -> Self {
+    pub(crate) fn new(client: Client, id: String, read_only: bool) -> Self {
         Self {
             client,
             id,
             execution: None,
+            read_only,
         }
     }
     pub(crate) async fn inspect(&mut self, request: Inspect) -> Result<Value> {
@@ -180,6 +182,10 @@ impl Session {
         Ok(serde_json::to_value(self.client.raw(tool, args).await?)?)
     }
     pub(crate) async fn control(&mut self, request: Control) -> Result<Value> {
+        ensure!(
+            !self.read_only,
+            "dump sessions permit inspection and close only"
+        );
         let action = request.validate()?;
         let (tool, mut args) = match action {
             Action::Run | Action::Continue => (

@@ -66,7 +66,7 @@ Linux 复用已有 LaunchSpec 解析器和 UID 隔离，将包括 cwd 外文件�
 
 内置调试器当前使用 GDB/MI。`mode = "dump"` 必须提供单独暂存的 Dump，且禁止启动参数；暂存目标仍为本 run 的原始映像。检查与控制保留有界类型化接口、停止/超时处理及会话所有权。Dump 会话拒绝执行控制，原始 `debug_command` 仅用于 GDB/MI。`dbgeng` 选项为托管 Windows 准入保留；Python 元数据 worker 报告其不可用，不能创建 Windows 调试器进程。
 
-Windows 调试使用固定版本的外部 WinDbg MCP 工具与现有 rmcp 协议库；自写 DbgEng 实现及 Python 协议适配器已删除。控制端 Rig/rmcp 客户端已在专用 VM 中通过真实 x64/x86 dump/live 互通验收。原生隔离资格检查以所属进程调用外部工具，并保留原始 MCP 记录。托管原生启动通路现已接入受保护账本及成对的目标/调试器清理意图。符号/目标对应关系、dump 准入、负向夹具及已安装会话/恢复验收仍未完成；直接 MCP 互通不证明生产隔离。参见[外部调试器验收](../../workers/tests/README.zh-CN.md#外部-windbg-mcp-验收)。
+Windows 调试使用固定版本的外部 WinDbg MCP 工具与现有 rmcp 协议库；自写 DbgEng 实现及 Python 协议适配器已删除。控制端 Rig/rmcp 客户端已在专用 VM 中通过真实 x64/x86 dump/live 互通验收。原生隔离资格检查以所属进程调用外部工具，并保留原始 MCP 记录。托管原生启动通路现已接入受保护账本及成对的目标/调试器清理意图。原生 launch 身份对应及文档列出的可信中断场景已通过已安装验收。dump 准入现复用 `minidump` 和上游 `open_dump`，不执行目标，策略仅允许检查及关闭；其已安装验收和更广泛对抗覆盖仍待完成。直接 MCP 互通不证明生产隔离。参见[外部调试器验收](../../workers/tests/README.zh-CN.md#外部-windbg-mcp-验收)。
 
 ## Windows 离线交付契约
 

@@ -101,6 +101,7 @@ pub(crate) fn stage(
     sources: Vec<AdmittedInput>,
     executable_policy: &AclPolicy,
     working: Option<&security::ResourceDirectory>,
+    allow_execution: bool,
 ) -> Result<Vec<fs::File>> {
     let private = AclPolicy::private_vm();
     stage_with_policy(
@@ -109,6 +110,7 @@ pub(crate) fn stage(
         executable_policy,
         &private,
         working.map(|working| working.path()),
+        allow_execution,
     )
 }
 fn stage_with_policy(
@@ -117,6 +119,7 @@ fn stage_with_policy(
     executable_policy: &AclPolicy,
     private: &AclPolicy,
     working: Option<&Path>,
+    allow_execution: bool,
 ) -> Result<Vec<fs::File>> {
     let mut held = Vec::with_capacity(sources.len());
     for mut source in sources {
@@ -152,7 +155,7 @@ fn stage_with_policy(
         file.flush()?;
         file.sync_all()?;
         drop(file);
-        let policy = if reference.executable {
+        let policy = if allow_execution && reference.executable {
             executable_policy.clone()
         } else {
             executable_policy.read_only_data()
@@ -238,6 +241,13 @@ mod tests {
     }
     #[test]
     fn staged_image_retains_paths_readonly_data_and_no_write_delete_sharing() -> Result<()> {
+        check_staged_access(true)
+    }
+    #[test]
+    fn dump_staging_denies_execution_even_for_executable_image_members() -> Result<()> {
+        check_staged_access(false)
+    }
+    fn check_staged_access(allow_execution: bool) -> Result<()> {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::{
             Security::{
@@ -299,7 +309,14 @@ mod tests {
                 reference.clone(),
             ));
         }
-        let handles = stage_with_policy(&scratch, sources, &image_policy, &private, None)?;
+        let handles = stage_with_policy(
+            &scratch,
+            sources,
+            &image_policy,
+            &private,
+            None,
+            allow_execution,
+        )?;
         assert_eq!(handles.len(), 2);
         for reference in &references {
             let path = scratch.join(&reference.path);
@@ -313,7 +330,7 @@ mod tests {
                 Some(32)
             );
             assert_eq!(fs::remove_file(&path).unwrap_err().raw_os_error(), Some(32));
-            let expected = if reference.executable {
+            let expected = if allow_execution && reference.executable {
                 image_policy.clone()
             } else {
                 image_policy.read_only_data()
@@ -331,7 +348,7 @@ mod tests {
                 )?);
                 assert_eq!(
                     security::test_authz::allows(&descriptor, &token, sid, FILE_EXECUTE)?,
-                    reference.executable
+                    allow_execution && reference.executable
                 );
                 for desired in [FILE_GENERIC_WRITE, DELETE, WRITE_DAC, WRITE_OWNER] {
                     assert!(
