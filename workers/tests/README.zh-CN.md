@@ -4,6 +4,20 @@
 
 [English](README.md) · 简体中文
 
+默认忽略的 Rust 夹具 `remote_installed_windows_worker_process_acceptance` 使用真实控制器，以及已独立固定指纹并安装好的 Windows VM。将 `WUKONG_REMOTE_WORKER_PROCESS_TEST` 指向 JSON 配置，包含托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output` 路径和 `probes`：必须恰含 `x64`/`x86`，各自提供该包 `runtime/selftest/` 目录中可信自编译 `wukong-probe.exe` 的绝对 `path` 及 SHA256 `sha256`。夹具通过准入输入协议上传字节；VM 无需编译器或下载包。检查 echo、截止时间、取消、单资源/租约屏障、稳定启动重试、原始/分块输出哈希和陈旧隔离令牌。报告保留原始回执/输出字节，不含租约令牌或私钥。这仅为有限原生进程验收；生产能力声明仍为 false。
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_TEST = (Resolve-Path .\remote-process-profile.json)
+cargo test --locked --lib remote_installed_windows_worker_process_acceptance -- --ignored --nocapture
+```
+
+这些任务关闭后，独立重启该专用测试服务并观察新的资格回执，保留旧回执和连接身份。随后 `remote_native_completed_process_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_PROCESS_RECOVERY_TEST`，配置包括托管 SSH `config`、既有报告的绝对 `previous` 路径、其 `previous_sha256` 和全新的绝对 `output` 路径。夹具检查系统启动/安装/包身份不变及租约 epoch 递增，无需重新上传，即可按原始稳定请求取回两个已完成结果，并比较原始回执字节。夹具本身不重启服务、不安装或卸载。两个夹具均于 2026-11-13 在 worker 源码 `fbf7912` 上通过用户提供的离线 VM 验收；只读 SQLite 检查和独立复制的原件进一步确认六个资源已关闭、副作用已完成且 scratch 为空。中断资源清理/恢复、准备阶段取消及其他执行/生命周期通路仍未完成。
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_RECOVERY_TEST = (Resolve-Path .\remote-process-recovery-profile.json)
+cargo test --locked --lib remote_native_completed_process_recovery_acceptance -- --ignored --nocapture
+```
+
 - `unit/`：可移植的单元和可信本地夹具测试；平台依赖项显式跳过。
 - `integration/`：需要真实隔离 worker、Linux、GDB、AFL++ 或 Ghidra 的验收入口。
 - `support/`：共享协议客户端，与生产运行代码分开。

@@ -4,6 +4,20 @@
 
 English · [简体中文](README.zh-CN.md)
 
+The ignored Rust fixture `remote_installed_windows_worker_process_acceptance` uses the real controller and an independently pinned, installed Windows VM. Set `WUKONG_REMOTE_WORKER_PROCESS_TEST` to a JSON profile with managed-SSH `config`, expected `manifest_sha256`, a new absolute `output` path and `probes`: exactly `x64`/`x86`, each containing the absolute `path` and SHA256 `sha256` of the trusted self-built `wukong-probe.exe` from that package's `runtime/selftest/` tree. It uploads the bytes through the admitted input protocol; no VM compiler or package download is needed. It checks echo, deadlines, cancellation, one-resource/lease barriers, stable start replay, raw/chunked output hashes and stale fences. The report retains original receipt/output bytes without lease tokens or private keys. This is limited native process acceptance; production capability advertisement remains false.
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_TEST = (Resolve-Path .\remote-process-profile.json)
+cargo test --locked --lib remote_installed_windows_worker_process_acceptance -- --ignored --nocapture
+```
+
+After those jobs close, independently restart only the dedicated test service and observe its new qualification receipt, preserving the old receipt and connection identity. `remote_native_completed_process_recovery_acceptance` then uses `WUKONG_REMOTE_WORKER_PROCESS_RECOVERY_TEST`: managed-SSH `config`, absolute `previous` report path, its `previous_sha256` and a new absolute `output` path. It checks the same OS/install/package identity and increasing lease epoch, retrieves both completed results under their original stable requests without re-upload, and compares original receipt bytes. The fixture performs no service restart, install or uninstall. Both fixtures passed on the provided offline VM on 2026-11-13 at worker source `fbf7912`; read-only SQLite inspection and independently copied originals corroborated six closed resources, completed effects and empty scratch. Interrupted-resource cleanup/recovery, preparation cancellation and the other execution/lifecycle paths remain unfinished.
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_RECOVERY_TEST = (Resolve-Path .\remote-process-recovery-profile.json)
+cargo test --locked --lib remote_native_completed_process_recovery_acceptance -- --ignored --nocapture
+```
+
 - `unit/`: portable unit/trusted-local fixture tests, with explicit platform skips.
 - `integration/`: actual isolated worker/Linux/GDB/AFL++/Ghidra acceptance.
 - `support/`: shared protocol clients, separate from production code.

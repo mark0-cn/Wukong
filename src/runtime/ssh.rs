@@ -222,6 +222,9 @@ fn client_path(path: &Path) -> Result<String> {
 }
 
 #[cfg(test)]
+#[path = "ssh_process_acceptance.rs"]
+mod process_acceptance;
+#[cfg(test)]
 mod tests {
     use super::*;
     /// The installer fixture retains its hosted-machine isolation checks.
@@ -368,7 +371,9 @@ mod tests {
         Ok(())
     }
 
-    fn read_fixture_profile<T: serde::de::DeserializeOwned>(variable: &str) -> Result<T> {
+    pub(super) fn read_fixture_profile<T: serde::de::DeserializeOwned>(
+        variable: &str,
+    ) -> Result<T> {
         let path = PathBuf::from(
             std::env::var_os(variable).context("missing dedicated acceptance profile")?,
         );
@@ -380,7 +385,7 @@ mod tests {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
-    fn enrolled_fixture_address(
+    pub(super) fn enrolled_fixture_address(
         config: &crate::runtime::RuntimeConfig,
         hosted: bool,
     ) -> Result<()> {
