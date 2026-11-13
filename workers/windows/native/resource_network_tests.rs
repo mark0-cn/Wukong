@@ -1,7 +1,7 @@
 use super::*;
 
-fn capture() -> Capture {
-    Capture {
+pub(super) fn capture() -> Binding {
+    Binding {
         start: FILETIME {
             dwHighDateTime: 0,
             dwLowDateTime: 100,
@@ -10,7 +10,7 @@ fn capture() -> Capture {
         listener_port: 45123,
     }
 }
-fn record() -> Record {
+pub(super) fn record() -> Record {
     Record {
         time: 150,
         application_id: b"sealed-native-app".to_vec(),

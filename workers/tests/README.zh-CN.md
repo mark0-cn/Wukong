@@ -4,6 +4,8 @@
 
 [English](README.md) · 简体中文
 
+默认忽略的原生 `live_sdk_subscription_opens_and_unsubscribes_on_the_dedicated_vm` 夹具打开真实的按应用/监听端口过滤的 WFP 订阅，检查可信回环对照并排空 SDK 订阅。仅以管理员身份在专用 Windows VM 运行。它不改变防火墙规则或全局事件选项，也不证明容器内数据包已被阻断。用户 Windows 10 VM 已通过这个 SDK 夹具；实时阻断及并发冷启动验收仍需已安装 worker 的资格检查。见 [Windows 观察契约](../windows/README.zh-CN.md)。
+
 对于已实现原生发现的工具包，可在进程、LaunchSpec 或中断进程验收配置中设置可选 `resource_inventory: true`。共享控制器夹具以每页两项查询两个 API，核对排他游标推进及 ID 一致，并在报告保留返回的资源摘要/状态。进程验收观察活动任务；LaunchSpec 验收要求全部六个已结算任务，拒绝非法范围/游标/作用域覆盖，并核对其他 run 的清单为空。其已完成恢复夹具在独立服务重启后比较完整原清单。故障夹具要求已对账的未知/关闭资源仍可被发现且不重新打开。历史工具包省略该选项。这些新增检查已通过本地编译/库检查，并在 `ddf86dc` 的用户离线 VM 通过已安装服务的进程、LaunchSpec、独立重启和服务中断验收。源码/内容身份及原始证据的边界见 [Windows 资格记录](../windows/README.zh-CN.md)。
 
 `remote_installed_windows_worker_launch_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_TEST`：托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output`，以及恰含 `x64`/`x86` 的 `probes`。每种架构提供 `program` 和 `dependency`，各含工具包 `runtime/selftest/` 目录中文件的绝对 `path` 与固定 `sha256`。可信探针加载同目录 `wukong-fixture.dll`，读取 cwd 外声明的 peer 文件，创建 cwd 文件，并将二进制 stdin/argv 输入复制到 stdout。控制器检查六个资源、改变清单/调用覆盖被拒绝、完整请求/回执身份、清理和已完成启动的稳定重试。VM 内不编译或下载。独立观察服务重启后，`remote_native_launch_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_RECOVERY_TEST`，包含 `config`、绝对 `previous`、其 `previous_sha256` 与全新的绝对 `output`；无需上传或执行，即可比较四个已完成 LaunchSpec 结果和原始回执。这些夹具在源码 `6e2bc91` 的用户离线 VM 通过；见绑定源码的[资格记录](../windows/README.zh-CN.md)。

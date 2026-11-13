@@ -118,19 +118,6 @@ impl Drop for Engine {
         }
     }
 }
-struct Enumeration<'a> {
-    engine: &'a Engine,
-    handle: HANDLE,
-}
-impl Drop for Enumeration<'_> {
-    fn drop(&mut self) {
-        if !self.handle.is_null() {
-            unsafe {
-                FwpmNetEventDestroyEnumHandle0(self.engine.0, self.handle);
-            }
-        }
-    }
-}
 fn checked(status: u32, operation: &str) -> Result<()> {
     ensure!(status == 0, "WFP {operation} failed: 0x{status:08x}");
     Ok(())
@@ -168,31 +155,30 @@ fn filter_name(pointer: *const u16) -> Result<String> {
     anyhow::bail!("WFP filter name exceeds qualification bound")
 }
 
-pub(super) struct Capture {
+struct Binding {
     start: FILETIME,
     application_id: Vec<u8>,
     listener_port: u16,
 }
+#[path = "resource_network_subscription.rs"]
+mod subscription;
+pub(super) struct Capture {
+    subscription: subscription::Subscription,
+}
 impl Capture {
     pub(super) fn start(executable: &Path, listener_port: u16) -> Result<Self> {
         security::require_system()?;
-        let path = security::wide(executable.as_os_str())?;
-        let mut app = Memory(null_mut());
-        checked(
-            unsafe { FwpmGetAppIdFromFileName0(path.as_ptr(), &mut app.0) },
-            "application identity",
-        )?;
-        ensure!(!app.0.is_null(), "WFP application identity is missing");
-        let application_id = blob(unsafe { &*app.0 })?.to_vec();
         Ok(Self {
-            start: time(),
-            application_id,
-            listener_port,
+            subscription: subscription::Subscription::start(Binding::observe(
+                executable,
+                listener_port,
+            )?)?,
         })
     }
-    pub(super) fn verify(&self, observation: &Observation) -> Result<Value> {
+    pub(super) fn verify(mut self, observation: &Observation) -> Result<Value> {
         ensure!(
-            observation.source_port > 0 && observation.source_port != self.listener_port,
+            observation.source_port > 0
+                && observation.source_port != self.subscription.binding().listener_port,
             "invalid probe source port"
         );
         if observation.outcome == Outcome::PermissionDenied {
@@ -200,115 +186,29 @@ impl Capture {
                 matches!(observation.os_error, Some(5 | 10013)),
                 "network permission denial has no matching Windows error"
             );
+            self.subscription.close()?;
             return Ok(
-                json!({"method":"socket_permission_denied","os_error":observation.os_error,"source_port":observation.source_port,"listener_port":self.listener_port}),
+                json!({"method":"socket_permission_denied","os_error":observation.os_error,"source_port":observation.source_port,"listener_port":self.subscription.binding().listener_port}),
             );
         }
-        let mut engine = Engine(null_mut());
-        checked(
-            unsafe { FwpmEngineOpen0(null(), RPC_C_AUTHN_WINNT, null(), null(), &mut engine.0) },
-            "open read-only observation",
-        )?;
         let end = time();
+        let start = self.subscription.binding().start;
         ensure!(
-            ticks(end) >= ticks(self.start) && ticks(end) - ticks(self.start) <= 30 * 10_000_000,
+            ticks(end) >= ticks(start) && ticks(end) - ticks(start) <= 30 * 10_000_000,
             "probe WFP time window is invalid"
         );
-        // An enumeration is a snapshot. Recreate it for bounded late delivery,
-        // preserving the original event-time window. Never enable collection.
-        for attempt in 0..5 {
-            if let Some(evidence) = self.find(&engine, observation.source_port, end)? {
-                return Ok(evidence);
-            }
-            if attempt < 4 {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-        anyhow::bail!(
-            "loopback timeout has no matching AppContainerLoopback WFP drop (source={},listener={})",
-            observation.source_port,
-            self.listener_port
+        let record = self.subscription.wait(observation.source_port, end)?;
+        self.subscription.close()?;
+        Self::verify_filter(
+            self.subscription.engine(),
+            record.filter_id,
+            record.layer_id,
+        )?;
+        Ok(
+            json!({"method":"wfp_appcontainer_loopback_drop","event_collection":"live_subscription","filter_id":record.filter_id,"layer_id":record.layer_id,"event_time":record.time,"window_start":ticks(start),"window_end":ticks(end),"source_port":observation.source_port,"listener_port":self.subscription.binding().listener_port,"listener_sid":"S-1-5-18","application_id_matched":true,"loopback":true,"event_direction":"outbound","filter":"AppContainerLoopback","action":"block"}),
         )
     }
-    fn find(&self, engine: &Engine, source_port: u16, end: FILETIME) -> Result<Option<Value>> {
-        let mut app = FWP_BYTE_BLOB {
-            size: self.application_id.len() as u32,
-            data: self.application_id.as_ptr().cast_mut(),
-        };
-        let mut condition = FWPM_FILTER_CONDITION0 {
-            fieldKey: FWPM_CONDITION_ALE_APP_ID,
-            matchType: FWP_MATCH_EQUAL,
-            conditionValue: FWP_CONDITION_VALUE0 {
-                r#type: FWP_BYTE_BLOB_TYPE,
-                Anonymous: FWP_CONDITION_VALUE0_0 { byteBlob: &mut app },
-            },
-        };
-        let template = FWPM_NET_EVENT_ENUM_TEMPLATE0 {
-            startTime: self.start,
-            endTime: end,
-            numFilterConditions: 1,
-            filterCondition: &mut condition,
-        };
-        let mut enumeration = Enumeration {
-            engine,
-            handle: null_mut(),
-        };
-        checked(
-            unsafe { FwpmNetEventCreateEnumHandle0(engine.0, &template, &mut enumeration.handle) },
-            "create event enumeration",
-        )?;
-        // At most 1024 same-application events; other applications' data never
-        // enters a report. The actual tuple/time/SID is checked independently.
-        for _ in 0..16 {
-            let mut entries = Memory::<*mut FWPM_NET_EVENT2>(null_mut());
-            let mut count = 0;
-            checked(
-                unsafe {
-                    FwpmNetEventEnum2(engine.0, enumeration.handle, 64, &mut entries.0, &mut count)
-                },
-                "enumerate events",
-            )?;
-            ensure!(
-                count <= 64 && (count == 0 || !entries.0.is_null()),
-                "invalid WFP event page"
-            );
-            if count == 0 {
-                return Ok(None);
-            }
-            for pointer in unsafe { std::slice::from_raw_parts(entries.0, count as usize) } {
-                ensure!(!pointer.is_null(), "WFP event is missing");
-                let event = unsafe { &**pointer };
-                if let Some(record) = Record::read(event)?
-                    && self.matches(&record, source_port, ticks(end))
-                {
-                    self.verify_filter(engine, record.filter_id, record.layer_id)?;
-                    return Ok(Some(
-                        json!({"method":"wfp_appcontainer_loopback_drop","filter_id":record.filter_id,"layer_id":record.layer_id,"event_time":record.time,"window_start":ticks(self.start),"window_end":ticks(end),"source_port":source_port,"listener_port":self.listener_port,"listener_sid":"S-1-5-18","application_id_matched":true,"loopback":true,"event_direction":"outbound","filter":"AppContainerLoopback","action":"block"}),
-                    ));
-                }
-            }
-            if count < 64 {
-                return Ok(None);
-            }
-        }
-        anyhow::bail!("WFP probe event enumeration exceeds bound")
-    }
-    fn matches(&self, record: &Record, source_port: u16, end: u64) -> bool {
-        record.time >= ticks(self.start)
-            && record.time <= end
-            && record.application_id == self.application_id
-            && record.listener_port == self.listener_port
-            && record.source_port == source_port
-            && record.local_address == 0x7f000001
-            && record.remote_address == 0x7f000001
-            && record.user_sid == "S-1-5-18"
-            && record.loopback
-            // The observed outgoing loopback attempt reports FWP_DIRECTION_OUT
-            // (0x3901), independently of the enforcing receive/accept layer.
-            // msFwpDirection does not use FWP_DIRECTION_OUTBOUND (0).
-            && record.direction == 0x3901
-    }
-    fn verify_filter(&self, engine: &Engine, id: u64, layer_id: u16) -> Result<()> {
+    fn verify_filter(engine: &Engine, id: u64, layer_id: u16) -> Result<()> {
         let mut filter = Memory(null_mut());
         checked(
             unsafe { FwpmFilterGetById0(engine.0, id, &mut filter.0) },
@@ -335,7 +235,39 @@ impl Capture {
         Ok(())
     }
 }
+impl Binding {
+    fn observe(executable: &Path, listener_port: u16) -> Result<Self> {
+        let path = security::wide(executable.as_os_str())?;
+        let mut app = Memory(null_mut());
+        checked(
+            unsafe { FwpmGetAppIdFromFileName0(path.as_ptr(), &mut app.0) },
+            "application identity",
+        )?;
+        ensure!(!app.0.is_null(), "WFP application identity is missing");
+        Ok(Self {
+            start: time(),
+            application_id: blob(unsafe { &*app.0 })?.to_vec(),
+            listener_port,
+        })
+    }
+    fn matches(&self, record: &Record, source_port: u16, end: u64) -> bool {
+        record.time >= ticks(self.start)
+            && record.time <= end
+            && record.application_id == self.application_id
+            && record.listener_port == self.listener_port
+            && record.source_port == source_port
+            && record.local_address == 0x7f000001
+            && record.remote_address == 0x7f000001
+            && record.user_sid == "S-1-5-18"
+            && record.loopback
+            // The observed outgoing loopback attempt reports FWP_DIRECTION_OUT
+            // (0x3901), independently of the enforcing receive/accept layer.
+            // msFwpDirection does not use FWP_DIRECTION_OUTBOUND (0).
+            && record.direction == 0x3901
+    }
+}
 
+#[derive(Clone)]
 struct Record {
     time: u64,
     application_id: Vec<u8>,
