@@ -690,7 +690,16 @@ impl Runtime {
                 "native artifacts require completed cleanup"
             );
             let suffix = if parts[2] == "receipt" && record.kind == ResourceKind::Debugger {
-                "debug-result.json".into()
+                let status = self.debugger_terminal(&record, &AclPolicy::private_vm())?;
+                if status["state"] == "lost" {
+                    artifact_suffix(
+                        status["result"]["recovery_artifact"]
+                            .as_str()
+                            .context("debugger recovery selector missing")?,
+                    )?
+                } else {
+                    "debug-result.json".into()
+                }
             } else {
                 artifact_suffix(parts[2])?
             };

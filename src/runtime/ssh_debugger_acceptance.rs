@@ -91,7 +91,41 @@ impl Calls<'_> {
             rows.len() == prior.len() + 1 && rows.contains(&closed),
             "retry created or changed a rejected resource"
         );
-        Ok(json!({"resource":closed,"error":error}))
+        let state = self
+            .inspect(
+                closed["resource_id"]
+                    .as_str()
+                    .context("rejected ID absent")?,
+                "state",
+            )
+            .await?;
+        ensure!(
+            state["state"] == "lost"
+                && state["cleanup_pending"] == false
+                && state["result"]["outcome"] == "unknown"
+                && state["native_owner"] == closed["native_owner"],
+            "rejected debugger lost its durable unknown outcome"
+        );
+        let (artifact, bytes) = original(
+            self.client,
+            &format!(
+                "native-results/{}/receipt",
+                closed["resource_id"].as_str().unwrap()
+            ),
+        )
+        .await?;
+        let proof: Value = serde_json::from_slice(&bytes)?;
+        ensure!(
+            artifact["sha256"] == state["result"]["recovery_receipt_sha256"]
+                && proof["resource_id"] == closed["resource_id"]
+                && proof["scope"] == "owned_resource_recovery"
+                && proof["owner"] == closed["native_owner"]
+                && proof["jobs_empty"] == true
+                && proof["profiles_removed"] == true
+                && proof["scratch_removed"] == true,
+            "controller recovery receipt differs from its original resource"
+        );
+        Ok(json!({"resource":closed,"error":error,"state":state,"receipt":artifact,"proof":proof}))
     }
     async fn call(&mut self, method: &str, params: Value) -> Result<Value> {
         self.count += 1;
@@ -401,6 +435,13 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
             "native debugger cleanup incomplete"
         );
         let observations = outcome?;
+        let terminal = calls.inspect(id, "state").await?;
+        ensure!(
+            terminal["state"] == "closed"
+                && terminal["cleanup_pending"] == false
+                && terminal["result"] == closed["response"]["cleanup"],
+            "closed debugger state differs from confirmed cleanup"
+        );
         ensure!(
             calls.call("debug.close", close_request).await? == closed,
             "close retry changed its original result"

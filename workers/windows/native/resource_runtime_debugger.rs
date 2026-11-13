@@ -125,7 +125,12 @@ impl Runtime {
             "debug.inspect" => {
                 let query: session_wire::Inspect =
                     serde_json::from_value(Value::Object(fields.clone()))?;
-                query.validate()?;
+                let kind = query.validate()?;
+                if kind == session_wire::Inspection::State && record.phase == Phase::Closed {
+                    return self
+                        .debugger_terminal(&record, &AclPolicy::private_vm())
+                        .map(Dispatch::Ready);
+                }
                 Operation::Inspect(query)
             }
             "debug.control" => {
@@ -201,6 +206,79 @@ impl Runtime {
             close: method == "debug.close",
             exchange,
         })))
+    }
+    /// Read only after journal-confirmed cleanup. The same run's successor can
+    /// inspect original ownership; it cannot turn this projection into a start.
+    pub(super) fn debugger_terminal(
+        &self,
+        record: &ResourceRecord,
+        policy: &AclPolicy,
+    ) -> Result<Value> {
+        ensure!(
+            record.kind == ResourceKind::Debugger && record.phase == Phase::Closed,
+            "debugger terminal observation requires confirmed closure"
+        );
+        let status_path = self.result_path(&record.id, "status.json");
+        if status_path.try_exists()? {
+            policy.verify(&status_path, false)?;
+            let value: Value =
+                serde_json::from_slice(&deployment::read_bytes(&status_path, 65536)?)?;
+            ensure!(
+                value["session_id"] == record.id
+                    && value["worker_session_id"] == record.id
+                    && value["native_owner"] == serde_json::to_value(&record.owner)?
+                    && value["kind"] == "debugger"
+                    && value["production_execution"] == false
+                    && value["state"] == "lost"
+                    && value["cleanup_pending"] == false
+                    && value["result"]["outcome"] == "unknown"
+                    && value["result"]["jobs_empty"] == true
+                    && value["result"]["profiles_removed"] == true
+                    && value["result"]["scratch_removed"] == true,
+                "native recovered debugger status binding or cleanup differs"
+            );
+            let artifact = value["result"]["recovery_artifact"]
+                .as_str()
+                .context("debugger recovery artifact missing")?;
+            ensure!(
+                artifact.starts_with("recovery-"),
+                "debugger recovery selector is not a recovery receipt"
+            );
+            let proof_path = self.result_path(&record.id, &artifact_suffix(artifact)?);
+            policy.verify(&proof_path, false)?;
+            let bytes = deployment::read_bytes(&proof_path, 65536)?;
+            let proof: Value = serde_json::from_slice(&bytes)?;
+            ensure!(
+                value["result"]["recovery_receipt_sha256"] == hex::encode(Sha256::digest(&bytes))
+                    && proof["schema"] == crate::resource_process::SCHEMA
+                    && proof["scope"] == "owned_resource_recovery"
+                    && proof["resource_id"] == record.id
+                    && proof["owner"] == serde_json::to_value(&record.owner)?
+                    && proof["jobs_empty"] == true
+                    && proof["profiles_removed"] == true
+                    && proof["scratch_removed"] == true,
+                "debugger recovery receipt content or binding differs"
+            );
+            return Ok(value);
+        }
+        let proof_path = self.result_path(&record.id, "debug-result.json");
+        policy.verify(&proof_path, false)?;
+        let proof: Value = serde_json::from_slice(&deployment::read_bytes(&proof_path, 65536)?)?;
+        ensure!(
+            proof["schema"] == crate::session_host::SCHEMA
+                && proof["scope"] == "native_debugger_host"
+                && proof["resource_id"] == record.id
+                && proof["owner"] == serde_json::to_value(&record.owner)?
+                && proof["outcome"] == "closed"
+                && proof["jobs_empty"] == true
+                && proof["profiles_removed"] == true
+                && proof["scratch_removed"] == true,
+            "native closed debugger proof binding or cleanup differs"
+        );
+        Ok(
+            json!({"session_id":record.id,"worker_session_id":record.id,"native_owner":record.owner,
+            "kind":"debugger","state":"closed","cleanup_pending":false,"result":proof,"production_execution":false}),
+        )
     }
     fn start_debugger(
         &mut self,
@@ -391,10 +469,8 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn debugger_start_reconciles_prior_intent_before_resolving_new_inputs() -> Result<()> {
-        let directory = tempfile::tempdir()?;
-        let owner = Owner {
+    fn owner() -> Owner {
+        Owner {
             identity: crate::lease_proxy::Identity {
                 protocol: 2,
                 installation_id: "a".repeat(32),
@@ -404,7 +480,12 @@ mod tests {
             run_id: "run".into(),
             owner_id: "controller".into(),
             epoch: 1,
-        };
+        }
+    }
+    #[test]
+    fn debugger_start_reconciles_prior_intent_before_resolving_new_inputs() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let owner = owner();
         let policy = AclPolicy::current_user()?;
         policy.apply(directory.path(), true)?;
         let mut journal =
@@ -491,6 +572,93 @@ mod tests {
         };
         assert!(!error.to_string().contains("native input"));
         assert!(journal.idle()?);
+        Ok(())
+    }
+    #[test]
+    fn terminal_debugger_observation_preserves_unknown_outcomes_and_binds_receipt_bytes()
+    -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let policy = AclPolicy::current_user()?;
+        policy.apply(directory.path(), true)?;
+        policy.create_directory(&directory.path().join("metadata"))?;
+        policy.create_directory(&directory.path().join("metadata/resource-results"))?;
+        let runtime = Runtime {
+            root: directory.path().into(),
+            executable: directory.path().join("never-execute"),
+            installation: owner().identity.installation_id,
+            running: None,
+            recovery: None,
+            debugger: None,
+        };
+        let record = ResourceRecord {
+            id: "d".repeat(32),
+            phase: Phase::Closed,
+            start_effect: "e".repeat(64),
+            owner: owner(),
+            kind: ResourceKind::Debugger,
+            specification: json!({}),
+        };
+        let artifact = format!("recovery-{}", "f".repeat(32));
+        let proof = json!({"schema":crate::resource_process::SCHEMA,"scope":"owned_resource_recovery",
+            "resource_id":record.id,"owner":record.owner,"jobs_empty":true,"profiles_removed":true,"scratch_removed":true});
+        let proof_path = runtime.result_path(&record.id, &artifact_suffix(&artifact)?);
+        deployment::publish_json(&proof_path, &proof, &policy)?;
+        let original = fs::read(&proof_path)?;
+        let status = json!({"session_id":record.id,"worker_session_id":record.id,"native_owner":record.owner,"kind":"debugger","production_execution":false,
+            "state":"lost","cleanup_pending":false,"result":{"outcome":"unknown","jobs_empty":true,
+            "profiles_removed":true,"scratch_removed":true,"recovery_artifact":artifact,
+            "recovery_receipt_sha256":hex::encode(Sha256::digest(&original))}});
+        let status_path = runtime.result_path(&record.id, "status.json");
+        deployment::publish_json(&status_path, &status, &policy)?;
+        assert_eq!(runtime.debugger_terminal(&record, &policy)?, status);
+        let mut foreign_epoch = record.clone();
+        foreign_epoch.owner.epoch += 1;
+        let mut foreign_run = record.clone();
+        foreign_run.owner.run_id = "another-run".into();
+        let mut foreign_resource = record.clone();
+        foreign_resource.id = "0".repeat(32);
+        for changed in [&foreign_epoch, &foreign_run, &foreign_resource] {
+            assert!(runtime.debugger_terminal(changed, &policy).is_err());
+        }
+        let mut live = record.clone();
+        live.phase = Phase::Closing;
+        assert!(runtime.debugger_terminal(&live, &policy).is_err());
+        let mut process = record.clone();
+        process.kind = ResourceKind::Process;
+        assert!(runtime.debugger_terminal(&process, &policy).is_err());
+        let mut altered = proof.clone();
+        altered["owner"]["epoch"] = json!(99);
+        fs::write(&proof_path, serde_json::to_vec(&altered)?)?;
+        assert!(runtime.debugger_terminal(&record, &policy).is_err());
+        fs::write(&proof_path, &original)?;
+        for (field, value) in [
+            ("outcome", json!("closed")),
+            ("jobs_empty", json!(false)),
+            ("recovery_artifact", json!("stdout")),
+            ("recovery_artifact", json!("recovery-../other")),
+        ] {
+            let mut changed = status.clone();
+            changed["result"][field] = value;
+            fs::write(&status_path, serde_json::to_vec(&changed)?)?;
+            assert!(
+                runtime.debugger_terminal(&record, &policy).is_err(),
+                "{field}"
+            );
+        }
+        fs::remove_file(&status_path)?;
+        assert!(runtime.debugger_terminal(&record, &policy).is_err());
+        let clean = json!({"schema":crate::session_host::SCHEMA,"scope":"native_debugger_host",
+            "resource_id":record.id,"owner":record.owner,"outcome":"closed",
+            "jobs_empty":true,"profiles_removed":true,"scratch_removed":true});
+        deployment::publish_json(
+            &runtime.result_path(&record.id, "debug-result.json"),
+            &clean,
+            &policy,
+        )?;
+        let closed = runtime.debugger_terminal(&record, &policy)?;
+        assert_eq!(closed["state"], "closed");
+        assert_eq!(closed["result"], clean);
+        assert_eq!(fs::read(&proof_path)?, original);
         Ok(())
     }
 }
