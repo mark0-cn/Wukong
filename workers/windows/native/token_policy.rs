@@ -1,5 +1,5 @@
 //! Exact sandbox token policy shared by suspended-child admission, the fixed
-//! resource probe and the unprivileged debugger helper.
+//! resource probe.
 use anyhow::{Result, ensure};
 use std::{mem::size_of, ptr::null};
 use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_PRIVILEGES, TokenPrivileges};
@@ -42,8 +42,7 @@ pub(crate) fn verify_privileges(token: windows_sys::Win32::Foundation::HANDLE) -
     Ok(())
 }
 
-/// Local path validation remains independent. This establishes the OS network
-/// boundary required before avoiding DbgEng's incompatible DOS-drive heuristic.
+/// Verify the OS network boundary independently of local path validation.
 pub(crate) fn verify_network_isolation(
     token: windows_sys::Win32::Foundation::HANDLE,
 ) -> Result<()> {
@@ -88,7 +87,7 @@ pub(crate) fn verify_network_isolation(
 mod tests {
     use super::*;
     #[test]
-    fn an_ordinary_token_cannot_select_the_contained_symbol_policy() -> Result<()> {
+    fn an_ordinary_token_cannot_satisfy_the_resource_network_policy() -> Result<()> {
         use windows_sys::Win32::{
             Foundation::CloseHandle,
             Security::TOKEN_QUERY,

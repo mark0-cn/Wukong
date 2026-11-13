@@ -4,7 +4,9 @@ use anyhow::{Context, Result, ensure};
 use futures_util::StreamExt;
 use rmcp::{
     RoleClient, ServiceExt,
-    model::{CallToolRequestParams, ClientCapabilities, ClientConfig, Implementation},
+    model::{
+        CallToolRequestParams, CallToolResult, ClientCapabilities, ClientConfig, Implementation,
+    },
     service::{RunningService, RxJsonRpcMessage, TxJsonRpcMessage},
     transport::async_rw::JsonRpcMessageCodec,
 };
@@ -54,7 +56,7 @@ impl Client {
         })
     }
 
-    pub(crate) async fn call(&mut self, name: &str, arguments: Value) -> Result<Value> {
+    pub(crate) async fn call(&mut self, name: &str, arguments: Value) -> Result<CallToolResult> {
         let mut request = CallToolRequestParams::new(name.to_owned());
         request.arguments = Some(
             arguments
@@ -79,9 +81,14 @@ impl Client {
             result.is_error != Some(true),
             "external debugger rejected {name}; inspect its MCP transcript"
         );
-        result
+        Ok(result)
+    }
+
+    pub(crate) async fn structured(&mut self, name: &str, arguments: Value) -> Result<Value> {
+        self.call(name, arguments)
+            .await?
             .structured_content
-            .context("external debugger did not return a structured result")
+            .with_context(|| format!("external debugger {name} did not return a structured result"))
     }
 
     pub(crate) async fn close(mut self) -> Result<()> {

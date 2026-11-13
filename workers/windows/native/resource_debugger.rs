@@ -141,7 +141,9 @@ pub(super) fn check(
 }
 
 async fn probe(client: &mut Client, pid: u32, symbols: &Path, architecture: &str) -> Result<()> {
-    let opened = client.call("attach_process", json!({"pid":pid})).await?;
+    let opened = client
+        .structured("attach_process", json!({"pid":pid}))
+        .await?;
     let session = opened["session_id"]
         .as_str()
         .context("MCP debugger omitted its session handle")?;
@@ -154,7 +156,7 @@ async fn probe(client: &mut Client, pid: u32, symbols: &Path, architecture: &str
             )
             .await?;
         let breakpoint = client
-            .call(
+            .structured(
                 "set_breakpoint",
                 json!({"session_id":session,"expression":"wukong_probe!fixture_step"}),
             )
@@ -162,14 +164,14 @@ async fn probe(client: &mut Client, pid: u32, symbols: &Path, architecture: &str
         let address = breakpoint["breakpoint"]["address"]
             .as_str()
             .context("fixture breakpoint is unresolved")?;
-        let stop = client.call("go", route.clone()).await?;
+        let stop = client.structured("go", route.clone()).await?;
         ensure!(
             stop["timed_out"] == false
                 && stop["target_gone"] == false
                 && stop["stopped_at"] == address,
             "contained debugger did not hit the fixture breakpoint"
         );
-        let registers = client.call("registers", route.clone()).await?;
+        let registers = client.structured("registers", route.clone()).await?;
         let ip = registers["instruction_pointer"]
             .as_str()
             .context("debugger has no program counter")?;
@@ -178,14 +180,14 @@ async fn probe(client: &mut Client, pid: u32, symbols: &Path, architecture: &str
             ip == address && ip_value > 0 && (architecture != "x86" || ip_value < 1 << 32),
             "contained program counter differs from the target architecture/breakpoint"
         );
-        let modules = client.call("modules", route.clone()).await?;
+        let modules = client.structured("modules", route.clone()).await?;
         ensure!(
             modules["modules"].as_array().is_some_and(|rows| rows
                 .iter()
                 .any(|row| row["name"] == "wukong_probe" && row["symbols"] == "pdb")),
             "contained debugger did not load the sealed fixture PDB"
         );
-        let stack = client.call("backtrace", route.clone()).await?;
+        let stack = client.structured("backtrace", route.clone()).await?;
         ensure!(
             stack["frames"][0]["symbol"] == "wukong_probe!fixture_step"
                 && stack["frames"][0]["address"] == address,
@@ -194,7 +196,7 @@ async fn probe(client: &mut Client, pid: u32, symbols: &Path, architecture: &str
         Ok(())
     }
     .await;
-    let released = client.call("end_session", route).await?;
+    let released = client.structured("end_session", route).await?;
     ensure!(
         released["released"] == true && released["recovery_required"] == false,
         "contained debugger did not release its session"
