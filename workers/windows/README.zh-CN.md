@@ -248,3 +248,11 @@ cargo test --locked --lib remote_installed_windows_worker_controller_acceptance 
 | 系统重启 | `760b3297ebd339a4cdb4c2df754fcb4f` | `7e73ed952c0b563196eda252e704136aff9198f355fa279cd740e4e47f76177f` |
 
 真实控制器在首次安装及服务重启后通过验收，持久租约 epoch 分别增长至 2、4。独立的协调重启夹具保留了重启前的实际控制器传输：下一次读取失败，重连在写入前拒绝旧绑定；新控制器在成功读取已有夹具的同时确认写入哨兵不存在。启动配置项 GUID 保持为 `b79fde1663b711ef984cccad5e43e22f`，loader 序号从 4 变为 5；安装/包身份不变，租约 epoch 从 5 增至 6。管理 SSH 与原生服务自动启动，两份旧回执及产品主机身份均保持不变。重启报告 SHA256 为 `7ef998ac30a418097f5e2f7aebae03561e506c509d09b4526c478c6167068158`，入口见[协调夹具](../tests/README.zh-CN.md)。这些结果覆盖固定可信资源及控制器绑定，不证明对抗性执行准入、普通分析资源恢复、更新/修复/回滚/卸载、旧式完整用户态 dump 或有效内核 dump 拒绝。生产执行仍禁用；上述检查未使用托管 CI，也未发布版本。
+
+## 原生 Python 源码作业
+
+托管 `py.run` 现与 `job.start` 共用原生进程账本、当前租约校验、目标 persona、guardian Job、有界输出及清理/恢复路径。它使用签名包内的 CPython 入口，固定选项为 `-I -B -u -X utf8`，源码及用户参数位于解释器选项之后。提交的源码绝不在 System 服务或元数据 worker 内编译、执行。因此，CPython 语法错误产生带原始 stderr 的失败作业。原生资源类型仍为 `process`，保留 `job.status/list/cancel/artifacts` 行为。
+
+源码为非空 UTF-8，最多 256 KiB，禁止 NUL。其哈希确定 `files/native-python/` 下密封、不可执行的输入；发布复用既有输入配额、持有文件核对和私有回执。最多 64 个 argv 参数及一个可选已准入目标沿用已有文件暂存策略。超时为 10–3600 秒（默认 120），输出为 1 KiB–8 MiB（默认 1 MiB），沿用 16 个进程/1 GiB 的 Job 限制。不接受环境、运行时或 LaunchSpec 覆盖。调试器准入仍要求原生映像。发布源码前先查询已完成或中断的启动，包括控制器归属变化后；恢复核对原始解释器及绑定源码的进程意图。
+
+本机原生检查通过 137 项测试、五项明确跳过，覆盖不可变源码准入、其他 owner/执行访问拒绝、解释器与调试器隔离、无效参数在发布前拒绝，以及中断 ID 对账且不准入继任控制器源码。[已安装 Python 夹具](../tests/README.zh-CN.md#原生-python-验收) 检查真实包内运行时；本次改动的已安装及中断验收尚待完成。生产执行仍禁用。固定解释器选项遵循 [CPython 命令行契约](https://docs.python.org/3.13/using/cmdline.html)；包中已提供隔离的 `._pth` 布局及依赖。

@@ -44,7 +44,6 @@ pub enum ResourceKind {
     Debugger,
     Replay,
     Interactive,
-    Python,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

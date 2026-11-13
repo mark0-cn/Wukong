@@ -20,6 +20,8 @@ pub struct Request {
     pub resource_id: String,
     pub owner: Owner,
     pub program: Reference,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interpreter: Option<Interpreter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub argument_files: Vec<Reference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -31,6 +33,18 @@ pub struct Request {
     pub output_limit: usize,
     pub processes: u32,
     pub memory_bytes: u64,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Interpreter {
+    Python,
+}
+impl Interpreter {
+    pub(crate) fn source_path(self, sha256: &str) -> String {
+        match self {
+            Self::Python => format!("files/native-python/{sha256}.py"),
+        }
+    }
 }
 pub(crate) const SCHEMA: u32 = 3;
 #[derive(Deserialize, Serialize)]
@@ -71,7 +85,7 @@ impl Request {
             &self.owner.identity.package_sha256,
         )?;
         ensure!(
-            self.program.executable
+            self.program.executable == self.interpreter.is_none()
                 && self.arguments.len() <= 128
                 && self.arguments.iter().all(|a| !a.contains('\0'))
                 && self
@@ -82,6 +96,17 @@ impl Request {
                     <= 16384,
             "invalid native process argv or executable policy"
         );
+        if let Some(interpreter) = self.interpreter {
+            ensure!(
+                self.program.path == interpreter.source_path(&self.program.sha256)
+                    && self.program.size <= 256 * 1024
+                    && self.launch.is_none()
+                    && self.input.is_none()
+                    && self.environment.is_empty()
+                    && self.arguments.len() <= 65,
+                "interpreted source must retain its bounded immutable input and fixed runtime"
+            );
+        }
         if let Some(launch) = &self.launch {
             ensure!(
                 self.argument_files.is_empty(),
@@ -239,7 +264,7 @@ fn finish(
         crate::process_capture::StopReason::Cancelled => "cancelled",
     };
     Ok(
-        serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,"argument_files":request.argument_files,"launch":request.launch,"input":request.input,"request_sha256":digest(request)?,
+        serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,"interpreter":request.interpreter,"argument_files":request.argument_files,"launch":request.launch,"input":request.input,"request_sha256":digest(request)?,
         "pid":result.pid,"execution_started":result.pid != 0,"exit_code":result.exit_code,"stop_reason":reason,"appcontainer_sid":appcontainer,"logon_sid":logon,
         "stdout_base64":base64::engine::general_purpose::STANDARD.encode(&result.stdout),"stderr_base64":base64::engine::general_purpose::STANDARD.encode(&result.stderr),
         "stdout_sha256":hex::encode(Sha256::digest(&result.stdout)),"stderr_sha256":hex::encode(Sha256::digest(&result.stderr)),
@@ -255,6 +280,7 @@ mod tests {
     fn request() -> Request {
         Request {
             schema: SCHEMA,
+            interpreter: None,
             resource_id: "a".repeat(32),
             owner: Owner {
                 identity: Binding {

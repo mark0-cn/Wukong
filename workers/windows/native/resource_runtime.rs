@@ -89,6 +89,14 @@ impl Specification {
             && request.output_limit == self.output_limit
     }
     fn prepare(&self, inputs: &Inputs, owner: &Owner) -> Result<Request> {
+        self.prepare_interpreted(inputs, owner, None)
+    }
+    fn prepare_interpreted(
+        &self,
+        inputs: &Inputs,
+        owner: &Owner,
+        interpreter: Option<crate::resource_process::Interpreter>,
+    ) -> Result<Request> {
         self.validate()?;
         let input = self
             .input
@@ -122,7 +130,15 @@ impl Specification {
                 )
             } else {
                 (
-                    inputs.reference(owner, &self.argv[0], Purpose::Execute)?,
+                    inputs.reference(
+                        owner,
+                        &self.argv[0],
+                        if interpreter.is_some() {
+                            Purpose::Inspect
+                        } else {
+                            Purpose::Execute
+                        },
+                    )?,
                     self.argv[1..].to_vec(),
                     self.env.clone(),
                     self.timeout_secs.unwrap_or(default_timeout()),
@@ -144,6 +160,7 @@ impl Specification {
             resource_id: "0".repeat(32),
             owner: owner.clone(),
             program,
+            interpreter,
             argument_files: argument_files.into_values().collect(),
             launch,
             arguments,
@@ -184,6 +201,8 @@ struct Recovering {
 }
 #[path = "resource_runtime_debugger.rs"]
 mod debugger;
+#[path = "resource_runtime_python.rs"]
+mod python;
 #[path = "resource_runtime_recovery.rs"]
 mod recovery;
 pub(crate) use debugger::Dispatch;
@@ -230,6 +249,7 @@ impl Runtime {
                 | "debug.control"
                 | "debug.close"
                 | "job.start"
+                | "py.run"
                 | "job.status"
                 | "job.cancel"
                 | "job.artifacts"
@@ -257,6 +277,14 @@ impl Runtime {
             return self.start(
                 journal,
                 inputs.context("native start input store is missing")?,
+                owner,
+                params,
+            );
+        }
+        if method == "py.run" {
+            return self.start_python(
+                journal,
+                inputs.context("native Python input store is missing")?,
                 owner,
                 params,
             );
@@ -325,18 +353,30 @@ impl Runtime {
         spec.validate()?;
         let specification =
             json!({"native_process_schema":crate::resource_process::SCHEMA,"process":spec});
+        self.start_prepared(journal, owner, request_id, &specification, || {
+            spec.prepare(inputs, owner)
+        })
+    }
+    fn start_prepared(
+        &mut self,
+        journal: &mut Journal,
+        owner: &Owner,
+        request_id: &str,
+        specification: &Value,
+        prepare: impl FnOnce() -> Result<Request>,
+    ) -> Result<Value> {
         if let Some(existing) =
-            journal.lookup_start(owner, request_id, ResourceKind::Process, &specification)?
+            journal.lookup_start(owner, request_id, ResourceKind::Process, specification)?
         {
             return self.reserved_status(journal, owner, existing);
         }
-        let mut request = spec.prepare(inputs, owner)?;
         ensure!(
             self.running.is_none() && self.debugger.is_none(),
             "native host remains owned"
         );
+        let mut request = prepare()?;
         let reserved =
-            journal.reserve_start(owner, request_id, ResourceKind::Process, &specification)?;
+            journal.reserve_start(owner, request_id, ResourceKind::Process, specification)?;
         let Reservation::Reserved {
             effect, resource, ..
         } = reserved
@@ -536,6 +576,7 @@ impl Runtime {
                 && result["resource_id"] == *id
                 && result["owner"] == serde_json::to_value(&request.owner)?
                 && result["program"] == serde_json::to_value(&request.program)?
+                && result["interpreter"] == serde_json::to_value(request.interpreter)?
                 && result["request_sha256"] == crate::inputs::digest(request)?
                 && result["input"] == serde_json::to_value(&request.input)?
                 && result["launch"] == serde_json::to_value(&request.launch)?

@@ -117,6 +117,12 @@ Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特
 
 首个正常停止夹具在已断开的 SSH 连接上验证旧租约，导致断言失败；服务重启及原资源清理已由独立观察确认成功。修正夹具前，六份观察器原件和 201 份启动/资源原件已核对哈希，该次仍保留为控制器测试失败。最终收集核对 250 份启动/资源原件，确认 17 个资源关闭、54 个副作用完成、四次启动资格检查通过，scratch 为空。每个成功故障用例另有六份观察器原件通过核对。全部 19 个服务及管理 SSH 保持运行，没有默认路由，ISO 保持卸载。这些结果覆盖空闲 dump 恢复，不覆盖执行中的检查操作、系统重启、旧版/内核格式或通用对抗隔离。生产执行仍禁用。
 
+### 原生 Python 验收
+
+`remote_installed_windows_worker_python_acceptance` 通过 `WUKONG_REMOTE_WORKER_PYTHON_TEST` 使用固定身份的 `config`、`manifest_sha256`、`python_sha256`、可信 `probe`（`path`/`sha256`）及新的绝对 `output`。它复用已有上传、进程状态及原始产物读取函数。夹具检查实际包内 CPython 选项/哈希、Unicode 与字面 argv、包内 `filelock` 依赖、密封源码/目标文件，以及可信子进程。单独用例覆盖语法错误、期限、输出超限和取消，全部要求实际执行且确认清理。稳定启动返回已完成状态，同一 ID 下改变源码被拒绝。编译不证明这些已安装用例通过。
+
+独立观察服务重启后，`remote_native_completed_python_recovery_acceptance` 通过 `WUKONG_REMOTE_WORKER_PYTHON_RECOVERY_TEST` 使用 `config`、以 `previous` 路径/SHA256 引用的原始报告，以及新的绝对 `output`。它要求租约 epoch 增加，并在不重新上传源码的情况下核对完全相同的原始状态及哈希绑定回执。两个测试默认忽略，通过 `cargo test --locked --lib TEST_NAME -- --ignored --nocapture` 运行，不执行安装或服务变更。必须记录真实且绑定源码的 VM 结果后，才可宣称已安装验收；中断/对抗覆盖及完整生产可用性仍是独立门槛。
+
 ### 外部 WinDbg MCP 验收
 
 显式启用的 `runtime::ssh::dump_acceptance::remote_installed_windows_worker_dump_acceptance` 夹具通过 `WUKONG_REMOTE_WORKER_DUMP_TEST` 读取固定哈希的 x64/x86 探针 EXE/PDB/minidump 引用及已登记 VM 连接。它检查 dump 身份对应、架构不匹配后的恢复、内存/寄存器/栈检查、全部类型化控制操作均被拒绝且不占用请求 ID、不执行目标的清理回执，以及完整上游工具日志。生成可信夹具转储时使用明确的环境变量白名单；绝不传输继承了控制器凭据的完整内存快照。编译及本机 SDK/ACL 测试不能替代该已安装验收。

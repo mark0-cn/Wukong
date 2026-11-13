@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add native managed Windows Python-job routing through the packaged CPython interpreter and the existing owned process lifecycle. Source bytes are sealed and hash-bound; completed or interrupted jobs are reconciled without replay. Full production Windows execution remains disabled pending the remaining acceptance work."
+zh_CN = "新增托管 Windows 的原生 Python 作业通路，复用包内 CPython 和已有所属进程生命周期。源码字节密封并绑定哈希；已完成或中断的作业通过对账恢复，不重放执行。完整 Windows 生产执行仍禁用，等待剩余验收完成。"

@@ -1,5 +1,5 @@
 use super::*;
-fn owner() -> Owner {
+pub(super) fn owner() -> Owner {
     Owner {
         identity: crate::lease_proxy::Identity {
             protocol: 2,

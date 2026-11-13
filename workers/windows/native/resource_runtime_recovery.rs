@@ -102,6 +102,9 @@ impl Runtime {
                 serde_json::from_value(record.specification["process"].clone())?;
             ensure!(
                 spec.matches(&request)
+                    && serde_json::from_value::<Option<crate::resource_process::Interpreter>>(
+                        record.specification["interpreter"].clone()
+                    )? == request.interpreter
                     && request.owner == record.owner
                     && request.resource_id == record.id,
                 "recovered result request differs from its journal intent"

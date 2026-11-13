@@ -25,6 +25,10 @@ impl Request {
             "unsupported debugger request schema"
         );
         self.target.validate()?;
+        ensure!(
+            self.target.interpreter.is_none(),
+            "debugger admission requires a native target image"
+        );
         if let Some(dump) = self.dump() {
             ensure!(
                 self.target.input.is_none(),

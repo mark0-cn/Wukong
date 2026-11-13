@@ -307,6 +307,14 @@ impl Inputs {
             result.get("native_input").is_none(),
             "worker cannot issue native input proof"
         );
+        self.publish_receipt(declaration)?;
+        result["native_input"] = serde_json::json!({"schema":1,"id":digest(declaration)?,
+            "identity":declaration.owner.identity,"run_id":declaration.owner.run_id,
+            "owner_id":declaration.owner.owner_id,"epoch":declaration.owner.epoch,
+            "sha256":declaration.sha256,"size":declaration.size,"executable":declaration.executable});
+        Ok(())
+    }
+    fn publish_receipt(&self, declaration: &Declaration) -> Result<()> {
         let directory = self.directory(declaration)?;
         let key = digest(&declaration.path)?;
         ensure!(
@@ -329,11 +337,30 @@ impl Inputs {
             )?;
             self.publish(&receipt, &serde_json::to_vec(declaration)?)?;
         }
-        result["native_input"] = serde_json::json!({"schema":1,"id":digest(declaration)?,
-            "identity":declaration.owner.identity,"run_id":declaration.owner.run_id,
-            "owner_id":declaration.owner.owner_id,"epoch":declaration.owner.epoch,
-            "sha256":declaration.sha256,"size":declaration.size,"executable":declaration.executable});
         Ok(())
+    }
+    /// Native controller-source admission has no metadata-worker upload. Reuse
+    /// the same immutable bytes, quota and receipt publication after its fence.
+    pub(crate) fn python_source(&self, owner: &Owner, source: &str) -> Result<Reference> {
+        ensure!(
+            !source.trim().is_empty() && source.len() <= 256 * 1024 && !source.contains('\0'),
+            "Python source must be nonempty UTF-8 <=256 KiB without NUL"
+        );
+        let sha256 = hex::encode(Sha256::digest(source.as_bytes()));
+        let put = Put {
+            declaration: Declaration {
+                schema: 1,
+                owner: owner.clone(),
+                path: crate::resource_process::Interpreter::Python.source_path(&sha256),
+                sha256,
+                size: source.len() as u64,
+                executable: false,
+            },
+            data: source.as_bytes().to_vec(),
+        };
+        self.prepare(&put)?;
+        self.publish_receipt(&put.declaration)?;
+        self.reference(owner, &put.declaration.path, Purpose::Inspect)
     }
     fn reserve(&self, directory: &Path, pending: &[(&Path, u64)]) -> Result<()> {
         // Include interrupted temporary files and every proposed physical byte.

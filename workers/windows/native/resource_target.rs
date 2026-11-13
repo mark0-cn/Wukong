@@ -11,7 +11,7 @@ use crate::{
     resource_process::{Request, SCHEMA, ScratchIntent, nonce},
     security::{self, AclPolicy, ResourceDirectory},
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, ffi::OsString, fs::File, path::PathBuf};
 
 pub(crate) struct Prepared {
@@ -107,7 +107,19 @@ impl Prepared {
         )?;
         let scratch = directory.path().to_owned();
         // acquire() checked each portable files/... member. Preserve its layout.
-        let executable = scratch.join(&request.program.path);
+        let program_path = scratch.join(&request.program.path);
+        let executable = match request.interpreter {
+            None => program_path.clone(),
+            Some(crate::resource_process::Interpreter::Python) => {
+                ensure!(
+                    debugger.is_none(),
+                    "native debugger cannot attach an interpreter request"
+                );
+                host.deployment
+                    .package(&host.root)
+                    .join(&host.manifest.manifest().entrypoints.python)
+            }
+        };
         let working = request
             .launch
             .as_ref()
@@ -136,7 +148,7 @@ impl Prepared {
                 .iter()
                 .map(|(key, value)| (key.clone(), OsString::from(value))),
         );
-        let arguments = request
+        let mut arguments: Vec<OsString> = request
             .arguments
             .iter()
             .map(|argument| {
@@ -159,6 +171,20 @@ impl Prepared {
                 }
             })
             .collect::<Result<_>>()?;
+        if request.interpreter.is_some() {
+            // CPython owns parsing and execution. These fixed options precede
+            // the sealed script; user argv can never become interpreter flags.
+            let mut invocation = vec![
+                "-I".into(),
+                "-B".into(),
+                "-u".into(),
+                "-X".into(),
+                "utf8".into(),
+                program_path.into_os_string(),
+            ];
+            invocation.append(&mut arguments);
+            arguments = invocation;
+        }
         Ok(Self {
             persona,
             identity,
