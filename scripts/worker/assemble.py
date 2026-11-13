@@ -115,7 +115,8 @@ def assemble(cache, output, native, keys):
     license_paths = {"python": ["runtime/python/LICENSE.txt"], "openssh": ["runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"],
                      "debugging_tools": ["licenses/debugging-tools.rtf"],
                      "worker_python_dependencies": ["runtime/python/Lib/site-packages/pygdbmi-0.11.0.0.dist-info/LICENSE",
-                         "runtime/python/Lib/site-packages/filelock-4.2.1.dist-info/licenses/LICENSE"]}
+                         "runtime/python/Lib/site-packages/filelock-4.2.1.dist-info/licenses/LICENSE",
+                         "runtime/python/Lib/site-packages/atomicwrites-1.4.0.dist-info/LICENSE"]}
     components = {name: dict(component, original_payloads=["originals/" + item["path"] for item in lock["assets"] if item["component"] == name],
                             licenses=license_paths[name]) for name, component in lock["components"].items()}
     manifest = dict(schema=1, platform="windows-amd64", version=version(), source_revision=native_metadata["source_revision"],

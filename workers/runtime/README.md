@@ -20,6 +20,8 @@ Managed Windows VMs require the complete offline package, including Python and a
 
 Bridge startup disables Python bytecode writes before importing worker modules, including in new daemon/job-supervisor processes. This keeps signed deployment files unchanged; writable state remains in the configured state directory. Launch other Python entry points from an immutable deployment with `-B` as well.
 
+Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before replacement, and failed writes clean up their temporary files. The library handles Windows write-through moves and POSIX parent-directory synchronization. Only transient Windows access/sharing violations retry, at most five times; a failed reservation never authorizes execution. Corrupted existing leases remain errors and are never silently reset. The offline package pins the published 1.4.0 universal wheel; 1.4.1 changes only the runtime module's version and API docstring. Failure-injection checks do not establish power-loss or current-source VM reboot acceptance.
+
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
 and the original `record`. Original MI transcripts remain available as evidence.

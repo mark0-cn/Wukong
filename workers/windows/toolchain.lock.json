@@ -15,7 +15,7 @@
       "channel": "preview"
     },
     "worker_python_dependencies": {
-      "version": "pygdbmi=0.11.0.0;filelock=4.2.1",
+      "version": "pygdbmi=0.11.0.0;filelock=4.2.1;atomicwrites=1.4.0",
       "channel": "stable"
     }
   },
@@ -474,6 +474,13 @@
       "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/winsdksetup.exe",
       "sha256": "b0bdbad38ae74c40ccae8cdbcf229807627fba2bc3100be28301c4ba884f755e",
       "size": 1450360
+    },
+    {
+      "component": "worker_python_dependencies",
+      "path": "python/atomicwrites-1.4.0-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/2c/a0/da5f49008ec6e9a658dbf5d7310a4debd397bce0b4db03cf8a410066bb87/atomicwrites-1.4.0-py2.py3-none-any.whl",
+      "size": 6790,
+      "sha256": "6d1784dea7c0c8d4a5172b6c620f40b6e4cbfdf96d783691f2e1302a7b88e197"
     }
   ]
 }

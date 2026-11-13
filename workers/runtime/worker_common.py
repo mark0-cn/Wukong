@@ -5,7 +5,7 @@ import json
 import os
 import re
 import time
-import uuid
+from atomicwrites import AtomicWriter, atomic_write
 
 PROTOCOL = 2
 MAX_RPC = 48 * 1024 * 1024
@@ -37,21 +37,23 @@ def safe_env(extra=None):
         env[k] = str(v)
     return env
 
+class _MetadataWriter(AtomicWriter):
+    def commit(self, stream):
+        # Preserve the bounded Windows sharing retry. The library owns temporary
+        # files, fsync, write-through replacement and rollback on every failure.
+        for attempt in range(5):
+            try:
+                return super().commit(stream)
+            except OSError as error:
+                if os.name != "nt" or getattr(error, "winerror", None) not in {5, 32, 33} or attempt == 4:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+
+
 def atomic_json(path, data):
-    path = Path(path)
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    # Windows: a concurrent reader holds the destination without
-    # FILE_SHARE_DELETE, so os.replace fails transiently with WinError 5.
-    # Retry briefly; the replacement itself stays atomic.
-    for attempt in range(5):
-        try:
-            os.replace(temporary, path)
-            return
-        except OSError:
-            if attempt == 4:
-                raise
-            time.sleep(0.02 * (attempt + 1))
+    encoded = json.dumps(data, ensure_ascii=False)
+    with atomic_write(path, writer_cls=_MetadataWriter, overwrite=True, encoding="utf-8") as stream:
+        stream.write(encoded)
 
 def load_json(path):
     # Windows: a concurrent atomic replacement can fail the open with a

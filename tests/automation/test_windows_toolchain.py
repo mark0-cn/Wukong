@@ -20,7 +20,7 @@ from scripts.worker.toolchain import acquire, load_lock
 class OfflineAssets(unittest.TestCase):
     def test_pinned_inventory_covers_full_sdk_and_runtime_requirements(self):
         lock = load_lock()
-        self.assertEqual(len(lock["assets"]), 48)
+        self.assertEqual(len(lock["assets"]), 49)
         sdk = [item for item in lock["assets"] if item["path"].startswith("sdk/")]
         self.assertEqual(len(sdk), 43)
         self.assertEqual(sum(item["path"].endswith(".cab") for item in sdk), 40)
