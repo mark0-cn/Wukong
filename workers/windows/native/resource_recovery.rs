@@ -7,7 +7,7 @@ use crate::{
     resource_process::{self, ScratchIntent},
     security::{self, AclPolicy},
 };
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
@@ -56,9 +56,12 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         root,
         resources,
         ..
-    } = crate::resource_host::open(installation, configuration)?;
+    } = crate::resource_host::open(installation, configuration)
+        .context("open original resource recovery host")?;
     let private = AclPolicy::private_vm();
-    private.verify(request_path, false)?;
+    private
+        .verify(request_path, false)
+        .context("verify protected resource recovery request")?;
     let request: Request = serde_json::from_slice(&deployment::read_bytes(request_path, 65536)?)?;
     request.validate()?;
     let record = &request.resource;
@@ -71,7 +74,8 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         "native recovery request slot or installation differs"
     );
     let found =
-        crate::processes::resource_job::drain(installation, &record.id, Duration::from_secs(15))?;
+        crate::processes::resource_job::drain(installation, &record.id, Duration::from_secs(15))
+            .context("drain original resource guardian")?;
     let mut personas = vec![(
         Role::Target,
         resource_process::nonce(installation, &record.id)?,
@@ -97,7 +101,8 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
                     == json!({"schema":1,"installation_id":installation,"role":role,"account_sid":deployment.account(role)?.sid,"profile_name":name,"resource_id":record.id}),
                 "native recovery profile intent differs"
             );
-            crate::persona::Persona::recover(installation, deployment.account(role)?, &name)?;
+            crate::persona::Persona::recover(installation, deployment.account(role)?, &name)
+                .with_context(|| format!("recover original {role:?} persona"))?;
         } else {
             ensure!(
                 !scratch_path.try_exists()? && !scratch_intent.try_exists()?,
@@ -118,7 +123,8 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
                 &scratch_path,
                 &scratch.appcontainer_sid,
                 &scratch.logon_sid,
-            )?;
+            )
+            .with_context(|| format!("recover original {role:?} scratch"))?;
         }
         ensure!(
             !scratch_path.try_exists()?,

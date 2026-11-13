@@ -66,9 +66,12 @@ impl Runtime {
         if !recovery.host.exited() && Instant::now() < recovery.deadline {
             return Ok(());
         }
+        let code = recovery.host.stop(Duration::from_secs(10))?;
         ensure!(
-            recovery.host.stop(Duration::from_secs(10))? == 0,
-            "native cleanup host failed; retain the resource blocker"
+            code == 0,
+            "native cleanup host failed for resource {}, attempt {}, exit code {code}; retain the resource blocker",
+            recovery.request.resource.id,
+            recovery.request.attempt,
         );
         let record = &recovery.request.resource;
         let artifact = format!("recovery-{}", recovery.request.attempt);

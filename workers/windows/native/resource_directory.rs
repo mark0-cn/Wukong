@@ -29,12 +29,13 @@ impl ResourceDirectory {
         security_system()?;
         validate_app_sid(app)?;
         validate_logon_sid(logon)?;
-        no_links(path)?;
+        no_links(path).context("verify recovery scratch ancestors")?;
         let handle = fs::OpenOptions::new()
             .access_mode(FILE_LIST_DIRECTORY | READ_CONTROL | WRITE_DAC | WRITE_OWNER)
             .share_mode(FILE_SHARE_READ)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-            .open(path)?;
+            .open(path)
+            .context("hold original recovery scratch root")?;
         ensure!(
             handle.metadata()?.is_dir() && handle.metadata()?.file_attributes() & 0x400 == 0,
             "recovery scratch root is redirected"
@@ -48,7 +49,8 @@ impl ResourceDirectory {
             );
         }
         let children = [(app.into(), DELETE), (logon.into(), DELETE)].into();
-        let descriptor = SecurityDescriptor::from_object(handle.as_raw_handle(), SE_FILE_OBJECT)?;
+        let descriptor = SecurityDescriptor::from_object(handle.as_raw_handle(), SE_FILE_OBJECT)
+            .context("read recovery scratch root policy")?;
         let raw = descriptor.attributes().lpSecurityDescriptor;
         ensure!(
             verify_descriptor(raw, &original.owner, &original.grants, true).is_ok()
@@ -64,13 +66,16 @@ impl ResourceDirectory {
         );
         let guard_path = path.join(ROOT_GUARD);
         let guard = if guard_path.try_exists()? {
-            original.verify(&guard_path, false)?;
+            original
+                .verify(&guard_path, false)
+                .context("verify original recovery scratch guard")?;
             Some(
                 fs::OpenOptions::new()
                     .read(true)
                     .share_mode(0)
                     .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-                    .open(&guard_path)?,
+                    .open(&guard_path)
+                    .context("hold original recovery scratch guard")?,
             )
         } else {
             None
@@ -81,9 +86,11 @@ impl ResourceDirectory {
             original,
             guard: std::sync::Mutex::new(guard),
         };
-        directory.reclaim()?;
+        directory
+            .reclaim()
+            .context("reclaim original scratch root")?;
         drop(directory);
-        crate::resource_cleanup::remove_reclaimed(path)
+        crate::resource_cleanup::remove_reclaimed(path).context("remove reclaimed scratch tree")
     }
     pub fn create(path: &Path, app: &str, logon: &str) -> Result<Self> {
         security_system()?;

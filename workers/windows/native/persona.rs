@@ -196,8 +196,10 @@ impl Persona {
             "invalid owned resource profile name"
         );
         let name = security::wide(OsStr::new(name))?;
-        let token = account.logon(installation)?;
-        let logon = security::token_logon_sid(&token)?;
+        let token = account
+            .logon(installation)
+            .context("log on owned resource account")?;
+        let logon = security::token_logon_sid(&token).context("read owned resource logon SID")?;
         let username = security::wide(OsStr::new(&account.name))?;
         let mut info = PROFILEINFOW {
             dwSize: size_of::<PROFILEINFOW>() as u32,

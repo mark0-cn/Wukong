@@ -161,13 +161,14 @@ impl Job {
         Self::drain_handle(self.0.0, timeout)
     }
     fn drain_handle(handle: HANDLE, timeout: Duration) -> Result<()> {
-        if Self::active_handle(handle)? == 0 {
+        if Self::active_handle(handle).context("query owned Job before termination")? == 0 {
             return Ok(());
         }
-        security::check(unsafe { TerminateJobObject(handle, 1) })?;
+        security::check(unsafe { TerminateJobObject(handle, 1) })
+            .context("terminate owned native Job")?;
         let deadline = Instant::now() + timeout;
         loop {
-            if Self::active_handle(handle)? == 0 {
+            if Self::active_handle(handle).context("query owned Job while draining")? == 0 {
                 return Ok(());
             }
             ensure!(
