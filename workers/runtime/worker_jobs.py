@@ -24,6 +24,7 @@ class JobManager:
         if not self.trusted and not self.isolated:
             raise ValueError("production execution requires a root Linux worker with UID/GID/CHOWN capabilities; use explicit trusted_local only for trusted fixtures")
         spec = dict(params)
+        launch = None
         if spec.get("network") is not None:
             from worker_network import network_profile, validate_plan
             if kind != "verify" or any(spec.get(key) is not None for key in ["args","env","expected","input_mode"]):
@@ -35,11 +36,15 @@ class JobManager:
             if input_path.stat().st_size > 1048576: raise ValueError("network input exceeds 1 MiB")
             validate_plan(spec["network"],input_path.read_bytes())
         elif spec.get("launch_spec"):
+            if kind=='process' and (spec.get('argv') or spec.get('env') or spec.get('cwd') not in (None,'.')):
+                raise ValueError('LaunchSpec owns process argv, environment and cwd')
             from worker_launch import load
             launch,_,_,_,_=load(self.root,spec)
+            if kind=='process' and params.get('timeout_secs') is not None and params['timeout_secs'] != launch.get('timeout_secs',30):
+                raise ValueError('LaunchSpec owns its execution timeout')
             spec["input_mode"]="stdin" if launch["input_mode"]=="stdin_pipe" else "argv"
             if launch["input_mode"]=="pty": raise ValueError("PTY replay is not supported; use interact.start and verify the delivery mode explicitly")
-            spec.setdefault("timeout_secs",launch["timeout_secs"])
+            spec.setdefault("timeout_secs",launch.get("timeout_secs",30))
         spec["isolated"] = self.isolated
         spec["call_id"] = spec.get("call_id") or spec.get("request_id")
         spec["kind"] = kind
@@ -61,11 +66,18 @@ class JobManager:
                 if spec["verifier_agent_id"] == spec["producer_agent_id"]:
                     raise ValueError("independent verifier must differ from PoC producer")
         else:
-            if not isinstance(spec.get("argv"), list) or not spec["argv"]:
+            if spec.get('launch_spec'):
+                if kind != 'process':
+                    raise ValueError('LaunchSpec owns process argv, environment and cwd')
+            elif not isinstance(spec.get("argv"), list) or not spec["argv"]:
                 raise ValueError("argv is required")
             cwd = confined(self.root, spec.get("cwd", "."), True)
             if not cwd.is_dir():
                 raise ValueError("cwd must be a worker directory")
+            if spec.get('input') is not None:
+                source=public_file(self.root,spec['input'])
+                if not source.is_file() or source.stat().st_size > MAX_FILE:
+                    raise ValueError('process input must be a staged file <=32 MiB')
         safe_env(spec.get("env"))
         call_id = spec.get("call_id")
         # Match the complete request, not just an id, to avoid silently reusing

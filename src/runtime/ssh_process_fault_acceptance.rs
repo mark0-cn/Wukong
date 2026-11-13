@@ -34,6 +34,8 @@ struct Profile {
     manifest_sha256: String,
     probe: Probe,
     fault: Fault,
+    #[serde(default)]
+    launch_spec: bool,
     ready: PathBuf,
     resume: PathBuf,
     output: PathBuf,
@@ -118,11 +120,21 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             && uploaded["native_input"]["epoch"] == lease.epoch,
         "fault fixture lacks current native input provenance"
     );
-    let request = json!({"argv":[uploaded["path"],"--fault-ready"],"timeout_secs":120,"request_id":"interrupted-start","call_id":"interrupted-start"});
+    let launch = if profile.launch_spec {
+        let manifest = json!({"schema_version":1,"base":format!("files/fault/{}",profile.probe.sha256),"target":"target.exe","files":{"target.exe":profile.probe.sha256},"args":["--fault-ready"],"cwd":"work/nested","input_mode":"stdin_pipe","env":{},"timeout_secs":120,"service":{"mode":"offline"}});
+        Some(bound.call("file.put",json!({"path":format!("fault/{}/launch.json",profile.probe.sha256),"data_base64":STANDARD.encode(serde_json::to_vec(&manifest)?),"executable":false,"request_id":"fault-launch-upload"})).await?)
+    } else {
+        None
+    };
+    let request = if let Some(launch) = &launch {
+        json!({"launch_spec":launch["path"],"request_id":"interrupted-start","call_id":"interrupted-start"})
+    } else {
+        json!({"argv":[uploaded["path"],"--fault-ready"],"timeout_secs":120,"request_id":"interrupted-start","call_id":"interrupted-start"})
+    };
     if profile.fault == Fault::Preparation {
         publish(
             &profile.ready,
-            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded}),
+            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"launch":launch}),
         )?;
         resume(&profile.resume).await?;
     }
@@ -133,7 +145,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     if profile.fault != Fault::Preparation {
         publish(
             &profile.ready,
-            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"job":started}),
+            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"launch":launch,"job":started}),
         )?;
         resume(&profile.resume).await?;
     }
@@ -175,7 +187,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
         status["result"]["outcome"] == "unknown" && status["result"].get("exit_code").is_none(),
         "interrupted execution manufactured a result"
     );
-    let cached = rebound.call("job.start", request).await?;
+    let cached = rebound.call("job.start", request.clone()).await?;
     ensure!(
         cached == status,
         "interrupted start was relaunched or its result changed"
@@ -241,7 +253,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     client.close().await?;
     publish(
         &profile.output,
-        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"started":started,"reconciled":status,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
+        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"launch":launch,"request":request,"started":started,"reconciled":status,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
     )?;
     Ok(())
 }

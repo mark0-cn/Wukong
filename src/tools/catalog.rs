@@ -546,7 +546,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::JobStartArgs>(
             "job_start",
             "tool-job-start",
-            "Start a persistent process job in the configured worker; returns a job_id immediately. argv entries may use {target} as a placeholder for the staged target path (resolved by the harness and staged in isolated jobs); worker paths like files/... resolve only as direct argv entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
+            "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,

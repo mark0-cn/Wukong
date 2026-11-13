@@ -46,7 +46,12 @@ def build(output, inspector=None):
         subprocess.run([str(compiler), "/nologo", "/W4", "/WX", "/Zi", "/Od", "/MT",
             "/Fe:" + str(target), str(source), "dbghelp.lib", "advapi32.lib", "/link", "/DEBUG", "/PDB:" + str(pdb)],
             cwd=directory, env=environment, check=True)
+        dependency_source=regular(ROOT/'workers/windows/fixtures/dependency.c')
+        dependency=directory/'wukong-fixture.dll'
+        export='wukong_fixture_value'
+        subprocess.run([str(compiler),'/nologo','/W4','/WX','/O2','/MT','/LD','/Fe:'+str(dependency),str(dependency_source),'/link','/EXPORT:'+export],cwd=directory,env=environment,check=True)
         artifacts[architecture] = {"binary": target.relative_to(output).as_posix(), "binary_sha256": sha256(target),
             "pdb": pdb.relative_to(output).as_posix(), "pdb_sha256": sha256(pdb),
-            "imported_libraries": require_static_crt(target, architecture, inspector), "source_sha256": sha256(source)}
+            "imported_libraries": require_static_crt(target, architecture, inspector), "source_sha256": sha256(source),
+            "dependency":{"binary":dependency.relative_to(output).as_posix(),"sha256":sha256(dependency),"source_sha256":sha256(dependency_source),"imported_libraries":require_static_crt(dependency,architecture,inspector)}}
     return {"schema": 1, "architectures": artifacts}

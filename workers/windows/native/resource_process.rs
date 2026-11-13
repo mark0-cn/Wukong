@@ -10,7 +10,7 @@ use crate::{
     resource_journal::{Binding, Owner},
     security::{self, AclPolicy},
 };
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, ffi::OsString, io::Read, path::Path, time::Duration};
 
@@ -23,6 +23,8 @@ pub struct Request {
     pub program: Reference,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub argument_files: Vec<Reference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<crate::resource_launch::Binding>,
     pub arguments: Vec<String>,
     pub input: Option<Reference>,
     pub environment: BTreeMap<String, String>,
@@ -31,7 +33,7 @@ pub struct Request {
     pub processes: u32,
     pub memory_bytes: u64,
 }
-pub(crate) const SCHEMA: u32 = 2;
+pub(crate) const SCHEMA: u32 = 3;
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ScratchIntent {
@@ -81,7 +83,15 @@ impl Request {
                     <= 16384,
             "invalid native process argv or executable policy"
         );
-        crate::resource_image::validate(&self.program, &self.argument_files, &self.arguments)?;
+        if let Some(launch) = &self.launch {
+            ensure!(
+                self.argument_files.is_empty(),
+                "LaunchSpec cannot override its file set with argv files"
+            );
+            launch.validate(&self.program, self.input.as_ref())?;
+        } else {
+            crate::resource_image::validate(&self.program, &self.argument_files, &self.arguments)?;
+        }
         ensure!(
             (1..=86400).contains(&self.timeout_secs)
                 && (1024..=8 * 1024 * 1024).contains(&self.output_limit),
@@ -168,16 +178,38 @@ pub fn execute(
     }
     let public = deployment.code_policy()?;
     let metadata = root.join("metadata");
+    if let Some(launch) = &request.launch {
+        let document = crate::resource_launch::Document::read(resource_input::open(
+            &metadata,
+            &request.owner,
+            &launch.manifest,
+            Purpose::Inspect,
+        )?)?;
+        launch.verify(
+            &request.program,
+            request.input.as_ref(),
+            document,
+            &request.arguments,
+            &request.environment,
+            request.timeout_secs,
+        )?;
+    }
+    let image_files = if let Some(launch) = &request.launch {
+        launch.image_files(&request.program, request.input.as_ref())?
+    } else {
+        request.argument_files.clone()
+    };
     // Reject incomplete/mismatched inputs before creating a persona or scratch.
-    let sources = crate::resource_image::acquire(
-        &metadata,
-        &request.owner,
-        &request.program,
-        &request.argument_files,
-    )?;
+    let sources =
+        crate::resource_image::acquire(&metadata, &request.owner, &request.program, &image_files)?;
     let input = request
         .input
         .as_ref()
+        .filter(|_| {
+            request.launch.as_ref().is_none_or(|launch| {
+                launch.input_mode == crate::resource_launch::InputMode::StdinPipe
+            })
+        })
         .map(|input| resource_input::open(&metadata, &request.owner, input, Purpose::Inspect))
         .transpose()?;
     let nonce = nonce(installation, &request.resource_id)?;
@@ -208,11 +240,33 @@ pub fn execute(
     // Keep controller logical paths valid in the private working directory.
     // acquire() already checked this portable relative files/... spelling.
     let executable = scratch.join(&request.program.path);
-    let held = crate::resource_image::stage(&scratch, sources, &public)?;
+    let working = request
+        .launch
+        .as_ref()
+        .map(|launch| {
+            crate::resource_image::working_directory(
+                &scratch,
+                &launch.cwd,
+                &persona.sid_text()?,
+                persona.logon_sid(),
+                &public,
+            )
+        })
+        .transpose()?;
+    let cwd = working
+        .as_ref()
+        .map(|directory| directory.path())
+        .unwrap_or(&scratch)
+        .to_owned();
+    let held = crate::resource_image::stage(&scratch, sources, &public, working.as_ref())?;
     if cancel.try_exists()? {
         let app = persona.sid_text()?;
         let logon = persona.logon_sid().to_owned();
         drop(held);
+        if let Some(working) = working {
+            working.reclaim()?;
+            drop(working);
+        }
         directory.reclaim()?;
         drop(directory);
         persona.close()?;
@@ -227,7 +281,29 @@ pub fn execute(
             .iter()
             .map(|(key, value)| (key.clone(), OsString::from(value))),
     );
-    let arguments: Vec<_> = request.arguments.iter().map(OsString::from).collect();
+    let arguments: Vec<_> = request
+        .arguments
+        .iter()
+        .map(|argument| {
+            if argument == "@@"
+                && request.launch.as_ref().is_some_and(|launch| {
+                    launch.input_mode == crate::resource_launch::InputMode::ArgvFile
+                })
+            {
+                Ok(scratch
+                    .join(
+                        &request
+                            .input
+                            .as_ref()
+                            .context("argv_file input disappeared")?
+                            .path,
+                    )
+                    .into_os_string())
+            } else {
+                Ok(OsString::from(argument))
+            }
+        })
+        .collect::<Result<_>>()?;
     let limits = ResourceLimits::new(request.processes, request.memory_bytes)?;
     let process = PreparedIo::new(request.output_limit)?.launch(
         input.map(|input| Box::new(input) as Box<dyn Read + Send>),
@@ -235,7 +311,7 @@ pub fn execute(
             Spawn {
                 executable: &executable,
                 arguments: &arguments,
-                directory: &scratch,
+                directory: &cwd,
                 environment: &child_environment,
                 log: io.output(),
                 input: io.input(),
@@ -249,6 +325,10 @@ pub fn execute(
         Ok(cancel.try_exists()?)
     })?;
     drop(held);
+    if let Some(working) = working {
+        working.reclaim()?;
+        drop(working);
+    }
     persona.close()?;
     private.verify(&scratch, true)?;
     security::no_links(&scratch)?;
@@ -306,7 +386,7 @@ fn finish(
         crate::process_capture::StopReason::Cancelled => "cancelled",
     };
     Ok(
-        serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,"argument_files":request.argument_files,
+        serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,"argument_files":request.argument_files,"launch":request.launch,"input":request.input,"request_sha256":digest(request)?,
         "pid":result.pid,"execution_started":result.pid != 0,"exit_code":result.exit_code,"stop_reason":reason,"appcontainer_sid":appcontainer,"logon_sid":logon,
         "stdout_base64":base64::engine::general_purpose::STANDARD.encode(&result.stdout),"stderr_base64":base64::engine::general_purpose::STANDARD.encode(&result.stderr),
         "stdout_sha256":hex::encode(Sha256::digest(&result.stdout)),"stderr_sha256":hex::encode(Sha256::digest(&result.stderr)),
@@ -343,6 +423,7 @@ mod tests {
             },
             arguments: vec!["--echo".into()],
             argument_files: Vec::new(),
+            launch: None,
             input: None,
             environment: BTreeMap::new(),
             timeout_secs: 5,
@@ -369,7 +450,7 @@ mod tests {
     {
         request().validate()?;
         for (key, value) in [
-            ("schema", serde_json::json!(3)),
+            ("schema", serde_json::json!(SCHEMA + 1)),
             ("resource_id", serde_json::json!("../outside")),
             ("timeout_secs", serde_json::json!(0)),
             ("processes", serde_json::json!(65)),

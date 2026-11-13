@@ -78,7 +78,7 @@ def doctor(root, trusted, isolated):
             "core_pattern": core_pattern, "external_core_handler": bool(core_pattern and core_pattern.startswith("|")),
             "metadata_protected_from_targets": isolated, "unique_experiment_uids": isolated,
             "tools": tools, "python_toolchain": python_toolchain, "dbgeng":dbgeng,
-            "capabilities": {"process_jobs": execution_ready, "persistent_jobs": execution_ready, "interactive_process": execution_ready, "resumable_file_transfer": True,
+            "capabilities": {"process_jobs": execution_ready, "launch_spec_jobs": execution_ready, "process_stdin": execution_ready, "persistent_jobs": execution_ready, "interactive_process": execution_ready, "resumable_file_transfer": True,
             "ghidra_query": _ghidra_ready(linux, execution_ready),
             "debug_gdb_mi": execution_ready and linux and tools["gdb"]["available"] and python_toolchain["pygdbmi"],
             "debug_dbgeng": dbgeng["available"] and trusted, "fuzz_qemu": execution_ready and linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),

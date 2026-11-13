@@ -4,6 +4,15 @@
 
 [English](README.md) · 简体中文
 
+`remote_installed_windows_worker_launch_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_TEST`：托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output`，以及恰含 `x64`/`x86` 的 `probes`。每种架构提供 `program` 和 `dependency`，各含工具包 `runtime/selftest/` 目录中文件的绝对 `path` 与固定 `sha256`。可信探针加载同目录 `wukong-fixture.dll`，读取 cwd 外声明的 peer 文件，创建 cwd 文件，并将二进制 stdin/argv 输入复制到 stdout。控制器检查六个资源、改变清单/调用覆盖被拒绝、完整请求/回执身份、清理和已完成启动的稳定重试。VM 内不编译或下载。独立观察服务重启后，`remote_native_launch_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_RECOVERY_TEST`，包含 `config`、绝对 `previous`、其 `previous_sha256` 与全新的绝对 `output`；无需上传或执行，即可比较四个已完成 LaunchSpec 结果和原始回执。这些夹具的已安装 VM 验收尚待完成。
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_LAUNCH_TEST = (Resolve-Path .\remote-launch-profile.json)
+cargo test --locked --lib remote_installed_windows_worker_launch_acceptance -- --ignored --nocapture
+$env:WUKONG_REMOTE_WORKER_LAUNCH_RECOVERY_TEST = (Resolve-Path .\remote-launch-recovery-profile.json)
+cargo test --locked --lib remote_native_launch_recovery_acceptance -- --ignored --nocapture
+```
+
 进程配置可选的 `argument_files: true` 需要带 `--read-argument` 的新版可信探针。它以无执行权限上传二进制数据，拒绝缺失准入的参数，将同一逻辑数据路径传入两次，核对原始输出字节/哈希，并要求原生回执恰好保留一个文件引用。容器内探针必须实际读到文件，且写入和 `FILE_EXECUTE` 打开均得到 `ERROR_ACCESS_DENIED`。该用例已在源码 `ecc18af` 的离线 VM 全新安装及服务重启后通过；报告身份和限制见 [Windows 资格记录](../windows/README.zh-CN.md)。
 
 默认忽略的 Rust 夹具 `remote_installed_windows_worker_process_acceptance` 使用真实控制器，以及已独立固定指纹并安装好的 Windows VM。将 `WUKONG_REMOTE_WORKER_PROCESS_TEST` 指向 JSON 配置，包含托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output` 路径和 `probes`：必须恰含 `x64`/`x86`，各自提供该包 `runtime/selftest/` 目录中可信自编译 `wukong-probe.exe` 的绝对 `path` 及 SHA256 `sha256`。夹具通过准入输入协议上传字节；VM 无需编译器或下载包。检查 echo、截止时间、取消、单资源/租约屏障、稳定启动重试、原始/分块输出哈希和陈旧隔离令牌。报告保留原始回执/输出字节，不含租约令牌或私钥。这仅为有限原生进程验收；生产能力声明仍为 false。
@@ -11,6 +20,8 @@
 对于带新版可信探针的 schema-2 工具包，`cleanup_adversary: true` 会另行在两种架构运行只读文件/受保护空 DACL 清理用例；旧探针应省略该项。也可固定独立构建的可信探针进行测试，无需替换已安装的签名 worker，但必须记录两者源码身份。上传路径/request ID 包含探针哈希，保留先前不可变输入。清理探针先向实际用户及 AppContainer SID 授予自身新目录的完整权限，保留 `READ_CONTROL | WRITE_DAC` 句柄，再通过 SDK 设置并读回受保护空 DACL。ACL 准备失败不算限制访问清理通过。
 
 默认忽略的 `remote_native_interrupted_process_acceptance` 使用 `WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST`：托管 SSH `config`、预期 `manifest_sha256`、固定哈希的可信 `probe`（`path`/`sha256`）、`fault`（`preparation`、`host` 或 `service`），以及全新的绝对 `ready`、`resume`、`output` 路径。准备用例在启动前发布 `ready`，便于独立操作方持有原生输入的独占句柄；宿主/服务用例在启动后发布，由操作方终止前核对真实归属进程身份和目标就绪。新版探针使用 `--fault-ready` 在本次私有 scratch 写出固定标记；操作方核对映像哈希、父进程和标记字节，不以粗粒度 CPU 计数或等待时间推断执行。服务用例还由操作方持续持有仅查询的守护 Job 句柄，迫使恢复通路重新打开并排空真实对象。独立观察操作/恢复后，才由操作方创建 `resume`。
+
+故障配置可选的 `launch_spec: true` 通过同一探针及故障协议使用清单指定的 `work/nested` cwd。操作方须核对受保护启动绑定，并在该 cwd 内观察到标记后才注入故障。这个新增的已安装 VM 用例尚待完成。
 
 夹具自身不终止进程、不注册任务；检查绑定的未知结果清理、不可变恢复字节、不重放启动、陈旧服务隔离令牌，以及后续准入成功。协调文件仅为信号，不是操作系统证据。这三个具体故障用例于 2026-11-13 在用户提供的离线 VM 通过；源码/内容身份及限制见 [Windows 资格记录](../windows/README.zh-CN.md)。先前已完成结果恢复不覆盖这些用例。
 
@@ -52,10 +63,13 @@ docker exec --user 10001:10001 wukong-worker python3 /opt/wukong/tests/run.py un
 python3 /opt/wukong/tests/run.py unit -p 'test_workbench*.py'
 python3 /opt/wukong/tests/run.py integration --state /state/acceptance --fuzz
 python3 /opt/wukong/tests/run.py isolation /state/isolation-acceptance
+python3 /opt/wukong/tests/run.py launch --state /state/launch-acceptance
 python3 /opt/wukong/tests/run.py ghidra --state /state/ghidra-acceptance
 ```
 
 测试状态目录应为本轮独占目录；真实后端要求见 [worker 说明](../runtime/README.zh-CN.md)。
+
+`launch` 套件构建可信 C 夹具，经配置好的 Linux UID 隔离运行 stdin、argv-file 两种 LaunchSpec 任务，检查 cwd 外声明的 peer 文件、可写 cwd 输出、原始二进制 stdout、原文件不变及稳定启动。运行时须使用文档规定的 capabilities、只读容器根目录和可执行 `/tmp`。可移植规划/单元检查不能替代该隔离验收。
 
 Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特权和管理员组，以检查普通账户的 DACL 权限，避免 `SeTakeOwnershipPrivilege` 授予 `WRITE_OWNER`。它不修改父进程令牌或已安装服务的策略。此夹具于 2026-11-13 在用户提供的 Windows 10 VM 上通过。
 

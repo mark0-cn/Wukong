@@ -88,13 +88,26 @@ impl Runtime {
             request.validate()?;
             let spec: Specification =
                 serde_json::from_value(record.specification["process"].clone())?;
-            ensure!(
-                request.owner == record.owner
-                    && request.resource_id == record.id
+            let launch_matches = if let Some(launch) = &request.launch {
+                spec.launch_spec.as_ref() == Some(&launch.manifest.path)
+                    && spec.argv.is_empty()
+                    && spec.env.is_empty()
+                    && spec
+                        .timeout_secs
+                        .is_none_or(|timeout| timeout == request.timeout_secs)
+            } else {
+                spec.launch_spec.is_none()
                     && spec.argv.first() == Some(&request.program.path)
                     && request.arguments == spec.argv[1..]
                     && request.environment == spec.env
-                    && request.timeout_secs == spec.timeout_secs
+                    && request.timeout_secs == spec.timeout_secs.unwrap_or(default_timeout())
+            };
+            ensure!(
+                launch_matches
+                    && request.owner == record.owner
+                    && request.resource_id == record.id
+                    && request.input.as_ref().map(|input| input.path.as_str())
+                        == spec.input.as_deref()
                     && request.output_limit == spec.output_limit,
                 "recovered result request differs from its journal intent"
             );

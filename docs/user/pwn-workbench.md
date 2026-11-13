@@ -101,6 +101,8 @@ port = 1337
 
 `argv_file` mode requires `@@` in argv; `pty` supports interactive sessions. LaunchSpec supplies consistent loader/libc/working-directory declarations to interaction, debugging, replay, minimization and verification. Confirm actual libc/loader mappings again at runtime.
 
+Background `job_start` also accepts the staged LaunchSpec with an optional staged input. The manifest supplies argv, environment, cwd and timeout, so omit per-call overrides. Process jobs support `stdin_pipe` and `argv_file`; use an interactive session for `pty`. Preparation records regular files from cwd, and isolated execution stages only declared members while preserving paths outside cwd. Symlinks must be resolved before preparation.
+
 When a loader is specified, tools create a stable-path patchelf execution copy without changing original binary/libc. Executed-file hashes may differ from attachment hashes; keep identities separate. Each execution uses a separate writable working-directory copy, currently limited to 1024 files/32 MiB. Use original services/dedicated debugging environments for large filesystems.
 
 <a id="题目自带-docker"></a>

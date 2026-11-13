@@ -176,8 +176,8 @@
     "text": "请求取消所属的同 run job。"
   },
   "job_start": {
-    "source": "Start a persistent process job in the configured worker; returns a job_id immediately. argv entries may use {target} as a placeholder for the staged target path (resolved by the harness and staged in isolated jobs); worker paths like files/... resolve only as direct argv entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
-    "text": "在配置 worker 启动持久进程，立即返回 job_id。argv 可用 {target} 占位，harness 解析并在隔离 job 暂存；files/... 只在直接 argv 项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。"
+    "source": "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
+    "text": "在配置 worker 启动持久进程，立即返回 job_id。使用 argv，或使用已暂存的 launch_spec 统一记录目标、文件、参数、cwd、环境和输入模式；input 选择已暂存的数据文件。使用 launch_spec 时省略 argv/env/cwd 覆盖，并保持配置所记期限。原始 argv 可用 {target}；files/... 只在直接参数项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。"
   },
   "job_status": {
     "source": "Observe an in-run job, refresh persisted status and import raw observations.",

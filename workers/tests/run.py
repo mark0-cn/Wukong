@@ -13,7 +13,7 @@ sys.path[:0] = [str(ROOT), str(RUNTIME)]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=["unit", "integration", "isolation", "ghidra", "windows-debugger"])
+    parser.add_argument("suite", choices=["unit", "integration", "isolation", "ghidra", "windows-debugger", "launch"])
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     remaining = args.arguments
@@ -27,7 +27,7 @@ def main():
             raise SystemExit("No worker tests matched the requested pattern")
         result = unittest.TextTestRunner(verbosity=2 if unit.verbose else 1).run(suite)
         raise SystemExit(0 if result.wasSuccessful() else 1)
-    module = {"integration": "runtime", "isolation": "isolation", "ghidra": "ghidra", "windows-debugger":"windows_debugger"}[args.suite]
+    module = {"integration": "runtime", "isolation": "isolation", "ghidra": "ghidra", "windows-debugger":"windows_debugger", "launch":"launch"}[args.suite]
     sys.argv = [str(ROOT / "integration" / (module + ".py")), *remaining]
     runpy.run_module("integration." + module, run_name="__main__")
 

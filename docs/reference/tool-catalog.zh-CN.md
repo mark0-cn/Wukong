@@ -52,7 +52,7 @@
 | `interactive_start` | analyst / verifier | 是 | interactive_process | 启动本 Agent 所属的持久化交互进程（REPL），返回 session_id；worker 路径只在直接 argv 项解析。 |
 | `job_artifacts` | analyst / verifier | 否 | worker transport | 列出并导入同 run job 的原始产物。 |
 | `job_cancel` | analyst / verifier | 是 | worker transport | 请求取消所属的同 run job。 |
-| `job_start` | analyst / verifier | 是 | process_jobs | 在配置 worker 启动持久进程，立即返回 job_id。argv 可用 {target} 占位，harness 解析并在隔离 job 暂存；files/... 只在直接 argv 项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。 |
+| `job_start` | analyst / verifier | 是 | process_jobs | 在配置 worker 启动持久进程，立即返回 job_id。使用 argv，或使用已暂存的 launch_spec 统一记录目标、文件、参数、cwd、环境和输入模式；input 选择已暂存的数据文件。使用 launch_spec 时省略 argv/env/cwd 覆盖，并保持配置所记期限。原始 argv 可用 {target}；files/... 只在直接参数项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。 |
 | `job_status` | analyst / verifier | 否 | worker transport | 观察同 run job，刷新持久状态并导入原始观察。 |
 | `libc_identify` | analyst / verifier | 否 | libc_identify | 使用同进程符号泄漏比较最多 16 份同 run ELF libc 候选；省略时只检查 worker libc。保留哈希、Build ID、架构、不一致泄漏和歧义。候选不确认映射身份，无匹配仅描述搜索集合。 |
 | `load_skill` | 全部 | 是 | controller | 激活内置或自定义能力/方法。root/analyst/verifier 角色指令自动安装，不能在此加载。初始与动态能力合计最多五个名称。精确正文/哈希持久化，下一新模型边界生效，替代同名初始正文并跨压缩/恢复保留。加载不改变角色、权限或完成条件。 |

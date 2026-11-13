@@ -22,8 +22,8 @@
       "zh-CN": "c794cc829189e8e946cb8242f5b8815554e4ef137a272b55ed7bfa307dbb27fa"
     },
     "docs/design/cross-platform-environments.md": {
-      "en": "9043863251c4984b70c9fbc874774ce6c1e52d66e8a8afe188aa5739bdffe42d",
-      "zh-CN": "d60ebaee6f7f18b91f76010828e57b5c33859f6fa358aa4121849cda192da364"
+      "en": "1c7ca73921f3a28cbb466b43f179089d59af20f331aa71a542a65e43de83db5d",
+      "zh-CN": "adf4e72d7425b0b8130b185a880cb00740fca9d15d9e4d8b3e234a60f1a30ed7"
     },
     "docs/design/implementation-contract.md": {
       "en": "34b958279e68476f2d62f42962102de8794a49a2ac12da61d5b8c84286698c2c",
@@ -94,8 +94,8 @@
       "zh-CN": "39c142f85e35eba625ee588a9fd5dd18d0f327e51e4c1a5ca724422b4987bf20"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "2e250d23c441719b3a9cc8bd8fe1cbcb54584fa05e4baf3d9045e27556a18255",
-      "zh-CN": "eaf6688804fd35cf13eb6dc965e5d6f5202613f79bdecb8cc795a1ee91830bf6"
+      "en": "1e288086b5f7dbefac8d64f796bef39787a9e373a945f9f1063a9ebb25f4ed2f",
+      "zh-CN": "14fd4aeae53e16048948ab1f64e6c804d3e7b31aa12b2dc07679cfaad68fdfb7"
     },
     "docs/user/languages.md": {
       "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
@@ -106,8 +106,8 @@
       "zh-CN": "c0e705f102318fcc24d8f4a2e6aa1b469d19dd36f4fdbd0d5b751d17d558b488"
     },
     "docs/user/pwn-workbench.md": {
-      "en": "0001a591222e6662acf9d534ddaa3209af02e09c67daca4698dd9f59e12a3e8a",
-      "zh-CN": "6aee163b890a57e6a519480ba6677540fa8b1930850783938956fde793ad7a3f"
+      "en": "2e69110c5edd1071c1cc822182b5a8153307210ac994615053a0fdfe47a1393c",
+      "zh-CN": "071a5dfd1da6c6a2599af76a8fea23ea91b8935012cb8e288c8de09279c993e6"
     },
     "docs/user/usage.md": {
       "en": "d282994fd7b23b232797529ad74f20c8656a8759b9f0ee440cf28e5815792a20",
@@ -150,12 +150,12 @@
       "zh-CN": "c81b2e650fd646123fcaafa485ea9aea5dd9e8ea132e74e6da4addbbd20d1ee8"
     },
     "workers/tests/README.md": {
-      "en": "7e946e37f46a7d9d4f2c2edffc13b05ed07b2f41000bfb512b2fa2e5d3205996",
-      "zh-CN": "4bc4d4ca3c3af291c5383e09c1784d9e99d008cfe6bcba1650e5597d669df4b9"
+      "en": "07fd445ccacb915b5ed092d4cc1c90f1421be433356771dd3b4603c4657e5e2a",
+      "zh-CN": "b3f02d49187287c8bfab229390feec1402bb7d1beaf0f36b9a205ccee21c086a"
     },
     "workers/windows/README.md": {
-      "en": "17e312e1caa5fa80022c6857f6fe369600fbe7943ed5bb68b0ac1037dac2bbeb",
-      "zh-CN": "5a9f259be4e046092c165d0ae105c2c33887955f2fcd4cb569d7b25e4035fc21"
+      "en": "45418f1e24750a463e96b220fb78d9ecb7cf322ea9d96ec70a894c8921d9d1db",
+      "zh-CN": "ad37e8e98616324e7be7472eaa53a1be49851306d6623eadff2e9164d8feccef"
     }
   }
 }

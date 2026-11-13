@@ -104,9 +104,16 @@ def supervise_job(root, directory):
         kind = spec["kind"]
         if kind in {"process", "fuzz"}:
             cwd = confined(root, spec.get("cwd", "."), True)
-            argv = spec["argv"]
+            argv = spec.get("argv",[])
             experiment = None
-            if spec.get("isolated"):
+            launch=None
+            if kind == 'process' and spec.get('launch_spec'):
+                from worker_launch import resolve
+                input_path=confined(root,spec['input'],True) if spec.get('input') else None
+                launch=resolve(root,spec,spec.get('isolated',False),input_path)
+                if launch['input_mode']=='pty': raise ValueError('process jobs cannot use pty')
+                argv,cwd,experiment=launch['argv'],launch['cwd'],launch['experiment']
+            elif spec.get("isolated"):
                 import isolation
                 experiment = isolation.sandbox(root, spec["execution_uid"])
                 cwd = Path(experiment["work"])
@@ -133,7 +140,7 @@ def supervise_job(root, directory):
                     argv = staged
                 isolation.seal(experiment)
                 atomic_json(directory / "experiment.json", experiment)
-            job_env = safe_env(spec.get("env"))
+            job_env = launch['env'] if launch else safe_env(spec.get("env"))
             # Jobs may persist their own outputs here; the directory belongs to
             # this job and is collected by job.artifacts. Isolated jobs cannot
             # write it and fall back to their sealed working directory.
@@ -143,7 +150,12 @@ def supervise_job(root, directory):
             # 'files', ...)) without guessing the worker layout. It is a fixed
             # path, not a credential.
             job_env["WUKONG_STATE_DIR"] = str(root)
-            result = run_process(argv, cwd, job_env, spec["timeout_secs"], spec["output_limit"], directory / "output", directory / "cancel", experiment)
+            stdin_bytes=None
+            if kind == 'process' and spec.get('input') and (launch is None or launch['input_mode']=='stdin_pipe'):
+                with (launch['stdin_path'] if launch else confined(root,spec['input'],True)).open('rb') as source: stdin_bytes=source.read(32*1024*1024+1)
+                if len(stdin_bytes)>32*1024*1024: raise ValueError('process stdin exceeds 32 MiB')
+            result = run_process(argv, cwd, job_env, spec["timeout_secs"], spec["output_limit"], directory / "output", directory / "cancel", experiment,stdin_bytes=stdin_bytes)
+            if launch: result['launch_identity']=launch['identity']
             result["experiment_uid"] = experiment["uid"] if experiment else None
             result["metadata_protected"] = bool(experiment)
             if experiment and kind == "process":

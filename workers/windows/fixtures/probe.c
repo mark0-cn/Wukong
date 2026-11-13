@@ -3,8 +3,21 @@
 #include <aclapi.h>
 #include <dbghelp.h>
 #include <wchar.h>
+#include <string.h>
 volatile LONG fixture_value = 0x12345678;
 __declspec(noinline) LONG fixture_step(LONG value) { return value ^ 0x1020304; }
+static int copy_input(HANDLE input) {
+    BYTE buffer[4096]; DWORD count = 0, written = 0;
+    for (;;) {
+        if (!ReadFile(input, buffer, sizeof(buffer), &count, NULL)) {
+            if (GetLastError() == ERROR_BROKEN_PIPE) break;
+            return 50;
+        }
+        if (!count) break;
+        if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, count, &written, NULL) || written != count) return 51;
+    }
+    return 0;
+}
 /* The restricted AppContainer SID must have WRITE_DAC at creation too. Owner
  * rights alone need not satisfy the token's restricted access check. */
 static BOOL create_owned_cleanup_directory(void) {
@@ -29,6 +42,40 @@ static BOOL create_owned_cleanup_directory(void) {
     return CreateDirectoryW(L"deny-tree", &attributes);
 }
 int wmain(int argc, wchar_t **argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--copy-stdin") == 0) return copy_input(GetStdHandle(STD_INPUT_HANDLE));
+    if ((argc == 3 && wcscmp(argv[1], L"--launch-stdin") == 0) ||
+        (argc == 4 && wcscmp(argv[1], L"--launch-argv") == 0)) {
+        wchar_t module[32768];
+        DWORD size = GetModuleFileNameW(NULL, module, 32768);
+        if (!size || size >= 32768) return 40;
+        wchar_t *separator = wcsrchr(module, L'\\');
+        if (!separator) return 41;
+        separator[1] = 0;
+        if (wcscat_s(module, 32768, L"wukong-fixture.dll") != 0) return 42;
+        HMODULE dependency = LoadLibraryW(module);
+        if (!dependency) return 43;
+        typedef DWORD (__cdecl *ValueFunction)(void);
+        ValueFunction value = (ValueFunction)(void *)GetProcAddress(dependency, "wukong_fixture_value");
+        if (!value || value() != 0x574b4758) return 44;
+        HANDLE peer = CreateFileW(argv[2], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        if (peer == INVALID_HANDLE_VALUE) return 45;
+        char marker[12]; DWORD count = 0;
+        BOOL read = ReadFile(peer, marker, sizeof(marker), &count, NULL);
+        CloseHandle(peer);
+        if (!read || count != 12 || memcmp(marker, "wukong-peer\n", 12) != 0) return 46;
+        HANDLE output = CreateFileW(L"created.bin", GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+        if (output == INVALID_HANDLE_VALUE) return 47;
+        DWORD written = 0;
+        BOOL saved = WriteFile(output, marker, count, &written, NULL);
+        CloseHandle(output);
+        if (!saved || written != count) return 48;
+        HANDLE input = argc == 3 ? GetStdHandle(STD_INPUT_HANDLE) : CreateFileW(argv[3], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        if (input == INVALID_HANDLE_VALUE) return 49;
+        int result = copy_input(input);
+        if (argc == 4) CloseHandle(input);
+        FreeLibrary(dependency);
+        return result;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--cleanup-adversary") == 0) {
         if (!create_owned_cleanup_directory()) return 20;
         HANDLE directory = CreateFileW(L"deny-tree", READ_CONTROL | WRITE_DAC,

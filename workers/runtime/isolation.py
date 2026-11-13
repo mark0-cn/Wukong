@@ -106,6 +106,9 @@ def _public_source(source, experiment, derived_sha256=None):
 def stage_file(source, experiment, name=None, executable=False, *, derived_sha256=None):
     source = _public_source(source, experiment, derived_sha256)
     destination = Path(experiment["readonly"]) / (name or (uuid.uuid4().hex + "-" + source.name))
+    if not destination.is_relative_to(Path(experiment['readonly'])) or '..' in Path(name or source.name).parts:
+        raise ValueError('staged file name must stay inside readonly storage')
+    destination.parent.mkdir(parents=True,exist_ok=True)
     shutil.copyfile(source, destination)
     destination.chmod(0o555 if executable else 0o444)
     return destination

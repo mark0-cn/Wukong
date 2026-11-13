@@ -50,6 +50,14 @@ worker 提供 `file.upload.begin`、`file.upload.status`、`file.upload.write`�
 
 大文件下载在流式导入证据前校验每个有界块与完整哈希。`file_get` 返回元数据和证据 ID，不内联文件字节；面向模型的输出保持有界。准备上传时检查实际剩余磁盘空间，但其他进程占用空间仍可能导致 IO 失败。重新连接不重放结果未知的调试修改。
 
+## 统一进程启动
+
+`job_start` 接受已有 schema-1 `launch_spec`，可另提供已暂存的 `input`。调用时省略 argv、环境和 cwd 覆盖；显式超时须与清单一致。进程任务支持 `stdin_pipe` 和带 `@@` 的 `argv_file`，PTY 输入属于交互会话。原始进程任务也可接收已暂存的 stdin。在将这些新输入发给 worker 前，分派必须观察到 `launch_spec_jobs` 或 `process_stdin` 支持。
+
+Windows 从当前 owner 范围内已完成的原生输入回执解析清单及每个声明成员。新的 System 宿主在准备 persona 前，重读已准入清单并核对完整配置与受保护请求一致。成员保留逻辑布局及可执行/数据策略；单独受 guard 保护的可写 cwd 复用已有资源目录和清理机制。原生启动要求离线服务模式，拒绝 Linux loader/library 路径，最多允许 64 个声明成员及一个 argv 输入。清单和受保护请求各限 64 KiB；stdin 限 32 MiB，路径须符合清理深度限制。内部进程 schema 3 将完整请求哈希绑定到结果；旧版活动契约拒绝继续。查询缓存启动仍先于解析新输入。这条启动通路的已安装 VM 验收及其余执行通路尚待完成。
+
+Linux 复用已有 LaunchSpec 解析器和 UID 隔离，将包括 cwd 外文件在内的完整声明布局暂存为密封执行文件及单独可写工作树。题目准备将 cwd 内普通文件记入清单；符号链接被拒绝，暂存仍限 1024 文件/32 MiB。文档规定的容器 capabilities、只读根目录和可执行 `/tmp` 仍为必要条件。
+
 ## 结构化调试适配器
 
 `debug_start` 选择 `auto`、`gdb_mi` 或 `dbgeng`；`mode = "dump"` 必须提供单独暂存的 Dump，且禁止启动参数。暂存目标仍为本 run 的原始映像。`debug_inspect` 有界提供寄存器、栈、内存、模块、线程、反汇编、异常和执行状态；`debug_control` 提供类型化断点及 run/continue/interrupt/step/next/finish。执行操作等待停止；到达期限后请求中断，无法确认停止状态时使会话失效。Dump 会话拒绝执行控制，原始 `debug_command` 仅用于 GDB/MI。

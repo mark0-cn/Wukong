@@ -100,21 +100,29 @@ def resolve(root,params,isolated=False,input_path=None):
     experiment=None
     if isolated:
         import isolation
+        members=[(name,base/name) for name in spec['files']]
+        if len(members)>1024 or sum(source.stat().st_size for _,source in members)>32*1048576:
+            raise ValueError('staged launch exceeds 1024 files/32 MiB')
         experiment=isolation.sandbox(root,isolation.allocate_uid(root))
-        target=isolation.stage_file(target,experiment,"target.bin",True,
-                                    derived_sha256=executed_digest if derived_runtime else None)
-        # Preserve relative data files and the configured working directory.
-        original_cwd=cwd
-        staged_cwd=isolation.stage_directory(cwd,experiment,"cwd")
-        cwd=Path(experiment["work"])/"cwd"
-        staged_cwd.rename(cwd)
-        for item in [cwd,*cwd.rglob("*")]:
-            executable=item.is_dir() or (original_cwd/item.relative_to(cwd)).stat().st_mode&0o111
-            item.chmod(0o755 if executable else 0o644)
-            os.chown(item,experiment["uid"],experiment["uid"])
-        if loader:
-            library=isolation.stage_directory(library,experiment,"libraries")
-            loader=library/Path(spec["loader"]).name; loader.chmod(0o555)
+        work=Path(experiment['work'])/'launch'
+        work.mkdir()
+        # Preserve the whole declared layout, including members outside cwd.
+        # Only the copies in work are mutable; the executed image stays sealed.
+        for name,source in members:
+            executable=bool(source.stat().st_mode&0o111)
+            isolation.stage_file(target if name==spec['target'] else source,experiment,'launch/'+name,
+                name==spec['target'] or executable,derived_sha256=executed_digest if name==spec['target'] and derived_runtime else None)
+            destination=work/name
+            destination.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(source,destination)
+            destination.chmod(0o755 if executable else 0o644)
+            os.chown(destination,experiment['uid'],experiment['uid'])
+        cwd=work/spec['cwd']
+        cwd.mkdir(parents=True,exist_ok=True)
+        for directory in [work,*[item for item in work.rglob('*') if item.is_dir()]]:
+            directory.chmod(0o755)
+            os.chown(directory,experiment['uid'],experiment['uid'])
+        target=Path(experiment['readonly'])/'launch'/spec['target']
         if input_path: input_path=isolation.stage_file(input_path,experiment,"input.bin")
         isolation.seal(experiment)
     args=list(spec["args"])

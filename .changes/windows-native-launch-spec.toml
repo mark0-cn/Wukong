@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Use a staged LaunchSpec for background jobs so the target, declared dependencies, working directory, environment and input delivery stay together. Windows native jobs preserve admitted executable/data permissions and bind the complete request to their receipt; complete Windows production routing remains pending."
+zh_CN = "后台任务可使用已暂存 LaunchSpec，统一目标、声明依赖、工作目录、环境和输入方式。Windows 原生任务保留已准入文件的执行/数据权限，并将完整请求绑定到回执；完整 Windows 生产路由仍待完成。"

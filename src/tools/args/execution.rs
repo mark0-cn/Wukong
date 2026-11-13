@@ -51,7 +51,14 @@ pub(in crate::tools) struct FileGetArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::tools) struct JobStartArgs {
+    #[serde(default)]
     pub argv: Vec<String>,
+    /// Existing prepared LaunchSpec; omit argv/env/cwd overrides when supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<String>,
+    /// Admitted input file; LaunchSpec selects stdin_pipe or argv_file delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -26,13 +26,18 @@ use std::{
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Specification {
+    #[serde(default)]
     argv: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    launch_spec: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    input: Option<String>,
     #[serde(default)]
     env: BTreeMap<String, String>,
     #[serde(default = "default_cwd")]
     cwd: String,
-    #[serde(default = "default_timeout")]
-    timeout_secs: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timeout_secs: Option<u64>,
     #[serde(default = "default_output")]
     output_limit: usize,
 }
@@ -177,10 +182,13 @@ impl Runtime {
         }
         // Null optional fields mean the same thing as omitted defaults.
         specification.retain(|_, value| !value.is_null());
-        let spec: Specification = serde_json::from_value(Value::Object(specification))?;
+        let mut spec: Specification = serde_json::from_value(Value::Object(specification))?;
+        if spec.launch_spec.is_none() && spec.timeout_secs.is_none() {
+            spec.timeout_secs = Some(default_timeout());
+        }
         ensure!(
             spec.cwd == "."
-                && !spec.argv.is_empty()
+                && (spec.launch_spec.is_some() || !spec.argv.is_empty())
                 && spec.argv.len() <= 129
                 && spec.argv.iter().all(|a| !a.contains('\0'))
                 && spec
@@ -198,9 +206,47 @@ impl Runtime {
         {
             return self.reserved_status(journal, owner, existing);
         }
-        let program = inputs.reference(owner, &spec.argv[0], Purpose::Execute)?;
+        let input = spec
+            .input
+            .as_deref()
+            .map(|path| inputs.reference(owner, path, Purpose::Inspect))
+            .transpose()?;
+        let (program, arguments, environment, timeout, launch) =
+            if let Some(path) = &spec.launch_spec {
+                ensure!(
+                    spec.argv.is_empty() && spec.env.is_empty(),
+                    "LaunchSpec owns argv and environment"
+                );
+                let (manifest, resolved) = crate::resource_launch::prepare(inputs, owner, path)?;
+                ensure!(
+                    spec.timeout_secs
+                        .is_none_or(|timeout| timeout == resolved.timeout_secs),
+                    "LaunchSpec owns its execution timeout"
+                );
+                let binding = crate::resource_launch::Binding {
+                    manifest,
+                    files: resolved.files,
+                    cwd: resolved.cwd,
+                    input_mode: resolved.input_mode,
+                };
+                (
+                    resolved.program,
+                    resolved.arguments,
+                    resolved.environment,
+                    resolved.timeout_secs,
+                    Some(binding),
+                )
+            } else {
+                (
+                    inputs.reference(owner, &spec.argv[0], Purpose::Execute)?,
+                    spec.argv[1..].to_vec(),
+                    spec.env,
+                    spec.timeout_secs.unwrap_or(default_timeout()),
+                    None,
+                )
+            };
         let mut argument_files = BTreeMap::new();
-        for path in &spec.argv[1..] {
+        for path in arguments.iter().filter(|_| launch.is_none()) {
             if path.starts_with("files/")
                 && path != &program.path
                 && !argument_files.contains_key(path)
@@ -215,10 +261,11 @@ impl Runtime {
             owner: owner.clone(),
             program,
             argument_files: argument_files.into_values().collect(),
-            arguments: spec.argv[1..].into(),
-            input: None,
-            environment: spec.env,
-            timeout_secs: spec.timeout_secs,
+            launch,
+            arguments,
+            input,
+            environment,
+            timeout_secs: timeout,
             output_limit: spec.output_limit,
             processes: 16,
             memory_bytes: 1024 * 1024 * 1024,
@@ -370,6 +417,9 @@ impl Runtime {
                 && result["resource_id"] == *id
                 && result["owner"] == serde_json::to_value(&request.owner)?
                 && result["program"] == serde_json::to_value(&request.program)?
+                && result["request_sha256"] == crate::inputs::digest(request)?
+                && result["input"] == serde_json::to_value(&request.input)?
+                && result["launch"] == serde_json::to_value(&request.launch)?
                 && result
                     .get("argument_files")
                     .cloned()

@@ -50,6 +50,14 @@ The worker exposes `file.upload.begin`, `file.upload.status`, `file.upload.write
 
 Large downloads verify each bounded chunk and the complete hash before streaming evidence ingestion. `file_get` returns metadata and an evidence ID, not inline file bytes. Model-facing output remains bounded. Actual free disk space is checked at upload preparation; an IO failure can still occur if other processes consume space. Reconnection does not replay unknown debugger mutations.
 
+## Unified process launches
+
+`job_start` accepts the existing schema-1 `launch_spec` with an optional staged `input`. Omit per-call argv, environment and cwd overrides; an explicit timeout must match the manifest. Process jobs support `stdin_pipe` and `argv_file` with `@@`, while PTY input belongs to interactive sessions. Raw process jobs also accept staged stdin. Dispatch requires observed `launch_spec_jobs` or `process_stdin` support before sending these new inputs to a worker.
+
+Windows resolves the manifest and every declared member from completed native input receipts in the current owner scope. The fresh System host rereads the admitted manifest and checks its complete configuration against the protected request before preparing the persona. Members retain their logical layout and executable/data policies; a separately guarded writable cwd shares the existing resource directory and cleanup machinery. Native launches require offline service mode, reject Linux loader/library paths and allow at most 64 declared members plus an argv input. Manifest and protected request each fit 64 KiB; stdin fits 32 MiB and paths fit the cleanup depth limit. Internal process schema 3 binds the complete request hash into results; old active contracts fail closed. Cached start lookup still precedes new input resolution. Installed-VM qualification for this launch path and the remaining execution routes is pending.
+
+Linux reuses its existing LaunchSpec resolver and UID isolation. It stages the complete declared layout, including files outside cwd, into sealed execution files and a separate writable working tree. Challenge preparation records regular cwd files in the manifest; symlinks are rejected and staging remains bounded to 1024 files/32 MiB. The documented container capabilities, read-only root and executable `/tmp` remain required.
+
 ## Structured debugger adapters
 
 `debug_start` selects `auto`, `gdb_mi` or `dbgeng`; `mode = "dump"` requires a separate staged dump and forbids launch arguments. The staged target remains the run's original image. `debug_inspect` exposes bounded registers, stack, memory, modules, threads, disassembly, exception and execution state. `debug_control` provides typed breakpoints and run/continue/interrupt/step/next/finish. Execution waits for a stop; deadlines request interruption and invalidate the session if a stopped state cannot be established. Dump sessions reject execution control. Raw `debug_command` remains GDB/MI-only.

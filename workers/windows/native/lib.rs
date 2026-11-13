@@ -42,6 +42,8 @@ pub mod resource_input;
 #[cfg(windows)]
 pub mod resource_journal;
 #[cfg(windows)]
+mod resource_launch;
+#[cfg(windows)]
 pub mod resource_process;
 #[cfg(windows)]
 pub mod resource_recovery;

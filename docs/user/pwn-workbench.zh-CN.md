@@ -101,6 +101,8 @@ port = 1337
 
 `argv_file` 输入模式必须在 argv 中包含 `@@`；`pty` 供交互会话使用。加载器、libc 和工作目录相同的声明由 LaunchSpec 统一提供给交互、调试、重放、最小化和验证。运行中通过映射再次确认 libc/loader。
 
+后台 `job_start` 也接受已暂存 LaunchSpec 及可选的已暂存输入。清单提供 argv、环境、cwd 和超时，调用时省略这些覆盖项。进程任务支持 `stdin_pipe`、`argv_file`；`pty` 应使用交互会话。准备时将 cwd 内普通文件记入清单；隔离执行仅暂存声明成员，并保留 cwd 外路径。准备前须先解析符号链接。
+
 指定 loader 时，工具生成稳定路径的 patchelf 运行副本，原始 binary/libc 不变。实际执行文件哈希可能不同于原始附件；两者不能混为一谈。每次执行使用独立、可写的工作目录副本，当前暂存限制为 1024 文件/32 MiB；大文件系统题使用原始服务或专门调试环境。
 
 <a id="challenges-with-docker"></a>

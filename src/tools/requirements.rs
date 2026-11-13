@@ -13,6 +13,18 @@ pub(super) enum Requirement {
 }
 
 impl Requirement {
+    fn job_inputs_available(args: &Value, observation: Option<&Value>) -> bool {
+        let capability = if args["launch_spec"].is_string() {
+            Some("launch_spec_jobs")
+        } else if args["input"].is_string() {
+            Some("process_stdin")
+        } else {
+            None
+        };
+        capability.is_none_or(|capability| {
+            observation.is_some_and(|value| value["capabilities"][capability] == true)
+        })
+    }
     pub(super) fn for_tool(name: &str) -> Self {
         use Requirement::*;
         let (linux, any): (bool, &'static [&'static str]) = match name {
@@ -161,6 +173,12 @@ impl ToolService {
                 "requested debugger capability is unavailable: {capability}"
             );
         }
+        if spec.definition.name.as_str() == "job_start" {
+            ensure!(
+                Requirement::job_inputs_available(args, observation.as_ref()),
+                "requested job LaunchSpec/stdin capability is unavailable"
+            );
+        }
         if spec.definition.name.as_str() == "input_minimize" && args["allow_signal_only"] != true {
             ensure!(
                 observation
@@ -176,6 +194,23 @@ impl ToolService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn new_job_inputs_require_observed_support_without_hiding_basic_jobs() {
+        let old = json!({"os":"linux","capabilities":{"process_jobs":true}});
+        assert!(Requirement::job_inputs_available(
+            &json!({"argv":["files/target"]}),
+            Some(&old)
+        ));
+        for args in [
+            json!({"launch_spec":"files/launch.json"}),
+            json!({"argv":["files/target"],"input":"files/input"}),
+        ] {
+            assert!(!Requirement::job_inputs_available(&args, Some(&old)));
+            assert!(!Requirement::job_inputs_available(&args, None));
+            let ready = json!({"os":"linux","capabilities":{"process_jobs":true,"launch_spec_jobs":true,"process_stdin":true}});
+            assert!(Requirement::job_inputs_available(&args, Some(&ready)));
+        }
+    }
 
     #[test]
     fn windows_debugger_never_enables_linux_tools_or_unobserved_execution() {

@@ -22,6 +22,7 @@ use windows_sys::Win32::{
     },
 };
 
+pub(crate) const MAX_DEPTH: usize = 128;
 pub(crate) fn remove_reclaimed(path: &Path) -> Result<()> {
     security::require_system()?;
     let private = AclPolicy::private_vm();
@@ -61,7 +62,10 @@ struct Budget {
     deadline: Instant,
 }
 fn contents(directory: &Dir, policy: &AclPolicy, budget: &mut Budget, depth: usize) -> Result<()> {
-    ensure!(depth <= 128, "owned cleanup exceeds directory depth bound");
+    ensure!(
+        depth <= MAX_DEPTH,
+        "owned cleanup exceeds directory depth bound"
+    );
     for entry in directory.entries()? {
         ensure!(
             budget.remaining > 0 && Instant::now() < budget.deadline,

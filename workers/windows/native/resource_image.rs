@@ -20,20 +20,38 @@ pub(crate) fn validate(
     files: &[Reference],
     arguments: &[String],
 ) -> Result<()> {
+    validate_paths(program, files)?;
+    for file in files {
+        ensure!(
+            arguments.contains(&file.path),
+            "native argument file is not a direct argv entry"
+        );
+    }
+    for argument in arguments {
+        if argument.starts_with("files/") && argument != &program.path {
+            ensure!(
+                files.iter().any(|file| &file.path == argument),
+                "native argv file has no admitted image member"
+            );
+        }
+    }
+    Ok(())
+}
+pub(crate) fn validate_paths(program: &Reference, files: &[Reference]) -> Result<()> {
     ensure!(
         files.len() <= 64,
         "native process has too many argument files"
     );
     let mut names = BTreeSet::new();
-    for (index, file) in std::iter::once(program).chain(files).enumerate() {
+    for file in std::iter::once(program).chain(files) {
         let name = file
             .path
             .strip_prefix("files/")
             .ok_or_else(|| anyhow::anyhow!("native image requires admitted files/... paths"))?;
         wukong_worker_package::validate_path(name)?;
         ensure!(
-            index == 0 || arguments.contains(&file.path),
-            "native argument file is not a direct argv entry"
+            file.path.split('/').count() <= crate::resource_cleanup::MAX_DEPTH,
+            "native image exceeds cleanup directory depth"
         );
         let key = file.path.to_ascii_lowercase();
         ensure!(
@@ -47,14 +65,6 @@ pub(crate) fn validate(
             ensure!(
                 !names.contains(&key),
                 "native image file overlaps a member directory"
-            );
-        }
-    }
-    for argument in arguments {
-        if argument.starts_with("files/") && argument != &program.path {
-            ensure!(
-                files.iter().any(|file| &file.path == argument),
-                "native argv file has no admitted image member"
             );
         }
     }
@@ -90,15 +100,23 @@ pub(crate) fn stage(
     scratch: &Path,
     sources: Vec<AdmittedInput>,
     executable_policy: &AclPolicy,
+    working: Option<&security::ResourceDirectory>,
 ) -> Result<Vec<fs::File>> {
     let private = AclPolicy::private_vm();
-    stage_with_policy(scratch, sources, executable_policy, &private)
+    stage_with_policy(
+        scratch,
+        sources,
+        executable_policy,
+        &private,
+        working.map(|working| working.path()),
+    )
 }
 fn stage_with_policy(
     scratch: &Path,
     sources: Vec<AdmittedInput>,
     executable_policy: &AclPolicy,
     private: &AclPolicy,
+    working: Option<&Path>,
 ) -> Result<Vec<fs::File>> {
     let mut held = Vec::with_capacity(sources.len());
     for mut source in sources {
@@ -117,7 +135,13 @@ fn stage_with_policy(
             if !path.exists() {
                 executable_policy.create_directory(&path)?;
             }
-            executable_policy.verify(&path, true)?;
+            let guarded = match working {
+                Some(working) => path.canonicalize()? == working,
+                None => false,
+            };
+            if !guarded {
+                executable_policy.verify(&path, true)?;
+            }
         }
         let destination = scratch.join(relative);
         let mut file = private.create_file(&destination)?;
@@ -144,6 +168,32 @@ fn stage_with_policy(
         );
     }
     Ok(held)
+}
+
+pub(crate) fn working_directory(
+    scratch: &Path,
+    cwd: &str,
+    app: &str,
+    logon: &str,
+    policy: &AclPolicy,
+) -> Result<security::ResourceDirectory> {
+    crate::resource_launch::logical(cwd)?;
+    let relative = Path::new(cwd);
+    let mut parents: Vec<_> = relative
+        .parent()
+        .into_iter()
+        .flat_map(Path::ancestors)
+        .filter(|path| !path.as_os_str().is_empty())
+        .collect();
+    parents.reverse();
+    for parent in parents {
+        let path = scratch.join(parent);
+        if !path.exists() {
+            policy.create_directory(&path)?;
+        }
+        policy.verify(&path, true)?;
+    }
+    security::ResourceDirectory::create(&scratch.join(relative), app, logon)
 }
 
 #[cfg(test)]
@@ -209,7 +259,7 @@ mod tests {
                 reference.clone(),
             ));
         }
-        let handles = stage_with_policy(&scratch, sources, &private, &private)?;
+        let handles = stage_with_policy(&scratch, sources, &private, &private, None)?;
         assert_eq!(handles.len(), 2);
         for reference in &references {
             let path = scratch.join(&reference.path);

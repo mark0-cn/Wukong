@@ -100,10 +100,21 @@ impl ExecutionService {
                         self.files.known_file(agent, text(&args, "input")?, false)?;
                     }
                 } else {
-                    ensure!(
-                        !string_list(&args, "argv")?.is_empty(),
-                        "job argv cannot be empty"
-                    );
+                    if let Some(launch) = args["launch_spec"].as_str() {
+                        self.files.known_file(agent, launch, false)?;
+                        ensure!(
+                            string_list(&args, "argv")?.is_empty(),
+                            "LaunchSpec owns job argv"
+                        );
+                    } else {
+                        ensure!(
+                            !string_list(&args, "argv")?.is_empty(),
+                            "job argv cannot be empty"
+                        );
+                    }
+                    if let Some(input) = args["input"].as_str() {
+                        self.files.known_file(agent, input, false)?;
+                    }
                 }
                 if name == "fuzz_start" {
                     let seeds = text(&args, "seeds")?;

@@ -55,6 +55,13 @@ def native_build(directory):
                 or sha256(regular(directory / probe["pdb"])) != probe["pdb_sha256"]
                 or require_static_crt(directory / probe["binary"], architecture, inspector) != probe["imported_libraries"]):
             raise ValueError("Offline self-test fixture was changed")
+        dependency=probe.get('dependency')
+        if dependency is not None:
+            if (dependency['binary']!=f'selftest/{architecture}/wukong-fixture.dll'
+                    or dependency['source_sha256']!=sha256(ROOT/'workers/windows/fixtures/dependency.c')
+                    or sha256(regular(directory/dependency['binary']))!=dependency['sha256']
+                    or require_static_crt(directory/dependency['binary'],architecture,inspector)!=dependency['imported_libraries']):
+                raise ValueError('Offline launch dependency fixture was changed')
     return binaries, metadata
 
 
@@ -99,6 +106,9 @@ def assemble(cache, output, native, keys):
             target = output / "runtime" / probe[key]
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(native / probe[key], target)
+        if probe.get('dependency'):
+            target=output/'runtime'/probe['dependency']['binary']
+            shutil.copyfile(native/probe['dependency']['binary'],target)
     shutil.copyfile(native / "native-build.json", output / "native-build.json")
     notices = collect(output / "licenses/native")
     lock = load_lock()
