@@ -93,7 +93,7 @@ Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特
 
 ### 托管调试器中断验收
 
-`ssh_debugger_fault_acceptance.rs` 复用密封探针上传、RPC 记录、协调文件及恢复后 echo 夹具。`WUKONG_REMOTE_WORKER_DEBUGGER_FAULT_TEST` 选择本机配置，包含固定指纹的 `config`、`manifest_sha256`、含 `program`/`pdb` 的单个 `probe`、`fault`（`cancel`、`host`、`service_stop` 或 `service_kill`），以及新的绝对 `ready`、`resume`、`output` 路径。运行 `cargo test --locked --lib remote_native_interrupted_debugger_acceptance -- --ignored --nocapture`。夹具在可信探针的 `wmain` 断点处删除断点，再发出固定跳出操作；因该夹具无限循环，操作将保持等待。独立 VM 操作者必须在允许所选故障前验证原始受保护请求、所属进程及账本中的待定变更。取消模式在观察完成后发布恢复标记；其他模式在独立故障操作完成后发布。由于单条传输串行处理请求，`cancel` 使用携带相同租约的第二条已认证控制器连接。测试要求原始结果保持未知、确认清理、回执哈希匹配、拒绝启动/控制重放，以及新的 echo 执行成功。服务重启必须增加租约 epoch 并拒绝旧凭据。构建/Clippy 检查不证明这些真实故障验收；目前尚未声明已安装中断结果。
+`ssh_debugger_fault_acceptance.rs` 复用密封探针上传、RPC 记录、协调文件及恢复后 echo 夹具。`WUKONG_REMOTE_WORKER_DEBUGGER_FAULT_TEST` 选择本机配置，包含固定指纹的 `config`、`manifest_sha256`、含 `program`/`pdb` 的单个 `probe`、`fault`（`cancel`、`host`、`service_stop` 或 `service_kill`），以及新的绝对 `ready`、`resume`、`output` 路径。运行 `cargo test --locked --lib remote_native_interrupted_debugger_acceptance -- --ignored --nocapture`。可信探针需构建为支持 `--debug-wait`：其 `fixture_debug_wait` 调用 `Sleep(120000)`。到达该符号并移除断点后，夹具使用上游有类型的单步跳过调用越过短序言并进入等待。每次已完成的准备操作均被保留，不解析指令文本。调用必须保持待定 600 ms，随后独立 VM 操作者还须验证原始受保护请求、所属进程和账本中仍为 started 的变更，才允许所选故障。取消模式在观察完成后发布恢复标记；其他模式在独立故障操作完成后发布。由于单条传输串行处理请求，`cancel` 使用携带相同租约的第二条已认证控制器连接。测试要求原始结果保持未知、确认清理、回执哈希匹配、拒绝启动/控制重放，以及新的 echo 执行成功。服务重启必须增加租约 epoch 并拒绝旧凭据。构建/Clippy 检查不证明这些真实故障验收；目前尚未声明已安装中断结果。
 
 ### 外部 WinDbg MCP 验收
 

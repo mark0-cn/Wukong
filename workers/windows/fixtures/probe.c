@@ -6,6 +6,7 @@
 #include <string.h>
 volatile LONG fixture_value = 0x12345678;
 __declspec(noinline) LONG fixture_step(LONG value) { return value ^ 0x1020304; }
+__declspec(noinline) void fixture_debug_wait(void) { Sleep(120000); }
 static int copy_input(HANDLE input) {
     BYTE buffer[4096]; DWORD count = 0, written = 0;
     for (;;) {
@@ -42,6 +43,10 @@ static BOOL create_owned_cleanup_directory(void) {
     return CreateDirectoryW(L"deny-tree", &attributes);
 }
 int wmain(int argc, wchar_t **argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--debug-wait") == 0) {
+        fixture_debug_wait();
+        return 0;
+    }
     if (argc == 2 && wcscmp(argv[1], L"--debug-once") == 0) {
         fixture_value = fixture_step(fixture_value);
         return 0;

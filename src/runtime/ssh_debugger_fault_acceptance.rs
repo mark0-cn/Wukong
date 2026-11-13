@@ -44,17 +44,21 @@ struct Profile {
     output: PathBuf,
 }
 
-async fn enter_main(calls: &mut Calls<'_>, id: &str) -> Result<()> {
+async fn enter_wait(calls: &mut Calls<'_>, id: &str) -> Result<()> {
     let breakpoint = calls
-        .control(id, "breakpoint_add", json!({"symbol":"wukong_probe!wmain"}))
+        .control(
+            id,
+            "breakpoint_add",
+            json!({"symbol":"wukong_probe!fixture_debug_wait"}),
+        )
         .await?;
     let bp = &breakpoint["response"]["structuredContent"]["breakpoint"];
     let address = bp["address"]
         .as_str()
-        .context("trusted main symbol unresolved")?;
+        .context("trusted wait symbol unresolved")?;
     let number = bp["id"]
         .as_u64()
-        .context("trusted main breakpoint missing")?
+        .context("trusted wait breakpoint missing")?
         .to_string();
     let mut hit = false;
     for _ in 0..3 {
@@ -71,7 +75,7 @@ async fn enter_main(calls: &mut Calls<'_>, id: &str) -> Result<()> {
             break;
         }
     }
-    ensure!(hit, "trusted fixture never reached main");
+    ensure!(hit, "trusted fixture never reached its wait");
     calls
         .control(id, "breakpoint_remove", json!({"breakpoint_id":number}))
         .await?;
@@ -150,6 +154,7 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         &profile.probe.program,
         &profile.probe.pdb,
         120,
+        &["--debug-wait"],
     )
     .await?;
     let mut calls = Calls {
@@ -162,7 +167,7 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
     let id = started["session_id"]
         .as_str()
         .context("fault debugger absent")?;
-    if let Err(error) = enter_main(&mut calls, id).await {
+    if let Err(error) = enter_wait(&mut calls, id).await {
         calls
             .call(
                 "debug.close",
@@ -171,25 +176,39 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
             .await?;
         return Err(error);
     }
-    // The sealed fixture's main loops forever. The upstream fixed step-out
-    // therefore leaves an actual control pending until the independent fault.
-    let control = json!({"session_id":id,"action":"finish","timeout_secs":60,"request_id":"fault-pending-finish"});
-    let mut pending = Box::pin(calls.call("debug.control", control.clone()));
-    if let Ok(result) = tokio::time::timeout(Duration::from_millis(600), &mut pending).await {
+    // Step over the trusted function's short prologue, then its 120-second
+    // Sleep call. This uses the upstream typed tool and no instruction parser.
+    // Each completed preparation is retained; only an independently observed
+    // still-started mutation authorizes a fault.
+    let mut preparation = Vec::new();
+    let (control, pending) = loop {
+        let control = json!({"session_id":id,"action":"next","timeout_secs":60,
+            "request_id":format!("fault-step-{}",preparation.len())});
+        let mut pending = Box::pin(bound.call("debug.control", control.clone()));
+        let Ok(result) = tokio::time::timeout(Duration::from_millis(600), &mut pending).await
+        else {
+            break (control, pending);
+        };
         drop(pending);
-        calls
-            .call(
-                "debug.close",
-                json!({"session_id":id,"request_id":"early-control-close"}),
-            )
-            .await?;
-        anyhow::bail!("fault control completed before independent observation: {result:?}");
-    }
+        let accepted = result
+            .as_ref()
+            .is_ok_and(|value| value["response"]["isError"] != true);
+        if !accepted || preparation.len() >= 16 {
+            calls
+                .call(
+                    "debug.close",
+                    json!({"session_id":id,"request_id":"early-control-close"}),
+                )
+                .await?;
+            anyhow::bail!("trusted wait was not reached: {result:?}");
+        }
+        preparation.push(json!({"params":control,"result":result?}));
+    };
     publish(
         &profile.ready,
         &json!({"scope":"dedicated_native_debugger_fault_ready","fault":profile.fault,
         "identity":client.identity(),"run_id":run,"owner_id":"debugger-fault-controller",
-        "started":started,"launch":launch,"pending_control":control,"probe_sha256":profile.probe.program.sha256}),
+        "started":started,"launch":launch,"preparation":preparation,"pending_control":control,"probe_sha256":profile.probe.program.sha256}),
     )?;
     wait_for_resume(&profile.resume, Duration::from_secs(180)).await?;
     let cancellation = if profile.fault == Fault::Cancel {
@@ -264,7 +283,10 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         "interrupted start replayed"
     );
     ensure!(
-        rebound.call("debug.control", control).await.is_err(),
+        rebound
+            .call("debug.control", control.clone())
+            .await
+            .is_err(),
         "interrupted control replayed or fabricated completion"
     );
     let (artifact, content) = original(&rebound, &format!("native-results/{id}/receipt")).await?;
@@ -289,6 +311,7 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         &profile.output,
         &json!({"passed":true,"scope":"interrupted_native_debugger_vm","fault":profile.fault,
         "identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"started":started,
+        "preparation":preparation,"pending_control":control,
         "interrupted_control_error":format!("{failed:#}"),"cancellation":cancellation,"terminal":status,
         "recovery_artifact":artifact,"recovery_receipt":proof,"after_recovery":after,"production_execution":false}),
     )?;

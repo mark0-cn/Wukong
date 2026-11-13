@@ -303,6 +303,7 @@ pub(super) async fn launch_fixture(
     program: &Probe,
     pdb: &Probe,
     timeout: u64,
+    arguments: &[&str],
 ) -> Result<Value> {
     upload(
         client,
@@ -318,7 +319,7 @@ pub(super) async fn launch_fixture(
         false,
     )
     .await?;
-    let manifest = json!({"schema_version":1,"challenge_id":"trusted-native-debugger","base":format!("files/{base}"),"target":"wukong-probe.exe","files":{"wukong-probe.exe":program.sha256,"wukong-probe.pdb":pdb.sha256},"args":[],"cwd":"work","input_mode":"stdin_pipe","env":{},"timeout_secs":timeout,"service":{"mode":"offline"},"loader":null,"library_path":null,"runtime_confirmed":false});
+    let manifest = json!({"schema_version":1,"challenge_id":"trusted-native-debugger","base":format!("files/{base}"),"target":"wukong-probe.exe","files":{"wukong-probe.exe":program.sha256,"wukong-probe.pdb":pdb.sha256},"args":arguments,"cwd":"work","input_mode":"stdin_pipe","env":{},"timeout_secs":timeout,"service":{"mode":"offline"},"loader":null,"library_path":null,"runtime_confirmed":false});
     upload(
         client,
         &format!("{base}/launch.json"),
@@ -379,13 +380,15 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
         );
         let wrong = &profile.probes[if architecture == "x64" { "x86" } else { "x64" }].pdb;
         let bad_base = format!("debugger/wrong-pdb/{}", fixtures.program.sha256);
-        let bad_launch = launch_fixture(&bound, &bad_base, &fixtures.program, wrong, 90).await?;
+        let bad_launch =
+            launch_fixture(&bound, &bad_base, &fixtures.program, wrong, 90, &[]).await?;
         let rejected = calls
             .rejected_start(json!({"mode":"launch","engine":"dbgeng",
             "launch_spec":bad_launch["path"],"request_id":format!("wrong-pdb-{architecture}")}))
             .await?;
         let base = format!("debugger/{}", fixtures.program.sha256);
-        let launch = launch_fixture(&bound, &base, &fixtures.program, &fixtures.pdb, 90).await?;
+        let launch =
+            launch_fixture(&bound, &base, &fixtures.program, &fixtures.pdb, 90, &[]).await?;
         let request = json!({"mode":"launch","engine":"dbgeng","launch_spec":launch["path"],"request_id":format!("debugger-start-{architecture}")});
         let started = calls.call("debug.start", request.clone()).await?;
         let id = started["session_id"]
