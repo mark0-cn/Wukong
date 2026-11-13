@@ -86,7 +86,7 @@ pub(super) fn check(
     environment.insert("_NT_ALT_SYMBOL_PATH".into(), symbols.as_os_str().to_owned());
     let helper = Spawn {
         executable: &package.join(executable),
-        arguments: &["--tools".into(), "session,inspect,exec".into()],
+        arguments: &["--tools".into(), "session,inspect,exec,crash".into()],
         directory: &debugger_path,
         environment: &environment,
         log: &output,
@@ -111,8 +111,9 @@ pub(super) fn check(
         let mut client = Client::connect(reader, writer, transcript).await?;
         let result = probe(&mut client, &mut target, &symbols, architecture).await;
         let closed = client.close().await;
-        result?;
-        closed
+        let loader_break = result?;
+        closed?;
+        Ok::<_, anyhow::Error>(loader_break)
     });
     let helper_stopped = helper.stop(Duration::from_secs(10));
     let target_stopped = target.stop(Duration::from_secs(10));
@@ -128,13 +129,14 @@ pub(super) fn check(
     debugger_persona.close()?;
     fs::remove_dir(&target_path)?;
     fs::remove_dir(&debugger_path)?;
-    outcome?;
+    let loader_break = outcome?;
     Ok(
         json!({"passed":true,"architecture":architecture,"engine":"dbgeng","backend":"windbg_mcp",
         "target_appcontainer_sid":target_sid,"debugger_appcontainer_sid":debugger_sid,
         "target_logon_sid":target_persona.logon_sid(),"debugger_logon_sid":debugger_persona.logon_sid(),
         "privileges":["SeChangeNotifyPrivilege"],"capabilities":0,"debug_privilege_enabled":false,
         "owned_attach":true,"pre_execution_attach":true,"single_pass_target":true,
+        "wow64_loader_break_observed":loader_break,
         "registers_observed":true,"target_module_observed":true,
         "symbols_loaded":true,"symbol_breakpoint_hit":true,"stack_symbol_observed":true,
         "jobs_empty":true,"profiles_removed":true,"scratch_removed":true}),
@@ -146,7 +148,7 @@ async fn probe(
     target: &mut crate::processes::OwnedProcess,
     symbols: &Path,
     architecture: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let opened = client.attach_owned(target).await?;
     let session = opened["session_id"]
         .as_str()
@@ -168,10 +170,33 @@ async fn probe(
         let address = breakpoint["breakpoint"]["address"]
             .as_str()
             .context("fixture breakpoint is unresolved")?;
-        let stop = client.structured("go", route.clone()).await?;
+        let mut stop = client.structured("go", route.clone()).await?;
+        let mut loader_break = false;
+        if architecture == "x86"
+            && stop["stopped_at"] != address
+            && stop["timed_out"] == false
+            && stop["target_gone"] == false
+            && stop["interrupted"] == false
+        {
+            let event = client
+                .structured(
+                    "exception_triage",
+                    json!({"session_id":session,"frames":1,"scan_stack":false}),
+                )
+                .await?;
+            ensure!(
+                wow64_loader_break(&stop, &event),
+                "single-pass fixture stopped at an unexpected exception"
+            );
+            // This is only the sealed fixture's initial WOW64 notification,
+            // not a general debugger policy for continuing exceptions.
+            loader_break = true;
+            stop = client.structured("go", route.clone()).await?;
+        }
         ensure!(
             stop["timed_out"] == false
                 && stop["target_gone"] == false
+                && stop["interrupted"] == false
                 && stop["stopped_at"] == address,
             "contained debugger did not hit the fixture breakpoint"
         );
@@ -197,7 +222,7 @@ async fn probe(
                 && stack["frames"][0]["address"] == address,
             "contained backtrace does not match the fixture breakpoint"
         );
-        Ok(())
+        Ok(loader_break)
     }
     .await;
     let released = client.structured("end_session", route).await?;
@@ -206,6 +231,15 @@ async fn probe(
         "contained debugger did not release its session"
     );
     result
+}
+
+fn wow64_loader_break(stop: &Value, event: &Value) -> bool {
+    let exception = &event["exception"];
+    exception["code"] == "0x4000001f"
+        && exception["first_chance"] == true
+        && exception["noncontinuable"] == false
+        && exception["address"].is_string()
+        && exception["address"] == stop["stopped_at"]
 }
 
 pub(super) fn validate_report(value: &Value) -> Result<()> {
@@ -223,7 +257,10 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
                 && debugger["backend"] == "windbg_mcp"
                 && debugger["privileges"] == json!(["SeChangeNotifyPrivilege"])
                 && debugger["capabilities"] == 0
-                && debugger["debug_privilege_enabled"] == false,
+                && debugger["debug_privilege_enabled"] == false
+                && debugger["wow64_loader_break_observed"]
+                    .as_bool()
+                    .is_some_and(|observed| !observed || architecture == "x86"),
             "contained DbgEng identity or privilege report differs"
         );
         for key in [
@@ -264,4 +301,29 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixture_continuation_refuses_other_faults_or_a_different_stop() {
+        let stop = json!({"stopped_at":"0x00000000771e7d89"});
+        let event = json!({"exception":{"code":"0x4000001f","address":stop["stopped_at"],"first_chance":true,"noncontinuable":false}});
+        assert!(wow64_loader_break(&stop, &event));
+        for (field, value) in [
+            ("code", json!("0xc0000005")),
+            ("code", json!("0x80000003")),
+            ("first_chance", json!(false)),
+            ("noncontinuable", json!(true)),
+            ("address", json!("0x0000000000000000")),
+            ("address", Value::Null),
+        ] {
+            let mut other = event.clone();
+            other["exception"][field] = value;
+            assert!(!wow64_loader_break(&stop, &other));
+        }
+        assert!(!wow64_loader_break(&json!({}), &json!({})));
+    }
 }
