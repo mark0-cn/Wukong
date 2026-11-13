@@ -150,6 +150,7 @@ impl Runtime {
                 .is_some_and(|live| live.request.resource_id == id && live.busy())
         {
             self.cancel(&id)?;
+            self.debugger.as_mut().unwrap().request_cancel();
             journal.start_closing(&id)?;
             anyhow::bail!("native debugger cancellation requested; owned cleanup is still pending");
         }

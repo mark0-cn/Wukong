@@ -276,7 +276,7 @@ impl LeaseProxy {
         journal.idle()
     }
     pub(crate) async fn cancel_resources(&self) -> Result<()> {
-        if let Some(runtime) = &self.resources.lock().await.runtime {
+        if let Some(runtime) = &mut self.resources.lock().await.runtime {
             runtime.cancel_active()?;
         }
         Ok(())

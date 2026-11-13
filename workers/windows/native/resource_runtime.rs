@@ -459,9 +459,14 @@ impl Runtime {
             json!({"job_id":id,"kind":"process","state":"lost","cleanup_pending":true,"error":"native host ownership was interrupted; cleanup reconciliation is required","production_execution":false}),
         )
     }
-    pub(crate) fn cancel_active(&self) -> Result<()> {
-        if let Some(debugger) = &self.debugger {
-            self.cancel(&debugger.request.resource_id)?;
+    pub(crate) fn cancel_active(&mut self) -> Result<()> {
+        if let Some(id) = self
+            .debugger
+            .as_ref()
+            .map(|debugger| debugger.request.resource_id.clone())
+        {
+            self.cancel(&id)?;
+            self.debugger.as_mut().unwrap().request_cancel();
         }
         if let Some(running) = &self.running {
             self.cancel(&running.request.resource_id)?;

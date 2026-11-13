@@ -28,6 +28,7 @@ pub(crate) struct Live {
     pub request_hash: String,
     sequence: u64,
     deadline: Option<Instant>,
+    cancel_requested: bool,
     pub failed: Option<String>,
 }
 pub(crate) struct Pending {
@@ -104,12 +105,13 @@ impl Live {
             request,
             sequence: 0,
             deadline: None,
+            cancel_requested: false,
             failed: None,
         })
     }
     pub(crate) fn prepare(&mut self, operation: Operation) -> Result<Pending> {
         ensure!(
-            self.failed.is_none() && !self.host.exited(),
+            self.failed.is_none() && !self.cancel_requested && !self.host.exited(),
             "native debugger host is not live"
         );
         ensure!(
@@ -147,6 +149,10 @@ impl Live {
         self.deadline = None;
         let result = completed.result.and_then(|value| {
             ensure!(
+                !self.cancel_requested,
+                "native debugger was cancelled while its reply was in flight"
+            );
+            ensure!(
                 value["transcript"]
                     == format!(
                         "native-results/{}/transcript-{}",
@@ -169,10 +175,17 @@ impl Live {
     }
     pub(crate) fn needs_recovery(&self) -> bool {
         self.failed.is_some()
-            || self.channel.is_some() && self.host.exited()
+            || (self.channel.is_some() || self.cancel_requested) && self.host.exited()
             || self
                 .deadline
                 .is_some_and(|deadline| Instant::now() >= deadline)
+    }
+    pub(crate) fn request_cancel(&mut self) {
+        if !self.cancel_requested {
+            self.cancel_requested = true;
+            let grace = Instant::now() + Duration::from_secs(5);
+            self.deadline = Some(self.deadline.map_or(grace, |deadline| deadline.min(grace)));
+        }
     }
     pub(crate) fn busy(&self) -> bool {
         self.channel.is_none()

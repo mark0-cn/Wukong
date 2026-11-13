@@ -46,7 +46,7 @@
 
 内部托管调试通路由 System 服务处理 `debug.start`、`debug.inspect`、`debug.control` 和 `debug.close`，与进程任务共享原生输入/LaunchSpec 准入及目标准备，并配对独立的目标/调试器 AppContainer。仅接受 `mode = "launch"` 及 `engine = "auto"` 或 `"dbgeng"`；拒绝 dump 请求。直接目标的资源期限默认为 3,600 秒，LaunchSpec 使用自己的超时。现有附加门控仅释放自己持有的一次挂起计数。完整映像/PDB 对应关系、dump 支持、已安装会话/恢复验收和对抗覆盖完成前，仍禁用生产可用性。
 
-继承管道通道使用从 `proto/session.proto` 生成的 `prost` 消息及 Tokio `LengthDelimitedCodec`，帧上限 4 MiB，每个会话最多 4,096 次交换，每次期限 75 秒。回复绑定资源、准入请求哈希及递增序号。交换在资源锁/输入锁之外等待；服务保留守护 Job 和持久化票据。交换期间请求关闭会发出取消并报告清理待定。成功关闭要求 Job 已清空、profile/scratch 已删除；恢复使用两组原始 persona 意图，绝不重新启动目标。上游 `continue_async`、`wait_for_stop` 和 `break_in` 持有执行句柄。因该后端缺少独立跳出/断点开关工具，仅固定 `gu`、`be N` 和 `bd N` 使用上游 `execute`，其中 ID 必须是已校验的数字；仍不接受任意命令。
+继承管道通道使用从 `proto/session.proto` 生成的 `prost` 消息及 Tokio `LengthDelimitedCodec`，帧上限 4 MiB，每个会话最多 4,096 次交换，每次期限 75 秒。回复绑定资源、准入请求哈希及递增序号。交换在资源锁/输入锁之外等待；服务保留守护 Job 和持久化票据。交换期间请求关闭会发出取消并报告清理待定。取消后最多给予宿主五秒，随后进行所属资源恢复；重复取消不会延长期限。服务停止或租约过期时，即使持有通道的 RPC 任务已被中止，仍可核对已退出的宿主。成功关闭要求 Job 已清空、profile/scratch 已删除；恢复使用两组原始 persona 意图，绝不重新启动目标。上游 `continue_async`、`wait_for_stop` 和 `break_in` 持有执行句柄。因该后端缺少独立跳出/断点开关工具，仅固定 `gu`、`be N` 和 `bd N` 使用上游 `execute`，其中 ID 必须是已校验的数字；仍不接受任意命令。
 
 目标输出和调试器 stderr 使用有界管道读取，stderr 最多保留 1 MiB。MCP 错误保留为原始结果数据。每次回复发布受保护的日志前缀回执，包含长度、SHA256 和请求绑定。校验归属后的 `file.get`、`file.stat` 和 `file.read` 可在日志增长时读取该不可变前缀。超过 32 KiB 的结果通过大小/哈希及日志引用返回，避免填满账本；8 MiB 上限的日志保留原始工具结果。本机原生测试覆盖参数拒绝、回复绑定、诊断上限、不可变前缀，以及在查询新输入前核对中断启动。Clippy/格式检查通过。这些检查不证明已安装 AppContainer 会话验收；先前 VM 结果保留原来的源码及范围。
 

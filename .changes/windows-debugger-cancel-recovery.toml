@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Bound owned debugger cancellation separately from ordinary command waits, so service shutdown and lease expiry can reconcile a host after its in-flight controller request was aborted. Repeated cancellation cannot extend the cleanup grace period."
+zh_CN = "为所属调试器取消设置独立于普通命令等待的期限，使服务停止及租约过期能在执行中的控制器请求中止后核对宿主。重复取消不能延长清理宽限期。"
