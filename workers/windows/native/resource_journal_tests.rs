@@ -70,6 +70,149 @@ fn reserved_effect(reservation: Reservation) -> Result<String> {
 }
 
 #[test]
+fn inventory_is_bounded_scoped_paged_and_preserves_original_owners_across_reopen() -> Result<()> {
+    let (root, policy, mut journal) = fixture()?;
+    let foreign = Owner {
+        run_id: "other-run".into(),
+        ..owner()
+    };
+    let Reservation::Reserved { resource, .. } =
+        journal.reserve_start(&foreign, "foreign", ResourceKind::Process, &json!({}))?
+    else {
+        anyhow::bail!("missing fixture reservation")
+    };
+    journal.start_closing(&resource)?;
+    journal.close(&resource, cleanup())?;
+    for index in 0..7 {
+        let Reservation::Reserved { resource, .. } = journal.reserve_start(
+            &owner(),
+            &format!("start-{index}"),
+            if index % 2 == 0 {
+                ResourceKind::Process
+            } else {
+                ResourceKind::Debugger
+            },
+            &json!({"index":index}),
+        )?
+        else {
+            anyhow::bail!("missing fixture reservation")
+        };
+        if index != 6 {
+            journal.start_closing(&resource)?;
+            journal.close(&resource, cleanup())?;
+        }
+    }
+    let successor = Owner {
+        owner_id: "successor".into(),
+        epoch: 2,
+        ..owner()
+    };
+    let all = journal.resources(&successor, None, None, 64)?;
+    assert_eq!(all.len(), 7);
+    assert!(all.iter().all(|record| record.owner == owner()));
+    assert_eq!(
+        all.iter()
+            .filter(|record| record.phase == Phase::Preparing)
+            .count(),
+        1
+    );
+    let processes = journal.resources(&successor, Some(ResourceKind::Process), None, 64)?;
+    assert_eq!(processes.len(), 4);
+    let mut observed = Vec::new();
+    let mut after = None;
+    loop {
+        let page =
+            journal.resources(&successor, Some(ResourceKind::Process), after.as_deref(), 1)?;
+        if page.is_empty() {
+            break;
+        }
+        after = Some(page[0].id.clone());
+        observed.extend(page);
+    }
+    assert_eq!(observed, processes);
+    assert_eq!(journal.resources(&foreign, None, None, 64)?.len(), 1);
+    assert!(
+        journal
+            .resources(
+                &Owner {
+                    run_id: "empty-run".into(),
+                    ..successor.clone()
+                },
+                None,
+                None,
+                64
+            )?
+            .is_empty()
+    );
+    for (cursor, limit) in [
+        (Some("../outside"), 1),
+        (Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), 1),
+        (None, 0),
+        (None, 65),
+    ] {
+        assert!(journal.resources(&successor, None, cursor, limit).is_err());
+    }
+    assert!(
+        journal
+            .resources(
+                &Owner {
+                    epoch: 0,
+                    ..successor.clone()
+                },
+                None,
+                None,
+                1
+            )
+            .is_err()
+    );
+    drop(journal);
+    let journal = Journal::with_policy(root.path(), successor.identity.clone(), policy.clone())?;
+    assert_eq!(journal.resources(&successor, None, None, 64)?, all);
+    drop(journal);
+    let mut next_boot = successor;
+    next_boot.identity.boot_id = format!("windows:{}:41", "b".repeat(32));
+    let journal = Journal::with_policy(root.path(), next_boot.identity.clone(), policy)?;
+    // Even an empty page cannot hide a prior run's different worker binding.
+    assert!(
+        journal
+            .resources(&next_boot, None, Some(&"f".repeat(32)), 1)
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn inventory_validates_fingerprints_and_rejects_missing_or_ambiguous_start_intents() -> Result<()> {
+    let (_root, _policy, mut journal) = fixture()?;
+    let (effect, resource) = reserve(&mut journal, &owner(), "start")?;
+    journal.start_closing(&resource)?;
+    journal.close(&resource, cleanup())?;
+    let original: String = journal.connection.query_row(
+        "SELECT payload FROM effects WHERE id=?1",
+        [&effect],
+        |row| row.get(0),
+    )?;
+    let mut changed: Value = serde_json::from_str(&original)?;
+    changed["specification"]["changed"] = json!(true);
+    journal.connection.execute(
+        "UPDATE effects SET payload=?1 WHERE id=?2",
+        params![changed.to_string(), effect],
+    )?;
+    assert!(journal.resources(&owner(), None, None, 1).is_err());
+    journal.connection.execute(
+        "UPDATE effects SET payload=?1 WHERE id=?2",
+        params![original, effect],
+    )?;
+    journal.connection.execute("INSERT INTO effects SELECT ?1,resource,fingerprint,payload,actor,state,ticket,outcome FROM effects WHERE id=?2", params!["f".repeat(64), effect])?;
+    assert!(journal.resources(&owner(), None, None, 1).is_err());
+    journal
+        .connection
+        .execute("DELETE FROM effects WHERE resource=?1", [&resource])?;
+    assert!(journal.resources(&owner(), None, None, 1).is_err());
+    Ok(())
+}
+
+#[test]
 fn recovery_view_preserves_original_intent_and_owner_without_reopening_old_boot_work() -> Result<()>
 {
     let (root, policy, mut journal) = fixture()?;

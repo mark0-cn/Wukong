@@ -222,6 +222,9 @@ fn client_path(path: &Path) -> Result<String> {
 }
 
 #[cfg(test)]
+#[path = "ssh_inventory_acceptance.rs"]
+mod inventory_acceptance;
+#[cfg(test)]
 #[path = "ssh_launch_acceptance.rs"]
 mod launch_acceptance;
 #[cfg(test)]

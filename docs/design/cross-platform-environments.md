@@ -42,6 +42,8 @@ For native managed SSH, the System service additionally owns the controller-faci
 
 The native service also opens a protected SQLite resource journal, reusing `rusqlite` and the existing binding/owner types. One active resource and pending mutation are reserved transactionally; interrupted effects survive database reopen and are reconciled rather than replayed. Active or uncertain entries additionally block lease release and expired takeover after service restart. Standalone process resources now use this journal, owned guardian Jobs and SDK profile/scratch cleanup. Fresh offline installation and the specified trusted preparation/host/service interruption cases passed at `69a5e3b`; see the [Windows component guide](../../workers/windows/README.md) for source-bound evidence and remaining limits.
 
+Native resource discovery uses the protected journal, not the metadata worker's job directory. The leased `job.list` array and typed `resource.list` pages are run/binding scoped, bounded to 64 entries and ordered by resource ID; original owner/start-effect/specification hashes remain traceable across controller changes. Resource summaries omit specifications and environment values. Discovery is not a substitute for OS cleanup or the direct journal idle barrier. See the [Windows API contract](../../workers/windows/README.md).
+
 ## Shared and large artifacts
 
 `artifact_stage` accepts a same-run evidence ID and stages a verified immutable copy in the caller's environment. Cross-environment transfer passes through the controller. The original evidence identity is retained. `stage_target` also streams its hash-verified original rather than placing the complete file in one RPC.

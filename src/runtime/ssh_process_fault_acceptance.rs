@@ -1,6 +1,7 @@
 //! The operator injects faults only in the separately enrolled dedicated VM.
 //! Coordination files contain selectors/provenance, never lease tokens or keys.
 use super::{
+    inventory_acceptance::inventory,
     process_acceptance::{Probe, terminal},
     tests::{enrolled_fixture_address, read_fixture_profile},
 };
@@ -36,6 +37,8 @@ struct Profile {
     fault: Fault,
     #[serde(default)]
     launch_spec: bool,
+    #[serde(default)]
+    resource_inventory: bool,
     ready: PathBuf,
     resume: PathBuf,
     output: PathBuf,
@@ -183,6 +186,16 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     }
     let rebound = active.with_lease(current.clone());
     let status = reconciled(&rebound, id).await?;
+    let recovered_inventory = if profile.resource_inventory {
+        let value = inventory(&rebound).await?;
+        ensure!(
+            value["jobs"] == json!([status]) && value["resources"][0]["phase"] == "closed",
+            "interrupted native resource is absent or reopened in discovery"
+        );
+        value
+    } else {
+        Value::Null
+    };
     ensure!(
         status["result"]["outcome"] == "unknown" && status["result"].get("exit_code").is_none(),
         "interrupted execution manufactured a result"
@@ -253,7 +266,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     client.close().await?;
     publish(
         &profile.output,
-        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"launch":launch,"request":request,"started":started,"reconciled":status,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
+        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"launch":launch,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
     )?;
     Ok(())
 }

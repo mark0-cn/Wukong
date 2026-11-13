@@ -52,6 +52,18 @@ fn default_output() -> usize {
     1024 * 1024
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Listing {
+    #[serde(default)]
+    after: Option<String>,
+    #[serde(default = "default_list_limit")]
+    limit: usize,
+}
+fn default_list_limit() -> usize {
+    64
+}
+
 struct Running {
     request: Request,
     host: SystemHost,
@@ -101,7 +113,12 @@ impl Runtime {
     pub(crate) fn handles(method: &str, params: &Map<String, Value>) -> bool {
         matches!(
             method,
-            "job.start" | "job.status" | "job.cancel" | "job.artifacts"
+            "job.start"
+                | "job.status"
+                | "job.cancel"
+                | "job.artifacts"
+                | "job.list"
+                | "resource.list"
         ) || matches!(method, "file.get" | "file.stat" | "file.read")
             && params
                 .get("path")
@@ -117,6 +134,9 @@ impl Runtime {
         params: &Map<String, Value>,
     ) -> Result<Value> {
         self.poll(journal)?;
+        if matches!(method, "job.list" | "resource.list") {
+            return self.list(journal, owner, method, params);
+        }
         if method == "job.start" {
             return self.start(
                 journal,
@@ -316,6 +336,47 @@ impl Runtime {
             },
         )?;
         Ok(value)
+    }
+    fn list(
+        &self,
+        journal: &Journal,
+        owner: &Owner,
+        method: &str,
+        params: &Map<String, Value>,
+    ) -> Result<Value> {
+        let mut params = params.clone();
+        for name in ["_binding", "_lease", "request_id", "call_id"] {
+            params.remove(name);
+        }
+        let listing: Listing = serde_json::from_value(Value::Object(params))?;
+        let records = journal.resources(
+            owner,
+            if method == "job.list" {
+                Some(ResourceKind::Process)
+            } else {
+                None
+            },
+            listing.after.as_deref(),
+            listing.limit,
+        )?;
+        if method == "job.list" {
+            return records
+                .iter()
+                .map(|record| self.status(journal, owner, &record.id))
+                .collect::<Result<Vec<_>>>()
+                .map(Value::Array);
+        }
+        let next_after = if records.len() == listing.limit {
+            records.last().map(|record| record.id.clone())
+        } else {
+            None
+        };
+        let resources = records.into_iter().map(|record| {
+            Ok(json!({"resource_id":record.id,"kind":record.kind,"phase":record.phase,"native_owner":record.owner,"start_effect":record.start_effect,"specification_sha256":crate::inputs::digest(&record.specification)?}))
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(
+            json!({"schema":1,"resources":resources,"next_after":next_after,"production_execution":false}),
+        )
     }
     fn reserved_status(
         &self,

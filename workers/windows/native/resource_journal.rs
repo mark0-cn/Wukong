@@ -6,9 +6,7 @@ use crate::{
     security::{self, AclPolicy},
 };
 use anyhow::{Context, Result, ensure};
-use rusqlite::{
-    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
-};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -262,6 +260,7 @@ impl Journal {
                     == APPLICATION_ID,
             "unsupported native resource database identity"
         );
+        connection.execute_batch("CREATE INDEX IF NOT EXISTS resources_by_run ON resources(run_id,id); CREATE INDEX IF NOT EXISTS effects_by_resource ON effects(resource);")?;
         Ok(Self {
             connection,
             binding,
@@ -300,6 +299,58 @@ impl Journal {
             "native resource belongs to another worker binding or run"
         );
         Ok(record)
+    }
+    /// A bounded, run-scoped discovery view. Every returned intent still goes
+    /// through the same fingerprint/owner checks as a direct resource lookup.
+    pub fn resources(
+        &self,
+        owner: &Owner,
+        kind: Option<ResourceKind>,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ResourceRecord>> {
+        self.owner(owner)?;
+        check_run(
+            &self.connection,
+            &owner.run_id,
+            &serde_json::to_string(&owner.identity)?,
+        )?;
+        ensure!(
+            (1..=64).contains(&limit),
+            "native inventory limit must be 1..64"
+        );
+        if let Some(after) = after {
+            ensure!(
+                after.len() == 32
+                    && after
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+                "native inventory cursor must be a canonical resource ID"
+            );
+        }
+        let encoded_kind = kind.map(serde_json::to_value).transpose()?;
+        let name = encoded_kind.as_ref().and_then(Value::as_str);
+        let mut statement = self.connection.prepare(
+            "SELECT r.id FROM resources r WHERE r.run_id=?1 AND (?2 IS NULL OR r.id>?2)
+             AND (?3 IS NULL OR EXISTS(SELECT 1 FROM effects e WHERE e.resource=r.id
+                 AND json_extract(e.payload,'$.operation')='start' AND json_extract(e.payload,'$.kind')=?3))
+             ORDER BY r.id LIMIT ?4",
+        )?;
+        let ids = statement
+            .query_map(params![owner.run_id, after, name, limit], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        ids.into_iter()
+            .map(|id| {
+                let record = self.resource(owner, &id)?;
+                ensure!(
+                    kind.is_none_or(|kind| record.kind == kind),
+                    "native inventory kind differs from its original intent"
+                );
+                Ok(record)
+            })
+            .collect()
     }
     pub fn reserve_mutation(
         &mut self,
@@ -631,8 +682,8 @@ fn effect_id(owner: &Owner, request: &str) -> Result<String> {
         request,
     ))
 }
-fn check_run(transaction: &Transaction<'_>, run: &str, binding: &str) -> Result<()> {
-    let previous: Option<String> = transaction
+fn check_run(connection: &Connection, run: &str, binding: &str) -> Result<()> {
+    let previous: Option<String> = connection
         .query_row("SELECT binding FROM runs WHERE run_id=?1", [run], |row| {
             row.get(0)
         })

@@ -42,6 +42,8 @@ Windows 将 OS loader 的 `KUSER_SHARED_DATA.BootId` 序号与动态链接的 `N
 
 原生服务还会打开受保护的 SQLite 资源账本，复用 `rusqlite` 和已有绑定/归属类型。事务限制同时只有一个活动资源及一个待定变更；中断的副作用在数据库重新打开后仍保留，应进行核对而非重放。活动或不确定记录还会在服务重启后继续阻止租约释放和过期接管。独立进程资源现使用该账本、归属守护 Job 及 SDK profile/scratch 清理。源码 `69a5e3b` 已通过全新离线安装，以及明确列出的可信准备/宿主/服务中断用例；与源码绑定的证据及剩余限制见 [Windows 组件指南](../../workers/windows/README.zh-CN.md)。
 
+原生资源发现使用受保护账本，而非 metadata worker 的任务目录。持租约调用的 `job.list` 数组及带类型的 `resource.list` 分页按 run/绑定隔离，最多 64 项并按资源 ID 排序；控制器变化后，原始归属/启动副作用/规格哈希仍可追溯。资源摘要省略规格和环境值。发现不能替代操作系统清理或直接的账本静止屏障。见 [Windows API 契约](../../workers/windows/README.zh-CN.md)。
+
 ## 共享制品与大文件
 
 `artifact_stage` 接受同一 run 的证据 ID，在调用方环境中准备经过校验的不可变副本。跨环境传输经过控制器，并保留原证据身份。`stage_target` 同样流式传输通过哈希校验的原始文件，不将完整文件放入单条 RPC。

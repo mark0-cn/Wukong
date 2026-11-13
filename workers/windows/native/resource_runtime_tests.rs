@@ -76,6 +76,8 @@ fn interrupted_native_start_retry_reads_original_intent_before_new_input_scope()
 #[test]
 fn native_routing_and_request_schema_never_select_privileged_paths() -> Result<()> {
     assert!(Runtime::handles("job.start", &Map::new()));
+    assert!(Runtime::handles("job.list", &Map::new()));
+    assert!(Runtime::handles("resource.list", &Map::new()));
     assert!(!Runtime::handles(
         "file.get",
         json!({"path":"metadata/resource-results/x.json"})
@@ -105,6 +107,91 @@ fn native_routing_and_request_schema_never_select_privileged_paths() -> Result<(
     );
     // Environment permission is validated by the host Request, not granted
     // by successful deserialization of this controller-facing shape.
+    Ok(())
+}
+
+#[test]
+fn native_inventory_retains_pending_cleanup_without_publishing_start_specifications() -> Result<()>
+{
+    let root = tempfile::tempdir()?;
+    let policy = AclPolicy::current_user()?;
+    policy.apply(root.path(), true)?;
+    let mut journal = Journal::with_policy(root.path(), owner().identity, policy)?;
+    let specification = json!({"private_fixture_value":"DO-NOT-PUBLISH-INVENTORY"});
+    let Reservation::Reserved { resource, .. } =
+        journal.reserve_start(&owner(), "pending", ResourceKind::Process, &specification)?
+    else {
+        anyhow::bail!("missing reservation")
+    };
+    let runtime = Runtime {
+        root: root.path().into(),
+        executable: root.path().join("never-execute"),
+        installation: owner().identity.installation_id,
+        running: None,
+        recovery: None,
+    };
+    let successor = Owner {
+        epoch: 2,
+        owner_id: "successor".into(),
+        ..owner()
+    };
+    let page = runtime.list(&journal, &successor, "resource.list", &Map::new())?;
+    assert_eq!(page["resources"][0]["resource_id"], resource);
+    assert_eq!(page["resources"][0]["phase"], "preparing");
+    assert_eq!(
+        page["resources"][0]["native_owner"],
+        serde_json::to_value(owner())?
+    );
+    assert_eq!(
+        page["resources"][0]["specification_sha256"],
+        crate::inputs::digest(&specification)?
+    );
+    assert!(!page.to_string().contains("DO-NOT-PUBLISH-INVENTORY"));
+    let jobs = runtime.list(&journal, &successor, "job.list", &Map::new())?;
+    assert_eq!(jobs[0]["job_id"], resource);
+    assert_eq!(jobs[0]["state"], "lost");
+    assert_eq!(jobs[0]["cleanup_pending"], true);
+    assert!(!journal.idle()?);
+    for params in [
+        json!({"run_id":"foreign"}),
+        json!({"kind":"debugger"}),
+        json!({"limit":65}),
+        json!({"after":".."}),
+    ] {
+        assert!(
+            runtime
+                .list(
+                    &journal,
+                    &successor,
+                    "job.list",
+                    params.as_object().unwrap()
+                )
+                .is_err()
+        );
+    }
+    let foreign = Owner {
+        run_id: "foreign".into(),
+        ..successor
+    };
+    assert_eq!(
+        runtime.list(&journal, &foreign, "job.list", &Map::new())?,
+        json!([])
+    );
+    journal.start_closing(&resource)?;
+    journal.close(
+        &resource,
+        Cleanup {
+            jobs_empty: true,
+            profiles_removed: true,
+            scratch_removed: true,
+        },
+    )?;
+    // A closed ledger entry is not a fabricated successful status file.
+    assert!(
+        runtime
+            .list(&journal, &owner(), "job.list", &Map::new())
+            .is_err()
+    );
     Ok(())
 }
 

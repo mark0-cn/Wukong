@@ -1,4 +1,5 @@
 //! Opt-in actual controller acceptance against the operator's dedicated VM.
+use super::inventory_acceptance::inventory;
 use super::tests::{enrolled_fixture_address, read_fixture_profile};
 use crate::runtime::{
     RuntimeClient, RuntimeConfig,
@@ -34,6 +35,8 @@ struct Profile {
     cleanup_adversary: bool,
     #[serde(default)]
     argument_files: bool,
+    #[serde(default)]
+    resource_inventory: bool,
 }
 
 #[derive(Deserialize)]
@@ -207,6 +210,23 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
                     && error.message.contains("missing native lease")),
         "unleased request did not reach the native missing-lease guard: {unleased:#}"
     );
+    if profile.resource_inventory {
+        for method in ["job.list", "resource.list"] {
+            let error = client
+                .call(method, json!({}))
+                .await
+                .err()
+                .context("unleased native inventory succeeded")?;
+            ensure!(
+                kind(&error, WorkerErrorKind::LeaseLost)
+                    || error
+                        .downcast_ref::<WorkerError>()
+                        .is_some_and(|error| error.kind == WorkerErrorKind::Internal
+                            && error.message.contains("missing native lease")),
+                "unleased inventory failed for an unrelated reason: {error:#}"
+            );
+        }
+    }
     let run = format!(
         "native-process-{}-{}",
         std::process::id(),
@@ -337,6 +357,15 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
         );
         let active = bound.call("job.start", json!({"argv":[uploaded["path"]],"timeout_secs":15,"request_id":format!("cancel-{architecture}")})).await?;
         let active_id = active["job_id"].as_str().context("cancel ID absent")?;
+        if profile.resource_inventory {
+            let observed = inventory(&bound).await?;
+            ensure!(
+                observed["jobs"].as_array().is_some_and(|jobs| jobs
+                    .iter()
+                    .any(|job| job["job_id"] == active_id && job["state"] == "running")),
+                "live native job is missing from authoritative inventory"
+            );
+        }
         ensure!(
             client
                 .call("environment.lease.release", json!({"lease":lease}))
@@ -474,10 +503,15 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
         cached["job_id"] == final_id && cached["state"] == "completed",
         "new controller epoch relaunched completed work or required new input bytes"
     );
+    let observed_inventory = if profile.resource_inventory {
+        inventory(&rebound).await?
+    } else {
+        Value::Null
+    };
     client
         .call("environment.lease.release", json!({"lease":successor}))
         .await?;
-    let report = json!({"passed":true,"scope":"limited_native_process_controller_vm","identity":client.identity(),"first_epoch":lease.epoch,"last_epoch":successor.epoch,"cases":evidence,"production_execution":false});
+    let report = json!({"passed":true,"scope":"limited_native_process_controller_vm","identity":client.identity(),"first_epoch":lease.epoch,"last_epoch":successor.epoch,"cases":evidence,"inventory":observed_inventory,"production_execution":false});
     client.close().await?;
     fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&report)?)?;
     Ok(())

@@ -1,5 +1,6 @@
 //! Real controller acceptance for a signed, disconnected native Windows worker.
 use super::{
+    inventory_acceptance::inventory,
     process_acceptance::{Probe, terminal},
     tests::{enrolled_fixture_address, read_fixture_profile},
 };
@@ -30,6 +31,8 @@ struct Profile {
     manifest_sha256: String,
     probes: BTreeMap<String, Architecture>,
     output: PathBuf,
+    #[serde(default)]
+    resource_inventory: bool,
 }
 fn bytes(probe: &Probe) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
@@ -223,11 +226,53 @@ async fn remote_installed_windows_worker_launch_acceptance() -> Result<()> {
         );
         lease = renewed;
     }
+    let observed_inventory = if profile.resource_inventory {
+        let value = inventory(&client.with_lease(lease.clone())).await?;
+        ensure!(
+            value["jobs"].as_array().is_some_and(|jobs| jobs.len() == 6),
+            "LaunchSpec inventory did not retain all six native jobs"
+        );
+        for params in [
+            json!({"limit":65}),
+            json!({"after":"../outside"}),
+            json!({"run_id":"foreign"}),
+        ] {
+            ensure!(
+                client
+                    .with_lease(lease.clone())
+                    .call("job.list", params)
+                    .await
+                    .is_err(),
+                "invalid native inventory query was admitted"
+            );
+        }
+        value
+    } else {
+        Value::Null
+    };
     client
         .call("environment.lease.release", json!({"lease":lease}))
         .await?;
+    if profile.resource_inventory {
+        let foreign: EnvironmentLease = serde_json::from_value(
+            client
+                .call(
+                    "environment.lease.acquire",
+                    json!({"run_id":format!("{run}-foreign"),"owner_id":"inventory-scope-fixture"}),
+                )
+                .await?,
+        )?;
+        let observed = inventory(&client.with_lease(foreign.clone())).await?;
+        ensure!(
+            observed["jobs"] == json!([]) && observed["resources"] == json!([]),
+            "foreign run discovered another run's native resources"
+        );
+        client
+            .call("environment.lease.release", json!({"lease":foreign}))
+            .await?;
+    }
     client.close().await?;
-    fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&json!({"passed":true,"scope":"native_launch_spec_vm","identity":client.identity(),"cases":cases,"production_execution":false}))?)?;
+    fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&json!({"passed":true,"scope":"native_launch_spec_vm","identity":client.identity(),"cases":cases,"inventory":observed_inventory,"production_execution":false}))?)?;
     Ok(())
 }
 
@@ -295,10 +340,20 @@ async fn remote_native_launch_recovery_acceptance() -> Result<()> {
             "restart replaced launch receipt bytes"
         );
     }
+    let observed_inventory = if previous["inventory"].is_object() {
+        let value = inventory(&bound).await?;
+        ensure!(
+            value == previous["inventory"],
+            "restart changed original native resource discovery or statuses"
+        );
+        value
+    } else {
+        Value::Null
+    };
     client
         .call("environment.lease.release", json!({"lease":lease}))
         .await?;
     client.close().await?;
-    fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&json!({"passed":true,"scope":"native_launch_after_observed_restart","prior_sha256":profile.previous_sha256,"epoch":lease.epoch,"identity":client.identity(),"cases":cases.len(),"production_execution":false}))?)?;
+    fs::File::create_new(profile.output)?.write_all(&serde_json::to_vec_pretty(&json!({"passed":true,"scope":"native_launch_after_observed_restart","prior_sha256":profile.previous_sha256,"epoch":lease.epoch,"identity":client.identity(),"cases":cases.len(),"inventory":observed_inventory,"production_execution":false}))?)?;
     Ok(())
 }
