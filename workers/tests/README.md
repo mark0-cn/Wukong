@@ -80,10 +80,10 @@ Bootstrap PE format fixtures run directly through `object` in the standalone Rus
 
 `integration --static-fixture` exercises the debugger/replay adapter with a statically linked fixture; it does not validate dynamic loader/library identity. Docker execution needs executable `/tmp`, ptrace and the documented isolation capabilities.
 
-On Windows with MSVC and an existing Debugging Tools installation, build `cargo build --locked --bin wukong-dbgeng`, then run:
+The legacy trusted-fixture adapter remains in the standalone worker until the external MCP backend completes containment qualification. On Windows with MSVC and an existing Debugging Tools installation, build `cargo build --locked --manifest-path workers/windows/Cargo.toml --target-dir target/windows-worker-native --bin wukong-dbgeng`, then run:
 
 ```powershell
-python workers/tests/run.py windows-debugger --state target/dbgeng-acceptance --helper target/debug/wukong-dbgeng.exe --engine-dir '<Debugging Tools x64 directory>'
+python workers/tests/run.py windows-debugger --state target/dbgeng-acceptance --helper target/windows-worker-native/debug/wukong-dbgeng.exe --engine-dir '<Debugging Tools x64 directory>'
 ```
 
 This compiles trusted x64/x86 fixtures and checks Dump registers, stack, memory, modules, threads, disassembly, live breakpoints, stepping, finish, request deduplication and deadline interruption followed by inspection. It retains hashes and raw transcripts in the selected directory. It neither installs tools nor proves production isolation or offline VM installation; those require dedicated VM acceptance.

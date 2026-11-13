@@ -1,4 +1,4 @@
-//! Standalone worker build; the engine implementation is shared with the development helper.
+//! Standalone legacy helper, pending replacement by the external WinDbg MCP backend.
 #[cfg(windows)]
 mod dbgeng;
 

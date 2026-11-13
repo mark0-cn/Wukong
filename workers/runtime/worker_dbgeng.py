@@ -1,4 +1,4 @@
-"""Persistent DbgEng adapter. Production target creation belongs to the Windows broker."""
+"""Legacy DbgEng adapter for explicitly trusted development fixtures only."""
 import collections
 import json
 import os
@@ -80,11 +80,11 @@ def doctor(root, trusted=False):
 class DebugSession:
     engine = "dbgeng"
 
-    def __init__(self, root, params, trusted=False, broker=None):
+    def __init__(self, root, params, trusted=False):
         if os.name != "nt":
             raise ValueError("DbgEng requires a Windows worker")
-        if not trusted and broker is None:
-            raise ValueError("production Windows debugging requires the managed isolation broker")
+        if not trusted:
+            raise ValueError("this legacy debugger supports only explicitly trusted development fixtures")
         self.id = uuid.uuid4().hex
         self.root = Path(root).resolve()
         self.directory = self.root / "debug" / self.id
@@ -130,14 +130,10 @@ class DebugSession:
                 request["architecture"] = self.image_identity["architecture"]
             else:
                 detected = self.image_identity["architecture"]
-                if broker is not None:
-                    self.inferior = broker.start_debuggee(self.directory, target, params)
-                else:
-                    # Only explicitly trusted development fixtures reach this path.
-                    self.inferior = subprocess.Popen([str(target), *params.get("args", [])], cwd=self.directory,
-                        env=safe_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        **detached_options())
-                    attach_windows_job(self.inferior)
+                self.inferior = subprocess.Popen([str(target), *params.get("args", [])], cwd=self.directory,
+                    env=safe_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    **detached_options())
+                attach_windows_job(self.inferior)
                 request = {"operation":"open", "mode":"attach", "pid":self.inferior.pid,
                            "architecture":detected, "timeout_secs":timeout}
             opened = self._request(request, timeout + 5)
