@@ -586,12 +586,13 @@ impl OwnedProcess {
             return Ok(false);
         }
         let previous = unsafe { ResumeThread(thread.0) };
-        // Even a failed/mismatched release cannot be replayed. The resource
-        // owner must close its Job and preserve the uncertain outcome.
+        // DbgEng may add its own suspension while attaching. Release only our
+        // one count, leaving every debugger-owned count intact. Never retry a
+        // failed release or try to drive the count to zero.
         self.initial_thread.take();
         ensure!(
-            previous == 1,
-            "owned initial suspend count changed: {previous}"
+            previous != 0 && previous != u32::MAX,
+            "owned initial suspension is absent or could not be released: {previous}"
         );
         Ok(true)
     }

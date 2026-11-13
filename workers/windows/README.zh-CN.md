@@ -68,7 +68,7 @@ x64 服务与固定 SDK 引擎相邻放置，支持原生 x64 和 WOW64 分析�
 
 父进程通过既有挂起子进程 AppContainer 启动器准入外部服务，要求零 capability 且仅启用 `SeChangeNotifyPrivilege`。独立隔离的目标仅向所属调试器身份授予访问权限。操作系统网络及进程/文件权限仍强制执行；不提升服务权限，也不接收模型选择的 PID、工具路径或符号路径。固定验收选择本地夹具符号目录，保留原始 MCP 结果和独立 stderr；这不证明上游全部引擎选项或通用符号搜索行为已通过认证。
 
-调试目标现保留初始 `CREATE_SUSPENDED` 线程句柄，直到 MCP 初始化完成。已有 Windows SDK 绑定通过所属进程句柄调用 `CheckRemoteDebuggerPresent`，确认附加后仅释放一次初始挂起计数。外部工具随后可完成加载器/初始断点等待；调试事件仍按 Windows 正常语义保持执行停止。未附加时绝不放行目标，挂起计数异常时结束资源而不重试。资格检查使用 `--debug-once`，仅调用一次目标符号便退出，不再依赖历史循环夹具。回执额外要求 `pre_execution_attach`、`single_pass_target`。本地回归证明附加前拒绝放行，并阻止将仍挂起的目标转交 System 宿主；此门禁的真实 x64/x86 隔离验收尚待完成。参见 SDK 的[附加契约](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-debugactiveprocess)和[线程恢复契约](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread)。
+调试目标现保留初始 `CREATE_SUSPENDED` 线程句柄，直到 MCP 初始化完成。已有 Windows SDK 绑定通过所属进程句柄调用 `CheckRemoteDebuggerPresent`，确认附加后仅释放一次初始挂起计数。外部工具随后可完成加载器/初始断点等待；调试事件仍按 Windows 正常语义保持执行停止。未附加时绝不放行目标。DbgEng 在附加时可以增加自己的挂起计数：专用 VM 返回的先前计数为二，第一版门禁错误地拒绝了它。修正版仅释放自己持有的一次初始计数，保留调试器持有的计数；计数为零或 SDK 调用失败时结束资源而不重试。资格检查使用 `--debug-once`，仅调用一次目标符号便退出，不再依赖历史循环夹具。回执额外要求 `pre_execution_attach`、`single_pass_target`。本地回归证明附加前拒绝放行，并阻止将仍挂起的目标转交 System 宿主；此门禁的真实 x64/x86 隔离验收尚待完成。参见 SDK 的[附加契约](https://learn.microsoft.com/en-us/windows/win32/api/debugapi/nf-debugapi-debugactiveprocess)和[线程恢复契约](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread)。
 
 固定隔离 MCP 验收要求 x64、x86 均解析 `wukong_probe!fixture_step` 断点，在其地址非超时停止，程序计数器与架构对应，目标模块加载 PDB 符号，栈顶帧对应同一地址和符号。随后释放会话、清空两个 Job、删除身份配置并回收 scratch。回执必须包含 `backend = "windbg_mcp"`，旧辅助程序回执不能证明新实现通过。专用 VM 已在 `1556c9a` 的首次启动、服务重启及系统重启中通过此替代实现。下文较早的 `7b6c4c0` 结果描述已删除的辅助程序。
 
