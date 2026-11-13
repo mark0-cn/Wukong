@@ -5,7 +5,7 @@ import re
 import subprocess
 
 from worker_common import safe_env, sha256_file
-from worker_dbgeng import local_path
+from worker_windows_paths import local_path
 from worker_processes import detached_options
 
 

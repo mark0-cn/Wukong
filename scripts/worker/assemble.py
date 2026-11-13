@@ -16,7 +16,7 @@ from scripts.worker.pe import require_static_crt
 from scripts.worker.source_identity import identity
 from scripts.worker.toolchain import load_lock
 
-BINARIES = ["wukong-worker.exe", "wukong-dbgeng.exe", "wukong-package.exe"]
+BINARIES = ["wukong-worker.exe", "wukong-package.exe"]
 
 
 def native_build(directory):
@@ -99,7 +99,7 @@ def assemble(cache, output, native, keys):
     prepare(cache, output)
     target = output / "runtime/native"
     target.mkdir()
-    for name in ["wukong-worker.exe", "wukong-dbgeng.exe"]:
+    for name in ["wukong-worker.exe"]:
         shutil.copyfile(binaries / name, target / name)
     for probe in native_metadata["selftests"]["architectures"].values():
         for key in ["binary", "pdb"]:
@@ -114,6 +114,7 @@ def assemble(cache, output, native, keys):
     lock = load_lock()
     license_paths = {"python": ["runtime/python/LICENSE.txt"], "openssh": ["runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"],
                      "debugging_tools": ["licenses/debugging-tools.rtf"],
+                     "windbg_mcp": ["licenses/windbg-mcp-LICENSE"],
                      "worker_python_dependencies": ["runtime/python/Lib/site-packages/pygdbmi-0.11.0.0.dist-info/LICENSE",
                          "runtime/python/Lib/site-packages/filelock-4.2.1.dist-info/licenses/LICENSE",
                          "runtime/python/Lib/site-packages/atomicwrites-1.4.0.dist-info/LICENSE"]}
@@ -122,7 +123,7 @@ def assemble(cache, output, native, keys):
     manifest = dict(schema=1, platform="windows-amd64", version=version(), source_revision=native_metadata["source_revision"],
         toolchain_lock_sha256=sha256(output / "toolchain.lock.json"), toolchain_lock_path="toolchain.lock.json", runtime_protocol=2,
         minimum_controller_version=version(), entrypoints=dict(worker="runtime/native/wukong-worker.exe", python="runtime/python/python.exe",
-            bridge="runtime/worker/bridge.py", dbgeng_helper="runtime/native/wukong-dbgeng.exe",
+            bridge="runtime/worker/bridge.py", windbg_mcp="runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe",
             dbgeng_library="runtime/sdk/Windows Kits/10/Debuggers/x64/dbgeng.dll", sshd="runtime/openssh/sshd.exe", ssh_keygen="runtime/openssh/ssh-keygen.exe"),
         components=components, license_notices=[path.relative_to(output).as_posix() for path in notices], files=file_index(output))
     if identity() != before:

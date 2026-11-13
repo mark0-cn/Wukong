@@ -57,7 +57,8 @@ fn fixture() -> Manifest {
             worker: "worker.exe".into(),
             python: "python/python.exe".into(),
             bridge: "runtime/bridge.py".into(),
-            dbgeng_helper: "worker-dbgeng.exe".into(),
+            dbgeng_helper: Some("worker-dbgeng.exe".into()),
+            windbg_mcp: None,
             dbgeng_library: "debuggers/dbgeng.dll".into(),
             sshd: "ssh/sshd.exe".into(),
             ssh_keygen: "ssh/ssh-keygen.exe".into(),
@@ -66,6 +67,31 @@ fn fixture() -> Manifest {
         license_notices: vec!["licenses/NOTICE.txt".into()],
         files,
     }
+}
+
+#[test]
+fn external_debugger_requires_its_verified_payload_and_rejects_parallel_backends()
+-> anyhow::Result<()> {
+    let mut manifest = fixture();
+    manifest.validate()?; // Legacy packages remain readable for maintenance.
+    manifest.entrypoints.windbg_mcp = Some("windbg-mcp.exe".into());
+    assert!(manifest.validate().is_err());
+    manifest.entrypoints.dbgeng_helper = None;
+    assert!(manifest.validate().is_err());
+    let executable = manifest.files.remove("worker-dbgeng.exe").unwrap();
+    manifest.files.insert("windbg-mcp.exe".into(), executable);
+    assert!(manifest.validate().is_err());
+    let mut component = manifest.components["python"].clone();
+    let original = manifest.files[&component.original_payloads[0]].clone();
+    component.original_payloads = vec!["payloads/windbg-mcp.zip".into()];
+    manifest
+        .files
+        .insert(component.original_payloads[0].clone(), original);
+    manifest.components.insert("windbg_mcp".into(), component);
+    manifest.validate()?;
+    manifest.files.remove("payloads/windbg-mcp.zip");
+    assert!(manifest.validate().is_err());
+    Ok(())
 }
 
 fn enrollment_fixture(

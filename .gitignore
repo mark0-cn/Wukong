@@ -1,4 +1,6 @@
 /target/
+/workers/windows/target/
+/workers/package/target/
 /work/
 /.wukong/
 /runs/

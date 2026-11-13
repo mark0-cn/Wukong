@@ -12,10 +12,6 @@ path = "native/lib.rs"
 [workspace]
 
 [[bin]]
-name = "wukong-dbgeng"
-path = "native/dbgeng_main.rs"
-
-[[bin]]
 name = "wukong-worker"
 path = "native/main.rs"
 
@@ -27,6 +23,7 @@ path = "native/package_main.rs"
 anyhow = "1"
 futures-util = { version = "0.3", features = ["sink"] }
 prost = "0.14"
+rmcp = { version = "=3.9.0", default-features = false, features = ["client", "transport-async-rw"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 base64 = "0.22"
 hex = "0.4"
@@ -36,16 +33,14 @@ sha2 = "0.10"
 zeroize = "1"
 socket2 = "0.6.5"
 object = { version = "0.40", default-features = false, features = ["read_core", "pe", "std"] }
-uuid = { version = "1", default-features = false, features = ["std"] }
-tokio = { version = "1.54", features = ["io-util", "io-std", "net", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.54", features = ["fs", "io-util", "io-std", "net", "macros", "process", "rt-multi-thread", "sync", "time"] }
 wukong-worker-package = { path = "../package" }
 
 [target.'cfg(windows)'.dependencies]
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
-windows = { version = "0.62", features = ["Win32_System_Diagnostics_Debug_Extensions", "Win32_System_LibraryLoader", "Win32_Security", "Win32_System_Threading", "Win32_NetworkManagement_WindowsFirewall", "Win32_System_Com"] }
-windows-core = "0.62"
+windows = { version = "0.62", features = ["Win32_NetworkManagement_WindowsFirewall", "Win32_System_Com"] }
 windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_Security_Isolation", "Win32_Security_Authorization", "Win32_Security_Authentication_Identity", "Win32_Security_Cryptography", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_StationsAndDesktops", "Win32_System_Environment", "Win32_System_Services", "Win32_System_SystemServices", "Win32_System_Pipes", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Rpc", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_NetworkManagement_NetManagement", "Win32_NetworkManagement_WindowsFilteringPlatform"] }
 
 [dev-dependencies]

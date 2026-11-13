@@ -54,17 +54,17 @@
 
 独占写入锁及持有的禁止删除共享数据库句柄阻止并发接管和替换。有界数据库使用 SQLite 回滚恢复、受保护文件及规范化 Windows 路径，不引入另一套文件系统事务引擎。活动或不确定的账本记录阻止原生租约释放和过期接管，服务重启后也一样；续租仍可执行。用户提供的 Windows 10 VM 上，无目标执行测试覆盖真实终止 SQLite 写入进程后热回滚日志的恢复、长路径、重放身份、陈旧完成结果及两种租约屏障。清理标志仅为内部业务前提，不是独立的操作系统证据。独立进程创建已接入；原生归属恢复及其他执行 RPC 通路仍未完成；broker 仍仅支持健康检查，并报告 `production_execution = false`。
 
-独立 Cargo 包构建 worker 组件，不链接桌面控制器、WebView 或模型客户端。`native/dbgeng.rs` 与控制器仓库的开发辅助程序共享。组件包版本独立于应用发布版本；交付的 worker 身份还绑定实际源码及二进制内容与运行时协议。
+独立 Cargo 包构建 worker 组件，不链接桌面控制器、WebView 或模型客户端。调试使用固定版本的上游 `windbg-mcp` 程序和官方 rmcp 客户端。自写 DbgEng 辅助程序、通信协议及 Python 会话实现已删除。交付身份绑定实际源码、二进制内容和运行时协议。
 
-辅助程序复用已有的 `object` 库读取 x86/x64 PE 元数据，使用显式配置的 SDK 中 `dbghelp.dll` 的[文件索引 API](https://learn.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-symsrvgetfileindexinfow)读取 GUID PDB 身份，并使用 DbgEng 的[模块信息 API](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/dbgeng/nf-dbgeng-idebugadvanced3-getsymbolinformationwide)观察实时进程与 dump 的 CodeView。Python 负责对应关系策略，不再另写 PE、minidump 或 MSF 解析器。文件索引调用在辅助程序的所属线程上、DbgEng 初始化前完成；初始化后拒绝再次索引文件，初始化失败则终止辅助程序。持有的文件句柄不共享写入或删除权限，并以 SHA256 绑定观察结果。PE 检查接受不超过 256 MiB 的普通文件，限制为 96 个节、128 个调试条目及一条不超过 64 KiB 的 CodeView 记录；PDB 以流式方式哈希，最大 4 GiB。模块对应关系要求完整的已加载模块列表，最多 256 项。
+离线锁固定 [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0)、原始发布压缩包及 MIT 许可证。x64 服务与固定 SDK 引擎相邻放置，支持 x64 和 WOW64 目标。相邻的 `vcruntime140.dll` 来自已固定的 Python 载荷；系统 UCRT 由 Windows 10 提供。VM 无需编译器或下载软件包。旧清单仍可读取以支持维护，但新后端不会执行旧辅助程序；新包仅选择外部 MCP 入口。
 
-对应关系比较映射大小、时间戳、双方均提供的校验和及支持的 RSDS GUID/age；同名模块冲突或候选不唯一时失败。缺少 CodeView 时明确记录 `module_metadata_only` 缺口。匹配始终记录 `byte_identity_verified = false`：模块元数据不证明可执行字节相同。符号只能来自配置缓存目录下的简单、非设备文件名；忽略内嵌的生产者目录、符号服务器及环境路径。存在的 PDB 必须符合预期 GUID/age 和内容哈希；缺失符号保持明确状态。SDK 文件索引身份与符号成功加载分别记录，改名为 `.pdb` 的映像会被拒绝。[可信调试器夹具](../tests/README.zh-CN.md)覆盖两种架构，保留原生格式拒绝结果和原始转录。这些检查不证明受限进程已加载 PDB、旧式完整用户态 dump 已通过、有效内核 dump 已被拒绝，或尚未完成的生产 broker 可用。
+现有控制端 Rig/rmcp 客户端已通过两种架构的专用 VM dump/live 验收，参见[外部调试器验收](../tests/README.zh-CN.md#外部-windbg-mcp-验收)。原生宿主复用 rmcp，帧上限为 2 MiB、单次调用期限为 40 秒、受保护 JSONL 记录上限为 8 MiB。超时保留结果不确定状态并触发所属进程清理，绝不自动重放变更。模块/PDB 观察来自外部工具；仅返回文本的线程结果保留为原始证据。通用原生调试准入、完整映像对应关系及 dump/符号负向验收仍未完成。Python 元数据 worker 不宣称或启动 WinDbg 会话。
 
 当前服务每次启动都会生成全新的 128 位资格检查 ID，在管理 SSH/服务就绪前运行已签封的 System 资源宿主；同一次系统启动中的服务重启也须重新运行。schema4 隔离回执绑定该 ID 与精确清单，缺失或旧 ID 无法通过验证。每份回执以 `metadata/isolation-selftest-MANIFEST-QUALIFICATION.json` 新建，保留此前证据而不覆盖。历史上仅绑定清单的回执不会跳过探针。此实现复用已有进程/Job 资格检查路径，不另写系统启动身份实现。普通依赖自检的缓存单独保留；重新进行资源检查不代表生产执行、生命周期恢复或系统重启验收成功。专用验收入口要求服务重启后出现新的资格回执。用户提供的 VM 已在 `7b6c4c0` 通过该检查和系统重启资格检查；未重跑托管 runner 夹具。
 
-经过认证的原生调试上下文还要求辅助程序的实际令牌属于零 capability 的 AppContainer，且仅保留已启用的 `SeChangeNotifyPrivilege`；在读取元数据前及加载引擎前分别检查。挂起子进程准入、固定探针和辅助程序复用 `native/token_policy.rs` 中的 SDK 检查。普通令牌不能仅凭上下文数据选择此策略。在该受限模式中，网络边界由操作系统的 AppContainer 网络隔离提供；省略 DbgEng 的 `DISALLOW_NETWORK_PATHS` DOS 盘符推断，因为它在 Windows 10 VM 中将已签封的本地缓存判为不可用。普通辅助程序模式仍保留该标志。两种模式都保留无链接的本地盘符路径、显式符号缓存、精确符号匹配，禁用环境、生产者和映像目录符号搜索及 SymSrv 自动检测，清空源码路径并禁止 shell 命令。参见微软的 [AppContainer 网络隔离](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation#network-isolation)及[引擎选项约定](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/debug-engopt-xxx)。
+父进程通过既有挂起子进程 AppContainer 启动器准入外部服务，要求零 capability 且仅启用 `SeChangeNotifyPrivilege`。独立隔离的目标仅向所属调试器身份授予访问权限。操作系统网络及进程/文件权限仍强制执行；不提升服务权限，也不接收模型选择的 PID、工具路径或符号路径。固定验收选择本地夹具符号目录，保留原始 MCP 结果和独立 stderr；这不证明上游全部引擎选项或通用符号搜索行为已通过认证。
 
-固定的受限资格检查现要求 x64、x86 会话均加载真正的 PDB（`DEBUG_SYMTYPE_PDB`），从 `wukong_probe!fixture_step` 解析断点，并出现非超时停止，其 SDK 断点事件须匹配该断点 ID，栈顶帧须位于断点地址且含该符号。SDK 断点事件在原始字节之外还保留类型化的断点 ID。仅导出符号、其他停止/事件/地址或缺失的栈均不能通过启动验收。不准入任意来源、辅助程序、PID 或调试器命令。用户提供的离线 Windows 10 VM 已在 `7b6c4c0` 的首次安装、服务重启及系统重启中通过这些加强后的门槛；此前 `008d805` 的通过结果仍仅覆盖当时较弱的附加、寄存器与模块检查。
+固定隔离 MCP 验收要求 x64、x86 均解析 `wukong_probe!fixture_step` 断点，在其地址非超时停止，程序计数器与架构对应，目标模块加载 PDB 符号，栈顶帧对应同一地址和符号。随后释放会话、清空两个 Job、删除身份配置并回收 scratch。回执必须包含 `backend = "windbg_mcp"`，旧辅助程序回执不能证明新实现通过。此替代实现仍需专用 VM 验收。下文较早的 `7b6c4c0` 结果描述已删除的辅助程序。
 
 原生输入发布会规范化已经验证的私有元数据根目录，并在直接 SDK 调用中保留 Windows 长路径格式。因此，在未启用长路径选项的 VM 中，不可变输入和分块输入成员也可以超过旧的 260 字符路径限制。专用 Windows 10 VM 回归使用特意加长的私有根目录，验证发布成功及原始内容来源证明；无需修改全局长路径设置或扩大目录权限。
 
@@ -91,7 +91,7 @@ $env:WUKONG_STAGE_TEST_CONTROLLER_VERSION = 'CONTROLLER_VERSION'
 cargo test --locked --manifest-path workers/windows/Cargo.toml --lib stages_explicit_read_only_offline_media_without_execution -- --ignored
 ```
 
-`wukong-worker.exe verify-package DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION` 使用共享[离线包约定](../package/README.zh-CN.md)。该只读命令校验独立信任、兼容性与文件精确内容。`verify-enrollment PACKAGE ENROLLMENT_DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION` 还会校验公开登记签名及其载荷绑定。两个校验命令均不安装或激活 worker。该程序与 `wukong-dbgeng.exe` 一起接受静态 CRT 检查。
+`wukong-worker.exe verify-package DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION` 使用[离线包约定](../package/README.zh-CN.md)校验独立信任、兼容性与文件精确内容。`verify-enrollment PACKAGE ENROLLMENT_DIRECTORY PINNED_PUBLIC_KEY_HEX CONTROLLER_VERSION` 另行校验登记签名及载荷绑定。两个命令均不安装或激活 worker。静态 CRT 检查覆盖 Wukong 引导二进制；外部调试器及固定运行时依赖作为包内容校验。
 
 `toolchain.lock.json` 以大小与 SHA256 固定官方 Python、OpenSSH、Python wheel 和完整 Debugging Tools MSI/CAB 清单。锁文件中的 OpenSSH 版本为上游**预览版**。在控制端准备缓存：
 
@@ -125,7 +125,7 @@ python -m scripts.worker.assemble --cache target/windows-offline-cache --output 
 
 原生调用方须先建立工具包信任，并防止其他进程写入版本目录。该入口不是 worker RPC，也不替代签名校验。它在执行前检查随包探针哈希，无须网络即可测试 OpenSSH 密钥生成，并使用随包运行时检查 x64/x86 dump/live 调试及每种架构三次重放。固定 SSH 探针会额外接收所需的 Windows `ProgramData` 路径，不改变目标作业的环境变量过滤。临时测试 SSH 密钥会删除，日志及结果保存在签名目录之外。成功报告明确仅涵盖离线依赖和可信样例，不代表生产目标隔离或服务/SSH 安装。运行后应再次校验签名目录。
 
-调试组件为结构化 DbgEng 辅助程序。真实 x64/x86 可信样例验收独立于生产 broker 隔离与离线 VM 安装验收。样例套件还检查重放：使用不同的生产者/验证者 ID，每种架构运行三次新进程与工作目录试验，校验输入及目标的精确哈希，并观测 `0xc0000005` 异常。这证明可信样例重放路径，不代表生产元数据保护或利用影响。参见[跨平台环境约定](../../docs/design/cross-platform-environments.zh-CN.md)和[运行时指南](../runtime/README.zh-CN.md)。
+调试组件使用外部 WinDbg MCP 工具。直接可信夹具互通与托管准入、离线 VM 安装分别验收。Python 依赖测试检查可信执行、dump 生成和重放；隔离调试器由原生启动资格检查负责。重放使用不同生产者/验证者 ID，每种架构执行三次全新进程与目录试验，检查目标/输入精确哈希及 `0xc0000005` 异常。这不证明利用影响。参见[跨平台约定](../../docs/design/cross-platform-environments.zh-CN.md)和[验收指南](../tests/README.zh-CN.md)。
 
 打开转储或附加进程后，辅助程序先核对引擎实际报告的调试对象类别，再允许检查。仅接受 Windows 用户态会话及用户态小型/完整转储。内核及其他类别会被拒绝；任何打开失败都会令辅助程序失效并关闭，避免继续使用部分打开的状态。样例套件为 x64/x86 记录实际观察到的用户态类别及限定值；当前验收仍不含真实内核转储拒绝样例。
 
@@ -159,7 +159,7 @@ python -m scripts.worker.bundle --package ABSOLUTE_PACKAGE --enrollment ABSOLUTE
 
 SCM 服务登记及固定原生子进程启动采用相同的本地路径规范化，使服务归属比较与已验证程序保持一致。离线 DbgEng 探测失败时，会将有界的 helper 退出/加载原因保存在受保护自检日志中。这些诊断不会放宽普通账户权限，也不会将失败的自检视为就绪。
 
-随包 DbgEng helper/引擎路径的校验使用已有的本地驱动器绝对名称，在计算哈希或加载前逐级检查所有祖先的链接和重解析点，拒绝网络路径、备用数据流、相对遍历以及含歧义的末尾点或空格。它不执行严格的名称规范化查询：真实的当前用户夹具移除令牌全部权限后，可复现 Python 严格路径解析的拒绝访问，而普通读取及新检查仍成功。helper 采用相同的本地路径策略，不恢复任何权限。这些检查依赖受保护的工具包和会话目录，不替代原生 broker 对目标可写路径的输入收集，也不替代真实已安装 worker 验收。
+Python 元数据 worker 使用既有的绝对本地盘符名称校验签封的 broker-health 程序，拒绝链接、重解析点及歧义组件。该检查由 `worker_windows_paths.py` 独立负责，不再属于调试器。真实 Windows 零特权令牌测试覆盖本地文件访问；普通访问校验不授予特权，也不恢复已删除的调试器路径协议。
 
 账户创建按已知 SID 解析内置 Users 别名，并按 SID 将专用账户加入该组，避免依赖本地化组名。早期恢复严格限于载荷、数据与服务激活前中断的管理账户创建。准备新介质时加上 `--previous-package ABSOLUTE_PREVIOUS_PACKAGE --previous-enrollment ABSOLUTE_PREVIOUS_PUBLIC_ENROLLMENT`，即可携带原始公开签名证据。恢复将证据与受保护安装记录比对，要求更高代次的签名登记，并保留已接受的恢复代次。同时核对账户精确归属注释、普通用户权限和 SID，不重设其密码。该路径拒绝其他现有账户和后续安装阶段。首次激活前仍须由所有者核对指纹。
 
@@ -193,7 +193,7 @@ SCM 服务登记及固定原生子进程启动采用相同的本地路径规范�
 
 回环探针使用现有固定版本的 socket2 库保留其实际绑定的源端口，报告观察结果，不将超时直接认定为拒绝。System 在子进程执行前后检查同一个监听器，并拒绝出现意外已接受连接。明确的 Windows 权限拒绝可以直接通过网络检查；超时还必须匹配 Windows SDK WFP 分类丢弃事件，核对已签封原生应用的 SDK 标识、精确回环套接字地址及端口、System 监听器身份和探针时间窗口。取回的执行过滤器必须是 `AppContainerLoopback`，采用阻止动作，并与事件的 IPv4 入站接收/接受层一致。回环丢弃事件保留 System 监听器身份，同时报告出站数据包方向（`FWP_DIRECTION_OUT`、`0x3901`）；2026-11-13 在专用 VM 中通过 Windows SDK 观察到了该值。接收/接受过滤层需独立核对，不能据此推定数据包方向。最终 WFP 回执包含 `event_direction = "outbound"`。[Windows 丢弃事件约定](https://learn.microsoft.com/zh-cn/windows/win32/api/fwpmtypes/ns-fwpmtypes-fwpm_net_event_classify_drop2)定义了该方向编码。只读枚举每个快照最多读取 1,024 个同应用事件，最多查询五个快照；不会启用事件收集或修改防火墙策略。证据缺失、收集禁用或无法确认时，资格检查失败。历史 schema3 和当前 schema4 回执均保留独立核对的网络证据；上文 2026-11-13 的提供 VM 回执包含两个已关联的 SDK 拒绝事件；其他环境尚未完成资格验收。
 
-受限探针失败时，在现有有界日志中区分套接字创建、源地址绑定/查询、临时文件操作及持有根目录的资格检查。操作位置说明保留底层 Windows 错误，不改变验收条件。DbgEng 路径失败会保留检查的路径和 Windows SDK 状态。
+隔离探针失败时，在有界日志中保留操作位置及底层操作系统错误。外部调试器保留原始 MCP 记录和独立 stderr 日志；诊断数据不能将失败资格检查变为就绪。
 
 临时资源根目录通过仅继承条目，把 `DELETE` 只授予各资源 AppContainer 和登录 SID 的后代文件与目录。根目录保留读、写、执行权限，不授予 `DELETE` 或 `FILE_DELETE_CHILD`；其受保护的私有保护文件不会继承这两项删除授权。现有描述符校验器单独核对精确的后代专用条目，普通策略仍拒绝此类条目。进程和文件系统授权夹具复用同一个 Windows Authz 辅助模块。专用 VM 回归验证真实 NTFS 继承、原先缺失删除权限的策略、其他资源拒绝、根目录及保护文件拒绝，以及回收。请在专用 Windows 测试 VM 中运行：
 

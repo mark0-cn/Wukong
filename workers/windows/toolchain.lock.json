@@ -17,6 +17,10 @@
     "worker_python_dependencies": {
       "version": "pygdbmi=0.11.0.0;filelock=4.2.1;atomicwrites=1.4.0",
       "channel": "stable"
+    },
+    "windbg_mcp": {
+      "version": "0.24.0",
+      "channel": "stable"
     }
   },
   "sdk": {
@@ -474,6 +478,13 @@
       "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/winsdksetup.exe",
       "sha256": "b0bdbad38ae74c40ccae8cdbcf229807627fba2bc3100be28301c4ba884f755e",
       "size": 1450360
+    },
+    {
+      "component": "windbg_mcp",
+      "path": "windbg-mcp-v0.24.0-windows-x64.zip",
+      "url": "https://github.com/glslang/windbg-mcp/releases/download/v0.24.0/windbg-mcp-v0.24.0-windows-x64.zip",
+      "size": 12708638,
+      "sha256": "f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34"
     },
     {
       "component": "worker_python_dependencies",

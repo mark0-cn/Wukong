@@ -69,6 +69,10 @@ impl Plan {
                 controller_version: &setup.controller_version,
             },
         )?;
+        ensure!(
+            manifest.manifest().entrypoints.windbg_mcp.is_some(),
+            "new installations require the external WinDbg MCP package"
+        );
         let enrollment = deployment::read_enrollment(&base.join("enrollment"), pinned)?;
         enrollment.bind_payload(&manifest)?;
         let bytes = deployment::read_bytes(&std::env::current_exe()?, 64 * 1024 * 1024)?;
@@ -353,11 +357,6 @@ pub fn install(plan: Plan) -> Result<Value> {
         &private.clone().with_account(&worker.sid, false)?,
     )?;
     let entry = &plan.manifest.manifest().entrypoints;
-    deployment::write_new_json(
-        &root.join("data/windows.backend.json"),
-        &json!({"helper":package.join(&entry.dbgeng_helper),"helper_sha256":plan.manifest.manifest().files[&entry.dbgeng_helper].sha256,"engine_dir":package.join(&entry.dbgeng_library).parent(),"engine_sha256":plan.manifest.manifest().files[&entry.dbgeng_library].sha256}),
-        &data,
-    )?;
     code.create_directory(&root.join("bootstrap"))?;
     let relay = root.join("bootstrap/wukong-worker.exe");
     copy_new(

@@ -41,11 +41,6 @@ def content_identity(root):
     digest=hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob('*.py')):
         digest.update(path.name.encode()+b'\0'+path.read_bytes()+b'\0')
-    backend=Path(root)/'windows.backend.json'
-    if backend.is_file():
-        profile=load_json(backend)
-        for key in ['helper_sha256','engine_sha256']:
-            digest.update(str(profile[key]).encode()+b'\0')
     return digest.hexdigest()
 
 

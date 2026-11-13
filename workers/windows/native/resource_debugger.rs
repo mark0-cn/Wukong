@@ -1,28 +1,8 @@
-//! Fixed sealed x64/x86 targets only. These probes never admit model-selected
-//! executables, process IDs, helper paths, source paths or symbol servers.
+//! Qualify an external MCP debugger against an independently contained sealed target.
 use super::*;
-use std::io::Write;
+use crate::{debugger_mcp::Client, processes::ResourceLimits};
+use std::os::windows::io::OwnedHandle;
 use wukong_worker_package::VerifiedManifest;
-#[path = "debugger_path_context.rs"]
-mod path_context;
-
-fn directory_identity(path: &Path) -> Result<path_context::DirectoryIdentity> {
-    use std::os::windows::fs::OpenOptionsExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, SYNCHRONIZE,
-    };
-    security::no_links(path)?;
-    let file = fs::OpenOptions::new()
-        .access_mode(FILE_READ_ATTRIBUTES | SYNCHRONIZE)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)?;
-    let name = path
-        .to_str()
-        .context("native debugger directory is not Unicode")?;
-    path_context::DirectoryIdentity::observe(&file, name)
-}
 
 pub(super) fn check(
     deployment: &Deployment,
@@ -37,6 +17,12 @@ pub(super) fn check(
         "invalid trusted architecture"
     );
     let package = deployment.package(root);
+    let executable = manifest
+        .manifest()
+        .entrypoints
+        .windbg_mcp
+        .as_ref()
+        .context("sealed package has no external WinDbg MCP backend")?;
     let probe_member = format!("runtime/selftest/{architecture}/wukong-probe.exe");
     ensure!(
         manifest.manifest().files.contains_key(&probe_member),
@@ -63,10 +49,11 @@ pub(super) fn check(
     let target_path = target_directory.path().to_owned();
     let debugger_path = debugger_directory.path().to_owned();
     let private = AclPolicy::private_vm();
-    let target_log_path = root
-        .join("metadata")
-        .join(format!("resource-target-{target_nonce}.log"));
-    let target_log = private.create_file(&target_log_path)?;
+    let target_log = private.create_file(
+        &root
+            .join("metadata")
+            .join(format!("resource-target-{target_nonce}.log")),
+    )?;
     let input = fs::File::open("NUL")?;
     let target_environment = scratch_environment(system_environment, &target_path);
     let target = Spawn {
@@ -78,92 +65,72 @@ pub(super) fn check(
         input: &input,
     }
     .sandbox_debug_target(&target_persona, target_directory, &debugger_persona)?;
-    // The PID comes from our still-held kernel process handle, never a worker.
-    let requests = [
-        json!({"id":1,"operation":"doctor"}),
-        json!({"id":2,"operation":"open","mode":"attach","pid":target.pid(),"architecture":architecture,"timeout_secs":20}),
-        json!({"id":3,"operation":"inspect","kind":"registers","limit":8}),
-        json!({"id":4,"operation":"control","action":"breakpoint_add","symbol":"wukong_probe!fixture_step"}),
-        json!({"id":5,"operation":"control","action":"continue","timeout_secs":5}),
-        json!({"id":6,"operation":"inspect","kind":"modules","limit":64}),
-        json!({"id":7,"operation":"inspect","kind":"stack","limit":8}),
-        json!({"id":8,"operation":"close"}),
-    ];
-    let engine = package.join(&manifest.manifest().entrypoints.dbgeng_library);
-    let engine_directory = engine.parent().context("missing sealed engine directory")?;
+
+    let (input, writer) = std::io::pipe()?;
+    let (reader, output) = std::io::pipe()?;
+    let input = fs::File::from(OwnedHandle::from(input));
+    let output = fs::File::from(OwnedHandle::from(output));
+    let log = private.create_file(
+        &root
+            .join("metadata")
+            .join(format!("resource-debugger-{debugger_nonce}.log")),
+    )?;
+    let transcript = private.create_file(
+        &root
+            .join("metadata")
+            .join(format!("resource-debugger-{debugger_nonce}.jsonl")),
+    )?;
     let symbols = package.join(format!("runtime/selftest/{architecture}"));
-    let paths = path_context::PathContext {
-        schema: 1,
-        engine: directory_identity(engine_directory)?,
-        symbols: directory_identity(&symbols)?,
-    };
-    let path_header = serde_json::to_vec(&paths)?;
-    ensure!(
-        path_header.len() < path_context::MAX_CONTEXT_BYTES,
-        "native debugger path context exceeds its frame bound"
-    );
-    let request_path = root
-        .join("metadata")
-        .join(format!("resource-debugger-{debugger_nonce}.jsonl"));
-    {
-        let mut file = private.create_file(&request_path)?;
-        file.write_all(&path_header)?;
-        file.write_all(b"\n")?;
-        for request in requests {
-            serde_json::to_writer(&mut file, &request)?;
-            file.write_all(b"\n")?;
-        }
-        file.sync_all()?;
-    }
-    let debugger_input = fs::File::open(&request_path)?;
-    let log_path = root
-        .join("metadata")
-        .join(format!("resource-debugger-{debugger_nonce}.log"));
-    let log = private.create_file(&log_path)?;
-    let debugger_environment = scratch_environment(system_environment, &debugger_path);
+    let mut environment = scratch_environment(system_environment, &debugger_path);
+    environment.insert("_NT_SYMBOL_PATH".into(), symbols.as_os_str().to_owned());
+    environment.insert("_NT_ALT_SYMBOL_PATH".into(), symbols.as_os_str().to_owned());
     let helper = Spawn {
-        executable: &package.join(&manifest.manifest().entrypoints.dbgeng_helper),
-        arguments: &[
-            engine
-                .parent()
-                .context("missing sealed engine directory")?
-                .as_os_str()
-                .to_owned(),
-            symbols.as_os_str().to_owned(),
-            "--native-path-context".into(),
-        ],
+        executable: &package.join(executable),
+        arguments: &["--tools".into(), "session,inspect,exec".into()],
         directory: &debugger_path,
-        environment: &debugger_environment,
-        log: &log,
-        input: &debugger_input,
+        environment: &environment,
+        log: &output,
+        input: &input,
     }
-    .sandbox(&debugger_persona, debugger_directory)?;
-    wait(&helper, Duration::from_secs(45))?;
-    let code = helper.exit_code()?;
-    helper.stop(Duration::from_secs(10))?;
-    target.stop(Duration::from_secs(10))?;
+    .sandbox_streamed(
+        &debugger_persona,
+        debugger_directory,
+        &log,
+        ResourceLimits::new(4, 1024 * 1024 * 1024)?,
+    )?;
+    drop((input, output));
+
+    // Private station/profile setup finishes before starting I/O threads. Drain
+    // the Job before shutting down the runtime's blocking pipe readers.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let outcome = runtime.block_on(async {
+        let reader = tokio::fs::File::from_std(fs::File::from(OwnedHandle::from(reader)));
+        let writer = tokio::fs::File::from_std(fs::File::from(OwnedHandle::from(writer)));
+        let mut client = Client::connect(reader, writer, transcript).await?;
+        let result = probe(&mut client, target.pid(), &symbols, architecture).await;
+        let closed = client.close().await;
+        result?;
+        closed
+    });
+    let helper_stopped = helper.stop(Duration::from_secs(10));
+    let target_stopped = target.stop(Duration::from_secs(10));
+    runtime.shutdown_timeout(Duration::from_secs(5));
+    helper_stopped?;
+    target_stopped?;
     ensure!(
         helper.job().active_processes()? == 0 && target.job().active_processes()? == 0,
         "debugger qualification Jobs are not empty"
     );
-    drop(helper);
-    drop(target);
-    drop(log);
-    drop(target_log);
-    drop(debugger_input);
-    let bytes = deployment::read_bytes(&log_path, 512 * 1024)?;
-    ensure!(
-        code == Some(0),
-        "contained {architecture} DbgEng failed (exit {code:?}): {}",
-        String::from_utf8_lossy(&bytes[..bytes.len().min(4096)])
-    );
-    validate_replies(&bytes, architecture)?;
+    drop((helper, target, log, target_log));
     target_persona.close()?;
     debugger_persona.close()?;
     fs::remove_dir(&target_path)?;
     fs::remove_dir(&debugger_path)?;
+    outcome?;
     Ok(
-        json!({"passed":true,"architecture":architecture,"engine":"dbgeng",
+        json!({"passed":true,"architecture":architecture,"engine":"dbgeng","backend":"windbg_mcp",
         "target_appcontainer_sid":target_sid,"debugger_appcontainer_sid":debugger_sid,
         "target_logon_sid":target_persona.logon_sid(),"debugger_logon_sid":debugger_persona.logon_sid(),
         "privileges":["SeChangeNotifyPrivilege"],"capabilities":0,"debug_privilege_enabled":false,
@@ -173,87 +140,66 @@ pub(super) fn check(
     )
 }
 
-fn validate_replies(bytes: &[u8], architecture: &str) -> Result<()> {
-    let replies: Vec<Value> = bytes
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .map(serde_json::from_slice)
-        .collect::<std::result::Result<_, _>>()?;
-    ensure!(
-        replies.len() == 8,
-        "contained DbgEng reply count differs: {}",
-        String::from_utf8_lossy(&bytes[..bytes.len().min(4096)])
-    );
-    for (index, reply) in replies.iter().enumerate() {
+async fn probe(client: &mut Client, pid: u32, symbols: &Path, architecture: &str) -> Result<()> {
+    let opened = client.call("attach_process", json!({"pid":pid})).await?;
+    let session = opened["session_id"]
+        .as_str()
+        .context("MCP debugger omitted its session handle")?;
+    let route = json!({"session_id":session});
+    let result = async {
+        client
+            .call(
+                "set_symbol_path",
+                json!({"session_id":session,"path":symbols,"append":false}),
+            )
+            .await?;
+        let breakpoint = client
+            .call(
+                "set_breakpoint",
+                json!({"session_id":session,"expression":"wukong_probe!fixture_step"}),
+            )
+            .await?;
+        let address = breakpoint["breakpoint"]["address"]
+            .as_str()
+            .context("fixture breakpoint is unresolved")?;
+        let stop = client.call("go", route.clone()).await?;
         ensure!(
-            reply["id"] == (index + 1) as u64
-                && reply.get("error").is_none()
-                && reply["output_truncated"] == false,
-            "contained DbgEng operation failed: {reply}"
+            stop["timed_out"] == false
+                && stop["target_gone"] == false
+                && stop["stopped_at"] == address,
+            "contained debugger did not hit the fixture breakpoint"
         );
+        let registers = client.call("registers", route.clone()).await?;
+        let ip = registers["instruction_pointer"]
+            .as_str()
+            .context("debugger has no program counter")?;
+        let ip_value = u64::from_str_radix(ip.trim_start_matches("0x"), 16)?;
+        ensure!(
+            ip == address && ip_value > 0 && (architecture != "x86" || ip_value < 1 << 32),
+            "contained program counter differs from the target architecture/breakpoint"
+        );
+        let modules = client.call("modules", route.clone()).await?;
+        ensure!(
+            modules["modules"].as_array().is_some_and(|rows| rows
+                .iter()
+                .any(|row| row["name"] == "wukong_probe" && row["symbols"] == "pdb")),
+            "contained debugger did not load the sealed fixture PDB"
+        );
+        let stack = client.call("backtrace", route.clone()).await?;
+        ensure!(
+            stack["frames"][0]["symbol"] == "wukong_probe!fixture_step"
+                && stack["frames"][0]["address"] == address,
+            "contained backtrace does not match the fixture breakpoint"
+        );
+        Ok(())
     }
+    .await;
+    let released = client.call("end_session", route).await?;
     ensure!(
-        replies[0]["result"]["engine"] == "dbgeng"
-            && replies[0]["result"]["local_symbols_only"] == true,
-        "contained debugger did not select the local-only engine"
+        released["released"] == true && released["recovery_required"] == false,
+        "contained debugger did not release its session"
     );
-    let opened = &replies[1]["result"];
-    ensure!(
-        opened["mode"] == "live"
-            && opened["debuggee_class"] == 2
-            && opened["architecture"] == if architecture == "x86" { 0x14c } else { 0x8664 }
-            && opened["debug_privilege_enabled"] == false
-            && opened["state"]["execution_state"] == "stopped",
-        "contained attachment differs: {opened}"
-    );
-    ensure!(
-        replies[2]["result"]["data"]["registers"]
-            .as_array()
-            .is_some_and(|values| !values.is_empty()),
-        "contained debugger observed no registers"
-    );
-    ensure!(
-        replies[5]["result"]["data"]["modules"]
-            .as_array()
-            .is_some_and(|modules| modules.iter().any(|module| module["symbol_type"]
-                == windows::Win32::System::Diagnostics::Debug::Extensions::DEBUG_SYMTYPE_PDB
-                && module["image"].as_str().is_some_and(|image| image
-                    .rsplit(['\\', '/'])
-                    .next()
-                    .is_some_and(|name| name.eq_ignore_ascii_case("wukong-probe.exe"))))),
-        "contained debugger did not load the sealed target's PDB symbols"
-    );
-    ensure!(
-        replies[3]["result"]["action"] == "breakpoint_add"
-            && replies[3]["result"]["address"]
-                .as_u64()
-                .is_some_and(|address| address != 0)
-            && replies[4]["result"]["state"]["execution_state"] == "stopped"
-            && replies[4]["result"]["state"]["interruption"].is_null()
-            && replies[4]["result"]["event"]["type"]
-                == windows::Win32::System::Diagnostics::Debug::Extensions::DEBUG_EVENT_BREAKPOINT
-            && replies[3]["result"]["breakpoint_id"].as_str().is_some()
-            && replies[4]["result"]["event"]["breakpoint_id"]
-                == replies[3]["result"]["breakpoint_id"],
-        "contained debugger did not stop at its symbol breakpoint"
-    );
-    ensure!(
-        replies[6]["result"]["data"]["frames"]
-            .as_array()
-            .is_some_and(|frames| frames
-                .first()
-                .is_some_and(|frame| frame["instruction_offset"]
-                    == replies[3]["result"]["address"]
-                    && frame["symbol"]["name"]
-                        .as_str()
-                        .is_some_and(|name| name.contains("!fixture_step")))),
-        "contained debugger stack did not observe the fixture symbol"
-    );
-    ensure!(
-        replies[7]["result"]["state"] == "closed",
-        "contained debugger did not close"
-    );
-    Ok(())
+    result
 }
 
 pub(super) fn validate_report(value: &Value) -> Result<()> {
@@ -268,6 +214,7 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
         ensure!(
             debugger["architecture"] == architecture
                 && debugger["engine"] == "dbgeng"
+                && debugger["backend"] == "windbg_mcp"
                 && debugger["privileges"] == json!(["SeChangeNotifyPrivilege"])
                 && debugger["capabilities"] == 0
                 && debugger["debug_privilege_enabled"] == false,
@@ -309,71 +256,4 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
         );
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn transcript() -> Vec<Value> {
-        vec![
-            json!({"id":1,"result":{"engine":"dbgeng","local_symbols_only":true},"output_truncated":false}),
-            json!({"id":2,"result":{"mode":"live","debuggee_class":2,"architecture":0x8664,
-                "debug_privilege_enabled":false,"state":{"execution_state":"stopped"}},"output_truncated":false}),
-            json!({"id":3,"result":{"data":{"registers":[{"name":"rip"}]}},"output_truncated":false}),
-            json!({"id":4,"result":{"action":"breakpoint_add","address":0x140001000u64,"breakpoint_id":"0"},"output_truncated":false}),
-            json!({"id":5,"result":{"state":{"execution_state":"stopped","interruption":null},"event":{"type":1,"breakpoint_id":"0"}},"output_truncated":false}),
-            json!({"id":6,"result":{"data":{"modules":[{"image":"C:\\sealed\\wukong-probe.exe","symbol_type":3}]}},"output_truncated":false}),
-            json!({"id":7,"result":{"data":{"frames":[{"instruction_offset":0x140001000u64,"symbol":{"name":"wukong_probe!fixture_step"}}]}},"output_truncated":false}),
-            json!({"id":8,"result":{"state":"closed"},"output_truncated":false}),
-        ]
-    }
-    fn encode(replies: &[Value]) -> Vec<u8> {
-        replies
-            .iter()
-            .flat_map(|reply| {
-                let mut bytes = serde_json::to_vec(reply).unwrap();
-                bytes.push(b'\n');
-                bytes
-            })
-            .collect()
-    }
-    #[test]
-    fn debugger_qualification_rejects_partial_privileged_or_wrong_target_transcripts() -> Result<()>
-    {
-        let baseline = transcript();
-        validate_replies(&encode(&baseline), "x64")?;
-        assert!(validate_replies(&encode(&baseline), "x86").is_err());
-        assert!(validate_replies(&encode(&baseline[..4]), "x64").is_err());
-        for (index, key, replacement) in [
-            (1, "debug_privilege_enabled", json!(true)),
-            (1, "debuggee_class", json!(1)),
-            (1, "state", json!({"execution_state":"running"})),
-        ] {
-            let mut replies = transcript();
-            replies[index]["result"][key] = replacement;
-            assert!(validate_replies(&encode(&replies), "x64").is_err());
-        }
-        let mut replies = transcript();
-        replies[5]["result"]["data"]["modules"][0]["image"] = json!("C:\\other.exe");
-        assert!(validate_replies(&encode(&replies), "x64").is_err());
-        let mut replies = transcript();
-        replies[5]["result"]["data"]["modules"][0]["symbol_type"] = json!(5);
-        assert!(validate_replies(&encode(&replies), "x64").is_err());
-        let mut replies = transcript();
-        replies[4]["result"]["state"]["interruption"] = json!("deadline");
-        assert!(validate_replies(&encode(&replies), "x64").is_err());
-        let mut replies = transcript();
-        replies[4]["result"]["event"]["breakpoint_id"] = json!("1");
-        assert!(validate_replies(&encode(&replies), "x64").is_err());
-        let mut replies = transcript();
-        replies[6]["result"]["data"]["frames"][0]["instruction_offset"] = json!(0x140001001u64);
-        assert!(validate_replies(&encode(&replies), "x64").is_err());
-        let mut replies = transcript();
-        replies[6]["result"]["data"]["frames"] = json!([]);
-        assert!(validate_replies(&encode(&replies), "x64").is_err());
-        let mut replies = transcript();
-        replies[2]["error"] = json!("access denied");
-        assert!(validate_replies(&encode(&replies), "x64").is_err());
-        Ok(())
-    }
 }

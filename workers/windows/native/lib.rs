@@ -9,6 +9,8 @@ pub mod broker;
 #[cfg(any(windows, test))]
 mod broker_wire;
 #[cfg(windows)]
+mod debugger_mcp;
+#[cfg(windows)]
 pub mod deployment;
 #[cfg(windows)]
 mod environment;

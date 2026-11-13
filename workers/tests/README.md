@@ -97,16 +97,6 @@ Bootstrap PE format fixtures run directly through `object` in the standalone Rus
 
 `integration --static-fixture` exercises the debugger/replay adapter with a statically linked fixture; it does not validate dynamic loader/library identity. Docker execution needs executable `/tmp`, ptrace and the documented isolation capabilities.
 
-The legacy trusted-fixture adapter remains in the standalone worker until the external MCP backend completes containment qualification. On Windows with MSVC and an existing Debugging Tools installation, build `cargo build --locked --manifest-path workers/windows/Cargo.toml --target-dir target/windows-worker-native --bin wukong-dbgeng`, then run:
-
-```powershell
-python workers/tests/run.py windows-debugger --state target/dbgeng-acceptance --helper target/windows-worker-native/debug/wukong-dbgeng.exe --engine-dir '<Debugging Tools x64 directory>'
-```
-
-This compiles trusted x64/x86 fixtures and checks Dump registers, stack, memory, modules, threads, disassembly, live breakpoints, stepping, finish, request deduplication and deadline interruption followed by inspection. It retains hashes and raw transcripts in the selected directory. It neither installs tools nor proves production isolation or offline VM installation; those require dedicated VM acceptance.
-
-For a compiler-free dedicated VM, copy only your self-built `fixture_x64/` and `fixture_x86/` directories from the printed attempt directory, then supply their parent with `--prebuilt-fixtures ABSOLUTE_DIRECTORY`. The VM still needs the complete offline Python/dependency and Debugging Tools payload; no VM package download is required. This entry also exercises actual `object`/DbgHelp/DbgEng format readers with positive PE identities and malformed PE/MSF/minidump inputs. It rejects conflicting PE timestamps, a valid PDB for another image, an image renamed to `.pdb`, and a dump whose known fixture RSDS GUID was changed while retaining the original matching PDB cache. It verifies that a missing cache cannot load the producer's external PDB. Portable unit tests separately cover correspondence policy and missing-identity gaps; their supplied observations do not replace native SDK acceptance. A file-index request after DbgEng initialization is rejected, and failed initialization ends the helper. This suite passed on the provided offline Windows 10 VM on 2026-11-13; its trusted sessions do not qualify AppContainer PDB loading, legacy full-user dumps, valid kernel-dump rejection or reboot recovery.
-
 The ignored Rust fixture `remote_windows_worker_reboot_binding_acceptance` checks a real dedicated Windows VM reboot while keeping the controller's old transport alive. First run the installed-worker controller acceptance described in the [Windows guide](../windows/README.md), so its immutable readback fixture exists and its leases are released. Set `WUKONG_REMOTE_WORKER_REBOOT_TEST` to a JSON profile containing the same pinned managed-SSH `config`, expected `manifest_sha256` and new absolute `ready`, `resume`, `output` paths; all three paths must initially be absent.
 
 ```powershell

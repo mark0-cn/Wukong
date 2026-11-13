@@ -129,7 +129,7 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 
 `fixtures/` 包含符号/stripped 的本地漏洞、修复与正常样本。构建脚本生成 ELF，行为 harness 实际重放并保存哈希与退出结果；检测准确率由独立报告和显式复核标签计算，不从 crash 推断 agent 检测成功。详见 `fixtures/README.md`。
 
-生产动态工具面向 Linux x86_64 ELF。PE/Mach-O 静态画像及显式可信样例的结构化 Windows DbgEng dump/live 调试可用；托管 Windows 生产隔离与安装尚未完成，macOS LLDB 尚未实现。参见[分析环境](cross-platform-environments.zh-CN.md)。当前平台验收以 CI 和[桌面更新验证](../development/desktop-updates.zh-CN.md)为准；早期原生内核检查不证明当前 Windows Docker Desktop 覆盖。外部工具与模型 provider 的环境依赖需要实际配置，缺少依赖会返回明确错误；本地协议测试不等同于线上 provider 或外部引擎验收。
+生产动态工具面向 Linux x86_64 ELF，PE/Mach-O 静态画像可用。Windows 使用外部 WinDbg MCP 工具，已通过真实可信 x64/x86 dump/live 客户端验收；自写 DbgEng 后端已删除，托管 Windows 调试准入及完整生产安装仍未完成。macOS LLDB 尚未实现。参见[分析环境](cross-platform-environments.zh-CN.md)。当前平台验收以 CI 和[桌面更新验证](../development/desktop-updates.zh-CN.md)为准；早期原生内核检查不证明当前 Windows Docker Desktop 覆盖。缺少依赖会返回明确错误；本地协议测试不等同于线上 provider 或外部引擎验收。
 
 <a id="typed-coordination-messages"></a>
 

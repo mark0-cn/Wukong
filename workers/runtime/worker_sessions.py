@@ -77,13 +77,7 @@ class SessionManager:
             if engine == "auto":
                 engine = "dbgeng" if sys.platform == "win32" else "gdb_mi"
             if engine == "dbgeng":
-                from worker_dbgeng import DebugSession as DbgEngSession
-                session = DbgEngSession(self.root, params, trusted=self.trusted)
-                with self.lock:
-                    self.debug[session.id] = session
-                return {"session_id":session.id, "state":"running", "engine":"dbgeng", "mode":session.mode,
-                        "ownership":"single_agent_serialized", "daemon_pid":os.getpid(),
-                        "target_sha256":session.target_sha256, "dump_sha256":session.dump_sha256}
+                raise ValueError("WinDbg uses the external MCP backend; this metadata worker cannot own debugger processes")
             if engine != "gdb_mi":
                 raise ValueError("requested debugger engine is unavailable")
             if not self.trusted and not self.isolated:
@@ -106,8 +100,6 @@ class SessionManager:
             if method == "debug.control":
                 return session.control(params, bounded_int(params.get("timeout_secs"), 30, 1, 60))
             if method == "debug.snapshot":
-                if session.engine == "dbgeng":
-                    return session.snapshot()
                 from worker_crash import debugger_snapshot
                 return debugger_snapshot(session)
             if method == "debug.profile":

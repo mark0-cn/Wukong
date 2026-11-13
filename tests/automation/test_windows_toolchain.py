@@ -20,7 +20,10 @@ from scripts.worker.toolchain import acquire, load_lock
 class OfflineAssets(unittest.TestCase):
     def test_pinned_inventory_covers_full_sdk_and_runtime_requirements(self):
         lock = load_lock()
-        self.assertEqual(len(lock["assets"]), 49)
+        self.assertEqual(len(lock["assets"]), 50)
+        debugger = [item for item in lock["assets"] if item["component"] == "windbg_mcp"]
+        self.assertEqual(len(debugger), 1)
+        self.assertEqual(debugger[0]["sha256"], "f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34")
         sdk = [item for item in lock["assets"] if item["path"].startswith("sdk/")]
         self.assertEqual(len(sdk), 43)
         self.assertEqual(sum(item["path"].endswith(".cab") for item in sdk), 40)

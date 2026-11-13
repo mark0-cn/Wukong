@@ -30,7 +30,12 @@ pub struct EntryPoints {
     pub worker: String,
     pub python: String,
     pub bridge: String,
-    pub dbgeng_helper: String,
+    /// Legacy packages can still be authenticated for maintenance, but their
+    /// helper is never executed by the new native debugger backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dbgeng_helper: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windbg_mcp: Option<String>,
     pub dbgeng_library: String,
     pub sshd: String,
     pub ssh_keygen: String,
@@ -123,13 +128,25 @@ impl Manifest {
         for path in [
             &self.entrypoints.worker,
             &self.entrypoints.python,
-            &self.entrypoints.dbgeng_helper,
             &self.entrypoints.dbgeng_library,
             &self.entrypoints.sshd,
             &self.entrypoints.ssh_keygen,
         ] {
             self.require_kind(path, PayloadKind::Runtime)?;
         }
+        let external_debugger = self.entrypoints.windbg_mcp.is_some();
+        ensure!(
+            external_debugger != self.entrypoints.dbgeng_helper.is_some(),
+            "package must select one debugger backend"
+        );
+        self.require_kind(
+            self.entrypoints
+                .windbg_mcp
+                .as_ref()
+                .or(self.entrypoints.dbgeng_helper.as_ref())
+                .unwrap(),
+            PayloadKind::Runtime,
+        )?;
         self.require_kind(&self.entrypoints.bridge, PayloadKind::WorkerSource)?;
         self.require_kind(&self.toolchain_lock_path, PayloadKind::Data)?;
         ensure!(
@@ -144,15 +161,19 @@ impl Manifest {
             self.require_kind(path, PayloadKind::License)?;
         }
         let mut original_payloads = BTreeSet::new();
-        for name in [
+        let mut required_components = vec![
             "python",
             "debugging_tools",
             "openssh",
             "worker_python_dependencies",
-        ] {
+        ];
+        if external_debugger {
+            required_components.push("windbg_mcp");
+        }
+        for name in &required_components {
             let component = self
                 .components
-                .get(name)
+                .get(*name)
                 .with_context(|| format!("missing offline component: {name}"))?;
             ensure!(
                 !component.version.is_empty() && component.version.len() <= 128,
@@ -177,7 +198,10 @@ impl Manifest {
                 self.require_kind(path, PayloadKind::License)?;
             }
         }
-        ensure!(self.components.len() == 4, "unsupported offline component");
+        ensure!(
+            self.components.len() == required_components.len(),
+            "unsupported offline component"
+        );
         Ok(())
     }
 

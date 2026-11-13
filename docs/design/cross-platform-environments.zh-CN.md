@@ -62,9 +62,9 @@ Linux 复用已有 LaunchSpec 解析器和 UID 隔离，将包括 cwd 外文件�
 
 ## 结构化调试适配器
 
-`debug_start` 选择 `auto`、`gdb_mi` 或 `dbgeng`；`mode = "dump"` 必须提供单独暂存的 Dump，且禁止启动参数。暂存目标仍为本 run 的原始映像。`debug_inspect` 有界提供寄存器、栈、内存、模块、线程、反汇编、异常和执行状态；`debug_control` 提供类型化断点及 run/continue/interrupt/step/next/finish。执行操作等待停止；到达期限后请求中断，无法确认停止状态时使会话失效。Dump 会话拒绝执行控制，原始 `debug_command` 仅用于 GDB/MI。
+内置调试器当前使用 GDB/MI。`mode = "dump"` 必须提供单独暂存的 Dump，且禁止启动参数；暂存目标仍为本 run 的原始映像。检查与控制保留有界类型化接口、停止/超时处理及会话所有权。Dump 会话拒绝执行控制，原始 `debug_command` 仅用于 GDB/MI。`dbgeng` 选项为托管 Windows 准入保留；Python 元数据 worker 报告其不可用，不能创建 Windows 调试器进程。
 
-Windows 原生辅助进程加载配置指定且通过哈希校验的 DbgEng 库，仅接受结构化操作。适配器记录目标、Dump、辅助程序及引擎哈希，保留有界 JSONL 原始记录。本地符号路径排除服务器及环境变量指定的路径。真实 x64/x86 可信夹具验收与生产隔离分开；全部执行路径具备原生资源所有权与准入前，Windows 目标执行必须显式使用可信夹具模式，不宣称可用于生产。
+Windows 调试使用固定版本的外部 WinDbg MCP 工具与现有 rmcp 协议库；自写 DbgEng 实现及 Python 协议适配器已删除。控制端 Rig/rmcp 客户端已在专用 VM 中通过真实 x64/x86 dump/live 互通验收。原生隔离资格检查以所属进程调用外部工具，并保留原始 MCP 记录。通用原生调试准入、符号/目标对应关系、负向夹具及恢复仍未完成；直接 MCP 互通不证明生产隔离。参见[外部调试器验收](../../workers/tests/README.zh-CN.md#外部-windbg-mcp-验收)。
 
 ## Windows 离线交付契约
 

@@ -164,6 +164,17 @@ def prepare(cache, output, lock_path=LOCK):
         shutil.copyfile(ROOT / "workers/runtime/requirements.txt", runtime / "worker/requirements.txt")
         files = msi_layout(cache / lock["sdk"]["database"], cache / "sdk/Installers",
                            runtime / "sdk", scratch / "sdk-files")
+        debugger_asset = next(item for item in lock["assets"] if item["component"] == "windbg_mcp")
+        debugger = scratch / "windbg-mcp"
+        unpack_zip(cache / debugger_asset["path"], debugger)
+        # The x64 server handles both x64 and WOW64 targets. Its adjacent engine
+        # and CRT are pinned payloads, not dependencies of the guest machine.
+        engine = runtime / "sdk/Windows Kits/10/Debuggers/x64"
+        for source, name in [(debugger / "windbg-mcp.exe", "windbg-mcp.exe"),
+                             (runtime / "python/vcruntime140.dll", "vcruntime140.dll")]:
+            with regular(source).open("rb") as incoming, (engine / name).open("xb") as outgoing:
+                shutil.copyfileobj(incoming, outgoing)
+        shutil.copyfile(regular(debugger / "LICENSE"), licenses / "windbg-mcp-LICENSE")
         shutil.copyfile(regular(lock_path), output / "toolchain.lock.json")
         index = {"schema": 1, "scope": "unsigned_controller_layout", "toolchain_lock_sha256": sha256(lock_path),
                  "sdk_files": len(files), "sdk_bytes": sum(item["size"] for item in files),

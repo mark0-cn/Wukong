@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import worker_dbgeng
+import worker_windows_paths
 
 
 @contextmanager
@@ -59,14 +59,14 @@ def without_privileges():
 
 
 @unittest.skipUnless(os.name == "nt", "real Windows restricted-token path fixture")
-class DbgEngPathsTests(unittest.TestCase):
+class WindowsPathsTests(unittest.TestCase):
     def test_zero_privilege_token_can_validate_existing_local_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary).absolute() / "known fixture.bin"
             path.write_bytes(b"inert-known-fixture")
             with without_privileges():
-                self.assertEqual(worker_dbgeng.local_path(path), path)
+                self.assertEqual(worker_windows_paths.local_path(path), path)
                 self.assertEqual(path.read_bytes(), b"inert-known-fixture")
             for invalid in [r"\\server\share\file", r"C:\file:stream", r"relative\file", str(path) + "."]:
                 with self.assertRaises(ValueError):
-                    worker_dbgeng.local_path(invalid)
+                    worker_windows_paths.local_path(invalid)
