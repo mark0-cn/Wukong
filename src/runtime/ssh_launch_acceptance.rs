@@ -34,7 +34,7 @@ struct Profile {
     #[serde(default)]
     resource_inventory: bool,
 }
-fn bytes(probe: &Probe) -> Result<Vec<u8>> {
+pub(super) fn bytes(probe: &Probe) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     fs::File::open(&probe.path)?
         .take(32 * 1024 * 1024 + 1)
@@ -45,7 +45,7 @@ fn bytes(probe: &Probe) -> Result<Vec<u8>> {
     );
     Ok(bytes)
 }
-async fn upload(
+pub(super) async fn upload(
     client: &RuntimeClient,
     path: &str,
     bytes: &[u8],
@@ -60,7 +60,7 @@ async fn upload(
     );
     Ok(value)
 }
-async fn original(client: &RuntimeClient, path: &str) -> Result<(Value, Vec<u8>)> {
+pub(super) async fn original(client: &RuntimeClient, path: &str) -> Result<(Value, Vec<u8>)> {
     let value = client.call("file.get", json!({"path":path})).await?;
     let bytes = STANDARD.decode(
         value["data_base64"]

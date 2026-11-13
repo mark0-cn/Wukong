@@ -44,6 +44,8 @@
 
 `native/resource_process.rs` 现已实现内部 `resource-execute` System 宿主，与启动资格检查共享签名部署验证、固定环境准备及 profile 创建。请求必须位于精确受保护的 `metadata/resource-requests/RESOURCE.json` 槽位，绑定当前安装/包、控制器归属及已准入的可执行输入引用。输入在 persona 创建前验证；映像从持续持有的原生输入读取器复制，保留逻辑 `files/...` 布局，并获得受保护的只读/执行策略和禁止写入/删除共享的句柄。profile 意图在创建前记录资源 ID。宿主通过已有的挂起创建、Job 归属 AppContainer 通路启动零能力目标，成功排空后关闭 persona 并删除已接管的 scratch。清理错误仍作为错误；目标创建的限制访问后代不会被误报为已删除。独立进程的隔离令牌/账本调度，以及明确列出的可信准备/宿主/服务恢复用例已在上文通过验收；其他执行 RPC 通路仍待完成。普通管理/metadata 令牌无法进入此仅 System 可用的入口。既有有限已安装 VM 执行通路在 `fbf7912` 通过；当前中断进程证据记录在上文。
 
+隔离 x64/x86 托管调试启动/控制/关闭通路已在 `5f2b692` 通过真实控制器验收，包含不可变活动日志读取及确认清理。参见[绑定源码的验收记录](../tests/README.zh-CN.md#托管原生-windbg-启动验收)。服务中断恢复、完整映像/PDB/dump 准入及更广泛对抗验收仍待完成。
+
 内部托管调试通路由 System 服务处理 `debug.start`、`debug.inspect`、`debug.control` 和 `debug.close`，与进程任务共享原生输入/LaunchSpec 准入及目标准备，并配对独立的目标/调试器 AppContainer。仅接受 `mode = "launch"` 及 `engine = "auto"` 或 `"dbgeng"`；拒绝 dump 请求。直接目标的资源期限默认为 3,600 秒，LaunchSpec 使用自己的超时。现有附加门控仅释放自己持有的一次挂起计数。完整映像/PDB 对应关系、dump 支持、已安装会话/恢复验收和对抗覆盖完成前，仍禁用生产可用性。
 
 继承管道通道使用从 `proto/session.proto` 生成的 `prost` 消息及 Tokio `LengthDelimitedCodec`，帧上限 4 MiB，每个会话最多 4,096 次交换，每次期限 75 秒。回复绑定资源、准入请求哈希及递增序号。交换在资源锁/输入锁之外等待；服务保留守护 Job 和持久化票据。交换期间请求关闭会发出取消并报告清理待定。取消后最多给予宿主五秒，随后进行所属资源恢复；重复取消不会延长期限。服务停止或租约过期时，即使持有通道的 RPC 任务已被中止，仍可核对已退出的宿主。成功关闭要求 Job 已清空、profile/scratch 已删除；恢复使用两组原始 persona 意图，绝不重新启动目标。上游 `continue_async`、`wait_for_stop` 和 `break_in` 持有执行句柄。因该后端缺少独立跳出/断点开关工具，仅固定 `gu`、`be N` 和 `bd N` 使用上游 `execute`，其中 ID 必须是已校验的数字；仍不接受任意命令。

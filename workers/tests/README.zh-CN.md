@@ -79,6 +79,12 @@ python3 /opt/wukong/tests/run.py ghidra --state /state/ghidra-acceptance
 
 Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特权和管理员组，以检查普通账户的 DACL 权限，避免 `SeTakeOwnershipPrivilege` 授予 `WRITE_OWNER`。它不修改父进程令牌或已安装服务的策略。此夹具于 2026-11-13 在用户提供的 Windows 10 VM 上通过。
 
+### 托管原生 WinDbg 启动验收
+
+`src/runtime/ssh_debugger_acceptance.rs` 通过真实控制器传输测试已安装服务。将 `WUKONG_REMOTE_WORKER_DEBUGGER_TEST` 设为本机 JSON 配置路径，包含固定指纹的托管 SSH `config`、`manifest_sha256`、新的绝对 `output`，以及以 `x64`/`x86` 为键的 `probes`。每种架构提供 `program` 和 `pdb`，各自包含本机绝对 `path` 及该签名包中的精确 `sha256`。运行 `cargo test --locked --lib remote_installed_windows_worker_debugger_acceptance -- --ignored --nocapture`。夹具仅上传这些密封字节及离线 LaunchSpec，不安装软件。每次调用后 fsync RPC JSONL，最终原始 MCP 日志与报告一同保留。
+
+2026-11-13，该夹具在专用离线 Windows 10 VM、原生源码 `5f2b692`、清单 `a8a755a2cd17c597f0ecfa87848db668aeba7654d6cddf4b5c90b45146a427a7` 上通过。两种架构均覆盖 PDB 符号断点、数字 ID 启用/禁用/删除、寄存器、内存、模块、栈、原始线程结果、反汇编、step/next/finish、异步 continue/interrupt、不可变活动日志前缀、拒绝释放活动租约、缓存关闭及拒绝重启已关闭会话。57 次控制器调用产生 60 次 MCP 调用，包含两次预期的非故障异常查询拒绝，原始错误均保留。首轮夹具错误地要求普通断点具有异常信息；修正运行前，已关闭其目标并独立收集原始证据。只读 SQLite 及独立 VM 检查确认三个资源关闭、32 个副作用完成、scratch 为空且无剩余所属调试器/探针进程。95 份原件均已核对哈希，先前运行的服务及管理 SSH 保持运行，ISO 已卸载。报告 SHA256 为 `cc50a5b0c35e00a21916bf8f8cab50731c20b8d9d451769d149b25db76ff0a04`；x64/x86 原始日志哈希分别为 `1934765a4e5dde8ff5465c0269393703aa73c43e5a6a075c2a188eefc1b6d58f` 和 `d825ff0644e0e5a538ea99f4889755354614a21c8d8d1796463f653d0f1b8986`。这验证所述隔离启动/控制/关闭通路，不证明完整映像/PDB/dump 准入、服务中断恢复、全部对抗边界或生产可用性。
+
 ### 外部 WinDbg MCP 验收
 
 `tests/windbg_mcp.rs` 通过现有 `McpRegistry`（Rig/rmcp）驱动真实外部调试器。它默认忽略，要求专用 VM 已具有仓库的可信 x64/x86 `wukong-probe` 程序、匹配的 PDB 和已生成的 dump。配置固定身份的 SSH stdio 命令，或在该 VM 内使用本地命令；测试不会安装软件或运行未知目标。
