@@ -2,6 +2,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
+Strong crash observation now captures the first-chance registers and stack before continuing to a matching second-chance exception on the same thread. Code, address, flags and parameters must agree; a handled exception or another stop is unresolved. This avoids treating WOW64's native notification frame as the x86 fault. Both stops and original MCP responses are retained and checked by the installed acceptance fixture. A directly observed second-chance fault still requires its registers and top frame to match its exception address. The trusted diagnostic passed; full corrected installed acceptance is pending.
+
 The process capture layer treats zero remaining time after process creation as an expired deadline and still drains the Job and I/O threads. Public timeout bounds remain unchanged. This fixes the x86 one-second minimization case that became an unknown host result in the `51e512f` batch. Independent recovery closed all 21 resources from that batch and its earlier probe, preserving 217 originals; the corrected installed deadline case remains pending.
 
 Debugger module correspondence prefers a nonempty `loaded_image_name` and falls back to `image_name` only when the loaded name is unavailable. This handles admitted targets renamed after linking; PE size/timestamp/checksum, PDB identity and duplicate-name rejection still apply. Reported paths are never opened. The `51e512f` installed batch exposed the old name mismatch; corrected installed qualification remains pending.

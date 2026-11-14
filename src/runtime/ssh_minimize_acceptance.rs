@@ -155,23 +155,48 @@ async fn evidence(
         }
         if proof["observation"].is_object() && !proof["observation"]["location_signature"].is_null()
         {
+            let observation = &proof["observation"];
+            let first = &observation["exception"]["exception"];
+            let unhandled = &observation["unhandled_exception"]["exception"];
             ensure!(
-                proof["observation"]["exception"]["exception"]["first_chance"] == false
-                    && proof["observation"]["pc_location"]["module_sha256"] == target["sha256"]
-                    && proof["observation"]["exception_code"] == proof["native"]["exit_code"],
+                unhandled["first_chance"] == false
+                    && first["first_chance"].is_boolean()
+                    && observation["pc_location"]["module_sha256"] == target["sha256"]
+                    && observation["exception_code"] == proof["native"]["exit_code"]
+                    && observation["stop"]["thread"]
+                        .as_u64()
+                        .is_some_and(|id| id > 0)
+                    && observation["stop"]["thread"] == observation["unhandled_stop"]["thread"]
+                    && first["address"] == observation["stop"]["stopped_at"]
+                    && first["address"] == observation["registers"]["instruction_pointer"]
+                    && first["address"] == observation["exception"]["frames"][0]["address"]
+                    && ["code", "address", "flags", "noncontinuable", "parameters"]
+                        .iter()
+                        .all(|key| !first[*key].is_null() && first[*key] == unhandled[*key]),
                 "strong observation did not bind an unhandled native crash to admitted content"
             );
             let (transcript, content) =
                 original(client, &format!("native-results/{id}/trial-{index}-mcp")).await?;
-            let mut triage = false;
-            for line in content
+            let calls: Vec<Value> = content
                 .split(|b| *b == b'\n')
                 .filter(|line| !line.is_empty())
-            {
-                let call: Value = serde_json::from_slice(line)?;
-                triage |= call["tool"] == "exception_triage" && call["result"]["isError"] != true;
+                .map(serde_json::from_slice)
+                .collect::<serde_json::Result<_>>()?;
+            for (tool, field) in [
+                ("go", "stop"),
+                ("exception_triage", "exception"),
+                ("registers", "registers"),
+                ("modules", "modules"),
+                ("go", "unhandled_stop"),
+                ("exception_triage", "unhandled_exception"),
+            ] {
+                ensure!(
+                    calls.iter().any(|call| call["tool"] == tool
+                        && call["result"]["isError"] != true
+                        && call["result"]["structuredContent"] == observation[field]),
+                    "strong observation has no matching original MCP {field}"
+                );
             }
-            ensure!(triage, "strong observation has no original MCP triage");
             proofs.push(json!({"artifact":metadata,"receipt":proof,"transcript":transcript}));
         } else {
             proofs.push(json!({"artifact":metadata,"receipt":proof}));
