@@ -498,11 +498,14 @@ async fn remote_native_completed_minimize_recovery_acceptance() -> Result<()> {
             "recovery executed a previous candidate again"
         );
         let first = &case["evidence"]["trials"][0]["receipt"];
+        // Input uploads are epoch-scoped. Recovery must read the durable
+        // baseline artifact owned by the completed job, not a successor lease's
+        // interpretation of the original public input path.
         let (_, source) = original(
             &bound,
-            first["input"]["path"]
+            case["evidence"]["receipt"]["trials"][0]["input_path"]
                 .as_str()
-                .context("original input absent")?,
+                .context("durable baseline input absent")?,
         )
         .await?;
         ensure!(
