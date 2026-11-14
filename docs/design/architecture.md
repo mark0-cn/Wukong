@@ -10,6 +10,17 @@ This project implements Strix-inspired responsibilities and runtime semantics: r
 
 ## Modules and responsibilities
 
+Public execution uses JSON-RPC protocol v3 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
+
+Controller connections/configuration/identity/leases live under `src/runtime` and `src/environments`; `ToolContext` carries a bound worker into file/job/session/verification use cases. `WorkerGateway` retains stable request IDs and unmodified worker receipts. Those use cases translate resource IDs into controller ownership records. `src/effects` and `src/store` retain business receipts, evidence and notifications; the worker's execution ledger separately records external effects. A repeated session-start receipt cannot reopen a closed controller session or erase its transcript.
+
+Windows groups code into `host`, `resources`, `executors`, `artifacts`, `isolation` and `rpc`. `ResourceManager` alone serializes lifecycle admission, reservation and ticket-checked completion. Input preparation, execution waits and recovery run outside its state lock; active work remains owned when a caller disconnects. Explicit active-resource states distinguish startup, execution, finishing, closing and recovery. Executors return observations without writing the ledger. The host injects a verified runtime context; Windows API details stay in isolation. Internal sessions retain Prost/Protobuf.
+
+`workers/analysis` is a Python package with explicit inputs and no worker state or transport. Linux adapters retain confinement/live debugging; Windows disposable helpers use the same package. The Windows component inventory excludes Linux worker services/dependencies. Architecture guards live in `tests/automation/test_execution_boundaries.py`.
+
+The controller store requires schema 5, the Windows resource journal version 2 and package manifests schema 2. Older formats/protocols fail closed. Use new workspaces and worker instances for v3; there is no migration, automatic deletion or legacy configuration adapter. Existing directories and evidence stay intact. Current acceptance is recorded separately from historical results.
+
+
 Windows has one native worker authority. The controller owns business tasks/evidence, `workers/protocol` shares public types, and the native service owns capabilities, leases, files and resources. Python on Windows is a disposable isolated analysis tool; Linux retains its Python worker. See [cross-platform environments](cross-platform-environments.md) and the [current Windows component guide](../../workers/windows/README.md).
 
 | Module | Responsibility |

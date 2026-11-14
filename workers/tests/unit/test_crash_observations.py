@@ -25,7 +25,7 @@ class CrashTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory); (root/"pattern").write_bytes(b"aaaabaaacaaa")
             with self.assertRaisesRegex(ValueError,"exactly n"):
-                CrashService(root,True,False).dispatch("cyclic.offset",{"pattern":"pattern",
+                CrashService(root,True,False).cyclic_offset({"pattern":"pattern",
                     "observed_base64":base64.b64encode(b"aaaabaaa").decode(),"alphabet":"abcd","n":4})
 
     def minimize(self, strong, weak=False):

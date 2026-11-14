@@ -37,6 +37,10 @@ enum Visibility {
     Internal,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each declarative registry row owns its schema, presentation, handler and permission policy"
+)]
 fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema>(
     name: &str,
     display_title: &'static str,

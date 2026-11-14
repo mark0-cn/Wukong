@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 mod resources;
 pub use resources::*;
+mod responses;
+pub use responses::*;
 mod methods;
 pub mod params;
 pub use methods::*;

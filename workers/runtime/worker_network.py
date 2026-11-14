@@ -89,4 +89,5 @@ def replay_network(root, directory, spec, input_bytes, index):
 
 class NetworkService:
     def __init__(self,root,trusted,isolated): self.root,self.trusted=root,trusted
-    def dispatch(self,method,params): return network_profile(self.root,params,self.trusted)
+    def profile(self, params):
+        return network_profile(self.root, params, self.trusted)

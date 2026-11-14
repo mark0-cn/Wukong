@@ -220,5 +220,111 @@
       "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     },
     "valid": false
+  },
+  {
+    "kind": "result",
+    "method": "file.get",
+    "value": {
+      "path": "files/probe",
+      "size": 1,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_base64": "AA=="
+    },
+    "valid": true
+  },
+  {
+    "kind": "result",
+    "method": "file.get",
+    "value": {
+      "path": "files/probe",
+      "size": 1,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "valid": false
+  },
+  {
+    "kind": "result",
+    "method": "file.read",
+    "value": {
+      "path": "files/probe",
+      "size": 1,
+      "offset": 0,
+      "chunk_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_base64": "AA=="
+    },
+    "valid": true
+  },
+  {
+    "kind": "result",
+    "method": "file.read",
+    "value": {
+      "path": "files/probe",
+      "size": 1,
+      "offset": -1,
+      "chunk_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_base64": "AA=="
+    },
+    "valid": false
+  },
+  {
+    "kind": "result",
+    "method": "file.upload.status",
+    "value": {
+      "transfer_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "offset": 1,
+      "complete": false
+    },
+    "valid": true
+  },
+  {
+    "kind": "result",
+    "method": "file.upload.status",
+    "value": {
+      "transfer_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "offset": 1,
+      "complete": "false"
+    },
+    "valid": false
+  },
+  {
+    "kind": "result",
+    "method": "debug.start",
+    "value": {
+      "session_id": "fixture",
+      "state": "running"
+    },
+    "valid": true
+  },
+  {
+    "kind": "result",
+    "method": "debug.start",
+    "value": {
+      "session_id": "fixture",
+      "state": "invalid"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "producer_agent_id": "p",
+      "verifier_agent_id": "v"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "producer_agent_id": "p",
+      "verifier_agent_id": "v",
+      "unexpected": 1
+    },
+    "valid": false
   }
 ]

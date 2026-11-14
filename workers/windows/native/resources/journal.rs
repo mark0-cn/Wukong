@@ -1,6 +1,7 @@
 //! System-owned resource/effect state, using SQLite transactions rather than a
 //! second filesystem transaction engine. This is not an execution broker API.
 use crate::artifacts::inputs::Owner;
+use crate::resources::models::bounded_identifier;
 use crate::resources::models::{MutationKind, Phase, ResourceKind, ResourceRecord};
 use crate::{
     artifacts::inputs::digest,
@@ -600,13 +601,6 @@ fn regular(file: &fs::File, maximum: u64) -> Result<()> {
             && info.dwFileAttributes & 0x400 == 0
             && file.metadata()?.len() <= maximum,
         "native resource database member is linked, redirected or oversized"
-    );
-    Ok(())
-}
-pub(crate) fn bounded_identifier(value: &str, maximum: usize) -> Result<()> {
-    ensure!(
-        !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control),
-        "invalid native resource identifier"
     );
     Ok(())
 }

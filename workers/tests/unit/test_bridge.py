@@ -12,6 +12,22 @@ from support.client import Client
 
 
 class SessionLaunchTests(unittest.TestCase):
+    def test_interactive_cleanup_failure_retains_the_owned_session(self):
+        from worker_sessions import SessionManager
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            manager = SessionManager(Path(directory), trusted=True, isolated=False)
+            session = Mock(id="owned")
+            session.close.side_effect = RuntimeError("cleanup failed")
+            manager.interact[session.id] = session
+            with self.assertRaisesRegex(RuntimeError, "cleanup failed"):
+                manager.interact_close({"session_id": session.id})
+            self.assertIs(manager._interact({"session_id": session.id}), session)
+            session.close.side_effect = None
+            session.close.return_value = {"session_id": session.id, "state": "closed"}
+            self.assertEqual(manager.interact_close({"session_id": session.id})["state"], "closed")
+            self.assertNotIn(session.id, manager.interact)
+
     def test_lost_session_error_kind_survives_durable_replay(self):
         import worker_runtime as bridge
         from worker_common import WorkerError,error_kind

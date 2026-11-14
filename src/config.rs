@@ -349,7 +349,6 @@ mod tests {
                         },
                     ),
                     request_timeout_secs: 120,
-                    ..Default::default()
                 },
             },
         );

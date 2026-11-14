@@ -5,18 +5,16 @@ use jsonrpsee_core::server::RpcModule;
 use jsonrpsee_types::{ErrorObjectOwned, Response};
 use serde_json::{Value, json};
 use std::sync::Arc;
-use wukong_worker_protocol::{MAX_RPC_BYTES, Method, WorkerErrorData, WorkerErrorKind};
+use wukong_worker_protocol::{MAX_RPC_BYTES, WorkerErrorData, WorkerErrorKind};
 
 pub(crate) struct Server(RpcModule<Worker>);
 impl Server {
     pub(crate) fn new(worker: Arc<Worker>) -> Result<Self> {
         let mut module = RpcModule::from_arc(worker);
-        for method in Method::ALL.iter().copied().filter(|method| {
-            matches!(
-                method,
-                Method::Ping | Method::Doctor | Method::LeaseAcquire | Method::LeaseRelease
-            ) || crate::rpc::catalog::route(method.name()).is_some()
-        }) {
+        for method in crate::rpc::catalog::GROUPS
+            .iter()
+            .flat_map(|group| group.methods.iter().map(|entry| entry.method))
+        {
             module.register_async_method(method.name(), move |params, worker, _| async move {
                 let params: Value = if params.as_str().is_none() {
                     json!({})

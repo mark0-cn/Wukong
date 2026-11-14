@@ -68,8 +68,8 @@ impl Request {
             .map_or("process", |replay| replay.configuration.kind.name())
     }
     pub fn validate(&self) -> Result<()> {
-        crate::resources::journal::bounded_identifier(&self.owner.run_id, 128)?;
-        crate::resources::journal::bounded_identifier(&self.owner.owner_id, 128)?;
+        crate::resources::models::bounded_identifier(&self.owner.run_id, 128)?;
+        crate::resources::models::bounded_identifier(&self.owner.owner_id, 128)?;
         ensure!(
             self.schema == SCHEMA
                 && self.resource_id.len() == 32

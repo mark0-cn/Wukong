@@ -18,8 +18,8 @@
       "zh-CN": "04ef38f29d72fd0ea63c0106c81e86210272b0617def67218e6079dbbcf6d01d"
     },
     "docs/design/architecture.md": {
-      "en": "5c32b98f3740bc17d1ec139abf7b7e35935104c1320f15008fba76bd07a7319f",
-      "zh-CN": "021bc4209a387b65f9c36254d277404ce1e59d90d324c753340e014c684b56dd"
+      "en": "3d9e9157328a686a3c3e1a9b0b2a6ca7e41520ae572b2efa346fbebc91d19f30",
+      "zh-CN": "4eefd82f8b9185697c2968f1f4e7d5f88ec74516a0f5eb455b1a85ab44eab1b4"
     },
     "docs/design/cross-platform-environments.md": {
       "en": "94b52ef54b239741df132cb5c3909139af1455cdfc091c68788e9e0745ee10ff",
@@ -94,8 +94,8 @@
       "zh-CN": "39c142f85e35eba625ee588a9fd5dd18d0f327e51e4c1a5ca724422b4987bf20"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "1e288086b5f7dbefac8d64f796bef39787a9e373a945f9f1063a9ebb25f4ed2f",
-      "zh-CN": "14fd4aeae53e16048948ab1f64e6c804d3e7b31aa12b2dc07679cfaad68fdfb7"
+      "en": "5b1266d380bc86dd9667cdb72c9a79bf37701366d1a6436f4f0093454d5f245a",
+      "zh-CN": "174bea096c353c48927ee04cf321a40af24e5b38d6a465e0b154e27d64b9b3bb"
     },
     "docs/user/languages.md": {
       "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
@@ -146,16 +146,16 @@
       "zh-CN": "70055ee918963c9690157f1d8820122f3e3a8cc8683375b1a34cdb2ae28cd4b4"
     },
     "workers/package/README.md": {
-      "en": "9085d705a29817cf131f100ee16e7463b6c1148ec513c15f335a6cf93b53ac65",
-      "zh-CN": "e750dab5b7e547835cc73317a0bfd19bb190061036baf83b1c8bfe3e20e56b6e"
+      "en": "a8cd0065881dbcdaa69c0ac894f84ca0984595434880daa49537f938f24d1cfc",
+      "zh-CN": "33cc11df80011331274319047e5546a993fd505b8dc7d4f87b136d183a12a3e9"
     },
     "workers/protocol/README.md": {
       "en": "db2024e9ce50161772f8f50a5aaaef6b381feb690f302f79087aa0a634bda8a0",
       "zh-CN": "9d5fd4b914e35e8d694d31c33cdd7ecae8fd040e54621dced40a6e77f5253a9c"
     },
     "workers/runtime/README.md": {
-      "en": "f682656f7594e18192ea48ad9577024d88f7b4192adce283c9799adfcbc24f0b",
-      "zh-CN": "ca99e1faa8d2ae39107191db66cedc6813bdc5d64d8432fe5457b3a8491b0f91"
+      "en": "9cdbd0650aebcc912e4833b60a72f7904c2d8582e08df861948b2eedcc66344d",
+      "zh-CN": "fb060a2a25a32907b2a1da35e28fba7e48f01b8dfa2552e4e9e3ef3202fd8838"
     },
     "workers/tests/README.md": {
       "en": "b88942d7deb1421300d2f1f67793ae85af2d08936b7e7d8f2d86c08e6d15ae33",

@@ -1,6 +1,6 @@
 //! Immutable resource identity and lifecycle observations; no storage implementation.
 use crate::artifacts::inputs::Owner;
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -48,4 +48,12 @@ impl Phase {
             _ => anyhow::bail!("invalid native resource phase"),
         }
     }
+}
+
+pub(crate) fn bounded_identifier(value: &str, maximum: usize) -> Result<()> {
+    ensure!(
+        !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control),
+        "invalid native resource identifier"
+    );
+    Ok(())
 }

@@ -4,6 +4,7 @@ use wukong_worker_protocol::{Method, WorkerCapacity, WorkerIdentity};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Route {
+    Control,
     Files,
     Execution,
     Analysis,
@@ -11,6 +12,7 @@ pub(crate) enum Route {
 
 #[derive(Clone, Copy)]
 pub(crate) enum Handler {
+    Control,
     Files,
     Jobs,
     Session,
@@ -31,6 +33,16 @@ pub(crate) struct Group {
 }
 
 pub(crate) const GROUPS: &[Group] = &[
+    Group {
+        route: Route::Control,
+        capabilities: &[],
+        methods: &[
+            registered(Method::Ping, Handler::Control),
+            registered(Method::Doctor, Handler::Control),
+            registered(Method::LeaseAcquire, Handler::Control),
+            registered(Method::LeaseRelease, Handler::Control),
+        ],
+    },
     Group {
         route: Route::Files,
         capabilities: &["resumable_file_transfer"],

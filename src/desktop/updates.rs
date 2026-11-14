@@ -514,7 +514,7 @@ impl Controller {
             .and_then(|environment| environment.runtime.docker_container())
         {
             ensure!(
-                container == &workbench.name("tools"),
+                container == workbench.name("tools"),
                 UiMessage::new("system-switch-to-the-tool-environment-before-installing-or")
             );
         }

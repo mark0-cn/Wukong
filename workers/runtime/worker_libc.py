@@ -15,4 +15,3 @@ class LibcService:
             paths = [path for path in [Path("/lib/x86_64-linux-gnu/libc.so.6"), Path("/lib/i386-linux-gnu/libc.so.6")] if path.is_file()]
         target = confined(self.root, params["target"], True) if params.get("target") else None
         return identify(params, paths, target, "supplied_corpus" if supplied else "worker_libc_only")
-    def dispatch(self, method, params): return self.identify(params)

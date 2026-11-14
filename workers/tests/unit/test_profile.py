@@ -18,8 +18,8 @@ class ProfileTests(unittest.TestCase):
             identity=file_identity(root/"target")
             self.assertEqual(identity["sha256"],hashlib.sha256(b"fixture").hexdigest())
             service=ProfileService(root,True,False)
-            self.assertFalse(service.dispatch("runtime.profile",{"target":"target"})["mapped_match"])
-            with self.assertRaises(ValueError): service.dispatch("runtime.profile",{"target":"../outside"})
+            self.assertFalse(service.profile({"target":"target"})["mapped_match"])
+            with self.assertRaises(ValueError): service.profile({"target":"../outside"})
     def test_bundle_copies_preserve_original_and_replay(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
@@ -29,8 +29,8 @@ class ProfileTests(unittest.TestCase):
                 return {"path":str(path),"sha256":hashlib.sha256(data).hexdigest(),"architecture":"x64","bits":64}
             service=ProfileService(root,True,False)
             with patch("worker_profile.file_identity",side_effect=fake):
-                result=service.dispatch("runtime.prepare",{"target":"target","libc":"libc","loader":"loader"})
-                self.assertEqual(result,service.dispatch("runtime.prepare",{"target":"target","libc":"libc","loader":"loader"}))
+                result=service.prepare({"target":"target","libc":"libc","loader":"loader"})
+                self.assertEqual(result,service.prepare({"target":"target","libc":"libc","loader":"loader"}))
             self.assertEqual((root/"target").read_bytes(),b"target")
             self.assertEqual(len(result["artifacts"]),3)
             # Interactive sessions launch in fresh directories; argv must not

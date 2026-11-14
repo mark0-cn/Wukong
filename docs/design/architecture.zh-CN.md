@@ -10,6 +10,17 @@
 
 ## 模块与职责
 
+公开执行通过 SSH/stdio 使用 JSON-RPC 协议 v3。独立 `workers/protocol` crate 负责方法标识、请求/响应类型、副作用、资源需求及生成的 JSON Schema。Rust/jsonrpsee 和 Python/jsonrpcserver 注册实际处理器，双方校验同一组契约样本。模型工具目录负责角色可见性和所需方法，各 Worker 目录负责处理器及就绪状态。第三方观察保留为原始证据，文件/作业/会话身份与传输配置使用结构化类型。
+
+控制器连接、配置、身份及租约位于 `src/runtime` 与 `src/environments`；`ToolContext` 将已绑定 Worker 传给文件、作业、会话和验证用例。`WorkerGateway` 保留稳定请求 ID 及未改写的 Worker 回执，由相应用例将资源 ID 转成控制器归属记录。`src/effects` 和 `src/store` 保存业务收据、证据及通知，Worker 执行账本另行记录外部副作用。重复的会话启动回执不能重新打开控制器已关闭的会话，也不能抹掉其 transcript。
+
+Windows 按 `host`、`resources`、`executors`、`artifacts`、`isolation` 和 `rpc` 分组。`ResourceManager` 统一串行处理生命周期准入、预留和核对票据后的提交。输入准备、执行等待与恢复在状态锁外运行，调用方断开后活动操作仍保有归属。显式活动资源状态区分启动、执行、收尾、关闭与恢复。执行器返回观察结果，不写账本；宿主注入已验证运行上下文，Windows API 细节保留在隔离层。内部会话继续使用 Prost/Protobuf。
+
+`workers/analysis` 是只接收明确输入、不拥有 Worker 状态或传输的 Python 包。Linux 适配器保留文件约束和真实调试，Windows 一次性辅助程序使用同一分析包。Windows 组件清单排除 Linux Worker 服务及依赖。架构检查位于 `tests/automation/test_execution_boundaries.py`。
+
+控制器存储要求 schema 5，Windows 资源账本要求版本 2，包清单要求 schema 2。旧格式或协议直接拒绝；v3 使用新工作区和新 Worker 实例，不提供迁移、自动删除或旧配置适配层。现有目录及证据保持原样。当前验收与历史结果分别记录。
+
+
 Windows 的执行管理入口只有原生 Worker。控制器负责业务任务和证据，`workers/protocol` 共用公开类型，原生服务负责能力、租约、文件和资源。Python 在 Windows 上作为一次性隔离分析工具；Linux 保留 Python Worker。详见[跨平台环境架构](cross-platform-environments.zh-CN.md)和[当前 Windows 组件指南](../../workers/windows/README.zh-CN.md)。
 
 | 模块 | 职责 |

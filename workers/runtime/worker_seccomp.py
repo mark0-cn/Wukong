@@ -8,5 +8,3 @@ class SeccompService:
         path = confined(self.root, params["filter"], True)
         if path.stat().st_size > 32768: raise ValueError("filter exceeds 32 KiB")
         return analyze(path.read_bytes(), params.get("endianness") or "little", params.get("probes"))
-    def dispatch(self, method, params):
-        return self.analyze(params)

@@ -43,7 +43,7 @@ pub struct JobStartArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env: Option<Map<String, Value>>,
+    pub env: Option<std::collections::BTreeMap<String, String>>,
     #[schemars(range(min = 1, max = 86400))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
@@ -83,7 +83,7 @@ pub struct FuzzStartArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env: Option<Map<String, Value>>,
+    pub env: Option<std::collections::BTreeMap<String, String>>,
     #[schemars(range(min = 1, max = 86400))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
@@ -219,7 +219,7 @@ pub struct InteractiveStartArgs {
     pub launch_spec: Option<String>,
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env: Option<Map<String, Value>>,
+    pub env: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -374,7 +374,7 @@ pub struct CrashReplayArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected: Option<Expected>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env: Option<Map<String, Value>>,
+    pub env: Option<std::collections::BTreeMap<String, String>>,
     #[schemars(range(min = 1, max = 60))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
@@ -407,7 +407,7 @@ pub struct InputMinimizeArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env: Option<Map<String, Value>>,
+    pub env: Option<std::collections::BTreeMap<String, String>>,
     #[schemars(range(min = 1, max = 60))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
@@ -428,7 +428,7 @@ pub struct ExecCommandArgs {
     /// Optional staged worker path (from stage_target); the worker places the
     /// resolved file at $TARGET in the command environment.
     pub target: Option<String>,
-    pub env: Option<Map<String, Value>>,
+    pub env: Option<std::collections::BTreeMap<String, String>>,
     #[schemars(range(min = 1, max = 120))]
     pub timeout_secs: Option<u64>,
 }
@@ -436,11 +436,17 @@ pub struct ExecCommandArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PocVerifyArgs {
+    #[schemars(length(min = 1))]
+    pub finding_id: String,
+    #[serde(flatten)]
+    pub input: VerificationInput,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct VerificationInput {
     /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_spec: Option<String>,
-    #[schemars(length(min = 1))]
-    pub finding_id: String,
     #[schemars(length(min = 1))]
     pub target: String,
     #[schemars(length(min = 1))]
@@ -458,7 +464,7 @@ pub struct PocVerifyArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected: Option<Expected>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env: Option<Map<String, Value>>,
+    pub env: Option<std::collections::BTreeMap<String, String>>,
     #[schemars(range(min = 1, max = 60))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
@@ -518,43 +524,13 @@ pub struct NetworkPatch {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PocVerifyRequest {
-    /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub launch_spec: Option<String>,
     #[schemars(length(min = 1))]
     pub producer_agent_id: String,
+    #[schemars(length(min = 1))]
     pub verifier_agent_id: String,
     pub network_binding: Option<Value>,
-    #[schemars(length(min = 1))]
-    pub target: String,
-    #[schemars(length(min = 1))]
-    pub input: String,
-    /// Bounded TCP replay through the prepared challenge service. Requires launch_spec;
-    /// excludes input_mode/args/env/expected. Input supplies the bytes for send slices.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub network: Option<NetworkReplay>,
-    /// How the input reaches the target: "argv" (AFL-style @@ file path,
-    /// default) or "stdin" (bytes piped to stdin).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_mode: Option<InputMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub args: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected: Option<Expected>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env: Option<Map<String, Value>>,
-    #[schemars(range(min = 1, max = 60))]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timeout_secs: Option<u64>,
-    #[schemars(range(min = 1, max = 16))]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trials: Option<u64>,
-    #[schemars(range(min = 1, max = 4096))]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<u64>,
-    #[schemars(range(min = 1, max = 3600))]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub minimize_timeout_secs: Option<u64>,
+    #[serde(flatten)]
+    pub input: VerificationInput,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

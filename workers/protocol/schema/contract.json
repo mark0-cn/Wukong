@@ -602,7 +602,9 @@
             ]
           },
           "env": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "type": "string"
+            },
             "type": [
               "object",
               "null"
@@ -815,9 +817,31 @@
       },
       "resources": "none",
       "result": {
+        "$defs": {
+          "SessionState": {
+            "enum": [
+              "running",
+              "exited",
+              "closed",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/SessionState"
+          }
+        },
+        "required": [
+          "session_id",
+          "state"
+        ],
+        "title": "SessionHandle",
         "type": "object"
       }
     },
@@ -1183,9 +1207,31 @@
       },
       "resources": "execution",
       "result": {
+        "$defs": {
+          "SessionState": {
+            "enum": [
+              "running",
+              "exited",
+              "closed",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/SessionState"
+          }
+        },
+        "required": [
+          "session_id",
+          "state"
+        ],
+        "title": "SessionHandle",
         "type": "object"
       }
     },
@@ -1199,9 +1245,290 @@
       },
       "resources": "none",
       "result": {
+        "$defs": {
+          "CapabilityValue": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "MethodAvailability": {
+            "additionalProperties": false,
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "ready"
+            ],
+            "type": "object"
+          },
+          "WorkerCapacity": {
+            "additionalProperties": false,
+            "description": "Limits advertised by the worker, independent of controller Agent concurrency.",
+            "properties": {
+              "exclusive_run_lease": {
+                "type": "boolean"
+              },
+              "max_active_resources": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "max_active_resources",
+              "exclusive_run_lease"
+            ],
+            "type": "object"
+          },
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "capabilities": {
+            "additionalProperties": {
+              "$ref": "#/$defs/CapabilityValue"
+            },
+            "type": "object"
+          },
+          "capacity": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/WorkerCapacity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exclusive_run_lease": {
+            "type": "boolean"
+          },
+          "identity": {
+            "$ref": "#/$defs/WorkerIdentity"
+          },
+          "isolation": {
+            "type": "string"
+          },
+          "methods": {
+            "additionalProperties": false,
+            "properties": {
+              "angr.solve": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "core.snapshot": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "crash.replay": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "cyclic.offset": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.close": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.command": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.control": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.events": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.inspect": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.profile": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.snapshot": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.start": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "doctor": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "emu.run": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "environment.lease.acquire": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "environment.lease.release": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "exec.run": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.get": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.put": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.read": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.stat": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.upload.begin": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.upload.commit": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.upload.status": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.upload.write": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "fuzz.start": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "fuzz.status": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "fuzz.stop": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "ghidra.query": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "input.minimize": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "interact.close": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "interact.profile": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "interact.start": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "interact.write": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.artifacts": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.cancel": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.list": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.start": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.status": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "libc.identify": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "network.profile": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "ping": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "poc.verify": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "py.run": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "resource.list": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "runtime.prepare": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "runtime.profile": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "seccomp.analyze": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "worker.shutdown": {
+                "$ref": "#/$defs/MethodAvailability"
+              }
+            },
+            "type": "object"
+          },
+          "os": {
+            "type": "string"
+          },
+          "protocol": {
+            "format": "uint32",
+            "maximum": 3,
+            "minimum": 3,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "protocol",
+          "identity",
+          "os",
+          "isolation",
+          "exclusive_run_lease",
+          "methods",
+          "capabilities"
+        ],
+        "title": "DoctorResult",
         "type": "object"
       }
     },
@@ -1412,8 +1739,21 @@
       "resources": "none",
       "result": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "released": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "released",
+          "epoch"
+        ],
+        "title": "LeaseReleased",
         "type": "object"
       }
     },
@@ -1435,7 +1775,9 @@
             ]
           },
           "env": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "type": "string"
+            },
             "type": [
               "object",
               "null"
@@ -1499,8 +1841,30 @@
       "resources": "none",
       "result": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "data_base64": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "size",
+          "data_base64"
+        ],
+        "title": "FileContents",
         "type": "object"
       }
     },
@@ -1681,8 +2045,44 @@
       "resources": "none",
       "result": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "additionalProperties": false,
+        "properties": {
+          "chunk_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "data_base64": {
+            "type": "string"
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "offset",
+          "size",
+          "data_base64",
+          "chunk_sha256"
+        ],
+        "title": "FileChunk",
         "type": "object"
       }
     },
@@ -1764,8 +2164,22 @@
       "resources": "none",
       "result": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "chunk_bytes": {
+            "format": "uint64",
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id",
+          "chunk_bytes"
+        ],
+        "title": "TransferStarted",
         "type": "object"
       }
     },
@@ -1923,9 +2337,153 @@
       },
       "resources": "none",
       "result": {
+        "$defs": {
+          "FileReceipt": {
+            "properties": {
+              "native_input": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/NativeInputReceipt"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "size"
+            ],
+            "type": "object"
+          },
+          "NativeInputReceipt": {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "executable": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "identity": {
+                "$ref": "#/$defs/WorkerIdentity"
+              },
+              "owner_id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "schema": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schema",
+              "id",
+              "identity",
+              "run_id",
+              "owner_id",
+              "epoch",
+              "sha256",
+              "size",
+              "executable"
+            ],
+            "type": "object"
+          },
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "additionalProperties": false,
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FileReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id",
+          "offset",
+          "complete"
+        ],
+        "title": "TransferStatus",
         "type": "object"
       }
     },
@@ -1957,9 +2515,153 @@
       },
       "resources": "none",
       "result": {
+        "$defs": {
+          "FileReceipt": {
+            "properties": {
+              "native_input": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/NativeInputReceipt"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "size"
+            ],
+            "type": "object"
+          },
+          "NativeInputReceipt": {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "executable": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "identity": {
+                "$ref": "#/$defs/WorkerIdentity"
+              },
+              "owner_id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "schema": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schema",
+              "id",
+              "identity",
+              "run_id",
+              "owner_id",
+              "epoch",
+              "sha256",
+              "size",
+              "executable"
+            ],
+            "type": "object"
+          },
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "additionalProperties": false,
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FileReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id",
+          "offset",
+          "complete"
+        ],
+        "title": "TransferStatus",
         "type": "object"
       }
     },
@@ -1979,7 +2681,9 @@
             ]
           },
           "env": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "type": "string"
+            },
             "type": [
               "object",
               "null"
@@ -2358,7 +3062,9 @@
             ]
           },
           "env": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "type": "string"
+            },
             "type": [
               "object",
               "null"
@@ -2514,9 +3220,31 @@
       },
       "resources": "none",
       "result": {
+        "$defs": {
+          "SessionState": {
+            "enum": [
+              "running",
+              "exited",
+              "closed",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/SessionState"
+          }
+        },
+        "required": [
+          "session_id",
+          "state"
+        ],
+        "title": "SessionHandle",
         "type": "object"
       }
     },
@@ -2558,7 +3286,9 @@
             "type": "array"
           },
           "env": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "type": "string"
+            },
             "type": [
               "object",
               "null"
@@ -2587,9 +3317,31 @@
       },
       "resources": "execution",
       "result": {
+        "$defs": {
+          "SessionState": {
+            "enum": [
+              "running",
+              "exited",
+              "closed",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/SessionState"
+          }
+        },
+        "required": [
+          "session_id",
+          "state"
+        ],
+        "title": "SessionHandle",
         "type": "object"
       }
     },
@@ -2876,7 +3628,9 @@
             ]
           },
           "env": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "type": "string"
+            },
             "type": [
               "object",
               "null"
@@ -3206,9 +3960,73 @@
       },
       "resources": "none",
       "result": {
+        "$defs": {
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "daemon_id": {
+            "type": "string"
+          },
+          "daemon_pid": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "identity": {
+            "$ref": "#/$defs/WorkerIdentity"
+          },
+          "protocol": {
+            "format": "uint32",
+            "maximum": 3,
+            "minimum": 3,
+            "type": "integer"
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "protocol",
+          "identity",
+          "daemon_id",
+          "daemon_pid"
+        ],
+        "title": "PingResult",
         "type": "object"
       }
     },
@@ -3446,7 +4264,9 @@
             ]
           },
           "env": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "type": "string"
+            },
             "type": [
               "object",
               "null"
@@ -3541,6 +4361,7 @@
             ]
           },
           "verifier_agent_id": {
+            "minLength": 1,
             "type": "string"
           }
         },
@@ -3978,9 +4799,24 @@
       },
       "resources": "none",
       "result": {
+        "$defs": {
+          "ShutdownState": {
+            "enum": [
+              "shutdown"
+            ],
+            "type": "string"
+          }
+        },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": true,
-        "title": "Map_of_AnyValue",
+        "properties": {
+          "state": {
+            "$ref": "#/$defs/ShutdownState"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "ShutdownResult",
         "type": "object"
       }
     }

@@ -10,6 +10,46 @@ fn session_lost(error: &anyhow::Error) -> bool {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_start_preserves_terminal_state_evidence_and_ownership() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("state"))?;
+        let target = temp.path().join("fixture.bin");
+        fs::write(&target, b"trusted inert fixture")?;
+        let coordinator = Coordinator::new(store.clone());
+        let run = coordinator.create_run(&target, "fixture", Budget::default(), json!({}))?;
+        let mut agent: AgentMetadata = store.get_record(&run.root_id)?.context("root missing")?;
+        for kind in [SessionKind::Debugger, SessionKind::Interactive] {
+            let raw = json!({"session_id":"worker-resource","state":"running"});
+            let mut record =
+                SessionsService::record_start(&store, "worker".into(), &agent, kind, &raw)?;
+            let created_at = record.created_at;
+            record.state = SessionState::Closed;
+            record.transcript_evidence_id = Some("original-transcript".into());
+            store.save_session(kind, &record)?;
+            let repeated =
+                SessionsService::record_start(&store, "worker".into(), &agent, kind, &raw)?;
+            assert_eq!(repeated.state, SessionState::Closed);
+            assert_eq!(repeated.created_at, created_at);
+            assert_eq!(
+                repeated.transcript_evidence_id,
+                record.transcript_evidence_id
+            );
+            assert_eq!(repeated.worker, Some(raw.clone()));
+            agent.run_id = "another-run".into();
+            assert!(
+                SessionsService::record_start(&store, "worker".into(), &agent, kind, &raw).is_err()
+            );
+            agent.run_id = run.id.clone();
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct SessionsService {
     pub(super) store: Store,
@@ -17,6 +57,44 @@ pub(super) struct SessionsService {
     pub(super) files: FilesService,
 }
 impl SessionsService {
+    fn record_start(
+        store: &Store,
+        worker_id: String,
+        agent: &AgentMetadata,
+        kind: SessionKind,
+        raw: &Value,
+    ) -> Result<SessionRecord> {
+        let handle: SessionHandle = serde_json::from_value(raw.clone())?;
+        let id = stable("session", &format!("{worker_id}:{}", handle.session_id));
+        store.write(|tx| {
+            if let Some(record) = tx.session(kind, &id)? {
+                ensure!(
+                    record.worker_resource_id == handle.session_id
+                        && record.worker_id == worker_id
+                        && record.run_id == agent.run_id
+                        && record.agent_id == agent.id,
+                    "session receipt belongs to another owner"
+                );
+                // A cached start receipt is historical evidence. Never reopen a closed
+                // session or discard observations imported after that receipt.
+                return Ok(record);
+            }
+            let record = SessionRecord {
+                id,
+                worker_resource_id: handle.session_id,
+                run_id: agent.run_id.clone(),
+                agent_id: agent.id.clone(),
+                worker_id,
+                state: handle.state,
+                worker: Some(raw.clone()),
+                transcript_evidence_id: None,
+                created_at: now(),
+                updated_at: now(),
+            };
+            tx.save_session(kind, &record)?;
+            Ok(record)
+        })
+    }
     fn present(session: &SessionRecord, mut raw: Value) -> Result<Value> {
         if let Some(id) = raw.get("session_id").and_then(Value::as_str) {
             ensure!(
@@ -163,24 +241,13 @@ impl SessionsService {
                         Request::DebugStart(serde_json::from_value(args)?),
                     )
                     .await?;
-                let handle: SessionHandle = serde_json::from_value(raw.clone())?;
-                let session_id = stable(
-                    "session",
-                    &format!("{}:{}", self.gateway.worker_identity()?, handle.session_id),
-                );
-                let record = SessionRecord {
-                    id: session_id,
-                    worker_resource_id: handle.session_id,
-                    run_id: agent.run_id.clone(),
-                    agent_id: agent.id.clone(),
-                    worker_id: self.gateway.worker_identity()?,
-                    state: handle.state,
-                    worker: Some(raw.clone()),
-                    transcript_evidence_id: None,
-                    created_at: now(),
-                    updated_at: now(),
-                };
-                self.store.save_session(SessionKind::Debugger, &record)?;
+                let record = Self::record_start(
+                    &self.store,
+                    self.gateway.worker_identity()?,
+                    agent,
+                    SessionKind::Debugger,
+                    &raw,
+                )?;
                 Self::present(&record, raw)
             }
             "interactive_start" => {
@@ -196,24 +263,13 @@ impl SessionsService {
                         Request::InteractStart(serde_json::from_value(args)?),
                     )
                     .await?;
-                let handle: SessionHandle = serde_json::from_value(raw.clone())?;
-                let session_id = stable(
-                    "session",
-                    &format!("{}:{}", self.gateway.worker_identity()?, handle.session_id),
-                );
-                let record = SessionRecord {
-                    id: session_id,
-                    worker_resource_id: handle.session_id,
-                    run_id: agent.run_id.clone(),
-                    agent_id: agent.id.clone(),
-                    worker_id: self.gateway.worker_identity()?,
-                    state: handle.state,
-                    worker: Some(raw.clone()),
-                    transcript_evidence_id: None,
-                    created_at: now(),
-                    updated_at: now(),
-                };
-                self.store.save_session(SessionKind::Interactive, &record)?;
+                let record = Self::record_start(
+                    &self.store,
+                    self.gateway.worker_identity()?,
+                    agent,
+                    SessionKind::Interactive,
+                    &raw,
+                )?;
                 Self::present(&record, raw)
             }
             "interactive_send" | "interactive_close" | "interactive_profile" => {

@@ -22,4 +22,3 @@ def parse_address(value):
     if not 0 <= parsed < 2**64:
         raise ValueError("address outside the 64-bit module-relative range")
     return parsed
-

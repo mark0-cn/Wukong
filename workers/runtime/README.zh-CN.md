@@ -14,7 +14,7 @@ Rust 控制端默认不运行待分析目标。请选择持久化 Docker/VM/SSH 
 python -m pip install -e workers/analysis -r workers/runtime/requirements.txt
 ```
 
-托管 Windows VM 必须使用包含 Python 和全部依赖的完整离线包；不得在 VM 内下载软件包或运行在线 pip 安装。[工具包约定](../package/README.zh-CN.md)和 [Windows 组件](../windows/README.zh-CN.md)说明当前实现及尚未完成的安装器/生产验收工作。
+托管 Windows VM 必须使用包含 Python 和全部依赖的完整离线包；不得在 VM 内下载软件包或运行在线 pip 安装。[工具包约定](../package/README.zh-CN.md)和 [Windows 组件](../windows/README.zh-CN.md)说明实现及按源码身份记录的安装/生产验收边界。
 
 Bridge 启动时会在导入 worker 模块前禁用 Python 字节码写入，新建 daemon 和作业监督器进程也遵循该设置，从而保持已签名部署文件不变；可写状态保存在配置的状态目录。不可变部署中的其他 Python 入口也应使用 `-B` 启动。
 

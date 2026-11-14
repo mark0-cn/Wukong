@@ -49,21 +49,22 @@ class Runtime:
     def dispatch_inner(self, method, params):
         return self.handlers[method](params)
 
-    def control(self, method, params):
-        if method == "ping":
-            return {"protocol": PROTOCOL, "identity":self.identity.value, "daemon_id":self.identity.daemon_id,
-                    "daemon_pid": os.getpid(), "state_dir": str(self.root)}
-        if method == "doctor":
-            return {**doctor(self.root,self.trusted,self.isolated,self.registrations),'identity':self.identity.value,
-                    'daemon_id':self.identity.daemon_id,'exclusive_run_lease':False}
-        if method == "ghidra.query":
-            from ghidra_backend import query
-            return query(self.root, params)
-        if method == "worker.shutdown":
-            active = [self.jobs.status(path.parent.name) for path in (self.root / "jobs").glob("*/status.json")]
-            if any(job["state"] not in TERMINAL for job in active):
-                raise ValueError("cannot shut down worker while jobs are active; cancel and reconcile them first")
-            self.sessions.close_all()
-            self.stopping = True
-            return {"state": "shutdown"}
-        raise ValueError("unsupported worker method: " + method)
+    def ping(self, params):
+        return {"protocol": PROTOCOL, "identity":self.identity.value, "daemon_id":self.identity.daemon_id,
+                "daemon_pid": os.getpid(), "state_dir": str(self.root)}
+
+    def doctor(self, params):
+        return {**doctor(self.root,self.trusted,self.isolated,self.registrations),'identity':self.identity.value,
+                'daemon_id':self.identity.daemon_id,'exclusive_run_lease':False}
+
+    def ghidra_query(self, params):
+        from ghidra_backend import query
+        return query(self.root, params)
+
+    def shutdown(self, params):
+        active = [self.jobs.status(path.parent.name) for path in (self.root / "jobs").glob("*/status.json")]
+        if any(job["state"] not in TERMINAL for job in active):
+            raise ValueError("cannot shut down worker while jobs are active; cancel and reconcile them first")
+        self.sessions.close_all()
+        self.stopping = True
+        return {"state": "shutdown"}

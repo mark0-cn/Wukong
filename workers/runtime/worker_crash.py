@@ -45,13 +45,16 @@ def debugger_snapshot(session):
 
 class CrashService:
     def __init__(self, root, trusted, isolated): self.root = Path(root).resolve()
-    def dispatch(self, method, params):
-        if method == "cyclic.offset":
-            path = confined(self.root, params["pattern"], True)
-            if path.stat().st_size > 1048576: raise ValueError("pattern exceeds 1 MiB")
-            observed = base64.b64decode(params["observed_base64"], validate=True)
-            return cyclic_offset(path.read_bytes(), observed, params["n"], params["alphabet"])
+    def cyclic_offset(self, params):
+        path = confined(self.root, params["pattern"], True)
+        if path.stat().st_size > 1048576: raise ValueError("pattern exceeds 1 MiB")
+        observed = base64.b64decode(params["observed_base64"], validate=True)
+        return cyclic_offset(path.read_bytes(), observed, params["n"], params["alphabet"])
+
+    def core_snapshot(self, params):
         return inspect_core(confined(self.root, params["core"], True))
+
+
 
 
 def replay_snapshot(root, spec, input_path, cancel):

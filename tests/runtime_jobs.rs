@@ -83,7 +83,6 @@ for line in sys.stdin:
             },
         ),
         request_timeout_secs: 3,
-        ..Default::default()
     })
     .await?;
     let waiting = client.clone();
@@ -170,7 +169,6 @@ for line in sys.stdin:
             },
         ),
         request_timeout_secs: 2,
-        ..Default::default()
     };
     let client = RuntimeClient::connect(config).await?;
     let error = client.call("exec.run", json!({})).await.unwrap_err();
@@ -385,7 +383,6 @@ for line in sys.stdin:
             },
         ),
         request_timeout_secs: 5,
-        ..Default::default()
     })
     .await?;
     assert!(
@@ -429,7 +426,6 @@ async fn bridge_startup_error_includes_captured_stderr() -> Result<()> {
             },
         ),
         request_timeout_secs: 2,
-        ..Default::default()
     };
     let error = match RuntimeClient::connect(config).await {
         Ok(client) => {
@@ -534,7 +530,6 @@ for line in sys.stdin:
             },
         ),
         request_timeout_secs: 3,
-        ..Default::default()
     };
     let previous = unsafe { GetStdHandle((-12i32) as u32) };
     assert_ne!(

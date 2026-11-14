@@ -18,7 +18,7 @@ For Linux workers and trusted development fixtures, install bridge dependencies 
 python -m pip install -e workers/analysis -r workers/runtime/requirements.txt
 ```
 
-Managed Windows VMs require the complete offline package, including Python and all dependencies; do not fetch packages or run online pip installation in the VM. The [package contract](../package/README.md) and [Windows components](../windows/README.md) describe the current implementation and remaining installer/production acceptance work.
+Managed Windows VMs require the complete offline package, including Python and all dependencies; do not fetch packages or run online pip installation in the VM. The [package contract](../package/README.md) and [Windows components](../windows/README.md) describe the implementation and source-bound installation/production acceptance limits.
 
 Bridge startup disables Python bytecode writes before importing worker modules, including in new daemon/job-supervisor processes. This keeps signed deployment files unchanged; writable state remains in the configured state directory. Launch other Python entry points from an immutable deployment with `-B` as well.
 

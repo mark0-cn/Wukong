@@ -6,7 +6,7 @@ use crate::{
     executors::resource_process::{self, Request},
     host::resource_host::Host,
     isolation::security::AclPolicy,
-    resources::journal::bounded_identifier,
+    resources::models::bounded_identifier,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};

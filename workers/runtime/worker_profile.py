@@ -92,7 +92,7 @@ class ProfileService:
         self.root = Path(root).resolve()
         self.lock = threading.RLock()
 
-    def dispatch(self, method, params):
+    def profile(self, params):
         identities = {}
         for key in ["target", "libc", "loader"]:
             if params.get(key): identities[key] = file_identity(confined(self.root, params[key], True))
@@ -100,7 +100,12 @@ class ProfileService:
         from worker_mitigations import environment_support
         result = {"environment_support":environment_support(), "files":identities,"status":"declared_files_only","mapped_match":False,
                   "note":"File identity is not proof that the target loaded this runtime."}
-        if method == "runtime.profile": return result
+
+        return result
+
+    def prepare(self, params):
+        result = self.profile(params)
+        identities = result["files"]
         if set(identities) != {"target", "libc", "loader"}: raise ValueError("prepare requires target, libc and loader")
         if any(value.get("elf_metadata_error") for value in identities.values()):
             raise ValueError("prepare requires ELF metadata support and three ELF files")
