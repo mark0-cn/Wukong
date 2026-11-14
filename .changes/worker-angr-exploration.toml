@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Use angr's native bounded Explorer so symbolic jobs find initial or reachable targets, respect avoided addresses, and stop at the configured step limit."
+zh_CN = "使用 angr 原生的有界 Explorer，使符号执行作业能够找到初始或可达目标、遵守避开地址并在配置的步数上限停止。"

@@ -120,6 +120,8 @@ JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`docto
 | `ghidra.query` | `target`, `target_sha256`、类型化 `query`、timeout；结果及哈希产物 |
 | `worker.shutdown` | 拒绝活动 job，关闭调试会话并停止 daemon |
 
+符号执行作业通过 `explore(n=max_steps)` 使用 angr 原生 `Explorer`，包括初始状态匹配和避开地址处理。结果记录实际观察到的步数；独立的作业超时也限制执行时间。
+
 修改请求应包含控制端稳定 `request_id`。操作账本先保留再执行，之后记录结果。同 ID 不同参数拒绝；提供 request_id 时 job ID 确定。调试 owner 在命令中途死亡时结果保持未知，不盲目重放。
 
 job 状态为 queued/running/completed/failed/cancelled/timed_out/lost。关闭控制端传输不取消工作。独立 supervisor 持续读取输出、限制每流字节、处理取消并更新 token 绑定心跳。过期后核对进程创建身份（Windows FILETIME 或 Linux `/proc` start time）；仅确认 supervisor 缺失/改变才标 lost，不确定则保留活动状态并记对账说明。不会重启 job；容器/VM 丢失不能恢复 GDB。

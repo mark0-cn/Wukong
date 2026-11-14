@@ -156,6 +156,8 @@ Relay-managed daemon startup uses the existing `filelock` dependency and a kerne
 | `ghidra.query` | `target`, `target_sha256`, typed `query`, timeout; Ghidra results and hashed worker artifacts |
 | `worker.shutdown` | Rejects active jobs, closes debug sessions, shuts down daemon |
 
+Symbolic jobs use angr's native `Explorer` through `explore(n=max_steps)`, including initial-state matching and avoided-address handling. The result reports observed steps; the independent job timeout also bounds execution.
+
 Mutating requests should include the controller's stable `request_id`. The durable
 operation ledger records a reservation before effects and the result afterwards.
 Repeating the same ID with changed parameters fails. Job IDs are deterministic

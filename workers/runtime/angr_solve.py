@@ -54,23 +54,15 @@ def mapped_address(project, module_relative):
 
 
 def bounded_explore(simulation, find, avoid, max_steps):
-    """Step the active stash at most max_steps times, matching find/avoid
-    addresses after every step. angr's explore() has no step limit, so a
-    looping program would otherwise run until the job-level timeout."""
-    find_targets = set(find)
-    avoid_targets = set(avoid or [])
+    """Use angr's Explorer and native step bound; retain observed work counts."""
     steps = 0
-    for _ in range(max_steps):
-        if not simulation.active or simulation.found:
-            break
-        simulation.step()
+
+    def observed(manager):
+        nonlocal steps
         steps += 1
-        if find_targets:
-            simulation.move("found", "active", lambda state: state.addr in find_targets)
-        if avoid_targets:
-            simulation.move("avoided", "active", lambda state: state.addr in avoid_targets)
-        if simulation.avoided:
-            simulation.drop(stash="avoided")
+        return manager
+
+    simulation.explore(find=find, avoid=avoid or [], n=max_steps, step_func=observed)
     return simulation, steps
 
 
