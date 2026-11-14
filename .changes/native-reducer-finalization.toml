@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Reserve evidence capacity for the final verified minimized input and receipt, and mark cancellation during finalization as incomplete."
+zh_CN = "为最终已验证的缩减输入及回执预留证据容量，并将收尾期间的取消一致标记为未完成。"

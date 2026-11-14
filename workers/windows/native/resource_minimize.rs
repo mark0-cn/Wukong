@@ -29,6 +29,13 @@ use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
 const MAX_INPUT: u64 = 32 * 1024 * 1024;
 pub(crate) const EVIDENCE_LIMIT: u64 = 256 * 1024 * 1024;
+const TRIAL_OVERHEAD: u64 = 40 * 1024 * 1024;
+const RECEIPT_RESERVE: u64 = 4 * 1024 * 1024;
+
+fn evidence_available(retained: u64, original_size: u64) -> bool {
+    // Reserve the next candidate, the final verified output, and its receipt.
+    retained + original_size * 2 + TRIAL_OVERHEAD + RECEIPT_RESERVE <= EVIDENCE_LIMIT
+}
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -288,7 +295,7 @@ pub(crate) fn execute(host: &Host, request: &Request, cancel: &Path) -> Result<V
     let signature = baseline["crash_signature"].as_str().map(str::to_owned);
     let mut trials = vec![trial_digest(host, request, 0)?];
     let mut failed = None;
-    let (best, attempts, complete, stop_reason) = if let Some(signature) = &signature {
+    let (best, attempts, mut complete, mut stop_reason) = if let Some(signature) = &signature {
         reduce(
             original.clone(),
             configuration.max_attempts,
@@ -304,9 +311,7 @@ pub(crate) fn execute(host: &Host, request: &Request, cancel: &Path) -> Result<V
                     Ok(Some("cancelled"))
                 } else if Instant::now() >= deadline {
                     Ok(Some("deadline expired"))
-                } else if evidence_used.get() + replay.input.size + 40 * 1024 * 1024
-                    > EVIDENCE_LIMIT
-                {
+                } else if !evidence_available(evidence_used.get(), replay.input.size) {
                     Ok(Some("evidence budget exhausted"))
                 } else {
                     Ok(None)
@@ -336,6 +341,11 @@ pub(crate) fn execute(host: &Host, request: &Request, cancel: &Path) -> Result<V
     } else {
         None
     };
+    let cancelled = cancel.try_exists()?;
+    if cancelled {
+        complete = false;
+        stop_reason = Some("cancelled".into());
+    }
     Ok(
         json!({"schema":1,"scope":"native_minimize_host","resource_id":request.resource_id,
         "owner":request.owner,"request_sha256":digest(request)?,"trials":trials,
@@ -344,7 +354,7 @@ pub(crate) fn execute(host: &Host, request: &Request, cancel: &Path) -> Result<V
         "reducer":"fixture3-ddmin",
         "equivalence_policy":if configuration.allow_signal_only {"signal_only"} else {"location_and_frames"},
         "signature_strength":if signature.is_none(){"unresolved"}else if configuration.allow_signal_only {"signal_only"} else {"location_and_frames"},
-        "failed":failed,"cancelled":cancel.try_exists()?,"jobs_empty":true,
+        "failed":failed,"cancelled":cancelled,"jobs_empty":true,
         "profiles_removed":true,"scratch_removed":true,"production_execution":false}),
     )
 }
@@ -567,6 +577,15 @@ pub(crate) fn summarize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn evidence_budget_reserves_the_final_verified_output_and_manifest() {
+        assert!(!evidence_available(
+            EVIDENCE_LIMIT - MAX_INPUT - TRIAL_OVERHEAD,
+            MAX_INPUT
+        ));
+        assert!(evidence_available(100 * 1024 * 1024, MAX_INPUT));
+        assert!(!evidence_available(EVIDENCE_LIMIT, 0));
+    }
     #[test]
     fn library_reduction_preserves_order_and_only_the_original_crash_identity() -> Result<()> {
         let mut indices = Vec::new();
