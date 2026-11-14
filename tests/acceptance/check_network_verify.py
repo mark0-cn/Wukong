@@ -120,6 +120,7 @@ def main():
         tool=prefix+'-tool';containers.append(tool)
         print(docker('run','--name',tool,*common,'--tmpfs','/tmp:rw,size=32m',
                      '--mount',f'type=bind,source={root / "workers/runtime"},target=/runtime,readonly',
+                     '--mount',f'type=bind,source={root / "workers/protocol/schema"},target=/protocol/schema,readonly',
                      '--mount',f'type=bind,source={Path(__file__).resolve()},target=/check.py,readonly',
                      '--mount',f'type=bind,source={output},target=/evidence',
                      '--env','PYTHONPATH=/runtime','--env','PYTHONDONTWRITEBYTECODE=1',
@@ -127,8 +128,9 @@ def main():
         state=json.loads(docker('inspect',tool))[0]
         assert list(state['NetworkSettings']['Networks'])==[prefix]
         assert not state['HostConfig']['PortBindings']
-        assert {m['Destination'] for m in state['Mounts']}=={'/runtime','/check.py','/evidence'}
+        assert {m['Destination'] for m in state['Mounts']}=={'/runtime','/protocol/schema','/check.py','/evidence'}
         (output/'container.json').write_text(json.dumps({'image_id':state['Image'],'network':prefix,
+            'contract_sha256':hashlib.sha256((root/'workers/protocol/schema/contract.json').read_bytes()).hexdigest(),
             'runtime_hashes':{p.name:hashlib.sha256(p.read_bytes()).hexdigest()
                               for p in (root/'workers/runtime').glob('worker_*.py')}},indent=2)+'\n')
         print('Evidence: '+str(output))
