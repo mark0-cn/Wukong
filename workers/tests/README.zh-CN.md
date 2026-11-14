@@ -10,6 +10,8 @@
 
 同一中断夹具接受 `minimize: true` 和 `resource_inventory: true`，不能同时启用 Python、回放或 LaunchSpec 模式。它仅在独立核对受保护的输入／计划、首轮试验身份、可信标记及所属进程后，中断三次尝试计划的基线试验。检查要求 `kind=minimize`、未知且丢失的结果、精确重试一致、改变尝试次数被拒绝、只读守护 Job 观察确认清理，以及后续执行成功。宿主和服务两种用例均在源码 `b05b7fc` 上通过。这只覆盖基线中断；调试观测及后续候选阶段仍待完成。
 
+进一步测试最小化故障边界时，可用 `minimization_stage` 选择 `baseline`（默认）、`observer` 或 `candidate`；非基线阶段要求 `minimize: true`。已签名探针在 `observer` 模式下等待真实调试器附加，在 `candidate` 模式下先验证非空基线，再阻塞于首个空候选。注入前，操作端必须核对该阶段的精确 scratch 意图、输入哈希、原生基线记录及实际标记，并验证清理后原始记录哈希不变。控制器在两种故障后均读取保留的原生记录；候选用例还要求原来的已验证基线。新增已安装用例仍待完成。
+
 `python workers/tests/run.py unit -p test_native_shell.py` 在 Windows 的临时目录运行可信固定 CMD 命令，其他平台明确跳过。它核对普通及扩展盘符路径下适配器的真实 stdin/stdout/stderr 句柄和 cwd，不进行安装或隔离配置变更。已安装 shell 夹具通过独立控制端连接观察同步调用并续租，与生产租约通道安排一致。
 
 `remote_installed_windows_worker_shell_acceptance` 使用 `WUKONG_REMOTE_WORKER_SHELL_TEST`，包含托管 SSH `config`、预期 `manifest_sha256`、新的绝对 `output` 及恰好 `x64`/`x86` 两个 `probes`（绝对 `path` 和固定 `sha256`）。八个可信用例覆盖 CMD 内建命令、相对 cwd/环境、引号与 stderr 重定向、非零退出、有界输出及 x64/x86 目标管道/超时。同步执行等待期间，夹具查询资源清单并续租；终态检查绑定原始凭据/输出哈希、已确认清理、原请求重试及更改命令被拒绝。独立观察服务重启后，`remote_native_completed_shell_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_SHELL_RECOVERY_TEST`，包含 `config`、固定的 `previous` 报告（`path`/`sha256`）及新的绝对 `output`；不上传或执行，比较全部原结果、产物及清单。普通测试忽略这两个夹具。上述具体已安装用例和已完成结果恢复已在源码 `26b7040` 通过；源码/内容身份及限制记录在 [Windows 资格验收记录](../windows/README.zh-CN.md)。生产执行仍禁用。

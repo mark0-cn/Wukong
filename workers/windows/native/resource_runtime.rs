@@ -887,6 +887,7 @@ fn artifact_suffix(name: &str) -> Result<String> {
         let suffix = match kind {
             "record" => "json",
             "input" => "input",
+            "native" => "native.json",
             "mcp" => "mcp",
             "observation" => "observation.json",
             "debug-log" => "debug-log",

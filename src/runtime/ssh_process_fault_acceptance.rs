@@ -2,6 +2,7 @@
 //! Coordination files contain selectors/provenance, never lease tokens or keys.
 use super::{
     inventory_acceptance::inventory,
+    launch_acceptance::original as original_artifact,
     process_acceptance::{Probe, terminal},
     tests::{enrolled_fixture_address, read_fixture_profile},
 };
@@ -29,6 +30,14 @@ enum Fault {
     Service,
     OsBoot,
 }
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum MinimizationStage {
+    #[default]
+    Baseline,
+    Observer,
+    Candidate,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Profile {
@@ -46,6 +55,8 @@ struct Profile {
     replay: bool,
     #[serde(default)]
     minimize: bool,
+    #[serde(default)]
+    minimization_stage: MinimizationStage,
     ready: PathBuf,
     resume: PathBuf,
     output: PathBuf,
@@ -156,6 +167,10 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
                 && profile.resource_inventory),
         "minimization fault acceptance requires host/service interruption with resource discovery"
     );
+    ensure!(
+        profile.minimize || profile.minimization_stage == MinimizationStage::Baseline,
+        "trial-stage selection requires minimization"
+    );
     for path in [&profile.ready, &profile.resume, &profile.output] {
         ensure!(
             path.is_absolute() && !path.try_exists()?,
@@ -227,8 +242,13 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     };
     let request = if profile.minimize {
         let input = trial_input.as_ref().context("minimization input missing")?;
+        let args = match profile.minimization_stage {
+            MinimizationStage::Baseline => vec!["--fault-ready"],
+            MinimizationStage::Observer => vec!["--minimize-observer-ready", "-"],
+            MinimizationStage::Candidate => vec!["--minimize-candidate-ready", "-"],
+        };
         json!({"target":uploaded["path"],"input":input["path"],"input_mode":"stdin",
-            "args":["--fault-ready"],"max_attempts":3,"timeout_secs":60,"minimize_timeout_secs":120,
+            "args":args,"max_attempts":3,"timeout_secs":60,"minimize_timeout_secs":120,
             "request_id":"interrupted-start","call_id":"interrupted-start"})
     } else if let Some(input) = &trial_input {
         json!({"target":uploaded["path"],"input":input["path"],"input_mode":"stdin",
@@ -256,7 +276,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     if profile.fault != Fault::Preparation {
         publish(
             &profile.ready,
-            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"trial_input":trial_input,"launch":launch,"method":method,"request":request,"job":started}),
+            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"minimization_stage":profile.minimization_stage,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"trial_input":trial_input,"launch":launch,"method":method,"request":request,"job":started}),
         )?;
         resume(&profile.resume, profile.fault).await?;
     }
@@ -495,6 +515,50 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             "service recovery did not reopen the externally retained guardian Job"
         );
     }
+    let retained_baseline = if profile.minimization_stage != MinimizationStage::Baseline {
+        let (metadata, data) =
+            original_artifact(&rebound, &format!("native-results/{id}/trial-0-native")).await?;
+        let execution: Value = serde_json::from_slice(&data)?;
+        let input = trial_input.as_ref().context("minimization input missing")?;
+        ensure!(
+            execution["schema"] == 1
+                && execution["scope"] == "native_minimize_execution"
+                && execution["resource_id"] == id
+                && execution["trial"] == 0
+                && execution["owner"] == status["native_owner"]
+                && execution["input"]["sha256"] == input["sha256"]
+                && execution["input"]["size"] == input["size"]
+                && execution["request_sha256"] == execution["native"]["request_sha256"]
+                && execution["native"]["program"]["sha256"] == profile.probe.sha256
+                && execution["native"]["exit_code"] == 0xc0000005_u32
+                && execution["native"]["stop_reason"] == "exited"
+                && execution["native"]["jobs_empty"] == true
+                && execution["native"]["profiles_removed"] == true
+                && execution["native"]["scratch_removed"] == true,
+            "interrupted later phase lost its completed native baseline"
+        );
+        let completed = if profile.minimization_stage == MinimizationStage::Candidate {
+            let (trial_metadata, data) =
+                original_artifact(&rebound, &format!("native-results/{id}/trial-0")).await?;
+            let trial: Value = serde_json::from_slice(&data)?;
+            ensure!(
+                trial["native_record"]["sha256"] == metadata["sha256"]
+                    && trial["native"] == execution["native"]
+                    && trial["input"] == execution["input"]
+                    && trial["resolved"] == true
+                    && trial["crashed"] == true
+                    && trial["observation"]["signature_strength"] == "location_and_frames"
+                    && trial["crash_signature"] == trial["observation"]["location_signature"],
+                "later candidate lost its verified baseline"
+            );
+            Some(json!({"artifact":trial_metadata,"receipt":trial}))
+        } else {
+            None
+        };
+        Some(json!({"artifact":metadata,"execution":execution,"completed":completed}))
+    } else {
+        None
+    };
     let after = echo_after_recovery(&rebound, &bytes, &profile.probe.sha256).await?;
     active
         .call("environment.lease.release", json!({"lease":current}))
@@ -503,7 +567,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     client.close().await?;
     publish(
         &profile.output,
-        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"trial_input":trial_input,"launch":launch,"method":method,"python_source_conflict_rejected":profile.python,"replay_trials_conflict_rejected":profile.replay,"minimize_attempts_conflict_rejected":profile.minimize,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
+        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"minimization_stage":profile.minimization_stage,"retained_baseline":retained_baseline,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"trial_input":trial_input,"launch":launch,"method":method,"python_source_conflict_rejected":profile.python,"replay_trials_conflict_rejected":profile.replay,"minimize_attempts_conflict_rejected":profile.minimize,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
     )?;
     Ok(())
 }

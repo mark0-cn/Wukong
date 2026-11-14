@@ -563,8 +563,13 @@ mod tests {
             "stdout_base64":"","stderr_base64":"","stdout_sha256":empty,"stderr_sha256":empty,
             "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"trial":0,
             "scratch_nonce":crate::resource_replay::nonce(&owner().identity.installation_id,&request.resource_id,0)?});
+        let execution = json!({"schema":1,"scope":"native_minimize_execution","resource_id":request.resource_id,
+            "owner":request.owner,"request_sha256":crate::inputs::digest(&request)?,"trial":0,"input":candidate,"native":native});
+        let native_bytes = serde_json::to_vec(&execution)?;
         let trial = json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,
             "request_sha256":crate::inputs::digest(&request)?,"trial":0,"input":candidate,"native":native,
+            "native_record":{"path":format!("native-results/{}/trial-0-native",request.resource_id),
+                "size":native_bytes.len(),"sha256":hex::encode(Sha256::digest(&native_bytes))},
             "resolved":true,"crashed":true,"crash_signature":"exception:0xc0000005"});
         let bytes = serde_json::to_vec(&trial)?;
         let receipt = json!({"schema":1,"scope":"native_minimize_host","resource_id":request.resource_id,
@@ -580,6 +585,7 @@ mod tests {
         let read = |suffix: &str| -> Result<Vec<u8>> {
             Ok(match suffix {
                 "trial-0.json" => bytes.clone(),
+                "trial-0.native.json" => native_bytes.clone(),
                 "trial-0.input" | "minimized" => b"A".to_vec(),
                 _ => anyhow::bail!("unexpected artifact"),
             })
@@ -601,7 +607,12 @@ mod tests {
                 "accepted {field}"
             );
         }
-        for corrupt in ["trial-0.json", "trial-0.input", "minimized"] {
+        for corrupt in [
+            "trial-0.json",
+            "trial-0.native.json",
+            "trial-0.input",
+            "minimized",
+        ] {
             assert!(
                 crate::resource_minimize::summarize(&request, &receipt, |suffix| {
                     if suffix == corrupt {

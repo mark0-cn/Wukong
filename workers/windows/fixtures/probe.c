@@ -9,6 +9,15 @@ __declspec(noinline) LONG fixture_step(LONG value) { return value ^ 0x1020304; }
 __declspec(noinline) void fixture_debug_wait(void) { Sleep(120000); }
 __declspec(noinline) void fixture_minimize_a(void) { *(volatile BYTE *)(ULONG_PTR)1 = 0xa5; }
 __declspec(noinline) void fixture_minimize_b(void) { *(volatile BYTE *)(ULONG_PTR)2 = 0x5a; }
+static int fault_ready(void) {
+    HANDLE file = CreateFileW(L"fault-ready.marker", GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    if (file == INVALID_HANDLE_VALUE) return 28;
+    DWORD written = 0;
+    BOOL ready = WriteFile(file, "wukong-owned-fault-ready\n", 25, &written, NULL);
+    CloseHandle(file);
+    if (!ready || written != 25) return 29;
+    for (;;) { fixture_value = fixture_step(fixture_value); Sleep(20); }
+}
 static int copy_input(HANDLE input) {
     BYTE buffer[4096]; DWORD count = 0, written = 0;
     for (;;) {
@@ -152,7 +161,8 @@ int wmain(int argc, wchar_t **argv) {
         CloseHandle(file);
         return 0;
     }
-    if (argc == 3 && (wcscmp(argv[1], L"--minimize") == 0 || wcscmp(argv[1], L"--minimize-empty") == 0)) {
+    if (argc == 3 && (wcscmp(argv[1], L"--minimize") == 0 || wcscmp(argv[1], L"--minimize-empty") == 0 ||
+        wcscmp(argv[1], L"--minimize-observer-ready") == 0 || wcscmp(argv[1], L"--minimize-candidate-ready") == 0)) {
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
         BOOL piped = wcscmp(argv[2], L"-") == 0;
         HANDLE file = piped ? GetStdHandle(STD_INPUT_HANDLE) :
@@ -162,6 +172,14 @@ int wmain(int argc, wchar_t **argv) {
         BOOL read = ReadFile(file, input, sizeof(input), &count, NULL);
         if (!piped) CloseHandle(file);
         if (!read && GetLastError() != ERROR_BROKEN_PIPE) return 5;
+        if (wcscmp(argv[1], L"--minimize-observer-ready") == 0) {
+            if (IsDebuggerPresent()) return fault_ready();
+            fixture_minimize_a();
+        }
+        if (wcscmp(argv[1], L"--minimize-candidate-ready") == 0) {
+            if (!count) return fault_ready();
+            fixture_minimize_a();
+        }
         if (wcscmp(argv[1], L"--minimize-empty") == 0 || memchr(input, 0xa5, count)) fixture_minimize_a();
         if (memchr(input, 0x5a, count)) fixture_minimize_b();
         return 0;
@@ -186,12 +204,7 @@ int wmain(int argc, wchar_t **argv) {
         return result ? 0 : 3;
     }
     if (argc == 2 && wcscmp(argv[1], L"--fault-ready") == 0) {
-        HANDLE file = CreateFileW(L"fault-ready.marker", GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
-        if (file == INVALID_HANDLE_VALUE) return 28;
-        DWORD written = 0;
-        BOOL ready = WriteFile(file, "wukong-owned-fault-ready\n", 25, &written, NULL);
-        CloseHandle(file);
-        if (!ready || written != 25) return 29;
+        return fault_ready();
     }
     for (;;) { fixture_value = fixture_step(fixture_value); Sleep(20); }
 }

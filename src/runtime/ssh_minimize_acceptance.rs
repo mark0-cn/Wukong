@@ -153,6 +153,27 @@ async fn evidence(
         if index == 0 {
             ensure!(data == source, "baseline changed original input");
         }
+        let (native_artifact, native_bytes) =
+            original(client, &format!("native-results/{id}/trial-{index}-native")).await?;
+        let execution: Value = serde_json::from_slice(&native_bytes)?;
+        ensure!(
+            native_artifact["sha256"] == proof["native_record"]["sha256"]
+                && native_artifact["size"] == proof["native_record"]["size"]
+                && native_artifact["path"] == proof["native_record"]["path"]
+                && execution["schema"] == 1
+                && execution["scope"] == "native_minimize_execution"
+                && [
+                    "resource_id",
+                    "owner",
+                    "request_sha256",
+                    "trial",
+                    "input",
+                    "native"
+                ]
+                .iter()
+                .all(|key| execution[*key] == proof[*key]),
+            "durable native execution differs from completed trial"
+        );
         if proof["observation"].is_object() && !proof["observation"]["location_signature"].is_null()
         {
             let observation = &proof["observation"];
@@ -197,9 +218,11 @@ async fn evidence(
                     "strong observation has no matching original MCP {field}"
                 );
             }
-            proofs.push(json!({"artifact":metadata,"receipt":proof,"transcript":transcript}));
+            proofs.push(json!({"artifact":metadata,"receipt":proof,"native_artifact":native_artifact,"transcript":transcript}));
         } else {
-            proofs.push(json!({"artifact":metadata,"receipt":proof}));
+            proofs.push(
+                json!({"artifact":metadata,"receipt":proof,"native_artifact":native_artifact}),
+            );
         }
     }
     let output = if let Some(path) = result["artifact"]["path"].as_str() {

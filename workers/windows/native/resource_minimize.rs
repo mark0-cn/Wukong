@@ -29,7 +29,9 @@ use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
 const MAX_INPUT: u64 = 32 * 1024 * 1024;
 pub(crate) const EVIDENCE_LIMIT: u64 = 256 * 1024 * 1024;
-const TRIAL_OVERHEAD: u64 = 40 * 1024 * 1024;
+// Reserve both native-result copies, both observation copies, the bounded MCP
+// transcript, diagnostics and target streams, plus their request metadata.
+const TRIAL_OVERHEAD: u64 = 72 * 1024 * 1024;
 const RECEIPT_RESERVE: u64 = 4 * 1024 * 1024;
 
 fn evidence_available(retained: u64, original_size: u64) -> bool {
@@ -151,6 +153,19 @@ fn trial(
     let native =
         resource_process::execute_prepared(request, cancel, Some(index), target, Some(deadline))?;
     resource_process::output(request, &native)?;
+    // The completed native execution must survive a later observer failure.
+    // Publishing this immutable record never makes the overall trial complete.
+    let native_path = result_path(host, request, &format!("trial-{index}.native.json"));
+    deployment::publish_json(
+        &native_path,
+        &json!({"schema":1,"scope":"native_minimize_execution","resource_id":request.resource_id,
+            "owner":request.owner,"request_sha256":digest(request)?,"trial":index,
+            "input":candidate.reference,"native":native}),
+        &AclPolicy::private_vm(),
+    )?;
+    let native_bytes = deployment::read_bytes(&native_path, 12 * 1024 * 1024)?;
+    let native_record = json!({"path":format!("native-results/{}/trial-{index}-native",request.resource_id),
+        "size":native_bytes.len(),"sha256":hex::encode(Sha256::digest(&native_bytes))});
     let code = native["exit_code"]
         .as_u64()
         .context("native exit code missing")? as u32;
@@ -172,7 +187,7 @@ fn trial(
     };
     let resolved = native["stop_reason"] == "exited" && (!crashed || signature.is_some());
     let value = json!({"schema":1,"trial":index,"resource_id":request.resource_id,"owner":request.owner,
-        "request_sha256":digest(request)?,"input":candidate.reference,"native":native,
+        "request_sha256":digest(request)?,"input":candidate.reference,"native":native,"native_record":native_record,
         "observation":observation,"crash_signature":signature,"crashed":crashed,"resolved":resolved});
     deployment::publish_json(
         &result_path(host, request, &format!("trial-{index}.json")),
@@ -374,6 +389,7 @@ fn trial_size(host: &Host, request: &Request, index: u16) -> Result<u64> {
     for suffix in [
         "input",
         "json",
+        "native.json",
         "mcp",
         "observation.json",
         "debug-log",
@@ -474,6 +490,30 @@ pub(crate) fn summarize(
             "minimization trial belongs to another execution"
         );
         resource_process::output(request, &value["native"])?;
+        let native_bytes = read(&format!("trial-{index}.native.json"))?;
+        let execution: Value = serde_json::from_slice(&native_bytes)?;
+        ensure!(
+            value["native_record"]["path"]
+                == format!(
+                    "native-results/{}/trial-{index}-native",
+                    request.resource_id
+                )
+                && value["native_record"]["size"] == native_bytes.len()
+                && value["native_record"]["sha256"] == hex::encode(Sha256::digest(&native_bytes))
+                && execution["schema"] == 1
+                && execution["scope"] == "native_minimize_execution"
+                && [
+                    "resource_id",
+                    "owner",
+                    "request_sha256",
+                    "trial",
+                    "input",
+                    "native"
+                ]
+                .iter()
+                .all(|key| execution[*key] == value[*key]),
+            "minimization trial differs from its durable native execution"
+        );
         ensure!(
             value["native"]["trial"] == index
                 && value["native"]["scratch_nonce"]
