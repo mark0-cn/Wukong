@@ -314,7 +314,7 @@ impl Identity {
             );
         }
         ensure!(
-            basename(&module.image_name).eq_ignore_ascii_case(basename(&self.image.path))
+            basename(module.image_path()).eq_ignore_ascii_case(basename(&self.image.path))
                 && module.timestamp == self.pe.timestamp
                 && module.size == u64::from(self.pe.size)
                 && module.checksum == self.pe.checksum
@@ -362,8 +362,10 @@ impl Identity {
             "MCP module inventory is truncated"
         );
         let mut found = rows.iter().filter(|row| {
-            row["image_name"]
+            row["loaded_image_name"]
                 .as_str()
+                .filter(|name| !name.is_empty())
+                .or_else(|| row["image_name"].as_str())
                 .is_some_and(|name| basename(name).eq_ignore_ascii_case(basename(&self.image.path)))
         });
         let module = found
@@ -405,6 +407,7 @@ impl Identity {
 #[derive(Deserialize)]
 struct Module {
     image_name: String,
+    loaded_image_name: Option<String>,
     timestamp: u32,
     size: u64,
     checksum: u32,
@@ -413,6 +416,16 @@ struct Module {
     unloaded: bool,
     symbols: String,
     pdb: Option<ModulePdb>,
+}
+impl Module {
+    fn image_path(&self) -> &str {
+        // DbgEng's image_name may retain the linker's original PE name after
+        // the admitted file was renamed. The loaded name describes this launch.
+        self.loaded_image_name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(&self.image_name)
+    }
 }
 #[derive(Deserialize)]
 struct ModulePdb {
@@ -592,6 +605,31 @@ mod tests {
         assert_eq!(&magic, b"MZ");
         let value = module(&identity);
         identity.observed(&json!({"modules":[value],"matched":1,"loaded":1}))?;
+        Ok(())
+    }
+    #[test]
+    fn renamed_image_uses_loaded_name_without_opening_reported_paths() -> Result<()> {
+        let mut identity = Identity::admit(&mut fixture()?)?;
+        identity.image.path = "files/renamed.exe".into();
+        let mut observed = module(&identity);
+        observed["image_name"] = json!("original-linker-name.exe");
+        observed["loaded_image_name"] = json!(r"Z:\does-not-exist\renamed.exe");
+        observed["start"] = json!("0x0000000000100000");
+        let listing = json!({"modules":[observed],"matched":1,"loaded":1});
+        assert_eq!(
+            identity.normalize(0x100020, &listing)?.unwrap()["module_sha256"],
+            identity.image.sha256
+        );
+        let mut wrong = listing["modules"][0].clone();
+        wrong["image_name"] = json!("renamed.exe");
+        wrong["loaded_image_name"] = json!(r"Z:\does-not-exist\another.exe");
+        assert!(identity.verify_module(&wrong).is_err());
+        wrong["loaded_image_name"] = listing["modules"][0]["loaded_image_name"].clone();
+        wrong["timestamp"] = json!(identity.pe.timestamp ^ 1);
+        assert!(identity.verify_module(&wrong).is_err());
+        let ambiguous =
+            json!({"modules":[listing["modules"][0],listing["modules"][0]],"matched":2,"loaded":2});
+        assert!(identity.observed(&ambiguous).is_err());
         Ok(())
     }
     #[test]
