@@ -20,6 +20,10 @@ from scripts.worker.build_debugger import BINARY as DEBUGGER_BINARY, validate as
 BINARIES = ["wukong-worker.exe", "wukong-package.exe"]
 SUPPLEMENTAL_LICENSES = {
     ("fixture3-ddmin", "0.1.1"): ROOT / "workers/windows/licenses/fixture3-ddmin-0.1.1/LICENSE",
+    ("jsonrpsee-core", "0.26.1"): ROOT / "workers/windows/licenses/jsonrpsee-0.26.1/LICENSE",
+    ("jsonrpsee-types", "0.26.1"): ROOT / "workers/windows/licenses/jsonrpsee-0.26.1/LICENSE",
+    ("uuid-simd", "0.8.0"): ROOT / "workers/windows/licenses/simd-0.8.0/LICENSE",
+    ("vsimd", "0.8.0"): ROOT / "workers/windows/licenses/simd-0.8.0/LICENSE",
 }
 
 
@@ -83,8 +87,8 @@ def file_index(root):
             kind = "license"
         elif name in {"runtime/python/LICENSE.txt", "runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"}:
             kind = "license"
-        elif name.startswith("runtime/worker/"):
-            kind = "worker_source"
+        elif name.startswith(("runtime/helpers/", "runtime/python/Lib/site-packages/wukong_analysis/")):
+            kind = "python_source"
         elif name.startswith("runtime/"):
             kind = "runtime"
         else:
@@ -130,19 +134,13 @@ def assemble(cache, output, native, keys):
     lock = load_lock()
     license_paths = {"python": ["runtime/python/LICENSE.txt"], "openssh": ["runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"],
                      "debugging_tools": ["licenses/debugging-tools.rtf"],
-                     "windbg_mcp": ["licenses/windbg-mcp-LICENSE"],
-                     "worker_python_dependencies": ["runtime/python/Lib/site-packages/pygdbmi-0.11.0.0.dist-info/LICENSE",
-                         "runtime/python/Lib/site-packages/filelock-4.2.1.dist-info/licenses/LICENSE",
-                         "runtime/python/Lib/site-packages/atomicwrites-1.4.0.dist-info/LICENSE",
-                         "runtime/python/Lib/site-packages/picire-26.11.dist-info/licenses/LICENSE.rst",
-                         "runtime/python/Lib/site-packages/chardet-5.2.0.dist-info/LICENSE",
-                         "runtime/python/Lib/site-packages/inators-2.1.1.dist-info/licenses/LICENSE.rst"]}
+                     "windbg_mcp": ["licenses/windbg-mcp-LICENSE"]}
     components = {name: dict(component, original_payloads=["originals/" + item["path"] for item in lock["assets"] if item["component"] == name],
                             licenses=license_paths[name]) for name, component in lock["components"].items()}
-    manifest = dict(schema=1, platform="windows-amd64", version=version(), source_revision=native_metadata["source_revision"],
-        toolchain_lock_sha256=sha256(output / "toolchain.lock.json"), toolchain_lock_path="toolchain.lock.json", runtime_protocol=2,
+    manifest = dict(schema=2, platform="windows-amd64", version=version(), source_revision=native_metadata["source_revision"],
+        toolchain_lock_sha256=sha256(output / "toolchain.lock.json"), toolchain_lock_path="toolchain.lock.json", runtime_protocol=3,
         minimum_controller_version=version(), entrypoints=dict(worker="runtime/native/wukong-worker.exe", python="runtime/python/python.exe",
-            bridge="runtime/worker/bridge.py", windbg_mcp="runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe",
+            selftest="runtime/helpers/selftest.py", windbg_mcp="runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe",
             dbgeng_library="runtime/sdk/Windows Kits/10/Debuggers/x64/dbgeng.dll", sshd="runtime/openssh/sshd.exe", ssh_keygen="runtime/openssh/ssh-keygen.exe"),
         components=components, license_notices=[path.relative_to(output).as_posix() for path in notices], files=file_index(output))
     if identity() != before:

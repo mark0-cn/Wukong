@@ -159,14 +159,16 @@ for line in sys.stdin:
  request=json.loads(line)
  if request['method']=='doctor':
   (root/'probing').write_text('ready');time.sleep(60)
- result={'identity':{'protocol':2,'installation_id':'slow-fixture','boot_id':'boot','package_sha256':'0'*64}}
+ result={'identity':{'protocol':3,'installation_id':'slow-fixture','boot_id':'boot','package_sha256':'0'*64}}
  print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
 "#).unwrap();
             config.default_environment=Some("slow".into());
             config.environments.insert("slow".into(),crate::environments::EnvironmentConfig {
                 name:"Slow fixture".into(),platform:crate::environments::Platform::current(),installation_id:None,
-                runtime:crate::runtime::RuntimeConfig {backend:crate::runtime::RuntimeBackend::TrustedLocal,
-                    state_dir:root.join("worker"),bridge_path:bridge,..Default::default()},
+                runtime:crate::runtime::RuntimeConfig {
+transport: crate::runtime::TransportConfig::TrustedLocal(crate::runtime::TrustedLocalConfig { state_dir: root.join("worker"), bridge_path: bridge, ..Default::default() }),
+..Default::default()
+},
             });
         }).await;
         let (seen, root_request) = tokio::sync::oneshot::channel();

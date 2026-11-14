@@ -60,7 +60,7 @@ impl ToolService {
         let mut selection = self.selection(agent, observation.as_ref().ok());
         selection.environment["preflight"] = match observation {
             Ok(value) => {
-                json!({"status":"observed","identity":value["identity"],"os":value["os"],"capabilities":value["capabilities"]})
+                json!({"status":"observed","identity":value["identity"],"os":value["os"],"capabilities":value["capabilities"],"methods":value["methods"]})
             }
             Err(error) => json!({"status":"unavailable","error":error}),
         };
@@ -81,11 +81,11 @@ mod tests {
             &bridge,
             r#"import json,pathlib,platform,sys
 root=pathlib.Path(sys.argv[sys.argv.index('--state')+1]);root.mkdir(exist_ok=True)
-identity={'protocol':2,'installation_id':'selection-fixture','boot_id':'boot','package_sha256':'0'*64}
+identity={'protocol':3,'installation_id':'selection-fixture','boot_id':'boot','package_sha256':'0'*64}
 for line in sys.stdin:
  request=json.loads(line);method=request['method']
  if method=='ping': result={'identity':identity}
- elif method=='doctor': result={'os':platform.system().lower(),'identity':identity,'capabilities':{'resumable_file_transfer':True}}
+ elif method=='doctor': result={'os':platform.system().lower(),'identity':identity,'capabilities':{'resumable_file_transfer':True},'methods':{'file.put':{'ready':True}}}
  else:
   (root/'unexpected-effect').write_text(method);result={}
  print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
@@ -102,9 +102,13 @@ for line in sys.stdin:
                 platform: crate::environments::Platform::current(),
                 installation_id: None,
                 runtime: crate::runtime::RuntimeConfig {
-                    backend: crate::runtime::RuntimeBackend::TrustedLocal,
-                    state_dir: root.join("worker"),
-                    bridge_path: bridge,
+                    transport: crate::runtime::TransportConfig::TrustedLocal(
+                        crate::runtime::TrustedLocalConfig {
+                            state_dir: root.join("worker"),
+                            bridge_path: bridge,
+                            ..Default::default()
+                        },
+                    ),
                     ..Default::default()
                 },
             },

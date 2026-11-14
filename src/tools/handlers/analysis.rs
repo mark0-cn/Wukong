@@ -2,7 +2,7 @@
 use super::*;
 
 pub(in crate::tools) fn handle_binary_inspect<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     __name: &'a str,
@@ -53,7 +53,7 @@ pub(in crate::tools) fn handle_binary_inspect<'a>(
 }
 
 pub(in crate::tools) fn handle_binary_strings<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -70,7 +70,7 @@ pub(in crate::tools) fn handle_binary_strings<'a>(
 }
 
 pub(in crate::tools) fn handle_functions_search<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -80,7 +80,7 @@ pub(in crate::tools) fn handle_functions_search<'a>(
 }
 
 pub(in crate::tools) fn handle_analysis_verify<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -160,7 +160,7 @@ pub(in crate::tools) fn handle_analysis_verify<'a>(
 }
 
 pub(in crate::tools) fn handle_differential_test<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,

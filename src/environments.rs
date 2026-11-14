@@ -59,15 +59,15 @@ impl EnvironmentConfig {
             "invalid environment name"
         );
         ensure!(
-            self.runtime.backend != RuntimeBackend::Disabled,
+            self.runtime.backend() != RuntimeBackend::Disabled,
             "registered environment must have a transport"
         );
         ensure!(
-            self.runtime.backend != RuntimeBackend::Docker || self.platform == Platform::Linux,
+            self.runtime.backend() != RuntimeBackend::Docker || self.platform == Platform::Linux,
             "Docker execution environments must use Linux"
         );
         ensure!(
-            self.runtime.backend != RuntimeBackend::TrustedLocal
+            self.runtime.backend() != RuntimeBackend::TrustedLocal
                 || self.platform == Platform::current(),
             "trusted fixture platform does not match this host"
         );
@@ -75,9 +75,10 @@ impl EnvironmentConfig {
             self.runtime.request_timeout_secs > 0,
             "environment timeout must be positive"
         );
-        if let Some(ssh) = &self.runtime.managed_ssh {
+        if let Some(ssh) = &self.runtime.managed_ssh() {
             ensure!(
-                self.runtime.backend == RuntimeBackend::Ssh && self.platform == Platform::Windows,
+                self.runtime.backend() == RuntimeBackend::ManagedSsh
+                    && self.platform == Platform::Windows,
                 "managed SSH requires a Windows SSH environment"
             );
             ssh.validate()?;
@@ -212,7 +213,7 @@ impl EnvironmentRegistry {
         let client = self.client(id).await?;
         let config = self.config(id)?;
         if config.platform != Platform::Windows
-            || config.runtime.backend == RuntimeBackend::TrustedLocal
+            || config.runtime.backend() == RuntimeBackend::TrustedLocal
         {
             return Ok(client);
         }

@@ -1,0 +1,652 @@
+[
+  {
+    "kind": "request",
+    "value": {
+      "path": "fixture.bin",
+      "data_base64": "AA=="
+    },
+    "valid": true,
+    "method": "file.put"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "path": "fixture.bin",
+      "data_base64": "AA==",
+      "unknown": true
+    },
+    "valid": false,
+    "method": "file.put"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "job_id": "owned"
+    },
+    "valid": true,
+    "method": "job.status"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "job_id": true
+    },
+    "valid": false,
+    "method": "job.status"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "argv": [
+        "fixture"
+      ],
+      "timeout_secs": 0
+    },
+    "valid": false,
+    "method": "job.start"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "argv": [
+        "fixture"
+      ],
+      "timeout_secs": 30,
+      "request_id": "stable"
+    },
+    "valid": true,
+    "method": "job.start"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "argv": [
+        "fixture"
+      ],
+      "request_id": ""
+    },
+    "valid": false,
+    "method": "job.start"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "source": "print(1)",
+      "request_id": "stable"
+    },
+    "valid": true,
+    "method": "py.run"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "session_id": "owned",
+      "action": "continue"
+    },
+    "valid": true,
+    "method": "debug.control"
+  },
+  {
+    "kind": "request",
+    "value": {
+      "session_id": "owned",
+      "action": "arbitrary"
+    },
+    "valid": false,
+    "method": "debug.control"
+  },
+  {
+    "kind": "result",
+    "value": {
+      "job_id": "worker-job",
+      "state": "completed",
+      "result": {
+        "exit_code": 0,
+        "receipt_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": true,
+    "method": "job.status"
+  },
+  {
+    "kind": "result",
+    "value": {
+      "job_id": "worker-job",
+      "state": "closing"
+    },
+    "valid": false,
+    "method": "job.status"
+  },
+  {
+    "kind": "result",
+    "value": {
+      "job_id": "worker-job",
+      "state": "lost",
+      "result": {
+        "exit_code": "zero"
+      }
+    },
+    "valid": false,
+    "method": "job.status"
+  },
+  {
+    "kind": "result",
+    "value": {
+      "path": "files/a",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 1
+    },
+    "valid": true,
+    "method": "file.stat"
+  },
+  {
+    "kind": "result",
+    "value": {
+      "path": "files/a",
+      "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "size": 1
+    },
+    "valid": false,
+    "method": "file.stat"
+  },
+  {
+    "kind": "error",
+    "value": {
+      "kind": "outcome_unknown"
+    },
+    "valid": true
+  },
+  {
+    "kind": "error",
+    "value": {
+      "kind": "safe_to_retry"
+    },
+    "valid": false
+  },
+  {
+    "kind": "capacity",
+    "value": {
+      "max_active_resources": 1,
+      "exclusive_run_lease": true
+    },
+    "valid": true
+  },
+  {
+    "kind": "capacity",
+    "value": {
+      "max_active_resources": 1,
+      "exclusive_run_lease": "yes"
+    },
+    "valid": false
+  },
+  {
+    "kind": "capabilities",
+    "value": {
+      "job.start": {
+        "ready": true
+      },
+      "debug.start": {
+        "ready": false,
+        "reason": "unavailable"
+      }
+    },
+    "valid": true
+  },
+  {
+    "kind": "capabilities",
+    "value": {
+      "invented.method": {
+        "ready": true
+      }
+    },
+    "valid": false
+  },
+  {
+    "kind": "identity",
+    "value": {
+      "protocol": 3,
+      "installation_id": "test",
+      "boot_id": "boot",
+      "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "valid": true
+  },
+  {
+    "kind": "identity",
+    "value": {
+      "protocol": 2,
+      "installation_id": "test",
+      "boot_id": "boot",
+      "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "valid": false
+  },
+  {
+    "kind": "result",
+    "method": "file.get",
+    "value": {
+      "path": "files/probe",
+      "size": 1,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_base64": "AA=="
+    },
+    "valid": true
+  },
+  {
+    "kind": "result",
+    "method": "file.get",
+    "value": {
+      "path": "files/probe",
+      "size": 1,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "valid": false
+  },
+  {
+    "kind": "result",
+    "method": "file.read",
+    "value": {
+      "path": "files/probe",
+      "size": 1,
+      "offset": 0,
+      "chunk_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_base64": "AA=="
+    },
+    "valid": true
+  },
+  {
+    "kind": "result",
+    "method": "file.read",
+    "value": {
+      "path": "files/probe",
+      "size": 1,
+      "offset": -1,
+      "chunk_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_base64": "AA=="
+    },
+    "valid": false
+  },
+  {
+    "kind": "result",
+    "method": "file.upload.status",
+    "value": {
+      "transfer_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "offset": 1,
+      "complete": false
+    },
+    "valid": true
+  },
+  {
+    "kind": "result",
+    "method": "file.upload.status",
+    "value": {
+      "transfer_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "offset": 1,
+      "complete": "false"
+    },
+    "valid": false
+  },
+  {
+    "kind": "result",
+    "method": "debug.start",
+    "value": {
+      "session_id": "fixture",
+      "state": "running"
+    },
+    "valid": true
+  },
+  {
+    "kind": "result",
+    "method": "debug.start",
+    "value": {
+      "session_id": "fixture",
+      "state": "invalid"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "producer_agent_id": "p",
+      "verifier_agent_id": "v"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "producer_agent_id": "p",
+      "verifier_agent_id": "v",
+      "unexpected": 1
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {},
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "after": null,
+      "limit": 2
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "after": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "limit": 64
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "limit": 65
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "unexpected": 1
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {},
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "after": null,
+      "limit": 2
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "after": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "limit": 64
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "limit": 65
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "unexpected": 1
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "debug.start",
+    "value": {
+      "mode": "launch",
+      "engine": "dbgeng",
+      "launch_spec": "files/probe/launch.json"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "debug.start",
+    "value": {
+      "mode": "dump",
+      "engine": "dbgeng",
+      "launch_spec": "files/probe/launch.json",
+      "dump": "files/probe.dmp"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": 1024
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": 8388608
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": 1023
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": 8388609
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": null
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1024
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388608
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1023
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388609
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": null
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1024
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388608
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1023
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388609
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": null
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1024,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388608,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1023,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388609,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": null,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": true
+  }
+]

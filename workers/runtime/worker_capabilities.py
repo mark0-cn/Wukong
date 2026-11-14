@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from worker_common import PROTOCOL, safe_env
+from worker_catalog import capabilities
 
 
 def _ghidra_ready(linux, execution_ready):
@@ -35,7 +36,7 @@ def _python_module(name):
         return False
 
 
-def doctor(root, trusted, isolated):
+def doctor(root, trusted, isolated, registrations):
     tools = {}
     for name in ["gdb", "afl-fuzz", "afl-qemu-trace", "afl-qemu-bridge", "afl-tmin", "gcc",
                  "one_gadget", "patchelf", "ropper", "pwninit", "pwndbg", "tmux", "strace", "ltrace", "seccomp-tools", "socat", "gdbserver", "eu-unstrip"]:
@@ -72,22 +73,24 @@ def doctor(root, trusted, isolated):
             spec=json.loads(launch.read_text())
             workbench={"launch_spec":"files/challenge/launch.json","challenge_id":spec["challenge_id"],"target":str(Path(spec["base"])/spec["target"]) if spec.get("target") else None,"input_mode":spec["input_mode"],"service":spec["service"],"runtime_confirmed":False}
         except (OSError,ValueError,KeyError) as error:workbench={"error":str(error)}
-    return {"workbench":workbench,"protocol": PROTOCOL, "os": platform.system().lower(), "platform": platform.platform(), "python": platform.python_version(),
+    ready = {
+        "files": True, "control": True, "debug_session": linux, "execution": execution_ready, "interactive": execution_ready,
+        "debugger": execution_ready and linux and tools["gdb"]["available"] and python_toolchain["pygdbmi"],
+        "fuzz": execution_ready and linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
+        "symbolic": execution_ready and python_toolchain["angr"], "emulation": python_toolchain["unicorn"],
+        "minimize": execution_ready and python_toolchain["picire"], "elf": python_toolchain["pyelftools"],
+        "cyclic": python_toolchain["pwntools"], "core": linux and python_toolchain["pwntools"],
+        "ghidra": _ghidra_ready(linux, execution_ready),
+        "network": bool(workbench and workbench.get("target") and workbench.get("service",{}).get("mode") in {"local_service","remote"}),
+    }
+    methods = {name: {"ready": ready[operation.readiness]} for name, operation in registrations.items()}
+    advertised = capabilities(registrations, ready)
+    advertised.update({"debug_dbgeng": False, "input_minimize": ready["minimize"] and ready["debugger"],
+                       "process_mapping_observations": linux,
+                       "formats": ["ELF"] if linux and execution_ready else ["PE"] if execution_ready and os.name == "nt" else []})
+    return {"methods":methods,"workbench":workbench,"protocol": PROTOCOL, "os": platform.system().lower(), "platform": platform.platform(), "python": platform.python_version(),
             "worker_root": str(root), "isolation": "trusted_local" if trusted else "external_worker",
             "core_pattern": core_pattern, "external_core_handler": bool(core_pattern and core_pattern.startswith("|")),
             "metadata_protected_from_targets": isolated, "unique_experiment_uids": isolated,
             "tools": tools, "python_toolchain": python_toolchain,
-            "capabilities": {"process_jobs": execution_ready, "launch_spec_jobs": execution_ready, "process_stdin": execution_ready, "persistent_jobs": execution_ready, "interactive_process": execution_ready, "resumable_file_transfer": True,
-            "ghidra_query": _ghidra_ready(linux, execution_ready),
-            "debug_gdb_mi": execution_ready and linux and tools["gdb"]["available"] and python_toolchain["pygdbmi"],
-            "debug_dbgeng": False, "fuzz_qemu": execution_ready and linux and tools["afl-fuzz"]["available"] and (tools["afl-qemu-trace"]["available"] or tools["afl-qemu-bridge"]["available"]),
-            "crash_replay": execution_ready, "input_minimize": execution_ready and python_toolchain["picire"] and tools["gdb"]["available"] and python_toolchain["pygdbmi"] and linux,
-            "input_minimize_signal_only": execution_ready and python_toolchain["picire"], "runtime_profile": True,
-            "runtime_prepare": python_toolchain["pyelftools"], "mitigation_profile": True,
-            "seccomp_analyze": True, "libc_identify": python_toolchain["pyelftools"],
-            "network_poc_verify": bool(workbench.get("target") and workbench.get("service",{}).get("mode") in {"local_service","remote"}) if workbench else False,
-            "process_mapping_observations": linux, "core_snapshot": linux and python_toolchain["pwntools"],
-            "cyclic_offset": python_toolchain["pwntools"], "poc_verify": execution_ready, "shell_exec": execution_ready,
-            "py_run": execution_ready, "emulation": python_toolchain["unicorn"],
-            "symbolic_execution": execution_ready and python_toolchain["angr"],
-            "formats": ["ELF"] if linux and execution_ready else ["PE"] if execution_ready and os.name=='nt' else [], "native_target_execution": execution_ready}}
+            "capabilities": advertised}

@@ -480,8 +480,12 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
             "close retry changed its original result"
         );
         ensure!(
-            calls.call("debug.start", request).await.is_err(),
-            "closed debugger was restarted"
+            calls.call("debug.start", request).await? == started,
+            "closed debugger start lost its original receipt"
+        );
+        ensure!(
+            calls.inspect(id, "state").await? == terminal,
+            "start retry changed the closed debugger state"
         );
         let (artifact, transcript) = original(
             &bound,

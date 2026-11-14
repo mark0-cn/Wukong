@@ -78,10 +78,12 @@ impl Registry {
             });
         }
         for environment in config.environments.values() {
-            if environment.runtime.backend == crate::runtime::RuntimeBackend::TrustedLocal {
+            if let crate::runtime::TransportConfig::TrustedLocal(local) =
+                &environment.runtime.transport
+            {
                 self.locations.insert(Location {
                     kind: LocationKind::Worker,
-                    path: files::absolute(&environment.runtime.state_dir)?,
+                    path: files::absolute(&local.state_dir)?,
                 });
             }
         }
@@ -208,7 +210,7 @@ pub(super) fn inventory(home: &Path) -> Result<Registry> {
                     .get("state_dir")
                     .and_then(toml::Value::as_str)
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| crate::runtime::RuntimeConfig::default().state_dir);
+                    .unwrap_or_else(|| crate::runtime::TrustedLocalConfig::default().state_dir);
                 registry.locations.insert(Location {
                     kind: LocationKind::Worker,
                     path: files::absolute(&if path.is_absolute() {

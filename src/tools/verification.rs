@@ -65,8 +65,9 @@ impl VerificationService {
                 .worker_call(
                     agent,
                     &format!("{call_id}:network-profile"),
-                    "network.profile",
-                    json!({"target":args["target"],"launch_spec":args["launch_spec"]}),
+                    Request::NetworkProfile(serde_json::from_value(
+                        json!({"target":args["target"],"launch_spec":args["launch_spec"]}),
+                    )?),
                 )
                 .await?;
             ensure!(

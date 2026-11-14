@@ -32,7 +32,7 @@ docker_container = "wukong-worker"
 
 `runtime.ssh_host` 提供 IP 字面值或 DNS 主机名，`runtime.ssh_executable` 选择控制端 OpenSSH 客户端。托管传输忽略用户及系统 SSH 配置，固定 Ed25519 公钥，只使用指定私钥，并禁用 agent/X11/端口转发、代理命令、本地命令与连接共享。发送固定中继标记，不发送 Python/shell 启动命令。原生服务端独立强制使用登记的中继，协议握手还会核对安装 ID。通用 Linux SSH 保留桥接路径引用，同时显式启用严格主机校验并禁用转发。客户端参数校验及真实 OpenSSH `-G` 配置解析测试独立于 SSH 连通和 VM 安装验收；桌面连接导入会校验公开安装凭据和独立核对的指纹，再保存专用公开主机固定文件，不导入私钥内容，参见 [Windows 组件指南](../../workers/windows/README.zh-CN.md)。登记不进行连接检查；桌面介质准备尚未完成。
 
-协议 2 握手确认安装 ID、操作系统启动身份以及 worker 代码/后端内容哈希。控制器在连接时固定该身份，并在每轮分析首次使用环境时以事务持久化。重连或恢复任务发现身份变化时，在执行前拒绝请求。环境配置可通过可选的 `installation_id` 进一步固定登记的安装实例。daemon 重启使用单独的诊断 ID，不代表操作系统重启，也不证明会话仍然存活。
+协议 3 握手确认安装 ID、操作系统启动身份以及 worker 代码/后端内容哈希。控制器在连接时固定该身份，并在每轮分析首次使用环境时以事务持久化。重连或恢复任务发现身份变化时，在执行前拒绝请求。环境配置可通过可选的 `installation_id` 进一步固定登记的安装实例。daemon 重启使用单独的诊断 ID，不代表操作系统重启，也不证明会话仍然存活。
 
 Windows 将 OS loader 的 `KUSER_SHARED_DATA.BootId` 序号与动态链接的 `NtQuerySystemInformation(SystemBootEnvironmentInformation)` 返回的启动配置项 GUID 组合。仅靠启动配置项 GUID 可能跨重启保持不变；loader 序号用于区分各次启动，不依赖时钟推算、PowerShell/WMI 或完整进程可见性。查询只读取[只读用户共享映射](https://www.microsoft.com/en-us/msrc/blog/2022/04/randomizing-the-kuser_shared_data-structure-on-windows)的 712 字节前缀及 32 字节原生响应，校验长度、Windows 10+ x86/x64 布局及非零配置项身份；遇到不受支持的数据则拒绝建立身份。参见 Microsoft 的 [BootId 定义](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-kuser_shared_data)及[原生查询兼容性约定](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntquerysysteminformation)。当前机器及跨进程检查不替代真实 VM 重启验收。
 
@@ -76,4 +76,12 @@ Windows 使用固定版本的外部 WinDbg MCP 和 `rmcp` 客户端；自写 Dbg
 
 ## 状态与验证边界
 
-新资源记录要求状态 schema 4。拒绝旧工作区且不迁移；应创建新工作区并单独保留旧数据。单元/可信夹具检查覆盖任务绑定、按需连接、真实 bridge 文件传输、可恢复上传和证据身份，不代表真实 GDB/Ghidra/DbgEng 或 Windows VM 安装器验收。参见[实现契约](implementation-contract.zh-CN.md)和[worker 指南](../../workers/runtime/README.zh-CN.md)。
+新资源记录要求状态 schema 5。拒绝旧工作区且不迁移；应创建新工作区并单独保留旧数据。单元/可信夹具检查覆盖任务绑定、按需连接、真实 bridge 文件传输、可恢复上传和证据身份，不代表真实 GDB/Ghidra/DbgEng 或 Windows VM 安装器验收。参见[实现契约](implementation-contract.zh-CN.md)和[worker 指南](../../workers/runtime/README.zh-CN.md)。
+
+## 控制器执行边界
+
+`ToolService` 负责角色准入、工具分派及持久结果处理。每次调用通过 `ToolContext` 借用控制器，并携带由一个 `BoundWorker` 组装的执行及分析服务；绑定时不克隆整个控制器。环境连接、配置快照、身份固定、租约及重连仍由 `environments`/`runtime` 负责。
+
+`WorkerGateway` 接收共享的类型化 `Request` 契约，保留稳定请求标识，在展示转换之前保存 Worker 原始回执。作业和会话服务根据运行、所有者及 Worker 校验控制器 ID，发送记录中的 Worker 资源 ID，核对返回身份，并明确构造面向控制器的引用。原始状态制品保留 Worker 标识。控制器调用收据与 Worker 执行账本保持分离。
+
+传输配置使用带标签的联合类型。`docker` 必须提供 `docker_container`；普通 `ssh` 必须提供 `ssh_host`，使用 Python stdio bridge；`managed_ssh` 必须提供 `ssh_host` 和完整的 `managed_ssh` 登记记录，使用原生 relay。`trusted_local` 仅包含可信夹具启动路径。不同传输的专有字段不能混用。设置页切换后端时整段替换传输配置。旧托管配置必须使用 `backend = "managed_ssh"` 重新建立；不提供旧格式解析器或状态迁移。请使用新的 schema 5 工作区，并单独保留旧目录及证据。

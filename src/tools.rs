@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
+use wukong_worker_protocol::{Method, Request};
 
 use crate::effects::{Admission, DurableEffects, ReplayPolicy};
 pub use crate::effects::{EffectOutcome as ToolOutcome, reconcile_record};
@@ -28,8 +29,7 @@ pub struct ToolService {
     pub coordinator: Coordinator,
     limits: crate::config::ToolLimits,
     skills_dir: Option<PathBuf>,
-    execution: ExecutionService,
-    analysis: AnalysisService,
+    analysis_config: crate::config::StaticConfig,
     mcp: McpRegistry,
     locks: Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>,
     environments: crate::environments::EnvironmentRegistry,
@@ -42,8 +42,10 @@ mod catalog;
 mod coordination;
 mod discovery;
 pub(crate) use discovery::ToolSelection;
+mod context;
 mod execution;
 mod gateway;
+use context::ToolContext;
 mod requirements;
 use analysis::AnalysisService;
 use execution::ExecutionService;
@@ -86,22 +88,9 @@ impl ToolService {
         DurableEffects::new(&self.store, self.limits.max_output_bytes)
     }
     pub(crate) fn with_store(&self, store: Store) -> Self {
-        let gateway = WorkerGateway {
-            store: store.clone(),
-            ..self.execution.gateway.clone()
-        };
-        let execution = ExecutionService::new(store.clone(), gateway.clone(), self.locks.clone());
-        let analysis = AnalysisService {
-            store: store.clone(),
-            files: execution.files.clone(),
-            gateway,
-            config: self.analysis.config.clone(),
-        };
         Self {
             store: store.clone(),
             coordinator: Coordinator::new(store),
-            execution,
-            analysis,
             ..self.clone()
         }
     }
@@ -116,35 +105,21 @@ impl ToolService {
         let environments =
             crate::environments::EnvironmentRegistry::new(config.environments.clone())?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
-        let gateway = WorkerGateway {
-            store: store.clone(),
-            client: None,
-            identity: "unbound".into(),
-            output_limit: config.tools.max_output_bytes,
-        };
-        let execution = ExecutionService::new(store.clone(), gateway.clone(), locks.clone());
-        let analysis = AnalysisService {
-            store: store.clone(),
-            files: execution.files.clone(),
-            gateway,
-            config: config.analysis,
-        };
         Ok(Self {
             store: store.clone(),
             coordinator: Coordinator::new(store),
             limits: config.tools,
             skills_dir: config.skills_dir,
-            execution,
-            analysis,
+            analysis_config: config.analysis,
             mcp,
             locks,
             environments,
             default_environment: config.default_environment,
         })
     }
-    pub(crate) async fn bound_to(&self, agent: &AgentMetadata) -> Result<Self> {
+    pub(crate) async fn bound_to(&self, agent: &AgentMetadata) -> Result<ToolContext<'_>> {
         let Some(environment_id) = &agent.environment_id else {
-            return Ok(self.clone());
+            return Ok(ToolContext::new(self, None));
         };
         self.checked_environment(agent).await?;
         let client = self
@@ -155,26 +130,10 @@ impl ToolService {
                 self.store.controller_owner().as_deref(),
             )
             .await?;
-        let identity = stable("worker", &serde_json::to_string(client.identity())?);
-        let gateway = WorkerGateway {
-            store: self.store.clone(),
-            client: Some(client),
-            identity,
-            output_limit: self.limits.max_output_bytes,
-        };
-        let execution =
-            ExecutionService::new(self.store.clone(), gateway.clone(), self.locks.clone());
-        let analysis = AnalysisService {
-            store: self.store.clone(),
-            files: execution.files.clone(),
-            gateway,
-            config: self.analysis.config.clone(),
-        };
-        Ok(Self {
-            execution,
-            analysis,
-            ..self.clone()
-        })
+        Ok(ToolContext::new(
+            self,
+            Some(gateway::BoundWorker::new(client)?),
+        ))
     }
 
     async fn checked_environment(&self, agent: &AgentMetadata) -> Result<RuntimeClient> {
@@ -222,14 +181,6 @@ impl ToolService {
         }
         Ok(())
     }
-    #[cfg(test)]
-    pub(crate) fn jobs(&self) -> &jobs::JobService {
-        &self.execution.jobs
-    }
-    #[cfg(test)]
-    pub(crate) fn worker_identity(&self) -> Result<String> {
-        self.execution.gateway.worker_identity()
-    }
     pub(crate) fn allows(&self, role: Role, name: &str) -> bool {
         builtins()
             .iter()
@@ -262,9 +213,6 @@ impl ToolService {
     pub async fn close(&self) {
         self.mcp.close().await;
         self.environments.close().await;
-        if let Some(runtime) = &self.execution.gateway.client {
-            let _ = runtime.close().await;
-        }
     }
     pub async fn doctor(&self) -> Result<Value> {
         if let Some(environment) = &self.default_environment {
@@ -363,8 +311,9 @@ impl ToolService {
                     scoped.require_backend(spec, &args).await?;
                     (spec.handler)(&scoped, &agent, call_id, name, args).await
                 } else {
-                    self.require_backend(spec, &args).await?;
-                    (spec.handler)(self, &agent, call_id, name, args).await
+                    let scoped = ToolContext::new(self, None);
+                    scoped.require_backend(spec, &args).await?;
+                    (spec.handler)(&scoped, &agent, call_id, name, args).await
                 }
             } else if self.mcp.contains(name) {
                 self.mcp.call(name, args).await
@@ -421,11 +370,6 @@ impl ToolService {
         action: impl FnOnce(&crate::store::StateSession<'_>) -> Result<Value>,
     ) -> Result<Value> {
         self.effects().commit(agent, call_id, action)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn runtime(&self) -> Result<&RuntimeClient> {
-        self.execution.gateway.runtime()
     }
 }
 

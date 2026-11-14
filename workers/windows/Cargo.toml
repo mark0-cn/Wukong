@@ -22,6 +22,8 @@ path = "native/package_main.rs"
 [dependencies]
 wukong-worker-protocol = { path = "../protocol" }
 anyhow = "1"
+jsonrpsee-core = { version = "0.26.0", features = ["server"] }
+jsonrpsee-types = "0.26.0"
 futures-util = { version = "0.3", features = ["sink"] }
 prost = "0.14"
 rmcp = { version = "=3.9.0", default-features = false, features = ["client", "transport-async-rw"] }

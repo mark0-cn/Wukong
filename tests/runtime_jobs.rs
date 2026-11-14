@@ -1,12 +1,16 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::time::Duration;
-use wukong::runtime::{RuntimeBackend, RuntimeClient, RuntimeConfig};
+use wukong::runtime::{RuntimeClient, RuntimeConfig};
 
 fn config(root: &std::path::Path) -> RuntimeConfig {
     RuntimeConfig {
-        backend: RuntimeBackend::TrustedLocal,
-        state_dir: root.to_path_buf(),
+        transport: wukong::runtime::TransportConfig::TrustedLocal(
+            wukong::runtime::TrustedLocalConfig {
+                state_dir: root.to_path_buf(),
+                ..Default::default()
+            },
+        ),
         ..Default::default()
     }
 }
@@ -52,7 +56,7 @@ for line in sys.stdin:
     method, params = request['method'], request.get('params', {})
     error = None
     if method == 'ping':
-        result = {'identity':{'protocol':2,'installation_id':'capacity-fixture','boot_id':'boot','package_sha256':'0'*64}}
+        result = {'identity':{'protocol':3,'installation_id':'capacity-fixture','boot_id':'boot','package_sha256':'0'*64}}
     elif method == 'job.start':
         calls += 1
         if params.get('request_id') == 'unknown':
@@ -71,9 +75,14 @@ for line in sys.stdin:
 "#,
     )?;
     let client = RuntimeClient::connect(RuntimeConfig {
-        bridge_path: bridge,
+        transport: wukong::runtime::TransportConfig::TrustedLocal(
+            wukong::runtime::TrustedLocalConfig {
+                bridge_path: bridge,
+                state_dir: root.path().to_path_buf(),
+                ..Default::default()
+            },
+        ),
         request_timeout_secs: 3,
-        ..config(root.path())
     })
     .await?;
     let waiting = client.clone();
@@ -127,7 +136,7 @@ for line in sys.stdin:
 #[tokio::test]
 async fn lost_transport_reconnects_and_timed_out_requests_are_not_replayed() -> Result<()> {
     // A fake bridge that answers the handshake, hangs forever on the first
-    // "slow" request (forcing a controller timeout) and answers instantly
+    // "exec.run" request (forcing a controller timeout) and answers instantly
     // once its marker file proves a fresh instance was spawned.
     let root = tempfile::tempdir()?;
     let bridge = root.path().join("fake_bridge.py");
@@ -140,10 +149,10 @@ for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
     if method == "ping":
-        result = {'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}
-    elif method == "slow":
+        result = {'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}
+    elif method == "exec.run":
         if not marker.exists():
-            marker.write_text("slow", encoding="utf-8")
+            marker.write_text("exec.run", encoding="utf-8")
             time.sleep(60)
         result = {"reconnected": True}
     else:
@@ -152,19 +161,22 @@ for line in sys.stdin:
 "#,
     )?;
     let config = RuntimeConfig {
-        backend: RuntimeBackend::TrustedLocal,
-        state_dir: root.path().to_path_buf(),
-        bridge_path: bridge,
+        transport: wukong::runtime::TransportConfig::TrustedLocal(
+            wukong::runtime::TrustedLocalConfig {
+                state_dir: root.path().to_path_buf(),
+                bridge_path: bridge,
+                ..Default::default()
+            },
+        ),
         request_timeout_secs: 2,
-        ..Default::default()
     };
     let client = RuntimeClient::connect(config).await?;
-    let error = client.call("slow", json!({})).await.unwrap_err();
+    let error = client.call("exec.run", json!({})).await.unwrap_err();
     let message = format!("{error:#}");
     assert!(message.contains("timed out"), "{message}");
     // The next call replaces the poisoned transport; the hung first request
     // is not re-sent, and the fresh bridge instance answers immediately.
-    let recovered = client.call("slow", json!({})).await?;
+    let recovered = client.call("exec.run", json!({})).await?;
     assert_eq!(recovered["reconnected"], true);
     client.close().await?;
     Ok(())
@@ -347,14 +359,14 @@ for line in sys.stdin:
     request=json.loads(line)
     method=request['method']
     if method=='ping':
-        reply={'jsonrpc':'2.0','id':request['id'],'result':{'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}
-    elif method=='rpc_error':
+        reply={'jsonrpc':'2.0','id':request['id'],'result':{'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}
+    elif method=='file.stat':
         reply={'jsonrpc':'2.0','id':request['id'],'error':{'code':-32000,'message':'fixture rejection'}}
-    elif method=='malformed':
+    elif method=='debug.command':
         (root/'executed').write_text('once')
         print('{invalid-json',flush=True)
         continue
-    elif method=='oversized':
+    elif method=='file.read':
         sys.stdout.write('x'*(48*1024*1024+1));sys.stdout.flush()
         continue
     else:
@@ -363,17 +375,20 @@ for line in sys.stdin:
 "#,
     )?;
     let client = RuntimeClient::connect(RuntimeConfig {
-        backend: RuntimeBackend::TrustedLocal,
-        state_dir: root.path().to_path_buf(),
-        bridge_path: bridge,
+        transport: wukong::runtime::TransportConfig::TrustedLocal(
+            wukong::runtime::TrustedLocalConfig {
+                state_dir: root.path().to_path_buf(),
+                bridge_path: bridge,
+                ..Default::default()
+            },
+        ),
         request_timeout_secs: 5,
-        ..Default::default()
     })
     .await?;
     assert!(
         format!(
             "{:#}",
-            client.call("rpc_error", json!({})).await.unwrap_err()
+            client.call("file.stat", json!({})).await.unwrap_err()
         )
         .contains("fixture rejection")
     );
@@ -382,13 +397,13 @@ for line in sys.stdin:
         1,
         "an RPC error must not poison a healthy transport"
     );
-    assert!(client.call("malformed", json!({})).await.is_err());
+    assert!(client.call("debug.command", json!({})).await.is_err());
     assert_eq!(client.doctor().await?["starts"], 2);
     assert_eq!(
         std::fs::read_to_string(root.path().join("executed"))?,
         "once"
     );
-    assert!(client.call("oversized", json!({})).await.is_err());
+    assert!(client.call("file.read", json!({})).await.is_err());
     assert_eq!(client.doctor().await?["starts"], 3);
     client.close().await?;
     Ok(())
@@ -403,9 +418,14 @@ async fn bridge_startup_error_includes_captured_stderr() -> Result<()> {
         "import sys\nsys.stderr.write('fixture: Docker engine unavailable\\n')\nsys.exit(1)\n",
     )?;
     let config = RuntimeConfig {
-        bridge_path: bridge,
+        transport: wukong::runtime::TransportConfig::TrustedLocal(
+            wukong::runtime::TrustedLocalConfig {
+                bridge_path: bridge,
+                state_dir: root.path().to_path_buf(),
+                ..Default::default()
+            },
+        ),
         request_timeout_secs: 2,
-        ..config(root.path())
     };
     let error = match RuntimeClient::connect(config).await {
         Ok(client) => {
@@ -431,24 +451,30 @@ async fn reconnected_worker_identity_is_checked_before_resending_any_operation()
 root=pathlib.Path(sys.argv[sys.argv.index('--state')+1])
 for line in sys.stdin:
  r=json.loads(line)
- if r['method']=='disconnect':
+ if r['method']=='job.status':
   print('{invalid-json',flush=True);continue
  if r['method']=='ping':
   boot=(root/'boot').read_text() if (root/'boot').exists() else 'first'
-  result={'identity':{'protocol':2,'installation_id':'fixture','boot_id':boot,'package_sha256':'0'*64}}
+  result={'identity':{'protocol':3,'installation_id':'fixture','boot_id':boot,'package_sha256':'0'*64}}
  else:
   (root/'effect').write_text('executed');result={}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
 "#,
     )?;
     let client = RuntimeClient::connect(RuntimeConfig {
-        bridge_path: bridge,
-        ..config(root.path())
+        transport: wukong::runtime::TransportConfig::TrustedLocal(
+            wukong::runtime::TrustedLocalConfig {
+                bridge_path: bridge,
+                state_dir: root.path().to_path_buf(),
+                ..Default::default()
+            },
+        ),
+        ..Default::default()
     })
     .await?;
-    assert!(client.call("disconnect", json!({})).await.is_err());
+    assert!(client.call("job.status", json!({})).await.is_err());
     std::fs::write(root.path().join("boot"), "second")?;
-    let error = client.call("mutate", json!({})).await.unwrap_err();
+    let error = client.call("job.cancel", json!({})).await.unwrap_err();
     assert!(format!("{error:#}").contains("identity changed"));
     assert!(!root.path().join("effect").exists());
     client.close().await?;
@@ -492,13 +518,18 @@ sys.stderr.write('x' * 131072)
 sys.stderr.flush()
 for line in sys.stdin:
     request = json.loads(line)
-    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True,'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}), flush=True)
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True,'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}), flush=True)
 "#,
     )?;
     let config = RuntimeConfig {
-        bridge_path: bridge,
+        transport: wukong::runtime::TransportConfig::TrustedLocal(
+            wukong::runtime::TrustedLocalConfig {
+                bridge_path: bridge,
+                state_dir: root.path().to_path_buf(),
+                ..Default::default()
+            },
+        ),
         request_timeout_secs: 3,
-        ..config(root.path())
     };
     let previous = unsafe { GetStdHandle((-12i32) as u32) };
     assert_ne!(

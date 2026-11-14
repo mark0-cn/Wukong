@@ -2,7 +2,7 @@
 use super::*;
 
 pub(in crate::tools) fn handle_artifact_stage<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call: &'a str,
     _name: &'a str,
@@ -18,7 +18,7 @@ pub(in crate::tools) fn handle_artifact_stage<'a>(
 }
 
 pub(in crate::tools) fn handle_environment_list<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     _agent: &'a AgentMetadata,
     _call: &'a str,
     _name: &'a str,
@@ -28,7 +28,7 @@ pub(in crate::tools) fn handle_environment_list<'a>(
 }
 
 pub(in crate::tools) fn handle_environment_doctor<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call: &'a str,
     _name: &'a str,
@@ -51,7 +51,7 @@ pub(in crate::tools) fn handle_environment_doctor<'a>(
 }
 
 pub(in crate::tools) fn handle_emulate_run<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -65,13 +65,17 @@ pub(in crate::tools) fn handle_emulate_run<'a>(
         tools
             .execution
             .gateway
-            .worker_call(agent, call_id, "emu.run", args)
+            .worker_call(
+                agent,
+                call_id,
+                Request::EmulateRun(serde_json::from_value(args)?),
+            )
             .await
     })
 }
 
 pub(in crate::tools) fn handle_libc_identify<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -91,13 +95,17 @@ pub(in crate::tools) fn handle_libc_identify<'a>(
         tools
             .execution
             .gateway
-            .worker_call(agent, call_id, "libc.identify", args)
+            .worker_call(
+                agent,
+                call_id,
+                Request::LibcIdentify(serde_json::from_value(args)?),
+            )
             .await
     })
 }
 
 pub(in crate::tools) fn handle_seccomp_analyze<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -111,7 +119,11 @@ pub(in crate::tools) fn handle_seccomp_analyze<'a>(
         let raw = tools
             .execution
             .gateway
-            .worker_call(agent, call_id, "seccomp.analyze", args)
+            .worker_call(
+                agent,
+                call_id,
+                Request::SeccompAnalyze(serde_json::from_value(args)?),
+            )
             .await?;
         ensure!(
             raw["filter_sha256"] == file.sha256,
@@ -122,7 +134,7 @@ pub(in crate::tools) fn handle_seccomp_analyze<'a>(
 }
 
 pub(in crate::tools) fn handle_runtime_doctor<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -140,7 +152,7 @@ pub(in crate::tools) fn handle_runtime_doctor<'a>(
 }
 
 pub(in crate::tools) fn handle_stage_target<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -150,7 +162,7 @@ pub(in crate::tools) fn handle_stage_target<'a>(
 }
 
 pub(in crate::tools) fn handle_file_put<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -160,7 +172,7 @@ pub(in crate::tools) fn handle_file_put<'a>(
 }
 
 pub(in crate::tools) fn handle_file_get<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -170,7 +182,7 @@ pub(in crate::tools) fn handle_file_get<'a>(
 }
 
 pub(in crate::tools) fn handle_job_start<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -185,7 +197,7 @@ pub(in crate::tools) fn handle_job_start<'a>(
 }
 
 pub(in crate::tools) fn handle_runtime_profile<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -200,18 +212,25 @@ pub(in crate::tools) fn handle_runtime_profile<'a>(
                     .known_file(agent, path, key == "target")?;
             }
         }
+        let mut profile_args = args.clone();
+        for field in ["session_id", "interactive_session_id", "address"] {
+            profile_args
+                .as_object_mut()
+                .context("profile arguments must be an object")?
+                .remove(field);
+        }
         let mut raw = tools
             .execution
             .gateway
             .worker_call(
                 agent,
                 call_id,
-                if name == "runtime_prepare" {
-                    "runtime.prepare"
+                (if name == "runtime_prepare" {
+                    Method::RuntimePrepare
                 } else {
-                    "runtime.profile"
-                },
-                args.clone(),
+                    Method::RuntimeProfile
+                })
+                .decode(profile_args)?,
             )
             .await?;
         if let Some(files) = raw["artifacts"].as_array() {
@@ -281,7 +300,7 @@ pub(in crate::tools) fn handle_runtime_profile<'a>(
 }
 
 pub(in crate::tools) fn handle_crash_snapshot<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -296,7 +315,11 @@ pub(in crate::tools) fn handle_crash_snapshot<'a>(
             return tools
                 .execution
                 .gateway
-                .worker_call(agent, call_id, "cyclic.offset", args)
+                .worker_call(
+                    agent,
+                    call_id,
+                    Request::CyclicOffset(serde_json::from_value(args)?),
+                )
                 .await;
         }
         ensure!(
@@ -317,14 +340,18 @@ pub(in crate::tools) fn handle_crash_snapshot<'a>(
             tools
                 .execution
                 .gateway
-                .worker_call(agent, call_id, "core.snapshot", args)
+                .worker_call(
+                    agent,
+                    call_id,
+                    Request::CoreSnapshot(serde_json::from_value(args)?),
+                )
                 .await
         }
     })
 }
 
 pub(in crate::tools) fn handle_mitigation_profile<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,

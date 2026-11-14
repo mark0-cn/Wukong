@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Restore cursor-based job inventory through protocol v3 on Windows and Linux. Job and resource pages accept 1–64 entries (64 by default), with an exclusive after cursor."
+zh_CN = "恢复 Windows 和 Linux 协议 v3 的作业清单游标分页。作业与资源每页接受 1–64 项（默认 64 项），after 游标不包含游标所在项。"

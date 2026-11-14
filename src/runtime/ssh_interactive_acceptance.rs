@@ -296,9 +296,14 @@ async fn remote_installed_windows_worker_interactive_acceptance() -> Result<()> 
                 raw == first_bytes && later["sha256"] == first_transcript["sha256"],
                 "later writes changed opening transcript evidence"
             );
+            let inventory = calls.call("resource.list", json!({"limit":64})).await?;
             ensure!(
-                calls.call("interact.start", start.clone()).await.is_err(),
-                "closed interactive start was replayed"
+                calls.call("interact.start", start.clone()).await? == opened,
+                "closed interactive start lost its original receipt"
+            );
+            ensure!(
+                calls.call("resource.list", json!({"limit":64})).await? == inventory,
+                "start retry reopened or changed a closed interactive resource"
             );
             cases.push(json!({"architecture":architecture,"case":name,"start":start,"opened":opened,"writes":writes,
                 "terminal":terminal,"receipt_sha256":receipt["sha256"],"proof":proof,"stdout_sha256":hex::encode(Sha256::digest(&expected))}));
@@ -569,12 +574,14 @@ async fn remote_native_completed_interactive_recovery_acceptance() -> Result<()>
             .await?;
             cached += 1;
         }
+        let inventory = bound.call("resource.list", json!({"limit":64})).await?;
         ensure!(
-            bound
-                .call("interact.start", case["start"].clone())
-                .await
-                .is_err(),
-            "restart reopened a completed session"
+            bound.call("interact.start", case["start"].clone()).await? == case["opened"],
+            "restart changed a completed session's original opener"
+        );
+        ensure!(
+            bound.call("resource.list", json!({"limit":64})).await? == inventory,
+            "restart replay reopened or changed an interactive resource"
         );
         let terminal = bound
             .call(

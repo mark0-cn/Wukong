@@ -24,12 +24,15 @@ def installation_identity(root):
         try:
             with path.open('x',encoding='utf-8') as stream:
                 os.chmod(path,0o600)
-                json.dump({'installation_id':uuid.uuid4().hex},stream)
+                json.dump({'protocol':PROTOCOL,'installation_id':uuid.uuid4().hex},stream)
                 stream.flush()
                 os.fsync(stream.fileno())
         except FileExistsError:
             pass
-    value=load_json(path)['installation_id']
+    document=load_json(path)
+    if document.get('protocol') != PROTOCOL:
+        raise ValueError('unsupported worker state protocol; use a new worker state directory')
+    value=document['installation_id']
     if not isinstance(value,str) or not re.fullmatch(r'[0-9a-f]{32}',value):
         raise ValueError('invalid worker installation identity; never silently replace it')
     return value
@@ -39,6 +42,12 @@ def content_identity(root):
     digest=hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob('*.py')):
         digest.update(path.name.encode()+b'\0'+path.read_bytes()+b'\0')
+    schema = Path(__file__).resolve().parent.parent / 'protocol/schema/contract.json'
+    digest.update(b'protocol/schema/contract.json\0' + schema.read_bytes() + b'\0')
+    import wukong_analysis
+    analysis = Path(wukong_analysis.__file__).resolve().parent
+    for path in sorted(analysis.glob("*.py")):
+        digest.update(b"analysis/" + path.name.encode() + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()
 
 

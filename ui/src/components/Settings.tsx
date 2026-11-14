@@ -8,6 +8,7 @@ import { StorageLocations, type StorageDraft } from './StorageLocations';
 import { LanguageSettings } from './LanguageSettings';
 import { WindowsConnection, emptyWindowsConnection, type WindowsConnectionDraft } from './WindowsConnection';
 import type { WindowsConnectionInput } from '../commands';
+import { editedForm, transportEdit } from '../settingsTransport';
 
 type Field = { path: string; label: string; kind?: 'number' | 'checkbox' | 'provider' | 'backend' | 'environment'; help?: string; options?: string[] };
 const groups = (form: Record<string, Json>): { title: string; fields: Field[] }[] => [
@@ -36,10 +37,10 @@ const groups = (form: Record<string, Json>): { title: string; fields: Field[] }[
   ] },
   ...Object.entries(environmentMap(form)).map(([id, value]) => ({ title: `${String(value.name ?? id)} · ${id}`, fields: [
     { path: `environments.${id}.name`, label: t('settings-environment-name') },
-    { path: `environments.${id}.runtime.backend`, label: t('settings-dynamic-analysis-backend'), kind: 'backend' as const, options: [...(value.platform === 'windows' ? ['ssh'] : ['docker', 'ssh']), ...(atPath(form, `environments.${id}.runtime.backend`) === 'trusted_local' ? ['trusted_local'] : [])] },
-    ...(value.platform !== 'windows' ? [{ path: `environments.${id}.runtime.docker_container`, label: t('settings-docker-container') }] : []),
-    { path: `environments.${id}.runtime.ssh_host`, label: t('settings-ssh-host') },
-    ...(value.platform !== 'windows' ? [{ path: `environments.${id}.runtime.remote_bridge_path`, label: t('settings-runtime-bridge-path') }] : []),
+    { path: `environments.${id}.runtime.backend`, label: t('settings-dynamic-analysis-backend'), kind: 'backend' as const, options: value.platform === 'windows' ? [String(atPath(form, `environments.${id}.runtime.backend`))] : ['docker', 'ssh', ...(atPath(form, `environments.${id}.runtime.backend`) === 'trusted_local' ? ['trusted_local'] : [])] },
+    ...(atPath(form, `environments.${id}.runtime.backend`) === 'docker' ? [{ path: `environments.${id}.runtime.docker_container`, label: t('settings-docker-container') }] : []),
+    ...(['ssh', 'managed_ssh'].includes(String(atPath(form, `environments.${id}.runtime.backend`))) ? [{ path: `environments.${id}.runtime.ssh_host`, label: t('settings-ssh-host') }] : []),
+    ...(['docker', 'ssh'].includes(String(atPath(form, `environments.${id}.runtime.backend`))) ? [{ path: `environments.${id}.runtime.remote_bridge_path`, label: t('settings-runtime-bridge-path') }] : []),
   ] })),
 ];
 function environmentMap(form: Record<string, Json>): Record<string, Record<string, Json>> {
@@ -123,6 +124,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
     } catch (error) { setError(errorValue(error)); }
     finally { setBusy(false); }
   };
+  const draft = document ? editedForm(document.form, edits) : {};
   if (!open) return null;
   return <Modal title={t('settings-workspace-settings')} description={t('settings-new-tasks-use-the-current-configuration-resumed')} onClose={() => { if (!storageBusy) onClose(); }} wide>
     <nav className="settings-sections" aria-label={t('ui-settings-sections')}>
@@ -145,10 +147,10 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
       </div>}
       {!document ? <p className="muted">{busy ? t('settings-loading-configuration') : t('settings-could-not-load-configuration-please-reload')}</p> : raw && section === 'advanced' ?
       <textarea className="toml-editor" aria-label={t('settings-toml-configuration-source')} spellCheck={false} value={document.source} disabled={busy}
-        onChange={event => setDocument({ ...document, source: event.target.value })} /> : groups(document.form).map((group, index) => ({ ...group, fields: group.fields.filter((field, fieldIndex) => index === 0 ? section === 'general' ? fieldIndex < 5 : section === 'advanced' && fieldIndex >= 5 : index === 1 ? section === 'budget' : section === 'advanced') })).filter(group => group.fields.length).map(group => <section key={group.fields[0].path} className="settings-group"><h3>{group.title}</h3>
+        onChange={event => setDocument({ ...document, source: event.target.value })} /> : groups(draft).map((group, index) => ({ ...group, fields: group.fields.filter((field, fieldIndex) => index === 0 ? section === 'general' ? fieldIndex < 5 : section === 'advanced' && fieldIndex >= 5 : index === 1 ? section === 'budget' : section === 'advanced') })).filter(group => group.fields.length).map(group => <section key={group.fields[0].path} className="settings-group"><h3>{group.title}</h3>
         <div className="settings-grid">{group.fields.map(field => {
-          const value = Object.hasOwn(edits, field.path) ? edits[field.path] : atPath(document.form, field.path);
-          const change = (value: Json) => setEdits(previous => ({ ...previous, [field.path]: value }));
+          const value = atPath(draft, field.path);
+          const change = (value: Json) => setEdits(previous => field.kind === 'backend' ? transportEdit(document.form, previous, field.path, String(value)) : ({ ...previous, [field.path]: value }));
           return <label key={field.path} className={`field ${field.kind === 'checkbox' ? 'field-checkbox' : ''}`}><span>{field.label}</span>
             {field.kind === 'environment' ? <select value={String(value ?? '')} disabled={busy} onChange={event => change(event.target.value || null)}><option value="" disabled={Object.keys(environmentMap(document.form)).length > 0}>{t('settings-controller-only')}</option>{Object.entries(environmentMap(document.form)).map(([id, environment]) => <option key={id} value={id}>{String(environment.name ?? id)}</option>)}</select> :
               field.kind === 'provider' || field.kind === 'backend' ? <select value={String(value ?? '')} disabled={busy} onChange={event => change(event.target.value)}>{(field.kind === 'provider' ? ['openai', 'openai_responses', 'anthropic', 'ollama'] : field.options ?? ['docker', 'ssh']).map(option => <option key={option} value={option}>{option}</option>)}</select> :

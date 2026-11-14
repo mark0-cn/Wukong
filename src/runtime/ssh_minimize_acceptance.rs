@@ -400,7 +400,8 @@ async fn remote_installed_windows_worker_minimize_acceptance() -> Result<()> {
                 }
             }
             ensure!(
-                calls.call("input.minimize", request.clone()).await? == status,
+                calls.call("input.minimize", request.clone()).await? == started
+                    && terminal(&bound, &client, &acquire, &lease, job).await? == status,
                 "completed request executed again"
             );
             let mut conflict = request.clone();
@@ -411,7 +412,7 @@ async fn remote_installed_windows_worker_minimize_acceptance() -> Result<()> {
             );
             let (_, unchanged) = original(&bound, input["path"].as_str().unwrap()).await?;
             ensure!(unchanged == source, "original input was modified");
-            cases.push(json!({"architecture":architecture,"case":case,"request":request,"status":status,"evidence":proof}));
+            cases.push(json!({"architecture":architecture,"case":case,"request":request,"started":started,"status":status,"evidence":proof}));
         }
     }
     let owned = inventory(&bound).await?;
@@ -490,12 +491,19 @@ async fn remote_native_completed_minimize_recovery_acceptance() -> Result<()> {
             renewed.epoch == lease.epoch && renewed.token == lease.token,
             "recovery lease changed"
         );
-        let status = bound
+        let started = bound
             .call("input.minimize", case["request"].clone())
             .await?;
         ensure!(
-            status == case["status"],
+            started == case["started"],
             "recovery executed a previous candidate again"
+        );
+        let status = bound
+            .call("job.status", json!({"job_id":started["job_id"]}))
+            .await?;
+        ensure!(
+            status == case["status"],
+            "restart changed terminal minimization status"
         );
         let first = &case["evidence"]["trials"][0]["receipt"];
         // Input uploads are epoch-scoped. Recovery must read the durable

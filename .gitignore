@@ -1,6 +1,7 @@
 /target/
 /workers/windows/target/
 /workers/package/target/
+/workers/protocol/target/
 /work/
 /.wukong/
 /runs/
@@ -38,3 +39,6 @@ __pycache__/
 # Additional local configuration and state
 /re-agent.toml
 /.re-agent/
+
+# Local Python package build metadata
+*.egg-info/

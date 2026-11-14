@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Expose the existing 1-KiB to 8-MiB output limit through the shared shell, replay, minimization and verification contracts, so bounded requests reach both native Windows and Linux workers."
+zh_CN = "在共享 Shell、重放、最小化和验证契约中开放已有的 1 KiB 至 8 MiB 输出上限，使带输出限制的请求能够到达原生 Windows 和 Linux Worker。"

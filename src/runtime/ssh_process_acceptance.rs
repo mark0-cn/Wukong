@@ -102,13 +102,20 @@ async fn remote_native_completed_process_recovery_acceptance() -> Result<()> {
         );
         let cached = bound.call("job.start", json!({"argv":[case["input"]["path"],"--echo"],"request_id":format!("echo-{architecture}"),"call_id":format!("echo-{architecture}"),"timeout_secs":5})).await?;
         ensure!(
-            cached == case["echo"],
+            cached == case["started"],
             "completed start changed after service restart"
+        );
+        ensure!(
+            terminal(&bound, cached["job_id"].as_str().unwrap()).await? == case["echo"],
+            "restart changed completed process status"
         );
         let closed = bound
             .call("job.cancel", json!({"job_id":cached["job_id"]}))
             .await?;
-        ensure!(closed == cached, "cancel reopened completed native work");
+        ensure!(
+            closed == case["echo"],
+            "cancel reopened completed native work"
+        );
         let receipt = case["originals"]
             .as_array()
             .context("original artifacts missing")?
@@ -131,8 +138,13 @@ async fn remote_native_completed_process_recovery_acceptance() -> Result<()> {
             let input = &arguments["input"]["path"];
             let recovered = bound.call("job.start", json!({"argv":[case["input"]["path"],"--read-argument",input,input],"timeout_secs":5,"request_id":format!("argument-{architecture}")})).await?;
             ensure!(
-                recovered == arguments["status"],
+                recovered == arguments["started"],
                 "restart replayed or changed an argument-file job"
+            );
+            ensure!(
+                terminal(&bound, recovered["job_id"].as_str().unwrap()).await?
+                    == arguments["status"],
+                "restart changed argument-file status"
             );
             let receipt = &arguments["receipt"];
             let current = bound
@@ -238,6 +250,7 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
     let bound = client.with_lease(lease.clone());
     let mut evidence = Vec::new();
     let mut final_start = Value::Null;
+    let mut final_receipt = Value::Null;
     let mut final_id = String::new();
     for (architecture, probe) in profile.probes {
         let mut bytes = Vec::new();
@@ -267,8 +280,12 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
         );
         let duplicate = bound.call("job.start", request.clone()).await?;
         ensure!(
-            duplicate == status,
+            duplicate == started,
             "completed start retry changed its original result"
+        );
+        ensure!(
+            terminal(&bound, id).await? == status,
+            "start retry changed terminal process status"
         );
         let mut conflict = request.clone();
         conflict["argv"] = json!([uploaded["path"]]);
@@ -369,8 +386,13 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
                 .is_err(),
             "active native job did not block lease release"
         );
-        let queued_start = bound.call("job.start", json!({"argv":[uploaded["path"],"--echo"],"request_id":format!("queued-{architecture}")}));
-        tokio::pin!(queued_start);
+        // Keep the queued request polled while observing/cancelling the active
+        // resource. Suspending this future inside call_once can retain the
+        // serialized transport lock and deadlock the following lease query.
+        let queued_client = bound.clone();
+        let queued_request = json!({"argv":[uploaded["path"],"--echo"],"request_id":format!("queued-{architecture}")});
+        let mut queued_start =
+            tokio::spawn(async move { queued_client.call("job.start", queued_request).await });
         ensure!(
             tokio::time::timeout(Duration::from_millis(500), &mut queued_start)
                 .await
@@ -394,7 +416,7 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
             cancelled["state"] == "cancelled" && cancelled["result"]["jobs_empty"] == true,
             "native cancellation did not clean up: {cancelled}"
         );
-        let queued = queued_start.await?;
+        let queued = queued_start.await??;
         let queued = terminal(
             &bound,
             queued["job_id"].as_str().context("queued job ID absent")?,
@@ -480,13 +502,14 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
                         && files[0]["executable"] == false),
                 "duplicate argument references or data execution policy changed"
             );
-            json!({"input":input,"status":status,"output":output,"receipt":receipt})
+            json!({"input":input,"started":started,"status":status,"output":output,"receipt":receipt})
         } else {
             Value::Null
         };
-        evidence.push(json!({"architecture":architecture,"input":uploaded,"echo":status,"originals":originals,"deadline":timed_out,"cancelled":cancelled,"queued":queued,"cleanup_adversary":cleanup,"argument_files":arguments}));
+        evidence.push(json!({"architecture":architecture,"input":uploaded,"started":started,"echo":status,"originals":originals,"deadline":timed_out,"cancelled":cancelled,"queued":queued,"cleanup_adversary":cleanup,"argument_files":arguments}));
         final_start = request;
         final_id = id.to_owned();
+        final_receipt = started;
     }
     client
         .call("environment.lease.release", json!({"lease":lease}))
@@ -509,7 +532,8 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
     let rebound = client.with_lease(successor.clone());
     let cached = rebound.call("job.start", final_start).await?;
     ensure!(
-        cached["job_id"] == final_id && cached["state"] == "completed",
+        cached == final_receipt
+            && terminal(&rebound, &final_id).await? == evidence.last().unwrap()["echo"],
         "new controller epoch relaunched completed work or required new input bytes"
     );
     let observed_inventory = if profile.resource_inventory {

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow debugger sessions to select their target through a staged LaunchSpec. The controller verifies the launch and input artifacts before dispatch, and Linux derives target identity from the checked launch description."
+zh_CN = "允许调试会话通过已暂存的 LaunchSpec 选择目标。控制器在派发前核对启动描述和输入产物，Linux 从校验后的启动描述中确定目标身份。"

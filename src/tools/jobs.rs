@@ -13,7 +13,7 @@ pub(crate) struct JobService {
 impl JobService {
     #[cfg(test)]
     pub(crate) async fn refresh(&self, run: &str) -> Result<()> {
-        if self.gateway.client.is_none() {
+        if self.gateway.worker.is_none() {
             return Ok(());
         }
         for job in self.store.records::<JobRecord>(run)? {
@@ -54,10 +54,16 @@ impl JobService {
         } else {
             serde_json::from_value(
                 self.gateway
-                    .worker_query(agent, "job.status", json!({"job_id":job_id}))
+                    .worker_query(Request::JobStatus(serde_json::from_value(
+                        json!({"job_id":job.worker_resource_id}),
+                    )?))
                     .await?,
             )?
         };
+        ensure!(
+            status.job_id == job.worker_resource_id,
+            "worker returned another job identity"
+        );
         let raw = serde_json::to_value(&status)?;
         self.store.write(|tx| {
             let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
@@ -149,7 +155,20 @@ impl JobService {
                 tx.save_record(&current)
             })?;
         }
-        Ok(raw)
+        self.present(&job, raw)
+    }
+
+    pub(super) fn present(&self, job: &JobRecord, raw: Value) -> Result<Value> {
+        let mut status: JobStatus = serde_json::from_value(raw)?;
+        ensure!(
+            status.job_id == job.worker_resource_id,
+            "worker returned another job identity"
+        );
+        status
+            .extra
+            .insert("worker_job_id".into(), json!(status.job_id));
+        status.job_id = job.id.clone();
+        Ok(serde_json::to_value(status)?)
     }
 
     fn brief(job: &JobRecord, status: &JobStatus) -> Value {
@@ -158,7 +177,7 @@ impl JobService {
             .imported_artifacts
             .as_ref()
             .and_then(|value| value["artifacts"].as_array());
-        json!({"type":"job_completed","job_id":status.job_id,"tool":job.tool_name,"state":status.state,
+        json!({"type":"job_completed","job_id":job.id,"tool":job.tool_name,"state":status.state,
             "exit_code":result.and_then(|result|result.exit_code),"passed":result.and_then(|result|result.passed),
             "stdout":status.stdout.chars().take(400).collect::<String>(),"stderr":status.stderr.chars().take(200).collect::<String>(),
             "evidence_id":job.status_evidence_id,"artifact_evidence_ids":artifacts.map(|items|items.iter().take(8).map(|item|item["evidence_id"].clone()).collect::<Vec<_>>()),
@@ -200,7 +219,11 @@ impl JobService {
         }
         let artifacts = self
             .gateway
-            .worker_query(agent, "job.artifacts", json!({"job_id":job_id}))
+            .worker_query(Request::JobArtifacts(
+                wukong_worker_protocol::params::JobArtifactsArgs {
+                    job_id: job.worker_resource_id.clone(),
+                },
+            ))
             .await?;
         let mut imported = Vec::new();
         for artifact in artifacts
@@ -243,7 +266,6 @@ impl JobService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::RuntimeBackend;
 
     #[tokio::test]
     async fn automatic_and_manual_observations_share_evidence_and_nested_results() -> Result<()> {
@@ -261,8 +283,12 @@ mod tests {
                     platform: crate::environments::Platform::current(),
                     installation_id: None,
                     runtime: crate::runtime::RuntimeConfig {
-                        backend: RuntimeBackend::TrustedLocal,
-                        state_dir: dir.path().join("worker"),
+                        transport: crate::runtime::TransportConfig::TrustedLocal(
+                            crate::runtime::TrustedLocalConfig {
+                                state_dir: dir.path().join("worker"),
+                                ..Default::default()
+                            },
+                        ),
                         ..Default::default()
                     },
                 },
@@ -284,10 +310,8 @@ mod tests {
             )?
             .agent
             .metadata;
-        let tools = ToolService::new(config, store.clone())
-            .await?
-            .bound_to(&owner)
-            .await?;
+        let service = ToolService::new(config, store.clone()).await?;
+        let tools = service.bound_to(&owner).await?;
         let started = tools
             .execute(
                 &owner.id,
@@ -318,7 +342,14 @@ mod tests {
         );
         store.read_evidence(&run.id, text(&automatic, "status_evidence_id")?)?;
         let manual = tools.jobs().observe(&owner, "manual", job_id).await?;
-        assert_eq!(manual, automatic["status"]);
+        assert_eq!(manual["job_id"], job_id);
+        assert_eq!(manual["worker_job_id"], automatic["status"]["job_id"]);
+        assert_eq!(manual["result"], automatic["status"]["result"]);
+        let original: Value = serde_json::from_slice(
+            &store.read_evidence(&run.id, text(&automatic, "status_evidence_id")?)?,
+        )?;
+        assert_eq!(original, automatic["status"]);
+        assert!(original.get("worker_job_id").is_none());
         assert_eq!(
             store.require::<Value>("job", job_id)?["status_evidence_id"],
             automatic["status_evidence_id"]
@@ -371,6 +402,7 @@ mod tests {
         store.write(|tx| tx.put_metadata("agent", &next.id, &next.run_id, &next))?;
         let mut lost = automatic;
         lost["id"] = json!("lost");
+        lost["worker_resource_id"] = json!("lost");
         lost["status"]["job_id"] = json!("lost");
         lost["status"]["state"] = json!("lost");
         lost.as_object_mut()

@@ -10,6 +10,17 @@ This project implements Strix-inspired responsibilities and runtime semantics: r
 
 ## Modules and responsibilities
 
+Public execution uses JSON-RPC protocol v3 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
+
+Controller connections/configuration/identity/leases live under `src/runtime` and `src/environments`; `ToolContext` carries a bound worker into file/job/session/verification use cases. `WorkerGateway` retains stable request IDs and unmodified worker receipts. Those use cases translate resource IDs into controller ownership records. `src/effects` and `src/store` retain business receipts, evidence and notifications; the worker's execution ledger separately records external effects. A repeated session-start receipt cannot reopen a closed controller session or erase its transcript.
+
+Windows groups code into `host`, `resources`, `executors`, `artifacts`, `isolation` and `rpc`. `ResourceManager` alone serializes lifecycle admission, reservation and ticket-checked completion. Input preparation, execution waits and recovery run outside its state lock; active work remains owned when a caller disconnects. Explicit active-resource states distinguish startup, execution, finishing, closing and recovery. Executors return observations without writing the ledger. The host injects a verified runtime context; Windows API details stay in isolation. Internal sessions retain Prost/Protobuf.
+
+`workers/analysis` is a Python package with explicit inputs and no worker state or transport. Linux adapters retain confinement/live debugging; Windows disposable helpers use the same package. The Windows component inventory excludes Linux worker services/dependencies. Architecture guards live in `tests/automation/test_execution_boundaries.py`.
+
+The controller store requires schema 5, the Windows resource journal version 2 and package manifests schema 2. Older formats/protocols fail closed. Use new workspaces and worker instances for v3; there is no migration, automatic deletion or legacy configuration adapter. Existing directories and evidence stay intact. Current acceptance is recorded separately from historical results.
+
+
 Windows has one native worker authority. The controller owns business tasks/evidence, `workers/protocol` shares public types, and the native service owns capabilities, leases, files and resources. Python on Windows is a disposable isolated analysis tool; Linux retains its Python worker. See [cross-platform environments](cross-platform-environments.md) and the [current Windows component guide](../../workers/windows/README.md).
 
 | Module | Responsibility |
@@ -53,7 +64,7 @@ Within an active run, `follow_up_agent` (CLI `message --kind follow_up`) adds wo
 
 Children close owned debug/interactive sessions before finishing; root resolves all sessions. Other Agents in the same run may close abandoned sessions of stopped/failed owners, but cannot issue debug commands/interactive input.
 
-Native logs in `state_dir/rig/RUN_ID` contain model conversations, effects and provider metadata, not clients/credentials. Resolved provider/endpoint configuration is pinned before first model I/O and reused on resume. Per-role request output budgets do not overwrite model capacity. Keys use configured environment variables. Fresh tasks use schema 4; old databases/custom AgentRun checkpoints are not migrated.
+Native logs in `state_dir/rig/RUN_ID` contain model conversations, effects and provider metadata, not clients/credentials. Resolved provider/endpoint configuration is pinned before first model I/O and reused on resume. Per-role request output budgets do not overwrite model capacity. Keys use configured environment variables. Fresh tasks use schema 5; old databases/custom AgentRun checkpoints are not migrated.
 
 `DurableEffects` centralizes admission, stable identities, transactional/worker receipts and recovery. Business call IDs combine Agent, generation, metered model turn and provider tool-call ID, not reassigned ECS IDs. Business state/receipts commit together. Worker replies persist before controller postprocessing; missing replies are reconciled using the same request ID against the durable worker ledger. Uncertain MCP writes remain for operator reconciliation, never automatic replay. Operator reconciliation also uses epoch leases. Native effects/database changes wake execution.
 
@@ -149,7 +160,7 @@ conversation/context and journal, not that a model request ran or acted on it.
 correlated reply (not an assessment of correctness). Old-generation replies are
 retained as `stale` and never injected as current work. `message_status` exposes
 these states. In-flight model requests keep their original mailbox snapshot.
-This increment uses a fresh schema 4 store; no old-database migration is provided.
+This increment uses a fresh schema 5 store; no old-database migration is provided.
 Informational mail left on completed work becomes
 stale when a new generation starts. CLI messages default to information; GUI
 operator input defaults to information; the explicit follow-up option reopens completed work.

@@ -8,7 +8,7 @@ from pathlib import Path
 import argparse
 import json
 import os
-from worker_common import MAX_RPC, job_dir, rpc_error
+from worker_common import MAX_RPC, job_dir
 from worker_job_supervisor import supervise_job
 from worker_transport import ensure_daemon, relay_call, serve
 
@@ -37,18 +37,10 @@ def main():
             raw = sys.stdin.buffer.readline(MAX_RPC + 1)
             if not raw:
                 break
-            request = {}
-            try:
-                if len(raw) > MAX_RPC:
-                    raise ValueError("request exceeds size limit")
-                request = json.loads(raw)
-                response = relay_call(endpoint, request)
-            except Exception as error:
-                response = {"jsonrpc": "2.0", "id": request.get("id"), "error": rpc_error(error)}
-            # Explicit UTF-8 bytes, ASCII-escaped JSON: the console codec
-            # (e.g. GBK on Windows) must never be able to break a frame when
-            # a result carries replacement characters.
-            sys.stdout.buffer.write(json.dumps(response, ensure_ascii=True).encode("utf-8") + b"\n")
+            if len(raw) > MAX_RPC:
+                raise ValueError("request exceeds size limit")
+            response = relay_call(endpoint, raw)
+            sys.stdout.buffer.write(response)
             sys.stdout.buffer.flush()
     else:
         parser.error("select --stdio, --daemon or --run-job")

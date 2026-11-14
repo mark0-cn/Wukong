@@ -9,7 +9,6 @@ use jsonrpsee_core::client::{
     Client, ClientBuilder, ClientT, Error as RpcError, ReceivedMessage, TransportReceiverT,
     TransportSenderT,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
@@ -20,52 +19,8 @@ use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 pub mod protocol;
 pub mod ssh;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeBackend {
-    #[default]
-    Disabled,
-    TrustedLocal,
-    Docker,
-    Ssh,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct RuntimeConfig {
-    pub backend: RuntimeBackend,
-    pub state_dir: PathBuf,
-    pub python: String,
-    pub bridge_path: PathBuf,
-    pub docker_container: Option<String>,
-    pub docker_executable: String,
-    pub ssh_host: Option<String>,
-    pub ssh_executable: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub managed_ssh: Option<ssh::ManagedSsh>,
-    pub remote_bridge_path: String,
-    pub remote_state_dir: String,
-    pub request_timeout_secs: u64,
-}
-impl Default for RuntimeConfig {
-    fn default() -> Self {
-        Self {
-            backend: RuntimeBackend::Disabled,
-            state_dir: PathBuf::from(".wukong/worker"),
-            python: "python".into(),
-            bridge_path: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("workers/runtime/bridge.py"),
-            docker_container: None,
-            docker_executable: default_docker_executable(),
-            ssh_host: None,
-            ssh_executable: "ssh".into(),
-            managed_ssh: None,
-            remote_bridge_path: "/opt/wukong/runtime/bridge.py".into(),
-            remote_state_dir: "/state".into(),
-            request_timeout_secs: 300,
-        }
-    }
-}
+mod config;
+pub use config::*;
 
 pub(crate) fn default_docker_executable() -> String {
     #[cfg(windows)]
@@ -103,16 +58,12 @@ fn remote_quote(value: &str) -> String {
 
 impl RuntimeClient {
     pub async fn connect(config: RuntimeConfig) -> Result<Self> {
-        anyhow::ensure!(
-            config.managed_ssh.is_none() || config.backend == RuntimeBackend::Ssh,
-            "managed SSH settings cannot be used with another transport"
-        );
-        if config.backend == RuntimeBackend::TrustedLocal {
-            crate::cleanup::create_owned_directory(&config.state_dir)?;
+        if let TransportConfig::TrustedLocal(local) = &config.transport {
+            crate::cleanup::create_owned_directory(&local.state_dir)?;
         }
-        if config.backend == RuntimeBackend::Disabled {
+        if config.backend() == RuntimeBackend::Disabled {
             bail!(
-                "Execution worker is disabled. Configure Docker/SSH, or explicitly select trusted_local for trusted fixtures."
+                "Execution worker is disabled. Configure Docker/SSH, or trusted_local for trusted fixtures."
             );
         }
         let transport = Self::spawn_transport(&config)
@@ -136,9 +87,9 @@ impl RuntimeClient {
     /// directory, so a fresh transport observes the same jobs and sessions
     /// as the one it replaces.
     async fn spawn_transport(config: &RuntimeConfig) -> Result<Transport> {
-        let mut cmd = match config.backend {
-            RuntimeBackend::Disabled => unreachable!(),
-            RuntimeBackend::TrustedLocal => {
+        let mut cmd = match &config.transport {
+            TransportConfig::Disabled => unreachable!(),
+            TransportConfig::TrustedLocal(config) => {
                 let mut c = Command::new(&config.python);
                 c.arg(&config.bridge_path)
                     .arg("--state")
@@ -147,11 +98,8 @@ impl RuntimeClient {
                     .arg("--trusted-local");
                 c
             }
-            RuntimeBackend::Docker => {
-                let container = config
-                    .docker_container
-                    .as_deref()
-                    .context("docker_container is required")?;
+            TransportConfig::Docker(config) => {
+                let container = &config.docker_container;
                 if container.starts_with('-') {
                     bail!("invalid docker container");
                 }
@@ -168,41 +116,38 @@ impl RuntimeClient {
                 ]);
                 c
             }
-            RuntimeBackend::Ssh => {
-                if let Some(managed) = &config.managed_ssh {
-                    managed.command(
-                        &config.ssh_executable,
-                        config.ssh_host.as_deref().context("ssh_host is required")?,
-                    )?
-                } else {
-                    let host = config.ssh_host.as_deref().context("ssh_host is required")?;
-                    if host.starts_with('-') || host.contains(['\n', '\r']) {
-                        bail!("invalid ssh host");
-                    }
-                    let mut c = Command::new(&config.ssh_executable);
-                    c.args([
-                        "-T",
-                        "-a",
-                        "-x",
-                        "-o",
-                        "BatchMode=yes",
-                        "-o",
-                        "StrictHostKeyChecking=yes",
-                        "-o",
-                        "ClearAllForwardings=yes",
-                        "-o",
-                        "PermitLocalCommand=no",
-                        "--",
-                        host,
-                    ]);
-                    // OpenSSH passes a remote command through a shell; quote each path.
-                    c.arg(format!(
-                        "python3 {} --state {} --stdio",
-                        remote_quote(&config.remote_bridge_path),
-                        remote_quote(&config.remote_state_dir)
-                    ));
-                    c
+            TransportConfig::ManagedSsh(config) => config
+                .managed_ssh
+                .command(&config.ssh_executable, &config.ssh_host)?,
+            TransportConfig::Ssh(config) => {
+                let host = &config.ssh_host;
+
+                if host.starts_with('-') || host.contains(['\n', '\r']) {
+                    bail!("invalid ssh host");
                 }
+                let mut c = Command::new(&config.ssh_executable);
+                c.args([
+                    "-T",
+                    "-a",
+                    "-x",
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "StrictHostKeyChecking=yes",
+                    "-o",
+                    "ClearAllForwardings=yes",
+                    "-o",
+                    "PermitLocalCommand=no",
+                    "--",
+                    host,
+                ]);
+                // OpenSSH passes a remote command through a shell; quote each path.
+                c.arg(format!(
+                    "python3 {} --state {} --stdio",
+                    remote_quote(&config.remote_bridge_path),
+                    remote_quote(&config.remote_state_dir)
+                ));
+                c
             }
         };
         // Never forward model/provider secrets into an analysis worker.
@@ -271,7 +216,7 @@ impl RuntimeClient {
                     serde_json::from_value(reply["identity"].clone())
                         .context("worker handshake did not establish its identity")?;
                 identity.validate()?;
-                if let Some(managed) = &config.managed_ssh {
+                if let Some(managed) = config.managed_ssh() {
                     anyhow::ensure!(
                         identity.installation_id == managed.installation_id,
                         "SSH worker installation differs from its enrolled native identity"
@@ -315,7 +260,8 @@ impl RuntimeClient {
     /// failed request itself is never re-sent, so a timed-out side effect
     /// still follows the durable reconcile path instead of being replayed.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
-        let starts_resource = wukong_worker_protocol::starts_resource(method);
+        let starts_resource = wukong_worker_protocol::Method::parse(method)?.resources()
+            == wukong_worker_protocol::ResourceDemand::Execution;
         let deadline =
             tokio::time::Instant::now() + Duration::from_secs(self.config.request_timeout_secs);
         // Tokio's FIFO mutex orders new starts. Observation/close/lease calls do

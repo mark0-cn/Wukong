@@ -28,7 +28,7 @@ struct Profile {
 }
 
 const SOURCE: &str = r#"import hashlib, json, pathlib, subprocess, sys
-import filelock
+from wukong_analysis.validation import parse_address
 script = pathlib.Path(__file__)
 target = pathlib.Path(sys.argv[-1])
 denied = []
@@ -46,7 +46,8 @@ print(json.dumps(dict(argv=sys.argv[1:-1], isolated=sys.flags.isolated,
     source_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
     target_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
     python_sha256=hashlib.sha256(pathlib.Path(sys.executable).read_bytes()).hexdigest(),
-    denied=denied, child=child.stdout.decode('utf-8'), dependency=filelock.__version__), ensure_ascii=False))
+    denied=denied, child=child.stdout.decode('utf-8'),
+    dependency=dict(module=parse_address.__module__, parsed=parse_address('0x10'))), ensure_ascii=False))
 "#;
 
 #[derive(Deserialize)]
@@ -96,10 +97,15 @@ async fn remote_native_completed_python_recovery_acceptance() -> Result<()> {
     let bound = client.with_lease(lease.clone());
     let mut cached = Vec::new();
     for case in cases {
-        let status = bound.call("py.run", case["request"].clone()).await?;
+        let started = bound.call("py.run", case["request"].clone()).await?;
+        ensure!(
+            started == case["started"],
+            "completed Python source was replayed or changed"
+        );
+        let status = terminal(&bound, started["job_id"].as_str().unwrap()).await?;
         ensure!(
             status == case["status"],
-            "completed Python source was replayed or changed"
+            "restart changed terminal Python status"
         );
         let (artifact, data) = original(
             &bound,
@@ -261,7 +267,8 @@ async fn remote_installed_windows_worker_python_acceptance() -> Result<()> {
                         && observed["python_sha256"] == profile.python_sha256
                         && observed["denied"] == json!([true, true])
                         && observed["child"] == "wukong-worker-selftest\n"
-                        && observed["dependency"].is_string(),
+                        && observed["dependency"]
+                            == json!({"module":"wukong_analysis.validation","parsed":16}),
                     "Python interpreter/argument/file/child observation differs: {observed}"
                 );
             }
@@ -286,7 +293,8 @@ async fn remote_installed_windows_worker_python_acceptance() -> Result<()> {
             _ => unreachable!(),
         }
         ensure!(
-            calls.call("py.run", request.clone()).await? == status,
+            calls.call("py.run", request.clone()).await? == started
+                && terminal(&bound, id).await? == status,
             "Python retry changed completed work"
         );
         let mut conflict = request.clone();
@@ -295,7 +303,7 @@ async fn remote_installed_windows_worker_python_acceptance() -> Result<()> {
             calls.call("py.run", conflict).await.is_err(),
             "Python request ID accepted changed source"
         );
-        cases.push(json!({"name":name,"request":request,"status":status,"receipt":receipt,"artifact":artifact,"streams":streams}));
+        cases.push(json!({"name":name,"request":request,"started":started,"status":status,"receipt":receipt,"artifact":artifact,"streams":streams}));
     }
     let listing = calls.call("resource.list", json!({"limit":64})).await?;
     let resources = listing["resources"]

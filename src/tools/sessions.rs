@@ -10,6 +10,46 @@ fn session_lost(error: &anyhow::Error) -> bool {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_start_preserves_terminal_state_evidence_and_ownership() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("state"))?;
+        let target = temp.path().join("fixture.bin");
+        fs::write(&target, b"trusted inert fixture")?;
+        let coordinator = Coordinator::new(store.clone());
+        let run = coordinator.create_run(&target, "fixture", Budget::default(), json!({}))?;
+        let mut agent: AgentMetadata = store.get_record(&run.root_id)?.context("root missing")?;
+        for kind in [SessionKind::Debugger, SessionKind::Interactive] {
+            let raw = json!({"session_id":"worker-resource","state":"running"});
+            let mut record =
+                SessionsService::record_start(&store, "worker".into(), &agent, kind, &raw)?;
+            let created_at = record.created_at;
+            record.state = SessionState::Closed;
+            record.transcript_evidence_id = Some("original-transcript".into());
+            store.save_session(kind, &record)?;
+            let repeated =
+                SessionsService::record_start(&store, "worker".into(), &agent, kind, &raw)?;
+            assert_eq!(repeated.state, SessionState::Closed);
+            assert_eq!(repeated.created_at, created_at);
+            assert_eq!(
+                repeated.transcript_evidence_id,
+                record.transcript_evidence_id
+            );
+            assert_eq!(repeated.worker, Some(raw.clone()));
+            agent.run_id = "another-run".into();
+            assert!(
+                SessionsService::record_start(&store, "worker".into(), &agent, kind, &raw).is_err()
+            );
+            agent.run_id = run.id.clone();
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct SessionsService {
     pub(super) store: Store,
@@ -17,6 +57,56 @@ pub(super) struct SessionsService {
     pub(super) files: FilesService,
 }
 impl SessionsService {
+    fn record_start(
+        store: &Store,
+        worker_id: String,
+        agent: &AgentMetadata,
+        kind: SessionKind,
+        raw: &Value,
+    ) -> Result<SessionRecord> {
+        let handle: SessionHandle = serde_json::from_value(raw.clone())?;
+        let id = stable("session", &format!("{worker_id}:{}", handle.session_id));
+        store.write(|tx| {
+            if let Some(record) = tx.session(kind, &id)? {
+                ensure!(
+                    record.worker_resource_id == handle.session_id
+                        && record.worker_id == worker_id
+                        && record.run_id == agent.run_id
+                        && record.agent_id == agent.id,
+                    "session receipt belongs to another owner"
+                );
+                // A cached start receipt is historical evidence. Never reopen a closed
+                // session or discard observations imported after that receipt.
+                return Ok(record);
+            }
+            let record = SessionRecord {
+                id,
+                worker_resource_id: handle.session_id,
+                run_id: agent.run_id.clone(),
+                agent_id: agent.id.clone(),
+                worker_id,
+                state: handle.state,
+                worker: Some(raw.clone()),
+                transcript_evidence_id: None,
+                created_at: now(),
+                updated_at: now(),
+            };
+            tx.save_session(kind, &record)?;
+            Ok(record)
+        })
+    }
+    fn present(session: &SessionRecord, mut raw: Value) -> Result<Value> {
+        if let Some(id) = raw.get("session_id").and_then(Value::as_str) {
+            ensure!(
+                id == session.worker_resource_id,
+                "worker returned another session identity"
+            );
+            raw["worker_session_id"] = json!(session.worker_resource_id);
+            raw["session_id"] = json!(session.id);
+        }
+        Ok(raw)
+    }
+
     pub(super) fn authorize_session(
         &self,
         agent: &AgentMetadata,
@@ -43,7 +133,7 @@ impl SessionsService {
         agent: &AgentMetadata,
         call_id: &str,
         name: &str,
-        args: Value,
+        mut args: Value,
     ) -> Result<Value> {
         match name {
             "debug_command" | "debug_inspect" | "debug_control" | "debug_close"
@@ -70,25 +160,26 @@ impl SessionsService {
                     current == SessionState::Running,
                     "debug session is closed or lost"
                 );
+                args["session_id"] = json!(session.worker_resource_id);
                 let raw = match self
                     .gateway
                     .worker_call(
                         agent,
                         call_id,
-                        if name == "debug_close" {
-                            "debug.close"
+                        (if name == "debug_close" {
+                            Method::DebugClose
                         } else if name == "debug_profile" {
-                            "debug.profile"
+                            Method::DebugProfile
                         } else if name == "debug_snapshot" {
-                            "debug.snapshot"
+                            Method::DebugSnapshot
                         } else if name == "debug_inspect" {
-                            "debug.inspect"
+                            Method::DebugInspect
                         } else if name == "debug_control" {
-                            "debug.control"
+                            Method::DebugControl
                         } else {
-                            "debug.command"
-                        },
-                        args,
+                            Method::DebugCommand
+                        })
+                        .decode(args)?,
                     )
                     .await
                 {
@@ -117,7 +208,7 @@ impl SessionsService {
                     .gateway
                     .runtime()?
                     .call(
-                        "file.get",
+                        Method::FileGet.name(),
                         json!({"path":transcript,"max_bytes":8*1024*1024}),
                     )
                     .await?;
@@ -128,10 +219,25 @@ impl SessionsService {
                 }
                 session.updated_at = now();
                 self.store.save_session(SessionKind::Debugger, &session)?;
-                Ok(json!({"response":raw,"transcript_evidence_id":evidence.id}))
+                Ok(
+                    json!({"response":Self::present(&session, raw)?,"transcript_evidence_id":evidence.id}),
+                )
             }
             "debug_start" => {
-                self.files.known_file(agent, text(&args, "target")?, true)?;
+                if let Some(target) = args["target"].as_str() {
+                    self.files.known_file(agent, target, true)?;
+                } else {
+                    ensure!(
+                        args["launch_spec"].is_string(),
+                        "debugger requires a staged target or LaunchSpec"
+                    );
+                }
+                if let Some(launch) = args["launch_spec"].as_str() {
+                    self.files.known_file(agent, launch, false)?;
+                }
+                if let Some(input) = args["input"].as_str() {
+                    self.files.known_file(agent, input, false)?;
+                }
                 let dump_mode = args["mode"].as_str() == Some("dump");
                 ensure!(
                     dump_mode == args["dump"].is_string(),
@@ -142,24 +248,20 @@ impl SessionsService {
                 }
                 let raw = self
                     .gateway
-                    .worker_call(agent, call_id, "debug.start", args)
+                    .worker_call(
+                        agent,
+                        call_id,
+                        Request::DebugStart(serde_json::from_value(args)?),
+                    )
                     .await?;
-                let handle: SessionHandle = serde_json::from_value(raw.clone())?;
-                let session_id = handle.session_id.as_str();
-                let record = SessionRecord {
-                    id: session_id.into(),
-                    worker_resource_id: text(&raw, "worker_session_id")?.into(),
-                    run_id: agent.run_id.clone(),
-                    agent_id: agent.id.clone(),
-                    worker_id: self.gateway.worker_identity()?,
-                    state: handle.state,
-                    worker: Some(raw.clone()),
-                    transcript_evidence_id: None,
-                    created_at: now(),
-                    updated_at: now(),
-                };
-                self.store.save_session(SessionKind::Debugger, &record)?;
-                Ok(raw)
+                let record = Self::record_start(
+                    &self.store,
+                    self.gateway.worker_identity()?,
+                    agent,
+                    SessionKind::Debugger,
+                    &raw,
+                )?;
+                Self::present(&record, raw)
             }
             "interactive_start" => {
                 ensure!(
@@ -168,24 +270,20 @@ impl SessionsService {
                 );
                 let raw = self
                     .gateway
-                    .worker_call(agent, call_id, "interact.start", args)
+                    .worker_call(
+                        agent,
+                        call_id,
+                        Request::InteractStart(serde_json::from_value(args)?),
+                    )
                     .await?;
-                let handle: SessionHandle = serde_json::from_value(raw.clone())?;
-                let session_id = handle.session_id.as_str();
-                let record = SessionRecord {
-                    id: session_id.into(),
-                    worker_resource_id: text(&raw, "worker_session_id")?.into(),
-                    run_id: agent.run_id.clone(),
-                    agent_id: agent.id.clone(),
-                    worker_id: self.gateway.worker_identity()?,
-                    state: handle.state,
-                    worker: Some(raw.clone()),
-                    transcript_evidence_id: None,
-                    created_at: now(),
-                    updated_at: now(),
-                };
-                self.store.save_session(SessionKind::Interactive, &record)?;
-                Ok(raw)
+                let record = Self::record_start(
+                    &self.store,
+                    self.gateway.worker_identity()?,
+                    agent,
+                    SessionKind::Interactive,
+                    &raw,
+                )?;
+                Self::present(&record, raw)
             }
             "interactive_send" | "interactive_close" | "interactive_profile" => {
                 let session_id = text(&args, "session_id")?.to_owned();
@@ -212,19 +310,20 @@ impl SessionsService {
                         || (name == "interactive_close" && current == SessionState::Exited),
                     "interactive session is closed or lost"
                 );
+                args["session_id"] = json!(session.worker_resource_id);
                 let raw = match self
                     .gateway
                     .worker_call(
                         agent,
                         call_id,
-                        if name == "interactive_close" {
-                            "interact.close"
+                        (if name == "interactive_close" {
+                            Method::InteractClose
                         } else if name == "interactive_profile" {
-                            "interact.profile"
+                            Method::InteractProfile
                         } else {
-                            "interact.write"
-                        },
-                        args,
+                            Method::InteractWrite
+                        })
+                        .decode(args)?,
                     )
                     .await
                 {
@@ -235,7 +334,7 @@ impl SessionsService {
                         // and block agent_finish forever.
                         let lost = session_lost(&error);
                         if name == "interactive_close" && lost {
-                            json!({"session_id":session_id,"state":"lost","reconciled":true})
+                            json!({"session_id":session.worker_resource_id,"state":"lost","reconciled":true})
                         } else {
                             return Err(error);
                         }
@@ -253,7 +352,7 @@ impl SessionsService {
                 session.updated_at = now();
                 self.store
                     .save_session(SessionKind::Interactive, &session)?;
-                Ok(raw)
+                Self::present(&session, raw)
             }
             _ => bail!("unknown session tool: {name}"),
         }

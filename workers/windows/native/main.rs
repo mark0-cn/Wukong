@@ -9,7 +9,7 @@ fn main() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
     #[cfg(windows)]
     if args.len() == 5 && args[1] == "resource-session" {
-        return wukong_windows_worker::session_host::run(
+        return wukong_windows_worker::executors::session_host::run(
             args[2].to_str().context("invalid session installation")?,
             Path::new(&args[3]),
             Path::new(&args[4]),
@@ -17,7 +17,7 @@ fn main() -> Result<()> {
     }
     #[cfg(windows)]
     if args.len() == 5 && args[1] == "resource-recover" {
-        let result = wukong_windows_worker::resource_recovery::run(
+        let result = wukong_windows_worker::resources::resource_recovery::run(
             args[2].to_str().context("invalid recovery installation")?,
             Path::new(&args[3]),
             Path::new(&args[4]),
@@ -27,7 +27,7 @@ fn main() -> Result<()> {
     }
     #[cfg(windows)]
     if args.len() == 5 && args[1] == "resource-execute" {
-        let result = wukong_windows_worker::resource_process::run(
+        let result = wukong_windows_worker::executors::resource_process::run(
             args[2]
                 .to_str()
                 .context("invalid native process installation")?,
@@ -39,7 +39,7 @@ fn main() -> Result<()> {
     }
     #[cfg(windows)]
     if args.len() == 5 && args[1] == "resource-selftest" {
-        let report = wukong_windows_worker::resource_host::selftest(
+        let report = wukong_windows_worker::host::resource_host::selftest(
             args[2].to_str().context("invalid resource installation")?,
             Path::new(&args[3]),
             args[4].to_str().context("invalid qualification identity")?,
@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     }
     #[cfg(windows)]
     if args.len() == 8 && args[1] == "isolation-probe" {
-        let report = wukong_windows_worker::resource_host::probe(
+        let report = wukong_windows_worker::host::resource_host::probe(
             Path::new(&args[2]),
             Path::new(&args[3]),
             args[4].to_str().context("invalid probe port")?.parse()?,
@@ -68,15 +68,15 @@ fn main() -> Result<()> {
     }
     #[cfg(windows)]
     if args.len() == 1 {
-        let result = wukong_windows_worker::setup_ui::review();
+        let result = wukong_windows_worker::host::setup_ui::review();
         if let Err(error) = &result {
-            wukong_windows_worker::setup_ui::failure(error);
+            wukong_windows_worker::host::setup_ui::failure(error);
         }
         return result;
     }
     #[cfg(windows)]
     if args.len() == 5 && args[1] == "install-elevated" {
-        return wukong_windows_worker::setup_ui::elevated(
+        return wukong_windows_worker::host::setup_ui::elevated(
             Path::new(&args[2]),
             &PublicKey::from_hex(args[3].to_str().context("invalid controller key")?)?,
             args[4]
@@ -86,7 +86,7 @@ fn main() -> Result<()> {
     }
     #[cfg(windows)]
     if args.len() == 5 && args[1] == "install-reviewed" {
-        let result = wukong_windows_worker::setup_ui::install_reviewed(
+        let result = wukong_windows_worker::host::setup_ui::install_reviewed(
             Path::new(&args[2]),
             &PublicKey::from_hex(args[3].to_str().context("invalid pinned controller key")?)?,
             args[4]
@@ -104,12 +104,12 @@ fn main() -> Result<()> {
             Path::new(&args[2]),
             &key,
             &Compatibility {
-                runtime_protocol: 2,
+                runtime_protocol: 3,
                 controller_version: controller,
             },
         )?;
         let enrollment =
-            wukong_windows_worker::deployment::read_enrollment(Path::new(&args[3]), &key)?;
+            wukong_windows_worker::host::deployment::read_enrollment(Path::new(&args[3]), &key)?;
         enrollment.bind_payload(&package)?;
         println!(
             "{}",
@@ -119,7 +119,7 @@ fn main() -> Result<()> {
     }
     #[cfg(windows)]
     if args.len() == 4 && args[1] == "service" {
-        return wukong_windows_worker::service::dispatch(
+        return wukong_windows_worker::host::service::dispatch(
             args[2].to_str().context("invalid installation ID")?,
             Path::new(&args[3]),
         );
@@ -130,7 +130,7 @@ fn main() -> Result<()> {
         return tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
-            .block_on(wukong_windows_worker::service::relay(installation));
+            .block_on(wukong_windows_worker::host::service::relay(installation));
     }
     ensure!(
         args.len() == 5 && args[1] == "verify-package",
@@ -144,7 +144,7 @@ fn main() -> Result<()> {
         Path::new(&args[2]),
         &key,
         &Compatibility {
-            runtime_protocol: 2,
+            runtime_protocol: 3,
             controller_version: controller,
         },
     )?;
