@@ -1195,13 +1195,14 @@
             ]
           },
           "target": {
+            "description": "Staged target image; may be omitted when launch_spec owns the target.",
             "minLength": 1,
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
-        "required": [
-          "target"
-        ],
         "title": "DebugStartArgs",
         "type": "object"
       },

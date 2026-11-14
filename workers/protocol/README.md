@@ -6,6 +6,8 @@ Verification expectations match only populated predicates. Omitted or null optio
 
 `job.list` and `resource.list` accept an optional exclusive `after` cursor and a `limit` of 1–64 (default 64). Job IDs are returned in ascending order; continue after the last ID until an empty page. Resource pages also expose `next_after`. Linux job inventory honors the same cursor and bounds as native Windows.
 
+`debug.start` can select a staged `target` or a staged `launch_spec`; the controller checks every supplied launch/input artifact against the current run. A native Windows LaunchSpec owns the target and arguments, so omit per-call `target` and `args` in that mode. The default debugger mode is `launch` and the default engine is `auto`. Linux derives the original target hash from the checked LaunchSpec before resolving its execution environment.
+
 This crate owns the public operation identifiers, request types, resource observations, request context, errors and capacity contract. It depends on neither the controller nor a platform worker. JSON-RPC envelopes are handled by jsonrpsee on Windows and jsonrpcserver on Linux. SSH and stdio remain transports; private native sessions use Protobuf.
 
 `src/methods.rs` declares each operation's input/output types, effect policy and resource demand. Platform registries bind those operations to actual handlers and readiness. The model tool catalog declares required operations directly; it does not infer them from tool names.

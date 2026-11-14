@@ -15,9 +15,13 @@ use std::collections::BTreeMap;
 fn auto() -> String {
     "auto".into()
 }
+fn launch_mode() -> String {
+    "launch".into()
+}
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Start {
+    #[serde(default = "launch_mode")]
     pub(crate) mode: String,
     #[serde(default = "auto")]
     pub(crate) engine: String,
@@ -131,4 +135,23 @@ fn session(request_id: &str, kind: ResourceKind, specification: Value) -> Result
             Ok(crate::executors::plan::Target::Session(request))
         }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launch_spec_owns_debugger_target_and_defaults_to_launch() -> Result<()> {
+        let request = json!({"launch_spec":"files/probe/launch.json","request_id":"launch"});
+        let plan = debugger(request.as_object().unwrap())?;
+        assert_eq!(plan.specification["debugger"]["mode"], "launch");
+        assert_eq!(plan.specification["debugger"]["engine"], "auto");
+        assert_eq!(plan.specification["process"]["argv"], json!([]));
+        let mut override_target = request.clone();
+        override_target["target"] = json!("files/other.exe");
+        assert!(debugger(override_target.as_object().unwrap()).is_err());
+        assert!(debugger(json!({"request_id":"empty"}).as_object().unwrap()).is_err());
+        Ok(())
+    }
 }

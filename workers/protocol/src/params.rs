@@ -122,8 +122,10 @@ pub struct DebugStartArgs {
     /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_spec: Option<String>,
+    /// Staged target image; may be omitted when launch_spec owns the target.
     #[schemars(length(min = 1))]
-    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
 }

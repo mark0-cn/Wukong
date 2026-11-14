@@ -422,5 +422,26 @@
       "unexpected": 1
     },
     "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "debug.start",
+    "value": {
+      "mode": "launch",
+      "engine": "dbgeng",
+      "launch_spec": "files/probe/launch.json"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "debug.start",
+    "value": {
+      "mode": "dump",
+      "engine": "dbgeng",
+      "launch_spec": "files/probe/launch.json",
+      "dump": "files/probe.dmp"
+    },
+    "valid": true
   }
 ]

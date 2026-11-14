@@ -6,6 +6,8 @@
 
 `job.list` 和 `resource.list` 接受可选的排他性 `after` 游标，以及 1–64 的 `limit`（默认 64）。作业 ID 按升序返回；使用最后一项 ID 继续查询，直到出现空页。资源分页还提供 `next_after`。Linux 作业清单遵循与原生 Windows 相同的游标语义和范围限制。
 
+`debug.start` 可通过已暂存的 `target` 或 `launch_spec` 选择目标；控制器会核对所有提供的启动描述及输入产物均属于当前任务。原生 Windows 的 LaunchSpec 负责目标和参数，因此此模式下应省略单次调用的 `target` 和 `args`。调试器默认模式为 `launch`，默认引擎为 `auto`。Linux 在解析执行环境前，从校验后的 LaunchSpec 中确定原始目标哈希。
+
 本 crate 负责公共方法标识、请求类型、资源观察、请求上下文、错误和容量契约，不依赖控制器或平台 Worker。Windows 的 JSON-RPC 信封由 jsonrpsee 处理，Linux 则使用 jsonrpcserver。SSH 和 stdio 仍是传输方式；原生内部会话使用 Protobuf。
 
 `src/methods.rs` 声明每个方法的输入／输出类型、副作用策略和资源需求。平台注册目录将这些方法绑定到实际处理器及其就绪条件。模型工具目录直接声明所需方法，不再通过工具名称推断。

@@ -224,7 +224,20 @@ impl SessionsService {
                 )
             }
             "debug_start" => {
-                self.files.known_file(agent, text(&args, "target")?, true)?;
+                if let Some(target) = args["target"].as_str() {
+                    self.files.known_file(agent, target, true)?;
+                } else {
+                    ensure!(
+                        args["launch_spec"].is_string(),
+                        "debugger requires a staged target or LaunchSpec"
+                    );
+                }
+                if let Some(launch) = args["launch_spec"].as_str() {
+                    self.files.known_file(agent, launch, false)?;
+                }
+                if let Some(input) = args["input"].as_str() {
+                    self.files.known_file(agent, input, false)?;
+                }
                 let dump_mode = args["mode"].as_str() == Some("dump");
                 ensure!(
                     dump_mode == args["dump"].is_string(),
