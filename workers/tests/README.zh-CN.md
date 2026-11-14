@@ -4,6 +4,8 @@
 
 [English](README.md) · 简体中文
 
+`remote_installed_windows_worker_shell_acceptance` 使用 `WUKONG_REMOTE_WORKER_SHELL_TEST`，包含托管 SSH `config`、预期 `manifest_sha256`、新的绝对 `output` 及恰好 `x64`/`x86` 两个 `probes`（绝对 `path` 和固定 `sha256`）。八个可信用例覆盖 CMD 内建命令、相对 cwd/环境、引号与 stderr 重定向、非零退出、有界输出及 x64/x86 目标管道/超时。同步执行等待期间，夹具查询资源清单并续租；终态检查绑定原始凭据/输出哈希、已确认清理、原请求重试及更改命令被拒绝。独立观察服务重启后，`remote_native_completed_shell_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_SHELL_RECOVERY_TEST`，包含 `config`、固定的 `previous` 报告（`path`/`sha256`）及新的绝对 `output`；不上传或执行，比较全部原结果、产物及清单。普通测试忽略这两个夹具。已安装资格验收待完成，生产执行仍禁用。
+
 现有中断夹具也接受 `replay: true` 的宿主/服务故障，要求 `resource_inventory: true`，且不得同时设置 `python` 或 `launch_spec`。它准入三次 `poc.verify` 试验，将封存 stdin 交给可信标记探针；操作端核对受保护计划、首次试验 scratch 身份、实际进程与标记后，才中断第一次试验。共享的只查询 guardian 观察器必须观察到清理完成。控制器要求 `kind=verify`、结果未知的 lost 状态、原请求重试完全一致、修改试验次数被拒绝，以及之后可以成功执行。两种情况已在源码 `2aaa155` 的已安装包通过；其他试验边界的中断仍未经资格验收。见 [Windows 资格记录](../windows/README.zh-CN.md)。
 
 `remote_installed_windows_worker_replay_acceptance` 使用 `WUKONG_REMOTE_WORKER_REPLAY_TEST`，提供托管 SSH `config`、预期 `manifest_sha256`、新的绝对路径 `output`，以及恰好 `x64`/`x86` 两项 `probes`（绝对 `path` 与固定 `sha256`）。它复用包内可信进程探针检查 12 个原生回放资源：重复原生异常、阴性结果、精确二进制 stdin、超时、取消及 LaunchSpec 输入。它核对每次试验的新身份、原始回执/输出哈希、完成后重试/冲突行为及已关闭清单。独立观察服务重启后，`remote_native_completed_replay_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_REPLAY_RECOVERY_TEST`，提供 `config`、固定哈希的 `previous` 报告（`path`/`sha256`）和新的绝对路径 `output`；不上传、不执行，只比较全部原状态及产物哈希。普通测试显式忽略这些夹具；指定已安装 VM 用例及已完成结果恢复在源码 `2aaa155` 通过，身份与限制见 [Windows 资格记录](../windows/README.zh-CN.md)。它们共享现有控制器传输、输入、清单及产物辅助方法。

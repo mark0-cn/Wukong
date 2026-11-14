@@ -242,7 +242,13 @@ mod recovery;
 mod replay;
 #[path = "resource_runtime_session.rs"]
 mod session;
-pub(crate) use session::Dispatch;
+#[path = "resource_runtime_shell.rs"]
+mod shell;
+pub(crate) enum Dispatch {
+    Ready(Value),
+    Session(Box<session::Pending>),
+    Command(Box<shell::Pending>),
+}
 pub(crate) struct Runtime {
     root: PathBuf,
     executable: PathBuf,
@@ -288,6 +294,7 @@ impl Runtime {
                 | "interact.start"
                 | "interact.write"
                 | "interact.close"
+                | "exec.run"
                 | "job.start"
                 | "py.run"
                 | "crash.replay"
@@ -302,6 +309,29 @@ impl Runtime {
                 .get("path")
                 .and_then(Value::as_str)
                 .is_some_and(|path| path.starts_with("native-results/"))
+    }
+    pub(crate) fn prepare_rpc(
+        &mut self,
+        journal: &mut Journal,
+        inputs: Option<&Inputs>,
+        owner: &Owner,
+        method: &str,
+        params: &Map<String, Value>,
+    ) -> Result<Dispatch> {
+        if method.starts_with("debug.") || method.starts_with("interact.") {
+            return self.prepare_session(journal, inputs, owner, method, params);
+        }
+        if method == "exec.run" {
+            self.poll(journal)?;
+            return self.start_shell(
+                journal,
+                inputs.context("native shell input store missing")?,
+                owner,
+                params,
+            );
+        }
+        self.call(journal, inputs, owner, method, params)
+            .map(Dispatch::Ready)
     }
     pub(crate) fn call(
         &mut self,
@@ -658,7 +688,8 @@ impl Runtime {
         fn tail(bytes: &[u8]) -> String {
             String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(4096)..]).into()
         }
-        let value = json!({"job_id":id,"kind":"process","state":state,"native_owner":request.owner,"stdout":tail(&streams[0]),"stderr":tail(&streams[1]),"result":{"exit_code":exit,"stop_reason":reason,"stdout_sha256":result["stdout_sha256"],"stderr_sha256":result["stderr_sha256"],"stdin_written":result["stdin_written"],"stdin_complete":result["stdin_complete"],"stdin_error":result["stdin_error"],"native_receipt_sha256":hex::encode(Sha256::digest(&bytes)),"jobs_empty":true,"profiles_removed":true,"scratch_removed":true},"production_execution":false});
+        let value = json!({"job_id":id,"kind":"process","state":state,"native_owner":request.owner,"stdout":tail(&streams[0]),"stderr":tail(&streams[1]),"result":{"exit_code":exit,"stop_reason":reason,"stdout_sha256":result["stdout_sha256"],"stderr_sha256":result["stderr_sha256"],"stdin_written":result["stdin_written"],"stdin_complete":result["stdin_complete"],"stdin_error":result["stdin_error"],"native_receipt_sha256":hex::encode(Sha256::digest(&bytes)),"jobs_empty":true,"profiles_removed":true,"scratch_removed":true,
+            "duration_secs":result["duration_secs"],"output_bytes_retained":{"stdout":streams[0].len(),"stderr":streams[1].len()},"output_truncated":reason == "output_limit" || streams.iter().any(|stream|stream.len()>4096)},"production_execution":false});
         self.retain(
             &self.result_path(id, "status.json"),
             &serde_json::to_vec(&value)?,

@@ -347,16 +347,33 @@ impl Inputs {
             "Python source must be nonempty UTF-8 <=256 KiB without NUL"
         );
         let sha256 = hex::encode(Sha256::digest(source.as_bytes()));
+        self.generated(
+            owner,
+            crate::resource_process::Interpreter::Python.source_path(&sha256),
+            source.as_bytes().to_vec(),
+        )
+    }
+    pub(crate) fn shell_command(&self, owner: &Owner, value: &Value) -> Result<Reference> {
+        let bytes = serde_json::to_vec(value)?;
+        let sha256 = hex::encode(Sha256::digest(&bytes));
+        self.generated(owner, format!("files/native-shell/{sha256}.json"), bytes)
+    }
+    fn generated(&self, owner: &Owner, path: String, data: Vec<u8>) -> Result<Reference> {
+        wukong_worker_package::validate_path(&path)?;
+        ensure!(
+            data.len() <= MAX_PUT,
+            "generated native input exceeds 32 MiB"
+        );
         let put = Put {
             declaration: Declaration {
                 schema: 1,
                 owner: owner.clone(),
-                path: crate::resource_process::Interpreter::Python.source_path(&sha256),
-                sha256,
-                size: source.len() as u64,
+                path,
+                sha256: hex::encode(Sha256::digest(&data)),
+                size: data.len() as u64,
                 executable: false,
             },
-            data: source.as_bytes().to_vec(),
+            data,
         };
         self.prepare(&put)?;
         self.publish_receipt(&put.declaration)?;

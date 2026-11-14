@@ -134,26 +134,7 @@ impl Request {
                 .is_none_or(|input| input.size <= 32 * 1024 * 1024),
             "native process stdin exceeds 32 MiB"
         );
-        ensure!(
-            self.environment.len() <= 64,
-            "too many native process environment overrides"
-        );
-        for (key, value) in &self.environment {
-            let approved = matches!(key.as_str(), "ASAN_OPTIONS" | "UBSAN_OPTIONS")
-                || key
-                    .strip_prefix("AFL_")
-                    .or_else(|| key.strip_prefix("QEMU_"))
-                    .is_some_and(|name| {
-                        !name.is_empty()
-                            && name
-                                .bytes()
-                                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
-                    });
-            ensure!(
-                approved && value.len() <= 4096 && !value.contains('\0'),
-                "native process environment override is not permitted"
-            );
-        }
+        validate_environment(&self.environment)?;
         ResourceLimits::new(self.processes, self.memory_bytes)?;
         if let Some(replay) = &self.replay {
             replay.validate(self)?;
@@ -164,6 +145,30 @@ impl Request {
         );
         Ok(())
     }
+}
+
+pub(crate) fn validate_environment(environment: &BTreeMap<String, String>) -> Result<()> {
+    ensure!(
+        environment.len() <= 64,
+        "too many native process environment overrides"
+    );
+    for (key, value) in environment {
+        let approved = matches!(key.as_str(), "ASAN_OPTIONS" | "UBSAN_OPTIONS")
+            || key
+                .strip_prefix("AFL_")
+                .or_else(|| key.strip_prefix("QEMU_"))
+                .is_some_and(|name| {
+                    !name.is_empty()
+                        && name
+                            .bytes()
+                            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+                });
+        ensure!(
+            approved && value.len() <= 4096 && !value.contains('\0'),
+            "native process environment override is not permitted"
+        );
+    }
+    Ok(())
 }
 
 /// This is an internal System host entry, not a metadata-worker execution API.
@@ -245,7 +250,9 @@ pub(crate) fn execute_one(
 /// Publish full binary-output evidence only after successful owned cleanup.
 /// The service reads this protected slot; target output never reaches its log.
 pub fn run(installation: &str, configuration: &Path, request: &Path) -> Result<serde_json::Value> {
-    let value = execute(installation, configuration, request)?;
+    let started = std::time::Instant::now();
+    let mut value = execute(installation, configuration, request)?;
+    value["duration_secs"] = serde_json::json!(started.elapsed().as_secs_f64());
     let (_, root) = deployment::load(configuration)?;
     let directory = root.join("metadata/resource-results");
     let policy = AclPolicy::private_vm();

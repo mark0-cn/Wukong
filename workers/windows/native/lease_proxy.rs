@@ -408,6 +408,7 @@ impl LeaseProxy {
                     "job.start"
                         | "debug.start"
                         | "interact.start"
+                        | "exec.run"
                         | "py.run"
                         | "crash.replay"
                         | "poc.verify"
@@ -441,21 +442,42 @@ impl LeaseProxy {
             // The journal, not a discarded RPC future, retains an unfinished
             // native side effect and its cleanup blocker.
             admission.completed = true;
-            let pending = match result? {
-                Dispatch::Ready(value) => {
-                    return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":value}));
-                }
-                Dispatch::Session(pending) => pending,
-            };
+            let prepared = result?;
             drop(resources);
             drop(inputs);
-            let completed = pending.exchange().await;
-            let mut resources = self.resources.lock().await;
-            let Resources { journal, runtime } = &mut *resources;
-            let value = runtime
-                .as_mut()
-                .context("native resource runtime vanished")?
-                .complete_session(journal, completed)?;
+            let value = match prepared {
+                Dispatch::Ready(value) => value,
+                Dispatch::Session(pending) => {
+                    let completed = pending.exchange().await;
+                    let mut resources = self.resources.lock().await;
+                    let Resources { journal, runtime } = &mut *resources;
+                    runtime
+                        .as_mut()
+                        .context("native resource runtime vanished")?
+                        .complete_session(journal, completed)?
+                }
+                Dispatch::Command(pending) => {
+                    tokio::time::timeout(Duration::from_secs(300), async {
+                        let mut ticks = tokio::time::interval(Duration::from_millis(100));
+                        loop {
+                            ticks.tick().await;
+                            let mut resources = self.resources.lock().await;
+                            let Resources { journal, runtime } = &mut *resources;
+                            if let Some(value) = runtime
+                                .as_mut()
+                                .context("native resource runtime vanished")?
+                                .poll_command(journal, &pending)?
+                            {
+                                return Ok::<_, anyhow::Error>(value);
+                            }
+                        }
+                    })
+                    .await
+                    .context(
+                        "native command observation timed out; reconcile its original resource",
+                    )??
+                }
+            };
             return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":value}));
         }
         let input = if let Some(inputs) = &inputs {

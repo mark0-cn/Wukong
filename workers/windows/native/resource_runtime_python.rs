@@ -83,25 +83,8 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resource_runtime::tests::owner;
+    use crate::resource_runtime::tests::{fixture, owner};
     use std::io::Read;
-
-    fn fixture() -> Result<(tempfile::TempDir, Journal, Inputs, Runtime)> {
-        let root = tempfile::tempdir()?;
-        let policy = AclPolicy::current_user()?;
-        policy.apply(root.path(), true)?;
-        let journal = Journal::with_policy(root.path(), owner().identity, policy.clone())?;
-        let inputs = Inputs::open(root.path(), policy)?;
-        let runtime = Runtime {
-            root: root.path().into(),
-            executable: root.path().join("never-execute"),
-            installation: owner().identity.installation_id,
-            running: None,
-            recovery: None,
-            session: None,
-        };
-        Ok((root, journal, inputs, runtime))
-    }
 
     #[test]
     fn interrupted_python_reuses_intent_without_admitting_successor_source() -> Result<()> {

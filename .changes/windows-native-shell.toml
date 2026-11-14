@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Run bounded Windows shell commands through the existing contained Python/process resource and Windows CMD. Reuse immutable input admission, owned Job cleanup and durable request retries; return hashed output artifacts after cleanup. Commands and environment are sealed data, and waiting for a reply leaves lease renewal available. Dedicated VM qualification is pending; production execution remains disabled."
+zh_CN = "通过现有的受限 Python/进程资源及 Windows CMD 执行有界 shell 命令。复用不可变输入准入、所属 Job 清理和持久请求重试；清理后返回具有哈希的输出产物。命令及环境作为已封存数据传递，等待回复时仍可续租。专用 VM 资格验收待完成；生产执行仍禁用。"

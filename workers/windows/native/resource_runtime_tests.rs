@@ -1,4 +1,21 @@
 use super::*;
+pub(super) fn fixture() -> Result<(tempfile::TempDir, Journal, Inputs, Runtime)> {
+    let root = tempfile::tempdir()?;
+    let policy = AclPolicy::current_user()?;
+    policy.apply(root.path(), true)?;
+    let journal = Journal::with_policy(root.path(), owner().identity, policy.clone())?;
+    let inputs = Inputs::open(root.path(), policy)?;
+    let runtime = Runtime {
+        root: root.path().into(),
+        executable: root.path().join("never-execute"),
+        installation: owner().identity.installation_id,
+        running: None,
+        recovery: None,
+        session: None,
+    };
+    Ok((root, journal, inputs, runtime))
+}
+
 pub(super) fn owner() -> Owner {
     Owner {
         identity: crate::lease_proxy::Identity {

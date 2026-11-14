@@ -7,11 +7,6 @@ use crate::{
     session_wire::{self, request::Operation},
 };
 
-pub(crate) enum Dispatch {
-    Ready(Value),
-    Session(Box<Pending>),
-}
-
 pub(crate) struct Pending {
     resource: String,
     ticket: Option<Ticket>,
@@ -98,7 +93,7 @@ fn cached(reservation: Reservation) -> Result<Value> {
     }
 }
 impl Runtime {
-    pub(crate) fn prepare_rpc(
+    pub(super) fn prepare_session(
         &mut self,
         journal: &mut Journal,
         inputs: Option<&Inputs>,
@@ -106,11 +101,6 @@ impl Runtime {
         method: &str,
         params: &Map<String, Value>,
     ) -> Result<Dispatch> {
-        if !method.starts_with("debug.") && !method.starts_with("interact.") {
-            return self
-                .call(journal, inputs, owner, method, params)
-                .map(Dispatch::Ready);
-        }
         self.poll(journal)?;
         if method == "interact.start" {
             return self.start_interactive(

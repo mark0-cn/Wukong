@@ -252,6 +252,9 @@ mod python_acceptance;
 #[path = "ssh_replay_acceptance.rs"]
 mod replay_acceptance;
 #[cfg(test)]
+#[path = "ssh_shell_acceptance.rs"]
+mod shell_acceptance;
+#[cfg(test)]
 mod tests {
     use super::*;
     /// The installer fixture retains its hosted-machine isolation checks.
