@@ -144,7 +144,14 @@ async fn remote_installed_windows_worker_shell_acceptance() -> Result<()> {
                 == ["x64", "x86"],
         "shell fixture profile differs"
     );
-    let client = RuntimeClient::connect(profile.config).await?;
+    let client = RuntimeClient::connect(profile.config.clone()).await?;
+    // RuntimeClient serializes each transport. Observe pending execution and
+    // renew its lease through a genuinely independent controller connection.
+    let observer = RuntimeClient::connect(profile.config).await?;
+    ensure!(
+        observer.identity() == client.identity(),
+        "shell observer binding differs"
+    );
     ensure!(
         client.identity().package_sha256 == profile.manifest_sha256,
         "shell package differs"
@@ -176,6 +183,7 @@ async fn remote_installed_windows_worker_shell_acceptance() -> Result<()> {
     )?;
     lease.validate(&run, "shell-controller-fixture", client.identity())?;
     let bound = client.with_lease(lease.clone());
+    let observed = observer.with_lease(lease.clone());
     let mut requests = vec![
         (
             "builtin".to_owned(),
@@ -230,9 +238,9 @@ async fn remote_installed_windows_worker_shell_acceptance() -> Result<()> {
             let (status, observation) =
                 tokio::join!(calls.call("exec.run", request.clone()), async {
                     tokio::time::sleep(Duration::from_millis(500)).await;
-                    let listing = bound.call("resource.list", json!({"limit":64})).await?;
+                    let listing = observed.call("resource.list", json!({"limit":64})).await?;
                     let renewed: EnvironmentLease = serde_json::from_value(
-                        client
+                        observer
                             .call("environment.lease.acquire", acquire.clone())
                             .await?,
                     )?;
@@ -357,6 +365,7 @@ async fn remote_installed_windows_worker_shell_acceptance() -> Result<()> {
             == cases.len(),
         "shell resource count differs"
     );
+    observer.close().await?;
     client
         .call("environment.lease.release", json!({"lease":lease}))
         .await?;

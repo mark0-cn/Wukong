@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Keep native CMD execution in its owned working directory by converting Windows extended drive paths to CMD's drive syntax. Pass stdin, stdout and stderr explicitly through Python's subprocess library so hidden child commands preserve their existing pipes."
+zh_CN = "将 Windows 扩展盘符路径转换为 CMD 支持的盘符语法，保证原生 CMD 在所属工作目录执行。通过 Python subprocess 库显式传递 stdin、stdout 和 stderr，使隐藏子命令保留现有管道。"

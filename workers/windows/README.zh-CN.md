@@ -2,6 +2,8 @@
 
 [English](README.md) · 简体中文
 
+shell 适配器向 `subprocess` 显式传入三个现有标准流，并将已准入的本地盘符 cwd 从 Windows 扩展语法转换为普通盘符语法。缺少这些步骤时，隐藏子进程的输出可能丢失，CMD 会把 `\\?\` 当成 UNC 并退回 Windows 目录。本地可信回归测试覆盖普通及扩展路径；VM 中的受限诊断复现了两种故障，并确认修正后的 cwd/标准流、引号及清理行为。这些诊断不替代重新构建的签名包资格验收，后者仍待完成。
+
 原生 `exec.run` 现在复用现有受限 Python/进程资源。固定且已封存的 Python 适配器使用标准库 `subprocess` 调用 Windows `System32/cmd.exe /d /s /c`，没有增加第二套进程监督器或命令解析器。命令文本、相对 cwd 和已批准的环境覆盖作为独立不可变 JSON 数据传递，用户文本不能成为解释器参数或适配器源码。可选 `target` 必须是已准入可执行文件，通过 `%TARGET%` 暴露；`%WUKONG_STATE_DIR%` 表示新建的所属 scratch 根，`%WUKONG_JOB_DIR%` 表示所选 cwd。环境覆盖复用现有 ASAN/UBSAN/AFL/QEMU 允许列表。使用 CMD 语法，不选择 PowerShell 或 Bash。API 准入 1–65,536 个不含 NUL 的字符，但仍受 CMD 自身命令行限制；失败直接返回，不改写命令。
 
 现有 Job 实施 1–120 秒执行超时及 stdout/stderr 合计 1 KiB–8 MiB 输出预算（默认 30 秒、1 MiB）。同步回复等待进程/Job/persona/scratch 清理确认，包含 `resource_id`、退出码、宿主执行与清理耗时、4 KiB 输出尾部、保留字节数及完整哈希凭据/输出产物引用。非零退出为 `failed`，到期为 `timed_out`。中断结果保持 `lost`/未知，不伪造输出或自动重放。原请求重试先复用原资源，再决定是否准入新输入；同一 ID 更改命令/cwd/环境/目标/限额会被拒绝。等待使用 Tokio，在两次观察之间释放输入/资源锁，允许继续续租。本地测试覆盖无效输入、大型封存配置、原作用域重试及已完成结果观察；原生库测试和控制端/worker Clippy 已通过。已安装 VM 资格验收仍待完成，生产执行仍禁用。

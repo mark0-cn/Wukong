@@ -8,7 +8,10 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as source:
     configuration = json.load(source)
 
-state = Path.cwd()
+# CMD treats the extended-length prefix as a UNC cwd and falls back to Windows.
+# The resource host admits local drive paths; keep that same directory in CMD's
+# ordinary drive syntax. No path lookup or permission is relaxed here.
+state = Path(os.getcwd().removeprefix("\\\\?\\"))
 target = str((state / sys.argv[2]).resolve()) if len(sys.argv) == 3 else None
 directory = state / configuration["cwd"]
 directory.mkdir(parents=True, exist_ok=True)
@@ -29,6 +32,9 @@ result = subprocess.run(
     executable=shell,
     cwd=directory,
     env=environment,
+    stdin=sys.stdin,
+    stdout=sys.stdout,
+    stderr=sys.stderr,
     creationflags=subprocess.CREATE_NO_WINDOW,
 )
 raise SystemExit(result.returncode)
