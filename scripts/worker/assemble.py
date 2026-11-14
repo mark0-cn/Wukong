@@ -20,6 +20,10 @@ from scripts.worker.build_debugger import BINARY as DEBUGGER_BINARY, validate as
 BINARIES = ["wukong-worker.exe", "wukong-package.exe"]
 SUPPLEMENTAL_LICENSES = {
     ("fixture3-ddmin", "0.1.1"): ROOT / "workers/windows/licenses/fixture3-ddmin-0.1.1/LICENSE",
+    ("jsonrpsee-core", "0.26.1"): ROOT / "workers/windows/licenses/jsonrpsee-0.26.1/LICENSE",
+    ("jsonrpsee-types", "0.26.1"): ROOT / "workers/windows/licenses/jsonrpsee-0.26.1/LICENSE",
+    ("uuid-simd", "0.8.0"): ROOT / "workers/windows/licenses/simd-0.8.0/LICENSE",
+    ("vsimd", "0.8.0"): ROOT / "workers/windows/licenses/simd-0.8.0/LICENSE",
 }
 
 
