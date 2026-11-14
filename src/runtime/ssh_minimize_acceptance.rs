@@ -1,0 +1,363 @@
+//! Actual installed minimization, using only the pinned development probes.
+use super::{
+    debugger_acceptance::Calls,
+    inventory_acceptance::inventory,
+    launch_acceptance::{bytes, original, upload},
+    process_acceptance::Probe,
+    process_fault_acceptance::publish,
+    tests::{enrolled_fixture_address, read_fixture_profile},
+};
+use crate::runtime::{RuntimeClient, RuntimeConfig, protocol::EnvironmentLease};
+use anyhow::{Context, Result, ensure};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::PathBuf,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Profile {
+    config: RuntimeConfig,
+    manifest_sha256: String,
+    probes: BTreeMap<String, Probe>,
+    output: PathBuf,
+}
+
+async fn terminal(
+    bound: &RuntimeClient,
+    client: &RuntimeClient,
+    acquire: &Value,
+    lease: &EnvironmentLease,
+    job: &str,
+) -> Result<Value> {
+    let deadline = Instant::now() + Duration::from_secs(150);
+    let mut renewed = Instant::now();
+    loop {
+        if renewed.elapsed() > Duration::from_secs(5) {
+            let next: EnvironmentLease = serde_json::from_value(
+                client
+                    .call("environment.lease.acquire", acquire.clone())
+                    .await?,
+            )?;
+            ensure!(
+                next.epoch == lease.epoch && next.token == lease.token,
+                "minimization lease changed"
+            );
+            renewed = Instant::now();
+        }
+        let status = bound.call("job.status", json!({"job_id":job})).await?;
+        if matches!(
+            status["state"].as_str(),
+            Some("completed" | "failed" | "cancelled" | "lost")
+        ) {
+            return Ok(status);
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "minimization did not terminate: {status}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+async fn evidence(
+    client: &RuntimeClient,
+    status: &Value,
+    target: &Value,
+    source: &[u8],
+) -> Result<Value> {
+    let id = status["job_id"]
+        .as_str()
+        .context("minimization job missing")?;
+    let result = &status["result"];
+    let (artifact, raw) = original(client, &format!("native-results/{id}/receipt")).await?;
+    ensure!(
+        artifact["sha256"] == result["native_receipt_sha256"],
+        "minimization receipt hash differs"
+    );
+    let receipt: Value = serde_json::from_slice(&raw)?;
+    ensure!(
+        receipt["scope"] == "native_minimize_host"
+            && receipt["owner"] == status["native_owner"]
+            && receipt["jobs_empty"] == true
+            && receipt["profiles_removed"] == true
+            && receipt["scratch_removed"] == true,
+        "minimization cleanup or owner differs"
+    );
+    let rows = receipt["trials"]
+        .as_array()
+        .context("minimization trials missing")?;
+    ensure!(
+        result["attempts"] == rows.len() && result["original_size"] == source.len(),
+        "minimization counts differ"
+    );
+    let mut personas = BTreeSet::new();
+    let mut proofs = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let (metadata, bytes) =
+            original(client, row["path"].as_str().context("trial path missing")?).await?;
+        ensure!(
+            metadata["sha256"] == row["sha256"],
+            "trial receipt hash differs"
+        );
+        let proof: Value = serde_json::from_slice(&bytes)?;
+        let (_, data) = original(
+            client,
+            row["input_path"]
+                .as_str()
+                .context("candidate path missing")?,
+        )
+        .await?;
+        ensure!(
+            proof["input"]["sha256"] == hex::encode(Sha256::digest(&data))
+                && proof["trial"] == index
+                && proof["request_sha256"] == receipt["request_sha256"]
+                && proof["native"]["program"]["sha256"] == target["sha256"]
+                && proof["native"]["jobs_empty"] == true
+                && proof["native"]["profiles_removed"] == true
+                && proof["native"]["scratch_removed"] == true,
+            "candidate identity or cleanup differs"
+        );
+        ensure!(
+            personas.insert(
+                proof["native"]["scratch_nonce"]
+                    .as_str()
+                    .context("candidate persona missing")?
+                    .to_owned()
+            ),
+            "candidate reused an earlier persona"
+        );
+        if index == 0 {
+            ensure!(data == source, "baseline changed original input");
+        }
+        if proof["observation"].is_object() && !proof["observation"]["location_signature"].is_null()
+        {
+            ensure!(
+                proof["observation"]["exception"]["exception"]["first_chance"] == false
+                    && proof["observation"]["pc_location"]["module_sha256"] == target["sha256"]
+                    && proof["observation"]["exception_code"] == proof["native"]["exit_code"],
+                "strong observation did not bind an unhandled native crash to admitted content"
+            );
+            let (transcript, content) =
+                original(client, &format!("native-results/{id}/trial-{index}-mcp")).await?;
+            let mut triage = false;
+            for line in content
+                .split(|b| *b == b'\n')
+                .filter(|line| !line.is_empty())
+            {
+                let call: Value = serde_json::from_slice(line)?;
+                triage |= call["tool"] == "exception_triage" && call["result"]["isError"] != true;
+            }
+            ensure!(triage, "strong observation has no original MCP triage");
+            proofs.push(json!({"artifact":metadata,"receipt":proof,"transcript":transcript}));
+        } else {
+            proofs.push(json!({"artifact":metadata,"receipt":proof}));
+        }
+    }
+    let output = if let Some(path) = result["artifact"]["path"].as_str() {
+        let (artifact, data) = original(client, path).await?;
+        ensure!(
+            artifact["sha256"] == result["artifact"]["sha256"],
+            "minimized bytes changed"
+        );
+        Some((artifact, data))
+    } else {
+        None
+    };
+    Ok(json!({"artifact":artifact,"receipt":receipt,"trials":proofs,"output":output}))
+}
+
+#[tokio::test]
+#[ignore = "requires the dedicated offline VM with installed native minimization and signed x64/x86 probes"]
+async fn remote_installed_windows_worker_minimize_acceptance() -> Result<()> {
+    let profile: Profile = read_fixture_profile("WUKONG_REMOTE_WORKER_MINIMIZE_TEST")?;
+    enrolled_fixture_address(&profile.config, false)?;
+    ensure!(
+        profile.output.is_absolute()
+            && !profile.output.try_exists()?
+            && profile
+                .probes
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                == ["x64", "x86"],
+        "minimization profile differs"
+    );
+    let client = RuntimeClient::connect(profile.config).await?;
+    ensure!(
+        client.identity().package_sha256 == profile.manifest_sha256,
+        "minimization package differs"
+    );
+    ensure!(
+        client
+            .call(
+                "input.minimize",
+                json!({"target":"files/missing","input":"files/missing","request_id":"unleased"})
+            )
+            .await
+            .is_err(),
+        "unleased minimization was admitted"
+    );
+    let run = format!(
+        "native-minimize-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    );
+    let acquire = json!({"run_id":run,"owner_id":"minimization-controller-fixture"});
+    let lease: EnvironmentLease = serde_json::from_value(
+        client
+            .call("environment.lease.acquire", acquire.clone())
+            .await?,
+    )?;
+    lease.validate(&run, "minimization-controller-fixture", client.identity())?;
+    let bound = client.with_lease(lease.clone());
+    let mut calls = Calls {
+        client: &bound,
+        log: fs::File::create_new(profile.output.with_extension("jsonl"))?,
+        count: 0,
+    };
+    let mut cases = Vec::new();
+    for (architecture, probe) in &profile.probes {
+        let base = format!("minimize-fixture/{architecture}");
+        let target = upload(&bound, &format!("{base}/target.exe"), &bytes(probe)?, true).await?;
+        for case in [
+            "strong",
+            "stdin",
+            "launch",
+            "empty",
+            "budget",
+            "weak",
+            "negative",
+            "unresolved",
+            "cancel",
+            "deadline",
+        ] {
+            let next: EnvironmentLease = serde_json::from_value(
+                client
+                    .call("environment.lease.acquire", acquire.clone())
+                    .await?,
+            )?;
+            ensure!(
+                next.epoch == lease.epoch && next.token == lease.token,
+                "lease renewal differs"
+            );
+            let source: &[u8] = match case {
+                "negative" => b"safe",
+                "unresolved" => b"CRASH-padding",
+                _ => &[0x5a, 0xa5],
+            };
+            let input = upload(&bound, &format!("{base}/{case}.bin"), source, false).await?;
+            let id = format!("{architecture}-{case}");
+            let mut request = json!({"target":target["path"],"input":input["path"],"args":["--minimize","@@"],
+                "timeout_secs":10,"minimize_timeout_secs":100,"max_attempts":64,"output_limit":4096,
+                "request_id":id,"call_id":id});
+            match case {
+                "stdin" => {
+                    request["args"] = json!(["--minimize", "-"]);
+                    request["input_mode"] = json!("stdin");
+                }
+                "empty" => request["args"] = json!(["--minimize-empty", "@@"]),
+                "budget" => request["max_attempts"] = json!(1),
+                "weak" => request["allow_signal_only"] = json!(true),
+                "unresolved" => request["args"] = json!(["--replay", "@@"]),
+                "cancel" | "deadline" => {
+                    request["args"] = json!(["@@"]);
+                    request["timeout_secs"] = json!(30);
+                    request["minimize_timeout_secs"] =
+                        json!(if case == "deadline" { 1 } else { 100 });
+                }
+                "launch" => {
+                    let spec = json!({"schema_version":1,"base":format!("files/{base}"),"target":"target.exe",
+                        "files":{"target.exe":probe.sha256},"args":["--minimize","@@"],"cwd":"work/nested",
+                        "input_mode":"argv_file","env":{},"timeout_secs":10,"service":{"mode":"offline"}});
+                    request["launch_spec"] = upload(
+                        &bound,
+                        &format!("{base}/launch.json"),
+                        &serde_json::to_vec(&spec)?,
+                        false,
+                    )
+                    .await?["path"]
+                        .clone();
+                    request.as_object_mut().unwrap().remove("args");
+                }
+                _ => {}
+            }
+            let started = calls.call("input.minimize", request.clone()).await?;
+            let job = started["job_id"]
+                .as_str()
+                .context("minimization job missing")?;
+            if case == "cancel" {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                calls.call("job.cancel", json!({"job_id":job})).await?;
+            }
+            let status = terminal(&bound, &client, &acquire, &lease, job).await?;
+            let failed = matches!(case, "negative" | "unresolved" | "deadline");
+            ensure!(
+                status["state"]
+                    == if case == "cancel" {
+                        "cancelled"
+                    } else if failed {
+                        "failed"
+                    } else {
+                        "completed"
+                    },
+                "{architecture}/{case} minimization outcome differs: {status}"
+            );
+            let proof = evidence(&bound, &status, &target, source).await?;
+            if !failed && case != "cancel" {
+                let expected: &[u8] = match case {
+                    "budget" => source,
+                    "empty" => &[],
+                    "weak" => &[0x5a],
+                    _ => &[0xa5],
+                };
+                let output: Vec<u8> = serde_json::from_value(proof["output"][1].clone())?;
+                ensure!(
+                    output == expected
+                        && status["result"]["complete"] == (case != "budget")
+                        && status["result"]["signature_strength"]
+                            == if case == "weak" {
+                                "signal_only"
+                            } else {
+                                "location_and_frames"
+                            },
+                    "{case} reduced bytes, completion or equivalence differ"
+                );
+            }
+            ensure!(
+                calls.call("input.minimize", request.clone()).await? == status,
+                "completed request executed again"
+            );
+            let mut conflict = request.clone();
+            conflict["max_attempts"] = json!(2);
+            ensure!(
+                calls.call("input.minimize", conflict).await.is_err(),
+                "request ID admitted different minimization"
+            );
+            let (_, unchanged) = original(&bound, input["path"].as_str().unwrap()).await?;
+            ensure!(unchanged == source, "original input was modified");
+            cases.push(json!({"architecture":architecture,"case":case,"request":request,"status":status,"evidence":proof}));
+        }
+    }
+    let owned = inventory(&bound).await?;
+    ensure!(
+        owned["resources"].as_array().is_some_and(
+            |rows| rows.len() == cases.len() && rows.iter().all(|row| row["phase"] == "closed")
+        ),
+        "minimization resources remain open"
+    );
+    client
+        .call("environment.lease.release", json!({"lease":lease}))
+        .await?;
+    client.close().await?;
+    publish(
+        &profile.output,
+        &json!({"passed":true,"scope":"installed_native_input_minimization",
+        "identity":client.identity(),"owner":acquire,"epoch":lease.epoch,"calls":calls.count,
+        "cases":cases,"inventory":owned,"production_execution":false}),
+    )
+}

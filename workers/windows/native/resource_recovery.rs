@@ -56,7 +56,7 @@ fn owned_personas(record: &ResourceRecord) -> Result<Vec<(Role, String)>> {
     let installation = &record.owner.identity.installation_id;
     let replay: Option<crate::resource_replay::Configuration> =
         serde_json::from_value(record.specification["replay"].clone())?;
-    let mut personas = if let Some(replay) = replay {
+    let mut personas = if let Some(replay) = &replay {
         replay.validate()?;
         ensure!(
             record.kind == ResourceKind::Process && record.specification["interpreter"].is_null(),
@@ -76,6 +76,22 @@ fn owned_personas(record: &ResourceRecord) -> Result<Vec<(Role, String)>> {
             resource_process::nonce(installation, &record.id)?,
         )]
     };
+    if let Some(minimize) = replay
+        .as_ref()
+        .and_then(|replay| replay.minimization.as_ref())
+        && !minimize.allow_signal_only
+    {
+        for trial in 0..minimize.max_attempts {
+            personas.push((
+                Role::Target,
+                crate::resource_minimize::target_nonce(installation, &record.id, trial)?,
+            ));
+            personas.push((
+                Role::Debugger,
+                crate::resource_minimize::debugger_nonce(installation, &record.id, trial)?,
+            ));
+        }
+    }
     if record.kind == ResourceKind::Debugger {
         personas.push((
             Role::Debugger,

@@ -240,6 +240,9 @@ mod inventory_acceptance;
 #[path = "ssh_launch_acceptance.rs"]
 mod launch_acceptance;
 #[cfg(test)]
+#[path = "ssh_minimize_acceptance.rs"]
+mod minimize_acceptance;
+#[cfg(test)]
 #[path = "ssh_process_acceptance.rs"]
 mod process_acceptance;
 #[cfg(test)]

@@ -16,6 +16,9 @@ struct Parameters {
     #[serde(default = "default_output")]
     output_limit: usize,
     trials: Option<u8>,
+    max_attempts: Option<u16>,
+    minimize_timeout_secs: Option<u64>,
+    allow_signal_only: Option<bool>,
     expected: Option<Expected>,
     producer_agent_id: Option<String>,
     verifier_agent_id: Option<String>,
@@ -27,14 +30,40 @@ impl Parameters {
                 && (1024..=8 * 1024 * 1024).contains(&self.output_limit),
             "replay deadline/output bound differs"
         );
+        let minimization = if kind == Kind::Minimize {
+            ensure!(
+                self.trials.is_none() && self.expected.is_none(),
+                "minimization owns candidate trials and crash equivalence"
+            );
+            Some(crate::resource_minimize::Configuration {
+                max_attempts: self.max_attempts.unwrap_or(128),
+                timeout_secs: self.minimize_timeout_secs.unwrap_or(300),
+                allow_signal_only: self.allow_signal_only.unwrap_or(false),
+            })
+        } else {
+            ensure!(
+                self.max_attempts.is_none()
+                    && self.minimize_timeout_secs.is_none()
+                    && self.allow_signal_only.is_none(),
+                "replay cannot accept minimization options"
+            );
+            None
+        };
         let config = Configuration {
             kind,
             target: self.target.clone(),
             input: self.input.clone(),
             input_mode: self.input_mode,
-            trials: self
-                .trials
-                .unwrap_or(if kind == Kind::Verify { 3 } else { 1 }),
+            trials: minimization.as_ref().map_or_else(
+                || {
+                    u16::from(
+                        self.trials
+                            .unwrap_or(if kind == Kind::Verify { 3 } else { 1 }),
+                    )
+                },
+                |minimization| minimization.max_attempts,
+            ),
+            minimization,
             expected: self.expected,
             call_id: request_id.into(),
             producer_agent_id: self.producer_agent_id,
@@ -116,15 +145,28 @@ impl Runtime {
         let id = &request.resource_id;
         let path = self.result_path(id, "json");
         AclPolicy::private_vm().verify(&path, false)?;
-        let bytes = deployment::read_bytes(&path, 65536)?;
+        let minimizing = request
+            .replay
+            .as_ref()
+            .is_some_and(|replay| replay.configuration.minimization.is_some());
+        let bytes =
+            deployment::read_bytes(&path, if minimizing { 4 * 1024 * 1024 } else { 65536 })?;
         let receipt: Value = serde_json::from_slice(&bytes)?;
-        let mut result = crate::resource_replay::summarize(request, &receipt, |index| {
-            let path = self.result_path(id, &format!("trial-{index}.json"));
-            AclPolicy::private_vm().verify(&path, false)?;
-            deployment::read_bytes(&path, 12 * 1024 * 1024)
-        })?;
+        let mut result = if minimizing {
+            crate::resource_minimize::summarize(request, &receipt, |suffix| {
+                let path = self.result_path(id, suffix);
+                AclPolicy::private_vm().verify(&path, false)?;
+                deployment::read_bytes(&path, 32 * 1024 * 1024)
+            })?
+        } else {
+            crate::resource_replay::summarize(request, &receipt, |index| {
+                let path = self.result_path(id, &format!("trial-{index}.json"));
+                AclPolicy::private_vm().verify(&path, false)?;
+                deployment::read_bytes(&path, 12 * 1024 * 1024)
+            })?
+        };
         result["native_receipt_sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
-        let status = json!({"job_id":id,"kind":request.kind(),"state":if receipt["cancelled"] == true {"cancelled"} else {"completed"},
+        let status = json!({"job_id":id,"kind":request.kind(),"state":if receipt["cancelled"] == true {"cancelled"} else if minimizing && !receipt["failed"].is_null() {"failed"} else {"completed"},
             "native_owner":request.owner,"result":result,"production_execution":false});
         self.retain(
             &self.result_path(id, "status.json"),
@@ -187,6 +229,44 @@ mod tests {
         });
         request.validate()?;
         Ok((spec, config, request))
+    }
+    #[test]
+    fn minimization_admission_validates_budgets_and_rejects_ignored_replay_fields() -> Result<()> {
+        let (_root, mut journal, inputs, mut runtime) = fixture()?;
+        for (key, value) in [
+            ("max_attempts", json!(0)),
+            ("max_attempts", json!(4097)),
+            ("minimize_timeout_secs", json!(0)),
+            ("minimize_timeout_secs", json!(3601)),
+            ("trials", json!(1)),
+            ("expected", json!({"exit_code":0})),
+        ] {
+            let mut params = parameters();
+            params[key] = value;
+            assert!(
+                runtime
+                    .start_replay(
+                        &mut journal,
+                        &inputs,
+                        &owner(),
+                        Kind::Minimize,
+                        params.as_object().unwrap()
+                    )
+                    .is_err(),
+                "accepted {key}"
+            );
+            assert!(journal.idle()?);
+        }
+        let (_, params): (_, Parameters) = start_parameters(parameters().as_object().unwrap())?;
+        let (_, settings) = params.plan(Kind::Minimize, "minimal-once")?;
+        assert_eq!(settings.trials, 128);
+        assert!(!settings.minimization.unwrap().allow_signal_only);
+        let mut params = parameters();
+        params["max_attempts"] = json!(4096);
+        let (_, params): (_, Parameters) = start_parameters(params.as_object().unwrap())?;
+        let (_, settings) = params.plan(Kind::Minimize, "maximal-once")?;
+        assert_eq!(settings.trials, 4096);
+        Ok(())
     }
     #[test]
     fn interrupted_replay_id_keeps_original_scope_and_never_admits_a_new_trial() -> Result<()> {
@@ -445,6 +525,95 @@ mod tests {
             json!({"stdout_contains":"\u{1}".repeat(4096)}),
         )?);
         assert!(bounded.validate().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn minimization_summary_requires_a_verified_original_candidate_and_unchanged_output()
+    -> Result<()> {
+        let (_root, _journal, inputs, _runtime) = fixture()?;
+        upload(&inputs, "known.exe", b"inert fixture", true)?;
+        upload(&inputs, "input.bin", b"A", false)?;
+        let (_, _, mut request) = prepared(&inputs, parameters())?;
+        let replay = request.replay.as_mut().unwrap();
+        replay.configuration.kind = Kind::Minimize;
+        replay.configuration.trials = 1;
+        replay.configuration.minimization = Some(crate::resource_minimize::Configuration {
+            max_attempts: 1,
+            timeout_secs: 30,
+            allow_signal_only: true,
+        });
+        request.validate()?;
+        let input = request.replay.as_ref().unwrap().input.clone();
+        let empty = hex::encode(Sha256::digest([]));
+        let hash = hex::encode(Sha256::digest(b"A"));
+        let candidate = crate::resource_input::Reference {
+            id: crate::inputs::digest(&(
+                "native.minimize.candidate.v1",
+                &request.resource_id,
+                0u16,
+                &hash,
+            ))?,
+            ..input
+        };
+        let native = json!({"schema":1,"scope":"native_process_host","resource_id":request.resource_id,
+            "owner":request.owner,"program":request.program,"interpreter":null,"argument_files":request.argument_files,
+            "launch":null,"input":null,"request_sha256":crate::inputs::digest(&request)?,
+            "pid":100,"execution_started":true,"exit_code":3221225477_u32,"stop_reason":"exited",
+            "stdout_base64":"","stderr_base64":"","stdout_sha256":empty,"stderr_sha256":empty,
+            "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"trial":0,
+            "scratch_nonce":crate::resource_replay::nonce(&owner().identity.installation_id,&request.resource_id,0)?});
+        let trial = json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,
+            "request_sha256":crate::inputs::digest(&request)?,"trial":0,"input":candidate,"native":native,
+            "resolved":true,"crashed":true,"crash_signature":"exception:0xc0000005"});
+        let bytes = serde_json::to_vec(&trial)?;
+        let receipt = json!({"schema":1,"scope":"native_minimize_host","resource_id":request.resource_id,
+            "owner":request.owner,"request_sha256":crate::inputs::digest(&request)?,
+            "trials":[{"trial":0,"sha256":hex::encode(Sha256::digest(&bytes)),
+                "path":format!("native-results/{}/trial-0",request.resource_id),
+                "input_path":format!("native-results/{}/trial-0-input",request.resource_id)}],
+            "attempts":1,"original_size":1,"minimized_size":1,"artifact":{
+                "path":format!("native-results/{}/minimized",request.resource_id),"sha256":hash,"size":1},
+            "complete":false,"stop_reason":"attempt budget exhausted","cancelled":false,"failed":null,
+            "crash_signature":"exception:0xc0000005","signature_strength":"signal_only","equivalence_policy":"signal_only",
+            "reducer":"fixture3-ddmin","jobs_empty":true,"profiles_removed":true,"scratch_removed":true});
+        let read = |suffix: &str| -> Result<Vec<u8>> {
+            Ok(match suffix {
+                "trial-0.json" => bytes.clone(),
+                "trial-0.input" | "minimized" => b"A".to_vec(),
+                _ => anyhow::bail!("unexpected artifact"),
+            })
+        };
+        let summary = crate::resource_minimize::summarize(&request, &receipt, read)?;
+        assert_eq!(summary["complete"], false);
+        for (field, changed) in [
+            ("complete", json!(true)),
+            ("attempts", json!(2)),
+            ("original_size", json!(2)),
+            ("signature_strength", json!("location_and_frames")),
+            ("trials", json!([])),
+            ("crash_signature", json!("exception:0xc000001d")),
+        ] {
+            let mut changed_receipt = receipt.clone();
+            changed_receipt[field] = changed;
+            assert!(
+                crate::resource_minimize::summarize(&request, &changed_receipt, read).is_err(),
+                "accepted {field}"
+            );
+        }
+        for corrupt in ["trial-0.json", "trial-0.input", "minimized"] {
+            assert!(
+                crate::resource_minimize::summarize(&request, &receipt, |suffix| {
+                    if suffix == corrupt {
+                        Ok(b"changed".to_vec())
+                    } else {
+                        read(suffix)
+                    }
+                })
+                .is_err(),
+                "accepted changed {corrupt}"
+            );
+        }
         Ok(())
     }
 }

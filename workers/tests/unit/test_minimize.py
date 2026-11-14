@@ -78,6 +78,15 @@ class MinimizeTests(unittest.TestCase):
                     self.assertFalse(result["capabilities"]["input_minimize"])
                     self.assertFalse(result["capabilities"]["input_minimize_signal_only"])
 
+    def test_ignored_replay_fields_are_rejected_before_minimization_admission(self):
+        from worker_jobs import JobManager
+        with tempfile.TemporaryDirectory() as root:
+            manager = JobManager(Path(root), True, False)
+            for field, value in (("trials", 1), ("expected", {"exit_code": 0})):
+                with self.subTest(field=field), self.assertRaisesRegex(ValueError, "not minimization options"):
+                    manager.start_job({"target": "missing", "input": "missing", field: value}, "minimize")
+            self.assertEqual(list((Path(root) / "jobs").iterdir()), [])
+
 
 if __name__ == "__main__":
     unittest.main()

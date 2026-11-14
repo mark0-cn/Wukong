@@ -1,13 +1,11 @@
 //! Fixed System child for one admitted debugger or interactive session. It owns the
 //! contained identities and Jobs; model PIDs and tool paths are never authority.
 use crate::{
-    accounts::Role,
     debugger_mcp::Client,
     deployment,
     inputs::digest,
-    process_capture::{CaptureWatch, CapturedStream},
-    processes::{OwnedProcess, ResourceLimits, Spawn},
-    resource_process::ScratchIntent,
+    process_capture::CaptureWatch,
+    processes::OwnedProcess,
     security::{self, AclPolicy},
     session_artifacts,
     session_commands::Session,
@@ -19,8 +17,6 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    fs,
-    os::windows::io::OwnedHandle,
     path::Path,
     time::{Duration, Instant},
 };
@@ -36,7 +32,7 @@ struct End {
 }
 type Controller = Channel<tokio::io::Stdin, tokio::io::Stdout>;
 
-async fn watch(
+pub(crate) async fn watch(
     cancel: &Path,
     deadline: Instant,
     output: Option<&CaptureWatch>,
@@ -252,122 +248,41 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         return crate::interactive_host::run(&host, &request, &cancel);
     }
     let debugger_nonce = nonce(installation, id)?;
-    let (mut debugger, _) = crate::resource_host::create_persona_named(
-        &host.deployment,
-        root,
-        Role::Debugger,
+    let mut backend = crate::session_backend::Backend::launch(
+        &host,
+        &request,
         &debugger_nonce,
-        Some(id),
+        session_artifacts::create(root, id)?,
+        |debugger, scratch| Prepared::prepare(&host, &request, debugger, scratch),
     )?;
-    deployment::publish_json(
-        &root
-            .join("metadata")
-            .join(format!("resource-scratch-{debugger_nonce}.json")),
-        &ScratchIntent {
-            schema: crate::resource_process::SCHEMA,
-            installation_id: installation.into(),
-            resource_id: id.clone(),
-            appcontainer_sid: debugger.sid_text()?,
-            logon_sid: debugger.logon_sid().into(),
-        },
-        &private,
-    )?;
-    let debugger_directory = security::ResourceDirectory::create(
-        &host.resources.join(&debugger_nonce),
-        &debugger.sid_text()?,
-        debugger.logon_sid(),
-    )?;
-    let debugger_path = debugger_directory.path().to_owned();
-    let mut target = Prepared::prepare(&host, &request, &debugger, &debugger_path)?;
-    let package = host.deployment.package(root);
-    let executable = package.join(
-        host.manifest
-            .manifest()
-            .entrypoints
-            .windbg_mcp
-            .as_ref()
-            .context("package has no WinDbg MCP backend")?,
-    );
-    let (input, writer) = std::io::pipe()?;
-    let (reader, output) = std::io::pipe()?;
-    let input = fs::File::from(OwnedHandle::from(input));
-    let output = fs::File::from(OwnedHandle::from(output));
-    let (diagnostic_reader, diagnostic_writer) = std::io::pipe()?;
-    let log = fs::File::from(OwnedHandle::from(diagnostic_writer));
-    let transcript = session_artifacts::create(root, id)?;
-    let mut environment =
-        crate::resource_host::scratch_environment(&host.environment, &debugger_path);
-    for key in [
-        "_NT_SYMBOL_PATH",
-        "_NT_ALT_SYMBOL_PATH",
-        "_NT_EXECUTABLE_IMAGE_PATH",
-    ] {
-        environment.insert(key.into(), target.symbols().as_os_str().to_owned());
-    }
-    let helper = Spawn {
-        executable: &executable,
-        arguments: &[
-            "--tools".into(),
-            if request.read_only() {
-                "session,inspect,crash"
-            } else {
-                "session,inspect,exec,crash"
-            }
-            .into(),
-        ],
-        directory: &debugger_path,
-        environment: &environment,
-        log: &output,
-        input: &input,
-    }
-    .sandbox_streamed(
-        &debugger,
-        debugger_directory,
-        &log,
-        ResourceLimits::new(4, 1024 * 1024 * 1024)?,
-    )?;
-    drop((input, output));
-    target.launch(&request, &debugger)?;
-    drop(log);
-    let diagnostics = CapturedStream::start(diagnostic_reader, 1024 * 1024)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let mut channel = Channel::new(tokio::io::stdin(), tokio::io::stdout());
     let outcome = runtime.block_on(async {
-        let client = Client::connect(
-            crate::stream_io::reader(reader),
-            crate::stream_io::writer(writer),
-            transcript,
-        )
-        .await?;
+        let client = backend.connect().await?;
         serve(
             &mut channel,
             client,
-            &mut target,
+            &mut backend.target,
             Serving {
                 request: &request,
                 root,
                 cancel: &cancel,
-                helper: &helper,
-                diagnostics: diagnostics.watch(),
+                helper: &backend.helper,
+                diagnostics: backend.diagnostics.watch(),
             },
         )
         .await
     });
-    let helper_stopped = helper.stop(Duration::from_secs(10));
-    let target_stopped = target.stop();
-    drop(helper);
+    let closed = backend.close();
     // Always shut down Tokio, even when cleanup or evidence publication fails.
     let sent = (|| -> Result<()> {
-        helper_stopped?;
-        let captured = target_stopped?;
-        let diagnostics = diagnostics.finish()?;
-        let identity = serde_json::to_value(target.identity()?)?;
-        target.close()?;
-        debugger.close()?;
-        private.verify(&debugger_path, true)?;
-        crate::resource_cleanup::remove_reclaimed(&debugger_path)?;
+        let crate::session_backend::Closed {
+            captured,
+            diagnostics,
+            identity,
+        } = closed?;
         let result_directory = root.join("metadata/resource-results");
         private.publish(
             &result_directory.join(format!("{id}.debug-stderr")),

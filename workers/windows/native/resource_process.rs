@@ -212,7 +212,7 @@ pub(crate) fn execute_one(
     host: &crate::resource_host::Host,
     request: &Request,
     cancel: &Path,
-    trial: Option<u8>,
+    trial: Option<u16>,
 ) -> Result<serde_json::Value> {
     if cancel.try_exists()? {
         return finish(
@@ -223,13 +223,23 @@ pub(crate) fn execute_one(
             trial,
         );
     }
-    let mut target = match trial {
+    let target = match trial {
         Some(index) => crate::resource_target::Prepared::open_trial(host, request, index)?,
         None => crate::resource_target::Prepared::open(host, request, None)?,
     };
+    execute_prepared(request, cancel, trial, target, None)
+}
+
+pub(crate) fn execute_prepared(
+    request: &Request,
+    cancel: &Path,
+    trial: Option<u16>,
+    mut target: crate::resource_target::Prepared,
+    deadline: Option<std::time::Instant>,
+) -> Result<serde_json::Value> {
     let appcontainer = target.persona.sid_text()?;
     let logon = target.persona.logon_sid().to_owned();
-    if cancel.try_exists()? {
+    if cancel.try_exists()? || deadline.is_some_and(|value| value <= std::time::Instant::now()) {
         target.close()?;
         return finish(request, not_started(request), appcontainer, logon, trial);
     }
@@ -240,9 +250,11 @@ pub(crate) fn execute_one(
         .map(|input| Box::new(input) as Box<dyn Read + Send>);
     let process =
         PreparedIo::new(request.output_limit)?.launch(input, |io| target.launch(io, limits))?;
-    let result = process.wait_with_cancel(Duration::from_secs(request.timeout_secs), || {
-        Ok(cancel.try_exists()?)
-    })?;
+    let timeout = deadline.map_or(Duration::from_secs(request.timeout_secs), |value| {
+        Duration::from_secs(request.timeout_secs)
+            .min(value.saturating_duration_since(std::time::Instant::now()))
+    });
+    let result = process.wait_with_cancel(timeout, || Ok(cancel.try_exists()?))?;
     target.close()?;
     finish(request, result, appcontainer, logon, trial)
 }
@@ -286,7 +298,7 @@ fn finish(
     result: CaptureResult,
     appcontainer: String,
     logon: String,
-    trial: Option<u8>,
+    trial: Option<u16>,
 ) -> Result<serde_json::Value> {
     use base64::Engine;
     use sha2::{Digest, Sha256};

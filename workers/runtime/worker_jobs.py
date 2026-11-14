@@ -24,6 +24,8 @@ class JobManager:
         if not self.trusted and not self.isolated:
             raise ValueError("production execution requires a root Linux worker with UID/GID/CHOWN capabilities; use explicit trusted_local only for trusted fixtures")
         spec = dict(params)
+        if kind == "minimize" and any(spec.get(key) is not None for key in ("trials", "expected")):
+            raise ValueError("input.minimize owns candidate trials and crash equivalence; trials/expected are not minimization options")
         launch = None
         if spec.get("network") is not None:
             from worker_network import network_profile, validate_plan

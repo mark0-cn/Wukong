@@ -38,6 +38,7 @@ minidump = "0.27"
 uuid = "1"
 tokio = { version = "1.54", features = ["io-util", "io-std", "net", "macros", "process", "rt-multi-thread", "sync", "time"] }
 wukong-worker-package = { path = "../package" }
+fixture3-ddmin = "=0.1.1"
 
 [target.'cfg(windows)'.dependencies]
 blocking = "1.7"

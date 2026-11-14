@@ -191,8 +191,10 @@ only a previously verified result, with `complete: false` and `stop_reason`.
 Unexpected evaluation errors fail the job. `reducer: "picire"` identifies the
 algorithm. Doctor advertises minimization only when Picire and its dependencies
 are present. The offline package pins all three pure-Python wheels and their
-original license files. This replaces the Python worker's algorithm; the native
-Windows execution route still requires separate implementation and acceptance.
+original license files. The native Windows route uses the Rust `fixture3-ddmin` library and WinDbg MCP
+for contained trials; local checks passed and installed-VM acceptance remains
+pending. Remove the
+previously ignored `trials` and `expected` fields from minimization calls.
 
 `ghidra.query` accepts the same `query` object as the Rust adapter:
 `{"operation":"functions","pattern":"main","offset":0,"limit":100}`,

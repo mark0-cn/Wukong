@@ -4,6 +4,8 @@
 
 [English](README.md) · 简体中文
 
+被忽略的 `remote_installed_windows_worker_minimize_acceptance` 夹具读取 `WUKONG_REMOTE_WORKER_MINIMIZE_TEST`：绝对路径 JSON 配置，包含 `config`、`manifest_sha256`、x64/x86 的已签名 `probes`（`path`、`sha256`），以及全新绝对路径 `output`。覆盖强/弱等价性、异常码相同但位置不同的故障、二进制 stdin/argv 和 LaunchSpec、空输入、一次尝试预算、无崩溃或无法确定的基线、取消/期限、原始试验证据及重试/冲突处理。轮询会续租。只能使用独立登记的离线开发 VM。新增夹具尚未在已安装包上运行，也不代表对抗隔离或其余生命周期验收。
+
 `python workers/tests/run.py unit -p test_native_shell.py` 在 Windows 的临时目录运行可信固定 CMD 命令，其他平台明确跳过。它核对普通及扩展盘符路径下适配器的真实 stdin/stdout/stderr 句柄和 cwd，不进行安装或隔离配置变更。已安装 shell 夹具通过独立控制端连接观察同步调用并续租，与生产租约通道安排一致。
 
 `remote_installed_windows_worker_shell_acceptance` 使用 `WUKONG_REMOTE_WORKER_SHELL_TEST`，包含托管 SSH `config`、预期 `manifest_sha256`、新的绝对 `output` 及恰好 `x64`/`x86` 两个 `probes`（绝对 `path` 和固定 `sha256`）。八个可信用例覆盖 CMD 内建命令、相对 cwd/环境、引号与 stderr 重定向、非零退出、有界输出及 x64/x86 目标管道/超时。同步执行等待期间，夹具查询资源清单并续租；终态检查绑定原始凭据/输出哈希、已确认清理、原请求重试及更改命令被拒绝。独立观察服务重启后，`remote_native_completed_shell_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_SHELL_RECOVERY_TEST`，包含 `config`、固定的 `previous` 报告（`path`/`sha256`）及新的绝对 `output`；不上传或执行，比较全部原结果、产物及清单。普通测试忽略这两个夹具。上述具体已安装用例和已完成结果恢复已在源码 `26b7040` 通过；源码/内容身份及限制记录在 [Windows 资格验收记录](../windows/README.zh-CN.md)。生产执行仍禁用。

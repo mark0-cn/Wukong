@@ -54,6 +54,8 @@ pub mod resource_journal;
 #[cfg(windows)]
 mod resource_launch;
 #[cfg(windows)]
+mod resource_minimize;
+#[cfg(windows)]
 pub mod resource_process;
 #[cfg(windows)]
 pub mod resource_recovery;
@@ -72,7 +74,11 @@ mod service_access;
 #[cfg(windows)]
 mod session_artifacts;
 #[cfg(windows)]
+mod session_backend;
+#[cfg(windows)]
 mod session_commands;
+#[cfg(windows)]
+mod session_crash;
 #[cfg(windows)]
 pub mod session_host;
 #[cfg(windows)]

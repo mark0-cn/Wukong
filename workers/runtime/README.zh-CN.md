@@ -126,7 +126,7 @@ job 状态为 queued/running/completed/failed/cancelled/timed_out/lost。关闭�
 
 PoC 每次使用新工作目录和只读输入副本。`job.status.result` 保存 passed、attempts、successes、逐次退出/信号、输入/目标 SHA256、生产者/验证者 ID、环境及 crash/behavior 阶段。重复原生崩溃不证明任意读写或代码执行。崩溃缩减默认要求保留原始模块内容及位置签名。显式 `allow_signal_only` 才允许较弱的信号/异常等价性，并标明这一限制；根因仍须独立确认。
 
-输入缩减使用固定版本 Picire 26.11，替代本地手写 delta-debugging 算法。现有回放模块负责每个候选的执行和证据。原始基线占一次尝试；Picire 对已接受候选的再次断言复用该试验。空输入会被显式检查。超时、取消、尝试预算耗尽或候选结果无法确定时，只保留之前已验证的结果，返回 `complete: false` 和 `stop_reason`。意外评估错误使 job 失败。`reducer: "picire"` 标明所用算法。Doctor 仅在 Picire 及其依赖均存在时声明最小化能力。离线包固定三个纯 Python wheel 及其原始许可证文件。此次替换的是 Python worker 算法；Windows 原生执行路径仍需单独实现和验收。
+输入缩减使用固定版本 Picire 26.11，替代本地手写 delta-debugging 算法。现有回放模块负责每个候选的执行和证据。原始基线占一次尝试；Picire 对已接受候选的再次断言复用该试验。空输入会被显式检查。超时、取消、尝试预算耗尽或候选结果无法确定时，只保留之前已验证的结果，返回 `complete: false` 和 `stop_reason`。意外评估错误使 job 失败。`reducer: "picire"` 标明所用算法。Doctor 仅在 Picire 及其依赖均存在时声明最小化能力。离线包固定三个纯 Python wheel 及其原始许可证文件。Windows 原生通路使用 Rust `fixture3-ddmin` 库和 WinDbg MCP 进行受限试验；本地检查已通过，已安装 VM 验收仍待完成。最小化调用须移除此前被忽略的 `trials`、`expected` 字段。
 
 `ghidra.query` 与 Rust 使用相同 query：`{"operation":"functions","pattern":"main","offset":0,"limit":100}`、`{"operation":"decompile","address":1234}`、`{"operation":"xrefs","address":1234,"direction":"both","limit":100}`。地址为模块相对。核对上传 SHA256，缓存绑定目标、Ghidra 版本/properties、launcher、bridge、分析设置。项目锁内复用导入程序；清理失主锁前核对进程。较长导入须将控制端请求超时设为大于查询超时，传输最多 300 秒。
 

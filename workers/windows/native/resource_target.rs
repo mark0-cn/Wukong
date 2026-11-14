@@ -58,9 +58,9 @@ impl Prepared {
     /// Resolve all inputs before creating the target's persona or scratch.
     pub(crate) fn open(host: &Host, request: &Request, debugger: Option<&Persona>) -> Result<Self> {
         let nonce = nonce(&host.deployment.installation_id, &request.resource_id)?;
-        Self::open_named(host, request, debugger, nonce)
+        Self::open_named(host, request, debugger, nonce, None)
     }
-    pub(crate) fn open_trial(host: &Host, request: &Request, trial: u8) -> Result<Self> {
+    pub(crate) fn open_trial(host: &Host, request: &Request, trial: u16) -> Result<Self> {
         let replay = request.replay.as_ref().context("replay plan is absent")?;
         ensure!(
             trial < replay.configuration.trials,
@@ -71,20 +71,55 @@ impl Prepared {
             &request.resource_id,
             trial,
         )?;
-        Self::open_named(host, request, None, nonce)
+        Self::open_named(host, request, None, nonce, None)
+    }
+    pub(crate) fn open_candidate(
+        host: &Host,
+        request: &Request,
+        trial: u16,
+        candidate: AdmittedInput,
+        debugger: Option<&Persona>,
+    ) -> Result<Self> {
+        let replay = request
+            .replay
+            .as_ref()
+            .context("minimization plan is absent")?;
+        ensure!(
+            replay.configuration.minimization.is_some()
+                && trial < replay.configuration.trials
+                && candidate.reference().path == replay.input.path
+                && !candidate.reference().executable
+                && candidate.reference().size <= replay.input.size,
+            "candidate differs from admitted minimization scope"
+        );
+        let nonce = if debugger.is_some() {
+            crate::resource_minimize::target_nonce(
+                &host.deployment.installation_id,
+                &request.resource_id,
+                trial,
+            )?
+        } else {
+            crate::resource_replay::nonce(
+                &host.deployment.installation_id,
+                &request.resource_id,
+                trial,
+            )?
+        };
+        Self::open_named(host, request, debugger, nonce, Some(candidate))
     }
     fn open_named(
         host: &Host,
         request: &Request,
         debugger: Option<&Persona>,
         nonce: String,
+        candidate: Option<AdmittedInput>,
     ) -> Result<Self> {
         let metadata = host.root.join("metadata");
         let mut sources = image_sources(host, request)?;
         let identity = debugger
             .map(|_| crate::session_identity::Identity::admit(&mut sources))
             .transpose()?;
-        let input = request
+        let mut input = request
             .input
             .as_ref()
             .filter(|_| {
@@ -94,6 +129,22 @@ impl Prepared {
             })
             .map(|input| resource_input::open(&metadata, &request.owner, input, Purpose::Inspect))
             .transpose()?;
+        if let Some(candidate) = candidate {
+            if input.is_some() {
+                input = Some(candidate);
+            } else {
+                let original = &request
+                    .replay
+                    .as_ref()
+                    .context("candidate has no replay")?
+                    .input;
+                let slot = sources
+                    .iter_mut()
+                    .find(|source| source.reference() == original)
+                    .context("argv candidate does not replace the admitted input")?;
+                *slot = candidate;
+            }
+        }
         let installation = &host.deployment.installation_id;
         let (persona, _) = crate::resource_host::create_persona_named(
             &host.deployment,

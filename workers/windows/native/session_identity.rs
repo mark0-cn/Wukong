@@ -376,6 +376,30 @@ impl Identity {
         self.verify_module(module)?;
         Ok(module)
     }
+    /// Only the admitted main image has an authenticated content identity here.
+    /// A path reported for another module never grants permission to open it.
+    pub(crate) fn normalize(&self, address: u64, listing: &Value) -> Result<Option<Value>> {
+        let module = self.observed(listing)?;
+        let base = crate::session_crash::address(&module["start"])?;
+        let end = base
+            .checked_add(u64::from(self.pe.size))
+            .context("module address overflow")?;
+        ensure!(
+            base > 0
+                && end
+                    <= if self.pe.machine == 0x14c {
+                        1 << 32
+                    } else {
+                        1 << 47
+                    },
+            "observed image lies outside user address space"
+        );
+        Ok((base..end).contains(&address).then(|| {
+            serde_json::json!({
+            "space":"image_rva","value":address-base,"module_sha256":self.image.sha256,
+            "path":self.image.path,"content_source":"admitted_file"})
+        }))
+    }
 }
 
 #[derive(Deserialize)]
@@ -568,6 +592,37 @@ mod tests {
         assert_eq!(&magic, b"MZ");
         let value = module(&identity);
         identity.observed(&json!({"modules":[value],"matched":1,"loaded":1}))?;
+        Ok(())
+    }
+    #[test]
+    fn crash_locations_bind_admitted_content_and_rva_without_following_module_paths() -> Result<()>
+    {
+        let identity = Identity::admit(&mut fixture()?)?;
+        let location = |base: u64| -> Result<Option<Value>> {
+            let mut observed = module(&identity);
+            observed["start"] = json!(format!("0x{base:016x}"));
+            identity.normalize(
+                base + 32,
+                &json!({"modules":[observed],"matched":1,"loaded":1}),
+            )
+        };
+        assert_eq!(location(0x100000)?, location(0x200000)?);
+        assert_eq!(
+            location(0x100000)?.unwrap()["module_sha256"],
+            identity.image.sha256
+        );
+        let mut observed = module(&identity);
+        observed["start"] = json!("0x0000000000100000");
+        let listing = json!({"modules":[observed],"matched":1,"loaded":1});
+        assert!(identity.normalize(0x42, &listing)?.is_none());
+        assert!(
+            identity
+                .normalize(0x100000 + u64::from(identity.pe.size), &listing)?
+                .is_none()
+        );
+        let mut changed = listing;
+        changed["modules"][0]["checksum"] = json!(identity.pe.checksum ^ 1);
+        assert!(identity.normalize(0x100020, &changed).is_err());
         Ok(())
     }
     #[test]

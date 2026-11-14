@@ -20,12 +20,14 @@ use std::path::Path;
 pub enum Kind {
     Replay,
     Verify,
+    Minimize,
 }
 impl Kind {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Replay => "replay",
             Self::Verify => "verify",
+            Self::Minimize => "minimize",
         }
     }
 }
@@ -52,7 +54,9 @@ pub struct Configuration {
     pub target: String,
     pub input: String,
     pub input_mode: Option<InputMode>,
-    pub trials: u8,
+    pub trials: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimization: Option<crate::resource_minimize::Configuration>,
     pub expected: Option<Expected>,
     pub call_id: String,
     pub producer_agent_id: Option<String>,
@@ -62,10 +66,20 @@ impl Configuration {
     pub(crate) fn validate(&self) -> Result<()> {
         crate::resource_launch::logical(&self.target)?;
         crate::resource_launch::logical(&self.input)?;
-        ensure!(
-            (1..=16).contains(&self.trials),
-            "replay requires 1 through 16 trials"
-        );
+        if let Some(minimization) = &self.minimization {
+            minimization.validate()?;
+            ensure!(
+                self.kind == Kind::Minimize
+                    && self.trials == minimization.max_attempts
+                    && self.expected.is_none(),
+                "minimization count or equivalence policy differs"
+            );
+        } else {
+            ensure!(
+                self.kind != Kind::Minimize && (1..=16).contains(&self.trials),
+                "replay requires 1 through 16 trials"
+            );
+        }
         bounded_identifier(&self.call_id, 128)?;
         for id in [&self.producer_agent_id, &self.verifier_agent_id]
             .into_iter()
@@ -155,14 +169,17 @@ impl Replay {
         Ok(())
     }
 }
-pub(crate) fn nonce(installation: &str, resource: &str, trial: u8) -> Result<String> {
+pub(crate) fn nonce(installation: &str, resource: &str, trial: u16) -> Result<String> {
     resource_process::nonce(installation, resource)?;
-    ensure!(trial < 16, "invalid replay trial index");
+    ensure!(trial < 4096, "invalid replay trial index");
     Ok(digest(&("native.replay.persona.v1", installation, resource, trial))?[..48].to_owned())
 }
 
 pub(crate) fn execute(host: &Host, request: &Request, cancel: &Path) -> Result<Value> {
     let replay = request.replay.as_ref().context("missing replay plan")?;
+    if replay.configuration.minimization.is_some() {
+        return crate::resource_minimize::execute(host, request, cancel);
+    }
     let mut trials = Vec::new();
     let policy = AclPolicy::private_vm();
     let mut cancelled = false;
@@ -194,7 +211,7 @@ pub(crate) fn execute(host: &Host, request: &Request, cancel: &Path) -> Result<V
     )
 }
 
-fn signature(exit: u32) -> Option<String> {
+pub(crate) fn signature(exit: u32) -> Option<String> {
     matches!(
         exit,
         0xc0000005 | 0xc000001d | 0xc0000094 | 0xc00000fd | 0xc0000409
@@ -220,7 +237,7 @@ fn matches(expected: Option<&Expected>, exit: u32, stdout: &[u8], stderr: &[u8])
 pub(crate) fn summarize(
     request: &Request,
     receipt: &Value,
-    mut read: impl FnMut(u8) -> Result<Vec<u8>>,
+    mut read: impl FnMut(u16) -> Result<Vec<u8>>,
 ) -> Result<Value> {
     let replay = request.replay.as_ref().context("missing replay plan")?;
     replay.validate(request)?;
@@ -249,7 +266,7 @@ pub(crate) fn summarize(
     let mut rows = Vec::new();
     let mut successes = 0;
     for (index, trial) in trials.iter().enumerate() {
-        let index = u8::try_from(index)?;
+        let index = u16::try_from(index)?;
         ensure!(trial["trial"] == index, "replay trial order differs");
         let bytes = read(index)?;
         ensure!(

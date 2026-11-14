@@ -7,6 +7,8 @@
 volatile LONG fixture_value = 0x12345678;
 __declspec(noinline) LONG fixture_step(LONG value) { return value ^ 0x1020304; }
 __declspec(noinline) void fixture_debug_wait(void) { Sleep(120000); }
+__declspec(noinline) void fixture_minimize_a(void) { *(volatile BYTE *)(ULONG_PTR)1 = 0xa5; }
+__declspec(noinline) void fixture_minimize_b(void) { *(volatile BYTE *)(ULONG_PTR)2 = 0x5a; }
 static int copy_input(HANDLE input) {
     BYTE buffer[4096]; DWORD count = 0, written = 0;
     for (;;) {
@@ -148,6 +150,20 @@ int wmain(int argc, wchar_t **argv) {
             if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, count, &written, NULL) || written != count) { CloseHandle(file); return 37; }
         }
         CloseHandle(file);
+        return 0;
+    }
+    if (argc == 3 && (wcscmp(argv[1], L"--minimize") == 0 || wcscmp(argv[1], L"--minimize-empty") == 0)) {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+        BOOL piped = wcscmp(argv[2], L"-") == 0;
+        HANDLE file = piped ? GetStdHandle(STD_INPUT_HANDLE) :
+            CreateFileW(argv[2], GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        if (file == INVALID_HANDLE_VALUE) return 4;
+        BYTE input[128] = {0}; DWORD count = 0;
+        BOOL read = ReadFile(file, input, sizeof(input), &count, NULL);
+        if (!piped) CloseHandle(file);
+        if (!read && GetLastError() != ERROR_BROKEN_PIPE) return 5;
+        if (wcscmp(argv[1], L"--minimize-empty") == 0 || memchr(input, 0xa5, count)) fixture_minimize_a();
+        if (memchr(input, 0x5a, count)) fixture_minimize_b();
         return 0;
     }
     if (argc == 3 && wcscmp(argv[1], L"--replay") == 0) {

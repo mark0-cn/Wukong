@@ -299,6 +299,7 @@ impl Runtime {
                 | "job.start"
                 | "py.run"
                 | "crash.replay"
+                | "input.minimize"
                 | "poc.verify"
                 | "job.status"
                 | "job.cancel"
@@ -362,13 +363,15 @@ impl Runtime {
                 params,
             );
         }
-        if matches!(method, "crash.replay" | "poc.verify") {
+        if matches!(method, "crash.replay" | "poc.verify" | "input.minimize") {
             return self.start_replay(
                 journal,
                 inputs.context("native replay input store is missing")?,
                 owner,
                 if method == "poc.verify" {
                     crate::resource_replay::Kind::Verify
+                } else if method == "input.minimize" {
+                    crate::resource_replay::Kind::Minimize
                 } else {
                     crate::resource_replay::Kind::Replay
                 },
@@ -402,6 +405,13 @@ impl Runtime {
                 return Ok(json!([self.artifact(id, name)?]));
             }
             if record.specification["replay"].is_object() {
+                if job_kind(&record)? == "minimize" {
+                    let mut artifacts = vec![self.artifact(id, "receipt")?];
+                    if !status["result"]["artifact"].is_null() {
+                        artifacts.push(self.artifact(id, "minimized")?);
+                    }
+                    return Ok(Value::Array(artifacts));
+                }
                 let count = status["result"]["trials"]
                     .as_u64()
                     .context("replay trial count missing")?;
@@ -490,12 +500,21 @@ impl Runtime {
         self.running = Some(Running {
             deadline: Instant::now()
                 + Duration::from_secs(
-                    (request.timeout_secs + 120)
-                        * u64::from(
-                            request
-                                .replay
-                                .as_ref()
-                                .map_or(1, |replay| replay.configuration.trials),
+                    request
+                        .replay
+                        .as_ref()
+                        .and_then(|replay| replay.configuration.minimization.as_ref())
+                        .map_or_else(
+                            || {
+                                (request.timeout_secs + 120)
+                                    * u64::from(
+                                        request
+                                            .replay
+                                            .as_ref()
+                                            .map_or(1, |replay| replay.configuration.trials),
+                                    )
+                            },
+                            |minimize| minimize.timeout_secs + 120,
                         ),
                 ),
             request,
@@ -733,7 +752,7 @@ impl Runtime {
         let suffix = artifact_suffix(name)?;
         let path = self.result_path(id, &suffix);
         AclPolicy::private_vm().verify(&path, false)?;
-        let data = deployment::read_bytes(&path, 12 * 1024 * 1024)?;
+        let data = deployment::read_bytes(&path, 32 * 1024 * 1024)?;
         Ok(
             json!({"path":format!("native-results/{id}/{name}"),"size":data.len(),"sha256":hex::encode(Sha256::digest(&data))}),
         )
@@ -825,7 +844,7 @@ impl Runtime {
             };
             let source = self.result_path(parts[1], &suffix);
             AclPolicy::private_vm().verify(&source, false)?;
-            deployment::read_bytes(&source, 12 * 1024 * 1024)?
+            deployment::read_bytes(&source, 32 * 1024 * 1024)?
         };
         let mut artifact =
             json!({"path":path,"size":data.len(),"sha256":hex::encode(Sha256::digest(&data))});
@@ -859,15 +878,26 @@ impl Runtime {
 
 fn artifact_suffix(name: &str) -> Result<String> {
     if let Some(trial) = name.strip_prefix("trial-") {
-        let index: u8 = trial.parse()?;
+        let (trial, kind) = trial.split_once('-').unwrap_or((trial, "record"));
+        let index: u16 = trial.parse()?;
         ensure!(
-            index < 16 && index.to_string() == trial,
+            index < 4096 && index.to_string() == trial,
             "invalid replay artifact index"
         );
-        return Ok(format!("{name}.json"));
+        let suffix = match kind {
+            "record" => "json",
+            "input" => "input",
+            "mcp" => "mcp",
+            "observation" => "observation.json",
+            "debug-log" => "debug-log",
+            "debug-stdout" => "debug-stdout",
+            "debug-stderr" => "debug-stderr",
+            _ => anyhow::bail!("invalid minimization artifact kind"),
+        };
+        return Ok(format!("trial-{index}.{suffix}"));
     }
     match name {
-        "stdout" | "stderr" => Ok(name.into()),
+        "stdout" | "stderr" | "minimized" => Ok(name.into()),
         "receipt" => Ok("json".into()),
         _ => {
             let attempt = name

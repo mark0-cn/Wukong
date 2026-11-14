@@ -407,6 +407,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5905ec755cc8386d7928353e4d356d2be3e89e81e5ca01fe630a1ca4d08dc175"
 
 [[package]]
+name = "fixture3-ddmin"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3054e8d5984d36c52d2ea3df71b83d1175a38293f17da1d836e7691f1bcb3245"
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1860,6 +1866,7 @@ dependencies = [
  "blocking",
  "cap-fs-ext",
  "cap-std",
+ "fixture3-ddmin",
  "futures-util",
  "hex",
  "junction",

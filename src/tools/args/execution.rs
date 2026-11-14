@@ -426,15 +426,10 @@ pub(in crate::tools) struct InputMinimizeArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected: Option<Expected>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<Map<String, Value>>,
     #[schemars(range(min = 1, max = 60))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
-    #[schemars(range(min = 1, max = 16))]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trials: Option<u64>,
     #[schemars(range(min = 1, max = 4096))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u64>,
