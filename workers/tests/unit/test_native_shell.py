@@ -11,7 +11,7 @@ import unittest
 @unittest.skipUnless(os.name == "nt", "requires Windows CMD")
 class NativeShellTests(unittest.TestCase):
     def test_explicit_streams_and_drive_cwd_survive_extended_resource_paths(self):
-        adapter = Path(__file__).resolve().parents[2] / "windows/native/shell_command.py"
+        adapter = Path(__file__).resolve().parents[2] / "windows/native/executors/shell_command.py"
         for extended in (False, True):
             with self.subTest(extended=extended), tempfile.TemporaryDirectory(prefix="native shell ") as temporary:
                 state = Path(temporary)

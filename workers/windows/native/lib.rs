@@ -1,106 +1,14 @@
-//! Native VM installation/service implementation. Controller signing lives in
-//! the independent package library and never in a model-callable service API.
+//! Native worker boundaries: host, resources, executors, artifacts, isolation and RPC.
 #[cfg(windows)]
-pub mod accounts;
+pub mod artifacts;
 #[cfg(windows)]
-mod authority;
+pub mod executors;
 #[cfg(windows)]
-mod debugger_mcp;
+pub mod host;
 #[cfg(windows)]
-pub mod deployment;
-#[cfg(windows)]
-mod environment;
-#[cfg(windows)]
-pub mod firewall;
-#[cfg(windows)]
-mod inputs;
-#[cfg(windows)]
-pub mod installer;
-#[cfg(windows)]
-mod interactive_host;
-#[cfg(windows)]
-mod interactive_io;
+pub mod isolation;
 pub mod pe_imports;
 #[cfg(windows)]
-mod persona;
+pub mod resources;
 #[cfg(windows)]
-pub mod pipe_transport;
-#[cfg(windows)]
-mod process_access;
-#[cfg(windows)]
-pub mod process_capture;
-#[cfg(windows)]
-mod process_profile;
-#[cfg(windows)]
-pub mod processes;
-#[cfg(windows)]
-pub mod recovery;
-#[cfg(windows)]
-mod resource_cleanup;
-#[cfg(windows)]
-pub mod resource_host;
-#[cfg(windows)]
-mod resource_image;
-#[cfg(windows)]
-pub mod resource_input;
-#[cfg(windows)]
-pub mod resource_journal;
-#[cfg(windows)]
-mod resource_launch;
-#[cfg(windows)]
-mod resource_minimize;
-#[cfg(windows)]
-pub mod resource_process;
-#[cfg(windows)]
-pub mod resource_recovery;
-#[cfg(windows)]
-mod resource_replay;
-#[cfg(windows)]
-mod resource_runtime;
-#[cfg(windows)]
-mod resource_target;
-#[cfg(windows)]
-pub mod security;
-#[cfg(windows)]
-pub mod service;
-#[cfg(windows)]
-mod service_access;
-#[cfg(windows)]
-mod session_artifacts;
-#[cfg(windows)]
-mod session_backend;
-#[cfg(windows)]
-mod session_commands;
-#[cfg(windows)]
-mod session_crash;
-#[cfg(windows)]
-pub mod session_host;
-#[cfg(windows)]
-mod session_identity;
-#[cfg(windows)]
-mod session_request;
-#[cfg(windows)]
-mod session_runtime;
-#[cfg(windows)]
-mod session_target;
-#[cfg(windows)]
-mod session_wire;
-#[cfg(windows)]
-pub mod setup_ui;
-#[cfg(windows)]
-pub mod staging;
-#[cfg(windows)]
-mod stream_io;
-#[cfg(windows)]
-mod token_policy;
-#[cfg(windows)]
-mod worker;
-#[cfg(windows)]
-mod worker_catalog;
-#[cfg(windows)]
-mod worker_identity;
-#[cfg(windows)]
-mod worker_leases;
-
-#[cfg(windows)]
-mod worker_rpc;
+pub mod rpc;

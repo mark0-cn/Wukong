@@ -286,7 +286,7 @@ async fn remote_installed_windows_worker_shell_acceptance() -> Result<()> {
         ensure!(
             receipt["program"]["sha256"]
                 == hex::encode(Sha256::digest(include_bytes!(
-                    "../../workers/windows/native/shell_command.py"
+                    "../../workers/windows/native/executors/shell_command.py"
                 ))),
             "shell did not execute the sealed adapter"
         );
