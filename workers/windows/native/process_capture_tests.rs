@@ -209,9 +209,11 @@ fn leader_exit_does_not_leave_a_descendant_holding_an_output_pipe() -> Result<()
 #[test]
 fn cancellation_and_deadline_stop_and_drain_the_same_owned_process() -> Result<()> {
     let root = tempfile::tempdir()?;
-    let deadline = fixture(root.path(), "wait", None, 65536, limits()?)?
-        .wait(Duration::from_millis(100), &AtomicBool::new(false))?;
-    assert_eq!(deadline.reason, StopReason::Deadline);
+    for timeout in [Duration::ZERO, Duration::from_millis(100)] {
+        let deadline = fixture(root.path(), "wait", None, 65536, limits()?)?
+            .wait(timeout, &AtomicBool::new(false))?;
+        assert_eq!(deadline.reason, StopReason::Deadline);
+    }
     let cancelled = fixture(root.path(), "wait", None, 65536, limits()?)?
         .wait(Duration::from_secs(5), &AtomicBool::new(true))?;
     assert_eq!(cancelled.reason, StopReason::Cancelled);

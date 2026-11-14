@@ -2,6 +2,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
+The process capture layer treats zero remaining time after process creation as an expired deadline and still drains the Job and I/O threads. Public timeout bounds remain unchanged. This fixes the x86 one-second minimization case that became an unknown host result in the `51e512f` batch. Independent recovery closed all 21 resources from that batch and its earlier probe, preserving 217 originals; the corrected installed deadline case remains pending.
+
 Debugger module correspondence prefers a nonempty `loaded_image_name` and falls back to `image_name` only when the loaded name is unavailable. This handles admitted targets renamed after linking; PE size/timestamp/checksum, PDB identity and duplicate-name rejection still apply. Reported paths are never opened. The `51e512f` installed batch exposed the old name mismatch; corrected installed qualification remains pending.
 
 The native lease proxy now supplies the owned input store to `input.minimize`, matching replay and verification. A real dispatch regression reaches executable admission for all three methods. The installed `18a647e` package exposed the missing dispatch entry before any resource or effect was created; its dedicated-VM debugger and eight ordinary process cases passed separately. Installed minimization remains pending on the corrected package.

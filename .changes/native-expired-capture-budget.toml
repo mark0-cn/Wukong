@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Treat an overall execution budget consumed during process creation as an expired deadline, draining the owned Job and retaining its result instead of reporting an unknown host failure."
+zh_CN = "当进程创建耗尽整体执行预算时，按期限已到处理，排空所属 Job 并保留结果，不再报告结果未知的宿主失败。"

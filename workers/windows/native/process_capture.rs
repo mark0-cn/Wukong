@@ -290,9 +290,11 @@ impl CapturedProcess {
         mut cancelled: impl FnMut() -> Result<bool>,
     ) -> Result<CaptureResult> {
         ensure!(
-            !timeout.is_zero() && timeout <= Duration::from_secs(86400),
+            timeout <= Duration::from_secs(86400),
             "invalid native capture deadline"
         );
+        // Process creation may consume the remaining overall budget. Zero is
+        // then an already expired deadline and must still drain the owned Job.
         let deadline = Instant::now() + timeout;
         let reason = loop {
             if cancelled()? {
