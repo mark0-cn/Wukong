@@ -411,6 +411,7 @@ impl LeaseProxy {
                         | "exec.run"
                         | "py.run"
                         | "crash.replay"
+                        | "input.minimize"
                         | "poc.verify"
                 ) {
             Some(self.inputs.lock().await)

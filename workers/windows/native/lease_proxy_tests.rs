@@ -27,6 +27,50 @@ fn acquire(run: &str, owner: &str) -> Value {
 }
 
 #[tokio::test]
+async fn replay_and_minimization_dispatch_reach_owned_input_admission() -> Result<()> {
+    let (_root, proxy) = fixture()?;
+    let (_runtime_root, _journal, _inputs, runtime) = crate::resource_runtime::tests::fixture()?;
+    proxy.resources.lock().await.runtime = Some(runtime);
+    let lease = call(&proxy, &acquire("run", "controller")).await?["result"].clone();
+    let uploaded = call(
+        &proxy,
+        &request(
+            "file.put",
+            json!({
+                "path":"fixture.bin","data_base64":"AA==","executable":false,
+                "request_id":"input","_lease":lease,"_binding":identity()
+            }),
+        ),
+    )
+    .await?;
+    assert!(uploaded.get("error").is_none(), "{uploaded}");
+    for method in ["input.minimize", "crash.replay", "poc.verify"] {
+        let reply = call(
+            &proxy,
+            &request(
+                method,
+                json!({
+                    "target":"files/fixture.bin","input":"files/fixture.bin","args":["@@"],
+                    "producer_agent_id":"producer","verifier_agent_id":"verifier",
+                    "request_id":method,"_lease":lease,"_binding":identity()
+                }),
+            ),
+        )
+        .await?;
+        assert_eq!(
+            reply["error"]["message"],
+            "native logical input differs from admitted owner or execution policy"
+        );
+    }
+    // Admission fails before reserving a resource or executing the fixture bytes.
+    assert_eq!(
+        call(&proxy, &release(&lease)).await?["result"]["released"],
+        true
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn native_resource_state_blocks_release_and_expired_takeover_but_not_renewal() -> Result<()> {
     use crate::resource_journal::{Cleanup, Reservation, ResourceKind};
     let (_root, proxy) = fixture()?;

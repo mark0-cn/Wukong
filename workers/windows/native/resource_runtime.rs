@@ -917,4 +917,4 @@ fn artifact_suffix(name: &str) -> Result<String> {
 
 #[cfg(test)]
 #[path = "resource_runtime_tests.rs"]
-mod tests;
+pub(crate) mod tests;

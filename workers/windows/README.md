@@ -2,6 +2,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
+The native lease proxy now supplies the owned input store to `input.minimize`, matching replay and verification. A real dispatch regression reaches executable admission for all three methods. The installed `18a647e` package exposed the missing dispatch entry before any resource or effect was created; its dedicated-VM debugger and eight ordinary process cases passed separately. Installed minimization remains pending on the corrected package.
+
 Offline assembly preserves the original MIT license for `fixture3-ddmin 0.1.1`, whose published crate omits the file. The supplement is tied to its recorded upstream revision and SHA256 in `licenses/fixture3-ddmin-0.1.1/source.json`; it is not reused for other versions.
 
 Native `input.minimize` uses pinned `fixture3-ddmin` with existing process admission, LaunchSpec, owned Jobs and recovery. The baseline consumes one of 1–4096 attempts (default 128); the total deadline is 1–3600 seconds (default 300). Every candidate retains protected input and a hashed trial record. Empty input is checked. Cancellation, deadlines, the 256-MiB aggregate evidence budget or unresolved observations retain only a verified candidate with `complete: false`. Unexpected execution/evidence errors retain recovery responsibility; uncertain trials are never restarted. The evidence budget reserves space for the final verified input and receipt. Cancellation observed during finalization also forces `complete: false`.

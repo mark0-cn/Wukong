@@ -1,5 +1,5 @@
 use super::*;
-pub(super) fn fixture() -> Result<(tempfile::TempDir, Journal, Inputs, Runtime)> {
+pub(crate) fn fixture() -> Result<(tempfile::TempDir, Journal, Inputs, Runtime)> {
     let root = tempfile::tempdir()?;
     let policy = AclPolicy::current_user()?;
     policy.apply(root.path(), true)?;
