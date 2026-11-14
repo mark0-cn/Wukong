@@ -23,6 +23,34 @@ type Pipes = Channel<
 >;
 const CALL_TIMEOUT: Duration = Duration::from_secs(75);
 
+fn validate_operation(
+    kind: crate::resource_journal::ResourceKind,
+    read_only: bool,
+    operation: &Operation,
+) -> Result<()> {
+    use crate::resource_journal::ResourceKind::{Debugger, Interactive};
+    ensure!(
+        matches!(kind, Debugger | Interactive),
+        "operation requires a session resource"
+    );
+    ensure!(
+        match operation {
+            Operation::Write(write) => {
+                write.validate()?;
+                kind == Interactive
+            }
+            Operation::Inspect(_) | Operation::Control(_) => kind == Debugger,
+            Operation::Open(_) | Operation::Close(_) | Operation::Profile(_) => true,
+        },
+        "native session operation does not match its admitted kind"
+    );
+    ensure!(
+        !read_only || !matches!(operation, Operation::Control(_)),
+        "dump sessions permit inspection and close only"
+    );
+    Ok(())
+}
+
 pub(crate) struct Live {
     // Drain the Job before dropping channel handles if the service is torn down.
     host: SystemHost,
@@ -118,24 +146,7 @@ impl Live {
         })
     }
     pub(crate) fn prepare(&mut self, operation: Operation) -> Result<Pending> {
-        ensure!(
-            match &operation {
-                Operation::Write(write) => {
-                    write.validate()?;
-                    self.request.kind() == crate::resource_journal::ResourceKind::Interactive
-                }
-                Operation::Profile(_) =>
-                    self.request.kind() == crate::resource_journal::ResourceKind::Interactive,
-                Operation::Inspect(_) | Operation::Control(_) =>
-                    self.request.kind() == crate::resource_journal::ResourceKind::Debugger,
-                _ => true,
-            },
-            "native session operation does not match its admitted kind"
-        );
-        ensure!(
-            !self.request.read_only() || !matches!(&operation, Operation::Control(_)),
-            "dump sessions permit inspection and close only"
-        );
+        validate_operation(self.request.kind(), self.request.read_only(), &operation)?;
         ensure!(
             self.failed.is_none() && !self.cancel_requested && !self.host.exited(),
             "native session host is not live"
@@ -225,6 +236,30 @@ impl Live {
             self.host.stop(Duration::from_secs(10))? == 0,
             "native session host did not confirm clean exit"
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resource_journal::ResourceKind;
+    #[test]
+    fn shared_profile_operation_preserves_session_kind_and_dump_permissions() -> Result<()> {
+        let profile = Operation::Profile(session_wire::Profile {});
+        for kind in [ResourceKind::Debugger, ResourceKind::Interactive] {
+            validate_operation(kind, false, &profile)?;
+        }
+        validate_operation(ResourceKind::Debugger, true, &profile)?;
+        assert!(validate_operation(ResourceKind::Process, false, &profile).is_err());
+        let control = Operation::Control(session_wire::Control::default());
+        assert!(validate_operation(ResourceKind::Debugger, true, &control).is_err());
+        assert!(validate_operation(ResourceKind::Interactive, false, &control).is_err());
+        let write = Operation::Write(session_wire::Write {
+            data: vec![],
+            read_timeout_seconds: 1,
+        });
+        assert!(validate_operation(ResourceKind::Debugger, false, &write).is_err());
         Ok(())
     }
 }

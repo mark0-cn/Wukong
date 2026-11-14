@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow runtime profiles through owned Windows debugger sessions without closing the session. Keep interactive-only writes and read-only dump restrictions enforced."
+zh_CN = "允许通过所属 Windows 调试器会话查询运行环境画像，不再因此关闭会话；继续强制执行仅交互会话可写入及转储只读限制。"
