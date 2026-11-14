@@ -23,6 +23,7 @@ use std::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WorkbenchConfig {
+    pub docker_executable: String,
     pub root: PathBuf,
     pub image: String,
     pub memory: String,
@@ -31,6 +32,7 @@ pub struct WorkbenchConfig {
 impl Default for WorkbenchConfig {
     fn default() -> Self {
         Self {
+            docker_executable: crate::runtime::default_docker_executable(),
             root: ".wukong/workbench".into(),
             image: "wukong:0.1".into(),
             memory: "4g".into(),
@@ -45,6 +47,28 @@ pub struct Workbench {
     pub docker: Docker,
     pub config: AppConfig,
 }
+/// Release the OS lock at the end of its owner scope, even if an unrelated
+/// concurrent Unix fork temporarily inherits the underlying open file description.
+pub struct OperationLock {
+    file: fs::File,
+}
+impl OperationLock {
+    fn acquire(root: &Path) -> Result<Self> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(root.join("operation.lock"))?;
+        file.try_lock()
+            .context("another workbench operation is active")?;
+        Ok(Self { file })
+    }
+}
+impl Drop for OperationLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
 impl Workbench {
     pub fn open(config: &AppConfig) -> Result<Self> {
         ensure!(
@@ -55,14 +79,7 @@ impl Workbench {
         );
         fs::create_dir_all(&config.workbench.root)?;
         let root = portable_path(&fs::canonicalize(&config.workbench.root)?);
-        let operation = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(root.join("operation.lock"))?;
-        operation
-            .try_lock()
-            .context("another workbench operation is active")?;
+        let _operation = OperationLock::acquire(&root)?;
         let identity = root.join("workspace.json");
         if !identity.exists() {
             write_json(
@@ -83,19 +100,12 @@ impl Workbench {
         Ok(Self {
             root,
             id,
-            docker: Docker::new(&config.runtime.docker_executable),
+            docker: Docker::new(&config.workbench.docker_executable),
             config: config.clone(),
         })
     }
-    pub fn lock(&self) -> Result<fs::File> {
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(self.root.join("operation.lock"))?;
-        file.try_lock()
-            .context("another workbench operation is active")?;
-        Ok(file)
+    pub fn lock(&self) -> Result<OperationLock> {
+        OperationLock::acquire(&self.root)
     }
     pub fn name(&self, suffix: &str) -> String {
         format!("wukong-{}-{suffix}", self.id)
@@ -140,6 +150,23 @@ pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cloned_descriptors_do_not_extend_an_ended_operation_scope() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let lock = OperationLock::acquire(temporary.path())?;
+        // On Unix this shares the open file description, just like a fork
+        // before exec has applied close-on-exec to inherited descriptors.
+        let inherited = lock.file.try_clone()?;
+        assert!(OperationLock::acquire(temporary.path()).is_err());
+        drop(lock);
+        let successor = OperationLock::acquire(temporary.path())?;
+        assert!(OperationLock::acquire(temporary.path()).is_err());
+        drop(inherited);
+        assert!(OperationLock::acquire(temporary.path()).is_err());
+        drop(successor);
+        assert!(OperationLock::acquire(temporary.path()).is_ok());
+        Ok(())
+    }
     #[test]
     fn workspace_identity_and_lock_are_stable() -> Result<()> {
         let temp = tempfile::tempdir()?;

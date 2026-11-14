@@ -11,6 +11,10 @@ on:
         description: 'Prebuild release clients and seed master caches (no publication)'
         type: boolean
         default: false
+      windows_worker_acceptance:
+        description: 'Install and test the native worker only on the disposable hosted Windows runner'
+        type: boolean
+        default: false
   workflow_call:
 
 permissions:
@@ -43,6 +47,7 @@ jobs:
         id: scope
         env:
           BUILD_RELEASE_CLIENTS: ${{ inputs.build_release_clients || false }}
+          WINDOWS_WORKER_ACCEPTANCE: ${{ inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance') }}
         run: python -m scripts.ci.ci_scope
       - name: Documentation pairs, links and review records
         run: python -m scripts.ci.check_docs
@@ -86,6 +91,13 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./tests/automation/test-online-package.ps1
           ./tests/automation/test-installer.ps1
+      - name: Windows Python worker tests
+        if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.linux == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check -r workers/runtime/requirements.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python workers/tests/run.py unit -p 'test_*.py' -v
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Frontend
         if: needs.changes.outputs.frontend == 'true'
         run: |
@@ -122,6 +134,55 @@ jobs:
         run: |
           cargo test --locked --all-targets
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Standalone Windows worker bootstrap
+        id: worker_native
+        if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
+        run: |
+          $locator = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $installation = & $locator -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -or -not $installation) { throw 'MSVC x64 build tools are unavailable' }
+          $setup = Join-Path $installation 'Common7/Tools/VsDevCmd.bat'
+          $command = '"{0}" -no_logo -arch=x64 -host_arch=x64 >nul && set' -f $setup
+          & cmd.exe /d /c $command | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') }
+          }
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo clippy --locked --manifest-path workers/windows/Cargo.toml --all-targets --target-dir target/windows-worker-native -- -D warnings
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path workers/windows/Cargo.toml --lib --target-dir target/windows-worker-native
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m scripts.worker.toolchain --cache target/windows-offline-cache --component windbg_mcp --download
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m scripts.worker.build_native
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo fmt --manifest-path workers/package/Cargo.toml -- --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo clippy --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks -- -D warnings
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:WUKONG_WORKER_CLI = Join-Path $PWD 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-worker.exe'
+          $env:WUKONG_PACKAGE_CLI = Join-Path $PWD 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-package.exe'
+          cargo test --locked --manifest-path workers/package/Cargo.toml --test contract --target-dir target/worker-package-checks -- --ignored
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Dedicated hosted Windows worker installation acceptance
+        id: worker_acceptance
+        if: ${{ !cancelled() && steps.worker_native.outcome == 'success' && (inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance')) }}
+        run: |
+          python tests/acceptance/check_windows_worker.py --confirm-hosted-runner --report target/windows-worker-acceptance/report.json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Preserve public native installation report
+        if: always() && (steps.worker_acceptance.outcome == 'success' || steps.worker_acceptance.outcome == 'failure')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-worker-installation-report
+          path: target/windows-worker-acceptance/report.json
+          if-no-files-found: error
+          retention-days: 7
 
   linux:
     needs: changes
@@ -172,6 +233,12 @@ jobs:
           cargo test --locked --all-targets
           cargo build --locked
           python tests/acceptance/check_cleanup.py --binary target/debug/wukong
+      - name: Offline worker package format
+        if: needs.changes.outputs.rust == 'true'
+        run: |
+          cargo fmt --manifest-path workers/package/Cargo.toml -- --check
+          cargo clippy --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks -- -D warnings
+          cargo test --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks
       - name: Linux bilingual interface tests
         if: needs.changes.outputs.frontend == 'true'
         timeout-minutes: 15
@@ -191,8 +258,10 @@ jobs:
           retention-days: 7
       - name: Verify replay between sibling containers
         run: |
+          docker build --tag wukong-network-acceptance \
+            --file tests/acceptance/network.Dockerfile workers/runtime
           python tests/acceptance/check_network_verify.py \
-            --image python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b \
+            --image wukong-network-acceptance \
             --output-dir "$RUNNER_TEMP/pwn-network"
       - name: Preserve Pwn fixture evidence
         if: always()

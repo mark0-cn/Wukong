@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add bounded native Windows interactive pipe sessions using the existing protobuf session host, resource journal and owned cleanup. Preserve binary output and exact write retries; interrupted writes remain uncertain and are never automatically replayed. Dedicated offline VM tests cover x64/x86 I/O, blocked-write recovery and completed-result recovery. PTY, process profiling and shell execution are not included. Production execution remains disabled."
+zh_CN = "复用现有 protobuf 会话宿主、资源日志及所属资源清理，增加有界的原生 Windows 交互管道会话。保留二进制输出及原写入重试结果；中断写入保持未知，不会自动重放。专用离线 VM 测试覆盖 x64/x86 I/O、阻塞写入恢复和已完成结果恢复；不含 PTY、进程 profile 和 shell 执行。生产执行仍禁用。"

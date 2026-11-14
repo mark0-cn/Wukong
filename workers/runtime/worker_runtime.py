@@ -14,10 +14,13 @@ from worker_profile import ProfileService
 from worker_crash import CrashService
 from worker_operations import OperationLedger
 from worker_sessions import SessionManager
+from worker_transfers import TransferService
+from worker_identity import WorkerIdentity
 
 class Runtime:
     def __init__(self, root, trusted):
         self.root, self.trusted = root.resolve(), trusted
+        self.identity = WorkerIdentity(self.root)
         self.isolated = sys.platform.startswith("linux") and os.geteuid() == 0 and not trusted
         self.jobs = JobManager(self.root, trusted, self.isolated)
         self.sessions = SessionManager(self.root, trusted, self.isolated)
@@ -30,23 +33,29 @@ class Runtime:
         self.seccomp = SeccompService(self.root, trusted, self.isolated)
         self.network = NetworkService(self.root, trusted, self.isolated)
         self.operations = OperationLedger(self.root)
+        self.transfers = TransferService(self.root)
         self.handlers = {}
-        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu, self.libc, self.profile, self.crash, self.seccomp, self.network]:
+        for service in [self.jobs, self.sessions, self.files, self.commands, self.emu, self.libc, self.profile, self.crash, self.seccomp, self.network, self.transfers]:
             for name in service.methods:
                 if name in self.handlers:
                     raise ValueError("duplicate worker method: " + name)
                 self.handlers[name] = service.dispatch
 
     def dispatch(self, method, params):
+        if method not in {'ping','doctor'} and '_binding' in params:
+            self.identity.validate(params['_binding'])
+            params={key:value for key,value in params.items() if key!='_binding'}
         return self.operations.invoke(method, params, self.dispatch_inner, self.sessions.reconcile_reply)
 
     def dispatch_inner(self, method, params):
         if method in self.handlers:
             return self.handlers[method](method, params)
         if method == "ping":
-            return {"protocol": PROTOCOL, "daemon_pid": os.getpid(), "state_dir": str(self.root)}
+            return {"protocol": PROTOCOL, "identity":self.identity.value, "daemon_id":self.identity.daemon_id,
+                    "daemon_pid": os.getpid(), "state_dir": str(self.root)}
         if method == "doctor":
-            return doctor(self.root,self.trusted,self.isolated)
+            return {**doctor(self.root,self.trusted,self.isolated),'identity':self.identity.value,
+                    'daemon_id':self.identity.daemon_id,'exclusive_run_lease':False}
         if method == "ghidra.query":
             from ghidra_backend import query
             return query(self.root, params)

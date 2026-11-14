@@ -458,6 +458,12 @@ mod tests {
     };
 
     fn fixture(dir: &std::path::Path) -> Result<(Store, AgentMetadata)> {
+        fixture_snapshot(dir, json!({}))
+    }
+    fn fixture_snapshot(
+        dir: &std::path::Path,
+        configuration: Value,
+    ) -> Result<(Store, AgentMetadata)> {
         let target = dir.join("sample");
         std::fs::write(&target, b"fixture")?;
         let store = Store::open(dir.join("state"))?;
@@ -465,7 +471,7 @@ mod tests {
             &target,
             "fixture",
             Budget::default(),
-            json!({}),
+            configuration,
         )?;
         let agent = Coordinator::new(store.clone())
             .create_child(
@@ -565,10 +571,24 @@ mod tests {
     async fn recovery_reuses_controller_and_worker_receipts_without_repeating_effects() -> Result<()>
     {
         let dir = tempfile::tempdir()?;
-        let (store, agent) = fixture(dir.path())?;
-        let mut config = AppConfig::default();
-        config.runtime.backend = RuntimeBackend::TrustedLocal;
-        config.runtime.state_dir = dir.path().join("worker");
+        let config = AppConfig {
+            default_environment: Some("fixture".into()),
+            environments: std::collections::BTreeMap::from([(
+                "fixture".into(),
+                crate::environments::EnvironmentConfig {
+                    name: "Trusted fixture".into(),
+                    platform: crate::environments::Platform::current(),
+                    installation_id: None,
+                    runtime: crate::runtime::RuntimeConfig {
+                        backend: RuntimeBackend::TrustedLocal,
+                        state_dir: dir.path().join("worker"),
+                        ..Default::default()
+                    },
+                },
+            )]),
+            ..Default::default()
+        };
+        let (store, agent) = fixture_snapshot(dir.path(), serde_json::to_value(&config)?)?;
         let args = json!({"command":"printf x >> \"$WUKONG_STATE_DIR/counter\"; printf done"});
         let mut tools = ToolService::new(config.clone(), store.clone()).await?;
         let first = tools
@@ -600,11 +620,21 @@ mod tests {
             assert!(!replay.is_error, "{replay:?}");
             assert_eq!(replay.value["result"], first.value["result"]);
             assert_eq!(
-                std::fs::read(config.runtime.state_dir.join("counter"))?,
+                std::fs::read(
+                    config.environments["fixture"]
+                        .runtime
+                        .state_dir
+                        .join("counter")
+                )?,
                 b"x"
             );
         }
-        tools.runtime()?.call("worker.shutdown", json!({})).await?;
+        tools
+            .bound_to(&agent)
+            .await?
+            .runtime()?
+            .call("worker.shutdown", json!({}))
+            .await?;
         tools.close().await;
         Ok(())
     }

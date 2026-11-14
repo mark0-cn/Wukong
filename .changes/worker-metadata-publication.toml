@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Flush worker metadata before publishing it, so interrupted writes do not replace a complete lease or operation record with partially written contents. Reuse atomicwrites for publication and cleanup, retaining bounded Windows sharing retries."
+zh_CN = "发布 worker 元数据前先刷盘，避免中断写入以不完整内容替换完整租约或操作记录。发布与清理由 atomicwrites 库处理，并保留 Windows 共享冲突的有界重试。"

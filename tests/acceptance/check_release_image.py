@@ -44,7 +44,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="wukong-release-") as directory:
             root = Path(directory)
             config = root / "wukong.toml"
-            config.write_text('state_dir = ' + json.dumps(str(root / "assessments")) + '\n[runtime]\ndocker_executable = ' + json.dumps(args.docker) + '\n[workbench]\nroot = ' + json.dumps(str(root / "workbench")) + '\nimage = ' + json.dumps(args.image) + '\n', encoding="utf-8")
+            config.write_text('state_dir = ' + json.dumps(str(root / "assessments")) + '\n[workbench]\ndocker_executable = ' + json.dumps(args.docker) + '\nroot = ' + json.dumps(str(root / "workbench")) + '\nimage = ' + json.dumps(args.image) + '\n', encoding="utf-8")
 
             def cli(*argv):
                 return json.loads(command([client, "--config", config, *argv], timeout=600))

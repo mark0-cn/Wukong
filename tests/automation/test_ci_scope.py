@@ -4,6 +4,9 @@ from scripts.ci.ci_scope import checks_passed, select_scope, prebuild_clients
 
 
 class ScopeTests(unittest.TestCase):
+    def test_explicit_worker_acceptance_builds_all_required_components_even_for_documentation(self):
+        scope = select_scope(["README.md"], "pull_request", force_full=True)
+        self.assertTrue(all(scope[name] for name in ("rust", "frontend", "linux")))
     def test_release_fragments_preserve_frontend_scope_but_unknown_note_files_do_not(self):
         selected = select_scope(["ui/src/components/Updates.tsx", ".changes/release-notes.toml"], "pull_request")
         self.assertTrue(selected["frontend"])

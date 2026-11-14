@@ -32,6 +32,8 @@ pub struct ToolService {
     analysis: AnalysisService,
     mcp: McpRegistry,
     locks: Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>,
+    environments: crate::environments::EnvironmentRegistry,
+    default_environment: Option<String>,
 }
 
 mod analysis;
@@ -39,8 +41,10 @@ mod args;
 mod catalog;
 mod coordination;
 mod discovery;
+pub(crate) use discovery::ToolSelection;
 mod execution;
 mod gateway;
+mod requirements;
 use analysis::AnalysisService;
 use execution::ExecutionService;
 use files::FilesService;
@@ -51,6 +55,7 @@ mod files;
 mod handlers;
 mod jobs;
 mod sessions;
+mod transfers;
 mod verification;
 mod verification_protocol;
 use catalog::builtins;
@@ -106,14 +111,15 @@ impl ToolService {
     pub(crate) fn from_dependencies(
         config: AppConfig,
         store: Store,
-        client: Option<RuntimeClient>,
         mcp: McpRegistry,
     ) -> Result<Self> {
+        let environments =
+            crate::environments::EnvironmentRegistry::new(config.environments.clone())?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
         let gateway = WorkerGateway {
             store: store.clone(),
-            client,
-            identity: stable("worker", &serde_json::to_string(&config.runtime)?),
+            client: None,
+            identity: "unbound".into(),
             output_limit: config.tools.max_output_bytes,
         };
         let execution = ExecutionService::new(store.clone(), gateway.clone(), locks.clone());
@@ -132,8 +138,91 @@ impl ToolService {
             analysis,
             mcp,
             locks,
+            environments,
+            default_environment: config.default_environment,
         })
     }
+    pub(crate) async fn bound_to(&self, agent: &AgentMetadata) -> Result<Self> {
+        let Some(environment_id) = &agent.environment_id else {
+            return Ok(self.clone());
+        };
+        self.checked_environment(agent).await?;
+        let client = self
+            .environments
+            .bind(
+                environment_id,
+                &agent.run_id,
+                self.store.controller_owner().as_deref(),
+            )
+            .await?;
+        let identity = stable("worker", &serde_json::to_string(client.identity())?);
+        let gateway = WorkerGateway {
+            store: self.store.clone(),
+            client: Some(client),
+            identity,
+            output_limit: self.limits.max_output_bytes,
+        };
+        let execution =
+            ExecutionService::new(self.store.clone(), gateway.clone(), self.locks.clone());
+        let analysis = AnalysisService {
+            store: self.store.clone(),
+            files: execution.files.clone(),
+            gateway,
+            config: self.analysis.config.clone(),
+        };
+        Ok(Self {
+            execution,
+            analysis,
+            ..self.clone()
+        })
+    }
+
+    async fn checked_environment(&self, agent: &AgentMetadata) -> Result<RuntimeClient> {
+        let environment_id = agent
+            .environment_id
+            .as_ref()
+            .context("task has no assigned environment")?;
+        let config = self.environments.config(environment_id)?;
+        let run: RunRecord = self.store.load(&agent.run_id)?;
+        ensure!(
+            run.config["environments"][environment_id] == serde_json::to_value(config)?,
+            "environment configuration changed since this assessment was created"
+        );
+        let client = self.environments.client(environment_id).await?;
+        self.store.bind_environment(&EnvironmentBinding {
+            id: stable(
+                "environment-binding",
+                &format!("{}:{environment_id}", agent.run_id),
+            ),
+            run_id: agent.run_id.clone(),
+            environment_id: environment_id.clone(),
+            identity: client.identity().clone(),
+        })?;
+        Ok(client)
+    }
+
+    pub(crate) async fn refresh_jobs(&self, run: &str) -> Result<()> {
+        for job in self.store.records::<JobRecord>(run)? {
+            if job.notification_message_id.is_some() {
+                continue;
+            }
+            let owner: AgentMetadata = require_in_run(&self.store, &job.agent_id, run)?;
+            let tools = self.bound_to(&owner).await?;
+            tools
+                .execution
+                .jobs
+                .observe(&owner, &format!("job-observation:{}", job.id), &job.id)
+                .await?;
+        }
+        Ok(())
+    }
+    pub(crate) async fn renew_environment_leases(&self, run: &str) -> Result<()> {
+        if let Some(owner) = self.store.controller_owner() {
+            self.environments.renew_leases(run, &owner).await?;
+        }
+        Ok(())
+    }
+    #[cfg(test)]
     pub(crate) fn jobs(&self) -> &jobs::JobService {
         &self.execution.jobs
     }
@@ -172,13 +261,14 @@ impl ToolService {
     }
     pub async fn close(&self) {
         self.mcp.close().await;
+        self.environments.close().await;
         if let Some(runtime) = &self.execution.gateway.client {
             let _ = runtime.close().await;
         }
     }
     pub async fn doctor(&self) -> Result<Value> {
-        if let Some(runtime) = &self.execution.gateway.client {
-            runtime.doctor().await
+        if let Some(environment) = &self.default_environment {
+            Ok(self.environments.doctor(environment).await?["observation"].clone())
         } else {
             Ok(
                 json!({"enabled":false,"capabilities":{},"reason":"runtime disabled in configuration"}),
@@ -268,7 +358,14 @@ impl ToolService {
                 args
             };
             if let Some(spec) = builtin {
-                (spec.handler)(self, &agent, call_id, name, args).await
+                if self.needs_worker(spec) {
+                    let scoped = self.bound_to(&agent).await?;
+                    scoped.require_backend(spec, &args).await?;
+                    (spec.handler)(&scoped, &agent, call_id, name, args).await
+                } else {
+                    self.require_backend(spec, &args).await?;
+                    (spec.handler)(self, &agent, call_id, name, args).await
+                }
             } else if self.mcp.contains(name) {
                 self.mcp.call(name, args).await
             } else {

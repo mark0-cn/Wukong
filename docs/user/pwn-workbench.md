@@ -36,7 +36,7 @@ wukong --config wukong.toml env up
 wukong --config wukong.toml env doctor
 ```
 
-If Docker is absent from PATH, set `[runtime].docker_executable` to its absolute path. Generated configuration is `wukong.toml` in the workbench directory; open the client with it or select **Use tool environment** in the desktop. Model credentials still come from host credential storage/environment variables.
+If Docker is absent from PATH, set `[workbench].docker_executable` to its absolute path. Generated configuration is `wukong.toml` in the workbench directory and registers the named `workbench` Linux environment; open the client with it or select **Use tool environment** in the desktop. Model credentials still come from host credential storage/environment variables.
 
 `env doctor` compiles/runs 32/64-bit programs and checks GDB breakpoints, pwntools I/O, Python libraries, Pwndbg/pwninit and Ghidra import. Results go to `doctor.json`; it does more than check executable presence.
 
@@ -100,6 +100,8 @@ port = 1337
 ```
 
 `argv_file` mode requires `@@` in argv; `pty` supports interactive sessions. LaunchSpec supplies consistent loader/libc/working-directory declarations to interaction, debugging, replay, minimization and verification. Confirm actual libc/loader mappings again at runtime.
+
+Background `job_start` also accepts the staged LaunchSpec with an optional staged input. The manifest supplies argv, environment, cwd and timeout, so omit per-call overrides. Process jobs support `stdin_pipe` and `argv_file`; use an interactive session for `pty`. Preparation records regular files from cwd, and isolated execution stages only declared members while preserving paths outside cwd. Symlinks must be resolved before preparation.
 
 When a loader is specified, tools create a stable-path patchelf execution copy without changing original binary/libc. Executed-file hashes may differ from attachment hashes; keep identities separate. Each execution uses a separate writable working-directory copy, currently limited to 1024 files/32 MiB. Use original services/dedicated debugging environments for large filesystems.
 

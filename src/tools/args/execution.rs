@@ -7,7 +7,21 @@ pub(in crate::tools) struct RuntimeDoctorArgs {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(in crate::tools) struct EnvironmentDoctorArgs {
+    pub environment_id: String,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::tools) struct StageTargetArgs {}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::tools) struct ArtifactStageArgs {
+    pub artifact_id: String,
+    #[serde(default)]
+    pub executable: bool,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -29,7 +43,7 @@ pub(in crate::tools) struct FilePutArgs {
 pub(in crate::tools) struct FileGetArgs {
     #[schemars(length(min = 1))]
     pub path: String,
-    #[schemars(range(min = 1, max = 33554432))]
+    #[schemars(range(min = 1, max = 17179869184_u64))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<u64>,
 }
@@ -37,7 +51,14 @@ pub(in crate::tools) struct FileGetArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::tools) struct JobStartArgs {
+    #[serde(default)]
     pub argv: Vec<String>,
+    /// Existing prepared LaunchSpec; omit argv/env/cwd overrides when supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_spec: Option<String>,
+    /// Admitted input file; LaunchSpec selects stdin_pipe or argv_file delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -103,6 +124,13 @@ pub(in crate::tools) struct FuzzStatusArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::tools) struct DebugStartArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<DebugMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<DebugEngine>,
+    /// Staged dump artifact; required in dump mode, separate from the target image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dump: Option<String>,
     /// Input artifact for argv_file LaunchSpecs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<String>,
@@ -122,6 +150,71 @@ pub(in crate::tools) struct DebugCommandArgs {
     pub session_id: String,
     #[schemars(length(min = 1))]
     pub command: String,
+    #[schemars(range(min = 1, max = 60))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+choices!(DebugMode { Launch, Dump });
+choices!(DebugEngine {
+    Auto,
+    GdbMi,
+    Dbgeng
+});
+choices!(DebugInspectKind {
+    Registers,
+    Stack,
+    Memory,
+    Modules,
+    Threads,
+    Disassembly,
+    Exception,
+    State
+});
+choices!(DebugAction {
+    Run,
+    Continue,
+    Interrupt,
+    Step,
+    Next,
+    Finish,
+    BreakpointAdd,
+    BreakpointRemove,
+    BreakpointEnable,
+    BreakpointDisable
+});
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::tools) struct DebugInspectArgs {
+    pub session_id: String,
+    pub kind: DebugInspectKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u64>,
+    #[schemars(range(min = 1, max = 65536))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<u64>,
+    #[schemars(range(min = 1, max = 256))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    #[schemars(range(min = 1, max = 60))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::tools) struct DebugControlArgs {
+    pub session_id: String,
+    pub action: DebugAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u64>,
+    #[schemars(length(min = 1, max = 512))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    #[schemars(length(min = 1, max = 32))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakpoint_id: Option<String>,
     #[schemars(range(min = 1, max = 60))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
@@ -171,6 +264,7 @@ pub(in crate::tools) struct InteractiveCloseArgs {
 pub(in crate::tools) struct AngrSolveArgs {
     #[schemars(length(min = 1))]
     pub target: String,
+    #[schemars(length(min = 1))]
     pub find: Vec<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avoid: Option<Vec<u64>>,
@@ -332,15 +426,10 @@ pub(in crate::tools) struct InputMinimizeArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected: Option<Expected>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<Map<String, Value>>,
     #[schemars(range(min = 1, max = 60))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
-    #[schemars(range(min = 1, max = 16))]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trials: Option<u64>,
     #[schemars(range(min = 1, max = 4096))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u64>,

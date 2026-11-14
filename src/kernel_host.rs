@@ -138,6 +138,12 @@ impl KernelHost {
     ) -> Result<std::collections::BTreeSet<String>> {
         self.tools.model_tool_names(agent)
     }
+    pub(crate) async fn prepare_tool_selection(
+        &self,
+        agent: &AgentMetadata,
+    ) -> crate::tools::ToolSelection {
+        self.tools.prepare_tool_selection(agent).await
+    }
     pub(crate) fn create_agent(
         &self,
         agent: &AgentMetadata,

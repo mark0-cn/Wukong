@@ -4,7 +4,6 @@ use crate::{
     config::AppConfig,
     domain::*,
     report,
-    runtime::{RuntimeBackend, RuntimeClient},
     store::Store,
 };
 use anyhow::Result;
@@ -254,21 +253,19 @@ pub async fn run(cli: Cli) -> Result<()> {
         | Command::Env { .. }
         | Command::Challenge { .. } => unreachable!(),
         Command::Doctor => {
-            let runtime = if config.runtime.backend == RuntimeBackend::Disabled {
-                json!({"available":false,"reason":"execution worker disabled; configure Docker/SSH or explicitly select trusted_local fixtures"})
-            } else {
-                match RuntimeClient::connect(config.runtime.clone()).await {
-                    Ok(client) => {
-                        let result = client.doctor().await;
-                        let _ = client.close().await;
-                        match result {
-                            Ok(v) => v,
-                            Err(e) => json!({"available":false,"error":format!("{e:#}")}),
-                        }
-                    }
-                    Err(e) => json!({"available":false,"error":format!("{e:#}")}),
-                }
-            };
+            let registry =
+                crate::environments::EnvironmentRegistry::new(config.environments.clone())?;
+            let mut environments = serde_json::Map::new();
+            for id in config.environments.keys() {
+                environments.insert(
+                    id.clone(),
+                    match registry.doctor(id).await {
+                        Ok(value) => value,
+                        Err(error) => json!({"available":false,"error":format!("{error:#}")}),
+                    },
+                );
+            }
+            registry.close().await;
             let key_env =
                 config
                     .model
@@ -280,7 +277,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                         _ => "OPENAI_API_KEY",
                     });
             print_json(
-                &json!({"version":env!("CARGO_PKG_VERSION"),"rig_version":crate::llm::RIG_VERSION,"state_dir":store.root(),"model":{"provider":config.model.provider,"model":config.model.model,"role_model":config.model.role_model,"role_models":config.model.role_models,"base_url":config.model.base_url,"credential_env":key_env,"credential_present":crate::credentials::lookup(key_env).is_some()},"static":{"binary_parser":true,"ghidra_executable":config.analysis.ghidra_executable,"configured":config.analysis.ghidra_executable.is_some()},"runtime":runtime,"mcp_servers":config.mcp.iter().map(|s|&s.name).collect::<Vec<_>>()}),
+                &json!({"version":env!("CARGO_PKG_VERSION"),"rig_version":crate::llm::RIG_VERSION,"state_dir":store.root(),"model":{"provider":config.model.provider,"model":config.model.model,"role_model":config.model.role_model,"role_models":config.model.role_models,"base_url":config.model.base_url,"credential_env":key_env,"credential_present":crate::credentials::lookup(key_env).is_some()},"static":{"binary_parser":true,"ghidra_executable":config.analysis.ghidra_executable,"configured":config.analysis.ghidra_executable.is_some()},"environments":environments,"mcp_servers":config.mcp.iter().map(|s|&s.name).collect::<Vec<_>>()}),
             )?;
         }
         Command::Analyze {

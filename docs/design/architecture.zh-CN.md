@@ -10,6 +10,8 @@
 
 ## 模块与职责
 
+Windows 的执行管理入口只有原生 Worker。控制器负责业务任务和证据，`workers/protocol` 共用公开类型，原生服务负责能力、租约、文件和资源。Python 在 Windows 上作为一次性隔离分析工具；Linux 保留 Python Worker。详见[跨平台环境架构](cross-platform-environments.zh-CN.md)和[当前 Windows 组件指南](../../workers/windows/README.zh-CN.md)。
+
 | 模块 | 职责 |
 |---|---|
 | `domain` | run/agent/message/event/tool/evidence/finding/verification/coverage 的持久化记录 |
@@ -51,7 +53,7 @@ agent 状态包括 queued、running、waiting、budget_paused、completed、stop
 
 子 agent 完成前须关闭自己持有的调试和交互会话，根任务完成前须处理全部会话。停止或失败的 owner 遗留会话可以由同任务的其他子 agent 关闭；该权限不允许发送调试命令或交互输入。
 
-Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，使用 schema 3 状态目录，不提供旧数据库或旧版自定义 AgentRun 检查点迁移。
+Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，使用 schema 4 状态目录，不提供旧数据库或旧版自定义 AgentRun 检查点迁移。
 
 `DurableEffects` 统一工具调用准入、稳定标识、事务回执、worker 成功回执和恢复决策。业务调用标识由 agent、generation、已计量模型轮次与 provider tool-call ID 构成，不依赖恢复后会重新分配的 ECS 实体或效果 ID。业务事务与回执一起提交；worker 回复在控制器后处理前持久化，若回复丢失则用同一请求标识查询 worker 的持久化操作账本。未决 MCP 写操作保留给操作员对账，不自动重放。操作员对账也使用带 epoch 的租约隔离。原生效果及数据库变化唤醒执行循环。
 
@@ -77,17 +79,21 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 共享资料按需装配：每次新模型请求按作者、父任务、前驱、scope 和任务关键词选择最多 6 条笔记、待办或可选 threat model 的有界预览。选择属于启发式提示，不保证覆盖全部相关资料；提示词明确提供遗漏数量和检索入口。`context_search` 支持文本、kind、作者 scope、agent_id 和分页，`context_read` 按 Unicode 字符位置读取原始文档 JSON（含 amendments）。两者按工具输出字节限额自动缩小页面，并保留下一页位置，不经过模型摘要。所有读取限于当前 run；原始证据继续通过 `evidence_read` 读取。会话压缩只保存同样的有界预览、账本计数和完整会话证据引用，不重新注入全部文档或任务树。计划和约束仍来自任务契约，筛选不会替代验收。
 
-内置工具由 `src/tools/catalog.rs` 统一注册，模型从第一轮获得角色可见的完整目录；原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；目标身份、证据、会话 owner 和独立复核仍由实际操作校验。工具定义直接用于执行、参数校验和[生成的工具目录](../reference/tool-catalog.zh-CN.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，实际能力仍需探测。运行 `wukong tool-catalog` 重新生成 Markdown，`wukong --json tool-catalog` 导出机器可读 schema。
+内置工具及其后端要求由 `src/tools/catalog.rs` 统一注册。每次模型请求前，异步环境预检根据实际观测能力选择角色可见的工具；root 编排保持延迟连接。预检失败时保留控制器工具，并报告不可用工具的要求。原生协调工具为 `task`、`message`、`wait`。root 使用 `finish_scan`，子 agent 使用 `agent_finish`；实际操作再次校验后端能力、目标身份、证据、会话 owner 和独立复核。工具定义直接用于执行、参数校验和[生成的工具目录](../reference/tool-catalog.zh-CN.md)，不保存工具发现或加载选择。MCP 定义在连接后合并，其实际能力仍需探测。运行 `wukong tool-catalog` 重新生成 Markdown，`wukong --json tool-catalog` 导出机器可读 schema。
 
 内置方法的来源、相关工具和机制夹具由 `prompts/coverage.json` 关联到现有 `SkillManifest`，通过 `wukong skill-catalog` 生成[覆盖清单](../reference/skill-coverage.zh-CN.md)。这些维护信息不改变角色权限、工具可用性或完成门槛。
 
 Python worker 的入口、传输、操作账本、任务管理、独立监督、调试、交互、文件和命令执行由独立组件负责。`Runtime` 仅装配和路由，操作账本通过回调执行及核对会话存活，不依赖具体运行时。
+
+具名[分析环境](cross-platform-environments.zh-CN.md)按需连接并与子任务不可变绑定。资源身份包含 worker；共享制品经过控制器哈希校验存储，以有界、可恢复的方式传输。
 
 外部进程与模型状态分别恢复。worker 的 debugger/fuzz/job handle 需要重新核对存活状态；保存了 pid 或 SQLite 状态不等于进程仍在运行。已完成的有副作用工具调用复用记录，无法确定结果的调用不能盲目重放。MCP 的 readOnlyHint 通过 Rig 的提示语义处理，不足以授权重放结果未知的远端调用。GDB 同一会话只允许 owner 顺序修改；并行实验创建独立进程。原生内核只注册配置允许的业务工具，不加载宿主 shell 或通用编码工具。
 
 <a id="desktop-reads-and-persistence-boundaries"></a>
 
 ## 桌面读取与持久化边界
+
+`desktop/configuration` 先在临时文档中应用标量或嵌套表设置修改，再完整解析结果，成功后才替换草稿。无效修改不会改变草稿。保存时保留无关注释、检查外部文件变更并验证解析后的配置；登记环境不会连接该环境或创建 SSH 凭据。
 
 `queries` 提供 `WorkspaceQueries`、`AssessmentQueries` 和 `ReportQueries`，返回不依赖 GUI 的摘要、增量游标、会话快照和报告快照。SQL 实现位于 `store/workspace` 与 `store/report_queries`；CLI 与 GUI 共用查询模型，聊天解析和布局缓存只保留在 GUI 适配层。
 
@@ -125,7 +131,7 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 
 `fixtures/` 包含符号/stripped 的本地漏洞、修复与正常样本。构建脚本生成 ELF，行为 harness 实际重放并保存哈希与退出结果；检测准确率由独立报告和显式复核标签计算，不从 crash 推断 agent 检测成功。详见 `fixtures/README.md`。
 
-首版动态工具集中在 Linux x86_64 ELF。PE/Mach-O 静态画像可用，但本仓库未实现 Windows DbgEng 或 macOS LLDB 动态后端。当前平台验收以 CI 和[桌面更新验证](../development/desktop-updates.zh-CN.md)为准；早期原生内核检查不证明当前 Windows Docker Desktop 覆盖。外部工具与模型 provider 的环境依赖需要实际配置，缺少依赖会返回明确错误；本地协议测试不等同于线上 provider 或外部引擎验收。
+生产动态工具面向 Linux x86_64 ELF，PE/Mach-O 静态画像可用。Windows 使用外部 WinDbg MCP 工具，已通过真实可信 x64/x86 dump/live 客户端验收；自写 DbgEng 后端已删除，托管 Windows 调试准入及完整生产安装仍未完成。macOS LLDB 尚未实现。参见[分析环境](cross-platform-environments.zh-CN.md)。当前平台验收以 CI 和[桌面更新验证](../development/desktop-updates.zh-CN.md)为准；早期原生内核检查不证明当前 Windows Docker Desktop 覆盖。缺少依赖会返回明确错误；本地协议测试不等同于线上 provider 或外部引擎验收。
 
 <a id="typed-coordination-messages"></a>
 
@@ -133,7 +139,7 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 
 消息携带 kind、correlation/reply ID、收发 generation、当前任务身份和证据引用。send_message_to_agent 默认 information：不重开任务、不打断等待。question、reply、result、blocked 可唤醒等待者但不清除等待条件。只有显式 follow_up_agent 重开已完成任务。
 
-queued 表示持久入队；included 表示进入原生会话/上下文及日志，不表示模型已执行或处理。replied 表示显式关联回复，不判断正确性。旧代次回复保留为 stale，不注入当前工作。message_status 展示状态；在途请求保留原邮箱快照。此增量使用新 schema 3，不迁移旧数据库。已完成任务遗留 information 在新代次开始时变 stale。CLI/GUI 默认 information，显式 follow-up 才重开。
+queued 表示持久入队；included 表示进入原生会话/上下文及日志，不表示模型已执行或处理。replied 表示显式关联回复，不判断正确性。旧代次回复保留为 stale，不注入当前工作。message_status 展示状态；在途请求保留原邮箱快照。此增量使用新 schema 4，不迁移旧数据库。已完成任务遗留 information 在新代次开始时变 stale。CLI/GUI 默认 information，显式 follow-up 才重开。
 
 原生 message 向可达活动 Agent 发请求或回复。信息/关联邮件使用类型化 send_message_to_agent，完成后的新工作用 follow_up_agent。原生等待投递与类型化回执一起投影；included 不证明模型已处理或回答。
 

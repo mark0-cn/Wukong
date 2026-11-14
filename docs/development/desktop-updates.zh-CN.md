@@ -23,7 +23,7 @@ Linux 支持范围以桌面安装验收矩阵为准，AppImage 不承诺兼容�
 `desktop/updates.rs` 处理检查、下载、独立候选自检、安装和 GUI 进度。准备阶段不替换现用 worker。
 安装前缓存并验证当前版本安装文件，原子保存恢复助手与 `updates/pending.json`。新进程只有在版本匹配且配套环境 doctor 通过后才将记录转为 `previous.json`。
 未确认更新阻止新任务启动；`maintenance.lock` 以共享/独占文件锁协调 GUI、CLI 和更新操作。
-模型设置及题目环境不参加版本替换；只接受数据 schema 3，不执行不兼容数据库迁移。
+模型设置及题目环境不参加版本替换；只接受数据 schema 4，不执行不兼容数据库迁移。
 
 `updates/recovery.rs` 不依赖 WebView：Windows 使用经过验证的上一版 NSIS 安装器，Linux 原子替换 AppImage。
 恢复后检查实际客户端版本，失败时保留记录。用户通过独立恢复程序确认恢复，不在超时后擅自覆盖仍可能运行的安装器。
@@ -86,6 +86,8 @@ Docker 的 info、inspect、version、ps 控制查询最多等待 30 秒，其�
 健康观察绑定工作区配置 epoch；配置或工作区改变后，旧的通过结果不能继续作为当前环境的健康证明。
 
 本机数据清理由独立的 `cleanup` 服务负责，通过 CLI 共用。`managed-locations.json` 记录配置与缓存目录切换，不保存凭据；新创建的状态、本机 worker 和 Ghidra 根目录带有归属标记。清单只包含已知的应用子项，保留未知的同级文件和无法确认归属的外部目录。删除前校验文件身份和清单指纹；普通文件先于元数据、设置和位置记录清理。预览只读，不初始化 Store 或 worker 客户端。CLI 属于操作员接口，不注册为 Agent 工具。
+
+具名环境清单仅登记 `trusted_local` worker 状态目录；Docker/SSH 的状态路径不作为本地 worker 清理根目录。关闭本地 worker 时检查协议 2。不可变只读 SQLite 归属检查识别状态 schema 3 和 4，不执行迁移，也不在旧工作区中启动分析任务。
 
 `desktop/cleanup.rs` 在独立的 webview profile 中只开放偏好、预览、确认和取消，不组装工作区服务。复用现有 React Modal、语言目录和类型化桥接展示同一份清单，界面最多展示 200 个路径/资源/保留项，后端保留完整预览。确认将清单保存到应用数据之外后退出，原生 hook 等 WebView 锁释放后调用无界面执行器。`packaging/windows/uninstall-hooks.nsh` 使用 Tauri 支持的 hook，不复制其 NSIS 模板。升级/被动路径不清理；共享清理关闭原生递归应用数据删除。匹配的 `cleanup finish` 在原生程序移除后解除延迟准入。Linux 只移除受管理的 AppImage/启动器/图标集成，便携副本保留。
 

@@ -4,13 +4,21 @@
 
 [English](README.md) · 简体中文
 
+本指南的 Python 进程管理适用于 Linux Worker 和可信开发夹具。托管 Windows 由原生 Worker 统一管理身份、能力、租约、上传和执行；Python 仅按需运行受隔离的分析代码。当前职责和容量限制见[Windows 组件指南](../windows/README.zh-CN.md)。
+
 Rust 控制端默认不运行待分析目标。请选择持久化 Docker/VM/SSH worker。`trusted_local` 显式在宿主运行可信夹具，仅用于开发测试。Python bridge 管理进程，容器或 VM 提供隔离。
 
-在 worker 使用的 Python 环境（可信本地测试为 `runtime.python`）安装依赖：
+对于 Linux worker 和可信开发夹具，在 worker 使用的 Python 环境（可信本地测试为 `environments.<id>.runtime.python`）安装依赖：
 
 ```sh
 python -m pip install -r workers/runtime/requirements.txt
 ```
+
+托管 Windows VM 必须使用包含 Python 和全部依赖的完整离线包；不得在 VM 内下载软件包或运行在线 pip 安装。[工具包约定](../package/README.zh-CN.md)和 [Windows 组件](../windows/README.zh-CN.md)说明当前实现及尚未完成的安装器/生产验收工作。
+
+Bridge 启动时会在导入 worker 模块前禁用 Python 字节码写入，新建 daemon 和作业监督器进程也遵循该设置，从而保持已签名部署文件不变；可写状态保存在配置的状态目录。不可变部署中的其他 Python 入口也应使用 `-B` 启动。
+
+元数据发布使用 `atomicwrites`：完整 UTF-8 JSON 在替换前刷盘，写入失败时清理临时文件。Windows 写穿移动和 POSIX 父目录同步由库处理。仅对 Windows 临时访问/共享冲突重试，最多五次；保留记录失败不得授权执行。已有操作记录损坏仍报错，绝不静默重置。离线包固定已发布的 1.4.0 通用 wheel；1.4.1 对运行模块仅修改版本号和 API 文档字符串。故障注入检查不证明断电或当前源码的 VM 重启验收通过。
 
 Docker 镜像自动安装依赖。GDB/MI 结果含解析后的 `payload`；异步事件是 type、message、payload、原始 `record` 的结构化记录。原始 MI transcript 保留为证据。
 
@@ -25,9 +33,9 @@ $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 & $docker build -f workers/Dockerfile -t wukong-worker:0.1 .
 & $docker volume create wukong-worker-state
 & $docker run -d --name wukong-worker --network none --cap-drop ALL `
-  --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
+  --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
   --security-opt no-new-privileges --security-opt seccomp=unconfined `
-  --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g `
+  --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g,exec `
   --mount type=volume,source=wukong-worker-state,target=/state wukong-worker:0.1
 ```
 
@@ -35,17 +43,21 @@ $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 
 Dockerfile 按 digest 固定 AFL++ 基础镜像，安装 GDB、GCC、Python、带 QEMU 插桩的 AFL++、pwntools/z3-solver/angr/ropper、校验 SHA256 的 Temurin JDK 25 LTS（Ghidra 12.2 所需）及校验 SHA256 的官方 Ghidra 12.2。`--build-arg INSTALL_GHIDRA=0` 可省略 Ghidra。审查 `docker image inspect` 后将 `AFL_IMAGE` 设为上游 digest 以固定基础镜像；完整可重复性仍受未完全锁定的传递依赖限制。
 
-应用配置：
+在应用配置中登记命名环境：
 
 ```toml
-[runtime]
+default_environment = "linux"
+[environments.linux]
+name = "Linux analysis"
+platform = "linux"
+[environments.linux.runtime]
 backend = "docker"
 docker_container = "wukong-worker"
 # 可选：Windows Docker Desktop 自动探测，否则使用 "docker"。
 # docker_executable = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 remote_bridge_path = "/opt/wukong/runtime/bridge.py"
 remote_state_dir = "/state"
-request_timeout_secs = 120
+request_timeout_secs = 300
 ```
 
 <a id="ssh-or-a-vm"></a>
@@ -55,7 +67,11 @@ request_timeout_secs = 120
 在隔离 Linux guest 安装 Python 3.12+、GDB、带 `afl-qemu-trace` 或 `afl-qemu-bridge` 的 AFL++。将整个目录复制到 `/opt/wukong/runtime`，配置专用管理账号。生产模式需要 root daemon，为每个 job/session 分配不同非特权 UID 并保护监督元数据。SSH 传输不自动添加 sudo；使用配置好的隔离 guest 账号。密钥 SSH 应预先可用，传输使用 `BatchMode=yes`。
 
 ```toml
-[runtime]
+default_environment = "linux"
+[environments.linux]
+name = "Linux VM"
+platform = "linux"
+[environments.linux.runtime]
 backend = "ssh"
 ssh_host = "root@analysis-vm"
 remote_bridge_path = "/opt/wukong/runtime/bridge.py"
@@ -64,13 +80,21 @@ remote_state_dir = "/state/wukong"
 
 子进程环境移除模型凭据；job 环境覆盖只允许 AFL/QEMU/sanitizer 设置。不互信用户不能共享状态目录。
 
-生产 Linux 元数据归可信 daemon 所有；目标/fuzz 清除附加组并使用独立 UID。每次实验有只读暂存文件及独立可写目录。GDB 保持可信身份，以实验 UID 启动 inferior。CHOWN/SETUID/SETGID 用于隔离，SYS_PTRACE/DAC_OVERRIDE 用于可信调试器经 procfs 读取/修改 inferior；目标进程不保留这些 capabilities。只读容器根、私有卷、禁网及 VM/容器边界分别生效。`trusted_local` 明确标记较弱的可信夹具边界。
+执行、重放、调试器及启动描述的输入使用公开产物路径策略。隔离文件/目录暂存不能把传输端点、job 描述或其他 worker 私有元数据作为程序输入发布。`files/` 下的上传载荷可以使用 `status.json` 等文件名；路径约束在解析别名后检查。目录暂存会在复制任何内容前校验全部成员。
+
+内部启动解析器仅在核对固定缓存路径、归属/权限及精确执行文件哈希后，才能暂存状态目录之外的准备运行时派生文件。该例外不是 RPC 选项，也不能授权元数据输入；原始目标与实际执行目标的身份仍分别记录。
+
+隔离 GDB 会话的原始 MI 命令须先通过按操作定义的参数语法校验，才会进入具有较高权限的调试器。表达式支持简单寄存器/符号、解引用、常量下标及算术/位运算/比较运算符。函数调用（包括调试器侧便利函数）、括号/类型转换、赋值和自增自减均被拒绝。MI 字符串使用受支持的 JSON 转义并重新序列化；八进制/十六进制转义及未校验选项被拒绝。转储检查除了只读操作白名单，也执行同样的参数检查。结构化请求优先使用 `debug.inspect` / `debug.control`；这项策略不代表 GDB 本身是安全沙箱。
+
+生产 Linux 元数据归可信 daemon 所有；目标/fuzz 清除附加组并使用独立 UID。每次实验有只读暂存文件及独立可写目录。GDB 保持可信身份，以实验 UID 启动 inferior。CHOWN/SETUID/SETGID 用于隔离；KILL 允许可信 supervisor 取消实验 UID 持有的进程组；SYS_PTRACE/DAC_OVERRIDE 用于可信调试器经 procfs 读取/修改 inferior；目标进程不保留这些 capabilities。只读容器根、私有卷、禁网及 VM/容器边界分别生效。`trusted_local` 明确标记较弱的可信夹具边界。
 
 <a id="protocol"></a>
 
 ## 协议
 
-JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`doctor` 返回真实能力、路径、版本，不宣称缺失后端可用。请求/响应最大 48 MiB，上传最大 32 MiB。控制端使用 jsonrpsee 有界 stdio；RPC 错误保留健康连接，格式/大小错误及超时关闭连接。下次重连不自动重放失败请求。
+JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`doctor` 返回真实能力、路径、版本，不宣称缺失后端可用。请求/响应最大 48 MiB；单帧上传最大 32 MiB，可恢复传输支持最大 16 GiB 文件，每块最多 1 MiB。参见[分析环境](../../docs/design/cross-platform-environments.zh-CN.md)。控制端使用 jsonrpsee 有界 stdio；RPC 错误保留健康连接，格式/大小错误及超时关闭连接。下次重连不自动重放失败请求。
+
+由中继管理的守护进程使用已有 `filelock` 依赖和内核持有的 `startup.guard` 锁，持锁直到就绪；竞争中继取得锁后再次检查端点。守护进程自身在初始化及服务全程独立持有 `daemon.guard`，启动者崩溃不会允许第二个守护进程竞争状态。进程退出即可释放锁归属，不再通过目录时间戳删除所谓过期锁。共享状态目录的所有中继必须使用同一 worker 部署。守护进程允许 30 秒完成初始化，包含 Windows 启动身份查询。就绪探测另设 1 秒响应超时；子进程若在就绪前退出，错误会指出退出状态，并包含本地 `daemon.log` 最后最多 2048 字节。
 
 | 方法 | 参数 / 结果 |
 | --- | --- |
@@ -87,7 +111,7 @@ JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`docto
 | `debug.command` | `session_id`、一条 GDB/MI `command`、可选 `timeout_secs` |
 | `debug.events`, `debug.close` | `session_id`；有界异步记录 / 关闭 |
 | `interact.start` | `argv`、可选 `env`；持久化交互进程与 `session_id` |
-| `interact.write` | `session_id`, `data_base64`、可选 `read_timeout_secs`；写 stdin 并返回新增有界输出 |
+| `interact.write` | `session_id`, `data_base64`、可选 `read_timeout_secs`；写 stdin 并返回新增有界输出。主进程退出后，在本次读取期限内等待 stdout EOF；管道尾部输出未收完时仍可返回 `timed_out=true`，`data_sent=false` 表示未尝试新的写入。 |
 | `interact.close` | `session_id`；终止会话进程树 |
 | `angr.solve` | `target`, `find`、可选 `avoid`/`stdin_length`/`max_steps`/`timeout_secs`/`printable_only`；有界符号执行 job，结果含 `input_base64` 和探索统计 |
 | `crash.replay` | `target`, `input`, `args`（`@@` 替换输入）、timeout；返回 job |
@@ -102,7 +126,11 @@ job 状态为 queued/running/completed/failed/cancelled/timed_out/lost。关闭�
 
 调试会话在同一 owner 锁下串行执行带 token 的 MI 命令。完整 transcript 有界并保留产物；MI 超时使会话失效，因为副作用可能未知。
 
-PoC 每次使用新工作目录和只读输入副本。`job.status.result` 保存 passed、attempts、successes、逐次退出/信号、输入/目标 SHA256、生产者/验证者 ID、环境及 crash/behavior 阶段。重复原生崩溃不证明任意读写或代码执行。缩减保留信号/异常签名；同信号不同漏洞仍须独立确认根因。
+PoC 每次使用新工作目录和只读输入副本。`job.status.result` 保存 passed、attempts、successes、逐次退出/信号、输入/目标 SHA256、生产者/验证者 ID、环境及 crash/behavior 阶段。重复原生崩溃不证明任意读写或代码执行。崩溃缩减默认要求保留原始模块内容及位置签名。显式 `allow_signal_only` 才允许较弱的信号/异常等价性，并标明这一限制；根因仍须独立确认。
+
+输入缩减使用固定版本 Picire 26.11，替代本地手写 delta-debugging 算法。现有回放模块负责每个候选的执行和证据。原始基线占一次尝试；Picire 对已接受候选的再次断言复用该试验。空输入会被显式检查。超时、取消、尝试预算耗尽或候选结果无法确定时，只保留之前已验证的结果，返回 `complete: false` 和 `stop_reason`。意外评估错误使 job 失败。`reducer: "picire"` 标明所用算法。Doctor 仅在 Picire 及其依赖均存在时声明最小化能力。离线包固定三个纯 Python wheel 及其原始许可证文件。Windows 原生通路使用 Rust `fixture3-ddmin` 库和 WinDbg MCP 进行受限试验；本地检查已通过，已安装 VM 验收仍待完成。最小化调用须移除此前被忽略的 `trials`、`expected` 字段。
+
+2026-11-14，Picire 26.11 通过真实隔离 Linux/GDB 验收。静态夹具及在已准入主映像内故障的动态链接夹具，都在 22 次尝试内将 23 字节缩至 `BAD`，并返回 `complete: true` 和 `location_and_frames`。动态集成还通过类型化调试检查、回放及三次验证试验；两种隔离 LaunchSpec 输入用例均通过。验收镜像为 `sha256:0887afcc06e9ae0df50bd2f7c4b560a9faa7accd032c5c72514b2323ef53a2e6`；动态报告 SHA256 为 `96c4426c5690179db45f4173eff98b722366712593cd00a822ee34be19886e38`。另一个 `abort()` 夹具的 PC 属于未准入 libc，正确拒绝了强等价性缩减；模块路径不能证明内容哈希。这些夹具不代表任意库身份或 AFL 模糊测试已通过验收。
 
 `ghidra.query` 与 Rust 使用相同 query：`{"operation":"functions","pattern":"main","offset":0,"limit":100}`、`{"operation":"decompile","address":1234}`、`{"operation":"xrefs","address":1234,"direction":"both","limit":100}`。地址为模块相对。核对上传 SHA256，缓存绑定目标、Ghidra 版本/properties、launcher、bridge、分析设置。项目锁内复用导入程序；清理失主锁前核对进程。较长导入须将控制端请求超时设为大于查询超时，传输最多 300 秒。
 

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Explicitly release workbench operation locks when their owner scope ends, so temporarily inherited file descriptors cannot leave an idle workbench reporting a concurrent operation."
+zh_CN = "工作台操作归属作用域结束时显式释放锁，避免临时继承的文件描述符使空闲工作台误报仍有并发操作。"

@@ -34,7 +34,7 @@ fn public_text<'a>(parts: impl IntoIterator<Item = &'a AssistantContent>) -> Str
 )]
 pub(super) fn prepare_models(
     mut calls: Query<
-        (Entity, &ForAgent, &mut ModelRequest),
+        (Entity, &ForAgent, &mut ModelRequest, &ModelTools),
         (
             With<Admitted>,
             Without<Started>,
@@ -48,7 +48,7 @@ pub(super) fn prepare_models(
     mut fatal: ResMut<Fatal>,
     mut commands: Commands,
 ) {
-    for (effect, from, mut call) in &mut calls {
+    for (effect, from, mut call, selected) in &mut calls {
         failed(
             &mut fatal,
             (|| -> Result<()> {
@@ -63,6 +63,10 @@ pub(super) fn prepare_models(
                 let preamble = application.runner.preamble(&agent, &run)?;
                 if let Some(prompt) = &mut call.prompt {
                     prompt.role = preamble;
+                    prompt.sections.push(rig_core::completion::Section::new(
+                        "analysis_environment",
+                        serde_json::to_string(&selected.0.environment)?,
+                    ));
                     if !agent.wait_for_predecessors.is_empty() {
                         let results = agent.wait_for_predecessors.iter().map(|id| application.runner.agent(id).map(|predecessor| json!({"id":id,"status":predecessor.status,"result":predecessor.task_result,"summary":predecessor.summary,"error":predecessor.error}))).collect::<Result<Vec<_>>>()?;
                         prompt.sections.push(rig_core::completion::Section::new(
@@ -89,7 +93,7 @@ pub(super) fn prepare_models(
                 request.max_tokens = Some(model_config.max_tokens);
                 request.temperature = model_config.temperature;
                 request.additional_params = model_config.additional_params;
-                let mut names = application.runner.tool_names(&agent)?;
+                let mut names = selected.0.names.clone();
                 names.extend(["task", "message", "wait"].map(str::to_owned));
                 // Rebuild from Rig's registry: its initial request was built
                 // with the previous selection, which can hide newly loaded tools.

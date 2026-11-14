@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow trusted Linux worker supervisors to cancel isolated experiment process groups while keeping target capabilities empty. Synchronize managed/manual Docker launch flags and executable temporary directories."
+zh_CN = "允许可信 Linux worker supervisor 取消独立实验用户的进程组，同时保持目标 capabilities 为空，并同步托管/手动 Docker 启动参数及可执行临时目录。"

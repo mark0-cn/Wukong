@@ -1,0 +1,518 @@
+{
+  "schema": 1,
+  "platform": "windows-amd64",
+  "components": {
+    "python": {
+      "version": "3.13.17",
+      "channel": "stable"
+    },
+    "debugging_tools": {
+      "version": "10.0.26100.9457",
+      "channel": "stable"
+    },
+    "openssh": {
+      "version": "10.4.0.0p1-Preview",
+      "channel": "preview"
+    },
+    "worker_python_dependencies": {
+      "version": "pygdbmi=0.11.0.0;filelock=4.2.1;atomicwrites=1.4.0;picire=26.11;chardet=5.2.0;inators=2.1.1",
+      "channel": "stable"
+    },
+    "windbg_mcp": {
+      "version": "0.24.0+wukong.pipe-stdin.1",
+      "channel": "stable"
+    }
+  },
+  "sdk": {
+    "bootstrapper": "winsdksetup.exe",
+    "ux_offset": 733184,
+    "ux_size": 706476,
+    "manifest": "0",
+    "license": "u1",
+    "package_id": "package_SDKDebuggers_x86_en_us",
+    "database": "sdk/Installers/SDK Debuggers-x86_en-us.msi",
+    "provenance": "MSI/CAB inventory and vendor SHA1 values read from the Microsoft-signed bootstrapper Burn manifest; all payloads additionally pinned by SHA256.",
+    "ux_files": {
+      "0": {
+        "size": 217617,
+        "sha256": "6c6d13a7f33a01a8f2517fa67cfcfca2b94868f5336085f60199f0cf12d88881"
+      },
+      "u0": {
+        "size": 145144,
+        "sha256": "30a94ce6fcd03f1320396ec2b92d4ef661b60bfadb5ac428e4b075ae593b4057"
+      },
+      "u1": {
+        "size": 248573,
+        "sha256": "0f4a26ac9dc50066f8a1bfeaaf3f092d1b9e4791df5487b9f3c31e7c3dc4d7f5"
+      },
+      "u10": {
+        "size": 231872,
+        "sha256": "968d74f496162dac8d6906e69a5ddfc13498be4a380afb814cb7eb19a0b167eb"
+      },
+      "u11": {
+        "size": 170800,
+        "sha256": "f9836c19b55583433141cbc1ae4542e65919abb0753e806b29740a732526b685"
+      },
+      "u12": {
+        "size": 35335,
+        "sha256": "db1846bf839500777cc32c4364f7a1d3f9189021d956ba3aad0488607ab4c3d6"
+      },
+      "u13": {
+        "size": 214776,
+        "sha256": "9fc8a41382f1847d82ed1ee3a0759a2f9e862698884b4686e3050837da99b2fb"
+      },
+      "u14": {
+        "size": 247506,
+        "sha256": "ca4a608c2976d147b98dbd811390a8d281a4874ae4f05a980fe30e6e41151674"
+      },
+      "u2": {
+        "size": 797,
+        "sha256": "a401a225addaf89110b4b0f6e8cf94779e7c0640bcdd2d670ffcf05aab0dad03"
+      },
+      "u3": {
+        "size": 98040,
+        "sha256": "d2e9e09b96ee9a23dbfd993ec7a1f1fc3936171ede97650993e626c08db1dc8d"
+      },
+      "u4": {
+        "size": 3409,
+        "sha256": "df05ac2a44327303b718b9fc05d306047ec387ee551664b8eb9b3e48df24b5f9"
+      },
+      "u5": {
+        "size": 1320,
+        "sha256": "b3204b5ccfb0e5e7b43d8448b2b9e179423f1b139e53aa72616c498246090c3c"
+      },
+      "u6": {
+        "size": 155324,
+        "sha256": "48ae54dd5a7dca60de835c384648433099c702bab71eb3339d88b96424db500e"
+      },
+      "u7": {
+        "size": 877,
+        "sha256": "361079f9f118e11ea3f05d75fd3874664c94334f453177242c8e32f0881a3527"
+      },
+      "u8": {
+        "size": 176056,
+        "sha256": "a152617906d0e09f667e95e90448d8abffdc1583f5b2c9d387dda694b3e689dc"
+      },
+      "u9": {
+        "size": 236984,
+        "sha256": "c5a37e4949ead0c6edadb459c80be37073bbce2befdb820515dc9a89b108bc51"
+      }
+    }
+  },
+  "assets": [
+    {
+      "path": "OpenSSH-Win64.zip",
+      "component": "openssh",
+      "url": "https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.4.0.0p1-Preview/OpenSSH-Win64.zip",
+      "sha256": "b67ff8becd203502190ec42ac7787c24c2cd3325ed7700485fe7a1c83d2a7957",
+      "size": 6021393
+    },
+    {
+      "path": "python-3.13.17-embed-amd64.zip",
+      "component": "python",
+      "url": "https://www.python.org/ftp/python/3.13.17/python-3.13.17-embed-amd64.zip",
+      "sha256": "9e35319bffedab8b36ad44d8f377cb4f1733bcec257a0b6d04d94f01486ddb38",
+      "size": 11441267
+    },
+    {
+      "path": "sdk/Installers/0253f7df0974f9d7169b410d812a5385.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/0253f7df0974f9d7169b410d812a5385.cab",
+      "size": 14012811,
+      "sha256": "4927b1ab616abed077df06cb41fe79d664e0a7c6cf4c1a777f5f7130b1a23274",
+      "vendor_sha1": "690b232b7d52b7f998d89c2a1bb2a5945c119b85"
+    },
+    {
+      "path": "sdk/Installers/1a822224523be67061edcc97f6c0e36a.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/1a822224523be67061edcc97f6c0e36a.cab",
+      "size": 1927814,
+      "sha256": "3e834ba7b99980fca5623fdd404e8cc329024a93d0c32de29999fe3e8d6f67cf",
+      "vendor_sha1": "1a88d2c82137f45d9dab7c10011603b0aa0a15ec"
+    },
+    {
+      "path": "sdk/Installers/2c1331a0f4ecc46dfa39f43a575305e0.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/2c1331a0f4ecc46dfa39f43a575305e0.cab",
+      "size": 1099043,
+      "sha256": "9667d599e1a15e6e6a6b7fccd287d1fc6ce07b646a099fc00812ff886a2573b3",
+      "vendor_sha1": "f58114a191f8089871d3633ef3103dfe1baecc44"
+    },
+    {
+      "path": "sdk/Installers/2c1817d3f3f33cd01376c5ec441cc636.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/2c1817d3f3f33cd01376c5ec441cc636.cab",
+      "size": 29838,
+      "sha256": "d2bed2657a764519836b60cef2909fb8139fab423ce04be76810c9b864f683c3",
+      "vendor_sha1": "2197f1cbb22c41e827ae4dac9c7871ee95db2c6d"
+    },
+    {
+      "path": "sdk/Installers/2f7b48ba67113253720675dbbbe9df33.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/2f7b48ba67113253720675dbbbe9df33.cab",
+      "size": 913616,
+      "sha256": "0f92e7c86a501362bd5e4fb42e8b215155e2429cb7d0bbf274eb2c2ae96061aa",
+      "vendor_sha1": "c4d0dda5ce5e3d6ffff7073aa92c53d100e48413"
+    },
+    {
+      "path": "sdk/Installers/34ee98a7c9420178c55f176f75c3fe10.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/34ee98a7c9420178c55f176f75c3fe10.cab",
+      "size": 4320293,
+      "sha256": "2c470d4609dfe0303de8e21727dcd0268b56dc098413dcadbaec9d69812344b1",
+      "vendor_sha1": "739b0a063a5a60643bc4606e6896fe7f868eb8e4"
+    },
+    {
+      "path": "sdk/Installers/34ef8c7e30b6852e56ba7a56fb7b3faa.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/34ef8c7e30b6852e56ba7a56fb7b3faa.cab",
+      "size": 38322,
+      "sha256": "eb2aa53eeb324b9a4cd42e5a4325edc3a171a6ca932acc9f15f49e163571d89b",
+      "vendor_sha1": "52b4b9315b82f69f90ad39b5769c5b89d1c78eac"
+    },
+    {
+      "path": "sdk/Installers/3960f55df7c8073f3997269e5e390abc.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/3960f55df7c8073f3997269e5e390abc.cab",
+      "size": 21041,
+      "sha256": "40b4fca44fc2bd12435d1495edda2649398eae78588d875de93c6576be7be419",
+      "vendor_sha1": "7a18e390a4c5c6c3a92d4359c4f38112105135f9"
+    },
+    {
+      "path": "sdk/Installers/3a53dffe0b4548753bc34825894f19bf.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/3a53dffe0b4548753bc34825894f19bf.cab",
+      "size": 746949,
+      "sha256": "41febf9987493efd4c2cacb46c23eb817859ef1a232ca812a1dede30f4959130",
+      "vendor_sha1": "8cfc2c5a8d85a4be350529c98f1d761e249eebb3"
+    },
+    {
+      "path": "sdk/Installers/3ca392fde3898c3be052ddcddd14bb5f.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/3ca392fde3898c3be052ddcddd14bb5f.cab",
+      "size": 12673753,
+      "sha256": "7a443a5013cc63ea59577b6c84e2aedb3b6e56560bb55cf406b7f3487159d310",
+      "vendor_sha1": "44433c1252fbe1f00102389149aff93df6bd166f"
+    },
+    {
+      "path": "sdk/Installers/412c1caad96b8fe5e8f7f6735585f297.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/412c1caad96b8fe5e8f7f6735585f297.cab",
+      "size": 241182,
+      "sha256": "b032ba08e89b41e662fe41d2dda02cbb452e24ebec61c3978ab1a068305abfdf",
+      "vendor_sha1": "140c3df49ec90c354c2d06076ddc3b205a38e2e6"
+    },
+    {
+      "path": "sdk/Installers/437e52bd67ebe977a8957439db5ecf75.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/437e52bd67ebe977a8957439db5ecf75.cab",
+      "size": 3308556,
+      "sha256": "ecec0f785e023399cba3b6758a9339580e1f6c5fdc1c4705defa5205e745e831",
+      "vendor_sha1": "5fa1efced13f023fd0ce6eb84ff56074113ebcea"
+    },
+    {
+      "path": "sdk/Installers/4ac48dbdddbc8ce04721f519b9cf1698.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/4ac48dbdddbc8ce04721f519b9cf1698.cab",
+      "size": 4082086,
+      "sha256": "08f0b41a99e66df1f6b5037de1c1c3f2a34d44e2763f54ea2caf74abfc7512af",
+      "vendor_sha1": "cc200752e69d2c73f1463f9297fa45554053bfff"
+    },
+    {
+      "path": "sdk/Installers/4de7a1422374f98369172705b05d4bf9.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/4de7a1422374f98369172705b05d4bf9.cab",
+      "size": 1149364,
+      "sha256": "27598832a4abea4e9fefbb5fab7a80399454a42c32d603c58b876567efb330fd",
+      "vendor_sha1": "f1cc5726395aebc0260077cfe83eaf29f2596724"
+    },
+    {
+      "path": "sdk/Installers/5f7ef4904f75bf6b3b9b0f8975ad1492.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/5f7ef4904f75bf6b3b9b0f8975ad1492.cab",
+      "size": 903846,
+      "sha256": "6565a2628d04e00f97da2de412fb547f567eb8dfd2385191e7c749ae8b48faf9",
+      "vendor_sha1": "8559f92ee66f11cbef76731cb6d181a076505fdb"
+    },
+    {
+      "path": "sdk/Installers/678f64f35c507af8a9af0532b9b211ec.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/678f64f35c507af8a9af0532b9b211ec.cab",
+      "size": 7410218,
+      "sha256": "2066076e5af8f7e59ec3480804fd997e0588b1226ab1c37c57a4f37a83a14287",
+      "vendor_sha1": "eb3362a2a6b6fed1a1dc279d18c8d69f18affcb3"
+    },
+    {
+      "path": "sdk/Installers/6bc159aa6f35510d049f0639e0ddb277.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/6bc159aa6f35510d049f0639e0ddb277.cab",
+      "size": 7423630,
+      "sha256": "e35cb19a0b5b578c5c9b0ed33528a835c8c97ce5191d2c85d52c8ed563de75f8",
+      "vendor_sha1": "a10b12581b04590238cfed45ce6c40ee7ab9afa5"
+    },
+    {
+      "path": "sdk/Installers/7178f554c01f912c749b622564106b02.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/7178f554c01f912c749b622564106b02.cab",
+      "size": 1146100,
+      "sha256": "c9a6464df807613fd4618de1c10660736f0b7e2ac49341e2b9e7694f41ff35de",
+      "vendor_sha1": "7344f8aedec4f8fc6d96a5ab37311f8bf0e772e7"
+    },
+    {
+      "path": "sdk/Installers/72bda6e16f5c7a040361c1304b4b5b36.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/72bda6e16f5c7a040361c1304b4b5b36.cab",
+      "size": 7410165,
+      "sha256": "e191f6fadea89537150c03bdf02b9cd7108c504548f44a0905bd16d5f2b3704f",
+      "vendor_sha1": "555187fc5c36148f5f5c19e9e523e8245f978d97"
+    },
+    {
+      "path": "sdk/Installers/79e9b68a34bc84ab465fe1b79b84a325.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/79e9b68a34bc84ab465fe1b79b84a325.cab",
+      "size": 1003891,
+      "sha256": "1f77f872653efdfade851e9cff763a0d613177370887ba00ba84b6ae50010355",
+      "vendor_sha1": "25bf514f13e61cb8185dfbaeefb2030bad1a3f17"
+    },
+    {
+      "path": "sdk/Installers/7cb1ba9318f4b586c6a3bdd541e7f3ad.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/7cb1ba9318f4b586c6a3bdd541e7f3ad.cab",
+      "size": 21024,
+      "sha256": "732cd1347eee0772c12fff68d080875ca51d0a41dc673ca3921eb6a170050902",
+      "vendor_sha1": "735fd1ea7127f29f93277fd413228478234cceeb"
+    },
+    {
+      "path": "sdk/Installers/8f636cea16f07b14f423402afc69cf83.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/8f636cea16f07b14f423402afc69cf83.cab",
+      "size": 3150794,
+      "sha256": "5a985d2e3c36e1f515efc4e9d8999000d0af1c3177bc2105fa64100f3234143f",
+      "vendor_sha1": "f5757c85cf227ab922677519caa7ea1276dc64e2"
+    },
+    {
+      "path": "sdk/Installers/96e8f767221532c6446fd1b8dad53b60.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/96e8f767221532c6446fd1b8dad53b60.cab",
+      "size": 1447946,
+      "sha256": "5f45bd6195e02428b6aa57fb0ddaf30489435a4f70e3512b34ddef4ec409516b",
+      "vendor_sha1": "d1413c889f364016bf5af6d5eafc07e66811505e"
+    },
+    {
+      "path": "sdk/Installers/9fff62eb37dba61a297941c75287dfec.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/9fff62eb37dba61a297941c75287dfec.cab",
+      "size": 622161,
+      "sha256": "9ddc24efdb6ae42f7ce0b40bc5d29c7a5d938189d3d2ec757dd8effd42822132",
+      "vendor_sha1": "a4393f23343573359990b240e835dc46e872b327"
+    },
+    {
+      "path": "sdk/Installers/SDK Debuggers-x86_en-us.msi",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/SDK%20Debuggers-x86_en-us.msi",
+      "size": 675840,
+      "sha256": "1828ba94469019ba49d2aefc10fb3b8b085c700df4bc6d675e1e0d0a6368749e",
+      "vendor_sha1": "c5fd0440f681f6d166ffe8b7d38baf0d49844f1d"
+    },
+    {
+      "path": "sdk/Installers/X64 Debuggers And Tools-x64_en-us.msi",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/X64%20Debuggers%20And%20Tools-x64_en-us.msi",
+      "size": 42659840,
+      "sha256": "ef023ed8773804cf8fe934cc5628594786cb854e66967414e5c329ea2cac47ed",
+      "vendor_sha1": "cbd4906b434c9d2d5a5d6a22af9878aa67259d36"
+    },
+    {
+      "path": "sdk/Installers/X86 Debuggers And Tools-x86_en-us.msi",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/X86%20Debuggers%20And%20Tools-x86_en-us.msi",
+      "size": 36032512,
+      "sha256": "077eae43624340d5d4bc5794ef9a418b7b415beef9d9c1273e5959e7cf0f0181",
+      "vendor_sha1": "ce5af9cc7cef9a1caa991eae8089a4a5b66a5f71"
+    },
+    {
+      "path": "sdk/Installers/a74408a87a51829b89e5282e73974d74.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/a74408a87a51829b89e5282e73974d74.cab",
+      "size": 283441,
+      "sha256": "3ad809822980a2b1c28d59c3ce380c84528d97b8a86631e36e44542bc2caab19",
+      "vendor_sha1": "c3f4c9e6105ec165b11b6e084e50853eaaba1ad1"
+    },
+    {
+      "path": "sdk/Installers/aac61496dd6fee21a0e5627e4dcd8488.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/aac61496dd6fee21a0e5627e4dcd8488.cab",
+      "size": 5523999,
+      "sha256": "007995e453a50366abe6f5453a087794fb3f44a6c6dfa97884b3483eb7566094",
+      "vendor_sha1": "21e57000bbecd2bc864f71a736e9ea8040649a2a"
+    },
+    {
+      "path": "sdk/Installers/ab8c11616091812d6c7137e366ba1d8d.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/ab8c11616091812d6c7137e366ba1d8d.cab",
+      "size": 29661,
+      "sha256": "685b282035456c7153c4e482ab3742f26142d4aa9484baeb364904eb75bd990c",
+      "vendor_sha1": "c18b0d81c3470ccd097467cfb3c491346eb3e55e"
+    },
+    {
+      "path": "sdk/Installers/b98a31e36735eb82b3b238c68f36fbbf.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/b98a31e36735eb82b3b238c68f36fbbf.cab",
+      "size": 3177918,
+      "sha256": "1d20219d1bac4b21247e898c5a5f7c716e54abb7060ea0382af65f12e9873933",
+      "vendor_sha1": "700301687e602889d87432692ddb861bc3e7a847"
+    },
+    {
+      "path": "sdk/Installers/ba5d20281a858248e59d96d75c014391.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/ba5d20281a858248e59d96d75c014391.cab",
+      "size": 1139157,
+      "sha256": "4446100e4d53248dc971316595f90c0e26a605255c280ac66c90e76dc9bea351",
+      "vendor_sha1": "b1917a6c6ee453706f0d579be68d8c3760783945"
+    },
+    {
+      "path": "sdk/Installers/baa2d817ae180ba7e772f1543c3bbdea.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/baa2d817ae180ba7e772f1543c3bbdea.cab",
+      "size": 538375,
+      "sha256": "6ad6978f6bd5aaa86010f606fcab9d698f7da8ca4b44180e51ca4ba1debfd277",
+      "vendor_sha1": "382b970b24bb0f69364dcabd37ccab8eb293b632"
+    },
+    {
+      "path": "sdk/Installers/bd4b6e22633abadb45b75bc86caaa120.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/bd4b6e22633abadb45b75bc86caaa120.cab",
+      "size": 229620,
+      "sha256": "0b1a539b065b3779ff431547ec149f394a4788a3cd577967ad19792e6183e31d",
+      "vendor_sha1": "0306a2cfc328f8aeca2d3f6e95e2b3d34649c112"
+    },
+    {
+      "path": "sdk/Installers/caab1106d57ff70cb3cbd8350a77e871.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/caab1106d57ff70cb3cbd8350a77e871.cab",
+      "size": 3677346,
+      "sha256": "fcd76620ace59f5ab646bf895a571f4056f00774f1b6030093f8e891c4b4acd1",
+      "vendor_sha1": "1f7d588df9bf31720315f8bfb2292ff9a3a4e0ed"
+    },
+    {
+      "path": "sdk/Installers/d55d1e003fbb00a12c63b8f618e452bf.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/d55d1e003fbb00a12c63b8f618e452bf.cab",
+      "size": 614185,
+      "sha256": "fb04b8cc313887b0efa98ef01aec8b6adc78ec973428ca7912941e43c5070a83",
+      "vendor_sha1": "412316eac411a17cf0fde9d53a26acd360a0349a"
+    },
+    {
+      "path": "sdk/Installers/dc19fbd16e9708e0bc4d8419e3a7d48d.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/dc19fbd16e9708e0bc4d8419e3a7d48d.cab",
+      "size": 21041,
+      "sha256": "544e6d79fe88cff306ed97274fc867014acc861ff55d55217676dcfce8096927",
+      "vendor_sha1": "6282f978e9036a935b49671435f2f14078bc0801"
+    },
+    {
+      "path": "sdk/Installers/dcb0a55d6cacaa05ead299e1d3de3c6d.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/dcb0a55d6cacaa05ead299e1d3de3c6d.cab",
+      "size": 7410165,
+      "sha256": "ed0f00c489ddaa7954489fcf6ae346eba2ad983ec144101500573c17aabb59a9",
+      "vendor_sha1": "d23efecd906a797241f9d0c0d28d959ccfeba179"
+    },
+    {
+      "path": "sdk/Installers/e10f9740446a96314a1731aa7cb4286a.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/e10f9740446a96314a1731aa7cb4286a.cab",
+      "size": 3271534,
+      "sha256": "8b75749de2eac62a2e714b38022bd4277f9981eeeac78fc6c8d1fd7330bf7e69",
+      "vendor_sha1": "a33e900d77e60b3cb90fe1cd78696fed227611d2"
+    },
+    {
+      "path": "sdk/Installers/e680f23450a21a27b2077dbdc08ca430.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/e680f23450a21a27b2077dbdc08ca430.cab",
+      "size": 9687176,
+      "sha256": "ea06eb75ffa57461de5055033fd7466d25a8d1510909cebde4bee4c653d4333e",
+      "vendor_sha1": "9c92716bc508861c5fbe2dfc677a5756af4bdd87"
+    },
+    {
+      "path": "sdk/Installers/e8bc712abeffd7c9711ee3f55d4aa99b.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/e8bc712abeffd7c9711ee3f55d4aa99b.cab",
+      "size": 2276353,
+      "sha256": "a623510117a63f79437506adcc8bb610aaaadf6f2d8239c00563f1d97db3cb8c",
+      "vendor_sha1": "0f2138dc6ce0cb37ee82b71ee8a628bad64adf4a"
+    },
+    {
+      "path": "sdk/Installers/f524b9054edb102e11fe3850fc6796ca.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/f524b9054edb102e11fe3850fc6796ca.cab",
+      "size": 519233,
+      "sha256": "c73ee73cd4feb1da667e508546ccebe0f36277cd9e480ef89096f55253344309",
+      "vendor_sha1": "6b162c96cfa3d0cec622a8bdce14a6b66bae5a29"
+    },
+    {
+      "path": "sdk/Installers/fe80f1b6d4cf60c919f4b3a0cd2f4306.cab",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/Installers/fe80f1b6d4cf60c919f4b3a0cd2f4306.cab",
+      "size": 2942993,
+      "sha256": "b999a19ec127a2af64b5df24805dcdba44ece9d2a485255f8322cb03d7439979",
+      "vendor_sha1": "2f7111911c93135986fa1954b441d22f56ba337b"
+    },
+    {
+      "path": "wheels/filelock-4.2.1-py3-none-any.whl",
+      "component": "worker_python_dependencies",
+      "url": "https://files.pythonhosted.org/packages/28/00/db89d339bc4ecdc8087fa7b8607ba22ffc27bf96286f340c9620bea428b3/filelock-4.2.1-py3-none-any.whl",
+      "size": 162455,
+      "sha256": "7be2662e9e826b9bba28afc0f843a123280d799a2ea44bb5d35ccec67905ae44"
+    },
+    {
+      "path": "wheels/pygdbmi-0.11.0.0-py3-none-any.whl",
+      "component": "worker_python_dependencies",
+      "url": "https://files.pythonhosted.org/packages/c8/4b/71df806f4d260ddf01f9e431f5a6538a4155db3ec84a131d7e087178c591/pygdbmi-0.11.0.0-py3-none-any.whl",
+      "size": 21258,
+      "sha256": "f7cac28e1d558927444c880ed1e65da1a5d8686121a3aac16f42fb84d3ceb60d"
+    },
+    {
+      "path": "winsdksetup.exe",
+      "component": "debugging_tools",
+      "url": "https://download.microsoft.com/download/46742ab5-6592-4968-a793-129e7f3bc55a/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/winsdksetup.exe",
+      "sha256": "b0bdbad38ae74c40ccae8cdbcf229807627fba2bc3100be28301c4ba884f755e",
+      "size": 1450360
+    },
+    {
+      "component": "windbg_mcp",
+      "path": "windbg-mcp-source-91fba928.zip",
+      "url": "https://github.com/glslang/windbg-mcp/archive/91fba9283c5f9f9bb94cd7f9b04c0aa4f7885e8c.zip",
+      "size": 9644369,
+      "sha256": "0250b197c8b2e25ef371a4f252f76fc05bb6c01a2c8c3227a0cc908e2301baad"
+    },
+    {
+      "component": "worker_python_dependencies",
+      "path": "python/atomicwrites-1.4.0-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/2c/a0/da5f49008ec6e9a658dbf5d7310a4debd397bce0b4db03cf8a410066bb87/atomicwrites-1.4.0-py2.py3-none-any.whl",
+      "size": 6790,
+      "sha256": "6d1784dea7c0c8d4a5172b6c620f40b6e4cbfdf96d783691f2e1302a7b88e197"
+    },
+    {
+      "component": "worker_python_dependencies",
+      "path": "wheels/picire-26.11-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/45/22/b5e55185a8882bd8455435f3f74df40ba8909ddcc1ab65ba1b216e9b815f/picire-26.11-py3-none-any.whl",
+      "size": 25839,
+      "sha256": "6b87c26455018e78a516cdddfc04f7b801c9f414d793dcf5e5e5b596b1755919"
+    },
+    {
+      "component": "worker_python_dependencies",
+      "path": "wheels/chardet-5.2.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/38/6f/f5fbc992a329ee4e0f288c1fe0e2ad9485ed064cac731ed2fe47dcc38cbf/chardet-5.2.0-py3-none-any.whl",
+      "size": 199385,
+      "sha256": "e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970"
+    },
+    {
+      "component": "worker_python_dependencies",
+      "path": "wheels/inators-2.1.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/1a/dd/b952bb9a6c86f1094801517616be344e2324c756accc492784aec8e05d27/inators-2.1.1-py3-none-any.whl",
+      "size": 13289,
+      "sha256": "3fcfa098b0df5e29c860c9142a28fe3487530760133b2a1bae1525ce2038d4ea"
+    }
+  ]
+}

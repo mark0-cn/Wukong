@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Register a Windows VM from its public offline-setup receipt in Workspace settings, independently confirm its SSH fingerprint and select an existing controller key. Connection drafts survive closing settings; saving creates only the dedicated public host pin. Registration does not verify connectivity or production isolation."
+zh_CN = "在工作区设置中从离线安装的公开凭据登记 Windows 虚拟机，独立核对 SSH 指纹并选择已有控制端密钥。关闭设置后保留连接草稿，保存时仅创建专用公开主机固定文件。登记不验证连通性或生产隔离。"

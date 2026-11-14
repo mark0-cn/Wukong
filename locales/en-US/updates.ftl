@@ -127,6 +127,7 @@ updates-health-configured = Configured
 updates-health-unconfigured = Not configured
 updates-health-docker = Docker connection
 updates-health-container = Tool container running
+updates-health-worker = Worker connection
 updates-health-tools = Tool self-check
 updates-health-time = Last connection check: { $time }
 updates-health-tool-time = Last tool self-check: { $time }

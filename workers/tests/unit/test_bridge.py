@@ -66,10 +66,34 @@ class GdbMiTests(unittest.TestCase):
         session.token = 0
         session.isolated = False
         session.lock = threading.Lock()
+        session.stop_condition = threading.Condition()
+        session.stop_sequence = 0
         session.records = queue.Queue(maxsize=8)
         session.events = collections.deque(maxlen=256)
         session.process = SimpleNamespace(stdout=io.StringIO(output), stdin=io.StringIO(), poll=lambda: None)
         return session
+
+    def test_dump_raw_commands_cannot_launch_or_modify_targets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = self.session(directory, "")
+            session.mode = "dump"
+            for command in ["-exec-run", "-data-write-memory-bytes 0x1 ff", '-data-evaluate-expression "function()"']:
+                with self.subTest(command=command), self.assertRaisesRegex(ValueError,"read-only"):
+                    session.command(command,1)
+
+    def test_unsafe_isolated_and_dump_arguments_never_reach_gdb_stdin(self):
+        expression = json.dumps('$_shell("id")')
+        for mode, command in [('launch', '-data-evaluate-expression '+expression),
+                              ('launch', '-break-condition 1 '+expression),
+                              ('dump', '-data-read-memory-bytes '+expression+' 16')]:
+            with self.subTest(mode=mode,command=command), tempfile.TemporaryDirectory() as directory:
+                session = self.session(directory, '')
+                session.isolated = mode == 'launch'
+                session.mode = mode
+                with self.assertRaises(ValueError):
+                    session.command(command,1)
+                self.assertEqual(session.process.stdin.getvalue(),'')
+                self.assertEqual(session.token,0)
 
     def test_nested_payloads_escaping_and_async_events(self):
         records = r'''*stopped,reason="breakpoint-hit",frame={func="main",line="12"}
@@ -245,7 +269,7 @@ class RuntimeTests(unittest.TestCase):
     def test_worker_receives_no_provider_credentials(self):
         result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(','.join(k for k in os.environ if 'API_KEY' in k or 'TOKEN' in k))"]))
         self.assertEqual(result["result"]["stdout"].strip(), "")
-        self.assertEqual(self.client.call("doctor")["protocol"], 1)
+        self.assertEqual(self.client.call("doctor")["protocol"], 2)
 
     def test_job_environment_carries_state_and_job_dirs(self):
         result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(os.environ['WUKONG_STATE_DIR']);print(os.environ['WUKONG_JOB_DIR'])"]))

@@ -127,6 +127,7 @@ updates-health-configured = 已配置
 updates-health-unconfigured = 未配置
 updates-health-docker = Docker 连接
 updates-health-container = 工具容器运行
+updates-health-worker = Worker 连接
 updates-health-tools = 工具自检
 updates-health-time = 最近连接检查：{ $time }
 updates-health-tool-time = 最近工具自检：{ $time }

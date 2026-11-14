@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Build the pinned WinDbg MCP source with a small stdin compatibility patch: engine children receive EOF from a closed pipe instead of opening NUL, which the provided Windows AppContainer denies. Offline packages retain source, patch and dependency licenses with checked build hashes."
+zh_CN = "构建固定版本的 WinDbg MCP 源码并应用小范围标准输入兼容补丁：引擎子进程从写端已关闭的管道接收 EOF，避免打开当前 Windows AppContainer 拒绝访问的 NUL。离线包保留源码、补丁及依赖许可证，并校验构建哈希。"

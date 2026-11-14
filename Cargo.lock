@@ -5027,6 +5027,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "junction"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde48f36530cbd91b65f050101e6c056d6eb743cea2a8f0f19beef69c6742ff8"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "kanaria"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11821,6 +11831,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bevy_ecs",
+ "bevy_tasks",
  "chrono",
  "clap",
  "fluent-bundle",
@@ -11828,6 +11839,7 @@ dependencies = [
  "futures",
  "hex",
  "jsonrpsee-core",
+ "junction",
  "minisign-verify",
  "object",
  "process-wrap",
@@ -11860,6 +11872,33 @@ dependencies = [
  "unic-langid",
  "uuid",
  "windows-sys 0.61.2",
+ "wukong-worker-package",
+ "wukong-worker-protocol",
+]
+
+[[package]]
+name = "wukong-worker-package"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "hex",
+ "libc",
+ "ring",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "windows-sys 0.61.2",
+ "zeroize",
+]
+
+[[package]]
+name = "wukong-worker-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
 ]
 
 [[package]]

@@ -1,0 +1,3 @@
+kind = "security"
+en = "Persist the Windows VM owner's signed enrollment before creating worker accounts, pin recovery and startup to that protected signing identity, and retain the highest accepted enrollment generation across interruptions. A matching payload hash cannot replace the enrolled signer."
+zh_CN = "在创建 worker 账户前持久保存 Windows VM 所有者的签名登记，恢复和启动固定使用这份受保护的签名身份，并在中断后保留已接受的最高登记代次；载荷哈希相同也不能替换已登记的签名身份。"

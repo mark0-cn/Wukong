@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Use Picire for input reduction while preserving verified crash identity and original trial evidence. Check empty inputs, retain only verified candidates when interrupted, and report unresolved or budget-limited reductions as incomplete."
+zh_CN = "使用 Picire 缩减输入，保留已验证的崩溃身份及原始试验证据。检查空输入，中断时只保留已验证候选，并将无法确定或预算受限的缩减标为未完成。"

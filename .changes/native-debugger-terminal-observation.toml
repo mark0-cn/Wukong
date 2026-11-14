@@ -1,0 +1,3 @@
+kind = "fix"
+en = "The internal Windows debugger can query a closed session's original state and cleanup receipt through existing read-only operations. Interrupted sessions retain an unknown outcome, and receipt hashes and ownership are checked before returning recovery evidence. This path still requires installed acceptance."
+zh_CN = "内部 Windows 调试器可通过现有只读操作查询已关闭会话的原始状态和清理回执。中断会话保留未知结果，返回恢复证据前会核对回执哈希及归属。该通路仍需已安装验收。"

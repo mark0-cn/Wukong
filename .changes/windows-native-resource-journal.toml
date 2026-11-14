@@ -1,0 +1,3 @@
+kind = "security"
+en = "Keep Windows worker leases blocked while the native resource journal contains active or uncertain work, including across service restarts. Resource execution remains disabled until native ownership and cleanup are integrated."
+zh_CN = "Windows worker 原生资源账本存在活动或不确定工作时阻止租约释放和接管，服务重启后仍保持此保护；原生归属及清理接入完成前仍禁用资源执行。"

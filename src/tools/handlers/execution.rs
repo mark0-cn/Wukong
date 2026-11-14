@@ -1,6 +1,55 @@
 //! Execution tool handlers.
 use super::*;
 
+pub(in crate::tools) fn handle_artifact_stage<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    call: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        tools
+            .execution
+            .files
+            .stage_artifact(agent, call, &args)
+            .await
+    })
+}
+
+pub(in crate::tools) fn handle_environment_list<'a>(
+    tools: &'a ToolService,
+    _agent: &'a AgentMetadata,
+    _call: &'a str,
+    _name: &'a str,
+    _args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move { Ok(tools.environments.list()) })
+}
+
+pub(in crate::tools) fn handle_environment_doctor<'a>(
+    tools: &'a ToolService,
+    agent: &'a AgentMetadata,
+    _call: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        let id = text(&args, "environment_id")?;
+        ensure!(
+            agent.role == Role::Root || agent.environment_id.as_deref() == Some(id),
+            "an agent may probe only its assigned environment"
+        );
+        let run: RunRecord = tools.store.load(&agent.run_id)?;
+        let config = tools.environments.config(id)?;
+        ensure!(
+            run.config["environments"][id] == serde_json::to_value(config)?,
+            "environment is outside this assessment or its configuration changed"
+        );
+        tools.environments.doctor(id).await
+    })
+}
+
 pub(in crate::tools) fn handle_emulate_run<'a>(
     tools: &'a ToolService,
     agent: &'a AgentMetadata,
@@ -74,12 +123,20 @@ pub(in crate::tools) fn handle_seccomp_analyze<'a>(
 
 pub(in crate::tools) fn handle_runtime_doctor<'a>(
     tools: &'a ToolService,
-    _agent: &'a AgentMetadata,
+    agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
     _args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.doctor().await })
+    Box::pin(async move {
+        if agent.environment_id.is_some() {
+            tools.checked_environment(agent).await?.doctor().await
+        } else {
+            Ok(
+                json!({"enabled":false,"capabilities":{},"reason":"task has no assigned environment"}),
+            )
+        }
+    })
 }
 
 pub(in crate::tools) fn handle_stage_target<'a>(
@@ -212,8 +269,12 @@ pub(in crate::tools) fn handle_runtime_profile<'a>(
                         .all(|value| value == "mapped_hash_confirmed")
             );
             raw["mapped_files"] = Value::Object(matches);
+            raw["status"] = json!(if process["status"] == "observed" {
+                "process_observed"
+            } else {
+                "process_observation_unavailable"
+            });
             raw["observation"] = observation;
-            raw["status"] = json!("process_observed");
         }
         Ok(raw)
     })

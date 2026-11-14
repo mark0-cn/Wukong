@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Recognize Windows sharing-violation denial when probing guarded sandbox roots; real held-directory fixtures cover that denial separately from ACL access denial."
+zh_CN = "检查受保护沙箱目录根时正确识别 Windows 共享冲突拒绝，并用真实目录句柄夹具单独覆盖该分支，区别于 ACL 访问拒绝。"

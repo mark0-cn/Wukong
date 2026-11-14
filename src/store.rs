@@ -19,7 +19,9 @@ mod records;
 pub use records::{DocumentKind, SessionKind, StoredRecord};
 mod session;
 pub(crate) use session::StateSession;
+mod artifacts;
 mod conversations;
+mod environment_bindings;
 mod leases;
 pub(crate) use leases::LeaseToken;
 
@@ -42,7 +44,7 @@ impl Store {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
           CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-          INSERT OR IGNORE INTO meta VALUES('schema_version','3');
+          INSERT OR IGNORE INTO meta VALUES('schema_version','4');
           ",
         )?;
         let version: String = conn.query_row(
@@ -564,7 +566,7 @@ impl Store {
     }
     pub fn verify_evidence_links(&self, run_id: &str, ids: &[String]) -> Result<()> {
         for evidence in ids {
-            self.read_evidence(run_id, evidence)?;
+            self.verified_evidence_path(run_id, evidence)?;
         }
         Ok(())
     }
@@ -620,14 +622,14 @@ mod tests {
         let conn = Connection::open(directory.path().join("state.sqlite3"))?;
         conn.execute_batch(
             "CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-            INSERT INTO meta VALUES('schema_version','2');
+            INSERT INTO meta VALUES('schema_version','3');
             CREATE TABLE legacy_history(data TEXT); INSERT INTO legacy_history VALUES('retained');",
         )?;
         let error = match Store::open(directory.path()) {
             Ok(_) => panic!("old schema accepted"),
             Err(error) => error,
         };
-        assert!(error.to_string().contains("expected 3"));
+        assert!(error.to_string().contains("expected 4"));
         let history: String =
             conn.query_row("SELECT data FROM legacy_history", [], |row| row.get(0))?;
         assert_eq!(history, "retained");

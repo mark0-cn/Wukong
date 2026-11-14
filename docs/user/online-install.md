@@ -6,13 +6,13 @@ English · [简体中文](online-install.zh-CN.md)
 
 [Language settings](languages.md)
 
-Wukong provides a Windows x64 installer EXE and a Linux x64 AppImage. Installation files contain the client; the tool image downloads online on first use. They contain no model credentials or challenge data.
+Wukong provides a Windows x64 installer EXE and a Linux x64 AppImage. Installation files contain the client; Linux tool environments download an image online. They contain no model credentials or challenge data. Named Windows VM environments use a separate [offline delivery contract](../design/cross-platform-environments.md#windows-offline-delivery-contract); configuring only a Windows environment does not require Docker.
 
 ## Windows
 
 1. Download `Wukong_<version>_x64-setup.exe` from an official [GitHub Release](https://github.com/mark0-cn/Wukong/releases); use the actual attachment filename.
 2. Choose English or SimpChinese, install for the current user and open Wukong. The client uses WebView2; the installer can prepare a missing runtime online. Application language follows the system initially and can be changed independently.
-3. First launch opens environment setup. Install and start Docker Desktop in Linux containers mode.
+3. With no registered environments, first launch opens Linux tool setup. For a Linux tool environment, install and start Docker Desktop in Linux containers mode. Existing named environment configuration skips this first-run setup.
 4. Select **Prepare tool environment**, wait for the image download and self-test, then configure the model in settings.
 
 The EXE currently has no Authenticode signature. In-app updates use separate signature verification.

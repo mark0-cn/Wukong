@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Default, Serialize)]
 pub struct Health {
     pub configured: bool,
+    pub platform: Option<crate::environments::Platform>,
     pub epoch: Option<u64>,
     pub docker: Option<bool>,
     pub running: Option<bool>,
@@ -22,6 +23,7 @@ impl Health {
         let timestamp = chrono::Utc::now().to_rfc3339();
         Self {
             configured: true,
+            platform: Some(crate::environments::Platform::Linux),
             epoch: Some(epoch),
             docker: Some(true),
             running: Some(true),
@@ -33,11 +35,68 @@ impl Health {
     }
 }
 pub fn check(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
+    let configured = config
+        .default_environment
+        .as_ref()
+        .and_then(|id| config.environments.get(id));
+    let Some(environment) = configured else {
+        return Ok(Health {
+            epoch: Some(epoch),
+            checked_at: Some(chrono::Utc::now().to_rfc3339()),
+            ..Default::default()
+        });
+    };
+    if config.default_environment.as_deref() != Some("workbench")
+        || environment.platform != crate::environments::Platform::Linux
+        || environment.runtime.backend != crate::runtime::RuntimeBackend::Docker
+    {
+        let mut health = Health {
+            configured: true,
+            platform: Some(environment.platform),
+            epoch: Some(epoch),
+            checked_at: Some(chrono::Utc::now().to_rfc3339()),
+            ..Default::default()
+        };
+        if full {
+            let result = (|| -> Result<serde_json::Value> {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?;
+                runtime.block_on(async {
+                    let registry =
+                        crate::environments::EnvironmentRegistry::new(config.environments.clone())?;
+                    let result = registry
+                        .doctor(config.default_environment.as_deref().unwrap())
+                        .await;
+                    registry.close().await;
+                    result
+                })
+            })();
+            match result {
+                Ok(value) => {
+                    health.running = Some(true);
+                    health.tools = Some(
+                        value["observation"]["capabilities"]["native_target_execution"] == true,
+                    );
+                    health.tools_checked_at = Some(chrono::Utc::now().to_rfc3339());
+                    if health.tools != Some(true) {
+                        health.error = Some(Message::new("system-health-tools-failed"));
+                    }
+                }
+                Err(error) => {
+                    health.running = Some(false);
+                    health.error = Some(Message::from_error(error));
+                }
+            }
+        }
+        return Ok(health);
+    }
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     let environment = workbench.environment().ok();
     let mut health = Health {
         configured: environment.is_some(),
+        platform: Some(crate::environments::Platform::Linux),
         epoch: Some(epoch),
         checked_at: Some(chrono::Utc::now().to_rfc3339()),
         image: environment.as_ref().map(|e| e.image.clone()),
@@ -99,11 +158,52 @@ pub fn check(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
 mod tests {
     use super::*;
     #[test]
+    fn windows_configuration_never_requires_docker_or_opens_a_workbench() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let mut config = AppConfig::default();
+        config.workbench.root = root.path().join("must-not-be-created");
+        config.workbench.docker_executable = "must-not-be-invoked".into();
+        config.default_environment = Some("workbench".into());
+        config.environments.insert(
+            "workbench".into(),
+            crate::environments::EnvironmentConfig {
+                name: "Windows VM".into(),
+                platform: crate::environments::Platform::Windows,
+                installation_id: None,
+                runtime: crate::runtime::RuntimeConfig {
+                    backend: crate::runtime::RuntimeBackend::Ssh,
+                    ssh_host: Some("fixture.invalid".into()),
+                    ..Default::default()
+                },
+            },
+        );
+        let health = check(&config, false, 1)?;
+        assert!(health.configured);
+        assert_eq!(health.docker, None);
+        assert_eq!(health.tools, None);
+        assert!(!config.workbench.root.exists());
+        Ok(())
+    }
+    #[test]
     fn an_existing_record_does_not_claim_a_missing_daemon_is_healthy() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let mut config = AppConfig::default();
         config.workbench.root = directory.path().join("workbench");
-        config.runtime.docker_executable = directory
+        config.default_environment = Some("workbench".into());
+        config.environments.insert(
+            "workbench".into(),
+            crate::environments::EnvironmentConfig {
+                name: "Linux workbench".into(),
+                platform: crate::environments::Platform::Linux,
+                installation_id: None,
+                runtime: crate::runtime::RuntimeConfig {
+                    backend: crate::runtime::RuntimeBackend::Docker,
+                    docker_container: Some("fixture".into()),
+                    ..Default::default()
+                },
+            },
+        );
+        config.workbench.docker_executable = directory
             .path()
             .join("missing-docker.exe")
             .to_string_lossy()

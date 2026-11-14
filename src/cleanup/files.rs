@@ -169,7 +169,8 @@ pub(super) fn inventory(home: &Path, plan: &mut Plan) -> Result<()> {
                     .is_some_and(|value| {
                         value.get("state_dir").is_some()
                             && value.get("model").is_some()
-                            && value.get("runtime").is_some()
+                            && (value.get("environments").is_some()
+                                || value.get("runtime").is_some())
                     });
             if !owned {
                 plan.retained.push(Retained {
@@ -429,7 +430,7 @@ fn valid_database(path: &Path) -> bool {
                     [],
                     |row| row.get::<_, String>(0),
                 )
-                .is_ok_and(|schema| schema == "3")
+                .is_ok_and(|schema| matches!(schema.as_str(), "3" | "4"))
                 && connection
                     .prepare("SELECT id,run_id,data FROM entities LIMIT 0")
                     .is_ok()

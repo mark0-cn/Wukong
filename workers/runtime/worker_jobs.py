@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from worker_capabilities import doctor
-from worker_common import BRIDGE_PATH, MAX_FILE, TERMINAL, artifact, atomic_json, bounded_int, confined, job_dir, load_json, parse_address, safe_env, tail
+from worker_common import BRIDGE_PATH, MAX_FILE, TERMINAL, artifact, atomic_json, bounded_int, confined, job_dir, load_json, parse_address, public_file, safe_env, tail
 from worker_processes import detached_options, process_identity
 
 class JobManager:
@@ -24,6 +24,9 @@ class JobManager:
         if not self.trusted and not self.isolated:
             raise ValueError("production execution requires a root Linux worker with UID/GID/CHOWN capabilities; use explicit trusted_local only for trusted fixtures")
         spec = dict(params)
+        if kind == "minimize" and any(spec.get(key) is not None for key in ("trials", "expected")):
+            raise ValueError("input.minimize owns candidate trials and crash equivalence; trials/expected are not minimization options")
+        launch = None
         if spec.get("network") is not None:
             from worker_network import network_profile, validate_plan
             if kind != "verify" or any(spec.get(key) is not None for key in ["args","env","expected","input_mode"]):
@@ -31,15 +34,19 @@ class JobManager:
             spec["trusted_local"] = self.trusted
             binding = network_profile(self.root,spec,self.trusted)
             if binding != spec.get("network_binding"): raise ValueError("network binding must match the admitted service profile")
-            input_path=confined(self.root,spec["input"],True)
+            input_path=public_file(self.root,spec["input"])
             if input_path.stat().st_size > 1048576: raise ValueError("network input exceeds 1 MiB")
             validate_plan(spec["network"],input_path.read_bytes())
         elif spec.get("launch_spec"):
+            if kind=='process' and (spec.get('argv') or spec.get('env') or spec.get('cwd') not in (None,'.')):
+                raise ValueError('LaunchSpec owns process argv, environment and cwd')
             from worker_launch import load
             launch,_,_,_,_=load(self.root,spec)
+            if kind=='process' and params.get('timeout_secs') is not None and params['timeout_secs'] != launch.get('timeout_secs',30):
+                raise ValueError('LaunchSpec owns its execution timeout')
             spec["input_mode"]="stdin" if launch["input_mode"]=="stdin_pipe" else "argv"
             if launch["input_mode"]=="pty": raise ValueError("PTY replay is not supported; use interact.start and verify the delivery mode explicitly")
-            spec.setdefault("timeout_secs",launch["timeout_secs"])
+            spec.setdefault("timeout_secs",launch.get("timeout_secs",30))
         spec["isolated"] = self.isolated
         spec["call_id"] = spec.get("call_id") or spec.get("request_id")
         spec["kind"] = kind
@@ -47,8 +54,8 @@ class JobManager:
         spec["output_limit"] = bounded_int(spec.get("output_limit"), 1048576, 1024, 8 * 1048576)
         spec["runner_token"] = secrets.token_hex(32)
         if kind in {"replay", "verify", "minimize"}:
-            target = confined(self.root, spec["target"], True)
-            input_path = confined(self.root, spec["input"], True)
+            target = public_file(self.root, spec["target"])
+            input_path = public_file(self.root, spec["input"])
             if not target.is_file() or not input_path.is_file() or input_path.stat().st_size > MAX_FILE:
                 raise ValueError("target/input must be files and input must be <=32 MiB")
             spec["timeout_secs"] = min(spec["timeout_secs"], 60)
@@ -61,11 +68,18 @@ class JobManager:
                 if spec["verifier_agent_id"] == spec["producer_agent_id"]:
                     raise ValueError("independent verifier must differ from PoC producer")
         else:
-            if not isinstance(spec.get("argv"), list) or not spec["argv"]:
+            if spec.get('launch_spec'):
+                if kind != 'process':
+                    raise ValueError('LaunchSpec owns process argv, environment and cwd')
+            elif not isinstance(spec.get("argv"), list) or not spec["argv"]:
                 raise ValueError("argv is required")
             cwd = confined(self.root, spec.get("cwd", "."), True)
             if not cwd.is_dir():
                 raise ValueError("cwd must be a worker directory")
+            if spec.get('input') is not None:
+                source=public_file(self.root,spec['input'])
+                if not source.is_file() or source.stat().st_size > MAX_FILE:
+                    raise ValueError('process input must be a staged file <=32 MiB')
         safe_env(spec.get("env"))
         call_id = spec.get("call_id")
         # Match the complete request, not just an id, to avoid silently reusing
@@ -166,7 +180,7 @@ class JobManager:
 
     def dispatch(self, method, params):
         if method == "angr.solve":
-            target = confined(self.root, params["target"], True)
+            target = public_file(self.root, params["target"])
             if not target.is_file():
                 raise ValueError("angr target must be a staged file")
             try:
@@ -195,7 +209,6 @@ class JobManager:
             if not isinstance(source, str) or not source.strip() or len(source) > 262144 or "\0" in source:
                 raise ValueError("source must be a nonempty string <=256KiB without NUL bytes")
             import py_compile
-            import uuid
             script_rel = "files/py_run_" + uuid.uuid4().hex + ".py"
             script = confined(self.root, script_rel)
             script.parent.mkdir(parents=True, exist_ok=True)
@@ -241,8 +254,8 @@ class JobManager:
             doctor = self.doctor()
             if not doctor["capabilities"]["fuzz_qemu"]:
                 raise ValueError("AFL++ QEMU capability unavailable; inspect doctor before selecting backend")
-            target = confined(self.root, params["target"], True)
-            seeds = confined(self.root, params["seeds"], True)
+            target = public_file(self.root, params["target"])
+            seeds = public_file(self.root, params["seeds"])
             if not seeds.is_dir() or not any(p.is_file() for p in seeds.iterdir()):
                 raise ValueError("nonempty seed directory required")
             key = params.get("request_id") or params.get("call_id")

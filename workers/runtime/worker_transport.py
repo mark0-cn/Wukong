@@ -8,49 +8,52 @@ import subprocess
 import sys
 import threading
 import time
-from worker_common import BRIDGE_PATH, MAX_RPC, PROTOCOL, atomic_json, load_json, rpc_error, safe_env
+from filelock import FileLock
+from worker_common import BRIDGE_PATH, MAX_RPC, PROTOCOL, atomic_json, load_json, rpc_error, safe_env, tail
 from worker_processes import detached_options
 from worker_runtime import Runtime
 
 def serve(root, trusted):
-    runtime = Runtime(root, trusted)
-    token = secrets.token_hex(32)
+    # The daemon owns this lock independently of a relay that may crash.
+    with FileLock(root / "daemon.guard", timeout=0):
+        runtime = Runtime(root, trusted)
+        token = secrets.token_hex(32)
 
-    class Handler(socketserver.StreamRequestHandler):
-        def handle(self):
-            self.connection.settimeout(310)
-            try:
-                line = self.rfile.readline(MAX_RPC + 1)
-                if len(line) > MAX_RPC:
-                    raise ValueError("request exceeds size limit")
-                request = json.loads(line)
-                if not secrets.compare_digest(str(request.pop("auth", "")), token):
-                    raise ValueError("worker authentication failed")
-                result = runtime.dispatch(request["method"], request.get("params") or {})
-                response = {"jsonrpc": "2.0", "id": request.get("id"), "result": result}
-            except Exception as error:
-                response = {"jsonrpc": "2.0", "id": locals().get("request", {}).get("id"), "error": rpc_error(error)}
-            encoded = json.dumps(response, ensure_ascii=False).encode() + b"\n"
-            if len(encoded) > MAX_RPC:
-                encoded = json.dumps({"jsonrpc": "2.0", "id": response.get("id"), "error": {"code": -32001, "message": "response exceeds size limit"}}).encode() + b"\n"
-            self.wfile.write(encoded)
-            if locals().get("request", {}).get("method") == "worker.shutdown" and "error" not in response:
-                threading.Thread(target=self.server.shutdown, daemon=True).start()
+        class Handler(socketserver.StreamRequestHandler):
+            def handle(self):
+                self.connection.settimeout(310)
+                try:
+                    line = self.rfile.readline(MAX_RPC + 1)
+                    if len(line) > MAX_RPC:
+                        raise ValueError("request exceeds size limit")
+                    request = json.loads(line)
+                    if not secrets.compare_digest(str(request.pop("auth", "")), token):
+                        raise ValueError("worker authentication failed")
+                    result = runtime.dispatch(request["method"], request.get("params") or {})
+                    response = {"jsonrpc": "2.0", "id": request.get("id"), "result": result}
+                except Exception as error:
+                    response = {"jsonrpc": "2.0", "id": locals().get("request", {}).get("id"), "error": rpc_error(error)}
+                encoded = json.dumps(response, ensure_ascii=False).encode() + b"\n"
+                if len(encoded) > MAX_RPC:
+                    encoded = json.dumps({"jsonrpc": "2.0", "id": response.get("id"), "error": {"code": -32001, "message": "response exceeds size limit"}}).encode() + b"\n"
+                self.wfile.write(encoded)
+                if locals().get("request", {}).get("method") == "worker.shutdown" and "error" not in response:
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
 
-    class Server(socketserver.ThreadingTCPServer):
-        daemon_threads = True
-        allow_reuse_address = False
+        class Server(socketserver.ThreadingTCPServer):
+            daemon_threads = True
+            allow_reuse_address = False
 
-    with Server(("127.0.0.1", 0), Handler) as server:
-        endpoint = {"protocol": PROTOCOL, "host": "127.0.0.1", "port": server.server_address[1], "auth": token, "pid": os.getpid()}
-        atomic_json(root / "endpoint.json", endpoint)
-        (root / "endpoint.json").chmod(0o600)
-        server.serve_forever(poll_interval=0.25)
+        with Server(("127.0.0.1", 0), Handler) as server:
+            endpoint = {"protocol": PROTOCOL, "host": "127.0.0.1", "port": server.server_address[1], "auth": token, "pid": os.getpid()}
+            atomic_json(root / "endpoint.json", endpoint)
+            (root / "endpoint.json").chmod(0o600)
+            server.serve_forever(poll_interval=0.25)
 
-def relay_call(endpoint, request):
+def relay_call(endpoint, request, timeout=305):
     request = {**request, "auth": endpoint["auth"]}
-    with socket.create_connection(("127.0.0.1", int(endpoint["port"])), timeout=5) as connection:
-        connection.settimeout(305)
+    with socket.create_connection(("127.0.0.1", int(endpoint["port"])), timeout=min(5, timeout)) as connection:
+        connection.settimeout(timeout)
         connection.sendall(json.dumps(request).encode() + b"\n")
         with connection.makefile("rb") as stream:
             line = stream.readline(MAX_RPC + 1)
@@ -64,7 +67,7 @@ def ensure_daemon(root, trusted):
     def existing():
         try:
             endpoint = load_json(endpoint_path)
-            reply = relay_call(endpoint, {"id": 0, "method": "ping"})
+            reply = relay_call(endpoint, {"id": 0, "method": "ping"}, timeout=1)
             if reply.get("result", {}).get("protocol") == PROTOCOL:
                 return endpoint
         except (OSError, ValueError, KeyError, socket.timeout):
@@ -74,27 +77,9 @@ def ensure_daemon(root, trusted):
     endpoint = existing()
     if endpoint:
         return endpoint
-    # Serialize daemon startup across relays. A stale lock is only removed after
-    # its age exceeds startup allowance and a fresh endpoint probe still fails.
-    lock = root / "startup.lock"
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        try:
-            lock.mkdir()
-            break
-        except FileExistsError:
-            endpoint = existing()
-            if endpoint:
-                return endpoint
-            if time.time() - lock.stat().st_mtime > 20:
-                try:
-                    lock.rmdir()
-                except OSError:
-                    pass
-            time.sleep(0.1)
-    else:
-        raise ValueError("worker daemon startup lock timeout")
-    try:
+    # Kernel-backed ownership survives slow initialization and is released on
+    # process exit. Never infer ownership from a directory's wall-clock age.
+    with FileLock(root / "startup.guard", timeout=30):
         endpoint = existing()
         if endpoint:
             return endpoint
@@ -102,15 +87,19 @@ def ensure_daemon(root, trusted):
         if trusted:
             argv.append("--trusted-local")
         with (root / "daemon.log").open("ab") as log:
-            subprocess.Popen(argv, env=safe_env(), stdin=subprocess.DEVNULL, stdout=log, stderr=log, **detached_options())
-        for _ in range(100):
+            process = subprocess.Popen(argv, env=safe_env(), stdin=subprocess.DEVNULL, stdout=log, stderr=log, **detached_options())
+        # Cold interpreter imports and state initialization can outlast a warm
+        # reconnect. Keep the startup lock across the bounded readiness wait.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
             endpoint = existing()
             if endpoint:
                 return endpoint
+            if process.poll() is not None:
+                try:
+                    diagnostic = tail(root / "daemon.log", 2048)
+                except OSError:
+                    diagnostic = "local startup log could not be read"
+                raise ValueError(f"worker daemon exited during startup ({process.returncode}); daemon.log tail: {diagnostic}")
             time.sleep(0.05)
         raise ValueError("worker daemon failed to start; inspect daemon.log")
-    finally:
-        try:
-            lock.rmdir()
-        except OSError:
-            pass

@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add controller transport for native Windows workers with explicit management keys, independently enrolled Ed25519 host pins, fixed relay requests and installation identity checks. Disable forwarding, proxy/local commands and shared SSH sessions."
+zh_CN = "新增原生 Windows worker 控制端传输，使用指定管理密钥、独立登记的 Ed25519 主机公钥、固定中继请求及安装身份校验，并禁用转发、代理/本地命令和 SSH 连接共享。"

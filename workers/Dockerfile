@@ -77,7 +77,8 @@ RUN mkdir -p /state/home/.config /state/cache \
     && rm -rf /root/.config \
     && ln -s /state/home/.config /root/.config
 # Trusted metadata/supervisors remain root; each target gets a distinct numeric
-# UID/GID. Startup drops all caps except CHOWN/SETUID/SETGID/SYS_PTRACE.
+# UID/GID. Launchers retain CHOWN/SETUID/SETGID/KILL/SYS_PTRACE/DAC_OVERRIDE
+# only in trusted supervisors; isolated targets retain no capabilities.
 USER root
 WORKDIR /state
 VOLUME ["/state"]

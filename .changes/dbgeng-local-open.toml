@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Validate debugger paths through Windows SDK no-reparse opens without requiring metadata access to protected ancestors, retaining local-volume restrictions and shared helper regressions for final and intermediate junctions."
+zh_CN = "通过 Windows SDK 的禁止重解析打开校验调试器路径，不要求读取受保护祖先目录的元数据，保留本地卷限制，并为共享辅助模块增加末级和中间 junction 回归。"

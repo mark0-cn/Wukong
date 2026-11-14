@@ -10,6 +10,8 @@ This project implements Strix-inspired responsibilities and runtime semantics: r
 
 ## Modules and responsibilities
 
+Windows has one native worker authority. The controller owns business tasks/evidence, `workers/protocol` shares public types, and the native service owns capabilities, leases, files and resources. Python on Windows is a disposable isolated analysis tool; Linux retains its Python worker. See [cross-platform environments](cross-platform-environments.md) and the [current Windows component guide](../../workers/windows/README.md).
+
 | Module | Responsibility |
 |---|---|
 | `domain` | Durable run/agent/message/event/tool/evidence/finding/verification/coverage records |
@@ -51,7 +53,7 @@ Within an active run, `follow_up_agent` (CLI `message --kind follow_up`) adds wo
 
 Children close owned debug/interactive sessions before finishing; root resolves all sessions. Other Agents in the same run may close abandoned sessions of stopped/failed owners, but cannot issue debug commands/interactive input.
 
-Native logs in `state_dir/rig/RUN_ID` contain model conversations, effects and provider metadata, not clients/credentials. Resolved provider/endpoint configuration is pinned before first model I/O and reused on resume. Per-role request output budgets do not overwrite model capacity. Keys use configured environment variables. Fresh tasks use schema 3; old databases/custom AgentRun checkpoints are not migrated.
+Native logs in `state_dir/rig/RUN_ID` contain model conversations, effects and provider metadata, not clients/credentials. Resolved provider/endpoint configuration is pinned before first model I/O and reused on resume. Per-role request output budgets do not overwrite model capacity. Keys use configured environment variables. Fresh tasks use schema 4; old databases/custom AgentRun checkpoints are not migrated.
 
 `DurableEffects` centralizes admission, stable identities, transactional/worker receipts and recovery. Business call IDs combine Agent, generation, metered model turn and provider tool-call ID, not reassigned ECS IDs. Business state/receipts commit together. Worker replies persist before controller postprocessing; missing replies are reconciled using the same request ID against the durable worker ledger. Uncertain MCP writes remain for operator reconciliation, never automatic replay. Operator reconciliation also uses epoch leases. Native effects/database changes wake execution.
 
@@ -77,17 +79,21 @@ Callable names remain `reverse`, `hunter`, etc., without directories. Flat `skil
 
 Each fresh model request selects at most six bounded shared-note/todo/optional-threat-model previews by author, parent, predecessor, scope and keywords. This heuristic does not guarantee full relevance coverage; prompts report omitted counts/search entry points. `context_search` supports text, kind, author scope, agent_id and pagination; `context_read` reads original document JSON including amendments by Unicode character offset. Both shrink pages to output-byte limits, retain continuation offsets and bypass model summaries. Reads stay within the run; `evidence_read` retrieves original evidence. Compaction retains the same previews, ledger counts and full-conversation references, never reinjecting every document/tree. Contracts still define plans/constraints; selection does not replace acceptance.
 
-`src/tools/catalog.rs` registers builtins; models see all role-visible tools from the first turn. Native coordination tools are `task`, `message`, `wait`. Root uses `finish_scan`, children `agent_finish`; actual operations still check target identity, evidence, session ownership and independent review. Definitions drive execution, validation and the [generated catalog](../reference/tool-catalog.md), without persisting tool-discovery selections. Connected MCP definitions merge in; capabilities still need probing. `wukong tool-catalog` generates Markdown; `wukong --json tool-catalog` exports schemas.
+`src/tools/catalog.rs` registers builtins and their backend requirements. Before each model request, asynchronous environment preflight selects the role-visible tools supported by observed capabilities; root orchestration stays lazy. Failed preflight preserves controller tools and reports unavailable requirements. Native coordination tools are `task`, `message`, `wait`. Root uses `finish_scan`, children `agent_finish`; actual operations recheck backend capabilities, target identity, evidence, session ownership and independent review. Definitions drive execution, validation and the [generated catalog](../reference/tool-catalog.md), without persisting tool-discovery selections. Connected MCP definitions merge in; their capabilities still need probing. `wukong tool-catalog` generates Markdown; `wukong --json tool-catalog` exports schemas.
 
 `prompts/coverage.json` associates method sources/tools/mechanism fixtures with `SkillManifest`; `wukong skill-catalog` generates [coverage](../reference/skill-coverage.md). Metadata does not change permissions, availability or completion gates.
 
 Worker entry, transport, ledger, jobs, independent supervision, debugging, interaction, files and command execution are separate components. `Runtime` only assembles/routes; the ledger executes callbacks/reconciles session liveness independently of a concrete runtime.
+
+Named [analysis environments](cross-platform-environments.md) connect lazily and bind immutably to child tasks. Resource identities include the worker; shared artifacts move through hash-verified controller storage with bounded resumable transfers.
 
 External processes recover separately from model state. Reconcile debugger/fuzz/job liveness; saved PIDs/SQLite do not prove survival. Reuse completed effects; never blindly replay uncertain ones. MCP readOnlyHint follows Rig hint semantics and does not authorize uncertain remote replay. GDB mutation is owner-serialized; parallel experiments use separate processes. The native kernel registers only allowed business tools, not host shell/general coding tools.
 
 <a id="桌面读取与持久化边界"></a>
 
 ## Desktop reads and persistence boundaries
+
+`desktop/configuration` applies scalar or nested-table settings edits to a temporary document, then parses the complete result before replacing the draft. Invalid edits leave the draft unchanged. Saving preserves unrelated comments, checks external file changes and validates the resolved configuration; registering an environment does not connect to it or create its SSH credentials.
 
 `queries` supplies GUI-independent `WorkspaceQueries`, `AssessmentQueries`, `ReportQueries` for summaries, incremental cursors, conversation/report snapshots. SQL lives in `store/workspace`/`store/report_queries`. CLI/GUI share query models; chat parsing/layout caches remain GUI adapters.
 
@@ -125,7 +131,7 @@ Record static hypotheses, crash reproduction, root cause, exploitation primitive
 
 `fixtures/` contains symbol/stripped vulnerable, fixed and normal samples. Builders generate ELF; behavior harnesses replay and save hashes/exits. Accuracy uses independent reports/explicit review labels, not crashes as Agent success. See [fixtures](../../fixtures/README.md).
 
-Dynamic tools target Linux x86_64 ELF; PE/Mach-O static profiling is available, but DbgEng/LLDB dynamic backends are not implemented. Current platform acceptance follows CI and [desktop update validation](../development/desktop-updates.md); historical native-kernel checks do not establish current Windows Docker Desktop coverage. Providers/engines need actual dependencies; missing dependencies produce explicit errors. Local protocol tests do not establish live-provider/engine acceptance.
+Production dynamic tools target Linux x86_64 ELF. PE/Mach-O static profiling is available. Windows uses an external WinDbg MCP tool, with real trusted x64/x86 dump/live client acceptance; the custom DbgEng backend has been removed, while managed Windows debugger admission and complete production installation remain unfinished. macOS LLDB is not implemented. See [analysis environments](cross-platform-environments.md). Current platform acceptance follows CI and [desktop update validation](../development/desktop-updates.md); historical native-kernel checks do not establish current Windows Docker Desktop coverage. Missing dependencies produce explicit errors. Local protocol tests do not establish live-provider/engine acceptance.
 
 <a id="类型化协调消息"></a>
 
@@ -143,7 +149,7 @@ conversation/context and journal, not that a model request ran or acted on it.
 correlated reply (not an assessment of correctness). Old-generation replies are
 retained as `stale` and never injected as current work. `message_status` exposes
 these states. In-flight model requests keep their original mailbox snapshot.
-This increment uses a fresh schema 3 store; no old-database migration is provided.
+This increment uses a fresh schema 4 store; no old-database migration is provided.
 Informational mail left on completed work becomes
 stale when a new generation starts. CLI messages default to information; GUI
 operator input defaults to information; the explicit follow-up option reopens completed work.

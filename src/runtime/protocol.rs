@@ -1,20 +1,11 @@
 //! Typed worker boundary. Unknown result fields are retained for raw evidence.
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+pub use wukong_worker_protocol::{EnvironmentLease, PROTOCOL, WorkerCapacity, WorkerIdentity};
 
 pub use crate::domain::{JobResult, JobState, JobStatus, SessionHandle, SessionState};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkerErrorKind {
-    InvalidRequest,
-    SessionLost,
-    Conflict,
-    OutcomeUnknown,
-    Internal,
-    #[default]
-    Unknown,
-}
+pub use wukong_worker_protocol::WorkerErrorKind;
 
 #[derive(Debug)]
 pub struct WorkerError {

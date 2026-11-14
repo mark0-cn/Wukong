@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add internal managed Windows debugger launch routes using the pinned external WinDbg MCP tool, protobuf host messages, durable request ownership and bounded transcript evidence. Production availability remains disabled pending complete image/symbol admission and installed isolation/recovery acceptance."
+zh_CN = "新增内部托管 Windows 调试启动通路，使用固定的外部 WinDbg MCP 工具、protobuf 宿主消息、持久化请求归属和有界日志证据。完整映像/符号准入及已安装隔离/恢复验收完成前，仍禁用生产可用性。"

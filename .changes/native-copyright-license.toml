@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Preserve native dependency license documents named COPYRIGHT in signed offline worker packages, retaining the original bytes and the existing missing-license rejection."
+zh_CN = "在签名离线 worker 包中保留以 COPYRIGHT 命名的原生依赖许可证文件，保持原始字节及现有缺失许可证拒绝条件。"

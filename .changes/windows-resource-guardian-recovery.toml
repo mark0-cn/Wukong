@@ -1,0 +1,3 @@
+kind = "security"
+en = "Add owned guardian Jobs and cleanup reconciliation for interrupted native Windows process resources. Preserve unknown outcomes without relaunching targets; use handle-relative scratch cleanup and retain admission blockers whenever ownership or cleanup cannot be confirmed. Complete production capability advertisement remains disabled."
+zh_CN = "为中断的原生 Windows 进程资源增加归属守护 Job 及清理恢复。保留未知结果，不重新启动目标；采用相对句柄 scratch 清理，无法确认归属或清理时继续保留准入阻断项。完整生产能力声明仍禁用。"

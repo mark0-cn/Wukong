@@ -1,0 +1,3 @@
+kind = "security"
+en = "Give every sandbox process and primary thread explicit System/resource authority, add only its paired debugger when required, and verify the actual owner, exact DACL and low integrity label before execution. This initial policy does not establish adversarial isolation or enable production execution."
+zh_CN = "为每个沙箱进程及主线程显式设置 System 和资源身份权限，仅在需要时加入配对调试器，并在执行前核验实际所有者、精确 DACL 和低完整性标签。此初始策略不证明对抗性隔离，也不启用生产执行。"

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Queue native Windows resource requests with Tokio's asynchronous mutex so contending requests do not occupy the service's executor threads. Busy resource polling returns not-idle, preserving the lease and cleanup barriers. This does not enable general native debugger execution."
+zh_CN = "原生 Windows 资源请求改用 Tokio 异步互斥锁排队，避免等待请求占满服务执行线程。资源忙时轮询返回未空闲，保留租约及清理屏障。此修改不启用通用原生调试执行。"

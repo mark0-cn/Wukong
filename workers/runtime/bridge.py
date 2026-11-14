@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Worker command-line entry point."""
+import sys
+# Signed deployments are immutable. Set this before importing worker modules,
+# including when a daemon/job supervisor starts a new embedded interpreter.
+sys.dont_write_bytecode = True
 from pathlib import Path
 import argparse
 import json
 import os
-import sys
 from worker_common import MAX_RPC, job_dir, rpc_error
 from worker_job_supervisor import supervise_job
 from worker_transport import ensure_daemon, relay_call, serve

@@ -36,6 +36,95 @@ async fn disabled_backend_never_executes() {
 }
 
 #[tokio::test]
+async fn capacity_queue_allows_closure_and_retries_only_explicit_pre_effect_rejections()
+-> Result<()> {
+    let root = tempfile::tempdir()?;
+    let bridge = root.path().join("capacity_bridge.py");
+    std::fs::write(
+        &bridge,
+        r#"
+import json, sys
+busy = True
+calls = 0
+effects = []
+for line in sys.stdin:
+    request = json.loads(line)
+    method, params = request['method'], request.get('params', {})
+    error = None
+    if method == 'ping':
+        result = {'identity':{'protocol':2,'installation_id':'capacity-fixture','boot_id':'boot','package_sha256':'0'*64}}
+    elif method == 'job.start':
+        calls += 1
+        if params.get('request_id') == 'unknown':
+            error = {'code':-32000,'message':'uncertain execution','data':{'kind':'outcome_unknown'}}
+        elif busy:
+            error = {'code':-32000,'message':'capacity occupied','data':{'kind':'resource_busy'}}
+        else:
+            effects.append(params['request_id'])
+            result = {'job_id':params['request_id']}
+    elif method == 'job.cancel':
+        busy = False
+        result = {'cancelled':True}
+    else:
+        result = {'calls':calls,'effects':effects}
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],**({'error':error} if error else {'result':result})}),flush=True)
+"#,
+    )?;
+    let client = RuntimeClient::connect(RuntimeConfig {
+        bridge_path: bridge,
+        request_timeout_secs: 3,
+        ..config(root.path())
+    })
+    .await?;
+    let waiting = client.clone();
+    let start = tokio::spawn(async move {
+        waiting
+            .call("job.start", json!({"request_id":"once"}))
+            .await
+    });
+    let mut observed_busy = false;
+    for _ in 0..50 {
+        if client.call("job.status", json!({})).await?["calls"]
+            .as_u64()
+            .unwrap()
+            > 0
+        {
+            observed_busy = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(observed_busy);
+    assert!(!start.is_finished());
+    client.call("job.cancel", json!({})).await?;
+    assert_eq!(start.await??["job_id"], "once");
+    assert_eq!(
+        client.call("job.status", json!({})).await?["effects"],
+        json!(["once"])
+    );
+    let before = client.call("job.status", json!({})).await?["calls"]
+        .as_u64()
+        .unwrap();
+    let error = client
+        .call("job.start", json!({"request_id":"unknown"}))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error
+            .downcast_ref::<wukong::runtime::protocol::WorkerError>()
+            .unwrap()
+            .kind,
+        wukong::runtime::protocol::WorkerErrorKind::OutcomeUnknown
+    );
+    assert_eq!(
+        client.call("job.status", json!({})).await?["calls"],
+        before + 1
+    );
+    client.close().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn lost_transport_reconnects_and_timed_out_requests_are_not_replayed() -> Result<()> {
     // A fake bridge that answers the handshake, hangs forever on the first
     // "slow" request (forcing a controller timeout) and answers instantly
@@ -50,7 +139,9 @@ marker = pathlib.Path(sys.argv[sys.argv.index("--state") + 1]) / "slow-marker"
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
-    if method == "slow":
+    if method == "ping":
+        result = {'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}
+    elif method == "slow":
         if not marker.exists():
             marker.write_text("slow", encoding="utf-8")
             time.sleep(60)
@@ -255,7 +346,9 @@ starts.write_text(str(count))
 for line in sys.stdin:
     request=json.loads(line)
     method=request['method']
-    if method=='rpc_error':
+    if method=='ping':
+        reply={'jsonrpc':'2.0','id':request['id'],'result':{'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}
+    elif method=='rpc_error':
         reply={'jsonrpc':'2.0','id':request['id'],'error':{'code':-32000,'message':'fixture rejection'}}
     elif method=='malformed':
         (root/'executed').write_text('once')
@@ -328,6 +421,40 @@ async fn bridge_startup_error_includes_captured_stderr() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn reconnected_worker_identity_is_checked_before_resending_any_operation() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let bridge = root.path().join("identity_fixture.py");
+    std::fs::write(
+        &bridge,
+        r#"import json,sys,pathlib
+root=pathlib.Path(sys.argv[sys.argv.index('--state')+1])
+for line in sys.stdin:
+ r=json.loads(line)
+ if r['method']=='disconnect':
+  print('{invalid-json',flush=True);continue
+ if r['method']=='ping':
+  boot=(root/'boot').read_text() if (root/'boot').exists() else 'first'
+  result={'identity':{'protocol':2,'installation_id':'fixture','boot_id':boot,'package_sha256':'0'*64}}
+ else:
+  (root/'effect').write_text('executed');result={}
+ print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
+"#,
+    )?;
+    let client = RuntimeClient::connect(RuntimeConfig {
+        bridge_path: bridge,
+        ..config(root.path())
+    })
+    .await?;
+    assert!(client.call("disconnect", json!({})).await.is_err());
+    std::fs::write(root.path().join("boot"), "second")?;
+    let error = client.call("mutate", json!({})).await.unwrap_err();
+    assert!(format!("{error:#}").contains("identity changed"));
+    assert!(!root.path().join("effect").exists());
+    client.close().await?;
+    Ok(())
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn desktop_runtime_does_not_inherit_invalid_console_stderr() -> Result<()> {
@@ -365,7 +492,7 @@ sys.stderr.write('x' * 131072)
 sys.stderr.flush()
 for line in sys.stdin:
     request = json.loads(line)
-    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True}}), flush=True)
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True,'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}), flush=True)
 "#,
     )?;
     let config = RuntimeConfig {

@@ -1,0 +1,9 @@
+{
+  "package": "fixture3-ddmin",
+  "version": "0.1.1",
+  "revision": "ca91985cf9fe448e16f8f481a9df7bdd55a06ff8",
+  "path_in_vcs": "packages/ddmin/crates/ddmin",
+  "license_choice": "MIT",
+  "url": "https://raw.githubusercontent.com/agent-quality-controls/fixture3/ca91985cf9fe448e16f8f481a9df7bdd55a06ff8/LICENSE",
+  "sha256": "cba355e075fca186c54c619453242f87846c277d227499b15c21ed66c40a2c14"
+}

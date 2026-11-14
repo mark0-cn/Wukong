@@ -8,8 +8,8 @@ export function EnvironmentHealth({ health: observation, epoch }: { health?: Hea
     <h3>{t('updates-health-title')}</h3>
     <div className="health-grid">
       <div><span>{t('updates-health-config')}</span><strong>{!health ? t('updates-health-unknown') : health.configured ? t('updates-health-configured') : t('updates-health-unconfigured')}</strong></div>
-      <div><span>{t('updates-health-docker')}</span><strong>{label(health?.docker)}</strong></div>
-      <div><span>{t('updates-health-container')}</span><strong>{label(health?.running)}</strong></div>
+      {health?.platform !== 'windows' && <div><span>{t('updates-health-docker')}</span><strong>{label(health?.docker)}</strong></div>}
+      <div><span>{t(health?.platform === 'windows' ? 'updates-health-worker' : 'updates-health-container')}</span><strong>{label(health?.running)}</strong></div>
       <div><span>{t('updates-health-tools')}</span><strong>{label(health?.tools)}</strong></div>
     </div>
     <p className="muted">{health?.checked_at ? t('updates-health-time', { time: new Date(health.checked_at).toLocaleString(currentLocale()) }) : t('updates-health-unchecked-help')}</p>

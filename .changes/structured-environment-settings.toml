@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow desktop settings to apply complete nested environment records atomically while preserving unrelated configuration and rejecting invalid drafts without partial changes."
+zh_CN = "允许桌面设置原子应用完整的嵌套环境记录，保留无关配置，并在草稿无效时拒绝部分修改。"

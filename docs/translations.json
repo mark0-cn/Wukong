@@ -18,20 +18,24 @@
       "zh-CN": "04ef38f29d72fd0ea63c0106c81e86210272b0617def67218e6079dbbcf6d01d"
     },
     "docs/design/architecture.md": {
-      "en": "370e0d9ceba075c5fbf899c8cc77b3489302f2f6a46bf9cbe20e81cda5659d81",
-      "zh-CN": "f267f86745fee0989824517a3112cce11894b9ce331bd43b3617cf7bba22e00b"
+      "en": "3f6c01e235a0726b6ce7ada6aaa9293c1f60f3385c228267f075d3a2c13ed8d7",
+      "zh-CN": "c5cc3e08588d33f95832bff8302c786e5968944c6efaef5fb1eb3523d1e0bba3"
+    },
+    "docs/design/cross-platform-environments.md": {
+      "en": "19193de806ff2def91c1f4e40285e7feef2b3d24fa752d41694893e96eba9c4d",
+      "zh-CN": "9e1305da5ce4b39e129fa3936a265ed163db703298b406bc6272d2cd8e9880de"
     },
     "docs/design/implementation-contract.md": {
-      "en": "34b958279e68476f2d62f42962102de8794a49a2ac12da61d5b8c84286698c2c",
-      "zh-CN": "7b56603d9fd1844beb9eec5f4d28fe0b9f24f41d902b450cb2dc6e39bd61b03f"
+      "en": "f0c8eb1b08058b2cd98cab8d961c2540387c10290032ae52e4ca1016ede305f9",
+      "zh-CN": "f59a2cce42d9ae3417235441293ed834704effb0faaed643dd70279872e5cd76"
     },
     "docs/development/commits.md": {
       "en": "98fa85d02ba9705f01e4dec271bbdad3df6ed6a8aca74a124e195571a2f5346a",
       "zh-CN": "97efcdc5bb9baea9ad3a412051141eb1546c3c3e70bc52b1f08bbfa6854b01dc"
     },
     "docs/development/desktop-updates.md": {
-      "en": "430f6f4063b474a26e45da9643ea547c45d87990a0f801043144930b66f2d3cc",
-      "zh-CN": "c35f77480548706ed3d95b2e47a825793d11f056b1665179783d495cf64ea14a"
+      "en": "f47a72d428023b7ead3ce0f142d49e9c8b2bc59d880f7c54c236e94f555a4140",
+      "zh-CN": "e682f7bec3c09a1104027c42989754434f866fba86c87364c6962908cfe80875"
     },
     "docs/development/documentation.md": {
       "en": "1c5a885e9fb60e19bc18e1b0d22367c2fc46d3d9a033e93670bb74873371c2a9",
@@ -42,16 +46,16 @@
       "zh-CN": "72fe258e53653c22a828ec69900ac35d934de2e2f876d8229ae871f2846cfc38"
     },
     "docs/development/github-maintenance.md": {
-      "en": "bbb2dad41e8f4cf7fa82b4255e19d6e8c828a64b4f1aae21dc3e7076f4d1ba1b",
-      "zh-CN": "c147505492256ba35b3741d86743bf9ac74a3864a6951b5c397ad8e1591fe5e3"
+      "en": "8378a7d95151da459f2b751e9093c20a2599b63832aa148d0baa2f0153752fe1",
+      "zh-CN": "6dde98f032bec25d74cb9210a810e29d6f4aa83a7589fcaa29f1cc4ffc78d121"
     },
     "docs/development/localization.md": {
       "en": "ec3b9bdac57653355e8ffe6b125edb5234218b72555fe9e8f42d346295b91e24",
       "zh-CN": "450d185afb276f989664c6d9de2847cc0c7eea579cf10a7690550a7beb592154"
     },
     "docs/development/maintenance.md": {
-      "en": "99b27f52cdb0aef3702d172725e4373626fa67ee454a05630b97f10635e530eb",
-      "zh-CN": "acec347cc1317e32c6ea41fac47bccb2fcbb354f6f24fcebcc38732624b25f0c"
+      "en": "b8eda7f71017dee4e4ba48e2192b6612130bbc17428635ee3fc8bc3e13c262eb",
+      "zh-CN": "cd6dfdfa09ef9fe9baf1105dc8ae303b72535630c167a4f7ce5f9de51956d88b"
     },
     "docs/development/releases.md": {
       "en": "335c8714b0ccae62a1501fe18f4385e11cc555f5b5711012de044953b525e31d",
@@ -90,24 +94,24 @@
       "zh-CN": "39c142f85e35eba625ee588a9fd5dd18d0f327e51e4c1a5ca724422b4987bf20"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "bea0cdf0269dad34154e13800cb0e6192cd78d6b5a884514077e8fd28c0a8d6c",
-      "zh-CN": "fc06d85c0d2098eccc9ef8eb48c66cadc3e06573d2cfe22fedea71ce577ae18e"
+      "en": "1e288086b5f7dbefac8d64f796bef39787a9e373a945f9f1063a9ebb25f4ed2f",
+      "zh-CN": "14fd4aeae53e16048948ab1f64e6c804d3e7b31aa12b2dc07679cfaad68fdfb7"
     },
     "docs/user/languages.md": {
       "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
       "zh-CN": "7065aba25b92383295d5a7c7d21cb0b7ea70885614959fb196e65d4b266beb29"
     },
     "docs/user/online-install.md": {
-      "en": "4affa812bf8d60bfd8c0589c41197a5a70bf09a1dbdc9412145508ad0b520436",
-      "zh-CN": "e8c6b0768fa6784a57751a9dfc0e6666475549f8e80ab1d6a987f843acdf7219"
+      "en": "bc29afadfcbb3c42342291379f514b3ddc20ccff2d14a9052666604354d6f453",
+      "zh-CN": "c0e705f102318fcc24d8f4a2e6aa1b469d19dd36f4fdbd0d5b751d17d558b488"
     },
     "docs/user/pwn-workbench.md": {
-      "en": "99055bdaff3fce9a8b3b9126317841771e25648c865b0bd4903d25691dc91ab7",
-      "zh-CN": "1f599c0ca9d5a7619dabdc144afe2fea530d85858aa9017c9edc8fbbc6f6bfc7"
+      "en": "2e69110c5edd1071c1cc822182b5a8153307210ac994615053a0fdfe47a1393c",
+      "zh-CN": "071a5dfd1da6c6a2599af76a8fea23ea91b8935012cb8e288c8de09279c993e6"
     },
     "docs/user/usage.md": {
-      "en": "8cc67ae033af3ec55b2027acfad78c0a833e57d105fece769b7d25ae28dcfbac",
-      "zh-CN": "e8100df59479ee47d4cc69539e20aa9c8026c20b33da6a913613bbb85acca3c1"
+      "en": "d282994fd7b23b232797529ad74f20c8656a8759b9f0ee440cf28e5815792a20",
+      "zh-CN": "ce65d4fa74e4204fda714d9bd7347d2fbc954bea27ffb911122537bd914dc262"
     },
     "evals/README.md": {
       "en": "8fb115c1b503627b087374bb0a3b254a140e6094baa6df91452a763a761b78ed",
@@ -137,13 +141,25 @@
       "en": "d3aae446d46bb68f8c4ea67f9a732a4e7f44f3a9c7b37fae75aa870d88630530",
       "zh-CN": "70055ee918963c9690157f1d8820122f3e3a8cc8683375b1a34cdb2ae28cd4b4"
     },
+    "workers/package/README.md": {
+      "en": "aae56f964d3fcac49d7759c51841555ea906cb39450a077e242d277a0be823c3",
+      "zh-CN": "59dc668460832566d06d0126c126b1b2a26c8a4400bd43993a58dbdad71d98f2"
+    },
     "workers/runtime/README.md": {
-      "en": "4ca64d52bc94160243474f0e1d1a3ba5770906e9696de6825b54b3e95b502812",
-      "zh-CN": "6f75bc3f9e1e1e10a353214e0346585e907bac0a00c6b9d1b698001884db92dd"
+      "en": "e6bf2b88a71e883c0c2d11440e6337e61130f723b8a96880334d0f356da88c3b",
+      "zh-CN": "b332682de0b4a199ab2d7bb93c5f35e592c7894dae9b3febafd4be3cf320ab8a"
     },
     "workers/tests/README.md": {
-      "en": "0a17ffdae8f26d8007ce9c8ca323e3c74e7fd72eb5adf0156c5e991d36e35ca5",
-      "zh-CN": "5a94c54a80033a1c28e8cb7a950052e9c989426549f5dd34c57803b2c4367cb3"
+      "en": "b88942d7deb1421300d2f1f67793ae85af2d08936b7e7d8f2d86c08e6d15ae33",
+      "zh-CN": "318c96e384b636294af93f475ad56a9b6c0a5a24fa603c57a87839d6e53cde04"
+    },
+    "workers/windows/README.md": {
+      "en": "7c52dbe0a6382b84cc35f636e0e76bf3192ad9337d40a7f53e2d958b63d6f30f",
+      "zh-CN": "ab4e5734323f2f03978d75b18465887c78e58d5196d7d6f024d3fa4fdb7e914e"
+    },
+    "workers/windows/VALIDATION-HISTORY.md": {
+      "en": "0d0397e04441b89da389edcc895fb469ebce0fdea4521dea4315f2fd7d863772",
+      "zh-CN": "8737cb2374aaa1711863507936ca3d3204961bb59a66b86e58a457baaf94d77a"
     }
   }
 }

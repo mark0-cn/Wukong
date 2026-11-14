@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Normalize offline worker firewall executable paths and identify exact Windows rule/property failures with public connection settings; validate native COM rule construction without changing host firewall policy."
+zh_CN = "规范离线 worker 防火墙程序路径，结合公开连接设置标明精确的 Windows 规则或属性失败步骤；在不修改宿主防火墙策略的情况下验证原生 COM 规则构造。"

@@ -256,6 +256,30 @@ async fn config_preview(
     .map_err(failure)
 }
 #[tauri::command]
+async fn windows_connection_preview(
+    mut document: ConfigDocument,
+    edits: Vec<ConfigEdit>,
+    input: crate::environments::registration::WindowsConnection,
+) -> Reply<ConfigDocument> {
+    tauri::async_runtime::spawn_blocking(move || {
+        document.import_windows_connection(&super::paths::home()?, &input, &edits)?;
+        Ok::<_, anyhow::Error>(document)
+    })
+    .await
+    .map_err(failure)?
+    .map_err(failure)
+}
+#[tauri::command]
+async fn pick_ssh_identity() -> Reply<Option<PathBuf>> {
+    tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title(super::preferences::locale().text("dialog-ssh-identity"))
+            .pick_file()
+    })
+    .await
+    .map_err(failure)
+}
+#[tauri::command]
 async fn config_save(
     service: State<'_, Arc<Service>>,
     epoch: u64,
@@ -358,6 +382,8 @@ pub fn run(
             config_read,
             config_open,
             config_preview,
+            windows_connection_preview,
+            pick_ssh_identity,
             config_save,
             finding_details,
             evidence_preview,

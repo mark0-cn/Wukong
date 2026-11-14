@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Define the internal Windows broker protocol with generated Protobuf messages and bounded library framing. Native broker endpoints must be deployed together from the same verified package; the Python health command output stays compatible."
+zh_CN = "Windows 内部 broker 协议改用生成的 Protobuf 消息和库提供的有界分帧。原生 broker 两端须从同一已验证软件包一起部署；Python 健康检查命令输出保持兼容。"

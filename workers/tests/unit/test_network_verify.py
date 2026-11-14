@@ -153,8 +153,8 @@ class NetworkVerificationTests(unittest.TestCase):
 
     def test_durable_worker_job_replay_and_identity_accounting(self):
         runtime=Runtime(self.root,True)
-        (self.root/"input.bin").write_bytes(self.input)
-        params={**self.spec,"input":"input.bin","request_id":"network-request","call_id":"network-call",
+        (self.root/"files/input.bin").write_bytes(self.input)
+        params={**self.spec,"input":"files/input.bin","request_id":"network-request","call_id":"network-call",
                 "producer_agent_id":"producer","verifier_agent_id":"verifier","trials":2}
         first=runtime.dispatch("poc.verify",params)
         deadline=time.monotonic()+8

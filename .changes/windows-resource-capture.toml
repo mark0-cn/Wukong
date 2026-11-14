@@ -1,0 +1,3 @@
+kind = "security"
+en = "Wait for the owned Windows leader to finish termination as well as draining its Job before reclaiming resource directories. Add bounded pipe and process-host groundwork while full native execution integration remains disabled."
+zh_CN = "接管 Windows 资源目录前，除排空 Job 外，还等待所持主进程完成终止；增加有界管道及进程宿主基础，完整原生执行接入仍保持禁用。"

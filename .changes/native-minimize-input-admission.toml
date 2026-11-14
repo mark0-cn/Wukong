@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Provide the owned input store when dispatching native Windows minimization, so admitted files reach the existing execution checks instead of failing before resource creation."
+zh_CN = "在分派原生 Windows 最小化时传入所属输入存储，使已准入文件进入现有执行检查，不再在资源创建前因缺少存储而失败。"

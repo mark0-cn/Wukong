@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Replace the custom WinDbg helper and Python debugger protocol with the pinned external WinDbg MCP tool and rmcp. Trusted debugger checks now use the documented MCP acceptance entry; the old windows-debugger test command and Python dbgeng sessions are removed. Managed native debugger admission remains unfinished and is not advertised as available."
+zh_CN = "以固定版本的外部 WinDbg MCP 工具及 rmcp 替换自写 WinDbg 辅助程序和 Python 调试协议。可信调试检查改用文档中的 MCP 验收入口；删除旧 windows-debugger 测试命令与 Python dbgeng 会话。托管原生调试准入仍未完成，不宣称可用。"

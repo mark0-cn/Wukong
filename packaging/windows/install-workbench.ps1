@@ -93,9 +93,8 @@ try {
         $image = $runtimeImage | ConvertTo-Json -Compress
         @"
 state_dir = "data/assessments"
-[runtime]
-docker_executable = $docker
 [workbench]
+docker_executable = $docker
 root = "data/workbench"
 image = $image
 "@ | Set-Content -LiteralPath $config -Encoding utf8

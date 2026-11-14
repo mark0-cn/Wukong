@@ -18,6 +18,7 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 pub mod protocol;
+pub mod ssh;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -30,7 +31,7 @@ pub enum RuntimeBackend {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct RuntimeConfig {
     pub backend: RuntimeBackend,
     pub state_dir: PathBuf,
@@ -39,6 +40,9 @@ pub struct RuntimeConfig {
     pub docker_container: Option<String>,
     pub docker_executable: String,
     pub ssh_host: Option<String>,
+    pub ssh_executable: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_ssh: Option<ssh::ManagedSsh>,
     pub remote_bridge_path: String,
     pub remote_state_dir: String,
     pub request_timeout_secs: u64,
@@ -54,6 +58,8 @@ impl Default for RuntimeConfig {
             docker_container: None,
             docker_executable: default_docker_executable(),
             ssh_host: None,
+            ssh_executable: "ssh".into(),
+            managed_ssh: None,
             remote_bridge_path: "/opt/wukong/runtime/bridge.py".into(),
             remote_state_dir: "/state".into(),
             request_timeout_secs: 300,
@@ -61,7 +67,7 @@ impl Default for RuntimeConfig {
     }
 }
 
-fn default_docker_executable() -> String {
+pub(crate) fn default_docker_executable() -> String {
     #[cfg(windows)]
     {
         let candidate = PathBuf::from(
@@ -80,11 +86,15 @@ struct Transport {
     client: Client,
     poisoned: bool,
     stderr: crate::process_io::StderrCapture,
+    identity: Option<protocol::WorkerIdentity>,
 }
 #[derive(Clone)]
 pub struct RuntimeClient {
     transport: Arc<Mutex<Transport>>,
+    start_admission: Arc<Mutex<()>>,
     config: RuntimeConfig,
+    identity: protocol::WorkerIdentity,
+    lease: Option<protocol::EnvironmentLease>,
 }
 
 fn remote_quote(value: &str) -> String {
@@ -93,6 +103,10 @@ fn remote_quote(value: &str) -> String {
 
 impl RuntimeClient {
     pub async fn connect(config: RuntimeConfig) -> Result<Self> {
+        anyhow::ensure!(
+            config.managed_ssh.is_none() || config.backend == RuntimeBackend::Ssh,
+            "managed SSH settings cannot be used with another transport"
+        );
         if config.backend == RuntimeBackend::TrustedLocal {
             crate::cleanup::create_owned_directory(&config.state_dir)?;
         }
@@ -104,9 +118,16 @@ impl RuntimeClient {
         let transport = Self::spawn_transport(&config)
             .await
             .context("start runtime bridge transport")?;
+        let identity = transport
+            .identity
+            .clone()
+            .context("missing worker identity")?;
         Ok(Self {
             transport: Arc::new(Mutex::new(transport)),
+            start_admission: Arc::new(Mutex::new(())),
             config,
+            identity,
+            lease: None,
         })
     }
 
@@ -148,19 +169,40 @@ impl RuntimeClient {
                 c
             }
             RuntimeBackend::Ssh => {
-                let host = config.ssh_host.as_deref().context("ssh_host is required")?;
-                if host.starts_with('-') || host.contains(['\n', '\r']) {
-                    bail!("invalid ssh host");
+                if let Some(managed) = &config.managed_ssh {
+                    managed.command(
+                        &config.ssh_executable,
+                        config.ssh_host.as_deref().context("ssh_host is required")?,
+                    )?
+                } else {
+                    let host = config.ssh_host.as_deref().context("ssh_host is required")?;
+                    if host.starts_with('-') || host.contains(['\n', '\r']) {
+                        bail!("invalid ssh host");
+                    }
+                    let mut c = Command::new(&config.ssh_executable);
+                    c.args([
+                        "-T",
+                        "-a",
+                        "-x",
+                        "-o",
+                        "BatchMode=yes",
+                        "-o",
+                        "StrictHostKeyChecking=yes",
+                        "-o",
+                        "ClearAllForwardings=yes",
+                        "-o",
+                        "PermitLocalCommand=no",
+                        "--",
+                        host,
+                    ]);
+                    // OpenSSH passes a remote command through a shell; quote each path.
+                    c.arg(format!(
+                        "python3 {} --state {} --stdio",
+                        remote_quote(&config.remote_bridge_path),
+                        remote_quote(&config.remote_state_dir)
+                    ));
+                    c
                 }
-                let mut c = Command::new("ssh");
-                c.args(["-T", "-o", "BatchMode=yes", "--", host]);
-                // OpenSSH passes a remote command through a shell; quote each path.
-                c.arg(format!(
-                    "python3 {} --state {} --stdio",
-                    remote_quote(&config.remote_bridge_path),
-                    remote_quote(&config.remote_state_dir)
-                ));
-                c
             }
         };
         // Never forward model/provider secrets into an analysis worker.
@@ -221,9 +263,23 @@ impl RuntimeClient {
             client,
             poisoned: false,
             stderr,
+            identity: None,
         };
         match request(&mut transport, "ping", json!({})).await {
-            Ok(_) => Ok(transport),
+            Ok(reply) => {
+                let identity: protocol::WorkerIdentity =
+                    serde_json::from_value(reply["identity"].clone())
+                        .context("worker handshake did not establish its identity")?;
+                identity.validate()?;
+                if let Some(managed) = &config.managed_ssh {
+                    anyhow::ensure!(
+                        identity.installation_id == managed.installation_id,
+                        "SSH worker installation differs from its enrolled native identity"
+                    );
+                }
+                transport.identity = Some(identity);
+                Ok(transport)
+            }
             Err(RequestFailure::Worker(error)) => {
                 let _ = transport.child.kill().await;
                 transport.stderr.finish().await;
@@ -240,6 +296,15 @@ impl RuntimeClient {
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
     }
+    pub fn identity(&self) -> &protocol::WorkerIdentity {
+        &self.identity
+    }
+    pub(crate) fn with_lease(&self, lease: protocol::EnvironmentLease) -> Self {
+        Self {
+            lease: Some(lease),
+            ..self.clone()
+        }
+    }
     pub async fn doctor(&self) -> Result<Value> {
         self.call("doctor", json!({})).await
     }
@@ -250,11 +315,65 @@ impl RuntimeClient {
     /// failed request itself is never re-sent, so a timed-out side effect
     /// still follows the durable reconcile path instead of being replayed.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        let starts_resource = wukong_worker_protocol::starts_resource(method);
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_secs(self.config.request_timeout_secs);
+        // Tokio's FIFO mutex orders new starts. Observation/close/lease calls do
+        // not take this permit, so the current owner can free execution capacity.
+        let _admission = if starts_resource {
+            Some(
+                tokio::time::timeout_at(deadline, self.start_admission.lock())
+                    .await
+                    .map_err(|_| protocol::WorkerError {
+                        kind: protocol::WorkerErrorKind::ResourceBusy,
+                        message: "worker capacity queue timed out before dispatch".into(),
+                    })?,
+            )
+        } else {
+            None
+        };
+        loop {
+            let result = self.call_once(method, params.clone()).await;
+            let capacity_busy = starts_resource
+                && result.as_ref().err().is_some_and(|error| {
+                    error
+                        .downcast_ref::<protocol::WorkerError>()
+                        .is_some_and(|error| error.kind == protocol::WorkerErrorKind::ResourceBusy)
+                });
+            if !capacity_busy || tokio::time::Instant::now() >= deadline {
+                return result;
+            }
+            // Only a worker's explicit pre-effect rejection may be retried.
+            // Transport failures and uncertain outcomes retain normal recovery.
+            tokio::time::sleep_until(
+                deadline.min(tokio::time::Instant::now() + Duration::from_millis(250)),
+            )
+            .await;
+            if tokio::time::Instant::now() >= deadline {
+                return result;
+            }
+        }
+    }
+
+    async fn call_once(&self, method: &str, mut params: Value) -> Result<Value> {
+        if method != "ping" && method != "doctor" {
+            params["_binding"] = serde_json::to_value(&self.identity)?;
+            if let Some(lease) = &self.lease {
+                params["_lease"] = serde_json::to_value(lease)?;
+            }
+        }
         let mut transport = self.transport.lock().await;
         if transport.poisoned {
             *transport = Self::spawn_transport(&self.config)
                 .await
                 .context("runtime transport lost and reconnect failed")?;
+        }
+        if transport.identity.as_ref() != Some(&self.identity) {
+            let _ = transport.child.kill().await;
+            transport.poisoned = true;
+            bail!(
+                "worker installation, boot or package identity changed; refusing execution in the previous binding"
+            );
         }
         match request(&mut transport, method, params).await {
             Ok(result) => Ok(result),

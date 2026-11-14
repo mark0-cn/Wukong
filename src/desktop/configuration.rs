@@ -45,7 +45,7 @@ impl ConfigDocument {
         let mut document = self.source.parse::<DocumentMut>()?;
         for edit in edits {
             ensure!(
-                !edit.path.is_empty() && edit.path.len() <= 3,
+                !edit.path.is_empty() && edit.path.len() <= 5,
                 "invalid configuration field path"
             );
             let mut item = document.as_item_mut();
@@ -75,12 +75,7 @@ impl ConfigDocument {
                 let text =
                     toml::to_string(&std::collections::BTreeMap::from([("value", &edit.value)]))?;
                 let parsed = text.parse::<DocumentMut>()?;
-                item[key] = Item::Value(
-                    parsed["value"]
-                        .as_value()
-                        .context("invalid field value")?
-                        .clone(),
-                );
+                item[key] = parsed.get("value").context("invalid field value")?.clone();
             }
         }
         let source = document.to_string();
@@ -92,6 +87,30 @@ impl ConfigDocument {
     }
     pub fn save(&mut self, state_override: Option<&Path>) -> Result<(AppConfig, Store)> {
         self.save_in(&super::paths::home()?, state_override)
+    }
+    pub fn import_windows_connection(
+        &mut self,
+        home: &Path,
+        input: &crate::environments::registration::WindowsConnection,
+        edits: &[ConfigEdit],
+    ) -> Result<()> {
+        let mut pending = self.clone();
+        pending.patch(edits)?;
+        let (id, environment) =
+            crate::environments::registration::prepare(home, input, &pending.form.environments)?;
+        let mut additions = vec![ConfigEdit {
+            path: vec!["environments".into(), id.clone()],
+            value: environment,
+        }];
+        if input.make_default || pending.form.default_environment.is_none() {
+            additions.push(ConfigEdit {
+                path: vec!["default_environment".into()],
+                value: id.into(),
+            });
+        }
+        pending.patch(&additions)?;
+        *self = pending;
+        Ok(())
     }
     fn save_in(
         &mut self,
@@ -123,6 +142,9 @@ impl ConfigDocument {
                 "system-another-program-changed-this-configuration-reload-before-editing"
             )
         );
+        let pins =
+            crate::environments::registration::prepare_pin_files(home, &resolved.environments)?;
+        crate::cleanup::register_host_pins_at_locked(home, &pins)?;
         let store = Store::open(&resolved.state_dir)?;
         // Keep both the previous and new locations discoverable after a switch.
         if let Ok(previous) = AppConfig::load(Some(&self.path)) {
@@ -143,6 +165,188 @@ impl ConfigDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn importing_a_connection_preserves_drafts_and_tracks_only_the_public_pin_on_save() -> Result<()>
+    {
+        use crate::environments::registration::WindowsConnection;
+        use base64::Engine;
+        let root = tempfile::tempdir()?;
+        let home = root.path().join("profile");
+        let path = root.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# preserve controller comments\nstate_dir='state'\n[model]\nmodel='before'\n",
+        )?;
+        let identity = root.path().join("existing-key");
+        std::fs::write(&identity, "CONTROLLED-KEY-FIXTURE-NOT-A-CREDENTIAL")?;
+        let mut blob = vec![0, 0, 0, 11];
+        blob.extend_from_slice(b"ssh-ed25519");
+        blob.extend_from_slice(&[0, 0, 0, 32]);
+        blob.extend_from_slice(&[7; 32]);
+        let key = wukong_worker_package::SshPublicKey {
+            algorithm: "ssh-ed25519".into(),
+            key: base64::engine::general_purpose::STANDARD.encode(blob),
+        };
+        let fingerprint = key.fingerprint()?;
+        let mut input = WindowsConnection { name:"Windows VM".into(), host:"192.0.2.1".into(), identity_file:identity.clone(),
+            confirmed_fingerprint:String::new(), make_default:false,
+            connection_json:serde_json::json!({"schema":1,"installed":true,"installation_id":"a".repeat(32),"environment_id":"windows",
+                "generation":1,"manifest_sha256":"b".repeat(64),"ssh_user":format!("wkgm{}","a".repeat(16)),"ssh_port":22,
+                "host_key":key,"host_fingerprint":fingerprint,"production_isolation_verified":false}).to_string() };
+        let mut document = ConfigDocument::open(path)?;
+        let original = document.source.clone();
+        let edits = [ConfigEdit {
+            path: vec!["model".into(), "model".into()],
+            value: "after".into(),
+        }];
+        assert!(
+            document
+                .import_windows_connection(&home, &input, &edits)
+                .is_err()
+        );
+        assert_eq!(document.source, original);
+        input.confirmed_fingerprint = fingerprint;
+        document.import_windows_connection(&home, &input, &edits)?;
+        assert_eq!(
+            document.form.default_environment.as_deref(),
+            Some("windows")
+        );
+        assert_eq!(document.form.model.model, "after");
+        let pin = document.form.environments["windows"]
+            .runtime
+            .managed_ssh
+            .as_ref()
+            .unwrap()
+            .known_hosts_file
+            .clone();
+        assert!(
+            !pin.exists() && !home.exists(),
+            "preview must not create controller files"
+        );
+        let (_, _store) = document.save_in(&home, None)?;
+        assert_eq!(
+            std::fs::read_to_string(&pin)?,
+            format!("wukong-worker-{} ssh-ed25519 {}\n", "a".repeat(32), key.key)
+        );
+        assert!(
+            document
+                .source
+                .starts_with("# preserve controller comments")
+        );
+        let registry = crate::cleanup::Registry::read(&home)?;
+        assert!(
+            registry
+                .locations
+                .iter()
+                .any(|location| location.path.canonicalize().ok() == pin.canonicalize().ok())
+        );
+        assert!(
+            !registry
+                .locations
+                .iter()
+                .any(|location| location.path.canonicalize().ok() == identity.canonicalize().ok())
+        );
+        assert_eq!(
+            std::fs::read_to_string(identity)?,
+            "CONTROLLED-KEY-FIXTURE-NOT-A-CREDENTIAL"
+        );
+        Ok(())
+    }
+    #[test]
+    fn structured_native_environment_edits_preserve_other_configuration() -> Result<()> {
+        use base64::Engine;
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# keep the controller settings\nstate_dir='state'\n[model]\nmodel='unchanged'\n",
+        )?;
+        let mut blob = vec![0, 0, 0, 11];
+        blob.extend_from_slice(b"ssh-ed25519");
+        blob.extend_from_slice(&[0, 0, 0, 32]);
+        blob.extend_from_slice(&[7; 32]);
+        let environment = serde_json::json!({"name":"Windows VM","platform":"windows",
+            "installation_id":"a".repeat(32),"runtime":{"backend":"ssh","ssh_host":"192.0.2.1",
+            "managed_ssh":{"installation_id":"a".repeat(32),"user":format!("wkgm{}","a".repeat(16)),
+            "port":22,"identity_file":root.path().join("private-key"),"known_hosts_file":root.path().join("host-pin"),
+            "host_key":{"algorithm":"ssh-ed25519","key":base64::engine::general_purpose::STANDARD.encode(blob)}}}});
+        let mut document = ConfigDocument::open(path)?;
+        document.patch(&[
+            ConfigEdit {
+                path: vec!["environments".into(), "windows".into()],
+                value: environment,
+            },
+            ConfigEdit {
+                path: vec!["default_environment".into()],
+                value: "windows".into(),
+            },
+        ])?;
+        let (config, _) = document.save_in(&root.path().join("profile"), None)?;
+        assert_eq!(config.model.model, "unchanged");
+        assert!(
+            document
+                .source
+                .starts_with("# keep the controller settings")
+        );
+        assert_eq!(
+            config.environments["windows"]
+                .runtime
+                .managed_ssh
+                .as_ref()
+                .unwrap()
+                .user,
+            format!("wkgm{}", "a".repeat(16))
+        );
+        assert!(
+            !root.path().join("private-key").exists(),
+            "configuration registration must remain lazy"
+        );
+        let saved = document.source.clone();
+        assert!(
+            document
+                .patch(&[
+                    ConfigEdit {
+                        path: vec!["model".into(), "model".into()],
+                        value: "must-not-be-applied".into(),
+                    },
+                    ConfigEdit {
+                        path: vec!["environments".into(), "invalid".into()],
+                        value: serde_json::json!({"name":"Invalid", "platform":17}),
+                    },
+                ])
+                .is_err()
+        );
+        assert_eq!(document.source, saved);
+        assert_eq!(document.form.model.model, "unchanged");
+        assert_eq!(std::fs::read_to_string(&document.path)?, saved);
+        Ok(())
+    }
+    #[test]
+    fn named_environment_fields_preserve_the_configuration_document() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("config.toml");
+        std::fs::write(&path, "# controller settings\nstate_dir='state'\n")?;
+        let mut document = ConfigDocument::open(path)?;
+        let edit = |path: &[&str], value: &str| ConfigEdit {
+            path: path.iter().map(|value| (*value).into()).collect(),
+            value: Value::String(value.into()),
+        };
+        document.patch(&[
+            edit(&["default_environment"], "windows"),
+            edit(&["environments", "windows", "name"], "Windows VM"),
+            edit(&["environments", "windows", "platform"], "windows"),
+            edit(&["environments", "windows", "runtime", "backend"], "ssh"),
+            edit(
+                &["environments", "windows", "runtime", "ssh_host"],
+                "windows-fixture",
+            ),
+        ])?;
+        let (config, _) = document.save_in(&root.path().join("profile"), None)?;
+        assert_eq!(config.default_environment.as_deref(), Some("windows"));
+        assert!(document.source.starts_with("# controller settings"));
+        assert!(!document.source.contains("\n[runtime]"));
+        Ok(())
+    }
     #[test]
     fn editing_preserves_comments_relative_paths_and_external_changes() -> Result<()> {
         let dir = tempfile::tempdir()?;

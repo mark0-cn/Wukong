@@ -22,6 +22,9 @@ pub struct ChildRequest {
     pub role: Role,
     pub task: String,
     pub scope: String,
+    /// Omitted means inherit the parent's environment.
+    #[serde(default)]
+    pub environment_id: Option<String>,
     #[serde(default)]
     pub contract: TaskContract,
     #[serde(default)]

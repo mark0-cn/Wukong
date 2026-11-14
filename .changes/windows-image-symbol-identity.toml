@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Check Windows debugger image and local symbol correspondence through the existing object library and Microsoft's debugging SDK. Report missing identities explicitly and reject conflicting modules or PDBs, without claiming executable byte identity or production isolation."
+zh_CN = "通过已有 object 库和微软调试 SDK 校验 Windows 调试映像与本地符号的对应关系，明确报告身份缺失并拒绝冲突模块或 PDB，不把元数据匹配视为可执行字节相同或生产隔离已通过。"

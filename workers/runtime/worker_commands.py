@@ -4,7 +4,7 @@ import os
 import shutil
 import threading
 import uuid
-from worker_common import bounded_int, safe_env
+from worker_common import bounded_int, public_file, safe_env
 from worker_processes import run_process
 
 class CommandService:
@@ -45,11 +45,10 @@ class CommandService:
             cwd = workdir
             resolved_target = None
             if params.get("target") is not None:
-                from worker_common import confined
                 target = params["target"]
                 if not isinstance(target, str):
                     raise ValueError("target must be a staged worker path")
-                resolved_target = confined(self.root, target, True)
+                resolved_target = public_file(self.root, target)
                 if not resolved_target.is_file():
                     raise ValueError("exec target must be a staged file")
             if self.isolated:

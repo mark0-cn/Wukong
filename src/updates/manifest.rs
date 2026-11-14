@@ -6,7 +6,7 @@ use std::path::Path;
 
 pub const PUBLIC_KEY: &str = include_str!("../desktop/update-public.key");
 pub const RELEASES: &str = "https://github.com/mark0-cn/Wukong/releases";
-pub const DATA_SCHEMA: u32 = 3;
+pub const DATA_SCHEMA: u32 = 4;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Artifact {
@@ -75,7 +75,9 @@ impl Manifest {
             "stable version required"
         );
         ensure!(
-            self.schema == 1 && self.runtime_protocol == 1 && self.data_schema == DATA_SCHEMA,
+            self.schema == 1
+                && self.runtime_protocol == crate::runtime::protocol::PROTOCOL
+                && self.data_schema == DATA_SCHEMA,
             "unsupported release format, runtime protocol or data migration"
         );
         ensure!(

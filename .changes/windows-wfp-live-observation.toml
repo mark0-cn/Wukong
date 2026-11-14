@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Windows worker startup observes network-isolation evidence through filtered live WFP notifications, avoiding reliance on shared event-log snapshots while retaining strict admission checks."
+zh_CN = "Windows worker 启动通过过滤后的 WFP 实时通知观察网络隔离证据，避免依赖共享事件日志快照，并保留严格的准入检查。"

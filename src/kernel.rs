@@ -28,6 +28,8 @@ mod admission;
 use admission::*;
 mod models;
 use models::*;
+mod preflight;
+use preflight::*;
 mod coordination;
 use coordination::*;
 mod business_tools;
@@ -136,6 +138,10 @@ pub(crate) fn drive(
                 release_predecessors.in_set(Stage::Prepare),
                 prepare_calls.in_set(PrepareSystems::Edit),
                 reconcile_calls.in_set(PrepareSystems::Edit),
+                begin_preflights
+                    .in_set(PrepareSystems::Edit)
+                    .after(prepare_spawns)
+                    .before(prepare_models),
                 prepare_models
                     .in_set(PrepareSystems::Edit)
                     .after(prepare_spawns),
@@ -148,6 +154,9 @@ pub(crate) fn drive(
                 retry_policy.in_set(ReviewSystems::Edit),
             ),
         )
+        // A completed non-effect task must release its hold before AgentLoop
+        // decides whether an effect changed enough to run another pass.
+        .add_systems(Update, finish_preflights.after(PollTasks).before(AgentLoop))
         // Stream arrivals do not necessarily advance Rig's effect graph, so
         // Review may be skipped while a response remains in flight.
         .add_systems(

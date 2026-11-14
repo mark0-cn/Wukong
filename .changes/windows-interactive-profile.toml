@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Observe owned native Windows interactive processes through the existing session channel, with bounded memory mappings, image paths and mitigation policies, and retain the full observation in immutable evidence. Production execution remains disabled pending broader qualification."
+zh_CN = "通过现有会话通道观察已拥有的 Windows 原生交互进程，返回有界的内存映射、映像路径及保护策略，并在不可变证据中保留完整观察。生产执行仍禁用，等待更广泛验收。"

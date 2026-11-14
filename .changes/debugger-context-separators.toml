@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Normalize manifest path separators and verbatim drive prefixes in the shared debugger identity observation before comparing Windows handle names."
+zh_CN = "在共享调试器身份观察中统一清单路径分隔符及 verbatim 盘符前缀，再比较 Windows 句柄名称。"

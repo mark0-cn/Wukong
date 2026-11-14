@@ -1,5 +1,8 @@
 # Copy to wukong.toml and set a model/endpoint available to your account.
 state_dir = ".wukong"
+# No environments means controller-only static analysis. Register named Linux
+# or Windows environments and choose default_environment to enable execution.
+# default_environment = "linux"
 # Optional role/capability examples (<name>.md); missing directories skip examples.
 # Example values demonstrate methods and are never target facts.
 demos_dir = "prompts/examples"
@@ -52,18 +55,17 @@ max_wall_seconds = 3600
 input_usd_per_million = 0.0
 output_usd_per_million = 0.0
 
-[runtime]
-backend = "disabled"
-state_dir = ".wukong/worker"
-python = "python"
-bridge_path = "workers/runtime/bridge.py"
+# [environments.linux]
+# name = "Linux analysis"
+# platform = "linux"
+# [environments.linux.runtime]
 # backend = "docker"
 # docker_container = "wukong-worker"
-remote_bridge_path = "/opt/wukong/runtime/bridge.py"
-remote_state_dir = "/state"
+# remote_bridge_path = "/opt/wukong/runtime/bridge.py"
+# remote_state_dir = "/state"
 # Must cover analysis.timeout_seconds (validated at startup): a shorter
 # transport timeout would cut off worker-side Ghidra queries mid-flight.
-request_timeout_secs = 300
+# request_timeout_secs = 300
 
 [analysis]
 # Optional local Ghidra launcher; use the version required by your installed JDK.

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Worker daemon and job-supervisor startup no longer writes Python bytecode into immutable deployment directories, preserving signed package integrity after execution."
+zh_CN = "Worker daemon 与作业监督器启动时不再向不可变部署目录写入 Python 字节码，保持运行后的签名包完整性。"

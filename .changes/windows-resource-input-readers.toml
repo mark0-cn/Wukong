@@ -1,0 +1,3 @@
+kind = "security"
+en = "Restrict staged Windows target images, dependencies and input files to the owning resource's logon and AppContainer identities. Shared tool-package read permissions no longer apply to these files."
+zh_CN = "将暂存的 Windows 目标映像、依赖和输入文件限制为所属资源的登录身份与 AppContainer 身份可读，不再对这些文件使用共享工具包的读取权限。"

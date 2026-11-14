@@ -1,0 +1,77 @@
+syntax = "proto3";
+package wukong.session.v1;
+
+// Private inherited pipes between the System service and its owned resource
+// host. These identifiers bind replies; they do not grant controller authority.
+message Request {
+  uint32 schema = 1;
+  string resource = 2;
+  uint64 sequence = 3;
+  oneof operation {
+    Open open = 4;
+    Inspect inspect = 5;
+    Control control = 6;
+    Close close = 7;
+    Write write = 8;
+    Profile profile = 9;
+  }
+}
+message Open {}
+message Close {}
+// Observes only the host's held target; callers cannot select a PID or path.
+message Profile {}
+// Empty data polls output without closing stdin. A failed/uncertain write must
+// be reconciled against its original journal effect, never replayed.
+message Write {
+  bytes data = 1;
+  uint32 read_timeout_seconds = 2;
+}
+enum Inspection {
+  INSPECTION_UNSPECIFIED = 0;
+  REGISTERS = 1;
+  STACK = 2;
+  MEMORY = 3;
+  MODULES = 4;
+  THREADS = 5;
+  DISASSEMBLY = 6;
+  EXCEPTION = 7;
+  STATE = 8;
+}
+message Inspect {
+  Inspection kind = 1;
+  optional uint64 address = 2;
+  optional uint32 length = 3;
+  optional uint32 limit = 4;
+  uint32 timeout_seconds = 5;
+}
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  RUN = 1;
+  CONTINUE = 2;
+  INTERRUPT = 3;
+  STEP = 4;
+  NEXT = 5;
+  FINISH = 6;
+  BREAKPOINT_ADD = 7;
+  BREAKPOINT_REMOVE = 8;
+  BREAKPOINT_ENABLE = 9;
+  BREAKPOINT_DISABLE = 10;
+}
+message Control {
+  Action action = 1;
+  optional uint64 address = 2;
+  optional string symbol = 3;
+  optional uint32 breakpoint_id = 4;
+  uint32 timeout_seconds = 5;
+}
+message Reply {
+  uint32 schema = 1;
+  string resource = 2;
+  uint64 sequence = 3;
+  string request_sha256 = 4;
+  oneof outcome {
+    // Original structured MCP data remains JSON; do not recreate upstream
+    // debugger schemas or parse its console text in the private transport.
+    bytes result_json = 5;
+  }
+}

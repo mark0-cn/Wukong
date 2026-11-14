@@ -23,7 +23,7 @@ pub(super) fn stop_workers(home: &Path) -> Result<()> {
         );
         let value: Value = crate::workbench::read_json(&endpoint)?;
         ensure!(
-            value["protocol"] == 1 && value["host"] == "127.0.0.1",
+            value["protocol"] == crate::runtime::protocol::PROTOCOL && value["host"] == "127.0.0.1",
             "unrecognized local worker endpoint"
         );
         let port = value["port"]
@@ -47,7 +47,8 @@ pub(super) fn stop_workers(home: &Path) -> Result<()> {
             }
         };
         ensure!(
-            ping["daemon_pid"] == value["pid"] && ping["protocol"] == 1,
+            ping["daemon_pid"] == value["pid"]
+                && ping["protocol"] == crate::runtime::protocol::PROTOCOL,
             "local worker identity changed"
         );
         let root = PathBuf::from(ping["state_dir"].as_str().context("worker root missing")?);

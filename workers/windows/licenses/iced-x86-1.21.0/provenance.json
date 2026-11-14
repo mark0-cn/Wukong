@@ -1,0 +1,10 @@
+{
+  "package": "iced-x86",
+  "version": "1.21.0",
+  "license": "MIT",
+  "source_revision": "c50f29b7bc305696895c075f3fc7719751426b12",
+  "source_identity": "The published crate's .cargo_vcs_info.json",
+  "url": "https://raw.githubusercontent.com/icedland/iced/c50f29b7bc305696895c075f3fc7719751426b12/LICENSE.txt",
+  "sha256": "93a47598376fd3f276b631e75149340087153c6ff1635a53c5790249e9124e2d",
+  "reason": "The published Rust crate omits its upstream license file. Preserve the original license at the crate's exact source revision."
+}

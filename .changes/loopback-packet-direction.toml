@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Correlate AppContainer loopback drops using the SDK-observed outbound packet direction independently of the receive/accept filter layer, and retain that direction in qualification receipts."
+zh_CN = "按 SDK 实际观察到的出站数据包方向匹配 AppContainer 回环丢弃事件，独立核对接收/接受过滤层，并在资格回执中保留方向。"

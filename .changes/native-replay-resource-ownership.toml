@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add native Windows replay and independent verification admission using the existing process ownership and recovery path. Trials retain hashed original evidence, use fresh execution directories and stop on cancellation; interrupted requests are reconciled without rerunning. The specified trusted x64/x86 replay and completed-result recovery cases passed in an offline VM; production execution remains disabled."
+zh_CN = "原生 Windows 回放及独立验证准入复用现有进程归属与恢复路径。各次试验保留带哈希的原始证据、使用新的执行目录，并响应取消；中断请求只核对恢复，不重新执行。指定可信 x64/x86 回放及已完成结果恢复用例已在离线 VM 通过，生产执行仍禁用。"

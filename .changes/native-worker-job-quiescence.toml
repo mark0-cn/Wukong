@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Wait for all owned native Windows Job processes to exit before accepting offline self-tests or reporting a successful service stop, including descendants that outlive their leader."
+zh_CN = "离线自检验收或服务成功停止前，等待所属 Windows 原生 Job 的全部进程退出，包括在主进程退出后仍存活的后代。"

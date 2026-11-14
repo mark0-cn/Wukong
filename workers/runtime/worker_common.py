@@ -5,9 +5,9 @@ import json
 import os
 import re
 import time
-import uuid
+from atomicwrites import AtomicWriter, atomic_write
 
-PROTOCOL = 1
+PROTOCOL = 2
 MAX_RPC = 48 * 1024 * 1024
 MAX_FILE = 32 * 1024 * 1024
 TERMINAL = {"completed", "failed", "cancelled", "timed_out", "lost"}
@@ -37,21 +37,23 @@ def safe_env(extra=None):
         env[k] = str(v)
     return env
 
+class _MetadataWriter(AtomicWriter):
+    def commit(self, stream):
+        # Preserve the bounded Windows sharing retry. The library owns temporary
+        # files, fsync, write-through replacement and rollback on every failure.
+        for attempt in range(5):
+            try:
+                return super().commit(stream)
+            except OSError as error:
+                if os.name != "nt" or getattr(error, "winerror", None) not in {5, 32, 33} or attempt == 4:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+
+
 def atomic_json(path, data):
-    path = Path(path)
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    # Windows: a concurrent reader holds the destination without
-    # FILE_SHARE_DELETE, so os.replace fails transiently with WinError 5.
-    # Retry briefly; the replacement itself stays atomic.
-    for attempt in range(5):
-        try:
-            os.replace(temporary, path)
-            return
-        except OSError:
-            if attempt == 4:
-                raise
-            time.sleep(0.02 * (attempt + 1))
+    encoded = json.dumps(data, ensure_ascii=False)
+    with atomic_write(path, writer_cls=_MetadataWriter, overwrite=True, encoding="utf-8") as stream:
+        stream.write(encoded)
 
 def load_json(path):
     # Windows: a concurrent atomic replacement can fail the open with a
@@ -127,10 +129,15 @@ def artifact(root, path):
     return {"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path), "size": path.stat().st_size}
 
 def public_file(root, relative):
+    root = Path(root).resolve()
     path = confined(root, relative, True)
     parts = path.relative_to(root).parts
     if not parts or parts[0] not in {"files", "jobs", "debug", "fuzz", "ghidra", "interact"}:
         raise ValueError("path is private worker metadata")
+    if parts[0] == "files":
+        # Uploaded payload names are data, even when named status.json. Path
+        # confinement has already resolved aliases before selecting this root.
+        return path
     if parts[0] == "ghidra" and (len(parts) < 2 or parts[1] != "results"):
         raise ValueError("path is private Ghidra project metadata")
     if path.name in {"spec.json", "status.json", "heartbeat.json", "cancel", "session.json", "supervisor.log"}:

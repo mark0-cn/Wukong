@@ -48,3 +48,5 @@ Track CLI/config, dynamic scheduling, persistence/resume, static analysis, Ghidr
 ## Structured method deliverables
 
 Canonical artifact names `formats`, `algorithms`, `state_machine`, `binary_diff` require a matching `structured.kind` and 1–256 rows. Every row references same-run `evidence_id`. Required row fields: formats: offset/width/encoding/meaning/confidence; algorithms: input/expected/observed/arithmetic; state_machine: from/action/to/expected/observed; binary_diff: baseline_sha256/target_sha256/before/after. Digests are 64 hexadecimal characters. The original artifact remains linked separately; structural completeness is not correctness. An independent verifier must challenge the semantic claims. Legacy noncanonical artifact names remain supported.
+
+Ordinary deliverables need only the exact contract name and original `evidence_id`; omit `structured` when no method rows are required. Completed conditions use the exact contract labels. Validation identifies missing deliverable names and lists all missing fields in the first invalid row, so correction does not require guessing one field per turn.

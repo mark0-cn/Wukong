@@ -119,6 +119,8 @@ impl Workbench {
                 "--cap-add",
                 "SETGID",
                 "--cap-add",
+                "KILL",
+                "--cap-add",
                 "SYS_PTRACE",
                 "--cap-add",
                 "DAC_OVERRIDE",
@@ -151,10 +153,23 @@ impl Workbench {
     pub fn write_worker_config(&self, env: &Environment, path: &Path) -> Result<()> {
         let mut config = self.config.clone();
         config.resolve_paths(&std::env::current_dir()?);
-        config.runtime.backend = crate::runtime::RuntimeBackend::Docker;
-        config.runtime.docker_container = Some(env.container.clone());
-        config.runtime.remote_state_dir = "/state".into();
-        config.runtime.remote_bridge_path = "/opt/wukong/runtime/bridge.py".into();
+        config.environments.insert(
+            "workbench".into(),
+            crate::environments::EnvironmentConfig {
+                name: "Linux workbench".into(),
+                platform: crate::environments::Platform::Linux,
+                installation_id: None,
+                runtime: crate::runtime::RuntimeConfig {
+                    backend: crate::runtime::RuntimeBackend::Docker,
+                    docker_executable: config.workbench.docker_executable.clone(),
+                    docker_container: Some(env.container.clone()),
+                    remote_state_dir: "/state".into(),
+                    remote_bridge_path: "/opt/wukong/runtime/bridge.py".into(),
+                    ..Default::default()
+                },
+            },
+        );
+        config.default_environment = Some("workbench".into());
         config.workbench.root = self.root.clone();
         config.workbench.image = env.image_id.clone();
         fs::write(path, toml::to_string_pretty(&config)?)?;

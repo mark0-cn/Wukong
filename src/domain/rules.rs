@@ -191,16 +191,19 @@ impl CompletionRules {
                 .completed_conditions
                 .iter()
                 .all(|condition| agent.contract.completion_conditions.contains(condition)),
-            "result claims an undeclared completion condition"
+            "result claims an undeclared completion condition; copy exact labels from contract.completion_conditions: {:?}",
+            agent.contract.completion_conditions
         );
         if result.outcome == TaskOutcome::Success {
+            let missing: Vec<_> = agent
+                .contract
+                .deliverables
+                .iter()
+                .filter(|name| !names.contains(name.as_str()))
+                .collect();
             ensure!(
-                agent
-                    .contract
-                    .deliverables
-                    .iter()
-                    .all(|name| names.contains(name.as_str())),
-                "required task deliverables missing; provide structured result artifacts"
+                missing.is_empty(),
+                "required task deliverables missing: {missing:?}; add result.artifacts with exact name and evidence_id. Omit structured unless the deliverable requires method rows"
             );
             ensure!(
                 agent
@@ -379,6 +382,7 @@ mod tests {
             },
             task: "fixture".into(),
             scope: id.into(),
+            environment_id: None,
             contract: TaskContract::default(),
             task_result: None,
             skills: vec![],

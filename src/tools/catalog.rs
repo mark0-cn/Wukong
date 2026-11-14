@@ -11,6 +11,7 @@ pub(super) struct Spec {
     pub(super) root_only: bool,
     pub(super) child_only: bool,
     pub(super) model_visible: bool,
+    pub(super) requirement: super::requirements::Requirement,
 }
 impl Spec {
     pub(super) fn allows(&self, role: Role) -> bool {
@@ -61,6 +62,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         parse: |value| Ok(serde_json::to_value(serde_json::from_value::<A>(value)?)?),
         side_effecting,
         model_visible: !matches!(visibility, Visibility::Internal),
+        requirement: super::requirements::Requirement::for_tool(name),
         root_only: matches!(visibility, Visibility::Root),
         child_only: matches!(visibility, Visibility::Child) || (target && name != "runtime_doctor"),
     }
@@ -73,6 +75,33 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::ArtifactStageArgs>(
+            "artifact_stage",
+            "tool-artifact-stage",
+            "Stage a hash-verified same-run evidence artifact into your assigned environment using bounded resumable transfer; returns the worker file and original evidence ID.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_artifact_stage,
+            Visibility::Child,
+        ),
+        spec::<args::RuntimeDoctorArgs>(
+            "environment_list",
+            "tool-environment-list",
+            "List registered analysis environments without connecting; configuration is not proof of readiness.",
+            ReplayPolicy::ReadOnly,
+            false,
+            handlers::handle_environment_list,
+            Visibility::All,
+        ),
+        spec::<args::EnvironmentDoctorArgs>(
+            "environment_doctor",
+            "tool-environment-doctor",
+            "Probe a registered environment's real platform and tools; children may probe only their assigned environment.",
+            ReplayPolicy::ReadOnly,
+            false,
+            handlers::handle_environment_doctor,
+            Visibility::All,
+        ),
         spec::<args::SeccompAnalyzeArgs>(
             "seccomp_analyze",
             "tool-seccomp-analyze",
@@ -517,7 +546,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::JobStartArgs>(
             "job_start",
             "tool-job-start",
-            "Start a persistent process job in the configured worker; returns a job_id immediately. argv entries may use {target} as a placeholder for the staged target path (resolved by the harness and staged in isolated jobs); worker paths like files/... resolve only as direct argv entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
+            "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,
@@ -571,7 +600,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::DebugStartArgs>(
             "debug_start",
             "tool-debug-start",
-            "Start an owned GDB/MI session on the staged target.",
+            "Start an owned debugger session on the staged target, or inspect a separately staged dump. Engine selection never falls back to another platform.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,
@@ -580,11 +609,29 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::DebugCommandArgs>(
             "debug_command",
             "tool-debug-command",
-            "Execute exactly one GDB/MI command in your owned session; stable request IDs prevent blind replay.",
+            "Execute one policy-checked GDB/MI command in your owned session. Isolated sessions accept simple noncalling expressions; prefer typed inspection/control. Stable request IDs prevent blind replay.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,
             Visibility::All,
+        ),
+        spec::<args::DebugInspectArgs>(
+            "debug_inspect",
+            "tool-debug-inspect",
+            "Inspect bounded registers, stack, memory, modules, threads, instructions, exception or execution state in your owned debugger session; full engine transcripts remain evidence.",
+            ReplayPolicy::ReadOnly,
+            true,
+            handlers::handle_job_start,
+            Visibility::Child,
+        ),
+        spec::<args::DebugControlArgs>(
+            "debug_control",
+            "tool-debug-control",
+            "Control your owned live debugger using typed breakpoint and execution actions. Dump sessions reject execution control; stable request IDs prevent blind replay.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_job_start,
+            Visibility::Child,
         ),
         spec::<args::DebugCloseArgs>(
             "debug_close",

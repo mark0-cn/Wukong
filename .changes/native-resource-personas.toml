@@ -1,0 +1,3 @@
+kind = "security"
+en = "Qualify Windows target/debugger identities with separate capability-free AppContainer probes, private low-integrity scratch/desktops and complete Job/profile cleanup before worker readiness. These are trusted probes; production execution remains disabled."
+zh_CN = "在 worker 就绪前，通过独立的无 capability AppContainer 探针、低完整性私有目录与桌面，以及完整 Job 和 profile 清理，检查 Windows 目标与调试器身份。这些仍为可信探针，生产执行继续禁用。"

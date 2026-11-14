@@ -61,8 +61,8 @@ impl ExecutionService {
                     .import_job_artifacts(agent, call_id, text(&args, "job_id")?)
                     .await
             }
-            "debug_command" | "debug_close" | "debug_start" | "interactive_start"
-            | "interactive_send" | "interactive_close" => {
+            "debug_command" | "debug_inspect" | "debug_control" | "debug_close" | "debug_start"
+            | "interactive_start" | "interactive_send" | "interactive_close" => {
                 self.sessions.session_tool(agent, call_id, name, args).await
             }
             "exec_command" => {
@@ -100,10 +100,21 @@ impl ExecutionService {
                         self.files.known_file(agent, text(&args, "input")?, false)?;
                     }
                 } else {
-                    ensure!(
-                        !string_list(&args, "argv")?.is_empty(),
-                        "job argv cannot be empty"
-                    );
+                    if let Some(launch) = args["launch_spec"].as_str() {
+                        self.files.known_file(agent, launch, false)?;
+                        ensure!(
+                            string_list(&args, "argv")?.is_empty(),
+                            "LaunchSpec owns job argv"
+                        );
+                    } else {
+                        ensure!(
+                            !string_list(&args, "argv")?.is_empty(),
+                            "job argv cannot be empty"
+                        );
+                    }
+                    if let Some(input) = args["input"].as_str() {
+                        self.files.known_file(agent, input, false)?;
+                    }
                 }
                 if name == "fuzz_start" {
                     let seeds = text(&args, "seeds")?;
@@ -143,6 +154,7 @@ impl ExecutionService {
                 let job_id = raw["job_id"].as_str().context("worker job ID missing")?;
                 let record = JobRecord {
                     id: job_id.into(),
+                    worker_resource_id: text(&raw, "worker_job_id")?.into(),
                     run_id: agent.run_id.clone(),
                     agent_id: agent.id.clone(),
                     worker_id: self.gateway.worker_identity()?,

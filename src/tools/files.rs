@@ -14,7 +14,14 @@ impl FilesService {
         evidence_id: Option<&str>,
     ) -> Result<()> {
         let path = raw["path"].as_str().context("worker file path missing")?;
-        let file_id = stable("file", &format!("{}:{path}", agent.run_id));
+        let file_id = stable(
+            "file",
+            &format!(
+                "{}:{}:{path}",
+                agent.run_id,
+                self.gateway.worker_identity()?
+            ),
+        );
         let previous: Option<WorkerFileRecord> = self.store.get_record(&file_id)?;
         let retained = previous
             .as_ref()
@@ -40,7 +47,14 @@ impl FilesService {
         path: &str,
         require_target: bool,
     ) -> Result<WorkerFileRecord> {
-        let id = stable("file", &format!("{}:{path}", agent.run_id));
+        let id = stable(
+            "file",
+            &format!(
+                "{}:{}:{path}",
+                agent.run_id,
+                self.gateway.worker_identity()?
+            ),
+        );
         let record: WorkerFileRecord = self.store.load(&id)?;
         ensure!(
             record.run_id == agent.run_id && record.worker_id == self.gateway.worker_identity()?,
@@ -58,12 +72,16 @@ impl FilesService {
 
     pub(super) async fn stage_target(&self, agent: &AgentMetadata, call_id: &str) -> Result<Value> {
         let run = target(&self.store, agent)?;
-        let bytes = fs::read(&run.target_path)?;
-        ensure!(
-            bytes.len() <= 32 * 1024 * 1024,
-            "worker staging currently supports samples up to 32 MiB"
-        );
-        let raw=self.gateway.worker_call(agent,call_id,"file.put",json!({"path":format!("targets/{}/sample.bin",run.target_sha256),"data_base64":BASE64.encode(&bytes),"executable":true})).await?;
+        let raw = self
+            .upload_path(
+                agent,
+                call_id,
+                &run.target_path,
+                &format!("targets/{}/sample.bin", run.target_sha256),
+                &run.target_sha256,
+                true,
+            )
+            .await?;
         ensure!(
             raw["sha256"] == run.target_sha256,
             "worker staged bytes differ from run target"
@@ -136,20 +154,17 @@ impl FilesService {
                 .iter()
                 .any(|job| {
                     job.worker_id == self.gateway.worker_identity().unwrap_or_default()
-                        && path.starts_with(&format!("jobs/{}/", job.id))
+                        && path.starts_with(&format!("jobs/{}/", job.worker_resource_id))
                 });
             ensure!(allowed, "worker path has not been declared for this run");
         }
-        let raw = self
-            .gateway
-            .runtime()?
-            .call(
-                "file.get",
-                json!({"path":path,"max_bytes":number(args,"max_bytes",32*1024*1024)}),
-            )
-            .await?;
-        let evidence = self.import_file(agent, call_id, &raw)?;
-        Ok(json!({"file":raw,"content_evidence_id":evidence.id}))
+        self.download_file(
+            agent,
+            call_id,
+            path,
+            number(args, "max_bytes", 32 * 1024 * 1024),
+        )
+        .await
     }
 
     pub(super) fn import_file(

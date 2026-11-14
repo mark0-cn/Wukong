@@ -1,0 +1,3 @@
+kind = "security"
+en = "Retain sandbox root guards on failed teardown; only an explicitly drained native Job authorizes reclaiming root permissions and removing its guard."
+zh_CN = "沙箱回收失败时保留目录根保护文件；只有显式确认原生 Job 清空后，才能收回目录根权限并移除保护文件。"

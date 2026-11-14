@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Windows worker cleanup now briefly retries deletion when Windows reports an access or sharing denial after the owned task has stopped. It uses BackON with eight retries and retains the original error and resource blocker if deletion still fails."
+zh_CN = "Windows worker 在所属任务停止后，若 Windows 删除操作报告访问或共享拒绝，现在使用 BackON 短暂等待，最多重试八次；删除持续失败时仍保留原始错误及资源阻塞状态。"

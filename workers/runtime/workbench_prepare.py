@@ -45,6 +45,13 @@ def prepare(root):
             spec["files"][str(output.relative_to(root))]=digest(output)
         spec.update(loader="prepared/libraries/ld.so",library_path="prepared/libraries")
     inside(root,spec["cwd"])
+    count,total=0,0
+    for path in inside(root,spec['cwd']).rglob('*'):
+        if path.is_symlink(): raise ValueError('launch cwd cannot contain symlinks')
+        if path.is_file() and path not in {root/'launch.json',root/'launch-request.json'}:
+            count+=1;total+=path.stat().st_size
+            if count>1024 or total>32*1048576: raise ValueError('launch cwd exceeds 1024 files/32 MiB')
+            spec['files'][path.relative_to(root).as_posix()]=digest(path)
     if spec["input_mode"]=="argv_file" and "@@" not in spec["args"]:
         raise ValueError("argv_file requires an @@ argument")
     # Original files and prepared copies are never mistaken for verified runtime identity.

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Give the installation's noninteractive SSH relay explicit status-query access to its owned worker service, allowing SCM-backed pipe-server identity checks. Keep service control/configuration/ownership restricted to System and administrators, and verify the exact descriptor at startup."
+zh_CN = "为本安装的非交互 SSH 中继明确授予专用 worker 服务的状态查询权限，以便通过 SCM 核对管道服务端身份。服务控制、配置和所有权仍仅限 System 与管理员，并在启动时核对精确安全描述符。"

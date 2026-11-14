@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Check DbgEng's observed debuggee class before inspecting a Windows session. Reject kernel and unsupported dump classes and close failed opens so partially initialized debugger state cannot be reused."
+zh_CN = "检查 Windows 调试会话前核对 DbgEng 实际报告的对象类别，拒绝内核及不受支持的转储类别，并关闭打开失败的会话，避免继续使用部分初始化的调试器状态。"

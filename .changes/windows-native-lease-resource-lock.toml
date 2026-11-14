@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Keep Windows worker lease renewal responsive while native resources are being inspected or cleaned up. Resource activity still prevents release or takeover until ownership is reconciled."
+zh_CN = "Windows worker 检查或清理原生资源时，租约续期保持可响应。资源仍在活动时，继续禁止释放或接管，直到所属资源完成核对与清理。"

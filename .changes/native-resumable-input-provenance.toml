@@ -1,0 +1,3 @@
+kind = "security"
+en = "Extend Windows native input provenance to resumable uploads. Reconcile native and worker offsets, verify every controller chunk and the final hash, and require fresh native bytes when another run or epoch reuses a worker file. Production execution remains disabled."
+zh_CN = "将 Windows 原生输入来源凭据扩展到断点续传，核对原生端与 worker 的进度、控制器传入的每块内容及最终哈希；其他 run 或 epoch 复用 worker 文件时仍须重新接收原生字节。生产执行继续保持禁用。"

@@ -1,0 +1,3 @@
+kind = "security"
+en = "Prevent privileged input staging from copying private worker metadata into isolated programs. Apply the public-artifact path policy to replay, debugging and launch inputs, while allowing metadata-like filenames in uploaded payloads."
+zh_CN = "阻止高权限输入暂存把 worker 私有元数据复制给隔离程序；重放、调试和启动输入统一采用公开产物路径策略，同时允许上传载荷使用类似元数据的文件名。"

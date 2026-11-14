@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Assign analysis tasks to named Linux or Windows environments and transfer hash-verified artifacts between them. Configuration now uses environments.<id>.runtime and default_environment; old [runtime] configuration and old workspace databases are rejected without migration. Create a fresh workspace and retain old data separately. Structured DbgEng debugging and offline toolchain layout are available for trusted development fixtures; managed Windows VM installation and production isolation are still being implemented."
+zh_CN = "可将分析任务绑定到具名 Linux 或 Windows 环境，并跨环境传输经过哈希校验的制品。配置改用 environments.<id>.runtime 与 default_environment；旧 [runtime] 配置及旧工作区数据库直接拒绝，不提供迁移。请创建新工作区并单独保留旧数据。结构化 DbgEng 调试和离线工具链展开可用于可信开发样例；托管 Windows VM 安装与生产隔离仍在实现中。"

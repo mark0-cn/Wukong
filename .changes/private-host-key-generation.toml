@@ -1,0 +1,3 @@
+kind = "security"
+en = "Generate VM SSH host keys inside a directory restricted from creation to System and administrators, separate management-readable public authorization, and verify these permissions before activation and service startup."
+zh_CN = "在从创建起仅允许 System 和管理员访问的目录中生成 VM SSH 主机密钥，将管理账户可读的公钥认证文件分开放置，并在激活前和服务启动时验证这些权限。"

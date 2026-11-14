@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Keep contained Windows debugger targets suspended until Windows confirms debugger attachment, so short-lived programs cannot run before the debugger is ready. Qualification now checks a target that calls its test symbol only once."
+zh_CN = "保持隔离的 Windows 调试目标挂起，直到 Windows 确认调试器已附加，避免短命程序在调试器就绪前运行。资格检查现使用仅调用一次测试符号的目标。"

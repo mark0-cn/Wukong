@@ -11,6 +11,10 @@
     "source": "Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target.",
     "text": "对 stdin 校验路径进行有界符号输入还原。提供模块相对成功/失败地址与输入长度，返回候选输入和探索统计的后台 job。简单可逆变换优先直接求逆，大状态空间使用切片或明确约束；必须在真实目标重放候选字节。"
   },
+  "artifact_stage": {
+    "source": "Stage a hash-verified same-run evidence artifact into your assigned environment using bounded resumable transfer; returns the worker file and original evidence ID.",
+    "text": "通过有界可恢复传输，将同一 run 中通过哈希校验的证据制品传入分配的环境，返回 worker 文件和原始证据 ID。"
+  },
   "binary_inspect": {
     "source": "Inspect the exact run target, architecture, sections, imports, symbols and mitigations.",
     "text": "检查本 run 的精确目标、架构、节、导入、符号和缓解机制。"
@@ -56,12 +60,20 @@
     "text": "关闭自己的调试会话，或清理同 run 中 owner 已终止的会话。"
   },
   "debug_command": {
-    "source": "Execute exactly one GDB/MI command in your owned session; stable request IDs prevent blind replay.",
-    "text": "在所属会话执行恰好一条 GDB/MI 命令；稳定请求 ID 防止盲目重放。"
+    "source": "Execute one policy-checked GDB/MI command in your owned session. Isolated sessions accept simple noncalling expressions; prefer typed inspection/control. Stable request IDs prevent blind replay.",
+    "text": "在所属会话执行一条通过策略校验的 GDB/MI 命令。隔离会话接受不含函数调用的简单表达式；优先使用结构化检查/控制。稳定请求 ID 防止盲目重放。"
   },
   "debug_start": {
-    "source": "Start an owned GDB/MI session on the staged target.",
-    "text": "对暂存目标启动自己拥有的 GDB/MI 会话。"
+    "source": "Start an owned debugger session on the staged target, or inspect a separately staged dump. Engine selection never falls back to another platform.",
+    "text": "对暂存目标启动自己拥有的调试会话，或检查单独暂存的 Dump。引擎选择不会回退到其他平台。"
+  },
+  "debug_inspect": {
+    "source": "Inspect bounded registers, stack, memory, modules, threads, instructions, exception or execution state in your owned debugger session; full engine transcripts remain evidence.",
+    "text": "在自己拥有的调试会话中，有界检查寄存器、栈、内存、模块、线程、指令、异常或执行状态；完整引擎记录保留为证据。"
+  },
+  "debug_control": {
+    "source": "Control your owned live debugger using typed breakpoint and execution actions. Dump sessions reject execution control; stable request IDs prevent blind replay.",
+    "text": "使用类型化的断点和执行动作控制自己拥有的实时调试器。Dump 会话拒绝执行控制；稳定请求 ID 防止盲目重放。"
   },
   "differential_test": {
     "source": "Compare the staged target and reference on bounded stdin vectors in an isolated background job. Preserve raw outputs, hashes and mismatches as artifacts. Timeout or truncated output is inconclusive, never a match.",
@@ -70,6 +82,14 @@
   "emulate_run": {
     "source": "Bounded Unicorn emulation of the staged target from a start address: maps the ELF segments plus a stack, executes up to count instructions or until the PC reaches the until address (whichever first), and returns registers plus requested memory dumps (data_base64). The target never runs natively — this is a pure simulation for VM-style or hand-crafted code (interpreter loops, x87/FPU blocks) without hand-building Unicorn harnesses. Use init_regs for register preconditions and memory to inject bytes. The watchdog timeout bounds runaway loops; unsupported instructions report the failing address in error.",
     "text": "从起始地址用 Unicorn 有界模拟暂存目标：映射 ELF 段和栈，运行到 count 条指令或 PC 到 until 地址，返回寄存器及所需内存 data_base64。目标不原生执行；可用于 VM/手工代码（解释器循环、x87/FPU）而无需自写 Unicorn harness。init_regs 设置前提寄存器，memory 注入字节；watchdog 限制失控循环，未知指令错误包含地址。"
+  },
+  "environment_doctor": {
+    "source": "Probe a registered environment's real platform and tools; children may probe only their assigned environment.",
+    "text": "探测已登记环境的实际平台和工具；子任务只能探测分配给自己的环境。"
+  },
+  "environment_list": {
+    "source": "List registered analysis environments without connecting; configuration is not proof of readiness.",
+    "text": "列出已登记的分析环境，不建立连接；配置存在不代表环境已就绪。"
   },
   "evidence_read": {
     "source": "Read a bounded byte range from an integrity-checked evidence artifact. Non-UTF8 is base64.",
@@ -156,8 +176,8 @@
     "text": "请求取消所属的同 run job。"
   },
   "job_start": {
-    "source": "Start a persistent process job in the configured worker; returns a job_id immediately. argv entries may use {target} as a placeholder for the staged target path (resolved by the harness and staged in isolated jobs); worker paths like files/... resolve only as direct argv entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
-    "text": "在配置 worker 启动持久进程，立即返回 job_id。argv 可用 {target} 占位，harness 解析并在隔离 job 暂存；files/... 只在直接 argv 项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。"
+    "source": "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
+    "text": "在配置 worker 启动持久进程，立即返回 job_id。使用 argv，或使用已暂存的 launch_spec 统一记录目标、文件、参数、cwd、环境和输入模式；input 选择已暂存的数据文件。使用 launch_spec 时省略 argv/env/cwd 覆盖，并保持配置所记期限。原始 argv 可用 {target}；files/... 只在直接参数项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。"
   },
   "job_status": {
     "source": "Observe an in-run job, refresh persisted status and import raw observations.",

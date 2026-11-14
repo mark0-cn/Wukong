@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Keep only Windows' ordinary directory-traversal privilege in native AppContainers so protected system paths can load, while continuing to require exact token readback, zero capabilities and file/network isolation checks."
+zh_CN = "原生 AppContainer 仅保留 Windows 普通目录遍历特权，使受保护系统路径可以加载；仍要求精确令牌回读、零 capability 以及文件和网络隔离检查。"

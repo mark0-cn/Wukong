@@ -89,14 +89,33 @@ pub fn bind(path: &Path, workbench: &Workbench) -> Result<()> {
     let environment = workbench.environment()?;
     let mut document = ConfigDocument::open(path.to_owned())?;
     let fields = [
-        (vec!["runtime", "backend"], json!("docker")),
+        (vec!["default_environment"], json!("workbench")),
         (
-            vec!["runtime", "docker_container"],
+            vec!["environments", "workbench", "name"],
+            json!("Linux workbench"),
+        ),
+        (
+            vec!["environments", "workbench", "platform"],
+            json!("linux"),
+        ),
+        (
+            vec!["environments", "workbench", "runtime", "backend"],
+            json!("docker"),
+        ),
+        (
+            vec!["environments", "workbench", "runtime", "docker_container"],
             json!(environment.container),
         ),
-        (vec!["runtime", "remote_state_dir"], json!("/state")),
         (
-            vec!["runtime", "remote_bridge_path"],
+            vec!["environments", "workbench", "runtime", "docker_executable"],
+            json!(workbench.config.workbench.docker_executable),
+        ),
+        (
+            vec!["environments", "workbench", "runtime", "remote_state_dir"],
+            json!("/state"),
+        ),
+        (
+            vec!["environments", "workbench", "runtime", "remote_bridge_path"],
             json!("/opt/wukong/runtime/bridge.py"),
         ),
         (vec!["workbench", "image"], json!(environment.image)),

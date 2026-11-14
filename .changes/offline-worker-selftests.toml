@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Windows worker payloads include prebuilt x64/x86 probes and symbols for offline dependency, dump/live debugging and replay checks without installing a compiler in the VM. These trusted self-tests remain separate from managed service and production isolation acceptance."
+zh_CN = "Windows worker 载荷包含预编译的 x64/x86 探针及符号，可离线检查依赖、dump/live 调试和重放，无须在 VM 中安装编译器。这些可信自检独立于托管服务和生产隔离验收。"

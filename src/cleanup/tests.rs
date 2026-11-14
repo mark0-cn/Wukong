@@ -12,6 +12,51 @@ fn fixture() -> Result<(tempfile::TempDir, Cleanup)> {
     let cleanup = Cleanup::at(home)?;
     Ok((temp, cleanup))
 }
+
+#[test]
+fn named_local_workers_are_inventoried_without_adopting_remote_state_paths() -> Result<()> {
+    let (temporary, cleanup) = fixture()?;
+    let mut config = crate::config::AppConfig::default();
+    for (id, backend) in [
+        ("local", crate::runtime::RuntimeBackend::TrustedLocal),
+        ("remote", crate::runtime::RuntimeBackend::Ssh),
+        ("container", crate::runtime::RuntimeBackend::Docker),
+    ] {
+        config.environments.insert(
+            id.into(),
+            crate::environments::EnvironmentConfig {
+                name: id.into(),
+                platform: crate::environments::Platform::current(),
+                installation_id: None,
+                runtime: crate::runtime::RuntimeConfig {
+                    backend,
+                    state_dir: temporary.path().join(id),
+                    ..Default::default()
+                },
+            },
+        );
+    }
+    let mut registry = locations::Registry::default();
+    registry.include_config(&config, None)?;
+    let local = files::absolute(&temporary.path().join("local"))?;
+    let workers: Vec<_> = registry
+        .locations
+        .iter()
+        .filter(|entry| entry.kind == LocationKind::Worker)
+        .collect();
+    assert_eq!(workers.len(), 1);
+    assert_eq!(workers[0].path, local);
+    fs::write(cleanup.home.join("wukong.toml"), toml::to_string(&config)?)?;
+    let registry = locations::inventory(&cleanup.home)?;
+    let workers: Vec<_> = registry
+        .locations
+        .iter()
+        .filter(|entry| entry.kind == LocationKind::Worker)
+        .collect();
+    assert_eq!(workers.len(), 1);
+    assert_eq!(workers[0].path, local);
+    Ok(())
+}
 #[test]
 fn malformed_configuration_diagnostics_never_echo_file_contents() -> Result<()> {
     let (_temp, cleanup) = fixture()?;

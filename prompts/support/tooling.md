@@ -21,6 +21,9 @@ surgery and stdin-driven PoCs:
   `ls /state` to locate the target — it is either at `$TARGET` (pass
   `target=`) or staged via argv in job_start. If you catch yourself
   searching for a file, you are missing one of those two mechanisms.
+- Only public artifacts can be copied into execution inputs. Worker transport
+  endpoints, job descriptors and other private metadata must use their status
+  APIs; they are never valid input files or directories.
 - stdin delivery is plain shell syntax: `printf '<payload>' | "$TARGET"`,
   a heredoc, or `python3 -c '...'`. There is no separate input plumbing.
 - The call is capped (timeout_secs, default 30; output is bounded). Anything
@@ -77,6 +80,12 @@ never runs natively. Use `init_regs` for register preconditions and
   `gdb -q ./target -ex "source /opt/gef.py"` and use `heap chunks`,
   `heap bins`, `tcache bins` for allocator debugging. The debug_start
   session itself stays plain GDB/MI.
+
+Prefer `debug_inspect` / `debug_control` for structured debugger operations.
+Isolated raw `debug_command` accepts policy-checked MI arguments and simple
+noncalling register/symbol/pointer expressions. Calls, casts/parentheses,
+assignments, increments and octal/hex string escapes are rejected; a permitted
+operation name does not authorize arbitrary interpreter-bearing arguments.
 
 ## job_start — persistent background jobs
 
@@ -178,12 +187,18 @@ class per call.
 - Timeout every job; angr and z3 can run away. timeout_secs is your friend.
 - The solver's answer is evidence only after the real binary reproduces it:
   run the solved input and cite both the solver job and the replay job.
+- Respect the selected worker's capacity. A Windows worker currently owns one
+  active resource; close a persistent debugger/interactive session before starting
+  another job or analysis helper. Queries, cancellation and session profiles remain
+  available. Capacity waiting does not authorize replay of an unknown outcome.
 
 ## Reproduce the exact runtime
 
 Use runtime_profile on staged target/libc/loader files. File identity and page-aligned
 symbol subtraction are candidate evidence, not proof of a loaded library. An owned live
 debugger session enables observed mappings and per-file mapped_hash_confirmed status.
+Windows profiles preserve admitted file hashes and observe the owned process handle;
+mapped Windows paths have unverified contents and cannot confirm mapped hashes.
 For supplied runtime files, runtime_prepare returns immutable copies and direct launch_argv;
 pass those argv entries unchanged to job_start or interactive_start. Extra libraries may
 still be missing. Preserve the original target and all runtime hashes. Never patch the

@@ -1,0 +1,3 @@
+kind = "security"
+en = "The internal Windows debugger checks admitted PE and optional local PDB metadata with existing format libraries before launching its target, then compares the external debugger's structured module identity. Mismatched symbols are refused and evidence distinguishes metadata correspondence from loaded PDB byte identity. Production execution remains disabled pending remaining acceptance."
+zh_CN = "内部 Windows 调试器在启动目标前使用现成格式库核对已准入 PE 及可选本地 PDB 元数据，再与外部调试器的结构化模块身份比较。不匹配的符号会被拒绝，证据区分元数据对应关系与已加载 PDB 的字节身份。其余验收完成前，仍禁用生产执行。"

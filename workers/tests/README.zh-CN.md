@@ -4,6 +4,68 @@
 
 [English](README.md) · 简体中文
 
+被忽略的 `remote_installed_windows_worker_minimize_acceptance` 夹具读取 `WUKONG_REMOTE_WORKER_MINIMIZE_TEST`：绝对路径 JSON 配置，包含 `config`、`manifest_sha256`、x64/x86 的已签名 `probes`（`path`、`sha256`），以及全新绝对路径 `output`。覆盖强/弱等价性、异常码相同但位置不同的故障、二进制 stdin/argv 和 LaunchSpec、空输入、一次尝试预算、无崩溃或无法确定的基线、取消/期限、原始试验证据及重试/冲突处理。轮询会续租。只能使用独立登记的离线开发 VM。全部 20 个已安装用例已在源码 `b05b7fc` 上通过；夹具还将捕获的寄存器、模块及两次异常停止与 MCP 原始响应核对。见 [Windows 资格记录](../windows/README.zh-CN.md)。已完成清理的用例不匹配会汇总到失败批次报告；所有权不确定时必须先验证恢复清理，再开始下一个用例。这不代表对抗隔离或其余生命周期验收。
+
+独立观察服务重启后，`remote_native_completed_minimize_recovery_acceptance` 读取 `WUKONG_REMOTE_WORKER_MINIMIZE_RECOVERY_TEST`，其中包含 `config`、带哈希的 `previous` 验收报告（`path`、`sha256`）及全新绝对路径 `output`。它以递增 epoch 取得并续租原所有者租约，不上传输入便重试全部 20 个请求，并与原报告比较终态、完整候选/崩溃/输出证据及资源清单。同一源码上的全部 20 个已完成结果已通过已安装恢复验证，见上述资格记录。
+
+同一中断夹具接受 `minimize: true` 和 `resource_inventory: true`，不能同时启用 Python、回放或 LaunchSpec 模式。它仅在独立核对受保护的输入／计划、首轮试验身份、可信标记及所属进程后，中断三次尝试计划的基线试验。检查要求 `kind=minimize`、未知且丢失的结果、精确重试一致、改变尝试次数被拒绝、只读守护 Job 观察确认清理，以及后续执行成功。宿主和服务两种用例均在源码 `b05b7fc` 上通过。这只覆盖基线中断；调试观测及后续候选阶段仍待完成。
+
+进一步测试最小化故障边界时，可用 `minimization_stage` 选择 `baseline`（默认）、`observer` 或 `candidate`；非基线阶段要求 `minimize: true`。已签名探针在 `observer` 模式下等待真实调试器附加，在 `candidate` 模式下先验证非空基线，再阻塞于首个空候选。注入前，操作端必须核对该阶段的精确 scratch 意图、输入哈希、原生基线记录及实际标记，并验证清理后原始记录哈希不变。控制器在两种故障后均读取保留的原生记录；候选用例还要求原来的已验证基线。新增已安装用例仍待完成。
+
+`python workers/tests/run.py unit -p test_native_shell.py` 在 Windows 的临时目录运行可信固定 CMD 命令，其他平台明确跳过。它核对普通及扩展盘符路径下适配器的真实 stdin/stdout/stderr 句柄和 cwd，不进行安装或隔离配置变更。已安装 shell 夹具通过独立控制端连接观察同步调用并续租，与生产租约通道安排一致。
+
+`remote_installed_windows_worker_shell_acceptance` 使用 `WUKONG_REMOTE_WORKER_SHELL_TEST`，包含托管 SSH `config`、预期 `manifest_sha256`、新的绝对 `output` 及恰好 `x64`/`x86` 两个 `probes`（绝对 `path` 和固定 `sha256`）。八个可信用例覆盖 CMD 内建命令、相对 cwd/环境、引号与 stderr 重定向、非零退出、有界输出及 x64/x86 目标管道/超时。同步执行等待期间，夹具查询资源清单并续租；终态检查绑定原始凭据/输出哈希、已确认清理、原请求重试及更改命令被拒绝。独立观察服务重启后，`remote_native_completed_shell_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_SHELL_RECOVERY_TEST`，包含 `config`、固定的 `previous` 报告（`path`/`sha256`）及新的绝对 `output`；不上传或执行，比较全部原结果、产物及清单。普通测试忽略这两个夹具。上述具体已安装用例和已完成结果恢复已在源码 `26b7040` 通过；源码/内容身份及限制记录在 [Windows 资格验收记录](../windows/README.zh-CN.md)。生产执行仍禁用。
+
+现有中断夹具也接受 `replay: true` 的宿主/服务故障，要求 `resource_inventory: true`，且不得同时设置 `python` 或 `launch_spec`。它准入三次 `poc.verify` 试验，将封存 stdin 交给可信标记探针；操作端核对受保护计划、首次试验 scratch 身份、实际进程与标记后，才中断第一次试验。共享的只查询 guardian 观察器必须观察到清理完成。控制器要求 `kind=verify`、结果未知的 lost 状态、原请求重试完全一致、修改试验次数被拒绝，以及之后可以成功执行。两种情况已在源码 `2aaa155` 的已安装包通过；其他试验边界的中断仍未经资格验收。见 [Windows 资格记录](../windows/README.zh-CN.md)。
+
+`remote_installed_windows_worker_replay_acceptance` 使用 `WUKONG_REMOTE_WORKER_REPLAY_TEST`，提供托管 SSH `config`、预期 `manifest_sha256`、新的绝对路径 `output`，以及恰好 `x64`/`x86` 两项 `probes`（绝对 `path` 与固定 `sha256`）。它复用包内可信进程探针检查 12 个原生回放资源：重复原生异常、阴性结果、精确二进制 stdin、超时、取消及 LaunchSpec 输入。它核对每次试验的新身份、原始回执/输出哈希、完成后重试/冲突行为及已关闭清单。独立观察服务重启后，`remote_native_completed_replay_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_REPLAY_RECOVERY_TEST`，提供 `config`、固定哈希的 `previous` 报告（`path`/`sha256`）和新的绝对路径 `output`；不上传、不执行，只比较全部原状态及产物哈希。普通测试显式忽略这些夹具；指定已安装 VM 用例及已完成结果恢复在源码 `2aaa155` 通过，身份与限制见 [Windows 资格记录](../windows/README.zh-CN.md)。它们共享现有控制器传输、输入、清单及产物辅助方法。
+
+默认忽略的原生 `live_sdk_subscription_opens_and_unsubscribes_on_the_dedicated_vm` 夹具打开真实的按应用/监听端口过滤的 WFP 订阅，检查可信回环对照并排空 SDK 订阅。仅以管理员身份在专用 Windows VM 运行。它不改变防火墙规则或全局事件选项，也不证明容器内数据包已被阻断。用户 Windows 10 VM 已通过这个 SDK 夹具；实时阻断及并发冷启动验收仍需已安装 worker 的资格检查。见 [Windows 观察契约](../windows/README.zh-CN.md)。
+
+对于已实现原生发现的工具包，可在进程、LaunchSpec 或中断进程验收配置中设置可选 `resource_inventory: true`。共享控制器夹具以每页两项查询两个 API，核对排他游标推进及 ID 一致，并在报告保留返回的资源摘要/状态。进程验收观察活动任务；LaunchSpec 验收要求全部六个已结算任务，拒绝非法范围/游标/作用域覆盖，并核对其他 run 的清单为空。其已完成恢复夹具在独立服务重启后比较完整原清单。故障夹具要求已对账的未知/关闭资源仍可被发现且不重新打开。历史工具包省略该选项。这些新增检查已通过本地编译/库检查，并在 `ddf86dc` 的用户离线 VM 通过已安装服务的进程、LaunchSpec、独立重启和服务中断验收。源码/内容身份及原始证据的边界见 [Windows 资格记录](../windows/README.zh-CN.md)。
+
+`remote_installed_windows_worker_launch_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_TEST`：托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output`，以及恰含 `x64`/`x86` 的 `probes`。每种架构提供 `program` 和 `dependency`，各含工具包 `runtime/selftest/` 目录中文件的绝对 `path` 与固定 `sha256`。可信探针加载同目录 `wukong-fixture.dll`，读取 cwd 外声明的 peer 文件，创建 cwd 文件，并将二进制 stdin/argv 输入复制到 stdout。控制器检查六个资源、改变清单/调用覆盖被拒绝、完整请求/回执身份、清理和已完成启动的稳定重试。VM 内不编译或下载。独立观察服务重启后，`remote_native_launch_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_LAUNCH_RECOVERY_TEST`，包含 `config`、绝对 `previous`、其 `previous_sha256` 与全新的绝对 `output`；无需上传或执行，即可比较四个已完成 LaunchSpec 结果和原始回执。这些夹具在源码 `6e2bc91` 的用户离线 VM 通过；见绑定源码的[资格记录](../windows/README.zh-CN.md)。
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_LAUNCH_TEST = (Resolve-Path .\remote-launch-profile.json)
+cargo test --locked --lib remote_installed_windows_worker_launch_acceptance -- --ignored --nocapture
+$env:WUKONG_REMOTE_WORKER_LAUNCH_RECOVERY_TEST = (Resolve-Path .\remote-launch-recovery-profile.json)
+cargo test --locked --lib remote_native_launch_recovery_acceptance -- --ignored --nocapture
+```
+
+进程配置可选的 `argument_files: true` 需要带 `--read-argument` 的新版可信探针。它以无执行权限上传二进制数据，拒绝缺失准入的参数，将同一逻辑数据路径传入两次，核对原始输出字节/哈希，并要求原生回执恰好保留一个文件引用。容器内探针必须实际读到文件，且写入和 `FILE_EXECUTE` 打开均得到 `ERROR_ACCESS_DENIED`。该用例已在源码 `ecc18af` 的离线 VM 全新安装及服务重启后通过；报告身份和限制见 [Windows 资格记录](../windows/README.zh-CN.md)。
+
+默认忽略的 Rust 夹具 `remote_installed_windows_worker_process_acceptance` 使用真实控制器，以及已独立固定指纹并安装好的 Windows VM。将 `WUKONG_REMOTE_WORKER_PROCESS_TEST` 指向 JSON 配置，包含托管 SSH `config`、预期 `manifest_sha256`、全新的绝对 `output` 路径和 `probes`：必须恰含 `x64`/`x86`，各自提供该包 `runtime/selftest/` 目录中可信自编译 `wukong-probe.exe` 的绝对 `path` 及 SHA256 `sha256`。夹具通过准入输入协议上传字节；VM 无需编译器或下载包。检查 echo、截止时间、取消、单资源/租约屏障、稳定启动重试、原始/分块输出哈希和陈旧隔离令牌。报告保留原始回执/输出字节，不含租约令牌或私钥。这仅为有限原生进程验收；生产能力声明仍为 false。
+
+对于带新版可信探针的 schema-2 工具包，`cleanup_adversary: true` 会另行在两种架构运行只读文件/受保护空 DACL 清理用例；旧探针应省略该项。也可固定独立构建的可信探针进行测试，无需替换已安装的签名 worker，但必须记录两者源码身份。上传路径/request ID 包含探针哈希，保留先前不可变输入。清理探针先向实际用户及 AppContainer SID 授予自身新目录的完整权限，保留 `READ_CONTROL | WRITE_DAC` 句柄，再通过 SDK 设置并读回受保护空 DACL。ACL 准备失败不算限制访问清理通过。
+
+默认忽略的 `remote_native_interrupted_process_acceptance` 使用 `WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST`：托管 SSH `config`、预期 `manifest_sha256`、固定哈希的可信 `probe`（`path`/`sha256`）、`fault`（`preparation`、`host` 或 `service`），以及全新的绝对 `ready`、`resume`、`output` 路径。准备用例在启动前发布 `ready`，便于独立操作方持有原生输入的独占句柄；宿主/服务用例在启动后发布，由操作方终止前核对真实归属进程身份和目标就绪。新版探针使用 `--fault-ready` 在本次私有 scratch 写出固定标记；操作方核对映像哈希、父进程和标记字节，不以粗粒度 CPU 计数或等待时间推断执行。服务用例还由操作方持续持有仅查询的守护 Job 句柄，迫使恢复通路重新打开并排空真实对象。独立观察操作/恢复后，才由操作方创建 `resume`。
+
+故障配置可选的 `launch_spec: true` 通过同一探针及故障协议使用清单指定的 `work/nested` cwd。操作方须核对受保护启动绑定，并在该 cwd 内观察到标记后才注入故障。这个新增服务中断用例也在 `6e2bc91` 的同一 VM 通过，包括独立仅查询守护 Job 观察及嵌套 scratch 清理。
+
+同一夹具支持对宿主/服务故障设置 `python: true`，要求 `resource_inventory: true` 且不使用 LaunchSpec。固定源码通过 CPython 的 `subprocess` 库启动已准入的可信探针，并写出独立的 Python 标记。中断前，操作方核对受保护的源码/子进程引用、签名包 CPython 映像哈希、两个标记的内容及真实宿主 → Python → 探针进程链。仅查询的守护 Job 观察器持续运行，直到恢复确认 Job 已清空。控制器要求精确重试 `py.run` 返回原始 unknown 结果，拒绝同请求 ID 下变更源码，检查 closed 清单，并在恢复后准入全新的原生 echo。过期服务租约验证通过替换连接提交原租约，避免把 SSH 断开误当作租约拒绝。
+
+额外的 `fault: os_boot` 配置要求 `resource_inventory: true`。独立操作方先核对实际拥有的探针及受保护请求，记录已有原件，再仅重启专用 VM。独立检查冷启动资格及原始清理证据后，在 360 秒内创建 `resume`。该分支保留旧传输/绑定，重连时拒绝旧启动，要求只有系统启动身份变化且租约 epoch 增长，拒绝旧 run 的发现/资源查询及旧输入复用，再于新 run 准入并发现一次新上传的执行。旧启动的结果通过独立原始证据核对，不放宽原生 run 绑定来暴露它们。编译/库检查已通过；这个新增控制器启动边界分支尚未通过 VM 验收。
+
+夹具自身不终止进程、不注册任务；检查绑定的未知结果清理、不可变恢复字节、不重放启动、陈旧服务隔离令牌，以及后续准入成功。协调文件仅为信号，不是操作系统证据。这三个具体故障用例于 2026-11-13 在用户提供的离线 VM 通过；源码/内容身份及限制见 [Windows 资格记录](../windows/README.zh-CN.md)。先前已完成结果恢复不覆盖这些用例。
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_FAULT_TEST = (Resolve-Path .\remote-process-fault-profile.json)
+cargo test --locked --lib remote_native_interrupted_process_acceptance -- --ignored --nocapture
+```
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_TEST = (Resolve-Path .\remote-process-profile.json)
+cargo test --locked --lib remote_installed_windows_worker_process_acceptance -- --ignored --nocapture
+```
+
+这些任务关闭后，独立重启该专用测试服务并观察新的资格回执，保留旧回执和连接身份。随后 `remote_native_completed_process_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_PROCESS_RECOVERY_TEST`，配置包括托管 SSH `config`、既有报告的绝对 `previous` 路径、其 `previous_sha256` 和全新的绝对 `output` 路径。夹具检查系统启动/安装/包身份不变及租约 epoch 递增，无需重新上传，即可按原始稳定请求取回两个已完成结果，并比较原始回执字节。夹具本身不重启服务、不安装或卸载。两个夹具均于 2026-11-13 在 worker 源码 `fbf7912` 上通过用户提供的离线 VM 验收；只读 SQLite 检查和独立复制的原件进一步确认六个资源已关闭、副作用已完成且 scratch 为空。中断资源清理/恢复、准备阶段取消及其他执行/生命周期通路仍未完成。
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_PROCESS_RECOVERY_TEST = (Resolve-Path .\remote-process-recovery-profile.json)
+cargo test --locked --lib remote_native_completed_process_recovery_acceptance -- --ignored --nocapture
+```
+
 - `unit/`：可移植的单元和可信本地夹具测试；平台依赖项显式跳过。
 - `integration/`：需要真实隔离 worker、Linux、GDB、AFL++ 或 Ghidra 的验收入口。
 - `support/`：共享协议客户端，与生产运行代码分开。
@@ -25,7 +87,107 @@ docker exec --user 10001:10001 wukong-worker python3 /opt/wukong/tests/run.py un
 python3 /opt/wukong/tests/run.py unit -p 'test_workbench*.py'
 python3 /opt/wukong/tests/run.py integration --state /state/acceptance --fuzz
 python3 /opt/wukong/tests/run.py isolation /state/isolation-acceptance
+python3 /opt/wukong/tests/run.py launch --state /state/launch-acceptance
 python3 /opt/wukong/tests/run.py ghidra --state /state/ghidra-acceptance
 ```
 
 测试状态目录应为本轮独占目录；真实后端要求见 [worker 说明](../runtime/README.zh-CN.md)。
+
+`launch` 套件构建可信 C 夹具，经配置好的 Linux UID 隔离运行 stdin、argv-file 两种 LaunchSpec 任务，检查 cwd 外声明的 peer 文件、可写 cwd 输出、原始二进制 stdout、原文件不变及稳定启动。运行时须使用文档规定的 capabilities、只读容器根目录和可执行 `/tmp`。可移植规划/单元检查不能替代该隔离验收。
+
+Windows 原生服务访问夹具对复制的管理员令牌同时禁用最大特权和管理员组，以检查普通账户的 DACL 权限，避免 `SeTakeOwnershipPrivilege` 授予 `WRITE_OWNER`。它不修改父进程令牌或已安装服务的策略。此夹具于 2026-11-13 在用户提供的 Windows 10 VM 上通过。
+
+### 托管原生 WinDbg 启动验收
+
+`src/runtime/ssh_debugger_acceptance.rs` 通过真实控制器传输测试已安装服务。将 `WUKONG_REMOTE_WORKER_DEBUGGER_TEST` 设为本机 JSON 配置路径，包含固定指纹的托管 SSH `config`、`manifest_sha256`、新的绝对 `output`，以及以 `x64`/`x86` 为键的 `probes`。每种架构提供 `program` 和 `pdb`，各自包含本机绝对 `path` 及该签名包中的精确 `sha256`。运行 `cargo test --locked --lib remote_installed_windows_worker_debugger_acceptance -- --ignored --nocapture`。夹具仅上传这些密封字节及离线 LaunchSpec，不安装软件。每次调用后 fsync RPC JSONL，最终原始 MCP 日志与报告一同保留。
+
+2026-11-13，该夹具在专用离线 Windows 10 VM、原生源码 `5f2b692`、清单 `a8a755a2cd17c597f0ecfa87848db668aeba7654d6cddf4b5c90b45146a427a7` 上通过。两种架构均覆盖 PDB 符号断点、数字 ID 启用/禁用/删除、寄存器、内存、模块、栈、原始线程结果、反汇编、step/next/finish、异步 continue/interrupt、不可变活动日志前缀、拒绝释放活动租约、缓存关闭及拒绝重启已关闭会话。57 次控制器调用产生 60 次 MCP 调用，包含两次预期的非故障异常查询拒绝，原始错误均保留。首轮夹具错误地要求普通断点具有异常信息；修正运行前，已关闭其目标并独立收集原始证据。只读 SQLite 及独立 VM 检查确认三个资源关闭、32 个副作用完成、scratch 为空且无剩余所属调试器/探针进程。95 份原件均已核对哈希，先前运行的服务及管理 SSH 保持运行，ISO 已卸载。报告 SHA256 为 `cc50a5b0c35e00a21916bf8f8cab50731c20b8d9d451769d149b25db76ff0a04`；x64/x86 原始日志哈希分别为 `1934765a4e5dde8ff5465c0269393703aa73c43e5a6a075c2a188eefc1b6d58f` 和 `d825ff0644e0e5a538ea99f4889755354614a21c8d8d1796463f653d0f1b8986`。这验证所述隔离启动/控制/关闭通路，不证明完整映像/PDB/dump 准入、服务中断恢复、全部对抗边界或生产可用性。
+
+当前夹具还在分别准入的 LaunchSpec 中交换两种架构的 PDB 文件。每次被拒绝的启动必须保留恰好一个资源，完成所属资源恢复并拒绝重放，随后才进行有效用例。有效启动/清理必须保留精确的已准入 PE/PDB 哈希及匹配的引擎元数据，且不得声称验证了已加载 PDB 的字节。
+
+2026-11-13，该扩展在 `4edc290` 的全新离线安装上通过，清单为 `f3a32f66d5fa3eb7330f4671826c84273ab01d80536f61ac7f1bd34cd284c062`。75 次控制器调用保留了 62 次 MCP 调用（两次为预期的非故障异常查询拒绝）。两份对调 PDB 均被拒绝；独立读取受保护原件确认错误明确为 GUID/链接器 age/架构不匹配，无目标准备意图、无 MCP 日志，随后 scratch 被移除。正确的 x64/x86 启动保留匹配的 PE/PDB 身份，并通过完整控制/关闭流程。只读 SQLite 确认四个资源关闭、28 个副作用已结算。88 份原件均已核对哈希；此前运行的 14 个服务及管理 SSH 保持运行，VM 无默认路由，ISO 已卸载。报告 SHA256 为 `b0e6d49949120cbf67d1006583f46c71f91e3bc22c9c5a2ebb194c9b127b8666`；x64/x86 日志哈希分别为 `4f5b2fc57c3e8d5535cfb6f11d546b6b71fa179b1a2eac54b1accc687b598e0d` 和 `2b89a5816d289b81561bbc6423b4da0259d6a7d86be9524d191cf49380a57b47`。这验证所述元数据/负例夹具，不证明已加载 PDB 字节身份、dump、服务中断恢复或通用对抗准入。该构建包含取消修复，但其中断场景仍未验收。
+
+夹具现在还通过 `debug.inspect` 查询正常及恢复终态，检查恢复结果仍为未知，并通过 `native-results/<id>/receipt` 读取原始恢复回执。这些新增断言已于 2026-11-13 在原生源码 `590a1cc`、清单 `e5313593570240f15d7c0c17729ee293f05f02184e6f1a8d116159dace738e85` 上通过。完整 x64/x86 流程保留 79 次控制器调用、62 次 MCP 调用及两次预期的非故障异常查询拒绝；报告 SHA256 为 `e2071673aa6217206ce2005ba5c8d2d81f10caa53d768e12c9a571a2f33d8b26`。88 份基线原件均已独立核对哈希。
+
+### 托管调试器中断验收
+
+`ssh_debugger_fault_acceptance.rs` 复用密封探针上传、RPC 记录、协调文件及恢复后 echo 夹具。`WUKONG_REMOTE_WORKER_DEBUGGER_FAULT_TEST` 选择本机配置，包含固定指纹的 `config`、`manifest_sha256`、含 `program`/`pdb` 的单个 `probe`、`fault`（`cancel`、`host`、`service_stop` 或 `service_kill`），以及新的绝对 `ready`、`resume`、`output` 路径。运行 `cargo test --locked --lib remote_native_interrupted_debugger_acceptance -- --ignored --nocapture`。可信探针需构建为支持 `--debug-wait`：其 `fixture_debug_wait` 调用 `Sleep(120000)`。到达该符号并移除断点后，夹具使用上游有类型的单步跳过调用越过短序言并进入等待。每次已完成的准备操作均被保留，不解析指令文本。调用必须保持待定 600 ms，随后独立 VM 操作者还须验证原始受保护请求、所属进程和账本中仍为 started 的变更，才允许所选故障。取消模式在观察完成后发布恢复标记；其他模式在独立故障操作完成后发布。由于单条传输串行处理请求，`cancel` 使用携带相同租约的第二条已认证控制器连接。测试要求原始结果保持未知、确认清理、回执哈希匹配、拒绝启动/控制重放，以及新的 echo 执行成功。服务重启必须增加租约 epoch 并拒绝旧凭据。构建/Clippy 检查不证明这些真实故障验收。下述已安装结果仅适用于明确列出的源码及夹具。
+
+2026-11-13，`a0119db` 控制器夹具和单独绑定哈希的可信等待探针验证了上述 `590a1cc` 安装。取消、终止精确会话宿主、正常停止并重启服务均通过：独立的仅查询 guardian 观察器在各次故障前记录七个活动进程、之后为零；原始结果保持未知，原始恢复回执已核对，拒绝重放，且新的 echo 执行成功。正常停止耗时 1,969 ms，SCM 退出码为零；重启使租约 epoch 从 9 增至 10，拒绝旧凭据并保留既有启动/连接字节。取消、宿主终止和服务停止报告的 SHA256 分别为 `6fc1a2cce777a938f1e0082689694802458522783cd3b1b187a7529c5839f9c3`、`40facc7354ee76444394427a1081f352bea8fa767779163a972ac7a97278a9f2` 和 `049095c5eddc2a0e8319377d34fc7e00b133e52f5c3945588b15953472c2f02d`。每个成功用例均已复制并核对六份观察器原件的哈希。
+
+真实服务进程终止后的自动重启失败：清理子进程返回 Windows 拒绝访问，保留资源阻塞状态和两个 scratch 目录。20 份原始失败文件已保留。随后用包内 SDK CDB 执行同一受保护恢复请求成功，但未复现或解释最初的拒绝访问。辅助清理及其后成功启动**不证明**服务强制终止后的自动恢复通过。最终独立收集核对了 326 份原件，全部 17 个资源关闭、136 个副作用已结算，包含先前失败的夹具准备；三份启动资格检查及原始连接身份均保留，之前运行的 15 个服务及管理 SSH 保持可用，ISO 已卸载。当前清理错误加入失败阶段以及资源/恢复尝试/退出码，便于定位这个未解决故障。dump 及通用对抗覆盖仍待完成。
+
+原生源码 `6c9f91f`、清单 `28018c23904355bbe3b578ffba61d20fa0001ec03e263b6896dafcce0205fd95` 的全新安装再次复现了服务强制终止失败，位置为目标 scratch 树删除，Windows 错误为 5。残留可信 EXE 已收回私有 ACL，PDB 尚未处理。19 份原始失败文件已核对哈希。随后 CDB 清理同一原始请求成功，服务恢复。之后一个独立的服务强制终止用例通过，恢复期间一直持有仅查询 guardian：七个活动进程降至零，epoch 从 2 增至 3，旧凭据及重放被拒绝，结果保持未知，新的 echo 执行成功。报告 SHA256 为 `f2a1904eb17b7ca8175f0fb13fecebffb266f26191b8577c5fbe1fc1988a1230`；六份观察器原件及最终 74 份启动/资源原件均已核对哈希。全部三个资源关闭、27 个副作用已结算，此前运行的 16 个服务保持运行，ISO 已卸载。首个失败用例仍是缺陷；后续通过不证明其根因已修复，也未确定谁保留了 EXE 的映像映射或句柄。
+
+当前删除处理使用 BackON，最多重试八次（初始等待 20 ms、单次最多 200 ms、每项累计约 1.1 秒），仅适用于 Windows 错误 5/32，并受既有目录树期限约束。确认所属资源静止及收回目录后，它只重复相对于持有句柄的条目删除；此操作不重试 ACL 修复或执行。每次重试在原始清理日志中保留条目和错误，持续失败仍保留阻塞状态。本机测试通过 Windows SDK 映射可信测试程序的副本：删除先以错误 5 失败，映像 section 释放后成功；持续保持映射则验证有界失败及后续清理。这些测试复现删除条件，未证明原 VM 中未确定的映射/句柄持有者。该缓解措施的已安装验收记录如下。
+
+2026-11-13，该缓解措施在 `4ed3ead` 的全新离线安装中通过，清单为 `b31611f11db6e863d993d204272abead011876bd53ef957bb63304360d6bb000`。普通服务强制终止用例通过，未触发删除重试（报告 SHA256 为 `f2641b0871505b1f91d1db15547c96f063f533f9bf5009356e5c64217530db31`）。第二个通过的用例使用 .NET `MemoryMappedFile`，在 worker Job 外持有精确核对哈希的可信探针只读映射。通过 SDK 支持的 ACL 观察确认清理已收回 EXE 后，再等待 100 ms 释放映射。原始恢复日志记录了三次错误 5 删除拒绝，分别等待约 20/40/80 ms，随后成功对账同一资源。该日志 SHA256 为 `bee0d58dfbb00b15562e30e1f8e0393fc298b6c6fae60b24cbfcf7b7f9901a38`；控制器报告 SHA256 为 `3d50663751c8156cc4d0a566614f0673bbb9ef805d984995e3104b886c4a6147`。
+
+两个用例均保留原始未知结果、核对恢复回执绑定、拒绝旧租约与重放，并成功执行新的 echo 任务。独立的仅查询 guardian 观察记录七个活动进程降至零，映射用例的 epoch 从 4 增至 5。普通用例的六份观察器原件、映射用例的十二份观察器/映射原件，以及最终 103 份启动/资源原件均已复制并核对哈希。最终只读检查确认五个资源关闭、41 个副作用已结算，其中包含一次未注入故障的准备失败：PowerShell 把空映射名转换成了空字符串；修正用例前已对账其原始资源。三份启动资格检查、此前运行的 17 个服务及管理 SSH 均保留，未增加默认路由，ISO 已卸载。这验证了有界删除恢复和明确列出的服务强制终止场景，不证明早前失败中的外部映射/句柄持有者是谁、无限占用能够被清除，或 dump 与通用对抗准入已经通过。
+
+2026-11-13，源码 `ea248d1`、清单 `5e40e5ca521afb25fdd8c0173a6d08f221505a04720196c389b8b6f859e9ae25` 通过全新离线安装及真实托管 x64/x86 minidump 夹具。69 次控制器调用和 24 次原始 MCP 调用检查了 PE/PDB/dump 对应、跨架构 dump 拒绝/恢复、寄存器、栈、内存及全部十种控制操作拒绝。被拒控制未占用稳定请求 ID，随后关闭复用该 ID 成功。两个回执均记录未执行目标，且无编造的目标输出产物。报告 SHA256 为 `248831a0d72a6babcce98aae38f56e5841be9bd24e8b15f63c622a2442f11c92`。
+
+首轮 live 回归断言失败：原生 break-in 事件先于显式中断请求停住了可信目标；上游正确返回 `requested = false`，原会话关闭且确认清理。再次运行前，已对账 89 份原始文件及当时全部六个已关闭资源。夹具现先收取该次运行的停止结果，再进行有界后续尝试，仍要求观察到成功中断。修正后的 x64/x86 live 回归在同一已安装 worker 上通过，报告 SHA256 为 `059410861f3fbc4eda84f8fc17fa4fa7bcf9aa1e56b3948587c34e7280c26767`。最终检查确认十个资源关闭、47 个副作用完成、scratch 为空；168 份原始启动/资源文件已复制并核对哈希。此前运行的 18 个服务及新服务、管理 SSH 和无默认路由的状态均保留，ISO 已卸载。这些结果仅验证列出的 minidump 用例和 live 回归，不覆盖 dump 中断/重启恢复、旧版/内核格式、更广泛对抗隔离或完整生产后端。
+
+故障配置还接受可选 `dump`，包含 `path` 和 `sha256`，并与可信探针映像/PDB 对应。它选择空闲的只读 dump 会话，不创建目标进程或待定控制操作，并拒绝 `cancel`。在终止宿主/服务前，独立操作者核对受保护的 dump 请求、已完成启动、不存在的目标 persona/scratch、暂存哈希及只读文件权限。随后复用同一仅查询 Job 观察器和恢复检查。旧租约通过已认证的新连接验证，避免把已断开的 SSH 连接错误当成 worker 拒绝旧租约。
+
+2026-11-13，这些空闲 dump 用例在同一 `ea248d1` 安装上通过：终止宿主、正常停止/重启服务、强制终止/重启服务。每个独立观察器均记录 Job 的五个活动进程降至零，且没有目标进程。原会话保持 lost 和未知结果，恢复回执哈希绑定正确；启动重放被拒绝，新的 echo 任务成功。两个服务用例的租约 epoch 分别从 7 增至 8、9 增至 10，并拒绝旧租约。报告 SHA256 依次为 `30450139c9f121cce89744bdabf9f4deeb76c01378b58aa6d3f9e2e5e506faad`、`2428b4ec21ae16ee456ad98510b2e69c4b1d675339431eb8e1302bd013441c03`、`6efd743512bf784abf74a3c6414efdb05567a008ce61e0c6622a317fea2240a6`。
+
+首个正常停止夹具在已断开的 SSH 连接上验证旧租约，导致断言失败；服务重启及原资源清理已由独立观察确认成功。修正夹具前，六份观察器原件和 201 份启动/资源原件已核对哈希，该次仍保留为控制器测试失败。最终收集核对 250 份启动/资源原件，确认 17 个资源关闭、54 个副作用完成、四次启动资格检查通过，scratch 为空。每个成功故障用例另有六份观察器原件通过核对。全部 19 个服务及管理 SSH 保持运行，没有默认路由，ISO 保持卸载。这些结果覆盖空闲 dump 恢复，不覆盖执行中的检查操作、系统重启、旧版/内核格式或通用对抗隔离。生产执行仍禁用。
+
+### 原生 Python 验收
+
+`remote_installed_windows_worker_python_acceptance` 通过 `WUKONG_REMOTE_WORKER_PYTHON_TEST` 使用固定身份的 `config`、`manifest_sha256`、`python_sha256`、可信 `probe`（`path`/`sha256`）及新的绝对 `output`。它复用已有上传、进程状态及原始产物读取函数。夹具检查实际包内 CPython 选项/哈希、Unicode 与字面 argv、包内 `filelock` 依赖、密封源码/目标文件，以及可信子进程。单独用例覆盖语法错误、期限、输出超限和取消，全部要求实际执行且确认清理。稳定启动返回已完成状态，同一 ID 下改变源码被拒绝。编译不证明这些已安装用例通过。
+
+独立观察服务重启后，`remote_native_completed_python_recovery_acceptance` 通过 `WUKONG_REMOTE_WORKER_PYTHON_RECOVERY_TEST` 使用 `config`、以 `previous` 路径/SHA256 引用的原始报告，以及新的绝对 `output`。它要求租约 epoch 增加，并在不重新上传源码的情况下核对完全相同的原始状态及哈希绑定回执。两个测试默认忽略，通过 `cargo test --locked --lib TEST_NAME -- --ignored --nocapture` 运行，不执行安装或服务变更。必须记录真实且绑定源码的 VM 结果后，才可宣称已安装验收；中断/对抗覆盖及完整生产可用性仍是独立门槛。
+
+2026-11-14，源码 `d02d1db`、清单 `7b719e5b36785b722794d475c4db00c7f26672759c167641931cd8689955fac3` 在提供的 Windows 10 VM 上通过全新离线安装及全部五个 Python 用例。实际 CPython 执行保留固定二进制/源码哈希、Unicode/字面 argv、包内依赖导入、源码/目标写入拒绝，以及成功的可信子进程。语法错误、期限、输出超限及取消均记录对应终态并确认清理。独立观察服务重启后，epoch 2 返回五个作业完全相同的原始状态/回执，未重新准入或执行源码；初始 epoch 为 1。随后 x64/x86 进程回归通过八个 echo/期限/取消/参数文件资源，并检查作用域内资源发现。
+
+Python 执行、已完成恢复及进程回归报告的 SHA256 依次为 `c4dec24f927bd8d0f6ead9bda7313c1c8cd2065e732b3e36b8409bea09e63276`、`49243987a16a9ce040cc74d7f4a885df0e29c5f0dc237024bb3b7b0d067e7fc4`、`f2084a521422d577a5348c9fe9d30b4093899528a0217f783ff2770057f7d5df`。最终独立收集复制并核对 98 份启动/请求/结果原件，确认 13 个资源关闭、13 个副作用完成、两次启动资格检查通过、scratch 为空。两次启动保留 38 次成功的受限 MCP 调用，调试器会话均已释放。此前 19 个服务、新服务及管理 SSH 均保持运行，没有默认路由，公开连接身份未变，ISO 已卸载。这些结果仅验证列出的 Python 和进程用例，不覆盖 Python 宿主/服务中断、系统启动恢复、更广泛对抗隔离或完整生产执行。
+
+2026-11-14，同一 `d02d1db` 安装还通过共享进程夹具的 Python 宿主/服务终止用例，包含已准入的原生子进程。两个独立仅查询观察器均测得中断前 guardian 中有五个进程、恢复后为零。精确重试 `py.run` 返回原始 lost/unknown 状态；同 ID 下变更源码被拒绝，已关闭资源仍可发现，全新的原生 echo 完成。服务用例的 epoch 从 7 增至 8，并通过替换连接拒绝原租约；宿主用例保持 epoch 6。宿主和服务报告的 SHA256 为 `2ffc5c6e8a126dfb2f8916b16f94814bb3dbf16db169e55b2579fd3afc446fd6`、`f2fe9c586eafb4fef8d7626e2758ecbd052c10b65ba1e0cb3aa89187ea989fcd`。
+
+首次源码使用 `subprocess.DEVNULL`；沙箱拒绝打开 `NUL`，因此执行失败，未注入故障。核对其清理结果和 104 份原件后，修正源码改为继承现有 stdin。之后宿主操作脚本最初拒绝了正确子进程的 Windows 扩展路径写法。只读观察核对精确哈希、父子进程链及操作目录尚未创建；接受该精确 `\\?\` 写法后，继续同一运行资源，未重放启动。原驱动失败与成功的控制器报告、修正后的操作观察分开保留。
+
+最终收集核对 136 份启动/资源原件及 12 份观察器原件的哈希，确认 18 个资源关闭、18 个副作用完成、三次启动资格检查通过、scratch 为空。全部 20 个 worker 服务及管理 SSH 保持运行，无默认路由，介质保持卸载。这些补充结果验证列出的 Python 中断用例；Python 系统重启恢复、更广泛对抗隔离及完整生产执行仍未验收。
+
+### 外部 WinDbg MCP 验收
+
+显式启用的 `runtime::ssh::dump_acceptance::remote_installed_windows_worker_dump_acceptance` 夹具通过 `WUKONG_REMOTE_WORKER_DUMP_TEST` 读取固定哈希的 x64/x86 探针 EXE/PDB/minidump 引用及已登记 VM 连接。它检查 dump 身份对应、架构不匹配后的恢复、内存/寄存器/栈检查、全部类型化控制操作均被拒绝且不占用请求 ID、不执行目标的清理回执，以及完整上游工具日志。生成可信夹具转储时使用明确的环境变量白名单；绝不传输继承了控制器凭据的完整内存快照。编译及本机 SDK/ACL 测试不能替代该已安装验收。
+
+`tests/windbg_mcp.rs` 通过现有 `McpRegistry`（Rig/rmcp）驱动真实外部调试器。它默认忽略，要求专用 VM 已具有仓库的可信 x64/x86 `wukong-probe` 程序、匹配的 PDB 和已生成的 dump。配置固定身份的 SSH stdio 命令，或在该 VM 内使用本地命令；测试不会安装软件或运行未知目标。
+
+将 `WUKONG_WINDBG_MCP_ACCEPTANCE` 指向包含以下字段的机器本地 JSON 文件：
+
+- `server`：现有 `McpServerConfig` 的 `name`、`command`、`args`、`env` 和 `timeout_seconds` 字段。使用 `name: "windbg"`、已验证的 `windbg-mcp.exe`、`--tools session,inspect,exec,crash` 参数和 45 秒超时。使用打包的 Win32-OpenSSH 时，在环境变量白名单中包含 `"PROGRAMDATA"`。SSH 须固定主机密钥并禁用转发。
+- `fixtures`：按 x64、x86 顺序提供两个对象，各自包含 `architecture`、`target`、`dump` 和 `symbols`。路径均为 VM 内绝对路径；`symbols` 为保存相应夹具 PDB 的本地目录。
+- `transcript`：控制端全新的绝对路径，保存原始 MCP JSONL 证据；不覆盖已有输出。
+
+```powershell
+$env:WUKONG_WINDBG_MCP_ACCEPTANCE = (Resolve-Path .\windbg-mcp-acceptance.json).Path
+cargo test --locked --test windbg_mcp existing_rig_client_drives_external_windbg_mcp -- --ignored --nocapture
+```
+
+此验收于 2026-11-13 在用户提供的离线 Windows 10 VM 上通过，使用 [glslang/windbg-mcp v0.24.0](https://github.com/glslang/windbg-mcp/releases/tag/v0.24.0)（压缩包 SHA256 为 `f6150397f7bc07a6d5fbd773adde3ec4b78639378abb5edec17be7201b1d3f34`）和已封存的 Debugging Tools 引擎。覆盖两种架构的 dump、实时启动、本地符号、`wmain` 断点、寄存器、16 字节指令内存、模块、调用栈、反汇编、单步、释放及最终空会话列表：共 51 次 MCP 调用，无工具错误。对 WOW64 额外加载器断点进行显式有界处理。线程列表文本作为原始证据保留，不宣称是结构化线程清单。这些结果证明客户端与后端互通，不证明托管 AppContainer 隔离、跨任务所有权、重启恢复或旧适配器已完整替换。
+
+独立的 `external_windbg_mcp_run_handles_are_bounded_and_fenced` 夹具使用 `WUKONG_WINDBG_MCP_RUN_ACCEPTANCE`，配置结构相同，但须指定新的 transcript 路径；可以省略 `dump`。它仅启动已签封的循环探针，验证上游 `continue_async`、`wait_for_stop` 和 `break_in`：重复读取停止结果、不会取消运行的零时长轮询、旧运行句柄拒绝、按运行句柄重复中断，以及引擎执行期限。不引入替代执行调度器或控制台解析器。
+
+```powershell
+$env:WUKONG_WINDBG_MCP_RUN_ACCEPTANCE = (Resolve-Path .\windbg-mcp-runs.json).Path
+cargo test --locked --test windbg_mcp external_windbg_mcp_run_handles_are_bounded_and_fenced -- --ignored --nocapture
+```
+
+2026-11-13，该异步夹具在专用离线 Windows 10 VM 上通过，使用已安装的 `10a6860` 包（清单 `fd9af35aa002ca8c9393f54f8bb03de872c1fd074c0e691cf7fe2b9edebb5636`），后端为固定版本 WinDbg MCP 0.24.0 及已记录的关闭 stdin 管道补丁。x64 和 x86 均覆盖上述断言。35 次调用的原始记录包含 33 次成功和两次预期的旧句柄拒绝，SHA256 为 `f7709ce5aaa9722a90c74e6127b2fed61a39392f052836dde2078e21f1196c2f`。两个会话均报告已释放、引擎 worker 已终止且未留下运行目标，最终会话列表为空。独立的前后检查核对了工具和两组 EXE/PDB，确认所属工具/目标进程无残留、worker 与管理服务仍运行、VM 没有默认路由。这是使用可信夹具的直接 Rig/rmcp 互通验证，不是托管原生会话准入或 AppContainer 验收；无需安装或重启服务。
+
+引导程序 PE 格式夹具在独立 Rust 库的 `pe_imports` 测试中直接调用 `object`，覆盖普通/延迟导入、两种架构、畸形目录及不安全库名。Python 自动化另行检查检查器响应绑定、CRT 拒绝、超时和执行前哈希验证；模拟观察数据不是 PE 格式验收。原生格式测试于 2026-11-13 在用户提供的离线 Windows 10 VM 上通过；真实控制端工具在本机重现了全部三个引导程序和两种编译探针的导入清单。
+
+`integration --static-fixture` 使用静态链接夹具验证调试器和重放适配器，不验证动态加载器及库身份。Docker 运行需要可执行的 `/tmp`、ptrace 和文档要求的隔离能力。
+
+默认忽略的 Rust 夹具 `remote_windows_worker_reboot_binding_acceptance` 在保留控制器旧传输的同时，检查独立 Windows VM 的真实系统重启。先运行 [Windows 指南](../windows/README.zh-CN.md)中的安装后控制器验收，建立不可变的回读夹具并释放租约。将 `WUKONG_REMOTE_WORKER_REBOOT_TEST` 指向 JSON 配置，其中包括相同的固定指纹托管 SSH `config`、预期 `manifest_sha256`，以及全新的绝对 `ready`、`resume`、`output` 路径；这三个文件起初都不得存在。
+
+```powershell
+$env:WUKONG_REMOTE_WORKER_REBOOT_TEST = (Resolve-Path .\remote-reboot-profile.json)
+cargo test --locked --lib remote_windows_worker_reboot_binding_acceptance -- --ignored --nocapture
+```
+
+测试在认证并保留租约后创建 `ready`，随后最多等待六分钟。操作者通过独立固定指纹的管理连接，仅重启专用 VM，确认服务自动就绪并生成新的 schema4 资格回执后，创建 `resume`。测试本身不执行重启、安装或卸载。它在写入前拒绝控制器旧绑定，检查系统启动身份变化及持久 epoch 增长，并以全新持租约连接验证已有回读夹具和写入哨兵不存在。`output` 仅包含身份/计数观察，不含租约令牌或密钥内容。用户提供的离线 Windows 10 VM 于 2026-11-13 在 worker 源码 `7b6c4c0` 上通过，包含管理 SSH/原生服务自动启动；原始回执和转录另行完成哈希验证。该结果覆盖固定可信资源及重启绑定，通用分析资源恢复与完整离线生命周期仍未完成。

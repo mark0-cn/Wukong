@@ -20,6 +20,7 @@ fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Resu
                 role,
                 task: "investigate a trusted fixture".into(),
                 scope: scope.into(),
+                environment_id: None,
                 skills: vec![],
                 inherit_context: false,
                 wait_for_predecessors: vec![],
@@ -30,6 +31,12 @@ fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Resu
         .agent)
 }
 fn fixture(path: &Path) -> Result<(Store, Coordinator, RunRecord, AgentSnapshot)> {
+    fixture_with_config(path, &AppConfig::default())
+}
+fn fixture_with_config(
+    path: &Path,
+    config: &AppConfig,
+) -> Result<(Store, Coordinator, RunRecord, AgentSnapshot)> {
     let store = Store::open(path.join("state"))?;
     let coordinator = Coordinator::new(store.clone());
     let target = path.join("sample.bin");
@@ -37,12 +44,36 @@ fn fixture(path: &Path) -> Result<(Store, Coordinator, RunRecord, AgentSnapshot)
         &target,
         b"fixture parser string\0another printable string\0",
     )?;
-    let run = coordinator.create_run(&target, "inspect", Budget::default(), json!({}))?;
+    let run = coordinator.create_run(
+        &target,
+        "inspect",
+        Budget::default(),
+        serde_json::to_value(config)?,
+    )?;
     let agent = child(&coordinator, &run.root_id, Role::Analyst, "recon")?;
     Ok((store, coordinator, run, agent))
 }
 fn result(outcome: &ToolOutcome) -> &Value {
     &outcome.value["result"]
+}
+fn worker_config(path: &Path) -> AppConfig {
+    AppConfig {
+        default_environment: Some("fixture".into()),
+        environments: std::collections::BTreeMap::from([(
+            "fixture".into(),
+            wukong::environments::EnvironmentConfig {
+                name: "Trusted fixture".into(),
+                platform: wukong::environments::Platform::current(),
+                installation_id: None,
+                runtime: wukong::runtime::RuntimeConfig {
+                    backend: RuntimeBackend::TrustedLocal,
+                    state_dir: path.join("worker"),
+                    ..Default::default()
+                },
+            },
+        )]),
+        ..Default::default()
+    }
 }
 
 #[tokio::test]
@@ -233,6 +264,7 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
         role: Role::Analyst,
         task: "investigate the parser boundary".into(),
         scope: "parser boundary".into(),
+        environment_id: None,
         skills: vec!["reverse".into(), "hunter".into(), "crash".into()],
         inherit_context: false,
         wait_for_predecessors: vec![],
@@ -398,8 +430,9 @@ async fn exec_command_routes_to_the_runtime_instead_of_unknown_tool() -> Result<
 #[tokio::test]
 async fn poc_verify_budget_enforces_closure_after_two_jobs() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let (store, coordinator, run, agent) = fixture(temp.path())?;
-    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let config = worker_config(temp.path());
+    let (store, coordinator, run, agent) = fixture_with_config(temp.path(), &config)?;
+    let service = ToolService::new(config, store.clone()).await?;
     let verifier = child(&coordinator, &run.root_id, Role::Verifier, "closure check")?;
     let evidence = store.artifact(
         &run.id,
@@ -426,7 +459,7 @@ async fn poc_verify_budget_enforces_closure_after_two_jobs() -> Result<()> {
             "job",
             &format!("closure-job-{index}"),
             &run.id,
-            &json!({"id":format!("closure-job-{index}"),"run_id":run.id,"agent_id":verifier.id,"worker_id":"fixture","owner_generation":verifier.generation,"call_id":format!("closure-call-{index}"),"worker_request_id":format!("request-{index}"),"parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"tool_name":"poc_verify","finding_id":finding_id,"status":{"job_id":format!("closure-job-{index}"),"state":"completed"}}),
+            &json!({"id":format!("closure-job-{index}"),"run_id":run.id,"agent_id":verifier.id,"worker_id":"fixture","worker_resource_id":format!("worker-closure-{index}"),"owner_generation":verifier.generation,"call_id":format!("closure-call-{index}"),"worker_request_id":format!("request-{index}"),"parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),"tool_name":"poc_verify","finding_id":finding_id,"status":{"job_id":format!("closure-job-{index}"),"state":"completed"}}),
         )?;
     }
     let third = service
@@ -591,10 +624,8 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
 #[tokio::test]
 async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let (store, _coordinator, run, owner) = fixture(temp.path())?;
-    let mut config = AppConfig::default();
-    config.runtime.backend = RuntimeBackend::TrustedLocal;
-    config.runtime.state_dir = temp.path().join("worker");
+    let config = worker_config(temp.path());
+    let (store, _coordinator, run, owner) = fixture_with_config(temp.path(), &config)?;
     let service = ToolService::new(config, store.clone()).await?;
     let program = "import sys\nfor line in sys.stdin:\n print('echo:'+line.strip(),flush=True)\n";
     let started = service
@@ -636,7 +667,7 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
         "interact_session",
         "ghost-session",
         &run.id,
-        &json!({"id":"ghost-session","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}),
+        &json!({"id":"ghost-session","worker_resource_id":"ghost-session","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}),
     )?;
     let ghost = service
         .execute(
@@ -650,7 +681,7 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
     let record: Value = store.require("interact_session", "ghost-session")?;
     assert_eq!(record["state"], "lost");
     store.put("debug_session", "ghost-debug", &run.id,
-        &json!({"id":"ghost-debug","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}))?;
+        &json!({"id":"ghost-debug","worker_resource_id":"ghost-debug","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}))?;
     let debug = service
         .execute(
             &owner.id,
@@ -671,12 +702,10 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
 #[tokio::test]
 async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let (store, coordinator, run, owner) = fixture(temp.path())?;
+    let config = worker_config(temp.path());
+    let (store, coordinator, run, owner) = fixture_with_config(temp.path(), &config)?;
     let cleaner = child(&coordinator, &run.root_id, Role::Analyst, "session cleanup")?;
-    let mut config = AppConfig::default();
-    config.runtime.backend = RuntimeBackend::TrustedLocal;
-    config.runtime.state_dir = temp.path().join("worker");
-    let runtime_config = config.runtime.clone();
+    let runtime_config = config.environments["fixture"].runtime.clone();
     let service = ToolService::new(config, store.clone()).await?;
     let program = "import sys\nfor line in sys.stdin:\n print('echo:'+line.strip(),flush=True)\n";
     let started = service
@@ -895,8 +924,8 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, _run, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    // Both spellings pass schema validation and reach dispatch, which then
-    // reports the unstaged worker target instead of a schema error.
+    // Both spellings pass schema validation and reach backend admission,
+    // which reports the disabled runtime instead of a schema error.
     for (index, find) in [
         json!(["0x401000"]),
         json!([4198400]),
@@ -916,7 +945,7 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
         assert!(outcome.is_error);
         let error = result(&outcome)["error"].as_str().unwrap().to_owned();
         assert!(!error.contains("expected an integer"), "{error}");
-        assert!(error.contains("worker_file"), "{error}");
+        assert!(error.contains("runtime is disabled"), "{error}");
     }
     // Malformed spellings still fail schema validation before dispatch.
     let bad = service
@@ -959,7 +988,7 @@ async fn angr_addresses_accept_integers_and_hex_strings() -> Result<()> {
         result(&empty)["error"]
             .as_str()
             .unwrap()
-            .contains("at least one find address")
+            .contains("invalid tool arguments")
     );
     service.close().await;
     Ok(())
@@ -1416,19 +1445,21 @@ async fn docker_independent_verification_uses_real_trials_and_limits_impact() ->
     let store = Store::open(temp.path().join("state"))?;
     let coordinator = Coordinator::new(store.clone());
     let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/build/benign");
+    let mut config = worker_config(temp.path());
+    let environment = config.environments.get_mut("fixture").unwrap();
+    environment.platform = wukong::environments::Platform::Linux;
+    environment.runtime.backend = RuntimeBackend::Docker;
+    environment.runtime.docker_container = Some(container);
+    environment.runtime.remote_state_dir = format!("/tmp/{}", id("wukong_tool_test"));
+    config.tools.timeout_seconds = 180;
     let run = coordinator.create_run(
         &target,
         "verify trusted fixture behavior",
         Budget::default(),
-        json!({}),
+        serde_json::to_value(&config)?,
     )?;
     let producer = child(&coordinator, &run.root_id, Role::Analyst, "producer")?;
     let verifier = child(&coordinator, &run.root_id, Role::Verifier, "verifier")?;
-    let mut config = AppConfig::default();
-    config.runtime.backend = RuntimeBackend::Docker;
-    config.runtime.docker_container = Some(container);
-    config.runtime.remote_state_dir = format!("/tmp/{}", id("wukong_tool_test"));
-    config.tools.timeout_seconds = 180;
     let service = ToolService::new(config, store.clone()).await?;
     let staged = service
         .execute(&producer.id, "stage", "stage_target", json!({}))
@@ -1737,8 +1768,13 @@ async fn mitigation_profiles_separate_static_unknown_runtime_and_session_ownersh
     }
     elf[20..24].copy_from_slice(&1u32.to_le_bytes());
     fs::write(&target, elf)?;
-    let run =
-        coordinator.create_run(&target, "inspect protections", Budget::default(), json!({}))?;
+    let config = worker_config(temp.path());
+    let run = coordinator.create_run(
+        &target,
+        "inspect protections",
+        Budget::default(),
+        serde_json::to_value(&config)?,
+    )?;
     let owner = child(
         &coordinator,
         &run.root_id,
@@ -1751,9 +1787,6 @@ async fn mitigation_profiles_separate_static_unknown_runtime_and_session_ownersh
         Role::Analyst,
         "independent reader",
     )?;
-    let mut config = AppConfig::default();
-    config.runtime.backend = RuntimeBackend::TrustedLocal;
-    config.runtime.state_dir = temp.path().join("worker");
     let service = ToolService::new(config, store).await?;
     let staged = service
         .execute(&owner.id, "mitigation:stage", "stage_target", json!({}))

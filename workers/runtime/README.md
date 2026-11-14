@@ -4,17 +4,25 @@
 
 English · [简体中文](README.zh-CN.md)
 
+The Python process manager in this guide serves Linux workers and trusted development fixtures. Managed Windows uses one native worker for identity, capabilities, leases, uploads and execution; Python runs isolated analysis on demand. See the [Windows component guide](../windows/README.md) for current ownership and capacity limits.
+
 The Rust controller never runs an analysed target by default. Choose a persistent
 Docker/VM/SSH worker. `trusted_local` explicitly runs trusted fixtures on the host
 and is only suitable for development tests. The Python bridge manages processes;
 the container or VM supplies isolation.
 
-Install the bridge dependencies in the Python environment used by the worker
-(or `runtime.python` for trusted local tests):
+For Linux workers and trusted development fixtures, install bridge dependencies in the Python environment used by the worker
+(or `environments.<id>.runtime.python` for trusted local tests):
 
 ```sh
 python -m pip install -r workers/runtime/requirements.txt
 ```
+
+Managed Windows VMs require the complete offline package, including Python and all dependencies; do not fetch packages or run online pip installation in the VM. The [package contract](../package/README.md) and [Windows components](../windows/README.md) describe the current implementation and remaining installer/production acceptance work.
+
+Bridge startup disables Python bytecode writes before importing worker modules, including in new daemon/job-supervisor processes. This keeps signed deployment files unchanged; writable state remains in the configured state directory. Launch other Python entry points from an immutable deployment with `-B` as well.
+
+Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before replacement, and failed writes clean up their temporary files. The library handles Windows write-through moves and POSIX parent-directory synchronization. Only transient Windows access/sharing violations retry, at most five times; a failed reservation never authorizes execution. Corrupted existing operation records remain errors and are never silently reset. The offline package pins the published 1.4.0 universal wheel; 1.4.1 changes only the runtime module's version and API docstring. Failure-injection checks do not establish power-loss or current-source VM reboot acceptance.
 
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
@@ -31,9 +39,9 @@ $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 & $docker build -f workers/Dockerfile -t wukong-worker:0.1 .
 & $docker volume create wukong-worker-state
 & $docker run -d --name wukong-worker --network none --cap-drop ALL `
-  --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
+  --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
   --security-opt no-new-privileges --security-opt seccomp=unconfined `
-  --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g `
+  --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g,exec `
   --mount type=volume,source=wukong-worker-state,target=/state wukong-worker:0.1
 ```
 
@@ -49,17 +57,21 @@ Ghidra 12.2), and the official Ghidra 12.2 release with a checked SHA256. Use
 `--build-arg INSTALL_GHIDRA=0` to omit Ghidra. To pin the base image, set `AFL_IMAGE`
 to an upstream image digest after reviewing `docker image inspect` output. Full reproducibility remains limited by incompletely pinned transitive dependencies.
 
-The `runtime` section of the application configuration is:
+Register a named environment in the application configuration:
 
 ```toml
-[runtime]
+default_environment = "linux"
+[environments.linux]
+name = "Linux analysis"
+platform = "linux"
+[environments.linux.runtime]
 backend = "docker"
 docker_container = "wukong-worker"
 # Optional: auto-detected on Windows Docker Desktop, otherwise "docker".
 # docker_executable = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 remote_bridge_path = "/opt/wukong/runtime/bridge.py"
 remote_state_dir = "/state"
-request_timeout_secs = 120
+request_timeout_secs = 300
 ```
 
 <a id="ssh-或-vm"></a>
@@ -75,7 +87,11 @@ sudo automatically; use a suitably configured isolated guest account. Key based
 SSH must already work; the transport uses `BatchMode=yes`.
 
 ```toml
-[runtime]
+default_environment = "linux"
+[environments.linux]
+name = "Linux VM"
+platform = "linux"
+[environments.linux.runtime]
 backend = "ssh"
 ssh_host = "root@analysis-vm"
 remote_bridge_path = "/opt/wukong/runtime/bridge.py"
@@ -86,11 +102,17 @@ Model credentials are removed from child environments. Job environment overrides
 are restricted to AFL/QEMU and sanitizer settings. State directories must not be
 shared between mutually untrusted users.
 
+Execution, replay, debugger and launch-description inputs use the public-artifact path policy. Isolated file/directory staging cannot publish transport endpoints, job descriptors or other private worker metadata as program inputs. Uploaded payloads under `files/` can use names such as `status.json`; confinement is checked after resolving aliases. Directory staging validates all members before copying any contents.
+
+The internal launch resolver can stage its prepared runtime derivative outside the state directory only after checking the fixed cache path, ownership/permissions and exact executed-file hash. This exception is not an RPC option and cannot authorize metadata inputs; original and executed target identities remain separate.
+
+In isolated GDB sessions, raw MI commands pass an operation-specific argument grammar before reaching the privileged debugger. Expressions support simple registers/symbols, dereferences, constant indexes and arithmetic/bitwise/comparison operators. Function calls (including host convenience functions), parentheses/casts, assignments and increments are rejected. MI strings use supported JSON escapes and are reserialized; octal/hex escapes and unchecked options are rejected. Dump inspection applies the same argument checks in addition to its read-only operation allowlist. Prefer typed `debug.inspect` / `debug.control` for structured requests; this policy does not make GDB itself a security sandbox.
+
 Production Linux metadata is owned by the trusted daemon; target/fuzz processes
 drop supplementary groups and run under separate allocated UIDs. Each experiment
 has read-only staged files and its own writable directory. GDB keeps its trusted
 owner and launches the inferior with the experiment UID. CHOWN/SETUID/SETGID are
-needed for this separation; SYS_PTRACE and DAC_OVERRIDE are needed by the trusted
+needed for this separation; KILL lets the trusted supervisor cancel process groups owned by experiment UIDs. SYS_PTRACE and DAC_OVERRIDE are needed by the trusted
 debugger to read/write inferior memory through procfs. These capabilities are not
 retained by target processes. The read-only container filesystem, private state
 volume, disabled network and VM/container boundary remain separate controls.
@@ -103,10 +125,12 @@ volume, disabled network and VM/container boundary remain separate controls.
 JSON-RPC 2.0 requests and responses are one JSON object per stdio line. Error
 responses identify unavailable tools; `doctor` returns actual capabilities,
 executable paths and versions instead of claiming missing backends are usable.
-Requests/responses are capped at 48 MiB. Uploaded files are capped at 32 MiB.
+Requests/responses are capped at 48 MiB. Single-frame file uploads are capped at 32 MiB; resumable transfers support up to 16 GiB using chunks of at most 1 MiB. See [analysis environments](../../docs/design/cross-platform-environments.md).
 The controller uses jsonrpsee over bounded stdio frames. RPC errors preserve a
 healthy connection; malformed/oversized frames and timeouts close it. The next
 call reconnects, without automatically replaying the failed request.
+
+Relay-managed daemon startup uses the existing `filelock` dependency and a kernel-backed `startup.guard` lock. The lock is held through readiness; competing relays recheck the endpoint after acquiring it. The daemon independently holds `daemon.guard` throughout initialization and service, so a crashed starter cannot authorize a competing daemon. Process exit releases ownership without deleting a timestamp-based stale lock. All relays sharing a state directory must use the same worker deployment. Startup allows 30 seconds for initialization, including the Windows boot-identity query. Readiness probes have a separate one-second response timeout; a child that exits before readiness reports its exit status and at most the final 2048 bytes of the local `daemon.log`.
 
 | Method | Parameters / result |
 | --- | --- |
@@ -123,7 +147,7 @@ call reconnects, without automatically replaying the failed request.
 | `debug.command` | `session_id`, one GDB/MI `command`, optional `timeout_secs` |
 | `debug.events`, `debug.close` | `session_id`; bounded async records / stop session |
 | `interact.start` | `argv`, optional `env`; a persistent interactive process with a worker-owned `session_id` |
-| `interact.write` | `session_id`, `data_base64`, optional `read_timeout_secs`; writes stdin and returns newly produced bounded output |
+| `interact.write` | `session_id`, `data_base64`, optional `read_timeout_secs`; writes stdin and returns newly produced bounded output. After leader exit, waits for stdout EOF up to the read deadline; `timed_out` can remain true while final pipe output is pending, and `data_sent=false` means no new write was attempted. |
 | `interact.close` | `session_id`; terminate the session's process tree |
 | `angr.solve` | `target`, `find`, optional `avoid`/`stdin_length`/`max_steps`/`timeout_secs`/`printable_only`; a bounded symbolic-execution job whose result JSON carries `input_base64` and exploration stats |
 | `crash.replay` | `target`, `input`, `args` (`@@` input substitution), timeout; job |
@@ -155,9 +179,26 @@ PoC verification uses a fresh working directory and read-only input copy per
 trial. `job.status.result` records `passed`, `attempts`, `successes`, raw per-trial
 exit status/signal, input and target SHA256, producer/verifier IDs, environment,
 and the observed stage (`crash` or `behavior`). Repeated native crashes do not
-prove arbitrary read/write or code execution. Crash minimization preserves the
-signal/exception signature; independent root-cause confirmation is still needed
-to distinguish two bugs producing the same signal.
+prove arbitrary read/write or code execution. Crash minimization requires the
+original module-content/location signature by default. Explicit
+`allow_signal_only` permits weaker signal/exception equivalence and labels it as
+such; independent root-cause confirmation is still needed.
+
+Input reduction uses pinned Picire 26.11 rather than a local delta-debugging
+implementation. Existing replay owns every candidate execution and its evidence.
+The original baseline consumes one attempt; Picire's reassertion of an already
+accepted candidate reuses that trial. Empty input is checked explicitly. A
+timeout, cancellation, exhausted attempt budget or unresolved candidate retains
+only a previously verified result, with `complete: false` and `stop_reason`.
+Unexpected evaluation errors fail the job. `reducer: "picire"` identifies the
+algorithm. Doctor advertises minimization only when Picire and its dependencies
+are present. The offline package pins all three pure-Python wheels and their
+original license files. The native Windows route uses the Rust `fixture3-ddmin` library and WinDbg MCP
+for contained trials; local checks passed and installed-VM acceptance remains
+pending. Remove the
+previously ignored `trials` and `expected` fields from minimization calls.
+
+On 2026-11-14, actual isolated Linux/GDB acceptance passed with Picire 26.11. Both the static fixture and a dynamically linked fixture faulting inside its admitted main image reduced 23 bytes to `BAD` in 22 attempts with `complete: true` and `location_and_frames`. The dynamic integration also passed typed debugger checks, replay and three verification trials; both isolated LaunchSpec input cases passed. The acceptance image was `sha256:0887afcc06e9ae0df50bd2f7c4b560a9faa7accd032c5c72514b2323ef53a2e6`; the dynamic report SHA256 was `96c4426c5690179db45f4173eff98b722366712593cd00a822ee34be19886e38`. A separate `abort()` fixture correctly refused strong reduction when its PC belonged to unadmitted libc; a module path does not establish a content hash. The fixtures do not qualify arbitrary library identity or AFL fuzzing.
 
 `ghidra.query` accepts the same `query` object as the Rust adapter:
 `{"operation":"functions","pattern":"main","offset":0,"limit":100}`,

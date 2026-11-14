@@ -40,6 +40,9 @@ impl Coordinator {
                 role: Role::Root,
                 task: task.to_owned(),
                 scope: "assessment".into(),
+                environment_id: run.config["default_environment"]
+                    .as_str()
+                    .map(str::to_owned),
                 contract: TaskContract {
                     objective: task.into(),
                     ..Default::default()
