@@ -369,10 +369,13 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
                 .is_err(),
             "active native job did not block lease release"
         );
-        let other = bound.call("job.start", json!({"argv":[uploaded["path"],"--echo"],"request_id":format!("blocked-{architecture}")})).await.err().context("second native resource started")?;
+        let queued_start = bound.call("job.start", json!({"argv":[uploaded["path"],"--echo"],"request_id":format!("queued-{architecture}")}));
+        tokio::pin!(queued_start);
         ensure!(
-            other.to_string().contains("active") || other.to_string().contains("owned"),
-            "second resource failed for an unrelated reason: {other:#}"
+            tokio::time::timeout(Duration::from_millis(500), &mut queued_start)
+                .await
+                .is_err(),
+            "second resource did not wait for the native capacity slot"
         );
         let renewed: EnvironmentLease = serde_json::from_value(
             client
@@ -390,6 +393,16 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
         ensure!(
             cancelled["state"] == "cancelled" && cancelled["result"]["jobs_empty"] == true,
             "native cancellation did not clean up: {cancelled}"
+        );
+        let queued = queued_start.await?;
+        let queued = terminal(
+            &bound,
+            queued["job_id"].as_str().context("queued job ID absent")?,
+        )
+        .await?;
+        ensure!(
+            queued["state"] == "completed" && queued["result"]["jobs_empty"] == true,
+            "queued start did not complete after owned cancellation: {queued}"
         );
         let cleanup = if profile.cleanup_adversary {
             let started = bound.call("job.start", json!({"argv":[uploaded["path"],"--cleanup-adversary"],"timeout_secs":10,"request_id":format!("cleanup-{architecture}")})).await?;
@@ -471,7 +484,7 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
         } else {
             Value::Null
         };
-        evidence.push(json!({"architecture":architecture,"input":uploaded,"echo":status,"originals":originals,"deadline":timed_out,"cancelled":cancelled,"cleanup_adversary":cleanup,"argument_files":arguments}));
+        evidence.push(json!({"architecture":architecture,"input":uploaded,"echo":status,"originals":originals,"deadline":timed_out,"cancelled":cancelled,"queued":queued,"cleanup_adversary":cleanup,"argument_files":arguments}));
         final_start = request;
         final_id = id.to_owned();
     }
