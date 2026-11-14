@@ -62,6 +62,6 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 
 原生构建身份包含共用协议 crate、原生/Python 源码、锁定输入和构建脚本。组装时验证该身份并保留依赖许可证。登记绑定控制器签名者和安装身份；SSH 独立绑定 Worker 主机密钥。连接与任务绑定见[跨平台环境指南](../../docs/design/cross-platform-environments.zh-CN.md)，实际安装后的进程/调试器/恢复用例见[Worker 验收指南](../tests/README.zh-CN.md)。
 
-单元测试验证契约和所有权不变量，不能证明 VM 隔离或真实模型效果。安装验收必须匹配准确的签名源码/包，并包含正常 Wukong 工具发现与分发路径。[历史记录](VALIDATION-HISTORY.zh-CN.md)保留旧提交、哈希、失败和限制，包括未完成的维护及对抗性验收；这些记录不能为当前重构提供验收证明。内核调试、自动创建 VM/快照和 GUI 目标交互仍不属于此 Worker 契约。
+单元测试验证契约和所有权不变量，不能证明 VM 隔离或真实模型效果。安装验收必须匹配准确的签名源码/包，并包含正常 Wukong 工具发现与分发路径。[2026-11-15 v3 验收记录](../../docs/history/validation/2026-11-15-execution-contract-v3.zh-CN.md)将新安装实例、x64/x86 执行与调试、重启恢复及完整 Wukong 流程绑定到准确源码/包和原始证据。较早的[历史记录](VALIDATION-HISTORY.zh-CN.md)保留各自的提交、失败和限制，包括未完成的维护及对抗性验收；正常路径验收不会取代这些限制。内核调试、自动创建 VM/快照和 GUI 目标交互仍不属于此 Worker 契约。
 
 Windows Python 源码由 `python-components.json` 选择：独立[分析包](../analysis/README.zh-CN.md)与 `python/selftest.py`。辅助程序仅需 CPython 标准库；`python/requirements.txt` 与 Linux bridge 依赖分开。离线打包不安装或复制 Linux Worker 模块。签名源码身份包含分析包与组件清单。

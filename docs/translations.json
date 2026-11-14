@@ -77,6 +77,10 @@
       "en": "f779acf4567947ae4d61b13e77c585cbbaf5d13e15337773661797e9a0ba6502",
       "zh-CN": "ec336fceccf444883a143ffdbd299f726b012b30981115a6d114e21dd04d5d72"
     },
+    "docs/history/validation/2026-11-15-execution-contract-v3.md": {
+      "en": "7c7430711f62adac295c6403efb32b81fa8a357fababbde9880e1a20fe048709",
+      "zh-CN": "03845e27baca57c44dd813f252179f07b5d649198b6fbbc7cb071e1aaa5feb22"
+    },
     "docs/reference/pwn-knowledge.md": {
       "en": "41f72d7e5ffa59a65df7e10a76610f05ddf195bf2f5f3c43f3c3c1f469a2a1ad",
       "zh-CN": "5ee3ede0ee23e57641b92de1a5315c8082e602e2f5037dc58a10f89de1aed524"
@@ -162,8 +166,8 @@
       "zh-CN": "638d42ddb65f704df86dd7cc2c24b6a945990a66c3d86c83190a96db4fd9adcf"
     },
     "workers/windows/README.md": {
-      "en": "49e5c1f1e438261539034d21f5a44367326a32bc5769ce6f2d176facf663cb2c",
-      "zh-CN": "dc9f31cb4923a84f1c3df369f2c1e4bbf817a36f47a1921af205b9c0f8fc3345"
+      "en": "8067fadc4852daa001e407075483c89f6627d4db26799b8a4500234c55ee3b8f",
+      "zh-CN": "92768e0cb8c5b4d2e9e8151ea3489500699208fa155185c2097d160086fffeb6"
     },
     "workers/windows/VALIDATION-HISTORY.md": {
       "en": "0d0397e04441b89da389edcc895fb469ebce0fdea4521dea4315f2fd7d863772",
