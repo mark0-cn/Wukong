@@ -18,6 +18,11 @@ FIXTURE = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+// Keep the fault PC in the admitted fixture image. abort() faults in libc,
+// whose path alone cannot establish the content identity required by reduction.
+__attribute__((noinline)) static void fixture_crash(void) {
+    *(volatile unsigned char *)1 = 0x42;
+}
 int main(int argc, char **argv) {
     if (argc < 2) { volatile unsigned counter = 0; for (;;) counter++; }
     FILE *file = fopen(argv[1], "rb");
@@ -25,7 +30,7 @@ int main(int argc, char **argv) {
     unsigned char input[128] = {0};
     size_t n = fread(input, 1, sizeof(input), file);
     fclose(file);
-    if (n >= 3 && input[0] == 'B' && input[1] == 'A' && input[2] == 'D') abort();
+    if (n >= 3 && input[0] == 'B' && input[1] == 'A' && input[2] == 'D') fixture_crash();
     puts("fixture-ok");
     return 0;
 }

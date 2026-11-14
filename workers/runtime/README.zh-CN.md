@@ -128,6 +128,8 @@ PoC 每次使用新工作目录和只读输入副本。`job.status.result` 保�
 
 输入缩减使用固定版本 Picire 26.11，替代本地手写 delta-debugging 算法。现有回放模块负责每个候选的执行和证据。原始基线占一次尝试；Picire 对已接受候选的再次断言复用该试验。空输入会被显式检查。超时、取消、尝试预算耗尽或候选结果无法确定时，只保留之前已验证的结果，返回 `complete: false` 和 `stop_reason`。意外评估错误使 job 失败。`reducer: "picire"` 标明所用算法。Doctor 仅在 Picire 及其依赖均存在时声明最小化能力。离线包固定三个纯 Python wheel 及其原始许可证文件。Windows 原生通路使用 Rust `fixture3-ddmin` 库和 WinDbg MCP 进行受限试验；本地检查已通过，已安装 VM 验收仍待完成。最小化调用须移除此前被忽略的 `trials`、`expected` 字段。
 
+2026-11-14，Picire 26.11 通过真实隔离 Linux/GDB 验收。静态夹具及在已准入主映像内故障的动态链接夹具，都在 22 次尝试内将 23 字节缩至 `BAD`，并返回 `complete: true` 和 `location_and_frames`。动态集成还通过类型化调试检查、回放及三次验证试验；两种隔离 LaunchSpec 输入用例均通过。验收镜像为 `sha256:0887afcc06e9ae0df50bd2f7c4b560a9faa7accd032c5c72514b2323ef53a2e6`；动态报告 SHA256 为 `96c4426c5690179db45f4173eff98b722366712593cd00a822ee34be19886e38`。另一个 `abort()` 夹具的 PC 属于未准入 libc，正确拒绝了强等价性缩减；模块路径不能证明内容哈希。这些夹具不代表任意库身份或 AFL 模糊测试已通过验收。
+
 `ghidra.query` 与 Rust 使用相同 query：`{"operation":"functions","pattern":"main","offset":0,"limit":100}`、`{"operation":"decompile","address":1234}`、`{"operation":"xrefs","address":1234,"direction":"both","limit":100}`。地址为模块相对。核对上传 SHA256，缓存绑定目标、Ghidra 版本/properties、launcher、bridge、分析设置。项目锁内复用导入程序；清理失主锁前核对进程。较长导入须将控制端请求超时设为大于查询超时，传输最多 300 秒。
 
 <a id="acceptance-checks"></a>

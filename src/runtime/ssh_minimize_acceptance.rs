@@ -54,7 +54,8 @@ async fn terminal(
         if matches!(
             status["state"].as_str(),
             Some("completed" | "failed" | "cancelled" | "lost")
-        ) {
+        ) && status["cleanup_pending"] != true
+        {
             return Ok(status);
         }
         ensure!(
@@ -74,6 +75,24 @@ async fn evidence(
         .as_str()
         .context("minimization job missing")?;
     let result = &status["result"];
+    if status["state"] == "lost" {
+        let selector = result["recovery_artifact"]
+            .as_str()
+            .context("lost minimization has no recovery evidence")?;
+        let (artifact, raw) = original(client, &format!("native-results/{id}/{selector}")).await?;
+        let receipt: Value = serde_json::from_slice(&raw)?;
+        ensure!(
+            artifact["sha256"] == result["recovery_receipt_sha256"]
+                && receipt["scope"] == "owned_resource_recovery"
+                && receipt["resource_id"] == id
+                && receipt["owner"] == status["native_owner"]
+                && receipt["jobs_empty"] == true
+                && receipt["profiles_removed"] == true
+                && receipt["scratch_removed"] == true,
+            "lost minimization lacks verified owned cleanup"
+        );
+        return Ok(json!({"artifact":artifact,"receipt":receipt,"outcome":"unknown"}));
+    }
     let (artifact, raw) = original(client, &format!("native-results/{id}/receipt")).await?;
     ensure!(
         artifact["sha256"] == result["native_receipt_sha256"],
@@ -221,6 +240,7 @@ async fn remote_installed_windows_worker_minimize_acceptance() -> Result<()> {
         count: 0,
     };
     let mut cases = Vec::new();
+    let mut failures = Vec::new();
     for (architecture, probe) in &profile.probes {
         let base = format!("minimize-fixture/{architecture}");
         let target = upload(&bound, &format!("{base}/target.exe"), &bytes(probe)?, true).await?;
@@ -296,19 +316,21 @@ async fn remote_installed_windows_worker_minimize_acceptance() -> Result<()> {
             }
             let status = terminal(&bound, &client, &acquire, &lease, job).await?;
             let failed = matches!(case, "negative" | "unresolved" | "deadline");
-            ensure!(
-                status["state"]
-                    == if case == "cancel" {
-                        "cancelled"
-                    } else if failed {
-                        "failed"
-                    } else {
-                        "completed"
-                    },
-                "{architecture}/{case} minimization outcome differs: {status}"
-            );
+            let expected_state = if case == "cancel" {
+                "cancelled"
+            } else if failed {
+                "failed"
+            } else {
+                "completed"
+            };
+            if status["state"] != expected_state {
+                failures.push(json!({"architecture":architecture,"case":case,
+                    "error":"minimization outcome differs","expected_state":expected_state,
+                    "state":status["state"]}));
+            }
+            // Only verified terminal cleanup permits continuing the batch.
             let proof = evidence(&bound, &status, &target, source).await?;
-            if !failed && case != "cancel" {
+            if !failed && case != "cancel" && status["state"] == "completed" {
                 let expected: &[u8] = match case {
                     "budget" => source,
                     "empty" => &[],
@@ -316,17 +338,18 @@ async fn remote_installed_windows_worker_minimize_acceptance() -> Result<()> {
                     _ => &[0xa5],
                 };
                 let output: Vec<u8> = serde_json::from_value(proof["output"][1].clone())?;
-                ensure!(
-                    output == expected
-                        && status["result"]["complete"] == (case != "budget")
-                        && status["result"]["signature_strength"]
-                            == if case == "weak" {
-                                "signal_only"
-                            } else {
-                                "location_and_frames"
-                            },
-                    "{case} reduced bytes, completion or equivalence differ"
-                );
+                let expected_strength = if case == "weak" {
+                    "signal_only"
+                } else {
+                    "location_and_frames"
+                };
+                if output != expected
+                    || status["result"]["complete"] != (case != "budget")
+                    || status["result"]["signature_strength"] != expected_strength
+                {
+                    failures.push(json!({"architecture":architecture,"case":case,
+                        "error":"reduced bytes, completion or equivalence differ"}));
+                }
             }
             ensure!(
                 calls.call("input.minimize", request.clone()).await? == status,
@@ -356,10 +379,15 @@ async fn remote_installed_windows_worker_minimize_acceptance() -> Result<()> {
     client.close().await?;
     publish(
         &profile.output,
-        &json!({"passed":true,"scope":"installed_native_input_minimization",
+        &json!({"passed":failures.is_empty(),"failures":failures,"scope":"installed_native_input_minimization",
         "identity":client.identity(),"owner":acquire,"epoch":lease.epoch,"calls":calls.count,
         "cases":cases,"inventory":owned,"production_execution":false}),
-    )
+    )?;
+    ensure!(
+        failures.is_empty(),
+        "minimization batch failed: {failures:?}"
+    );
+    Ok(())
 }
 
 #[derive(Deserialize)]

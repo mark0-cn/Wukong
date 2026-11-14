@@ -196,6 +196,8 @@ for contained trials; local checks passed and installed-VM acceptance remains
 pending. Remove the
 previously ignored `trials` and `expected` fields from minimization calls.
 
+On 2026-11-14, actual isolated Linux/GDB acceptance passed with Picire 26.11. Both the static fixture and a dynamically linked fixture faulting inside its admitted main image reduced 23 bytes to `BAD` in 22 attempts with `complete: true` and `location_and_frames`. The dynamic integration also passed typed debugger checks, replay and three verification trials; both isolated LaunchSpec input cases passed. The acceptance image was `sha256:0887afcc06e9ae0df50bd2f7c4b560a9faa7accd032c5c72514b2323ef53a2e6`; the dynamic report SHA256 was `96c4426c5690179db45f4173eff98b722366712593cd00a822ee34be19886e38`. A separate `abort()` fixture correctly refused strong reduction when its PC belonged to unadmitted libc; a module path does not establish a content hash. The fixtures do not qualify arbitrary library identity or AFL fuzzing.
+
 `ghidra.query` accepts the same `query` object as the Rust adapter:
 `{"operation":"functions","pattern":"main","offset":0,"limit":100}`,
 `{"operation":"decompile","address":1234}`, or
