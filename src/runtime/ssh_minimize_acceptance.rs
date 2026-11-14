@@ -361,3 +361,94 @@ async fn remote_installed_windows_worker_minimize_acceptance() -> Result<()> {
         "cases":cases,"inventory":owned,"production_execution":false}),
     )
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Recovery {
+    config: RuntimeConfig,
+    previous: Probe,
+    output: PathBuf,
+}
+
+#[tokio::test]
+#[ignore = "requires completed native minimization and an independently observed dedicated VM service restart"]
+async fn remote_native_completed_minimize_recovery_acceptance() -> Result<()> {
+    let profile: Recovery = read_fixture_profile("WUKONG_REMOTE_WORKER_MINIMIZE_RECOVERY_TEST")?;
+    enrolled_fixture_address(&profile.config, false)?;
+    ensure!(
+        profile.output.is_absolute() && !profile.output.try_exists()?,
+        "new minimization recovery report required"
+    );
+    let prior: Value = serde_json::from_slice(&bytes(&profile.previous)?)?;
+    ensure!(
+        prior["passed"] == true && prior["scope"] == "installed_native_input_minimization",
+        "prior minimization proof differs"
+    );
+    let cases = prior["cases"]
+        .as_array()
+        .context("minimization cases absent")?;
+    ensure!(cases.len() == 20, "prior minimization coverage differs");
+    let client = RuntimeClient::connect(profile.config).await?;
+    ensure!(
+        serde_json::to_value(client.identity())? == prior["identity"],
+        "minimization restart changed worker binding"
+    );
+    let owner = &prior["owner"];
+    let lease: EnvironmentLease = serde_json::from_value(
+        client
+            .call("environment.lease.acquire", owner.clone())
+            .await?,
+    )?;
+    ensure!(
+        Some(lease.epoch) > prior["epoch"].as_u64(),
+        "minimization restart did not advance the fence"
+    );
+    let bound = client.with_lease(lease.clone());
+    for case in cases {
+        let renewed: EnvironmentLease = serde_json::from_value(
+            client
+                .call("environment.lease.acquire", owner.clone())
+                .await?,
+        )?;
+        ensure!(
+            renewed.epoch == lease.epoch && renewed.token == lease.token,
+            "recovery lease changed"
+        );
+        let status = bound
+            .call("input.minimize", case["request"].clone())
+            .await?;
+        ensure!(
+            status == case["status"],
+            "recovery executed a previous candidate again"
+        );
+        let first = &case["evidence"]["trials"][0]["receipt"];
+        let (_, source) = original(
+            &bound,
+            first["input"]["path"]
+                .as_str()
+                .context("original input absent")?,
+        )
+        .await?;
+        ensure!(
+            evidence(&bound, &status, &first["native"]["program"], &source).await?
+                == case["evidence"],
+            "recovery changed an original candidate, crash observation or minimized artifact"
+        );
+    }
+    let owned = inventory(&bound).await?;
+    ensure!(
+        owned == prior["inventory"],
+        "recovery changed minimization resources"
+    );
+    client
+        .call("environment.lease.release", json!({"lease":lease}))
+        .await?;
+    client.close().await?;
+    publish(
+        &profile.output,
+        &json!({"passed":true,
+        "scope":"completed_native_minimization_after_observed_service_restart",
+        "prior_sha256":profile.previous.sha256,"identity":client.identity(),"epoch":lease.epoch,
+        "cached_jobs":cases.len(),"inventory":owned,"production_execution":false}),
+    )
+}
