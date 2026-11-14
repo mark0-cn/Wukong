@@ -325,3 +325,130 @@ async fn remote_installed_windows_worker_interactive_acceptance() -> Result<()> 
         "epoch":lease.epoch,"calls":calls.count,"cases":cases,"inventory":discovered,"production_execution":false}),
     )
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Recovery {
+    config: RuntimeConfig,
+    previous: Probe,
+    output: PathBuf,
+}
+
+#[tokio::test]
+#[ignore = "requires completed interactive acceptance and an independently observed dedicated VM service restart"]
+async fn remote_native_completed_interactive_recovery_acceptance() -> Result<()> {
+    let profile: Recovery = read_fixture_profile("WUKONG_REMOTE_WORKER_INTERACTIVE_RECOVERY_TEST")?;
+    enrolled_fixture_address(&profile.config, false)?;
+    ensure!(
+        profile.output.is_absolute() && !profile.output.try_exists()?,
+        "new interactive recovery report required"
+    );
+    let prior: Value = serde_json::from_slice(&bytes(&profile.previous)?)?;
+    ensure!(
+        prior["passed"] == true && prior["scope"] == "native_interactive_controller_vm",
+        "prior interactive proof differs"
+    );
+    let cases = prior["cases"]
+        .as_array()
+        .context("interactive cases absent")?;
+    ensure!(cases.len() == 10, "prior interactive coverage differs");
+    let client = RuntimeClient::connect(profile.config).await?;
+    ensure!(
+        serde_json::to_value(client.identity())? == prior["identity"],
+        "interactive restart changed worker binding"
+    );
+    let owner = &cases[0]["opened"]["native_owner"];
+    let lease: EnvironmentLease = serde_json::from_value(
+        client
+            .call(
+                "environment.lease.acquire",
+                json!({"run_id":owner["run_id"],"owner_id":owner["owner_id"]}),
+            )
+            .await?,
+    )?;
+    ensure!(
+        Some(lease.epoch) > prior["epoch"].as_u64(),
+        "interactive restart did not advance the fence"
+    );
+    let bound = client.with_lease(lease.clone());
+    let mut cached = 0;
+    let mut uncertain = 0;
+    for case in cases {
+        let id = case["opened"]["session_id"]
+            .as_str()
+            .context("prior interactive ID absent")?;
+        for write in case["writes"].as_array().context("prior writes absent")? {
+            ensure!(
+                bound
+                    .call("interact.write", write["request"].clone())
+                    .await?
+                    == write["result"],
+                "restart replayed a completed interactive write or changed its original result"
+            );
+            original(
+                &bound,
+                write["result"]["transcript"]
+                    .as_str()
+                    .context("write transcript absent")?,
+            )
+            .await?;
+            cached += 1;
+        }
+        ensure!(
+            bound
+                .call("interact.start", case["start"].clone())
+                .await
+                .is_err(),
+            "restart reopened a completed session"
+        );
+        let terminal = bound
+            .call(
+                "interact.close",
+                json!({"session_id":id,"request_id":format!("reconcile-{id}")}),
+            )
+            .await?;
+        let (artifact, raw) = original(&bound, &format!("native-results/{id}/receipt")).await?;
+        ensure!(
+            artifact["sha256"] == case["receipt_sha256"]
+                && serde_json::from_slice::<Value>(&raw)? == case["proof"],
+            "interactive original receipt changed after restart"
+        );
+        if case["case"] == "blocked" {
+            ensure!(
+                terminal["state"] == "lost" && terminal["result"]["outcome"] == "unknown",
+                "interrupted write lost its unknown outcome"
+            );
+            let error=bound.call("interact.write",json!({"session_id":id,"request_id":format!("blocked-{}",case["architecture"].as_str().unwrap()),"data_base64":STANDARD.encode(vec![42;1024*1024]),"read_timeout_secs":1})).await.expect_err("uncertain write was replayed");
+            ensure!(
+                error.to_string().contains("unknown after cleanup"),
+                "uncertain write failed for another reason: {error:#}"
+            );
+            uncertain += 1;
+        } else {
+            ensure!(
+                terminal["state"] == "closed",
+                "known interactive closure changed"
+            );
+            let (artifact, _) = original(&bound, &format!("native-results/{id}/stdout")).await?;
+            ensure!(
+                artifact["sha256"] == case["stdout_sha256"],
+                "interactive original output changed after restart"
+            );
+        }
+    }
+    let discovered = inventory_kind(&bound, "interactive").await?;
+    ensure!(
+        discovered == prior["inventory"] && uncertain == 2,
+        "restart created or changed interactive resources"
+    );
+    client
+        .call("environment.lease.release", json!({"lease":lease}))
+        .await?;
+    client.close().await?;
+    publish(
+        &profile.output,
+        &json!({"passed":true,"scope":"completed_native_interactive_after_observed_service_restart",
+        "prior_sha256":profile.previous.sha256,"identity":client.identity(),"epoch":lease.epoch,
+        "cached_writes":cached,"uncertain_writes":uncertain,"resources":cases.len(),"production_execution":false}),
+    )
+}
