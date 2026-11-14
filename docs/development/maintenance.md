@@ -81,6 +81,8 @@ python workers/tests/run.py unit -p test_bridge.py
 
 Install `workers/runtime/requirements.txt` in a virtual environment and make `python` available before worker tests. Ordinary tests use trusted local fixtures/loopback services; ignored real Ghidra/Docker acceptance requires each test's documented environment.
 
+Sibling-container network acceptance builds `tests/acceptance/network.Dockerfile` with `workers/runtime` as its context, installing the same pinned worker requirements before entering the isolated network. A bare Python image does not provide the worker's metadata-publication dependencies.
+
 <a id="可重复性能基准"></a>
 
 ## Repeatable performance baseline

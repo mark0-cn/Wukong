@@ -86,6 +86,8 @@ python workers/tests/run.py unit -p test_bridge.py
 
 运行 worker 测试前，在虚拟环境中安装 `workers/runtime/requirements.txt` 并确保 `python` 命令可用。普通测试使用可信本地夹具和回环服务；被忽略的真实 Ghidra/Docker 验收需要按各测试说明配置环境。
 
+同级容器网络验收以 `workers/runtime` 为构建上下文，构建 `tests/acceptance/network.Dockerfile`，先安装相同的固定版本 worker 依赖，再进入隔离网络。裸 Python 镜像不包含 worker 发布元数据所需的依赖。
+
 <a id="repeatable-performance-baseline"></a>
 
 ## 可重复性能基准
