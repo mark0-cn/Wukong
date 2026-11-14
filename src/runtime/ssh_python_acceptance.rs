@@ -28,7 +28,7 @@ struct Profile {
 }
 
 const SOURCE: &str = r#"import hashlib, json, pathlib, subprocess, sys
-import filelock
+from wukong_analysis.validation import parse_address
 script = pathlib.Path(__file__)
 target = pathlib.Path(sys.argv[-1])
 denied = []
@@ -46,7 +46,8 @@ print(json.dumps(dict(argv=sys.argv[1:-1], isolated=sys.flags.isolated,
     source_sha256=hashlib.sha256(script.read_bytes()).hexdigest(),
     target_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
     python_sha256=hashlib.sha256(pathlib.Path(sys.executable).read_bytes()).hexdigest(),
-    denied=denied, child=child.stdout.decode('utf-8'), dependency=filelock.__version__), ensure_ascii=False))
+    denied=denied, child=child.stdout.decode('utf-8'),
+    dependency=dict(module=parse_address.__module__, parsed=parse_address('0x10'))), ensure_ascii=False))
 "#;
 
 #[derive(Deserialize)]
@@ -266,7 +267,8 @@ async fn remote_installed_windows_worker_python_acceptance() -> Result<()> {
                         && observed["python_sha256"] == profile.python_sha256
                         && observed["denied"] == json!([true, true])
                         && observed["child"] == "wukong-worker-selftest\n"
-                        && observed["dependency"].is_string(),
+                        && observed["dependency"]
+                            == json!({"module":"wukong_analysis.validation","parsed":16}),
                     "Python interpreter/argument/file/child observation differs: {observed}"
                 );
             }
