@@ -651,7 +651,9 @@ pub struct LeaseRelease {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourceList {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
-    #[schemars(range(min = 1, max = 256))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 64))]
     pub limit: Option<u64>,
 }

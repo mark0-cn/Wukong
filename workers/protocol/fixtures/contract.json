@@ -326,5 +326,101 @@
       "unexpected": 1
     },
     "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {},
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "after": null,
+      "limit": 2
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "after": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "limit": 64
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "limit": 65
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "job.list",
+    "value": {
+      "unexpected": 1
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {},
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "after": null,
+      "limit": 2
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "after": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "limit": 64
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "limit": 0
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "limit": 65
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "resource.list",
+    "value": {
+      "unexpected": 1
+    },
+    "valid": false
   }
 ]

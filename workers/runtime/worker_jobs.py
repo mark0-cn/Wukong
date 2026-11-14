@@ -238,7 +238,11 @@ class JobManager:
         return self.status(params["job_id"])
 
     def list(self, params):
-        return [self.status(path.parent.name) for path in sorted((self.root / "jobs").glob("*/status.json"))[-256:]]
+        limit = bounded_int(params.get("limit"), 64, 1, 64)
+        after = params.get("after") or ""
+        paths = sorted((self.root / "jobs").glob("*/status.json"))
+        page = [path for path in paths if path.parent.name > after][:limit]
+        return [self.status(path.parent.name) for path in page]
 
     def cancel(self, params):
         directory = job_dir(self.root, params["job_id"])

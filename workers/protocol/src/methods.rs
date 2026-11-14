@@ -62,7 +62,7 @@ methods! {
     JobStatus => ("job.status", JobStatusArgs, JobStatus, Read, None),
     JobCancel => ("job.cancel", JobCancelArgs, JobStatus, Reconcile, None),
     JobArtifacts => ("job.artifacts", JobArtifactsArgs, Vec<FileReference>, Read, None),
-    JobList => ("job.list", Empty, Vec<JobStatus>, Read, None),
+    JobList => ("job.list", ResourceList, Vec<JobStatus>, Read, None),
     ResourceList => ("resource.list", ResourceList, RawEvidence, Read, None),
     DebugStart => ("debug.start", DebugStartArgs, SessionHandle, Once, Execution),
     DebugInspect => ("debug.inspect", DebugInspectArgs, RawEvidence, Read, None),

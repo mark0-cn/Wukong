@@ -20,7 +20,6 @@ use crate::{
 };
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
@@ -29,18 +28,6 @@ fn job_kind(record: &ResourceRecord) -> Result<&'static str> {
     let replay: Option<crate::executors::resource_replay::Configuration> =
         serde_json::from_value(record.specification["replay"].clone())?;
     Ok(replay.map_or("process", |replay| replay.kind.name()))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Listing {
-    #[serde(default)]
-    after: Option<String>,
-    #[serde(default = "default_list_limit")]
-    limit: usize,
-}
-fn default_list_limit() -> usize {
-    64
 }
 
 struct Starting {
@@ -430,7 +417,9 @@ impl ResourceState {
         for name in ["_binding", "_lease", "request_id", "call_id"] {
             params.remove(name);
         }
-        let listing: Listing = serde_json::from_value(Value::Object(params))?;
+        let listing: wukong_worker_protocol::params::ResourceList =
+            serde_json::from_value(Value::Object(params))?;
+        let limit = usize::try_from(listing.limit.unwrap_or(64))?;
         let records = self.journal.resources(
             owner,
             if method == "job.list" {
@@ -439,7 +428,7 @@ impl ResourceState {
                 None
             },
             listing.after.as_deref(),
-            listing.limit,
+            limit,
         )?;
         if method == "job.list" {
             return records
@@ -448,7 +437,7 @@ impl ResourceState {
                 .collect::<Result<Vec<_>>>()
                 .map(Value::Array);
         }
-        let next_after = if records.len() == listing.limit {
+        let next_after = if records.len() == limit {
             records.last().map(|record| record.id.clone())
         } else {
             None

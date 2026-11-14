@@ -3528,7 +3528,24 @@
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
-        "title": "Empty",
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "uint64",
+            "maximum": 64,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "title": "ResourceList",
         "type": "object"
       },
       "resources": "none",
@@ -4581,7 +4598,7 @@
           },
           "limit": {
             "format": "uint64",
-            "maximum": 256,
+            "maximum": 64,
             "minimum": 1,
             "type": [
               "integer",
