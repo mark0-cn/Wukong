@@ -4,6 +4,8 @@
 
 [English](README.md) · 简体中文
 
+协议 v3 的已安装 Worker 验收分别保留异步启动的初始回执和作业终态。包括服务重启后的原请求重试，都必须返回初始回执；另行查询 `job.status` 时，终态结果及原始产物哈希必须保持不变。容量检查要求控制器请求排队时不阻塞续租或取消，并在活动资源清理完成后准入。
+
 被忽略的 `remote_installed_windows_worker_minimize_acceptance` 夹具读取 `WUKONG_REMOTE_WORKER_MINIMIZE_TEST`：绝对路径 JSON 配置，包含 `config`、`manifest_sha256`、x64/x86 的已签名 `probes`（`path`、`sha256`），以及全新绝对路径 `output`。覆盖强/弱等价性、异常码相同但位置不同的故障、二进制 stdin/argv 和 LaunchSpec、空输入、一次尝试预算、无崩溃或无法确定的基线、取消/期限、原始试验证据及重试/冲突处理。轮询会续租。只能使用独立登记的离线开发 VM。全部 20 个已安装用例已在源码 `b05b7fc` 上通过；夹具还将捕获的寄存器、模块及两次异常停止与 MCP 原始响应核对。见 [Windows 资格记录](../windows/README.zh-CN.md)。已完成清理的用例不匹配会汇总到失败批次报告；所有权不确定时必须先验证恢复清理，再开始下一个用例。这不代表对抗隔离或其余生命周期验收。
 
 独立观察服务重启后，`remote_native_completed_minimize_recovery_acceptance` 读取 `WUKONG_REMOTE_WORKER_MINIMIZE_RECOVERY_TEST`，其中包含 `config`、带哈希的 `previous` 验收报告（`path`、`sha256`）及全新绝对路径 `output`。它以递增 epoch 取得并续租原所有者租约，不上传输入便重试全部 20 个请求，并与原报告比较终态、完整候选/崩溃/输出证据及资源清单。同一源码上的全部 20 个已完成结果已通过已安装恢复验证，见上述资格记录。

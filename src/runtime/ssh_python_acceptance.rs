@@ -96,10 +96,15 @@ async fn remote_native_completed_python_recovery_acceptance() -> Result<()> {
     let bound = client.with_lease(lease.clone());
     let mut cached = Vec::new();
     for case in cases {
-        let status = bound.call("py.run", case["request"].clone()).await?;
+        let started = bound.call("py.run", case["request"].clone()).await?;
+        ensure!(
+            started == case["started"],
+            "completed Python source was replayed or changed"
+        );
+        let status = terminal(&bound, started["job_id"].as_str().unwrap()).await?;
         ensure!(
             status == case["status"],
-            "completed Python source was replayed or changed"
+            "restart changed terminal Python status"
         );
         let (artifact, data) = original(
             &bound,
@@ -286,7 +291,8 @@ async fn remote_installed_windows_worker_python_acceptance() -> Result<()> {
             _ => unreachable!(),
         }
         ensure!(
-            calls.call("py.run", request.clone()).await? == status,
+            calls.call("py.run", request.clone()).await? == started
+                && terminal(&bound, id).await? == status,
             "Python retry changed completed work"
         );
         let mut conflict = request.clone();
@@ -295,7 +301,7 @@ async fn remote_installed_windows_worker_python_acceptance() -> Result<()> {
             calls.call("py.run", conflict).await.is_err(),
             "Python request ID accepted changed source"
         );
-        cases.push(json!({"name":name,"request":request,"status":status,"receipt":receipt,"artifact":artifact,"streams":streams}));
+        cases.push(json!({"name":name,"request":request,"started":started,"status":status,"receipt":receipt,"artifact":artifact,"streams":streams}));
     }
     let listing = calls.call("resource.list", json!({"limit":64})).await?;
     let resources = listing["resources"]

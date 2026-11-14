@@ -297,7 +297,8 @@ async fn remote_installed_windows_worker_replay_acceptance() -> Result<()> {
                 }
             }
             ensure!(
-                calls.call(method, request.clone()).await? == status,
+                calls.call(method, request.clone()).await? == started
+                    && terminal(&bound, job).await? == status,
                 "completed replay was restarted"
             );
             let mut conflict = request.clone();
@@ -306,7 +307,7 @@ async fn remote_installed_windows_worker_replay_acceptance() -> Result<()> {
                 calls.call(method, conflict).await.is_err(),
                 "replay request ID accepted changed trials"
             );
-            cases.push(json!({"architecture":architecture,"case":name,"method":method,"request":request,"status":status,"evidence":proof}));
+            cases.push(json!({"architecture":architecture,"case":name,"method":method,"request":request,"started":started,"status":status,"evidence":proof}));
         }
     }
     let discovered = inventory(&bound).await?;
@@ -375,7 +376,9 @@ async fn remote_native_completed_replay_recovery_acceptance() -> Result<()> {
             bound
                 .call(case["method"].as_str().unwrap(), case["request"].clone())
                 .await?
-                == case["status"],
+                == case["started"]
+                && terminal(&bound, case["started"]["job_id"].as_str().unwrap()).await?
+                    == case["status"],
             "recovery replayed an original trial"
         );
         let proof = &case["evidence"];
