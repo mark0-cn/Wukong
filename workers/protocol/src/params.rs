@@ -393,6 +393,10 @@ pub struct CrashReplayArgs {
     #[schemars(range(min = 1, max = 3600))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimize_timeout_secs: Option<u64>,
+    /// Maximum retained output per trial in bytes (default 1 MiB).
+    #[schemars(range(min = 1024, max = 8388608))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_limit: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -423,6 +427,10 @@ pub struct InputMinimizeArgs {
     #[schemars(range(min = 1, max = 3600))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimize_timeout_secs: Option<u64>,
+    /// Maximum retained output per trial in bytes (default 1 MiB).
+    #[schemars(range(min = 1024, max = 8388608))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_limit: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -437,6 +445,10 @@ pub struct ExecCommandArgs {
     pub env: Option<std::collections::BTreeMap<String, String>>,
     #[schemars(range(min = 1, max = 120))]
     pub timeout_secs: Option<u64>,
+    /// Maximum retained shell output in bytes (default 1 MiB).
+    #[schemars(range(min = 1024, max = 8388608))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_limit: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -483,6 +495,10 @@ pub struct VerificationInput {
     #[schemars(range(min = 1, max = 3600))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimize_timeout_secs: Option<u64>,
+    /// Maximum retained output per trial in bytes (default 1 MiB).
+    #[schemars(range(min = 1024, max = 8388608))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_limit: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

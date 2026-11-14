@@ -8,6 +8,8 @@
 
 `debug.start` 可通过已暂存的 `target` 或 `launch_spec` 选择目标；控制器会核对所有提供的启动描述及输入产物均属于当前任务。原生 Windows 的 LaunchSpec 负责目标和参数，因此此模式下应省略单次调用的 `target` 和 `args`。调试器默认模式为 `launch`，默认引擎为 `auto`。Linux 在解析执行环境前，从校验后的 LaunchSpec 中确定原始目标哈希。
 
+`exec.run`、`crash.replay`、`input.minimize` 和 `poc.verify` 接受可选的 `output_limit`，范围为 1,024–8,388,608 字节（默认 1 MiB），与两种平台的执行器一致。该上限限制保留的执行输出（重放／最小化按每次试验计算），与控制器面向模型的输出预览限制不同。生产者／验证者身份仅属于 `poc.verify` 请求。
+
 本 crate 负责公共方法标识、请求类型、资源观察、请求上下文、错误和容量契约，不依赖控制器或平台 Worker。Windows 的 JSON-RPC 信封由 jsonrpsee 处理，Linux 则使用 jsonrpcserver。SSH 和 stdio 仍是传输方式；原生内部会话使用 Protobuf。
 
 `src/methods.rs` 声明每个方法的输入／输出类型、副作用策略和资源需求。平台注册目录将这些方法绑定到实际处理器及其就绪条件。模型工具目录直接声明所需方法，不再通过工具名称推断。

@@ -659,6 +659,16 @@
               "null"
             ]
           },
+          "output_limit": {
+            "description": "Maximum retained output per trial in bytes (default 1 MiB).",
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "target": {
             "minLength": 1,
             "type": "string"
@@ -1781,6 +1791,16 @@
             },
             "type": [
               "object",
+              "null"
+            ]
+          },
+          "output_limit": {
+            "description": "Maximum retained shell output in bytes (default 1 MiB).",
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -3110,6 +3130,16 @@
               "null"
             ]
           },
+          "output_limit": {
+            "description": "Maximum retained output per trial in bytes (default 1 MiB).",
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "target": {
             "minLength": 1,
             "type": "string"
@@ -4352,6 +4382,16 @@
             "description": "Bounded TCP replay through the prepared challenge service. Requires launch_spec;\nexcludes input_mode/args/env/expected. Input supplies the bytes for send slices."
           },
           "network_binding": true,
+          "output_limit": {
+            "description": "Maximum retained output per trial in bytes (default 1 MiB).",
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "producer_agent_id": {
             "minLength": 1,
             "type": "string"

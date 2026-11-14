@@ -1,6 +1,8 @@
 """The same golden values must be accepted/rejected by Rust and Python."""
 import json
+import os
 from pathlib import Path
+import tempfile
 import unittest
 from jsonschema import ValidationError
 from worker_contract import CONTRACT, validator, validate_request, validate_result
@@ -8,6 +10,17 @@ from worker_rpc import Server
 
 
 class ContractTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "requires a POSIX fixture shell")
+    def test_shell_output_limit_reaches_the_executor(self):
+        from worker_commands import CommandService
+        params = {"command": "printf '%4096s' x", "output_limit": 1024}
+        validate_request("exec.run", params)
+        with tempfile.TemporaryDirectory() as directory:
+            result = CommandService(Path(directory), trusted=True, isolated=False).run(params)
+        self.assertTrue(result["output_truncated"])
+        self.assertEqual(result["output_bytes"]["stdout"], 4096)
+        self.assertEqual(len(result["stdout"].encode()), 1024)
+
     def test_shared_corpus(self):
         path = Path(__file__).resolve().parents[2] / "protocol/fixtures/contract.json"
         for sample in json.loads(path.read_text(encoding="utf-8")):

@@ -228,8 +228,11 @@ async fn remote_installed_windows_worker_replay_acceptance() -> Result<()> {
             };
             let id = format!("{architecture}-{name}");
             let mut request = json!({"target":target["path"],"input":input["path"],"args":["--replay","@@"],
-                "trials":trials,"timeout_secs":5,"output_limit":4096,"producer_agent_id":"fixture-producer",
-                "verifier_agent_id":"fixture-verifier","request_id":id,"call_id":id});
+                "trials":trials,"timeout_secs":5,"output_limit":4096,"request_id":id,"call_id":id});
+            if method == "poc.verify" {
+                request["producer_agent_id"] = json!("fixture-producer");
+                request["verifier_agent_id"] = json!("fixture-verifier");
+            }
             if name == "stdin" {
                 request["args"] = json!(["--copy-stdin"]);
                 request["input_mode"] = json!("stdin");

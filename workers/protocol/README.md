@@ -8,6 +8,8 @@ Verification expectations match only populated predicates. Omitted or null optio
 
 `debug.start` can select a staged `target` or a staged `launch_spec`; the controller checks every supplied launch/input artifact against the current run. A native Windows LaunchSpec owns the target and arguments, so omit per-call `target` and `args` in that mode. The default debugger mode is `launch` and the default engine is `auto`. Linux derives the original target hash from the checked LaunchSpec before resolving its execution environment.
 
+`exec.run`, `crash.replay`, `input.minimize` and `poc.verify` accept an optional `output_limit` of 1,024–8,388,608 bytes (default 1 MiB), matching both platform executors. The limit bounds retained execution output (per trial for replay/minimization); it is distinct from the controller's model-facing output preview. Producer/verifier identities belong only to `poc.verify` requests.
+
 This crate owns the public operation identifiers, request types, resource observations, request context, errors and capacity contract. It depends on neither the controller nor a platform worker. JSON-RPC envelopes are handled by jsonrpsee on Windows and jsonrpcserver on Linux. SSH and stdio remain transports; private native sessions use Protobuf.
 
 `src/methods.rs` declares each operation's input/output types, effect policy and resource demand. Platform registries bind those operations to actual handlers and readiness. The model tool catalog declares required operations directly; it does not infer them from tool names.

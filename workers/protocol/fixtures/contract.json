@@ -443,5 +443,210 @@
       "dump": "files/probe.dmp"
     },
     "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": 1024
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": 8388608
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": 1023
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": 8388609
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "exec.run",
+    "value": {
+      "command": "echo fixture",
+      "output_limit": null
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1024
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388608
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1023
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388609
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "crash.replay",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": null
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1024
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388608
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1023
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388609
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "input.minimize",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": null
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1024,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388608,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 1023,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": 8388609,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "poc.verify",
+    "value": {
+      "target": "files/probe",
+      "input": "files/input",
+      "output_limit": null,
+      "producer_agent_id": "producer",
+      "verifier_agent_id": "verifier"
+    },
+    "valid": true
   }
 ]
