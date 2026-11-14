@@ -453,9 +453,7 @@ pub(crate) fn prefix_utf8(bytes: &[u8], limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        config::AppConfig, coordinator::Coordinator, runtime::RuntimeBackend, tools::ToolService,
-    };
+    use crate::{config::AppConfig, coordinator::Coordinator, tools::ToolService};
 
     fn fixture(dir: &std::path::Path) -> Result<(Store, AgentMetadata)> {
         fixture_snapshot(dir, json!({}))
@@ -580,8 +578,12 @@ mod tests {
                     platform: crate::environments::Platform::current(),
                     installation_id: None,
                     runtime: crate::runtime::RuntimeConfig {
-                        backend: RuntimeBackend::TrustedLocal,
-                        state_dir: dir.path().join("worker"),
+                        transport: crate::runtime::TransportConfig::TrustedLocal(
+                            crate::runtime::TrustedLocalConfig {
+                                state_dir: dir.path().join("worker"),
+                                ..Default::default()
+                            },
+                        ),
                         ..Default::default()
                     },
                 },
@@ -623,6 +625,8 @@ mod tests {
                 std::fs::read(
                     config.environments["fixture"]
                         .runtime
+                        .trusted_local()
+                        .unwrap()
                         .state_dir
                         .join("counter")
                 )?,

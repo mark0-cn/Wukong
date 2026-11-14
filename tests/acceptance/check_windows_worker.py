@@ -241,7 +241,7 @@ def main():
             raise RuntimeError('Installed public host fingerprint differs from its key')
         host_pin = keys / 'host-pin'
         host_pin.write_text(f'wukong-worker-{installation} {host["algorithm"]} {host["key"]}\n', encoding='utf-8', newline='\n')
-        config = dict(backend='ssh', ssh_host=management, ssh_executable=str(package / 'runtime/openssh/ssh.exe'),
+        config = dict(backend='managed_ssh', ssh_host=management, ssh_executable=str(package / 'runtime/openssh/ssh.exe'),
                       request_timeout_secs=30, managed_ssh=dict(installation_id=installation,
                       user=connection['ssh_user'], port=port, identity_file=str(ssh_private),
                       known_hosts_file=str(host_pin), host_key=host))

@@ -40,7 +40,7 @@ fn registration_is_lazy_and_imports_only_a_public_pin_without_reading_the_privat
     assert!(!value.to_string().contains("CONTROLLED-PRIVATE-CANARY"));
     assert!(value.pointer("/production_isolation_verified").is_none());
     let environment: EnvironmentConfig = serde_json::from_value(value)?;
-    let ssh = environment.runtime.managed_ssh.as_ref().unwrap();
+    let ssh = environment.runtime.managed_ssh().unwrap();
     assert!(!ssh.known_hosts_file.exists());
     let expected = ssh.known_hosts_record()?;
     let path = ssh.known_hosts_file.clone();
@@ -97,8 +97,7 @@ fn only_generated_host_pin_paths_are_prepared() -> Result<()> {
     let external = root.path().join("user-selected-known-hosts");
     environment
         .runtime
-        .managed_ssh
-        .as_mut()
+        .managed_ssh_mut()
         .unwrap()
         .known_hosts_file = external.clone();
     assert!(prepare_pin_files(root.path(), &BTreeMap::from([(id, environment)]))?.is_empty());

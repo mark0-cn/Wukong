@@ -57,7 +57,7 @@ def release_image(number, revision, repository=DEFAULT_REPOSITORY):
         raise ValueError(f"Release manifest version does not match {tag}")
     if manifest.get("platform") != "windows-amd64" or manifest.get("tool_platform") != "linux/amd64":
         raise ValueError("Release must provide a Windows x64 client and linux/amd64 image")
-    if manifest.get("runtime_protocol") != 3 or manifest.get("data_schema") != 4:
+    if manifest.get("runtime_protocol") != 3 or manifest.get("data_schema") != 5:
         raise ValueError("Release runtime protocol or data schema is not supported")
     source = manifest.get("image_source_revision", manifest.get("source_revision"))
     if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{40}", source):

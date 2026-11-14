@@ -10,16 +10,16 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
-use wukong::runtime::{RuntimeBackend, RuntimeClient, RuntimeConfig};
+use wukong::runtime::{RuntimeClient, RuntimeConfig};
 
-fn worker_config(root: &std::path::Path) -> Result<RuntimeConfig> {
+fn worker_config(_root: &std::path::Path) -> Result<RuntimeConfig> {
     let container = std::env::var("WUKONG_TEST_DOCKER_CONTAINER")
         .context("set WUKONG_TEST_DOCKER_CONTAINER to a running worker container")?;
     Ok(RuntimeConfig {
-        backend: RuntimeBackend::Docker,
-        docker_container: Some(container),
-        remote_state_dir: format!("/tmp/wukong-adapters-{}", uuid::Uuid::new_v4().simple()),
-        state_dir: root.to_path_buf(),
+        transport: wukong::runtime::TransportConfig::Docker(wukong::runtime::DockerConfig {
+            remote_state_dir: format!("/tmp/wukong-adapters-{}", uuid::Uuid::new_v4().simple()),
+            ..wukong::runtime::DockerConfig::new(container)
+        }),
         ..Default::default()
     })
 }

@@ -47,7 +47,7 @@ def package(binary, metadata, output, tag, *, released_image=False):
         "platform": "windows-amd64", "tool_platform": "linux/amd64",
         "image": image["repository"] + "@" + image["digest"],
         "image_id": image["image_id"], "image_size_bytes": image["size_bytes"],
-        "runtime_protocol": 3, "data_schema": 4,
+        "runtime_protocol": 3, "data_schema": 5,
         "files": {name: sha256(path) for name, path in members.items()},
     }
     if released_image:

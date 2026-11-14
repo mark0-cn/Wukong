@@ -102,9 +102,13 @@ for line in sys.stdin:
                 platform: crate::environments::Platform::current(),
                 installation_id: None,
                 runtime: crate::runtime::RuntimeConfig {
-                    backend: crate::runtime::RuntimeBackend::TrustedLocal,
-                    state_dir: root.join("worker"),
-                    bridge_path: bridge,
+                    transport: crate::runtime::TransportConfig::TrustedLocal(
+                        crate::runtime::TrustedLocalConfig {
+                            state_dir: root.join("worker"),
+                            bridge_path: bridge,
+                            ..Default::default()
+                        },
+                    ),
                     ..Default::default()
                 },
             },

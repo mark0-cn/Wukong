@@ -53,7 +53,7 @@ agent 状态包括 queued、running、waiting、budget_paused、completed、stop
 
 子 agent 完成前须关闭自己持有的调试和交互会话，根任务完成前须处理全部会话。停止或失败的 owner 遗留会话可以由同任务的其他子 agent 关闭；该权限不允许发送调试命令或交互输入。
 
-Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，使用 schema 4 状态目录，不提供旧数据库或旧版自定义 AgentRun 检查点迁移。
+Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 provider 原生元数据，不包含模型客户端或凭据。首次模型请求前固定解析后的 provider/endpoint 配置，恢复使用保存值。角色输出预算逐请求设置，不覆盖模型自身的容量信息。密钥由配置指定的环境变量提供。本次实现面向新任务，使用 schema 5 状态目录，不提供旧数据库或旧版自定义 AgentRun 检查点迁移。
 
 `DurableEffects` 统一工具调用准入、稳定标识、事务回执、worker 成功回执和恢复决策。业务调用标识由 agent、generation、已计量模型轮次与 provider tool-call ID 构成，不依赖恢复后会重新分配的 ECS 实体或效果 ID。业务事务与回执一起提交；worker 回复在控制器后处理前持久化，若回复丢失则用同一请求标识查询 worker 的持久化操作账本。未决 MCP 写操作保留给操作员对账，不自动重放。操作员对账也使用带 epoch 的租约隔离。原生效果及数据库变化唤醒执行循环。
 
@@ -139,7 +139,7 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 
 消息携带 kind、correlation/reply ID、收发 generation、当前任务身份和证据引用。send_message_to_agent 默认 information：不重开任务、不打断等待。question、reply、result、blocked 可唤醒等待者但不清除等待条件。只有显式 follow_up_agent 重开已完成任务。
 
-queued 表示持久入队；included 表示进入原生会话/上下文及日志，不表示模型已执行或处理。replied 表示显式关联回复，不判断正确性。旧代次回复保留为 stale，不注入当前工作。message_status 展示状态；在途请求保留原邮箱快照。此增量使用新 schema 4，不迁移旧数据库。已完成任务遗留 information 在新代次开始时变 stale。CLI/GUI 默认 information，显式 follow-up 才重开。
+queued 表示持久入队；included 表示进入原生会话/上下文及日志，不表示模型已执行或处理。replied 表示显式关联回复，不判断正确性。旧代次回复保留为 stale，不注入当前工作。message_status 展示状态；在途请求保留原邮箱快照。此增量使用新 schema 5，不迁移旧数据库。已完成任务遗留 information 在新代次开始时变 stale。CLI/GUI 默认 information，显式 follow-up 才重开。
 
 原生 message 向可达活动 Agent 发请求或回复。信息/关联邮件使用类型化 send_message_to_agent，完成后的新工作用 follow_up_agent。原生等待投递与类型化回执一起投影；included 不证明模型已处理或回答。
 

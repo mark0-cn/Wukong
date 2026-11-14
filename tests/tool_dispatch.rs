@@ -6,7 +6,6 @@ use wukong::{
     coordinator::{ChildRequest, Coordinator},
     domain::*,
     mcp::McpServerConfig,
-    runtime::RuntimeBackend,
     store::Store,
     tools::{ToolOutcome, ToolService},
 };
@@ -66,8 +65,12 @@ fn worker_config(path: &Path) -> AppConfig {
                 platform: wukong::environments::Platform::current(),
                 installation_id: None,
                 runtime: wukong::runtime::RuntimeConfig {
-                    backend: RuntimeBackend::TrustedLocal,
-                    state_dir: path.join("worker"),
+                    transport: wukong::runtime::TransportConfig::TrustedLocal(
+                        wukong::runtime::TrustedLocalConfig {
+                            state_dir: path.join("worker"),
+                            ..Default::default()
+                        },
+                    ),
                     ..Default::default()
                 },
             },
@@ -1448,9 +1451,11 @@ async fn docker_independent_verification_uses_real_trials_and_limits_impact() ->
     let mut config = worker_config(temp.path());
     let environment = config.environments.get_mut("fixture").unwrap();
     environment.platform = wukong::environments::Platform::Linux;
-    environment.runtime.backend = RuntimeBackend::Docker;
-    environment.runtime.docker_container = Some(container);
-    environment.runtime.remote_state_dir = format!("/tmp/{}", id("wukong_tool_test"));
+    environment.runtime.transport =
+        wukong::runtime::TransportConfig::Docker(wukong::runtime::DockerConfig {
+            remote_state_dir: format!("/tmp/{}", id("wukong_tool_test")),
+            ..wukong::runtime::DockerConfig::new(container)
+        });
     config.tools.timeout_seconds = 180;
     let run = coordinator.create_run(
         &target,

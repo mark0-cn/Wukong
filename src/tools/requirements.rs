@@ -56,8 +56,7 @@ impl Requirement {
 
 impl ToolService {
     pub(super) fn local_ghidra(&self) -> Option<PathBuf> {
-        self.analysis
-            .config
+        self.analysis_config
             .ghidra_executable
             .clone()
             .or_else(|| std::env::var_os("WUKONG_GHIDRA_HEADLESS").map(PathBuf::from))
@@ -70,7 +69,9 @@ impl ToolService {
             Requirement::Worker(_) => true,
         }
     }
+}
 
+impl ToolContext<'_> {
     pub(super) async fn require_backend(&self, spec: &catalog::Spec, args: &Value) -> Result<()> {
         let observation =
             if self.needs_worker(spec) && !matches!(spec.requirement, Requirement::Probe) {

@@ -17,6 +17,18 @@ pub(super) struct SessionsService {
     pub(super) files: FilesService,
 }
 impl SessionsService {
+    fn present(session: &SessionRecord, mut raw: Value) -> Result<Value> {
+        if let Some(id) = raw.get("session_id").and_then(Value::as_str) {
+            ensure!(
+                id == session.worker_resource_id,
+                "worker returned another session identity"
+            );
+            raw["worker_session_id"] = json!(session.worker_resource_id);
+            raw["session_id"] = json!(session.id);
+        }
+        Ok(raw)
+    }
+
     pub(super) fn authorize_session(
         &self,
         agent: &AgentMetadata,
@@ -43,7 +55,7 @@ impl SessionsService {
         agent: &AgentMetadata,
         call_id: &str,
         name: &str,
-        args: Value,
+        mut args: Value,
     ) -> Result<Value> {
         match name {
             "debug_command" | "debug_inspect" | "debug_control" | "debug_close"
@@ -70,25 +82,26 @@ impl SessionsService {
                     current == SessionState::Running,
                     "debug session is closed or lost"
                 );
+                args["session_id"] = json!(session.worker_resource_id);
                 let raw = match self
                     .gateway
                     .worker_call(
                         agent,
                         call_id,
-                        if name == "debug_close" {
-                            "debug.close"
+                        (if name == "debug_close" {
+                            Method::DebugClose
                         } else if name == "debug_profile" {
-                            "debug.profile"
+                            Method::DebugProfile
                         } else if name == "debug_snapshot" {
-                            "debug.snapshot"
+                            Method::DebugSnapshot
                         } else if name == "debug_inspect" {
-                            "debug.inspect"
+                            Method::DebugInspect
                         } else if name == "debug_control" {
-                            "debug.control"
+                            Method::DebugControl
                         } else {
-                            "debug.command"
-                        },
-                        args,
+                            Method::DebugCommand
+                        })
+                        .decode(args)?,
                     )
                     .await
                 {
@@ -117,7 +130,7 @@ impl SessionsService {
                     .gateway
                     .runtime()?
                     .call(
-                        "file.get",
+                        Method::FileGet.name(),
                         json!({"path":transcript,"max_bytes":8*1024*1024}),
                     )
                     .await?;
@@ -128,7 +141,9 @@ impl SessionsService {
                 }
                 session.updated_at = now();
                 self.store.save_session(SessionKind::Debugger, &session)?;
-                Ok(json!({"response":raw,"transcript_evidence_id":evidence.id}))
+                Ok(
+                    json!({"response":Self::present(&session, raw)?,"transcript_evidence_id":evidence.id}),
+                )
             }
             "debug_start" => {
                 self.files.known_file(agent, text(&args, "target")?, true)?;
@@ -142,13 +157,20 @@ impl SessionsService {
                 }
                 let raw = self
                     .gateway
-                    .worker_call(agent, call_id, "debug.start", args)
+                    .worker_call(
+                        agent,
+                        call_id,
+                        Request::DebugStart(serde_json::from_value(args)?),
+                    )
                     .await?;
                 let handle: SessionHandle = serde_json::from_value(raw.clone())?;
-                let session_id = handle.session_id.as_str();
+                let session_id = stable(
+                    "session",
+                    &format!("{}:{}", self.gateway.worker_identity()?, handle.session_id),
+                );
                 let record = SessionRecord {
-                    id: session_id.into(),
-                    worker_resource_id: text(&raw, "worker_session_id")?.into(),
+                    id: session_id,
+                    worker_resource_id: handle.session_id,
                     run_id: agent.run_id.clone(),
                     agent_id: agent.id.clone(),
                     worker_id: self.gateway.worker_identity()?,
@@ -159,7 +181,7 @@ impl SessionsService {
                     updated_at: now(),
                 };
                 self.store.save_session(SessionKind::Debugger, &record)?;
-                Ok(raw)
+                Self::present(&record, raw)
             }
             "interactive_start" => {
                 ensure!(
@@ -168,13 +190,20 @@ impl SessionsService {
                 );
                 let raw = self
                     .gateway
-                    .worker_call(agent, call_id, "interact.start", args)
+                    .worker_call(
+                        agent,
+                        call_id,
+                        Request::InteractStart(serde_json::from_value(args)?),
+                    )
                     .await?;
                 let handle: SessionHandle = serde_json::from_value(raw.clone())?;
-                let session_id = handle.session_id.as_str();
+                let session_id = stable(
+                    "session",
+                    &format!("{}:{}", self.gateway.worker_identity()?, handle.session_id),
+                );
                 let record = SessionRecord {
-                    id: session_id.into(),
-                    worker_resource_id: text(&raw, "worker_session_id")?.into(),
+                    id: session_id,
+                    worker_resource_id: handle.session_id,
                     run_id: agent.run_id.clone(),
                     agent_id: agent.id.clone(),
                     worker_id: self.gateway.worker_identity()?,
@@ -185,7 +214,7 @@ impl SessionsService {
                     updated_at: now(),
                 };
                 self.store.save_session(SessionKind::Interactive, &record)?;
-                Ok(raw)
+                Self::present(&record, raw)
             }
             "interactive_send" | "interactive_close" | "interactive_profile" => {
                 let session_id = text(&args, "session_id")?.to_owned();
@@ -212,19 +241,20 @@ impl SessionsService {
                         || (name == "interactive_close" && current == SessionState::Exited),
                     "interactive session is closed or lost"
                 );
+                args["session_id"] = json!(session.worker_resource_id);
                 let raw = match self
                     .gateway
                     .worker_call(
                         agent,
                         call_id,
-                        if name == "interactive_close" {
-                            "interact.close"
+                        (if name == "interactive_close" {
+                            Method::InteractClose
                         } else if name == "interactive_profile" {
-                            "interact.profile"
+                            Method::InteractProfile
                         } else {
-                            "interact.write"
-                        },
-                        args,
+                            Method::InteractWrite
+                        })
+                        .decode(args)?,
                     )
                     .await
                 {
@@ -235,7 +265,7 @@ impl SessionsService {
                         // and block agent_finish forever.
                         let lost = session_lost(&error);
                         if name == "interactive_close" && lost {
-                            json!({"session_id":session_id,"state":"lost","reconciled":true})
+                            json!({"session_id":session.worker_resource_id,"state":"lost","reconciled":true})
                         } else {
                             return Err(error);
                         }
@@ -253,7 +283,7 @@ impl SessionsService {
                 session.updated_at = now();
                 self.store
                     .save_session(SessionKind::Interactive, &session)?;
-                Ok(raw)
+                Self::present(&session, raw)
             }
             _ => bail!("unknown session tool: {name}"),
         }

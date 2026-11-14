@@ -2,7 +2,7 @@
 use super::*;
 
 pub(in crate::tools) fn handle_finding_file<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -12,7 +12,7 @@ pub(in crate::tools) fn handle_finding_file<'a>(
 }
 
 pub(in crate::tools) fn handle_findings_list<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -22,7 +22,7 @@ pub(in crate::tools) fn handle_findings_list<'a>(
 }
 
 pub(in crate::tools) fn handle_finding_get<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -40,7 +40,7 @@ pub(in crate::tools) fn handle_finding_get<'a>(
 }
 
 pub(in crate::tools) fn handle_verification_record<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -56,7 +56,7 @@ pub(in crate::tools) fn handle_verification_record<'a>(
 }
 
 pub(in crate::tools) fn handle_evidence_read<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,

@@ -2,7 +2,7 @@
 use super::*;
 
 pub(in crate::tools) fn handle_threat_model_get<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -23,7 +23,7 @@ pub(in crate::tools) fn handle_threat_model_get<'a>(
 }
 
 pub(in crate::tools) fn handle_threat_model_save<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -33,7 +33,7 @@ pub(in crate::tools) fn handle_threat_model_save<'a>(
 }
 
 pub(in crate::tools) fn handle_threat_model_amend<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -43,7 +43,7 @@ pub(in crate::tools) fn handle_threat_model_amend<'a>(
 }
 
 pub(in crate::tools) fn handle_notes_list<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -55,7 +55,7 @@ pub(in crate::tools) fn handle_notes_list<'a>(
 }
 
 pub(in crate::tools) fn handle_context_search<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -67,7 +67,7 @@ pub(in crate::tools) fn handle_context_search<'a>(
 }
 
 pub(in crate::tools) fn handle_context_read<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -79,7 +79,7 @@ pub(in crate::tools) fn handle_context_read<'a>(
 }
 
 pub(in crate::tools) fn handle_todos_list<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -91,7 +91,7 @@ pub(in crate::tools) fn handle_todos_list<'a>(
 }
 
 pub(in crate::tools) fn handle_coverage_record<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -101,7 +101,7 @@ pub(in crate::tools) fn handle_coverage_record<'a>(
 }
 
 pub(in crate::tools) fn handle_coverage_list<'a>(
-    tools: &'a ToolService,
+    tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,

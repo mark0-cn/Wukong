@@ -165,8 +165,10 @@ for line in sys.stdin:
             config.default_environment=Some("slow".into());
             config.environments.insert("slow".into(),crate::environments::EnvironmentConfig {
                 name:"Slow fixture".into(),platform:crate::environments::Platform::current(),installation_id:None,
-                runtime:crate::runtime::RuntimeConfig {backend:crate::runtime::RuntimeBackend::TrustedLocal,
-                    state_dir:root.join("worker"),bridge_path:bridge,..Default::default()},
+                runtime:crate::runtime::RuntimeConfig {
+transport: crate::runtime::TransportConfig::TrustedLocal(crate::runtime::TrustedLocalConfig { state_dir: root.join("worker"), bridge_path: bridge, ..Default::default() }),
+..Default::default()
+},
             });
         }).await;
         let (seen, root_request) = tokio::sync::oneshot::channel();

@@ -22,7 +22,7 @@ impl Spec {
 }
 
 type Handler = for<'a> fn(
-    &'a ToolService,
+    &'a ToolContext<'_>,
     &'a AgentMetadata,
     &'a str,
     &'a str,

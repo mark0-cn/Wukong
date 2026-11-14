@@ -423,15 +423,14 @@ mod tests {
         hosted: bool,
     ) -> Result<()> {
         let address: std::net::Ipv4Addr = config
-            .ssh_host
-            .as_deref()
+            .ssh_host()
             .context("missing worker management address")?
             .parse()?;
         ensure!(
             !address.is_loopback()
                 && !address.is_unspecified()
                 && !address.is_multicast()
-                && config.managed_ssh.is_some(),
+                && config.managed_ssh().is_some(),
             "installed-worker acceptance requires an enrolled non-loopback IPv4 worker"
         );
         if hosted {
@@ -771,7 +770,7 @@ mod tests {
         use crate::{
             config::AppConfig,
             environments::{EnvironmentConfig, Platform},
-            runtime::{RuntimeBackend, RuntimeConfig},
+            runtime::RuntimeConfig,
         };
         let temporary = tempfile::tempdir()?;
         let mut profile = fixture(&temporary.path().join("pins"))?;
@@ -782,9 +781,13 @@ mod tests {
             platform: Platform::Windows,
             installation_id: Some(profile.installation_id.clone()),
             runtime: RuntimeConfig {
-                backend: RuntimeBackend::Ssh,
-                ssh_host: Some("192.0.2.1".into()),
-                managed_ssh: Some(profile.clone()),
+                transport: crate::runtime::TransportConfig::ManagedSsh(
+                    crate::runtime::ManagedSshConfig {
+                        ssh_host: "192.0.2.1".into(),
+                        managed_ssh: profile.clone(),
+                        ssh_executable: "ssh".into(),
+                    },
+                ),
                 ..Default::default()
             },
         };
@@ -794,7 +797,7 @@ mod tests {
         environment.installation_id = Some(profile.installation_id.clone());
         profile.identity_file = "keys/private".into();
         profile.known_hosts_file = "keys/known_hosts".into();
-        environment.runtime.managed_ssh = Some(profile);
+        *environment.runtime.managed_ssh_mut().unwrap() = profile;
         let mut config = AppConfig {
             default_environment: Some("windows".into()),
             ..Default::default()
@@ -805,8 +808,7 @@ mod tests {
         let resolved = AppConfig::load(Some(&path))?;
         let profile = resolved.environments["windows"]
             .runtime
-            .managed_ssh
-            .as_ref()
+            .managed_ssh()
             .unwrap();
         assert_eq!(
             profile.identity_file,

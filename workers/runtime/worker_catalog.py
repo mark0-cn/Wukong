@@ -47,5 +47,6 @@ def register(runtime):
     add(runtime.control, 'ghidra', ('ghidra.query',), ('ghidra_query',))
     add(runtime.jobs.dispatch, 'control', ('job.status', 'job.cancel', 'job.list', 'job.artifacts', 'fuzz.status', 'fuzz.stop'))
     add(runtime.sessions.dispatch, 'control', ('interact.write', 'interact.profile', 'interact.close'))
-    add(runtime.sessions.dispatch, 'debug_session', ('debug.inspect', 'debug.control', 'debug.command', 'debug.profile', 'debug.events', 'debug.snapshot', 'debug.close'))
+    add(runtime.sessions.dispatch, 'debug_session', ('debug.inspect', 'debug.control', 'debug.command', 'debug.profile', 'debug.events', 'debug.snapshot'))
+    add(runtime.sessions.dispatch, 'control', ('debug.close',))
     return registrations

@@ -145,7 +145,7 @@ impl RunSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::AppConfig, llm::Provider, runtime::RuntimeBackend};
+    use crate::{config::AppConfig, llm::Provider};
 
     #[tokio::test]
     async fn stalled_worker_does_not_block_renewal_cancellation_or_wall_budget() -> Result<()> {
@@ -181,9 +181,13 @@ for line in sys.stdin:
                     platform: crate::environments::Platform::current(),
                     installation_id: None,
                     runtime: crate::runtime::RuntimeConfig {
-                        backend: RuntimeBackend::TrustedLocal,
-                        state_dir: root.join("worker"),
-                        bridge_path: bridge,
+                        transport: crate::runtime::TransportConfig::TrustedLocal(
+                            crate::runtime::TrustedLocalConfig {
+                                state_dir: root.join("worker"),
+                                bridge_path: bridge,
+                                ..Default::default()
+                            },
+                        ),
                         ..Default::default()
                     },
                 },

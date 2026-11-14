@@ -53,7 +53,7 @@ Within an active run, `follow_up_agent` (CLI `message --kind follow_up`) adds wo
 
 Children close owned debug/interactive sessions before finishing; root resolves all sessions. Other Agents in the same run may close abandoned sessions of stopped/failed owners, but cannot issue debug commands/interactive input.
 
-Native logs in `state_dir/rig/RUN_ID` contain model conversations, effects and provider metadata, not clients/credentials. Resolved provider/endpoint configuration is pinned before first model I/O and reused on resume. Per-role request output budgets do not overwrite model capacity. Keys use configured environment variables. Fresh tasks use schema 4; old databases/custom AgentRun checkpoints are not migrated.
+Native logs in `state_dir/rig/RUN_ID` contain model conversations, effects and provider metadata, not clients/credentials. Resolved provider/endpoint configuration is pinned before first model I/O and reused on resume. Per-role request output budgets do not overwrite model capacity. Keys use configured environment variables. Fresh tasks use schema 5; old databases/custom AgentRun checkpoints are not migrated.
 
 `DurableEffects` centralizes admission, stable identities, transactional/worker receipts and recovery. Business call IDs combine Agent, generation, metered model turn and provider tool-call ID, not reassigned ECS IDs. Business state/receipts commit together. Worker replies persist before controller postprocessing; missing replies are reconciled using the same request ID against the durable worker ledger. Uncertain MCP writes remain for operator reconciliation, never automatic replay. Operator reconciliation also uses epoch leases. Native effects/database changes wake execution.
 
@@ -149,7 +149,7 @@ conversation/context and journal, not that a model request ran or acted on it.
 correlated reply (not an assessment of correctness). Old-generation replies are
 retained as `stale` and never injected as current work. `message_status` exposes
 these states. In-flight model requests keep their original mailbox snapshot.
-This increment uses a fresh schema 4 store; no old-database migration is provided.
+This increment uses a fresh schema 5 store; no old-database migration is provided.
 Informational mail left on completed work becomes
 stale when a new generation starts. CLI messages default to information; GUI
 operator input defaults to information; the explicit follow-up option reopens completed work.

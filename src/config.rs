@@ -147,9 +147,13 @@ impl AppConfig {
         resolve(base, &mut self.workbench.root);
         resolve(base, &mut self.state_dir);
         for environment in self.environments.values_mut() {
-            resolve(base, &mut environment.runtime.state_dir);
-            resolve(base, &mut environment.runtime.bridge_path);
-            if let Some(ssh) = &mut environment.runtime.managed_ssh {
+            if let crate::runtime::TransportConfig::TrustedLocal(local) =
+                &mut environment.runtime.transport
+            {
+                resolve(base, &mut local.state_dir);
+                resolve(base, &mut local.bridge_path);
+            }
+            if let Some(ssh) = environment.runtime.managed_ssh_mut() {
                 resolve(base, &mut ssh.identity_file);
                 resolve(base, &mut ssh.known_hosts_file);
             }
@@ -256,7 +260,6 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::RuntimeBackend;
 
     #[test]
     fn example_directories_are_top_level_overrides_resolved_from_config() {
@@ -340,9 +343,12 @@ mod tests {
                 platform: crate::environments::Platform::Linux,
                 installation_id: None,
                 runtime: crate::runtime::RuntimeConfig {
-                    backend: RuntimeBackend::Docker,
+                    transport: crate::runtime::TransportConfig::Docker(
+                        crate::runtime::DockerConfig {
+                            ..crate::runtime::DockerConfig::new("fixture".into())
+                        },
+                    ),
                     request_timeout_secs: 120,
-                    docker_container: Some("fixture".into()),
                     ..Default::default()
                 },
             },

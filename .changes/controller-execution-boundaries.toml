@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Separate Worker bindings and resource ownership from tool dispatch, preserve original execution receipts, and reject mixed transport settings. Use backend = managed_ssh for enrolled Windows connections and a fresh schema 5 workspace; existing directories and evidence are not migrated or deleted."
+zh_CN = "将 Worker 绑定及资源归属从工具分派中分离，保留原始执行回执，并拒绝混用传输配置。已登记的 Windows 连接改用 backend = managed_ssh，并使用新的 schema 5 工作区；不迁移或删除现有目录与证据。"

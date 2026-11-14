@@ -15,7 +15,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                              platform="windows-amd64", tool_platform="linux/amd64",
                              image="example/wukong@sha256:" + "b" * 64,
                              image_id="sha256:" + "c" * 64, image_size_bytes=12345,
-                             runtime_protocol=3, data_schema=4)
+                             runtime_protocol=3, data_schema=5)
 
     def assets(self, mutate_sums=lambda text: text):
         manifest = json.dumps(self.manifest).encode()

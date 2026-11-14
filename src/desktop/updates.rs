@@ -511,7 +511,7 @@ impl Controller {
         if let Some(container) = config
             .environments
             .get("workbench")
-            .and_then(|environment| environment.runtime.docker_container.as_ref())
+            .and_then(|environment| environment.runtime.docker_container())
         {
             ensure!(
                 container == &workbench.name("tools"),

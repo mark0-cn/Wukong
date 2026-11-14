@@ -6,7 +6,7 @@ use wukong::{
     coordinator::{ChildRequest, Coordinator},
     domain::{AgentMetadata, Budget, Role, WorkerFileRecord},
     environments::{EnvironmentConfig, EnvironmentRegistry, Platform},
-    runtime::{RuntimeBackend, RuntimeConfig},
+    runtime::RuntimeConfig,
     store::Store,
     tools::ToolService,
 };
@@ -17,8 +17,12 @@ fn environment(root: &std::path::Path) -> EnvironmentConfig {
         name: "Trusted development fixture".into(),
         platform: Platform::current(),
         runtime: RuntimeConfig {
-            backend: RuntimeBackend::TrustedLocal,
-            state_dir: root.into(),
+            transport: wukong::runtime::TransportConfig::TrustedLocal(
+                wukong::runtime::TrustedLocalConfig {
+                    state_dir: root.into(),
+                    ..Default::default()
+                },
+            ),
             ..Default::default()
         },
     }
@@ -79,7 +83,8 @@ fn binding_is_inherited_validated_and_participates_in_deduplication() -> Result<
 async fn registration_is_lazy_and_missing_workers_do_not_block_other_environments() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let mut absent = environment(&temp.path().join("absent"));
-    absent.runtime.python = temp.path().join("missing-python.exe").display().to_string();
+    absent.runtime.trusted_local_mut().unwrap().python =
+        temp.path().join("missing-python.exe").display().to_string();
     let registry = EnvironmentRegistry::new(BTreeMap::from([
         (
             "available".into(),
@@ -284,7 +289,7 @@ for line in sys.stdin:
     request=json.loads(line)
     method=request['method']
     if method=='ping': result={'identity':{'protocol':3,'installation_id':__import__('hashlib').sha256(str(sys.argv).encode()).hexdigest(),'boot_id':'fixture-boot','package_sha256':'0'*64}}
-    elif method=='doctor': result={'os':platform.system().lower(),'capabilities':{'process_jobs':True}}
+    elif method=='doctor': result={'os':platform.system().lower(),'capabilities':{'process_jobs':True},'methods':{name:{'ready':True} for name in ('job.start','job.status','job.artifacts')}}
     elif method=='job.start': result={'job_id':'same-local-id','state':'running'}
     elif method=='job.status': result={'job_id':'same-local-id','state':'completed','result':{'exit_code':0}}
     elif method=='job.artifacts': result=[]
@@ -293,9 +298,17 @@ for line in sys.stdin:
 "#,
     )?;
     let mut first_environment = environment(&temp.path().join("first"));
-    first_environment.runtime.bridge_path = bridge.clone();
+    first_environment
+        .runtime
+        .trusted_local_mut()
+        .unwrap()
+        .bridge_path = bridge.clone();
     let mut second_environment = environment(&temp.path().join("second"));
-    second_environment.runtime.bridge_path = bridge;
+    second_environment
+        .runtime
+        .trusted_local_mut()
+        .unwrap()
+        .bridge_path = bridge;
     let config = AppConfig {
         default_environment: Some("first".into()),
         environments: BTreeMap::from([
@@ -338,12 +351,19 @@ for line in sys.stdin:
         );
     }
     assert_ne!(ids[0], ids[1]);
+    let receipts: Vec<serde_json::Value> = store.list("worker_receipt", &run.id)?;
+    assert_eq!(receipts.len(), 2);
+    assert!(
+        receipts
+            .iter()
+            .all(|receipt| receipt["result"]["job_id"] == "same-local-id"
+                && receipt["result"].get("worker_job_id").is_none())
+    );
     let jobs = store.records::<wukong::domain::JobRecord>(&run.id)?;
     assert_eq!(jobs.len(), 2);
-    assert!(
-        jobs.iter()
-            .all(|job| job.worker_resource_id == "same-local-id")
-    );
+    assert!(jobs.iter().all(
+        |job| job.worker_resource_id == "same-local-id" && job.status.job_id == "same-local-id"
+    ));
     for (agent, id) in [(&first, &ids[0]), (&second, &ids[1])] {
         let status = tools
             .execute(
