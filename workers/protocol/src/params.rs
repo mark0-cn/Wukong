@@ -12,9 +12,13 @@ macro_rules! choices {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Expected {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdout_contains: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stderr_contains: Option<String>,
 }
 

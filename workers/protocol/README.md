@@ -2,6 +2,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
+Verification expectations match only populated predicates. Omitted or null optional fields do not add constraints; Rust serialization omits them. If no predicates remain, verification still requires an observed crash rather than treating a normal exit as success.
+
 This crate owns the public operation identifiers, request types, resource observations, request context, errors and capacity contract. It depends on neither the controller nor a platform worker. JSON-RPC envelopes are handled by jsonrpsee on Windows and jsonrpcserver on Linux. SSH and stdio remain transports; private native sessions use Protobuf.
 
 `src/methods.rs` declares each operation's input/output types, effect policy and resource demand. Platform registries bind those operations to actual handlers and readiness. The model tool catalog declares required operations directly; it does not infer them from tool names.
