@@ -4,7 +4,7 @@
 
 [English](README.md) · 简体中文
 
-`remote_installed_windows_worker_replay_acceptance` 使用 `WUKONG_REMOTE_WORKER_REPLAY_TEST`，提供托管 SSH `config`、预期 `manifest_sha256`、新的绝对路径 `output`，以及恰好 `x64`/`x86` 两项 `probes`（绝对 `path` 与固定 `sha256`）。它复用包内可信进程探针检查 12 个原生回放资源：重复原生异常、阴性结果、精确二进制 stdin、超时、取消及 LaunchSpec 输入。它核对每次试验的新身份、原始回执/输出哈希、完成后重试/冲突行为及已关闭清单。独立观察服务重启后，`remote_native_completed_replay_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_REPLAY_RECOVERY_TEST`，提供 `config`、固定哈希的 `previous` 报告（`path`/`sha256`）和新的绝对路径 `output`；不上传、不执行，只比较全部原状态及产物哈希。普通测试显式忽略这些夹具，已安装 VM 资格验收仍待完成。它们共享现有控制器传输、输入、清单及产物辅助方法。
+`remote_installed_windows_worker_replay_acceptance` 使用 `WUKONG_REMOTE_WORKER_REPLAY_TEST`，提供托管 SSH `config`、预期 `manifest_sha256`、新的绝对路径 `output`，以及恰好 `x64`/`x86` 两项 `probes`（绝对 `path` 与固定 `sha256`）。它复用包内可信进程探针检查 12 个原生回放资源：重复原生异常、阴性结果、精确二进制 stdin、超时、取消及 LaunchSpec 输入。它核对每次试验的新身份、原始回执/输出哈希、完成后重试/冲突行为及已关闭清单。独立观察服务重启后，`remote_native_completed_replay_recovery_acceptance` 使用 `WUKONG_REMOTE_WORKER_REPLAY_RECOVERY_TEST`，提供 `config`、固定哈希的 `previous` 报告（`path`/`sha256`）和新的绝对路径 `output`；不上传、不执行，只比较全部原状态及产物哈希。普通测试显式忽略这些夹具；指定已安装 VM 用例及已完成结果恢复在源码 `2aaa155` 通过，身份与限制见 [Windows 资格记录](../windows/README.zh-CN.md)。它们共享现有控制器传输、输入、清单及产物辅助方法。
 
 默认忽略的原生 `live_sdk_subscription_opens_and_unsubscribes_on_the_dedicated_vm` 夹具打开真实的按应用/监听端口过滤的 WFP 订阅，检查可信回环对照并排空 SDK 订阅。仅以管理员身份在专用 Windows VM 运行。它不改变防火墙规则或全局事件选项，也不证明容器内数据包已被阻断。用户 Windows 10 VM 已通过这个 SDK 夹具；实时阻断及并发冷启动验收仍需已安装 worker 的资格检查。见 [Windows 观察契约](../windows/README.zh-CN.md)。
 
