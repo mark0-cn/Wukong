@@ -200,30 +200,23 @@ def supervise_job(root, directory):
                 raise ValueError("input does not reproduce a crash; minimization requires a stable crash signature")
             if not spec.get("allow_signal_only", False) and not baseline.get("location_signature"):
                 raise ValueError("location signature unavailable; inspect trial-0000/crash-snapshot.json. Install GDB/pygdbmi or explicitly opt into allow_signal_only (weak crash equivalence).")
-            attempts, granularity, index = 1, 2, 1
-            while len(data) > 1 and attempts < spec["max_attempts"] and time.monotonic() < deadline and not (directory / "cancel").exists():
-                chunk = max(1, (len(data) + granularity - 1) // granularity)
-                reduced = False
-                for offset in range(0, len(data), chunk):
-                    if attempts >= spec["max_attempts"] or time.monotonic() >= deadline or (directory / "cancel").exists():
-                        break
-                    candidate = data[:offset] + data[offset + chunk:]
-                    observation = replay(root, directory, spec, candidate, index)
-                    attempts += 1
-                    index += 1
-                    if crash_signature(observation) == signature:
-                        data, granularity, reduced = candidate, max(2, granularity - 1), True
-                        break
-                if not reduced:
-                    if granularity >= len(data):
-                        break
-                    granularity = min(len(data), granularity * 2)
+            from worker_minimize import reduce_input
+            def equivalent(candidate, index):
+                observed = replay(root, directory, spec, candidate, index)
+                if observed.get("state") != "completed":
+                    return None
+                if (not spec.get("allow_signal_only", False)
+                        and crash_signature(observed) and not observed.get("location_signature")):
+                    return None
+                return crash_signature(observed) == signature
+            data, reduction = reduce_input(data, equivalent,
+                max_attempts=spec["max_attempts"], deadline=deadline,
+                cancelled=lambda: (directory / "cancel").exists())
             minimized = directory / "minimized.bin"
             minimized.write_bytes(data)
             result = {"artifact": artifact(root, minimized), "original_size": confined(root, spec["input"], True).stat().st_size,
-                      "minimized_size": len(data), "attempts": attempts, "crash_signature": signature,
-                      "signature_strength": "signal_only" if spec.get("allow_signal_only", False) else "location_and_frames",
-                      "complete": attempts < spec["max_attempts"] and time.monotonic() < deadline and not (directory / "cancel").exists()}
+                      "minimized_size": len(data), "crash_signature": signature, **reduction,
+                      "signature_strength": "signal_only" if spec.get("allow_signal_only", False) else "location_and_frames"}
             meta["state"] = "cancelled" if (directory / "cancel").exists() else "completed"
         else:
             raise ValueError("unknown job kind")

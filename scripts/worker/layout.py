@@ -62,10 +62,8 @@ def unpack_zip(archive, output, prefix="", wheel=False):
             if any(entry.file_size > 1024 * 1024 for entry in [*wheel_metadata, *package_metadata]):
                 raise ValueError("Wheel metadata exceeds the offline size limit")
             metadata = source.read(wheel_metadata[0]).decode("utf-8")
-            package = source.read(package_metadata[0]).decode("utf-8")
-            if ("Root-Is-Purelib: true" not in metadata or "Tag: py3-none-any" not in metadata
-                    or any(line.startswith("Requires-Dist:") for line in package.splitlines())):
-                raise ValueError("Wheel dependency closure is not supported by this lock")
+            if "Root-Is-Purelib: true" not in metadata or "Tag: py3-none-any" not in metadata:
+                raise ValueError("Offline wheels must be pure Python")
         output.mkdir(parents=True, exist_ok=True)
         for entry, name in entries:
             target = no_links(output / name)
@@ -149,6 +147,10 @@ def prepare(cache, output, lock_path=LOCK):
         runtime = output / "runtime"
         unpack_zip(cache / python_asset["path"], runtime / "python")
         unpack_zip(cache / ssh_asset["path"], runtime / "openssh", prefix="OpenSSH-Win64/")
+        from scripts.worker.python_wheels import verify as verify_wheels
+        wheels = [validate_asset(cache, item) for item in lock["assets"]
+                  if item["component"] == "worker_python_dependencies"]
+        verify_wheels(wheels, ROOT / "workers/runtime/requirements.txt", lock["components"]["python"]["version"])
         for item in lock["assets"]:
             if item["component"] == "worker_python_dependencies":
                 unpack_zip(cache / item["path"], runtime / "python/Lib/site-packages", wheel=True)

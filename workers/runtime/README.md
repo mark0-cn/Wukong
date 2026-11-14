@@ -177,9 +177,22 @@ PoC verification uses a fresh working directory and read-only input copy per
 trial. `job.status.result` records `passed`, `attempts`, `successes`, raw per-trial
 exit status/signal, input and target SHA256, producer/verifier IDs, environment,
 and the observed stage (`crash` or `behavior`). Repeated native crashes do not
-prove arbitrary read/write or code execution. Crash minimization preserves the
-signal/exception signature; independent root-cause confirmation is still needed
-to distinguish two bugs producing the same signal.
+prove arbitrary read/write or code execution. Crash minimization requires the
+original module-content/location signature by default. Explicit
+`allow_signal_only` permits weaker signal/exception equivalence and labels it as
+such; independent root-cause confirmation is still needed.
+
+Input reduction uses pinned Picire 26.11 rather than a local delta-debugging
+implementation. Existing replay owns every candidate execution and its evidence.
+The original baseline consumes one attempt; Picire's reassertion of an already
+accepted candidate reuses that trial. Empty input is checked explicitly. A
+timeout, cancellation, exhausted attempt budget or unresolved candidate retains
+only a previously verified result, with `complete: false` and `stop_reason`.
+Unexpected evaluation errors fail the job. `reducer: "picire"` identifies the
+algorithm. Doctor advertises minimization only when Picire and its dependencies
+are present. The offline package pins all three pure-Python wheels and their
+original license files. This replaces the Python worker's algorithm; the native
+Windows execution route still requires separate implementation and acceptance.
 
 `ghidra.query` accepts the same `query` object as the Rust adapter:
 `{"operation":"functions","pattern":"main","offset":0,"limit":100}`,

@@ -15,7 +15,7 @@
       "channel": "preview"
     },
     "worker_python_dependencies": {
-      "version": "pygdbmi=0.11.0.0;filelock=4.2.1;atomicwrites=1.4.0",
+      "version": "pygdbmi=0.11.0.0;filelock=4.2.1;atomicwrites=1.4.0;picire=26.11;chardet=5.2.0;inators=2.1.1",
       "channel": "stable"
     },
     "windbg_mcp": {
@@ -492,6 +492,27 @@
       "url": "https://files.pythonhosted.org/packages/2c/a0/da5f49008ec6e9a658dbf5d7310a4debd397bce0b4db03cf8a410066bb87/atomicwrites-1.4.0-py2.py3-none-any.whl",
       "size": 6790,
       "sha256": "6d1784dea7c0c8d4a5172b6c620f40b6e4cbfdf96d783691f2e1302a7b88e197"
+    },
+    {
+      "component": "worker_python_dependencies",
+      "path": "wheels/picire-26.11-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/45/22/b5e55185a8882bd8455435f3f74df40ba8909ddcc1ab65ba1b216e9b815f/picire-26.11-py3-none-any.whl",
+      "size": 25839,
+      "sha256": "6b87c26455018e78a516cdddfc04f7b801c9f414d793dcf5e5e5b596b1755919"
+    },
+    {
+      "component": "worker_python_dependencies",
+      "path": "wheels/chardet-5.2.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/38/6f/f5fbc992a329ee4e0f288c1fe0e2ad9485ed064cac731ed2fe47dcc38cbf/chardet-5.2.0-py3-none-any.whl",
+      "size": 199385,
+      "sha256": "e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970"
+    },
+    {
+      "component": "worker_python_dependencies",
+      "path": "wheels/inators-2.1.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/1a/dd/b952bb9a6c86f1094801517616be344e2324c756accc492784aec8e05d27/inators-2.1.1-py3-none-any.whl",
+      "size": 13289,
+      "sha256": "3fcfa098b0df5e29c860c9142a28fe3487530760133b2a1bae1525ce2038d4ea"
     }
   ]
 }

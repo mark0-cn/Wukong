@@ -130,7 +130,10 @@ def assemble(cache, output, native, keys):
                      "windbg_mcp": ["licenses/windbg-mcp-LICENSE"],
                      "worker_python_dependencies": ["runtime/python/Lib/site-packages/pygdbmi-0.11.0.0.dist-info/LICENSE",
                          "runtime/python/Lib/site-packages/filelock-4.2.1.dist-info/licenses/LICENSE",
-                         "runtime/python/Lib/site-packages/atomicwrites-1.4.0.dist-info/LICENSE"]}
+                         "runtime/python/Lib/site-packages/atomicwrites-1.4.0.dist-info/LICENSE",
+                         "runtime/python/Lib/site-packages/picire-26.11.dist-info/licenses/LICENSE.rst",
+                         "runtime/python/Lib/site-packages/chardet-5.2.0.dist-info/LICENSE",
+                         "runtime/python/Lib/site-packages/inators-2.1.1.dist-info/licenses/LICENSE.rst"]}
     components = {name: dict(component, original_payloads=["originals/" + item["path"] for item in lock["assets"] if item["component"] == name],
                             licenses=license_paths[name]) for name, component in lock["components"].items()}
     manifest = dict(schema=1, platform="windows-amd64", version=version(), source_revision=native_metadata["source_revision"],

@@ -158,6 +158,8 @@ python -m scripts.worker.layout --cache target/windows-offline-cache --output ta
 
 只有 `--download` 允许网络访问。已有缓存条目不匹配时直接失败，不替换原文件。展开要求 Windows 控制端和全新输出目录，没有联网或下载路径。它以只读方式查询 MSI 表，仅解压回调批准的 CAB 成员，将完整调试器载荷清单与已固定的微软引导程序内部元数据核对，并保留全部原始 MSI/CAB/ZIP/wheel 及许可证。不会运行 MSI 安装、自定义操作或修改已安装工具。解压使用微软 [MSI 数据库](https://learn.microsoft.com/en-us/windows/win32/api/msiquery/nf-msiquery-msiviewfetch)及 [cabinet 回调](https://learn.microsoft.com/en-us/windows/win32/setupapi/spfilenotify-fileincabinet) API。
 
+展开 wheel 前，展开器调用控制端 pip（`install --dry-run --no-index`），从已核对哈希的锁定文件中为随包 Python 版本解析全部依赖。控制端需要支持 dry-run/report 的 pip；不会安装任何包。Pip 配置文件、索引和缓存均被禁用。requirements 只允许普通版本固定项；wheel 必须为纯 Python，依赖不得带条件或直接引用。缺失或冲突的依赖、不兼容的 Python 要求，以及报告选中其他内容都会使组装失败。Picire 及其依赖携带原始许可证。
+
 输出包含已预展开 wheel 的私有嵌入式 Python、Python worker 源码、OpenSSH 和完整 SDK 调试器文件树。Python 忽略用户和注册表路径，仅加载随包库及 worker 目录；VM 无须 pip。归档路径拒绝链接、目录穿越、别名与覆盖写入。缓存和暂存目录应仅供控制端访问：这些检查本身不提供并发写入隔离。失败输出保留用于诊断，不能复用。该命令生成**未签名的控制端展开目录**。普通控制端展开检查与可信样例不代表干净 Windows VM 的依赖覆盖。
 
 组装并签名新的完整载荷前，先提交 worker 改动，再从该干净提交重新构建。组装器要求源码提交与目录哈希匹配，并核对已锁定的原生构建元数据、实际二进制哈希和静态 CRT 导入。包内包含原生二进制及其依赖许可文本、Rust 标准库版权声明和全部原始第三方载荷。原生声明收集保留原始 `LICENSE`、`COPYING`、`NOTICE`、`UNLICENSE`、`COPYRIGHT` 文件及显式声明的许可证文件；以 `COPYRIGHT` 文件分发的完整许可证文本会原样保留。不会下载缺失文件。
