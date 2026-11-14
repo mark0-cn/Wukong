@@ -209,8 +209,12 @@ async fn remote_installed_windows_worker_dump_acceptance() -> Result<()> {
             "closed dump result was replaced"
         );
         ensure!(
-            calls.call("debug.start", request).await.is_err(),
-            "closed dump was reopened"
+            calls.call("debug.start", request).await? == started,
+            "closed dump start lost its original receipt"
+        );
+        ensure!(
+            calls.inspect(id, "state").await? == state,
+            "start retry changed the closed dump state"
         );
         let (artifact, transcript) = original(
             &bound,
