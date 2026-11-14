@@ -107,10 +107,7 @@ async fn remote_installed_windows_worker_dump_acceptance() -> Result<()> {
         client.identity().package_sha256 == profile.manifest_sha256,
         "dump fixture package differs"
     );
-    ensure!(
-        client.doctor().await?["capabilities"]["native_target_execution"] == false,
-        "partial dump acceptance advertised production availability"
-    );
+    super::inventory_acceptance::qualified(&client).await?;
     let acquire = json!({"run_id":format!("native-dump-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()),"owner_id":"dump-controller-fixture"});
     let lease: EnvironmentLease = serde_json::from_value(
         client

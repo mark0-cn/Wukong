@@ -8,6 +8,19 @@ from scripts.worker import source_identity
 
 
 class WorkerSourceIdentityTests(unittest.TestCase):
+    def test_public_contract_edit_changes_native_source_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            contract = root / "workers/protocol/src/lib.rs"
+            contract.parent.mkdir(parents=True)
+            contract.write_text("pub const PROTOCOL: u32 = 2;", encoding="utf-8")
+            with patch.object(source_identity, "ROOT", root), patch.object(
+                source_identity.subprocess, "check_output", return_value="a" * 40
+            ):
+                before = source_identity.identity()["source_tree_sha256"]
+                contract.write_text("pub const PROTOCOL: u32 = 3;", encoding="utf-8")
+                self.assertNotEqual(before, source_identity.identity()["source_tree_sha256"])
+
     def test_vendor_patch_edit_changes_source_hash(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -25,7 +38,7 @@ class WorkerSourceIdentityTests(unittest.TestCase):
     def test_protocol_edit_changes_source_hash(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            schema = root / "workers/windows/proto/broker.proto"
+            schema = root / "workers/windows/proto/session.proto"
             schema.parent.mkdir(parents=True)
             schema.write_text('syntax = "proto3"; message Request {}', encoding="utf-8")
             with patch.object(source_identity, "ROOT", root), patch.object(

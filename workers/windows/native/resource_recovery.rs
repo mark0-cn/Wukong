@@ -172,7 +172,7 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
             "native recovery scratch remains"
         );
     }
-    let value = json!({"schema":resource_process::SCHEMA,"scope":"owned_resource_recovery","attempt":request.attempt,"resource_id":record.id,"record_sha256":digest(record)?,"owner":record.owner,"guardian_found":found,"jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"production_execution":false});
+    let value = json!({"schema":resource_process::SCHEMA,"scope":"owned_resource_recovery","attempt":request.attempt,"resource_id":record.id,"record_sha256":digest(record)?,"owner":record.owner,"guardian_found":found,"jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"isolation":"appcontainer"});
     deployment::publish_json(
         &root
             .join("metadata/resource-results")

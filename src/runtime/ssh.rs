@@ -478,16 +478,17 @@ mod tests {
         let ping = client.call("ping", json!({})).await?;
         let doctor = client.doctor().await?;
         ensure!(
-            doctor["capabilities"]["native_target_execution"] == false,
-            "unaccepted production execution must remain unavailable"
+            doctor["capabilities"]["native_target_execution"] == true
+                && doctor["readiness"]["ready"] == true,
+            "installed native execution must pass current startup qualification"
         );
         ensure!(
-            doctor["native_broker"]["available"] == true
-                && doctor["native_broker"]["identity"] == doctor["identity"]
-                && doctor["native_broker"]["production_execution"] == false
-                && doctor["native_broker"]["scope"] == "native_broker_channel_only",
-            "installed metadata worker cannot authenticate its native broker: {}",
-            doctor["native_broker"]
+            doctor["implementation"] == "native_windows"
+                && doctor["execution_owner"] == "native_windows"
+                && doctor["capacity"]["max_active_resources"] == 1
+                && doctor["exclusive_run_lease"] == true,
+            "installed worker has an inconsistent authority or capacity contract: {}",
+            doctor
         );
         let acquire = json!({"run_id":"hosted-installation-check","owner_id":"controller-fixture"});
         let first: EnvironmentLease = serde_json::from_value(
@@ -619,7 +620,7 @@ mod tests {
         let report: Value = json!({"passed":true,"scope":scope,
             "identity":client.identity(),"daemon_id":ping["daemon_id"],"daemon_pid":ping["daemon_pid"],
             "first_epoch":first.epoch,"last_epoch":second.epoch,"artifact_sha256":artifact["sha256"],
-            "native_broker":doctor["native_broker"],
+            "native_worker":doctor,
             "native_input":artifact["native_input"],
             "native_resumable_input":chunked["native_input"],
             "production_isolation_verified":false});

@@ -1,4 +1,4 @@
-//! Native provenance for the existing bounded resumable-upload protocol.
+//! Native bounded resumable uploads with one durable offset and publication authority.
 use super::*;
 use std::io::{Read, Seek, SeekFrom};
 use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
@@ -14,7 +14,7 @@ pub(crate) struct Transfer {
 enum Action {
     Begin,
     Status,
-    Write { end: u64 },
+    Write,
     Commit,
 }
 fn text<'a>(params: &'a serde_json::Map<String, Value>, key: &str) -> Result<&'a str> {
@@ -47,6 +47,33 @@ fn transfer_id(declaration: &Declaration) -> Result<String> {
     Ok(hex::encode(Sha256::digest(spec.as_bytes())))
 }
 impl Inputs {
+    pub(super) fn transfer_result(&self, transfer: &Transfer) -> Result<Value> {
+        let declaration = &transfer.declaration;
+        if matches!(transfer.action, Action::Commit) {
+            return self.receipt(declaration);
+        }
+        let directory = self.directory(declaration)?;
+        let key = digest(&declaration.path)?;
+        let blob = directory.join(format!("{key}.data"));
+        let partial = directory.join(format!("{key}.partial"));
+        let available = if blob.exists() { &blob } else { &partial };
+        let offset = if available.exists() {
+            self.policy.verify(available, false)?;
+            fs::symlink_metadata(available)?.len()
+        } else {
+            0
+        };
+        ensure!(offset <= declaration.size, "native transfer size changed");
+        let complete = directory.join(format!("{key}.receipt.json")).exists();
+        let mut result = serde_json::json!({"transfer_id":transfer.transfer_id,"offset":offset,"complete":complete});
+        if matches!(transfer.action, Action::Begin) {
+            result["chunk_bytes"] = Value::from(CHUNK);
+        }
+        if complete {
+            result["artifact"] = self.receipt(declaration)?;
+        }
+        Ok(result)
+    }
     pub(super) fn prepare_transfer(
         &self,
         owner: Owner,
@@ -209,7 +236,7 @@ impl Inputs {
                     file.write_all(&data[repeated..])?;
                     file.sync_all()?;
                 }
-                Action::Write { end }
+                Action::Write
             }
             _ => anyhow::bail!("unsupported native transfer operation"),
         };
@@ -218,84 +245,6 @@ impl Inputs {
             transfer_id: id.into(),
             action,
         })
-    }
-    pub(super) fn complete_transfer(&self, transfer: &Transfer, result: &mut Value) -> Result<()> {
-        ensure!(
-            result.is_object() && result.get("native_input").is_none(),
-            "worker cannot issue native transfer proof"
-        );
-        let declaration = &transfer.declaration;
-        match transfer.action {
-            Action::Begin => ensure!(
-                result["transfer_id"] == transfer.transfer_id && result["chunk_bytes"] == CHUNK,
-                "worker transfer identity differs"
-            ),
-            Action::Commit => self.finish(declaration, result)?,
-            Action::Status | Action::Write { .. } => {
-                let offset = result["offset"]
-                    .as_u64()
-                    .filter(|offset| *offset <= declaration.size)
-                    .context("invalid worker transfer offset")?;
-                let complete = result["complete"]
-                    .as_bool()
-                    .context("invalid worker transfer completion")?;
-                ensure!(
-                    result["transfer_id"] == transfer.transfer_id,
-                    "worker transfer identity differs"
-                );
-                let directory = self.directory(declaration)?;
-                let key = digest(&declaration.path)?;
-                let blob = directory.join(format!("{key}.data"));
-                let path = if blob.exists() {
-                    blob
-                } else {
-                    directory.join(format!("{key}.partial"))
-                };
-                let available = if path.exists() {
-                    self.policy.verify(&path, false)?;
-                    fs::symlink_metadata(&path)?.len()
-                } else {
-                    0
-                };
-                ensure!(
-                    available <= declaration.size,
-                    "native transfer size changed"
-                );
-                let acknowledged = match transfer.action {
-                    Action::Write { end } => {
-                        ensure!(
-                            offset >= end && available >= end,
-                            "worker did not acknowledge the entire chunk"
-                        );
-                        end
-                    }
-                    _ => offset.min(available),
-                };
-                let admitted = complete
-                    && acknowledged == declaration.size
-                    && directory.join(format!("{key}.receipt.json")).exists();
-                if complete {
-                    let artifact = result
-                        .get("artifact")
-                        .context("completed worker transfer has no artifact")?;
-                    ensure!(
-                        artifact["path"] == declaration.path
-                            && artifact["sha256"] == declaration.sha256
-                            && artifact["size"] == declaration.size
-                            && artifact.get("native_input").is_none(),
-                        "worker transfer artifact differs"
-                    );
-                }
-                result["offset"] = Value::from(acknowledged);
-                result["complete"] = Value::from(admitted);
-                if admitted {
-                    self.finish(declaration, &mut result["artifact"])?;
-                } else {
-                    result.as_object_mut().unwrap().remove("artifact");
-                }
-            }
-        }
-        Ok(())
     }
 }
 

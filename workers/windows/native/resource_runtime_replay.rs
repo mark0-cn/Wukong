@@ -167,7 +167,7 @@ impl Runtime {
         };
         result["native_receipt_sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
         let status = json!({"job_id":id,"kind":request.kind(),"state":if receipt["cancelled"] == true {"cancelled"} else if minimizing && !receipt["failed"].is_null() {"failed"} else {"completed"},
-            "native_owner":request.owner,"result":result,"production_execution":false});
+            "native_owner":request.owner,"result":result,"isolation":"appcontainer"});
         self.retain(
             &self.result_path(id, "status.json"),
             &serde_json::to_vec(&status)?,
@@ -212,12 +212,9 @@ mod tests {
     fn upload(inputs: &Inputs, name: &str, data: &[u8], executable: bool) -> Result<()> {
         let params =
             json!({"path":name,"data_base64":STANDARD.encode(data),"executable":executable});
-        let pending = inputs.prepare_rpc(owner(), "file.put", params.as_object().unwrap())?;
-        inputs.complete_rpc(
-            &pending,
-            &mut json!({"path":format!("files/{name}"),"size":data.len(),
-            "sha256":hex::encode(Sha256::digest(data))}),
-        )
+        inputs
+            .call(owner(), "file.put", params.as_object().unwrap())
+            .map(|_| ())
     }
     fn prepared(inputs: &Inputs, params: Value) -> Result<(Specification, Configuration, Request)> {
         let (id, parameters): (_, Parameters) = start_parameters(params.as_object().unwrap())?;

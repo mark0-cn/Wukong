@@ -7,16 +7,14 @@ Passing these trusted fixtures does not establish production target isolation.
 import sys
 sys.dont_write_bytecode = True
 import argparse
-import base64
+import importlib
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
-import time
 
 from worker_common import PROTOCOL, safe_env, sha256_file
-from worker_runtime import Runtime
 
 
 def ssh_probe_environment():
@@ -53,34 +51,14 @@ def architecture_test(root, manifest, state, architecture):
     echo = subprocess.run([str(target), "--echo"], cwd=directory, env=safe_env(), capture_output=True, timeout=15)
     if echo.returncode or echo.stdout != b"wukong-worker-selftest\n":
         raise ValueError("Native self-test probe could not execute")
-    runtime = Runtime(directory, trusted=True)
-    image = runtime.dispatch("file.put", {"path": target.name, "data_base64": base64.b64encode(target.read_bytes()).decode(), "executable": True})
     dumped = directory / "probe.dmp"
-    process = subprocess.run([str(directory / image["path"]), "--dump", str(dumped)], cwd=directory, env=safe_env(), capture_output=True, timeout=20)
-    if process.returncode:
+    process = subprocess.run([str(target), "--dump", str(dumped)], cwd=directory, env=safe_env(), capture_output=True, timeout=20)
+    if process.returncode or not dumped.is_file():
         raise ValueError("Offline dump generation failed")
-    runtime.dispatch("file.put", {"path": "probe.dmp", "data_base64": base64.b64encode(dumped.read_bytes()).decode()})
-    payload = b"CRASH: offline package self-test"
-    input_ = runtime.dispatch("file.put", {"path": "replay-input", "data_base64": base64.b64encode(payload).decode()})
-    job = runtime.dispatch("poc.verify", dict(target=image["path"], input=input_["path"], args=["--replay", "@@"], trials=3,
-        timeout_secs=3, call_id="offline-selftest", producer_agent_id="offline-producer", verifier_agent_id="offline-verifier"))
-    deadline = time.monotonic() + 90
-    while job["state"] not in {"completed", "failed", "cancelled", "timed_out", "lost"}:
-        if time.monotonic() >= deadline:
-            runtime.dispatch("job.cancel", {"job_id": job["job_id"]})
-            raise ValueError("Offline replay self-test exceeded deadline")
-        time.sleep(0.05)
-        job = runtime.dispatch("job.status", {"job_id": job["job_id"]})
-    result = job.get("result", {})
-    if (job["state"] != "completed" or result.get("passed") is not True or result.get("successes") != 3
-            or result.get("attempts") != 3 or result.get("target", {}).get("sha256") != image["sha256"]
-            or result.get("input", {}).get("sha256") != input_["sha256"]
-            or len(result.get("results", [])) != 3
-            or any(row.get("crash_signature") != "exception:0xc0000005" for row in result["results"])):
-        raise ValueError("Offline native replay self-test failed")
-    if runtime.active_resources():
-        raise ValueError("Offline self-test retained active resources")
-    return {"architecture": architecture, "target_sha256": image["sha256"], "dump_sha256": sha256_file(dumped), "replay_trials": 3}
+    with dumped.open("rb") as stream:
+        if stream.read(4) != b"MDMP":
+            raise ValueError("Offline probe did not produce a minidump")
+    return {"architecture": architecture, "target_sha256": sha256_file(target), "dump_sha256": sha256_file(dumped)}
 
 
 def run(package, state):
@@ -96,6 +74,13 @@ def run(package, state):
     manifest = json.loads(raw)
     if manifest["runtime_protocol"] != PROTOCOL:
         raise ValueError("Incompatible self-test package")
+    dependencies = ["pygdbmi", "filelock", "atomicwrites", "picire", "chardet", "inators"]
+    for module in dependencies:
+        importlib.import_module(module)
+    from worker_seccomp import decode, probe
+    program, rows = decode(bytes([6, 0, 0, 0, 0, 0, 255, 127]))
+    if probe(program, rows, {"arch": 0xc000003e, "nr": 1}, "little")["decision"]["action"] != "ALLOW":
+        raise ValueError("Packaged filter analysis self-test failed")
     state.mkdir(parents=True, exist_ok=True)
     attempt = Path(tempfile.mkdtemp(prefix="offline-selftest-", dir=state))
     ssh = checked_file(package, manifest, manifest["entrypoints"]["ssh_keygen"])
@@ -108,7 +93,7 @@ def run(package, state):
         (attempt / "ssh-probe.pub").unlink(missing_ok=True)
     results = [architecture_test(package, manifest, attempt, architecture) for architecture in ["x64", "x86"]]
     report = {"passed": True, "scope": "offline_dependencies_and_trusted_fixtures", "runtime_protocol": PROTOCOL,
-              "signed_manifest_sha256": sha256_file(package / "manifest.json"), "architectures": results,
+              "signed_manifest_sha256": sha256_file(package / "manifest.json"), "architectures": results, "python_dependencies": dependencies,
               "production_isolation_verified": False, "state_directory": str(attempt)}
     (attempt / "result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report

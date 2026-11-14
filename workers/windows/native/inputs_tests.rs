@@ -22,9 +22,6 @@ fn put(owner: Owner, data: &[u8]) -> Result<Put> {
             .unwrap(),
     )
 }
-fn reply(put: &Put) -> Value {
-    json!({"path":put.declaration.path,"sha256":put.declaration.sha256,"size":put.declaration.size})
-}
 fn fixture() -> Result<(tempfile::TempDir, Inputs)> {
     let directory = tempfile::tempdir()?;
     let policy = AclPolicy::current_user()?;
@@ -54,7 +51,7 @@ fn native_logical_lookup_needs_completed_exact_owner_and_execution_policy() -> R
             .reference(&owner(), &put.declaration.path, Purpose::Execute)
             .is_err()
     );
-    inputs.complete(&put, &mut reply(&put))?;
+    inputs.receipt(&put.declaration)?;
     assert_eq!(
         inputs.reference(&owner(), &put.declaration.path, Purpose::Execute)?,
         reference(&put)?
@@ -81,7 +78,7 @@ fn native_logical_lookup_needs_completed_exact_owner_and_execution_policy() -> R
         data: put.data.clone(),
     };
     inputs.prepare(&data)?;
-    inputs.complete(&data, &mut reply(&data))?;
+    inputs.receipt(&data.declaration)?;
     assert!(
         inputs
             .reference(&owner(), &data.declaration.path, Purpose::Execute)
@@ -104,7 +101,7 @@ fn native_resource_ingestion_requires_a_completed_receipt_and_pins_the_verified_
             .acquire(&owner(), &reference, Purpose::Execute)
             .is_err()
     );
-    inputs.complete(&put, &mut reply(&put))?;
+    inputs.receipt(&put.declaration)?;
     let mut input = inputs.acquire(&owner(), &reference, Purpose::Execute)?;
     assert_eq!(input.reference(), &reference);
     let blob = inputs
@@ -113,7 +110,7 @@ fn native_resource_ingestion_requires_a_completed_receipt_and_pins_the_verified_
     assert!(fs::OpenOptions::new().write(true).open(&blob).is_err());
     assert!(fs::rename(&blob, blob.with_extension("renamed")).is_err());
     // An ordinary read-only retry may still validate the immutable source.
-    inputs.complete(&put, &mut reply(&put))?;
+    inputs.receipt(&put.declaration)?;
     let mut bytes = Vec::new();
     input.read_to_end(&mut bytes)?;
     assert_eq!(bytes, b"only-controller-admitted-bytes");
@@ -128,7 +125,7 @@ fn resource_input_selectors_cannot_change_owner_content_or_executable_policy() -
     let mut put = put(owner(), b"data-only-input")?;
     put.declaration.executable = false;
     inputs.prepare(&put)?;
-    inputs.complete(&put, &mut reply(&put))?;
+    inputs.receipt(&put.declaration)?;
     let expected = reference(&put)?;
     assert!(
         inputs
@@ -212,7 +209,7 @@ fn resource_input_acquisition_rechecks_private_bytes_and_rejects_links() -> Resu
     let (directory, inputs) = fixture()?;
     let put = put(owner(), b"original-native-input")?;
     inputs.prepare(&put)?;
-    inputs.complete(&put, &mut reply(&put))?;
+    inputs.receipt(&put.declaration)?;
     let reference = reference(&put)?;
     let blob = inputs
         .directory(&put.declaration)?
@@ -269,8 +266,7 @@ fn direct_sdk_publication_handles_members_beyond_the_legacy_windows_path_limit()
     ));
     assert!(member.to_string_lossy().len() > 260);
     inputs.prepare(&put)?;
-    let mut result = reply(&put);
-    inputs.complete(&put, &mut result)?;
+    let result = inputs.receipt(&put.declaration)?;
     assert_eq!(result["native_input"]["sha256"], result["sha256"]);
     Ok(())
 }
@@ -282,8 +278,7 @@ fn native_bytes_and_receipts_are_bound_to_the_controller_owner_and_survive_reope
     let scope = inputs.directory(&first.declaration)?;
     let key = digest(&first.declaration.path)?;
     assert!(!scope.join(format!("{key}.receipt.json")).exists());
-    let mut result = reply(&first);
-    inputs.complete(&first, &mut result)?;
+    let result = inputs.receipt(&first.declaration)?;
     assert_eq!(result["native_input"]["epoch"], 1);
     assert_eq!(
         result["native_input"]["identity"],
@@ -293,8 +288,7 @@ fn native_bytes_and_receipts_are_bound_to_the_controller_owner_and_survive_reope
     drop(inputs);
     let inputs = Inputs::open(directory.path(), AclPolicy::current_user()?)?;
     inputs.prepare(&first)?;
-    let mut repeated = reply(&first);
-    inputs.complete(&first, &mut repeated)?;
+    let repeated = inputs.receipt(&first.declaration)?;
     assert_eq!(result, repeated);
     for other in [
         Owner {
@@ -312,8 +306,7 @@ fn native_bytes_and_receipts_are_bound_to_the_controller_owner_and_survive_reope
     ] {
         let other = put(other, b"original-controller-bytes")?;
         inputs.prepare(&other)?;
-        let mut observation = reply(&other);
-        inputs.complete(&other, &mut observation)?;
+        let observation = inputs.receipt(&other.declaration)?;
         assert_ne!(
             observation["native_input"]["id"],
             result["native_input"]["id"]
@@ -323,25 +316,16 @@ fn native_bytes_and_receipts_are_bound_to_the_controller_owner_and_survive_reope
     Ok(())
 }
 #[test]
-fn changed_bytes_or_forged_worker_results_never_create_an_admitted_receipt() -> Result<()> {
+fn changed_bytes_never_create_an_admitted_receipt() -> Result<()> {
     let (_directory, inputs) = fixture()?;
     let first = put(owner(), b"controller-bytes")?;
     inputs.prepare(&first)?;
     let scope = inputs.directory(&first.declaration)?;
     let key = digest(&first.declaration.path)?;
-    for invalid in [
-        json!({"path":"metadata/authority.json","sha256":first.declaration.sha256,"size":first.declaration.size}),
-        json!({"path":first.declaration.path,"sha256":"d".repeat(64),"size":first.declaration.size}),
-        json!({"path":first.declaration.path,"sha256":first.declaration.sha256,"size":first.declaration.size+1}),
-        json!({"path":first.declaration.path,"sha256":first.declaration.sha256,"size":first.declaration.size,"native_input":{"id":"forged"}}),
-    ] {
-        assert!(inputs.complete(&first, &mut invalid.clone()).is_err());
-        assert!(!scope.join(format!("{key}.receipt.json")).exists());
-    }
     assert!(inputs.prepare(&put(owner(), b"changed-request")?).is_err());
     fs::write(scope.join(format!("{key}.data")), b"modified-content")?;
     assert!(inputs.prepare(&first).is_err());
-    assert!(inputs.complete(&first, &mut reply(&first)).is_err());
+    assert!(inputs.receipt(&first.declaration).is_err());
     assert!(!scope.join(format!("{key}.receipt.json")).exists());
     Ok(())
 }
@@ -384,9 +368,9 @@ fn a_second_link_to_native_bytes_invalidates_admission() -> Result<()> {
     let alias = directory.path().join("fixture-alias.data");
     fs::hard_link(&blob, &alias)?;
     assert!(inputs.prepare(&input).is_err());
-    assert!(inputs.complete(&input, &mut reply(&input)).is_err());
+    assert!(inputs.receipt(&input.declaration).is_err());
     fs::remove_file(&alias)?;
     inputs.prepare(&input)?;
-    inputs.complete(&input, &mut reply(&input))?;
+    inputs.receipt(&input.declaration)?;
     Ok(())
 }

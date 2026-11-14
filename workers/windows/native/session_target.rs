@@ -121,6 +121,21 @@ impl Prepared {
             Self::Dump { identity, .. } => Ok(identity),
         }
     }
+    pub(crate) fn profile(&mut self) -> Value {
+        let observed = match self {
+            Self::Launch { process, .. } => process
+                .as_mut()
+                .context("debugger target not launched")
+                .and_then(|process| process.process_mut().profile()),
+            Self::Dump { .. } => {
+                return json!({"status":"unavailable","reason":"dump has no live owned process"});
+            }
+        };
+        observed.unwrap_or_else(|error| {
+            json!({"status":"unavailable",
+            "error":format!("{error:#}").chars().take(512).collect::<String>()})
+        })
+    }
     pub(crate) fn symbols(&self) -> &Path {
         match self {
             Self::Launch { image, .. } => image.symbols(),

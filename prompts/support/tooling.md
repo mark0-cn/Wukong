@@ -187,12 +187,18 @@ class per call.
 - Timeout every job; angr and z3 can run away. timeout_secs is your friend.
 - The solver's answer is evidence only after the real binary reproduces it:
   run the solved input and cite both the solver job and the replay job.
+- Respect the selected worker's capacity. A Windows worker currently owns one
+  active resource; close a persistent debugger/interactive session before starting
+  another job or analysis helper. Queries, cancellation and session profiles remain
+  available. Capacity waiting does not authorize replay of an unknown outcome.
 
 ## Reproduce the exact runtime
 
 Use runtime_profile on staged target/libc/loader files. File identity and page-aligned
 symbol subtraction are candidate evidence, not proof of a loaded library. An owned live
 debugger session enables observed mappings and per-file mapped_hash_confirmed status.
+Windows profiles preserve admitted file hashes and observe the owned process handle;
+mapped Windows paths have unverified contents and cannot confirm mapped hashes.
 For supplied runtime files, runtime_prepare returns immutable copies and direct launch_argv;
 pass those argv entries unchanged to job_start or interactive_start. Extra libraries may
 still be missing. Preserve the original target and all runtime hashes. Never patch the

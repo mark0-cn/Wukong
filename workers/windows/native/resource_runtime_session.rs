@@ -120,7 +120,10 @@ impl Runtime {
         }
         let interactive = method.starts_with("interact.");
         let close = matches!(method, "debug.close" | "interact.close");
-        let observation = matches!(method, "debug.inspect" | "interact.profile");
+        let observation = matches!(
+            method,
+            "debug.inspect" | "debug.profile" | "interact.profile"
+        );
         if !observation {
             request_id(params)?;
         }
@@ -149,11 +152,8 @@ impl Runtime {
                 .map(Dispatch::Ready);
         }
         let operation = match method {
-            "interact.profile" => {
-                ensure!(
-                    fields.is_empty(),
-                    "interactive profile accepts only session_id"
-                );
+            "debug.profile" | "interact.profile" => {
+                ensure!(fields.is_empty(), "session profile accepts only session_id");
                 Operation::Profile(session_wire::Profile {})
             }
             "debug.inspect" => {
@@ -280,7 +280,7 @@ impl Runtime {
                     && value["worker_session_id"] == record.id
                     && value["native_owner"] == serde_json::to_value(&record.owner)?
                     && value["kind"] == serde_json::to_value(record.kind)?
-                    && value["production_execution"] == false
+                    && value["isolation"] == "appcontainer"
                     && value["state"] == "lost"
                     && value["cleanup_pending"] == false
                     && value["result"]["outcome"] == "unknown"
@@ -335,7 +335,7 @@ impl Runtime {
         );
         Ok(
             json!({"session_id":record.id,"worker_session_id":record.id,"native_owner":record.owner,
-            "kind":record.kind,"state":"closed","cleanup_pending":false,"result":proof,"production_execution":false}),
+            "kind":record.kind,"state":"closed","cleanup_pending":false,"result":proof,"isolation":"appcontainer"}),
         )
     }
     fn start_debugger(
@@ -478,10 +478,9 @@ impl Runtime {
             mode,
         };
         request.validate()?;
-        ensure!(
-            self.running.is_none() && self.session.is_none() && self.recovery.is_none(),
-            "native host remains owned"
-        );
+        if self.running.is_some() || self.session.is_some() || self.recovery.is_some() {
+            return Err(wukong_worker_protocol::CapacityBusy.into());
+        }
         let reserved = journal.reserve_start(owner, request_id, kind, &specification)?;
         let Reservation::Reserved {
             effect, resource, ..
@@ -727,7 +726,7 @@ mod tests {
     }
     fn owner() -> Owner {
         Owner {
-            identity: crate::lease_proxy::Identity {
+            identity: crate::worker::Identity {
                 protocol: 2,
                 installation_id: "a".repeat(32),
                 boot_id: format!("windows:{}:1", "b".repeat(32)),
@@ -861,7 +860,7 @@ mod tests {
             let proof_path = runtime.result_path(&record.id, &artifact_suffix(&artifact)?);
             deployment::publish_json(&proof_path, &proof, &policy)?;
             let original = fs::read(&proof_path)?;
-            let status = json!({"session_id":record.id,"worker_session_id":record.id,"native_owner":record.owner,"kind":kind,"production_execution":false,
+            let status = json!({"session_id":record.id,"worker_session_id":record.id,"native_owner":record.owner,"kind":kind,"isolation":"appcontainer",
             "state":"lost","cleanup_pending":false,"result":{"outcome":"unknown","jobs_empty":true,
             "profiles_removed":true,"scratch_removed":true,"recovery_artifact":artifact,
             "recovery_receipt_sha256":hex::encode(Sha256::digest(&original))}});

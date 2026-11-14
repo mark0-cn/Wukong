@@ -2,12 +2,10 @@
 import json
 from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from worker_common import atomic_json, load_json
-from worker_identity import ExclusiveLease
 from worker_operations import OperationLedger
 
 
@@ -56,19 +54,6 @@ class AtomicMetadataTests(unittest.TestCase):
                 atomic_json(path, {'generation': 2})
         self.assertEqual(path.read_bytes(), previous)
         self.assertEqual(list(self.root.iterdir()), [path])
-
-    def test_corrupted_lease_is_not_silently_reinitialized(self):
-        path = self.root / 'exclusive-lease.json'
-        corrupted = b'\0' * 234
-        path.write_bytes(corrupted)
-        identity = SimpleNamespace(value={'boot_id': 'trusted-fixture-next-boot'})
-        lease = ExclusiveLease(self.root, identity, lambda: False)
-        with self.assertRaises(json.JSONDecodeError):
-            lease.acquire({'run_id': 'trusted-fixture', 'owner_id': 'controller'})
-        self.assertEqual(path.read_bytes(), corrupted)
-        with self.assertRaises(json.JSONDecodeError):
-            load_json(path)
-
 
 if __name__ == '__main__':
     unittest.main()

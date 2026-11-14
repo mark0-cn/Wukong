@@ -1,6 +1,6 @@
 //! System-owned resource/effect state, using SQLite transactions rather than a
 //! second filesystem transaction engine. This is not an execution broker API.
-pub use crate::{inputs::Owner, lease_proxy::Identity as Binding};
+pub use crate::{inputs::Owner, worker::Identity as Binding};
 use crate::{
     inputs::digest,
     security::{self, AclPolicy},
@@ -157,11 +157,7 @@ impl Journal {
         binding: Binding,
         policy: AclPolicy,
     ) -> Result<Self> {
-        Binding::from_readiness(
-            serde_json::to_value(&binding)?,
-            &binding.installation_id,
-            &binding.package_sha256,
-        )?;
+        crate::worker_identity::validate(&binding)?;
         crate::pipe_transport::service_name(&binding.installation_id)?;
         policy.verify(metadata, true)?;
         let root = metadata.canonicalize()?.join("native-resources");

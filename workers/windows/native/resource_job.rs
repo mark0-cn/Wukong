@@ -5,7 +5,7 @@ use windows_sys::Win32::{
     Foundation::{ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, GetLastError},
     Security::Authorization::SE_KERNEL_OBJECT,
     Storage::FileSystem::READ_CONTROL,
-    System::SystemServices::JOB_OBJECT_TERMINATE,
+    System::SystemServices::{JOB_OBJECT_QUERY, JOB_OBJECT_TERMINATE},
 };
 
 pub(crate) fn name(installation: &str, resource: &str) -> Result<String> {

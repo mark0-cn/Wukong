@@ -91,6 +91,7 @@ struct Transport {
 #[derive(Clone)]
 pub struct RuntimeClient {
     transport: Arc<Mutex<Transport>>,
+    start_admission: Arc<Mutex<()>>,
     config: RuntimeConfig,
     identity: protocol::WorkerIdentity,
     lease: Option<protocol::EnvironmentLease>,
@@ -123,6 +124,7 @@ impl RuntimeClient {
             .context("missing worker identity")?;
         Ok(Self {
             transport: Arc::new(Mutex::new(transport)),
+            start_admission: Arc::new(Mutex::new(())),
             config,
             identity,
             lease: None,
@@ -312,7 +314,48 @@ impl RuntimeClient {
     /// live in the shared state directory and survive the stdio client. The
     /// failed request itself is never re-sent, so a timed-out side effect
     /// still follows the durable reconcile path instead of being replayed.
-    pub async fn call(&self, method: &str, mut params: Value) -> Result<Value> {
+    pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        let starts_resource = wukong_worker_protocol::starts_resource(method);
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_secs(self.config.request_timeout_secs);
+        // Tokio's FIFO mutex orders new starts. Observation/close/lease calls do
+        // not take this permit, so the current owner can free execution capacity.
+        let _admission = if starts_resource {
+            Some(
+                tokio::time::timeout_at(deadline, self.start_admission.lock())
+                    .await
+                    .map_err(|_| protocol::WorkerError {
+                        kind: protocol::WorkerErrorKind::ResourceBusy,
+                        message: "worker capacity queue timed out before dispatch".into(),
+                    })?,
+            )
+        } else {
+            None
+        };
+        loop {
+            let result = self.call_once(method, params.clone()).await;
+            let capacity_busy = starts_resource
+                && result.as_ref().err().is_some_and(|error| {
+                    error
+                        .downcast_ref::<protocol::WorkerError>()
+                        .is_some_and(|error| error.kind == protocol::WorkerErrorKind::ResourceBusy)
+                });
+            if !capacity_busy || tokio::time::Instant::now() >= deadline {
+                return result;
+            }
+            // Only a worker's explicit pre-effect rejection may be retried.
+            // Transport failures and uncertain outcomes retain normal recovery.
+            tokio::time::sleep_until(
+                deadline.min(tokio::time::Instant::now() + Duration::from_millis(250)),
+            )
+            .await;
+            if tokio::time::Instant::now() >= deadline {
+                return result;
+            }
+        }
+    }
+
+    async fn call_once(&self, method: &str, mut params: Value) -> Result<Value> {
         if method != "ping" && method != "doctor" {
             params["_binding"] = serde_json::to_value(&self.identity)?;
             if let Some(lease) = &self.lease {

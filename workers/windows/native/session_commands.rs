@@ -125,6 +125,13 @@ pub(crate) struct Session {
     read_only: bool,
 }
 impl Session {
+    pub(crate) fn profile(&mut self, process: Value, launch_identity: Value) -> Result<Value> {
+        self.client
+            .record_observation(&json!({"process":process,"launch_identity":launch_identity}))?;
+        Ok(
+            json!({"process":crate::process_profile::preview(process),"launch_identity":launch_identity}),
+        )
+    }
     pub(crate) fn new(client: Client, id: String, read_only: bool) -> Self {
         Self {
             client,

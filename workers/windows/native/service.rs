@@ -1,18 +1,16 @@
-//! SCM-owned native worker epoch and authenticated fixed SSH relay. The Python
-//! runtime runs as a separate ordinary account; LocalSystem never parses targets.
+//! SCM lifetime and authenticated SSH transport. Worker dispatch and state live in worker.rs.
 use crate::{
     accounts::Role,
     deployment::{self, Deployment},
-    lease_proxy::{Identity, LeaseProxy},
     pipe_transport,
     processes::{OwnedProcess, Spawn},
     security::{self, AclPolicy},
+    worker::Worker,
 };
 use anyhow::{Context, Result, ensure};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    ffi::{OsStr, OsString, c_void},
+    ffi::{OsStr, c_void},
     fs,
     path::{Path, PathBuf},
     ptr::{null, null_mut},
@@ -22,11 +20,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{
-    io::BufReader,
-    net::{TcpStream, windows::named_pipe::NamedPipeServer},
-    sync::Semaphore,
-};
+use tokio::{io::BufReader, net::windows::named_pipe::NamedPipeServer, sync::Semaphore};
 use windows_sys::Win32::System::Services::*;
 
 struct ContextState {
@@ -138,110 +132,6 @@ pub fn dispatch(installation: &str, configuration: &Path) -> Result<()> {
     security::check(unsafe { StartServiceCtrlDispatcherW(table.as_ptr()) })
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Endpoint {
-    protocol: u32,
-    host: String,
-    port: u16,
-    auth: String,
-    pid: u32,
-}
-impl Endpoint {
-    fn read(root: &Path, process: &OwnedProcess) -> Result<Self> {
-        let value: Self = serde_json::from_slice(&deployment::read_bytes(
-            &root.join("data/endpoint.json"),
-            4096,
-        )?)?;
-        ensure!(
-            value.protocol == 2
-                && value.host == "127.0.0.1"
-                && value.port > 0
-                && value.pid == process.pid()
-                && value.auth.len() == 64
-                && value.auth.bytes().all(|b| b.is_ascii_hexdigit()),
-            "invalid owned native daemon endpoint"
-        );
-        Ok(value)
-    }
-    async fn call(&self, bytes: &[u8]) -> Result<Vec<u8>> {
-        let mut request: Value = serde_json::from_slice(bytes)?;
-        let object = request
-            .as_object_mut()
-            .context("native worker request must be an object")?;
-        ensure!(
-            !object.contains_key("auth"),
-            "native worker authentication is service-owned"
-        );
-        object.insert("auth".into(), Value::String(self.auth.clone()));
-        let mut bytes = serde_json::to_vec(&request)?;
-        bytes.push(b'\n');
-        tokio::time::timeout(Duration::from_secs(310), async {
-            let stream = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, self.port)).await?;
-            let mut stream = BufReader::new(stream);
-            pipe_transport::write_frame(stream.get_mut(), &bytes).await?;
-            pipe_transport::read_frame(&mut stream)
-                .await?
-                .context("owned worker closed without a response")
-        })
-        .await
-        .context("owned worker RPC deadline exceeded")?
-    }
-}
-fn spawn_worker(
-    root: &Path,
-    package: &Path,
-    deployment: &Deployment,
-    manifest: &wukong_worker_package::VerifiedManifest,
-) -> Result<OwnedProcess> {
-    let entry = &manifest.manifest().entrypoints;
-    let mut environment = deployment::worker_environment(root, package)?;
-    environment.insert(
-        "WUKONG_NATIVE_BROKER_CLIENT".into(),
-        package.join(&entry.worker).into_os_string(),
-    );
-    environment.insert(
-        "WUKONG_NATIVE_BROKER_CLIENT_SHA256".into(),
-        manifest.manifest().files[&entry.worker]
-            .sha256
-            .clone()
-            .into(),
-    );
-    environment.insert(
-        "WUKONG_NATIVE_BROKER_INSTALLATION".into(),
-        deployment.installation_id.clone().into(),
-    );
-    environment.insert(
-        "WUKONG_NATIVE_BROKER_PARENT_PID".into(),
-        std::process::id().to_string().into(),
-    );
-    let path = root.join("data/daemon-native.log");
-    security::no_links(&path)?;
-    let log = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    let input = fs::File::open("NUL")?;
-    Spawn {
-        executable: &package.join(&entry.python),
-        arguments: &[
-            OsString::from("-B"),
-            OsString::from("-E"),
-            package.join(&entry.bridge).into_os_string(),
-            "--state".into(),
-            root.join("data").into_os_string(),
-            "--daemon".into(),
-        ],
-        directory: &root.join("data"),
-        environment: &environment,
-        log: &log,
-        input: &input,
-    }
-    .worker(
-        &deployment.installation_id,
-        deployment.account(Role::Worker)?,
-    )
-}
 fn spawn_ssh(
     root: &Path,
     package: &Path,
@@ -290,7 +180,6 @@ async fn offline_selftest(
         return Ok(());
     }
     let mut environment = deployment::worker_environment(root, package)?;
-    environment.remove("WUKONG_NATIVE_BINDING_FILE");
     environment.insert(
         "PROGRAMDATA".into(),
         std::env::var_os("ProgramData").context("Windows ProgramData is missing")?,
@@ -371,8 +260,7 @@ async fn offline_selftest(
 async fn serve_client(
     server: NamedPipeServer,
     sid: String,
-    endpoint: Endpoint,
-    leases: Arc<LeaseProxy>,
+    worker: Arc<Worker>,
     _permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<()> {
     let mut stream = BufReader::new(server);
@@ -386,12 +274,7 @@ async fn serve_client(
             return Ok(());
         };
         pipe_transport::authenticate_client(stream.get_ref(), &sid)?;
-        let reply = leases
-            .call(&frame, |bytes| {
-                let endpoint = &endpoint;
-                async move { endpoint.call(&bytes).await }
-            })
-            .await?;
+        let reply = worker.call(&frame).await?;
         pipe_transport::write_frame(stream.get_mut(), &reply).await?;
     }
 }
@@ -415,46 +298,12 @@ async fn run(context: &ContextState) -> Result<()> {
             == json!({"schema":1,"protocol":2,"installation_id":deployment.installation_id,"package_sha256":manifest.sha256()}),
         "native worker binding differs from active signed payload"
     );
-    let worker = spawn_worker(&root, &package, &deployment, &manifest)?;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
-    let (endpoint, identity) = loop {
-        ensure!(
-            !worker.exited(),
-            "ordinary-account Python worker exited before readiness"
-        );
-        ensure!(
-            !STOP.load(Ordering::Acquire),
-            "service stopped during startup"
-        );
-        if let Ok(endpoint) = Endpoint::read(&root, &worker)
-            && let Ok(Ok(reply)) = tokio::time::timeout(
-                Duration::from_secs(2),
-                endpoint.call(b"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"ping\"}\n"),
-            )
-            .await
-        {
-            let reply: Value = serde_json::from_slice(&reply)?;
-            if reply["result"]["daemon_pid"] == worker.pid()
-                && reply["result"]["identity"]["package_sha256"] == manifest.sha256()
-            {
-                let identity = Identity::from_readiness(
-                    reply["result"]["identity"].clone(),
-                    &deployment.installation_id,
-                    manifest.sha256(),
-                )?;
-                break (endpoint, identity);
-            }
-        }
-        ensure!(
-            tokio::time::Instant::now() < deadline,
-            "ordinary-account Python worker readiness timed out"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    };
-    let leases = Arc::new(LeaseProxy::open(identity.clone(), &root.join("metadata"))?);
-    leases.open_resources(&root, &deployment, &manifest)?;
+    let identity =
+        crate::worker_identity::identity(&deployment.installation_id, manifest.sha256())?;
+    let worker = Arc::new(Worker::open(identity.clone(), &root.join("metadata"))?);
+    worker.open_resources(&root, &deployment, &manifest)?;
     let recovery_deadline = tokio::time::Instant::now() + Duration::from_secs(120);
-    while !leases.poll_resources()? {
+    while !worker.poll_resources()? {
         ensure!(
             !STOP.load(Ordering::Acquire) && tokio::time::Instant::now() < recovery_deadline,
             "native startup resource recovery did not finish"
@@ -476,14 +325,7 @@ async fn run(context: &ContextState) -> Result<()> {
         Ok(())
     })
     .await?;
-    let broker_sid = deployment.account(Role::Worker)?.sid.clone();
-    let broker = Arc::new(crate::broker::Broker::new(
-        identity.clone(),
-        broker_sid.clone(),
-        worker.job().observer()?,
-    )?);
-    let mut broker_listener =
-        pipe_transport::broker_server(&context.installation, &broker_sid, true)?;
+    worker.qualify();
     let sid = deployment.account(Role::Management)?.sid.clone();
     let mut listener = pipe_transport::server(&context.installation, &sid, true)?;
     let ssh = spawn_ssh(&root, &package, &manifest)?;
@@ -494,29 +336,19 @@ async fn run(context: &ContextState) -> Result<()> {
     );
     report(SERVICE_RUNNING, 0)?;
     let semaphore = Arc::new(Semaphore::new(15));
-    let broker_semaphore = Arc::new(Semaphore::new(4));
     let mut tasks = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
-            result=broker_listener.connect(), if broker_semaphore.available_permits()>0 => {
-                result?;
-                let permit=broker_semaphore.clone().acquire_owned().await?;
-                let next=pipe_transport::broker_server(&context.installation,&broker_sid,false)?;
-                let accepted=std::mem::replace(&mut broker_listener,next);
-                let broker=broker.clone();
-                tasks.spawn(async move { let _permit=permit; broker.serve(accepted).await });
-            },
             result=listener.connect(), if semaphore.available_permits()>0 => {
                 result?;
                 let permit=semaphore.clone().acquire_owned().await?;
                 let next=pipe_transport::server(&context.installation,&sid,false)?;
                 let accepted=std::mem::replace(&mut listener,next);
-                tasks.spawn(serve_client(accepted,sid.clone(),endpoint.clone(),leases.clone(),permit));
+                tasks.spawn(serve_client(accepted,sid.clone(),worker.clone(),permit));
             },
             _=tokio::time::sleep(Duration::from_millis(250))=>{
-                leases.poll_resources()?;
+                worker.poll_resources()?;
                 if STOP.load(Ordering::Acquire) {break;}
-                ensure!(!worker.exited(),"Python worker epoch exited; all owned descendants will be killed before SCM restart");
                 ensure!(!ssh.exited(),"packaged SSH daemon exited");
             },
             _=tasks.join_next(), if !tasks.is_empty()=>{},
@@ -524,9 +356,9 @@ async fn run(context: &ContextState) -> Result<()> {
     }
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
-    leases.cancel_resources().await?;
+    worker.cancel_resources().await?;
     let resource_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    while !leases.poll_resources()? {
+    while !worker.poll_resources()? {
         ensure!(
             tokio::time::Instant::now() < resource_deadline,
             "native resource cleanup remains pending during service stop"
@@ -535,9 +367,7 @@ async fn run(context: &ContextState) -> Result<()> {
     }
     ssh.stop(Duration::from_secs(10))?;
     report(SERVICE_STOP_PENDING, 0)?;
-    worker.stop(Duration::from_secs(10))?;
     drop(ssh);
-    drop(worker);
     Ok(())
 }
 

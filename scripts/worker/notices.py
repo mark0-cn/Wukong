@@ -24,7 +24,7 @@ def collect(output, manifest=None, supplemental=None):
             supplement = supplemental.get((package["name"], package["version"]))
             if supplement:
                 candidates.append(supplement)
-        if package["source"] is None and root in {ROOT / "workers/windows", ROOT / "workers/package"}:
+        if package["source"] is None and root in {ROOT / "workers/windows", ROOT / "workers/package", ROOT / "workers/protocol"}:
             candidates.append(ROOT / "LICENSE")
         if not package.get("license") or not candidates:
             raise ValueError("Missing native dependency license documents: " + package["name"])

@@ -140,10 +140,7 @@ async fn remote_installed_windows_worker_python_acceptance() -> Result<()> {
         client.identity().package_sha256 == profile.manifest_sha256,
         "Python fixture package differs"
     );
-    ensure!(
-        client.doctor().await?["capabilities"]["native_target_execution"] == false,
-        "partial Python acceptance cannot enable the full backend"
-    );
+    super::inventory_acceptance::qualified(&client).await?;
     ensure!(
         client
             .call(
@@ -308,13 +305,50 @@ async fn remote_installed_windows_worker_python_acceptance() -> Result<()> {
         resources.len() == cases.len() && resources.iter().all(|row| row["phase"] == "closed"),
         "Python resource inventory differs"
     );
+    let filter = upload(
+        &bound,
+        "analysis/filter.bpf",
+        &[6, 0, 0, 0, 0, 0, 255, 127],
+        false,
+    )
+    .await?;
+    let analysis_request = json!({"filter":filter["path"],"endianness":"little",
+        "probes":[{"arch":3221225534u64,"nr":1}],"request_id":"analysis-filter"});
+    let analysis = calls
+        .call("seccomp.analyze", analysis_request.clone())
+        .await?;
+    ensure!(
+        analysis["supported"] == true
+            && analysis["probes"][0]["decision"]["action"] == "ALLOW"
+            && analysis["filter_sha256"] == filter["sha256"]
+            && analysis["execution_evidence"]["native_owner"]["epoch"] == lease.epoch,
+        "isolated analysis did not return the input-bound result"
+    );
+    ensure!(
+        calls.call("seccomp.analyze", analysis_request).await? == analysis,
+        "analysis retry changed the retained original result"
+    );
+    let (_, analysis_receipt) = original(
+        &bound,
+        analysis["execution_evidence"]["receipt"]["path"]
+            .as_str()
+            .context("analysis receipt missing")?,
+    )
+    .await?;
+    let analysis_receipt: Value = serde_json::from_slice(&analysis_receipt)?;
+    ensure!(
+        analysis_receipt["jobs_empty"] == true
+            && analysis_receipt["profiles_removed"] == true
+            && analysis_receipt["scratch_removed"] == true,
+        "analysis helper did not confirm resource cleanup"
+    );
     client
         .call("environment.lease.release", json!({"lease":lease}))
         .await?;
     client.close().await?;
     publish(
         &profile.output,
-        &json!({"passed":true,"scope":"native_python_controller_vm","identity":client.identity(),"epoch":lease.epoch,"cases":cases,"calls":calls.count,"production_execution":false}),
+        &json!({"passed":true,"scope":"native_python_controller_vm","identity":client.identity(),"epoch":lease.epoch,"cases":cases,"analysis":analysis,"calls":calls.count,"production_execution":false}),
     )?;
     Ok(())
 }

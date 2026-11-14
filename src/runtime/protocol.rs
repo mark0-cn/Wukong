@@ -1,87 +1,11 @@
 //! Typed worker boundary. Unknown result fields are retained for raw evidence.
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL: u32 = 2;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct WorkerIdentity {
-    pub protocol: u32,
-    pub installation_id: String,
-    pub boot_id: String,
-    pub package_sha256: String,
-}
-
-impl WorkerIdentity {
-    pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(self.protocol == PROTOCOL, "unsupported worker protocol");
-        anyhow::ensure!(
-            [&self.installation_id, &self.boot_id]
-                .iter()
-                .all(|value| !value.is_empty() && value.len() <= 256),
-            "invalid worker identity"
-        );
-        anyhow::ensure!(
-            self.package_sha256.len() == 64
-                && self
-                    .package_sha256
-                    .bytes()
-                    .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
-            "invalid worker package identity"
-        );
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnvironmentLease {
-    pub epoch: u64,
-    pub run_id: String,
-    pub owner_id: String,
-    pub boot_id: String,
-    pub token: String,
-    pub expires_at: f64,
-}
-
-impl EnvironmentLease {
-    pub(crate) fn validate(
-        &self,
-        run: &str,
-        owner: &str,
-        identity: &WorkerIdentity,
-    ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.run_id == run
-                && self.owner_id == owner
-                && self.boot_id == identity.boot_id
-                && self.epoch > 0
-                && self.token.len() == 32
-                && self.token.bytes().all(|c| c.is_ascii_hexdigit())
-                && self.expires_at.is_finite()
-                && self.expires_at > 0.0,
-            "worker returned an invalid environment lease"
-        );
-        Ok(())
-    }
-}
+pub use wukong_worker_protocol::{EnvironmentLease, PROTOCOL, WorkerCapacity, WorkerIdentity};
 
 pub use crate::domain::{JobResult, JobState, JobStatus, SessionHandle, SessionState};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkerErrorKind {
-    InvalidRequest,
-    SessionLost,
-    Conflict,
-    BindingChanged,
-    LeaseLost,
-    OutcomeUnknown,
-    Internal,
-    #[default]
-    Unknown,
-}
+pub use wukong_worker_protocol::WorkerErrorKind;
 
 #[derive(Debug)]
 pub struct WorkerError {

@@ -156,10 +156,7 @@ async fn remote_installed_windows_worker_shell_acceptance() -> Result<()> {
         client.identity().package_sha256 == profile.manifest_sha256,
         "shell package differs"
     );
-    ensure!(
-        client.doctor().await?["capabilities"]["native_target_execution"] == false,
-        "partial shell qualification cannot enable production"
-    );
+    super::inventory_acceptance::qualified(&client).await?;
     ensure!(
         client
             .call(

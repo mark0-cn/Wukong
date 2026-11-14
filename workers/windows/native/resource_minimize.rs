@@ -370,7 +370,7 @@ pub(crate) fn execute(host: &Host, request: &Request, cancel: &Path) -> Result<V
         "equivalence_policy":if configuration.allow_signal_only {"signal_only"} else {"location_and_frames"},
         "signature_strength":if signature.is_none(){"unresolved"}else if configuration.allow_signal_only {"signal_only"} else {"location_and_frames"},
         "failed":failed,"cancelled":cancelled,"jobs_empty":true,
-        "profiles_removed":true,"scratch_removed":true,"production_execution":false}),
+        "profiles_removed":true,"scratch_removed":true,"isolation":"appcontainer"}),
     )
 }
 fn trial_digest(host: &Host, request: &Request, index: u16) -> Result<Value> {

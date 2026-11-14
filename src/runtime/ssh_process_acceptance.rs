@@ -189,11 +189,7 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
         client.identity().package_sha256 == profile.manifest_sha256,
         "process fixture package differs"
     );
-    let doctor = client.doctor().await?;
-    ensure!(
-        doctor["capabilities"]["native_target_execution"] == false,
-        "partial process qualification must not advertise complete production execution"
-    );
+    super::inventory_acceptance::qualified(&client).await?;
     let unleased = client
         .call(
             "job.start",

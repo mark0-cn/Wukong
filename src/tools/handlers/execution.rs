@@ -269,8 +269,12 @@ pub(in crate::tools) fn handle_runtime_profile<'a>(
                         .all(|value| value == "mapped_hash_confirmed")
             );
             raw["mapped_files"] = Value::Object(matches);
+            raw["status"] = json!(if process["status"] == "observed" {
+                "process_observed"
+            } else {
+                "process_observation_unavailable"
+            });
             raw["observation"] = observation;
-            raw["status"] = json!("process_observed");
         }
         Ok(raw)
     })

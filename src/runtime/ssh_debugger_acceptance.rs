@@ -362,10 +362,7 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
         client.identity().package_sha256 == profile.manifest_sha256,
         "debugger fixture package differs"
     );
-    ensure!(
-        client.doctor().await?["capabilities"]["native_target_execution"] == false,
-        "partial debugger qualification advertised production execution"
-    );
+    super::inventory_acceptance::qualified(&client).await?;
     let run = format!(
         "native-debugger-{}-{}",
         std::process::id(),
@@ -416,6 +413,28 @@ async fn remote_installed_windows_worker_debugger_acceptance() -> Result<()> {
             "native debugger opener differs"
         );
         let outcome = async {
+            let files = tokio::time::timeout(
+                Duration::from_secs(5),
+                calls.call(
+                    "runtime.profile",
+                    json!({"target":format!("files/{base}/wukong-probe.exe")}),
+                ),
+            )
+            .await??;
+            ensure!(
+                files["files"]["target"]["sha256"] == fixtures.program.sha256
+                    && files["mapped_match"] == false,
+                "live-session file identity differs"
+            );
+            let observed = calls
+                .call("debug.profile", json!({"session_id":id}))
+                .await?;
+            ensure!(
+                observed["response"]["process"]["status"] == "observed"
+                    && observed["response"]["process"]["platform"] == "windows"
+                    && observed["response"]["launch_identity"]["sha256"] == fixtures.program.sha256,
+                "debugger-owned process profile missing or misbound"
+            );
             let identity = &started["response"]["identity"];
             ensure!(
                 identity["admitted"]["image"]["sha256"] == fixtures.program.sha256

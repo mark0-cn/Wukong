@@ -22,9 +22,7 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE, WAIT_OBJECT_0},
     Security::{CreateRestrictedToken, GetTokenInformation, TOKEN_PRIVILEGES, TokenPrivileges},
-    System::{
-        JobObjects::*, StationsAndDesktops::*, SystemServices::JOB_OBJECT_QUERY, Threading::*,
-    },
+    System::{JobObjects::*, StationsAndDesktops::*, Threading::*},
 };
 
 pub struct Job(Handle);
@@ -49,39 +47,7 @@ impl ResourceLimits {
         })
     }
 }
-/// A noninheritable, query-only duplicate usable by authenticated broker tasks.
-/// It never authorizes assignment, termination or policy changes.
-pub(crate) struct JobObserver(OwnedHandle);
-impl JobObserver {
-    pub(crate) fn contains(&self, pid: u32) -> Result<bool> {
-        let process = Handle(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) });
-        ensure!(
-            !process.0.is_null(),
-            "cannot inspect native broker caller process"
-        );
-        let mut contained = 0;
-        security::check(unsafe {
-            IsProcessInJob(process.0, self.0.as_raw_handle(), &mut contained)
-        })?;
-        Ok(contained != 0)
-    }
-}
 impl Job {
-    pub(crate) fn observer(&self) -> Result<JobObserver> {
-        let mut handle = null_mut();
-        security::check(unsafe {
-            DuplicateHandle(
-                GetCurrentProcess(),
-                self.0.0,
-                GetCurrentProcess(),
-                &mut handle,
-                JOB_OBJECT_QUERY,
-                0,
-                0,
-            )
-        })?;
-        Ok(JobObserver(unsafe { OwnedHandle::from_raw_handle(handle) }))
-    }
     pub fn new() -> Result<Self> {
         Self::configured(None)
     }

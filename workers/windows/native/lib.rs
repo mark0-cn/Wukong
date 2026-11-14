@@ -5,10 +5,6 @@ pub mod accounts;
 #[cfg(windows)]
 mod authority;
 #[cfg(windows)]
-pub mod broker;
-#[cfg(any(windows, test))]
-mod broker_wire;
-#[cfg(windows)]
 mod debugger_mcp;
 #[cfg(windows)]
 pub mod deployment;
@@ -24,8 +20,6 @@ pub mod installer;
 mod interactive_host;
 #[cfg(windows)]
 mod interactive_io;
-#[cfg(windows)]
-mod lease_proxy;
 pub mod pe_imports;
 #[cfg(windows)]
 mod persona;
@@ -99,3 +93,11 @@ pub mod staging;
 mod stream_io;
 #[cfg(windows)]
 mod token_policy;
+#[cfg(windows)]
+mod worker;
+#[cfg(windows)]
+mod worker_catalog;
+#[cfg(windows)]
+mod worker_identity;
+#[cfg(windows)]
+mod worker_leases;

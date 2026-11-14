@@ -234,6 +234,8 @@ struct Recovering {
     host: SystemHost,
     deadline: Instant,
 }
+#[path = "resource_runtime_analysis.rs"]
+mod analysis;
 #[path = "resource_runtime_python.rs"]
 mod python;
 #[path = "resource_runtime_recovery.rs"]
@@ -248,6 +250,7 @@ pub(crate) enum Dispatch {
     Ready(Value),
     Session(Box<session::Pending>),
     Command(Box<shell::Pending>),
+    Analysis(Box<analysis::Pending>),
 }
 pub(crate) struct Runtime {
     root: PathBuf,
@@ -286,26 +289,8 @@ impl Runtime {
     }
     pub(crate) fn handles(method: &str, params: &Map<String, Value>) -> bool {
         matches!(
-            method,
-            "debug.start"
-                | "debug.inspect"
-                | "debug.control"
-                | "debug.close"
-                | "interact.start"
-                | "interact.write"
-                | "interact.profile"
-                | "interact.close"
-                | "exec.run"
-                | "job.start"
-                | "py.run"
-                | "crash.replay"
-                | "input.minimize"
-                | "poc.verify"
-                | "job.status"
-                | "job.cancel"
-                | "job.artifacts"
-                | "job.list"
-                | "resource.list"
+            crate::worker_catalog::route(method),
+            Some(crate::worker_catalog::Route::Execution | crate::worker_catalog::Route::Analysis)
         ) || matches!(method, "file.get" | "file.stat" | "file.read")
             && params
                 .get("path")
@@ -320,6 +305,16 @@ impl Runtime {
         method: &str,
         params: &Map<String, Value>,
     ) -> Result<Dispatch> {
+        if crate::worker_catalog::route(method) == Some(crate::worker_catalog::Route::Analysis) {
+            self.poll(journal)?;
+            return self.start_analysis(
+                journal,
+                inputs.context("analysis input store missing")?,
+                owner,
+                method,
+                params,
+            );
+        }
         if method.starts_with("debug.") || method.starts_with("interact.") {
             return self.prepare_session(journal, inputs, owner, method, params);
         }
@@ -461,10 +456,9 @@ impl Runtime {
         {
             return self.reserved_status(journal, owner, existing);
         }
-        ensure!(
-            self.running.is_none() && self.session.is_none(),
-            "native host remains owned"
-        );
+        if self.running.is_some() || self.session.is_some() || self.recovery.is_some() {
+            return Err(wukong_worker_protocol::CapacityBusy.into());
+        }
         let mut request = prepare()?;
         let reserved =
             journal.reserve_start(owner, request_id, ResourceKind::Process, specification)?;
@@ -496,7 +490,7 @@ impl Runtime {
             input: &input,
         }
         .system_host(&self.installation, &resource)?;
-        let value = json!({"job_id":resource,"kind":request.kind(),"state":"running","call_id":request_id,"native_host_pid":host.pid(),"production_execution":false});
+        let value = json!({"job_id":resource,"kind":request.kind(),"state":"running","call_id":request_id,"native_host_pid":host.pid(),"isolation":"appcontainer"});
         self.running = Some(Running {
             deadline: Instant::now()
                 + Duration::from_secs(
@@ -567,7 +561,7 @@ impl Runtime {
             Ok(json!({"resource_id":record.id,"kind":record.kind,"phase":record.phase,"native_owner":record.owner,"start_effect":record.start_effect,"specification_sha256":crate::inputs::digest(&record.specification)?}))
         }).collect::<Result<Vec<_>>>()?;
         Ok(
-            json!({"schema":1,"resources":resources,"next_after":next_after,"production_execution":false}),
+            json!({"schema":1,"resources":resources,"next_after":next_after,"isolation":"appcontainer"}),
         )
     }
     fn reserved_status(
@@ -601,11 +595,11 @@ impl Runtime {
             .filter(|running| running.request.resource_id == id)
         {
             return Ok(
-                json!({"job_id":id,"kind":running.request.kind(),"state":if running.failed.is_some() {"lost"} else {"running"},"native_host_pid":running.host.pid(),"error":running.failed,"cleanup_pending":running.failed.is_some(),"production_execution":false}),
+                json!({"job_id":id,"kind":running.request.kind(),"state":if running.failed.is_some() {"lost"} else {"running"},"native_host_pid":running.host.pid(),"error":running.failed,"cleanup_pending":running.failed.is_some(),"isolation":"appcontainer"}),
             );
         }
         Ok(
-            json!({"job_id":id,"kind":job_kind(&record)?,"state":"lost","cleanup_pending":true,"error":"native host ownership was interrupted; cleanup reconciliation is required","production_execution":false}),
+            json!({"job_id":id,"kind":job_kind(&record)?,"state":"lost","cleanup_pending":true,"error":"native host ownership was interrupted; cleanup reconciliation is required","isolation":"appcontainer"}),
         )
     }
     pub(crate) fn cancel_active(&mut self) -> Result<()> {
@@ -709,7 +703,7 @@ impl Runtime {
             String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(4096)..]).into()
         }
         let value = json!({"job_id":id,"kind":"process","state":state,"native_owner":request.owner,"stdout":tail(&streams[0]),"stderr":tail(&streams[1]),"result":{"exit_code":exit,"stop_reason":reason,"stdout_sha256":result["stdout_sha256"],"stderr_sha256":result["stderr_sha256"],"stdin_written":result["stdin_written"],"stdin_complete":result["stdin_complete"],"stdin_error":result["stdin_error"],"native_receipt_sha256":hex::encode(Sha256::digest(&bytes)),"jobs_empty":true,"profiles_removed":true,"scratch_removed":true,
-            "duration_secs":result["duration_secs"],"output_bytes_retained":{"stdout":streams[0].len(),"stderr":streams[1].len()},"output_truncated":reason == "output_limit" || streams.iter().any(|stream|stream.len()>4096)},"production_execution":false});
+            "duration_secs":result["duration_secs"],"output_bytes_retained":{"stdout":streams[0].len(),"stderr":streams[1].len()},"output_truncated":reason == "output_limit" || streams.iter().any(|stream|stream.len()>4096)},"isolation":"appcontainer"});
         self.retain(
             &self.result_path(id, "status.json"),
             &serde_json::to_vec(&value)?,

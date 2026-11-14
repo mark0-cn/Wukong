@@ -119,6 +119,10 @@ impl Client {
             .structured_content
             .with_context(|| format!("external debugger {name} did not return a structured result"))
     }
+    pub(crate) fn record_observation(&mut self, value: &Value) -> Result<()> {
+        self.transcript
+            .append(&json!({"source":"owned_process_handle","observation":value}))
+    }
 
     pub(crate) async fn close(mut self) -> Result<()> {
         tokio::time::timeout(Duration::from_secs(5), self.service.close())

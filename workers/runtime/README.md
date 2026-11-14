@@ -4,6 +4,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
+The Python process manager in this guide serves Linux workers and trusted development fixtures. Managed Windows uses one native worker for identity, capabilities, leases, uploads and execution; Python runs isolated analysis on demand. See the [Windows component guide](../windows/README.md) for current ownership and capacity limits.
+
 The Rust controller never runs an analysed target by default. Choose a persistent
 Docker/VM/SSH worker. `trusted_local` explicitly runs trusted fixtures on the host
 and is only suitable for development tests. The Python bridge manages processes;
@@ -20,7 +22,7 @@ Managed Windows VMs require the complete offline package, including Python and a
 
 Bridge startup disables Python bytecode writes before importing worker modules, including in new daemon/job-supervisor processes. This keeps signed deployment files unchanged; writable state remains in the configured state directory. Launch other Python entry points from an immutable deployment with `-B` as well.
 
-Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before replacement, and failed writes clean up their temporary files. The library handles Windows write-through moves and POSIX parent-directory synchronization. Only transient Windows access/sharing violations retry, at most five times; a failed reservation never authorizes execution. Corrupted existing leases remain errors and are never silently reset. The offline package pins the published 1.4.0 universal wheel; 1.4.1 changes only the runtime module's version and API docstring. Failure-injection checks do not establish power-loss or current-source VM reboot acceptance.
+Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before replacement, and failed writes clean up their temporary files. The library handles Windows write-through moves and POSIX parent-directory synchronization. Only transient Windows access/sharing violations retry, at most five times; a failed reservation never authorizes execution. Corrupted existing operation records remain errors and are never silently reset. The offline package pins the published 1.4.0 universal wheel; 1.4.1 changes only the runtime module's version and API docstring. Failure-injection checks do not establish power-loss or current-source VM reboot acceptance.
 
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload

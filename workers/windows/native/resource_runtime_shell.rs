@@ -144,7 +144,7 @@ impl Runtime {
             "receipt":format!("native-results/{}/{artifact}",pending.resource),
             "stdout_artifact":if unknown {None}else{Some(format!("native-results/{}/stdout",pending.resource))},
             "stderr_artifact":if unknown {None}else{Some(format!("native-results/{}/stderr",pending.resource))},
-            "cleanup_pending":false,"result":result,"production_execution":false}),
+            "cleanup_pending":false,"result":result,"isolation":"appcontainer"}),
         ))
     }
 }

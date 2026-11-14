@@ -145,7 +145,7 @@ impl Runtime {
                 "previous interrupted status differs"
             );
         } else {
-            let mut value = json!({"job_id":record.id,"kind":record.kind,"state":"lost","native_owner":record.owner,"cleanup_pending":false,"result":{"outcome":"unknown","jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"recovery_artifact":artifact,"recovery_receipt_sha256":hex::encode(Sha256::digest(receipt))},"production_execution":false});
+            let mut value = json!({"job_id":record.id,"kind":record.kind,"state":"lost","native_owner":record.owner,"cleanup_pending":false,"result":{"outcome":"unknown","jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"recovery_artifact":artifact,"recovery_receipt_sha256":hex::encode(Sha256::digest(receipt))},"isolation":"appcontainer"});
             if record.kind != ResourceKind::Process {
                 value.as_object_mut().unwrap().remove("job_id");
                 value["session_id"] = json!(record.id);

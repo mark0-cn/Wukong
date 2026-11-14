@@ -1,9 +1,9 @@
 //! Controller-admitted bytes, kept outside Python/target-writable state.
 //! No source path supplied by the worker is ever opened with System authority.
 use crate::{
-    lease_proxy::Identity,
     resource_input::{AdmittedInput, Purpose, Reference},
     security::{self, AclPolicy},
+    worker::Identity,
 };
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -12,7 +12,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::{Seek, Write},
+    io::{Read, Seek, SeekFrom, Write},
     os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
     path::{Path, PathBuf},
 };
@@ -27,11 +27,6 @@ const MAX_SCOPE_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
 #[path = "inputs_transfers.rs"]
 mod transfers;
-pub(crate) enum Pending {
-    Put(Put),
-    Transfer(transfers::Transfer),
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Owner {
@@ -96,36 +91,107 @@ pub(crate) struct Inputs {
 }
 impl Inputs {
     pub fn handles(method: &str) -> bool {
-        matches!(
-            method,
-            "file.put"
-                | "file.upload.begin"
-                | "file.upload.write"
-                | "file.upload.status"
-                | "file.upload.commit"
-        )
+        crate::worker_catalog::route(method) == Some(crate::worker_catalog::Route::Files)
     }
-    pub fn prepare_rpc(
+    pub fn call(
         &self,
         owner: Owner,
         method: &str,
         params: &serde_json::Map<String, Value>,
-    ) -> Result<Pending> {
+    ) -> Result<Value> {
+        if method == "runtime.profile" {
+            return self.profile(&owner, params);
+        }
+        if matches!(method, "file.get" | "file.stat" | "file.read") {
+            return self.read(&owner, method, params);
+        }
         if method == "file.put" {
             let put = Put::parse(owner, params)?;
             self.prepare(&put)?;
-            Ok(Pending::Put(put))
-        } else {
-            Ok(Pending::Transfer(
-                self.prepare_transfer(owner, method, params)?,
-            ))
+            return self.receipt(&put.declaration);
         }
+        let transfer = self.prepare_transfer(owner, method, params)?;
+        self.transfer_result(&transfer)
     }
-    pub fn complete_rpc(&self, pending: &Pending, result: &mut Value) -> Result<()> {
-        match pending {
-            Pending::Put(put) => self.complete(put, result),
-            Pending::Transfer(transfer) => self.complete_transfer(transfer, result),
+    /// Identity comes from the admitted immutable bytes. Parsing or execution is
+    /// deliberately outside this privileged metadata path and needs no slot.
+    fn profile(&self, owner: &Owner, params: &serde_json::Map<String, Value>) -> Result<Value> {
+        let mut files = serde_json::Map::new();
+        for key in ["target", "libc", "loader"] {
+            if let Some(path) = params.get(key).filter(|v| !v.is_null()) {
+                let path = path
+                    .as_str()
+                    .context("profile input must be a logical file path")?;
+                let reference = self.reference(owner, path, Purpose::Inspect)?;
+                let _held = self.acquire(owner, &reference, Purpose::Inspect)?;
+                files.insert(
+                    key.into(),
+                    serde_json::json!({"path":path,"sha256":reference.sha256,
+                    "size":reference.size,"build_id":null,"architecture":null,"bits":null,
+                    "interpreter":null,"metadata_status":"admitted_content_identity_only"}),
+                );
+            }
         }
+        ensure!(files.contains_key("target"), "profile target required");
+        Ok(
+            serde_json::json!({"files":files,"status":"declared_files_only","mapped_match":false,
+            "environment_support":{"platform":"windows","status":"unobserved"},
+            "note":"Admitted file identity does not prove mapped contents or enabled process protections. Request an owned session observation for runtime state."}),
+        )
+    }
+    fn receipt(&self, declaration: &Declaration) -> Result<Value> {
+        self.publish_receipt(declaration)?;
+        Ok(
+            serde_json::json!({"path":declaration.path,"sha256":declaration.sha256,"size":declaration.size,
+            "native_input":{"schema":1,"id":digest(declaration)?,"identity":declaration.owner.identity,
+                "run_id":declaration.owner.run_id,"owner_id":declaration.owner.owner_id,"epoch":declaration.owner.epoch,
+                "sha256":declaration.sha256,"size":declaration.size,"executable":declaration.executable}}),
+        )
+    }
+    fn read(
+        &self,
+        owner: &Owner,
+        method: &str,
+        params: &serde_json::Map<String, Value>,
+    ) -> Result<Value> {
+        let path = params
+            .get("path")
+            .and_then(Value::as_str)
+            .context("file path required")?;
+        let reference = self.reference(owner, path, Purpose::Inspect)?;
+        let mut file = self.acquire(owner, &reference, Purpose::Inspect)?;
+        let mut result =
+            serde_json::json!({"path":path,"sha256":reference.sha256,"size":reference.size});
+        if method == "file.stat" {
+            return Ok(result);
+        }
+        let number = |key: &str, default: u64| -> Result<u64> {
+            params.get(key).map_or(Ok(default), |v| {
+                v.as_u64()
+                    .context("file offset/limit must be an unsigned integer")
+            })
+        };
+        let maximum = number("max_bytes", 1024 * 1024)?;
+        ensure!(
+            (1..=MAX_PUT as u64).contains(&maximum),
+            "file read limit exceeds 32 MiB"
+        );
+        let offset = if method == "file.get" {
+            ensure!(reference.size <= maximum, "file exceeds max_bytes");
+            0
+        } else {
+            number("offset", 0)?
+        };
+        ensure!(offset <= reference.size, "file offset exceeds size");
+        file.seek(SeekFrom::Start(offset))?;
+        let mut bytes = Vec::new();
+        file.take(maximum).read_to_end(&mut bytes)?;
+        result["data_base64"] = Value::String(STANDARD.encode(&bytes));
+        if method == "file.read" {
+            result["offset"] = Value::from(offset);
+            result["chunk_sha256"] = Value::String(hex::encode(Sha256::digest(&bytes)));
+        }
+        Ok(result)
     }
     pub fn open(metadata: &Path, policy: AclPolicy) -> Result<Self> {
         policy.verify(metadata, true)?;
@@ -259,8 +325,7 @@ impl Inputs {
             executable: declaration.executable,
         })
     }
-    /// Prepare before forwarding. Bytes are immutable, but there is no admitted
-    /// receipt until the corresponding worker result is checked and settled.
+    /// Persist immutable bytes before publishing the native receipt.
     pub fn prepare(&self, put: &Put) -> Result<()> {
         let directory = self.directory(&put.declaration)?;
         let key = digest(&put.declaration.path)?;
@@ -289,30 +354,6 @@ impl Inputs {
             self.publish(&blob, &put.data)?;
         }
         self.check_blob(&blob, &put.declaration)
-    }
-    /// Only a valid successful worker reply can expose this proof. A lost,
-    /// malformed or conflicting reply leaves the native lease uncertain.
-    pub fn complete(&self, put: &Put, result: &mut Value) -> Result<()> {
-        self.finish(&put.declaration, result)
-    }
-    fn finish(&self, declaration: &Declaration, result: &mut Value) -> Result<()> {
-        ensure!(
-            result.is_object()
-                && result["path"] == declaration.path
-                && result["sha256"] == declaration.sha256
-                && result["size"] == declaration.size,
-            "worker upload receipt differs from controller-admitted bytes"
-        );
-        ensure!(
-            result.get("native_input").is_none(),
-            "worker cannot issue native input proof"
-        );
-        self.publish_receipt(declaration)?;
-        result["native_input"] = serde_json::json!({"schema":1,"id":digest(declaration)?,
-            "identity":declaration.owner.identity,"run_id":declaration.owner.run_id,
-            "owner_id":declaration.owner.owner_id,"epoch":declaration.owner.epoch,
-            "sha256":declaration.sha256,"size":declaration.size,"executable":declaration.executable});
-        Ok(())
     }
     fn publish_receipt(&self, declaration: &Declaration) -> Result<()> {
         let directory = self.directory(declaration)?;
@@ -358,7 +399,12 @@ impl Inputs {
         let sha256 = hex::encode(Sha256::digest(&bytes));
         self.generated(owner, format!("files/native-shell/{sha256}.json"), bytes)
     }
-    fn generated(&self, owner: &Owner, path: String, data: Vec<u8>) -> Result<Reference> {
+    pub(crate) fn generated(
+        &self,
+        owner: &Owner,
+        path: String,
+        data: Vec<u8>,
+    ) -> Result<Reference> {
         wukong_worker_package::validate_path(&path)?;
         ensure!(
             data.len() <= MAX_PUT,

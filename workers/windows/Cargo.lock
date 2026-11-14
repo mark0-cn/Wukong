@@ -1889,6 +1889,7 @@ dependencies = [
  "windows",
  "windows-sys 0.61.2",
  "wukong-worker-package",
+ "wukong-worker-protocol",
  "zeroize",
 ]
 
@@ -1907,6 +1908,14 @@ dependencies = [
  "sha2 0.10.9",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "wukong-worker-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
 ]
 
 [[package]]

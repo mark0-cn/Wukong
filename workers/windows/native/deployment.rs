@@ -222,10 +222,6 @@ pub fn worker_environment(root: &Path, package: &Path) -> Result<BTreeMap<String
         ("TMP".into(), temporary.into_os_string()),
         ("PYTHONDONTWRITEBYTECODE".into(), "1".into()),
         ("PYTHONUNBUFFERED".into(), "1".into()),
-        (
-            "WUKONG_NATIVE_BINDING_FILE".into(),
-            root.join("binding.json").into_os_string(),
-        ),
     ]
     .into_iter()
     .collect())

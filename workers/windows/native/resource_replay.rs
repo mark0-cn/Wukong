@@ -207,7 +207,7 @@ pub(crate) fn execute(host: &Host, request: &Request, cancel: &Path) -> Result<V
     Ok(
         json!({"schema":1,"scope":"native_replay_host","resource_id":request.resource_id,
         "owner":request.owner,"request_sha256":digest(request)?,"trials":trials,"cancelled":cancelled,
-        "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"production_execution":false}),
+        "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"isolation":"appcontainer"}),
     )
 }
 

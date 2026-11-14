@@ -6,7 +6,7 @@ use crate::{
     process_capture::{CaptureResult, PreparedIo},
     processes::ResourceLimits,
     resource_input::Reference,
-    resource_journal::{Binding, Owner},
+    resource_journal::Owner,
     security::{self, AclPolicy},
 };
 use anyhow::{Result, ensure};
@@ -86,11 +86,7 @@ impl Request {
                 && !self.owner.owner_id.is_empty(),
             "missing admitted native process owner"
         );
-        Binding::from_readiness(
-            serde_json::to_value(&self.owner.identity)?,
-            &self.owner.identity.installation_id,
-            &self.owner.identity.package_sha256,
-        )?;
+        crate::worker_identity::validate(&self.owner.identity)?;
         ensure!(
             self.program.executable == self.interpreter.is_none()
                 && self.arguments.len() <= 128
@@ -314,7 +310,7 @@ fn finish(
         "stdout_base64":base64::engine::general_purpose::STANDARD.encode(&result.stdout),"stderr_base64":base64::engine::general_purpose::STANDARD.encode(&result.stderr),
         "stdout_sha256":hex::encode(Sha256::digest(&result.stdout)),"stderr_sha256":hex::encode(Sha256::digest(&result.stderr)),
         "stdin_written":result.input.written,"stdin_complete":result.input.completed,"stdin_error":result.input.error,
-        "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"scope":"native_process_host","production_execution":false});
+        "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"scope":"native_process_host","isolation":"appcontainer"});
     if let Some(trial) = trial {
         value["trial"] = serde_json::json!(trial);
         value["scratch_nonce"] = serde_json::json!(crate::resource_replay::nonce(
@@ -395,7 +391,7 @@ mod tests {
             replay: None,
             resource_id: "a".repeat(32),
             owner: Owner {
-                identity: Binding {
+                identity: crate::resource_journal::Binding {
                     protocol: 2,
                     installation_id: "b".repeat(32),
                     boot_id: format!("windows:{}:1", "c".repeat(32)),

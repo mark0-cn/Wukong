@@ -69,7 +69,7 @@ fn response(
     let value = json!({"session_id":target.target.resource_id,"worker_session_id":target.target.resource_id,
         "native_owner":target.target.owner,"engine":"dbgeng","state":state,
         "mode":if target.read_only(){"dump"}else{"launch"},"read_only":target.read_only(),
-        "transcript":transcript,"response":result,"production_execution":false});
+        "transcript":transcript,"response":result,"isolation":"appcontainer"});
     Ok(Reply {
         schema: session_wire::SCHEMA,
         resource: target.target.resource_id.clone(),
@@ -196,7 +196,14 @@ async fn serve(
                     .context("native debugger control outcome is unknown after timeout")?
                 }
                 Operation::Close(_) => unreachable!(),
-                Operation::Write(_) | Operation::Profile(_) => {
+                Operation::Profile(_) => session
+                    .as_mut()
+                    .context("native debugger is not open")?
+                    .profile(
+                        target.profile(),
+                        serde_json::to_value(&request.target.program)?,
+                    ),
+                Operation::Write(_) => {
                     anyhow::bail!("debugger sessions do not accept interactive operations")
                 }
             }
@@ -291,7 +298,7 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         let mut proof = json!({"schema":SCHEMA,"scope":"native_debugger_host","resource_id":id,
         "owner":request.target.owner,"request_sha256":digest(&request)?,"identity":identity,"outcome":if outcome.is_ok(){"closed"}else{"unknown"},
         "target_executed":captured.is_some(),"read_only":request.read_only(),
-        "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"production_execution":false});
+        "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"isolation":"appcontainer"});
         if let Some(captured) = captured {
             private.publish(
                 &result_directory.join(format!("{id}.stdout")),

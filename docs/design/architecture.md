@@ -10,6 +10,8 @@ This project implements Strix-inspired responsibilities and runtime semantics: r
 
 ## Modules and responsibilities
 
+Windows has one native worker authority. The controller owns business tasks/evidence, `workers/protocol` shares public types, and the native service owns capabilities, leases, files and resources. Python on Windows is a disposable isolated analysis tool; Linux retains its Python worker. See [cross-platform environments](cross-platform-environments.md) and the [current Windows component guide](../../workers/windows/README.md).
+
 | Module | Responsibility |
 |---|---|
 | `domain` | Durable run/agent/message/event/tool/evidence/finding/verification/coverage records |

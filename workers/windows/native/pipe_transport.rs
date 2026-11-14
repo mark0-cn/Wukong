@@ -58,13 +58,11 @@ pub fn service_name(installation: &str) -> Result<String> {
 #[derive(Clone, Copy)]
 pub(crate) enum Channel {
     Relay,
-    Broker,
 }
 fn pipe_name(installation: &str, channel: Channel) -> Result<String> {
     let service = service_name(installation)?;
     Ok(match channel {
         Channel::Relay => format!(r"\\.\pipe\{service}"),
-        Channel::Broker => format!(r"\\.\pipe\{service}-Broker"),
     })
 }
 
@@ -75,20 +73,6 @@ pub fn server(installation: &str, management_sid: &str, first: bool) -> Result<N
         installation,
         Channel::Relay,
         &format!("D:P(A;;GA;;;SY)(A;;0x{CLIENT_ACCESS:08x};;;{management_sid})"),
-        first,
-    )
-}
-pub(crate) fn broker_server(
-    installation: &str,
-    worker_sid: &str,
-    first: bool,
-) -> Result<NamedPipeServer> {
-    security::require_system()?;
-    security::validate_account_sid(worker_sid)?;
-    create_server(
-        installation,
-        Channel::Broker,
-        &format!("D:P(A;;GA;;;SY)(A;;0x{CLIENT_ACCESS:08x};;;{worker_sid})"),
         first,
     )
 }
@@ -228,46 +212,6 @@ pub async fn connect(installation: &str) -> Result<NamedPipeClient> {
         "native pipe server does not match the enrolled SCM service"
     );
     Ok(client)
-}
-
-/// The expected PID is handed to the ordinary worker by its System parent,
-/// before spawning it. No request can choose a different server identity.
-pub(crate) async fn connect_broker(installation: &str, expected: u32) -> Result<NamedPipeClient> {
-    ensure!(expected > 0, "missing native broker parent PID");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    let client = loop {
-        match open_client(installation, Channel::Broker) {
-            Ok(client) => break client,
-            Err(error)
-                if error
-                    .downcast_ref::<io::Error>()
-                    .and_then(io::Error::raw_os_error)
-                    == Some(ERROR_PIPE_BUSY as i32)
-                    && tokio::time::Instant::now() < deadline =>
-            {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            Err(error) => return Err(error),
-        }
-    };
-    let mut actual = 0;
-    security::check(unsafe { GetNamedPipeServerProcessId(client.as_raw_handle(), &mut actual) })?;
-    ensure!(
-        actual == expected,
-        "native broker does not match the trusted service parent PID"
-    );
-    Ok(client)
-}
-
-#[cfg(test)]
-pub(crate) fn broker_fixture_server(installation: &str, sid: &str) -> Result<NamedPipeServer> {
-    security::validate_account_sid(sid)?;
-    create_server(
-        installation,
-        Channel::Broker,
-        &format!("D:P(A;;GA;;;{sid})(A;;GA;;;SY)"),
-        true,
-    )
 }
 
 pub async fn read_frame(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Option<Vec<u8>>> {

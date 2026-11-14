@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Give the Windows native worker sole ownership of capability discovery, run leases, uploads and execution. Analysis uses isolated Python helpers, and resource starts wait for advertised capacity without replaying uncertain operations. Remove the obsolete Python metadata daemon and reverse health channel."
+zh_CN = "由 Windows 原生 Worker 统一管理能力发现、运行租约、上传和执行。分析通过隔离的 Python 辅助进程完成，资源启动等待已声明容量，未知操作不会重放。移除旧 Python 元数据守护进程和反向健康通道。"

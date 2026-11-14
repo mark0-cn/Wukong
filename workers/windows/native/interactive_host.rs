@@ -39,7 +39,7 @@ fn response(
     value["native_owner"] = json!(target.target.owner);
     value["kind"] = json!("interactive");
     value["state"] = json!(state);
-    value["production_execution"] = json!(false);
+    value["isolation"] = json!("appcontainer");
     value["transcript"] = json!(session_artifacts::snapshot(
         root,
         id,
@@ -208,7 +208,7 @@ pub(crate) fn run(host: &Host, request: &Target, cancel: &Path) -> Result<()> {
             "resource_id":id,"owner":request.target.owner,"request_sha256":digest(request)?,
             "program":request.target.program,"pid":pid,
             "outcome":if outcome.is_ok(){"closed"}else{"unknown"},"read_only":false,"target_executed":true,
-            "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"production_execution":false,
+            "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"isolation":"appcontainer",
             "stdout_sha256":hex::encode(Sha256::digest(io.output.bytes())),"exit_code":exit_code?});
         deployment::publish_json(
             &root

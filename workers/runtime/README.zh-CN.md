@@ -4,6 +4,8 @@
 
 [English](README.md) · 简体中文
 
+本指南的 Python 进程管理适用于 Linux Worker 和可信开发夹具。托管 Windows 由原生 Worker 统一管理身份、能力、租约、上传和执行；Python 仅按需运行受隔离的分析代码。当前职责和容量限制见[Windows 组件指南](../windows/README.zh-CN.md)。
+
 Rust 控制端默认不运行待分析目标。请选择持久化 Docker/VM/SSH worker。`trusted_local` 显式在宿主运行可信夹具，仅用于开发测试。Python bridge 管理进程，容器或 VM 提供隔离。
 
 对于 Linux worker 和可信开发夹具，在 worker 使用的 Python 环境（可信本地测试为 `environments.<id>.runtime.python`）安装依赖：
@@ -16,7 +18,7 @@ python -m pip install -r workers/runtime/requirements.txt
 
 Bridge 启动时会在导入 worker 模块前禁用 Python 字节码写入，新建 daemon 和作业监督器进程也遵循该设置，从而保持已签名部署文件不变；可写状态保存在配置的状态目录。不可变部署中的其他 Python 入口也应使用 `-B` 启动。
 
-元数据发布使用 `atomicwrites`：完整 UTF-8 JSON 在替换前刷盘，写入失败时清理临时文件。Windows 写穿移动和 POSIX 父目录同步由库处理。仅对 Windows 临时访问/共享冲突重试，最多五次；保留记录失败不得授权执行。已有租约损坏仍报错，绝不静默重置。离线包固定已发布的 1.4.0 通用 wheel；1.4.1 对运行模块仅修改版本号和 API 文档字符串。故障注入检查不证明断电或当前源码的 VM 重启验收通过。
+元数据发布使用 `atomicwrites`：完整 UTF-8 JSON 在替换前刷盘，写入失败时清理临时文件。Windows 写穿移动和 POSIX 父目录同步由库处理。仅对 Windows 临时访问/共享冲突重试，最多五次；保留记录失败不得授权执行。已有操作记录损坏仍报错，绝不静默重置。离线包固定已发布的 1.4.0 通用 wheel；1.4.1 对运行模块仅修改版本号和 API 文档字符串。故障注入检查不证明断电或当前源码的 VM 重启验收通过。
 
 Docker 镜像自动安装依赖。GDB/MI 结果含解析后的 `payload`；异步事件是 type、message、payload、原始 `record` 的结构化记录。原始 MI transcript 保留为证据。
 

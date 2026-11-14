@@ -10,6 +10,8 @@
 
 ## 模块与职责
 
+Windows 的执行管理入口只有原生 Worker。控制器负责业务任务和证据，`workers/protocol` 共用公开类型，原生服务负责能力、租约、文件和资源。Python 在 Windows 上作为一次性隔离分析工具；Linux 保留 Python Worker。详见[跨平台环境架构](cross-platform-environments.zh-CN.md)和[当前 Windows 组件指南](../../workers/windows/README.zh-CN.md)。
+
 | 模块 | 职责 |
 |---|---|
 | `domain` | run/agent/message/event/tool/evidence/finding/verification/coverage 的持久化记录 |

@@ -6,7 +6,7 @@ import subprocess
 from scripts._lib.repository import ROOT
 from scripts.worker.paths import regular
 
-SOURCES = ["workers/windows", "workers/package", "workers/runtime", "scripts/worker"]
+SOURCES = ["workers/windows", "workers/package", "workers/protocol", "workers/runtime", "scripts/worker"]
 
 
 def identity():
