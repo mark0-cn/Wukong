@@ -71,6 +71,46 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Channel<R, W> {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn framed_protobuf_round_trips_over_real_inherited_pipe_adapters() -> Result<()> {
+        let (input, host_output) = std::io::pipe()?;
+        let (host_input, output) = std::io::pipe()?;
+        let mut client = Channel::new(
+            crate::stream_io::reader(input),
+            crate::stream_io::writer(output),
+        );
+        let mut host = Channel::new(
+            crate::stream_io::reader(host_input),
+            crate::stream_io::writer(host_output),
+        );
+        let request = Request {
+            schema: SCHEMA,
+            resource: "a".repeat(32),
+            sequence: 1,
+            operation: Some(request::Operation::Open(Open {})),
+        };
+        let hash = "b".repeat(64);
+        let expected = serde_json::json!({"state":"running","text":"binary \u{0} and 中文"});
+        let reply = async {
+            let received: Request = host.receive().await?.context("pipe request absent")?;
+            ensure!(received == request, "pipe request changed");
+            host.send(&Reply {
+                schema: SCHEMA,
+                resource: request.resource.clone(),
+                sequence: 1,
+                request_sha256: hash.clone(),
+                outcome: Some(reply::Outcome::ResultJson(serde_json::to_vec(&expected)?)),
+            })
+            .await
+        };
+        let (actual, sent) = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            tokio::join!(client.exchange(&request, &hash), reply)
+        })
+        .await?;
+        sent?;
+        assert_eq!(actual?, expected);
+        Ok(())
+    }
+    #[tokio::test]
     async fn replies_bind_resource_sequence_and_admitted_request() -> Result<()> {
         for fault in 0..7 {
             let (left, right) = tokio::io::duplex(4096);

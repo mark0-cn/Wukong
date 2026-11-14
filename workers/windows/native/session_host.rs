@@ -329,8 +329,8 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
     let mut channel = Channel::new(tokio::io::stdin(), tokio::io::stdout());
     let outcome = runtime.block_on(async {
         let client = Client::connect(
-            tokio::fs::File::from_std(fs::File::from(OwnedHandle::from(reader))),
-            tokio::fs::File::from_std(fs::File::from(OwnedHandle::from(writer))),
+            crate::stream_io::reader(reader),
+            crate::stream_io::writer(writer),
             transcript,
         )
         .await?;

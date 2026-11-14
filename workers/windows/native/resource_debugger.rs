@@ -106,8 +106,8 @@ pub(super) fn check(
         .enable_all()
         .build()?;
     let outcome = runtime.block_on(async {
-        let reader = tokio::fs::File::from_std(fs::File::from(OwnedHandle::from(reader)));
-        let writer = tokio::fs::File::from_std(fs::File::from(OwnedHandle::from(writer)));
+        let reader = crate::stream_io::reader(reader);
+        let writer = crate::stream_io::writer(writer);
         let mut client = Client::connect(reader, writer, transcript).await?;
         let result = probe(&mut client, &mut target, &symbols, architecture).await;
         let closed = client.close().await;

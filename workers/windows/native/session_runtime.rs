@@ -17,7 +17,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-type Pipes = Channel<tokio::fs::File, tokio::fs::File>;
+type Pipes = Channel<
+    crate::stream_io::Stream<std::io::PipeReader>,
+    crate::stream_io::Stream<std::io::PipeWriter>,
+>;
 const CALL_TIMEOUT: Duration = Duration::from_secs(75);
 
 pub(crate) struct Live {
@@ -96,8 +99,8 @@ impl Live {
         }
         .system_host_streamed(installation, id, &log)?;
         drop((input, output));
-        let reader = tokio::fs::File::from_std(File::from(OwnedHandle::from(reader)));
-        let writer = tokio::fs::File::from_std(File::from(OwnedHandle::from(writer)));
+        let reader = crate::stream_io::reader(reader);
+        let writer = crate::stream_io::writer(writer);
         Ok(Self {
             host,
             channel: Some(Channel::new(reader, writer)),
