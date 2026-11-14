@@ -44,6 +44,8 @@ struct Profile {
     python: bool,
     #[serde(default)]
     replay: bool,
+    #[serde(default)]
+    minimize: bool,
     ready: PathBuf,
     resume: PathBuf,
     output: PathBuf,
@@ -145,6 +147,15 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
                 && profile.resource_inventory),
         "replay fault acceptance requires host/service interruption with resource discovery"
     );
+    ensure!(
+        !profile.minimize
+            || (matches!(profile.fault, Fault::Host | Fault::Service)
+                && !profile.python
+                && !profile.replay
+                && !profile.launch_spec
+                && profile.resource_inventory),
+        "minimization fault acceptance requires host/service interruption with resource discovery"
+    );
     for path in [&profile.ready, &profile.resume, &profile.output] {
         ensure!(
             path.is_absolute() && !path.try_exists()?,
@@ -191,28 +202,35 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     } else {
         None
     };
-    let replay_input = if profile.replay {
+    let trial_input = if profile.replay || profile.minimize {
         Some(
             bound
                 .call(
                     "file.put",
-                    json!({"path":"fault/replay-input.bin",
-            "data_base64":STANDARD.encode(b"trusted replay interruption"),"executable":false,
-            "request_id":"replay-input-upload"}),
+                    json!({"path":"fault/trial-input.bin",
+            "data_base64":STANDARD.encode(b"trusted trial interruption"),"executable":false,
+            "request_id":"trial-input-upload"}),
                 )
                 .await?,
         )
     } else {
         None
     };
-    let method = if profile.replay {
+    let method = if profile.minimize {
+        "input.minimize"
+    } else if profile.replay {
         "poc.verify"
     } else if profile.python {
         "py.run"
     } else {
         "job.start"
     };
-    let request = if let Some(input) = &replay_input {
+    let request = if profile.minimize {
+        let input = trial_input.as_ref().context("minimization input missing")?;
+        json!({"target":uploaded["path"],"input":input["path"],"input_mode":"stdin",
+            "args":["--fault-ready"],"max_attempts":3,"timeout_secs":60,"minimize_timeout_secs":120,
+            "request_id":"interrupted-start","call_id":"interrupted-start"})
+    } else if let Some(input) = &trial_input {
         json!({"target":uploaded["path"],"input":input["path"],"input_mode":"stdin",
             "args":["--fault-ready"],"trials":3,"timeout_secs":60,
             "producer_agent_id":"fixture-producer","verifier_agent_id":"fixture-verifier",
@@ -238,7 +256,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     if profile.fault != Fault::Preparation {
         publish(
             &profile.ready,
-            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"replay_input":replay_input,"launch":launch,"method":method,"request":request,"job":started}),
+            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"trial_input":trial_input,"launch":launch,"method":method,"request":request,"job":started}),
         )?;
         resume(&profile.resume, profile.fault).await?;
     }
@@ -415,18 +433,23 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             "source conflict changed the interrupted resource"
         );
     }
-    if profile.replay {
+    if profile.replay || profile.minimize {
+        let (kind, field) = if profile.minimize {
+            ("minimize", "max_attempts")
+        } else {
+            ("verify", "trials")
+        };
         ensure!(
-            status["kind"] == "verify",
-            "interrupted replay lost its kind"
+            status["kind"] == kind,
+            "interrupted trial resource lost its kind"
         );
         let mut changed = request.clone();
-        changed["trials"] = json!(4);
+        changed[field] = json!(4);
         let rejected = rebound
             .call(method, changed)
             .await
             .err()
-            .context("interrupted replay accepted changed trials")?;
+            .context("interrupted resource accepted a changed attempt count")?;
         ensure!(
             rejected.downcast_ref::<WorkerError>().is_some(),
             "changed trial count failed outside worker admission: {rejected:#}"
@@ -466,7 +489,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             && proof["scratch_removed"] == true,
         "native recovery receipt does not bind cleanup to the original resource"
     );
-    if profile.fault == Fault::Service || profile.replay {
+    if profile.fault == Fault::Service || profile.replay || profile.minimize {
         ensure!(
             proof["guardian_found"] == true,
             "service recovery did not reopen the externally retained guardian Job"
@@ -480,7 +503,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     client.close().await?;
     publish(
         &profile.output,
-        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"replay_input":replay_input,"launch":launch,"method":method,"python_source_conflict_rejected":profile.python,"replay_trials_conflict_rejected":profile.replay,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
+        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"trial_input":trial_input,"launch":launch,"method":method,"python_source_conflict_rejected":profile.python,"replay_trials_conflict_rejected":profile.replay,"minimize_attempts_conflict_rejected":profile.minimize,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
     )?;
     Ok(())
 }
