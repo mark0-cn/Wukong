@@ -65,14 +65,9 @@ impl Backend {
         )?;
         let path = directory.path().to_owned();
         let mut target = prepare(&debugger, &path)?;
-        let executable = host.package.join(
-            host.manifest
-                .manifest()
-                .entrypoints
-                .windbg_mcp
-                .as_ref()
-                .context("package has no WinDbg MCP backend")?,
-        );
+        let executable = host
+            .package
+            .join(&host.manifest.manifest().entrypoints.windbg_mcp);
         let (input, writer) = std::io::pipe()?;
         let (reader, output) = std::io::pipe()?;
         let input = File::from(OwnedHandle::from(input));

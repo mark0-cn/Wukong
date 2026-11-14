@@ -197,7 +197,7 @@ async fn offline_selftest(
             "-B".into(),
             "-E".into(),
             package
-                .join("runtime/worker/worker_selftest.py")
+                .join(&manifest.manifest().entrypoints.selftest)
                 .into_os_string(),
             "--package".into(),
             package.as_os_str().to_owned(),

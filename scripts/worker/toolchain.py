@@ -14,8 +14,8 @@ from scripts._lib.repository import ROOT
 from scripts.worker.paths import member, no_links, regular, unique_paths
 
 LOCK = ROOT / "workers/windows/toolchain.lock.json"
-COMPONENTS = {"python", "debugging_tools", "openssh", "worker_python_dependencies", "windbg_mcp"}
-HOSTS = {"www.python.org", "download.microsoft.com", "github.com", "files.pythonhosted.org"}
+COMPONENTS = {"python", "debugging_tools", "openssh", "windbg_mcp"}
+HOSTS = {"www.python.org", "download.microsoft.com", "github.com"}
 
 
 def load_lock(path=LOCK):

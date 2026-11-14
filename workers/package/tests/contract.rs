@@ -15,23 +15,21 @@ fn fixture() -> Manifest {
     for path in [
         "worker.exe",
         "python/python.exe",
-        "worker-dbgeng.exe",
+        "windbg-mcp.exe",
         "debuggers/dbgeng.dll",
         "ssh/sshd.exe",
         "ssh/ssh-keygen.exe",
     ] {
         files.insert(path.into(), entry(PayloadKind::Runtime));
     }
-    files.insert("runtime/bridge.py".into(), entry(PayloadKind::WorkerSource));
+    files.insert(
+        "runtime/selftest.py".into(),
+        entry(PayloadKind::PythonSource),
+    );
     files.insert("toolchain.lock.json".into(), entry(PayloadKind::Data));
     files.insert("licenses/NOTICE.txt".into(), entry(PayloadKind::License));
     let mut components = BTreeMap::new();
-    for name in [
-        "python",
-        "debugging_tools",
-        "openssh",
-        "worker_python_dependencies",
-    ] {
+    for name in ["python", "debugging_tools", "openssh", "windbg_mcp"] {
         let path = format!("payloads/{name}.bin");
         files.insert(path.clone(), entry(PayloadKind::OriginalInstaller));
         components.insert(
@@ -45,7 +43,7 @@ fn fixture() -> Manifest {
         );
     }
     Manifest {
-        schema: 1,
+        schema: 2,
         platform: "windows-amd64".into(),
         version: "1.0.0".into(),
         source_revision: "a".repeat(40),
@@ -56,9 +54,8 @@ fn fixture() -> Manifest {
         entrypoints: EntryPoints {
             worker: "worker.exe".into(),
             python: "python/python.exe".into(),
-            bridge: "runtime/bridge.py".into(),
-            dbgeng_helper: Some("worker-dbgeng.exe".into()),
-            windbg_mcp: None,
+            selftest: "runtime/selftest.py".into(),
+            windbg_mcp: "windbg-mcp.exe".into(),
             dbgeng_library: "debuggers/dbgeng.dll".into(),
             sshd: "ssh/sshd.exe".into(),
             ssh_keygen: "ssh/ssh-keygen.exe".into(),
@@ -70,27 +67,24 @@ fn fixture() -> Manifest {
 }
 
 #[test]
-fn external_debugger_requires_its_verified_payload_and_rejects_parallel_backends()
--> anyhow::Result<()> {
-    let mut manifest = fixture();
-    manifest.validate()?; // Legacy packages remain readable for maintenance.
-    manifest.entrypoints.windbg_mcp = Some("windbg-mcp.exe".into());
-    assert!(manifest.validate().is_err());
-    manifest.entrypoints.dbgeng_helper = None;
-    assert!(manifest.validate().is_err());
-    let executable = manifest.files.remove("worker-dbgeng.exe").unwrap();
-    manifest.files.insert("windbg-mcp.exe".into(), executable);
-    assert!(manifest.validate().is_err());
-    let mut component = manifest.components["python"].clone();
-    let original = manifest.files[&component.original_payloads[0]].clone();
-    component.original_payloads = vec!["payloads/windbg-mcp.zip".into()];
-    manifest
-        .files
-        .insert(component.original_payloads[0].clone(), original);
-    manifest.components.insert("windbg_mcp".into(), component);
+fn explicit_python_and_debugger_entrypoints_reject_old_package_formats() -> anyhow::Result<()> {
+    let manifest = fixture();
     manifest.validate()?;
-    manifest.files.remove("payloads/windbg-mcp.zip");
-    assert!(manifest.validate().is_err());
+    let mut old = serde_json::to_value(&manifest)?;
+    old["schema"] = 1.into();
+    assert!(serde_json::from_value::<Manifest>(old)?.validate().is_err());
+    let mut old = serde_json::to_value(&manifest)?;
+    old["entrypoints"]["dbgeng_helper"] = "worker-dbgeng.exe".into();
+    assert!(serde_json::from_value::<Manifest>(old).is_err());
+    for path in [
+        "windbg-mcp.exe",
+        "runtime/selftest.py",
+        "payloads/windbg_mcp.bin",
+    ] {
+        let mut incomplete = manifest.clone();
+        incomplete.files.remove(path);
+        assert!(incomplete.validate().is_err());
+    }
     Ok(())
 }
 

@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Share Python analysis between Linux and Windows without deploying Linux worker services in Windows packages. Linux installations must install workers/analysis alongside worker requirements. Windows package manifest schema 2 requires the explicit self-test and WinDbg MCP entries; build and enroll a fresh package instead of reusing schema 1. Existing installations and evidence are not migrated or removed."
+zh_CN = "Linux 与 Windows 共用 Python 分析代码，Windows 包不再部署 Linux Worker 服务。Linux 安装需在 Worker 依赖之外安装 workers/analysis。Windows 包清单 schema 2 要求显式自检和 WinDbg MCP 入口；请构建并登记新包，不复用 schema 1。现有安装与证据不会被迁移或删除。"

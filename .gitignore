@@ -39,3 +39,6 @@ __pycache__/
 # Additional local configuration and state
 /re-agent.toml
 /.re-agent/
+
+# Local Python package build metadata
+*.egg-info/

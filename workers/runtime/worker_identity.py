@@ -44,6 +44,10 @@ def content_identity(root):
         digest.update(path.name.encode()+b'\0'+path.read_bytes()+b'\0')
     schema = Path(__file__).resolve().parent.parent / 'protocol/schema/contract.json'
     digest.update(b'protocol/schema/contract.json\0' + schema.read_bytes() + b'\0')
+    import wukong_analysis
+    analysis = Path(wukong_analysis.__file__).resolve().parent
+    for path in sorted(analysis.glob("*.py")):
+        digest.update(b"analysis/" + path.name.encode() + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()
 
 

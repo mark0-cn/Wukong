@@ -20,7 +20,7 @@ from scripts.worker.toolchain import acquire, load_lock
 class OfflineAssets(unittest.TestCase):
     def test_pinned_inventory_covers_full_sdk_and_runtime_requirements(self):
         lock = load_lock()
-        self.assertEqual(len(lock["assets"]), 53)
+        self.assertEqual(len(lock["assets"]), 47)
         debugger = [item for item in lock["assets"] if item["component"] == "windbg_mcp"]
         self.assertEqual(len(debugger), 1)
         self.assertEqual(debugger[0]["sha256"], "0250b197c8b2e25ef371a4f252f76fc05bb6c01a2c8c3227a0cc908e2301baad")
@@ -29,9 +29,9 @@ class OfflineAssets(unittest.TestCase):
         self.assertEqual(sum(item["path"].endswith(".cab") for item in sdk), 40)
         self.assertTrue(all(len(item["vendor_sha1"]) == 40 for item in sdk))
         self.assertEqual(lock["components"]["openssh"]["channel"], "preview")
-        requirements = Path("workers/runtime/requirements.txt").read_text().split()
-        pinned = lock["components"]["worker_python_dependencies"]["version"].split(";")
-        self.assertEqual(sorted(requirements), sorted(value.replace("=", "==") for value in pinned))
+        requirements = Path("workers/windows/python/requirements.txt").read_text(encoding="utf-8")
+        self.assertFalse([line for line in requirements.splitlines() if line.strip() and not line.startswith("#")])
+        self.assertNotIn("worker_python_dependencies", lock["components"])
 
     def test_cache_requires_exact_bytes_and_never_downloads_implicitly(self):
         payload = b"verified official payload fixture"
@@ -159,21 +159,6 @@ class OfflineZip(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 unpack_zip(archive, root / "output")
 
-    def test_wheels_require_pure_metadata(self):
-        for pure in ["true", "false"]:
-            with self.subTest(pure=pure), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                archive = root / "test.whl"
-                with zipfile.ZipFile(archive, "w") as source:
-                    source.writestr("fixture.py", "print('fixture')")
-                    source.writestr("fixture.dist-info/WHEEL", f"Root-Is-Purelib: {pure}\nTag: py3-none-any\n")
-                    source.writestr("fixture.dist-info/METADATA", "Name: fixture\n")
-                if pure == "false":
-                    with self.assertRaisesRegex(ValueError, "pure Python"):
-                        unpack_zip(archive, root / "output", wheel=True)
-                else:
-                    unpack_zip(archive, root / "output", wheel=True)
-                    self.assertTrue((root / "output/fixture.py").is_file())
 
 
 @unittest.skipUnless(os.name == "nt" and shutil.which("makecab.exe"), "Windows cabinet API acceptance")

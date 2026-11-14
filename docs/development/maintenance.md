@@ -14,7 +14,7 @@ English · [简体中文](maintenance.zh-CN.md)
 - `coordinator` separates runs/tasks/messages/waits/completion use cases, committing through the same Store transactions. `binary` retains public address/hash APIs; profiling, strings and Ghidra lifecycle have separate modules.
 - `store` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `store/conversations` owns conversation payloads/revisions. Current state schema is 4, without legacy migration.
 
-See [worker components](../../workers/runtime/README.md). Deploy the entire runtime directory; entry files do not re-export modules.
+See [worker components](../../workers/runtime/README.md). Deploy the Linux runtime directory and generated protocol schema, and install the independent `workers/analysis` package; entry files do not re-export modules. Windows packaging uses its explicit component inventory instead of copying the Linux runtime.
 
 Keep cross-module calls typed and ownership/completion gates centralized. General metadata queries do not read checkpoints. Inheritance, follow-ups and complete export explicitly request full reads. Metadata writes must not clear conversations; checkpoints/mailbox acknowledgments still commit atomically.
 
@@ -79,9 +79,9 @@ cargo test --offline --all-targets
 python workers/tests/run.py unit -p test_bridge.py
 ```
 
-Install `workers/runtime/requirements.txt` in a virtual environment and make `python` available before worker tests. Ordinary tests use trusted local fixtures/loopback services; ignored real Ghidra/Docker acceptance requires each test's documented environment.
+Install `workers/analysis` and `workers/runtime/requirements.txt` in a virtual environment and make `python` available before worker tests. Ordinary tests use trusted local fixtures/loopback services; ignored real Ghidra/Docker acceptance requires each test's documented environment.
 
-Sibling-container network acceptance builds `tests/acceptance/network.Dockerfile` with `workers/runtime` as its context, installing the same pinned worker requirements before entering the isolated network. A bare Python image does not provide the worker's metadata-publication dependencies.
+Sibling-container network acceptance builds `tests/acceptance/network.Dockerfile` with the repository root as its context, installing the analysis package and the same pinned Linux worker requirements before entering the isolated network. A bare Python image does not provide the worker's metadata-publication dependencies.
 
 <a id="可重复性能基准"></a>
 

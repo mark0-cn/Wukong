@@ -6,7 +6,7 @@ import subprocess
 from scripts._lib.repository import ROOT
 from scripts.worker.paths import regular
 
-SOURCES = ["workers/windows", "workers/package", "workers/protocol", "workers/runtime", "scripts/worker"]
+SOURCES = ["workers/windows", "workers/package", "workers/protocol", "workers/analysis", "scripts/worker"]
 
 
 def identity():
@@ -15,7 +15,8 @@ def identity():
         for path in sorted((ROOT / directory).rglob("*")):
             if path.suffix not in {".py", ".rs", ".proto", ".patch", ".c", ".h", ".toml", ".lock", ".json", ".txt"} or not path.is_file():
                 continue
-            if "__pycache__" in path.parts or "target" in path.relative_to(ROOT).parts:
+            if any(part in {"__pycache__", "target", "build", "dist"} or part.endswith(".egg-info")
+                   for part in path.relative_to(ROOT).parts):
                 continue
             name = path.relative_to(ROOT).as_posix().encode("ascii")
             digest.update(len(name).to_bytes(4, "little"))

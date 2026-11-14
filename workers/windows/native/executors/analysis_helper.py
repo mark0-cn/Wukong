@@ -7,11 +7,13 @@ import sys
 def main():
     configuration = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     method, params = configuration["method"], configuration["params"]
-    from worker_seccomp import SeccompService
-    if method not in SeccompService.methods:
+    from wukong_analysis.seccomp import analyze
+    if method != "seccomp.analyze":
         raise ValueError("analysis method is not supported by this offline package")
-    service = SeccompService(Path.cwd(), False, False)
-    result = service.dispatch(method, params)
+    path = Path(sys.argv[2])
+    if path.stat().st_size > 32768:
+        raise ValueError("filter exceeds 32 KiB")
+    result = analyze(path.read_bytes(), params.get("endianness") or "little", params.get("probes"))
     print(json.dumps({"result": result}, ensure_ascii=True), flush=True)
 
 

@@ -23,12 +23,7 @@ pub(super) fn check(
         "invalid trusted architecture"
     );
     let package = deployment.package(root);
-    let executable = manifest
-        .manifest()
-        .entrypoints
-        .windbg_mcp
-        .as_ref()
-        .context("sealed package has no external WinDbg MCP backend")?;
+    let executable = &manifest.manifest().entrypoints.windbg_mcp;
     let probe_member = format!("runtime/selftest/{architecture}/wukong-probe.exe");
     ensure!(
         manifest.manifest().files.contains_key(&probe_member),

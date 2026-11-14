@@ -11,14 +11,14 @@ Rust 控制端默认不运行待分析目标。请选择持久化 Docker/VM/SSH 
 对于 Linux worker 和可信开发夹具，在 worker 使用的 Python 环境（可信本地测试为 `environments.<id>.runtime.python`）安装依赖：
 
 ```sh
-python -m pip install -r workers/runtime/requirements.txt
+python -m pip install -e workers/analysis -r workers/runtime/requirements.txt
 ```
 
 托管 Windows VM 必须使用包含 Python 和全部依赖的完整离线包；不得在 VM 内下载软件包或运行在线 pip 安装。[工具包约定](../package/README.zh-CN.md)和 [Windows 组件](../windows/README.zh-CN.md)说明当前实现及尚未完成的安装器/生产验收工作。
 
 Bridge 启动时会在导入 worker 模块前禁用 Python 字节码写入，新建 daemon 和作业监督器进程也遵循该设置，从而保持已签名部署文件不变；可写状态保存在配置的状态目录。不可变部署中的其他 Python 入口也应使用 `-B` 启动。
 
-元数据发布使用 `atomicwrites`：完整 UTF-8 JSON 在替换前刷盘，写入失败时清理临时文件。Windows 写穿移动和 POSIX 父目录同步由库处理。仅对 Windows 临时访问/共享冲突重试，最多五次；保留记录失败不得授权执行。已有操作记录损坏仍报错，绝不静默重置。离线包固定已发布的 1.4.0 通用 wheel；1.4.1 对运行模块仅修改版本号和 API 文档字符串。故障注入检查不证明断电或当前源码的 VM 重启验收通过。
+元数据发布使用 `atomicwrites`：完整 UTF-8 JSON 在替换前刷盘，写入失败时清理临时文件。Windows 写穿移动和 POSIX 父目录同步由库处理。仅对 Windows 临时访问/共享冲突重试，最多五次；保留记录失败不得授权执行。已有操作记录损坏仍报错，绝不静默重置。Linux bridge 依赖固定在 `requirements.txt`；原生 Windows 元数据不使用这套 Python 实现。故障注入检查不证明断电或当前源码的 VM 重启验收通过。
 
 Docker 镜像自动安装依赖。GDB/MI 结果含解析后的 `payload`；异步事件是 type、message、payload、原始 `record` 的结构化记录。原始 MI transcript 保留为证据。
 
@@ -64,7 +64,7 @@ request_timeout_secs = 300
 
 ## SSH 或 VM
 
-在隔离 Linux guest 安装 Python 3.12+、GDB、带 `afl-qemu-trace` 或 `afl-qemu-bridge` 的 AFL++。将整个目录复制到 `/opt/wukong/runtime`，配置专用管理账号。生产模式需要 root daemon，为每个 job/session 分配不同非特权 UID 并保护监督元数据。SSH 传输不自动添加 sudo；使用配置好的隔离 guest 账号。密钥 SSH 应预先可用，传输使用 `BatchMode=yes`。
+在隔离 Linux guest 安装 Python 3.12+、GDB、带 `afl-qemu-trace` 或 `afl-qemu-bridge` 的 AFL++。在该 Python 环境安装 `workers/analysis`，将本目录复制到 `/opt/wukong/runtime`，生成的 `workers/protocol/schema` 复制到 `/opt/wukong/protocol/schema`，并配置专用管理账号。生产模式需要 root daemon，为每个 job/session 分配不同非特权 UID 并保护监督元数据。SSH 传输不自动添加 sudo；使用配置好的隔离 guest 账号。密钥 SSH 应预先可用，传输使用 `BatchMode=yes`。
 
 ```toml
 default_environment = "linux"
@@ -128,7 +128,7 @@ job 状态为 queued/running/completed/failed/cancelled/timed_out/lost。关闭�
 
 PoC 每次使用新工作目录和只读输入副本。`job.status.result` 保存 passed、attempts、successes、逐次退出/信号、输入/目标 SHA256、生产者/验证者 ID、环境及 crash/behavior 阶段。重复原生崩溃不证明任意读写或代码执行。崩溃缩减默认要求保留原始模块内容及位置签名。显式 `allow_signal_only` 才允许较弱的信号/异常等价性，并标明这一限制；根因仍须独立确认。
 
-输入缩减使用固定版本 Picire 26.11，替代本地手写 delta-debugging 算法。现有回放模块负责每个候选的执行和证据。原始基线占一次尝试；Picire 对已接受候选的再次断言复用该试验。空输入会被显式检查。超时、取消、尝试预算耗尽或候选结果无法确定时，只保留之前已验证的结果，返回 `complete: false` 和 `stop_reason`。意外评估错误使 job 失败。`reducer: "picire"` 标明所用算法。Doctor 仅在 Picire 及其依赖均存在时声明最小化能力。离线包固定三个纯 Python wheel 及其原始许可证文件。Windows 原生通路使用 Rust `fixture3-ddmin` 库和 WinDbg MCP 进行受限试验；本地检查已通过，已安装 VM 验收仍待完成。最小化调用须移除此前被忽略的 `trials`、`expected` 字段。
+输入缩减使用固定版本 Picire 26.11，替代本地手写 delta-debugging 算法。现有回放模块负责每个候选的执行和证据。原始基线占一次尝试；Picire 对已接受候选的再次断言复用该试验。空输入会被显式检查。超时、取消、尝试预算耗尽或候选结果无法确定时，只保留之前已验证的结果，返回 `complete: false` 和 `stop_reason`。意外评估错误使 job 失败。`reducer: "picire"` 标明所用算法。Doctor 仅在 Picire 及其依赖均存在时声明最小化能力。这些依赖属于 Linux Worker，不再装入 Windows 包。Windows 原生通路使用 Rust `fixture3-ddmin` 库和 WinDbg MCP 进行受限试验；本地检查已通过，已安装 VM 验收仍待完成。最小化调用须移除此前被忽略的 `trials`、`expected` 字段。
 
 2026-11-14，Picire 26.11 通过真实隔离 Linux/GDB 验收。静态夹具及在已准入主映像内故障的动态链接夹具，都在 22 次尝试内将 23 字节缩至 `BAD`，并返回 `complete: true` 和 `location_and_frames`。动态集成还通过类型化调试检查、回放及三次验证试验；两种隔离 LaunchSpec 输入用例均通过。验收镜像为 `sha256:0887afcc06e9ae0df50bd2f7c4b560a9faa7accd032c5c72514b2323ef53a2e6`；动态报告 SHA256 为 `96c4426c5690179db45f4173eff98b722366712593cd00a822ee34be19886e38`。另一个 `abort()` 夹具的 PC 属于未准入 libc，正确拒绝了强等价性缩减；模块路径不能证明内容哈希。这些夹具不代表任意库身份或 AFL 模糊测试已通过验收。
 
@@ -179,6 +179,6 @@ Ghidra 套件编译自己的 C 夹具，通过只读适配器导入，定位 mai
 
 `bridge.py` 只选择 stdio relay、daemon 或独立监督；部署整个 runtime 目录，Docker 已整体复制。`worker_transport` 管认证帧与启动；`worker_runtime` 装配/路由；`worker_operations` 管持久化保留与重放，`worker_sessions` 提供会话存活；`worker_jobs` 管记录/取消，`worker_job_supervisor` 管独立执行。调试、交互、文件、同步命令独立组件。`worker_processes` 管有界 I/O/进程树；`worker_common` 管协议值、路径约束、流式哈希和原子元数据。后端直接导入这些组件。
 
-`worker_seccomp` 管离线 classic-BPF/具体探测；`worker_libc` 静态比较有界 ELF 候选；`worker_network` 校验准备好的服务绑定并执行声明式 TCP 验证。监督器仍拥有生命周期/取消；不会在特权 supervisor 内运行模型提供的程序。见 [Pwn 工具契约](../../docs/reference/pwn-tools.zh-CN.md)。
+`worker_seccomp`、`worker_libc`、`worker_emu` 和 `worker_crash` 将受限输入及真实调试观察适配到独立[分析包](../analysis/README.zh-CN.md)。该包负责 BPF 解码/探测、有界 ELF 候选比较、Unicorn 模拟与崩溃数据解释，不拥有 Worker 状态或传输。`worker_network` 校验准备好的服务绑定并执行声明式 TCP 验证。监督器仍拥有生命周期/取消；不会在特权 supervisor 内运行模型提供的程序。见 [Pwn 工具契约](../../docs/reference/pwn-tools.zh-CN.md)。
 
 `worker_launch_spec` 管公共解析、受限成员查找、流式产物哈希。原生启动和网络重放各自保留执行策略/预算。`worker_network` 协调试验；`worker_network_plan` 校验步骤/捕获；`worker_network_transport` 管有界 TCP 与新响应边界；`worker_network_evidence` 保存精确收发块及哈希 transcript。取消仍由 supervisor 管理。

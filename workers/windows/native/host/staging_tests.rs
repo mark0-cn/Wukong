@@ -15,14 +15,14 @@ pub(crate) fn inert_package(root: &Path, signer: &Signer) -> Result<()> {
     for name in [
         "worker.exe",
         "python.exe",
-        "dbgeng-helper.exe",
+        "windbg-mcp.exe",
         "dbgeng.dll",
         "sshd.exe",
         "ssh-keygen.exe",
     ] {
         files.insert(name.into(), entry(PayloadKind::Runtime));
     }
-    files.insert("bridge.py".into(), entry(PayloadKind::WorkerSource));
+    files.insert("selftest.py".into(), entry(PayloadKind::PythonSource));
     files.insert("lock.json".into(), entry(PayloadKind::Data));
     files.insert(
         format!("long/{}/payload.bin", "x".repeat(190)),
@@ -30,12 +30,7 @@ pub(crate) fn inert_package(root: &Path, signer: &Signer) -> Result<()> {
     );
     files.insert("licenses/LICENSE".into(), entry(PayloadKind::License));
     let mut components = BTreeMap::new();
-    for name in [
-        "python",
-        "debugging_tools",
-        "openssh",
-        "worker_python_dependencies",
-    ] {
+    for name in ["python", "debugging_tools", "openssh", "windbg_mcp"] {
         let path = format!("originals/{name}");
         files.insert(path.clone(), entry(PayloadKind::OriginalInstaller));
         components.insert(
@@ -54,7 +49,7 @@ pub(crate) fn inert_package(root: &Path, signer: &Signer) -> Result<()> {
         fs::write(path, b"fixture")?;
     }
     let manifest = Manifest {
-        schema: 1,
+        schema: 2,
         platform: "windows-amd64".into(),
         version: "1.0.0".into(),
         source_revision: "a".repeat(40),
@@ -65,9 +60,8 @@ pub(crate) fn inert_package(root: &Path, signer: &Signer) -> Result<()> {
         entrypoints: EntryPoints {
             worker: "worker.exe".into(),
             python: "python.exe".into(),
-            bridge: "bridge.py".into(),
-            dbgeng_helper: Some("dbgeng-helper.exe".into()),
-            windbg_mcp: None,
+            selftest: "selftest.py".into(),
+            windbg_mcp: "windbg-mcp.exe".into(),
             dbgeng_library: "dbgeng.dll".into(),
             sshd: "sshd.exe".into(),
             ssh_keygen: "ssh-keygen.exe".into(),

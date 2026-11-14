@@ -14,7 +14,16 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from worker_common import PROTOCOL, safe_env, sha256_file
+import hashlib
+
+def sha256_file(path):
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+def safe_env():
+    allowed = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC", "USERPROFILE"}
+    return {key: value for key, value in os.environ.items() if key.upper() in allowed}
+
 
 
 def ssh_probe_environment():
@@ -72,12 +81,11 @@ def run(package, state):
     if len(raw) > 4 * 1024 * 1024:
         raise ValueError("Self-test manifest exceeds limit")
     manifest = json.loads(raw)
-    if manifest["runtime_protocol"] != PROTOCOL:
-        raise ValueError("Incompatible self-test package")
-    dependencies = ["pygdbmi", "filelock", "atomicwrites", "picire", "chardet", "inators"]
+    protocol = manifest["runtime_protocol"]
+    dependencies = ["wukong_analysis.seccomp"]
     for module in dependencies:
         importlib.import_module(module)
-    from worker_seccomp import decode, probe
+    from wukong_analysis.seccomp import decode, probe
     program, rows = decode(bytes([6, 0, 0, 0, 0, 0, 255, 127]))
     if probe(program, rows, {"arch": 0xc000003e, "nr": 1}, "little")["decision"]["action"] != "ALLOW":
         raise ValueError("Packaged filter analysis self-test failed")
@@ -92,7 +100,7 @@ def run(package, state):
         (attempt / "ssh-probe").unlink(missing_ok=True)
         (attempt / "ssh-probe.pub").unlink(missing_ok=True)
     results = [architecture_test(package, manifest, attempt, architecture) for architecture in ["x64", "x86"]]
-    report = {"passed": True, "scope": "offline_dependencies_and_trusted_fixtures", "runtime_protocol": PROTOCOL,
+    report = {"passed": True, "scope": "offline_dependencies_and_trusted_fixtures", "runtime_protocol": protocol,
               "signed_manifest_sha256": sha256_file(package / "manifest.json"), "architectures": results, "python_dependencies": dependencies,
               "production_isolation_verified": False, "state_directory": str(attempt)}
     (attempt / "result.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

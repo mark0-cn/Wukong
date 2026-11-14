@@ -73,10 +73,7 @@ impl Plan {
                 controller_version: &setup.controller_version,
             },
         )?;
-        ensure!(
-            manifest.manifest().entrypoints.windbg_mcp.is_some(),
-            "new installations require the external WinDbg MCP package"
-        );
+
         let enrollment = deployment::read_enrollment(&base.join("enrollment"), pinned)?;
         enrollment.bind_payload(&manifest)?;
         let bytes = crate::artifacts::io::read_bytes(&std::env::current_exe()?, 64 * 1024 * 1024)?;
