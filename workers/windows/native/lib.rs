@@ -21,6 +21,10 @@ mod inputs;
 #[cfg(windows)]
 pub mod installer;
 #[cfg(windows)]
+mod interactive_host;
+#[cfg(windows)]
+mod interactive_io;
+#[cfg(windows)]
 mod lease_proxy;
 pub mod pe_imports;
 #[cfg(windows)]

@@ -98,7 +98,7 @@ mod tests {
             installation: owner().identity.installation_id,
             running: None,
             recovery: None,
-            debugger: None,
+            session: None,
         };
         Ok((root, journal, inputs, runtime))
     }

@@ -2,6 +2,10 @@
 
 [English](README.md) · 简体中文
 
+原生 `interact.start`、`interact.write` 和 `interact.close` 现在与调试会话共用现有的所属会话宿主、生成的 protobuf 通道、SQLite effect 和恢复路径。共同入口为 `resource-session`；已移除仅用于调试的运行时模块和重复的 transcript 写入器。交互目标复用已准入映像/LaunchSpec 准备、目标 persona、Job 和 scratch 清理。多次调用之间保持 `stdin` 打开；`stdout` 和 `stderr` 共用一条管道。写入期间及空闲时持续读取输出。空输入仅查询输出，不发送 EOF。每次写入最多 1 MiB，读取超时为 1–300 秒（默认 10 秒）；整个会话的输出总额上限为 1 MiB，证据总额上限为 8 MiB。直接启动的会话一小时后到期；LaunchSpec 决定自身的截止时间。返回输出为有界的 4 KiB 字节尾部，包含 UTF-8 文本、base64、字节数及截断状态；完整二进制输出保留在具有哈希的 transcript/`stdout` 产物中。
+
+写入 effect 保留解码后输入的 SHA256、大小和超时。原请求重试返回原结果，包括会话关闭后；同一请求 ID 更改输入或超时会被拒绝。阻塞或中断的写入保持结果未知，要求清理所属资源，不会自动重放。自然退出只有在 Job 排空、persona/scratch 清理及宿主退出后才报告 `exited`；随后关闭只观察现有终态资源。原生交互输入由写入调用提供：初始已准入输入仅支持 LaunchSpec `argv_file`。LaunchSpec 决定 argv/环境；公共接口要求的 `argv` 占位参数会被忽略。本次改动尚未实现 PTY、交互进程 profile 和原生 shell 执行。生产执行仍禁用。本地管道/日志测试及静态 x64/x86 夹具编译已通过；显式启用的已安装 VM 测试覆盖十个计划用例，但尚未针对此源码执行。
+
 私有继承调试管道现在使用 [`blocking::Unblock`](https://docs.rs/blocking/1.7.0/blocking/struct.Unblock.html)，显式设置 8 KiB 缓冲，并通过 `tokio-util` 兼容适配器接入。帧仍由生成的 protobuf 和 `LengthDelimitedCodec` 处理，外部调试请求仍使用 rmcp。它替换了[文档限定用于普通文件](https://docs.rs/tokio/1.54.1/tokio/fs/)的 `tokio::fs::File` 包装，同时移除了不再直接使用的 Tokio 文件系统 feature。现有所有者在丢弃管道操作前排空 Job，写入刷新后才报告成功。本地真实管道检查覆盖二进制 protobuf 往返、读取超时后继续，以及阻塞写入在所属对端关闭后结束。这些检查不代表此适配器改动已通过安装 VM 资格验收，也不代表原生交互/shell 支持已完成。
 
 同一 `2aaa155` 包随后通过独立注入的回放宿主及服务终止验收，故障发生在三次已准入验证试验的第一次。两次保留的只查询 guardian 观察器均记录到四个进程降为零。原请求保持 lost、结果未知及 `kind=verify`；原请求重试没有重跑，修改试验次数被拒绝，随后新的普通执行成功。宿主/服务报告 SHA256 分别为 `c454a037be9f06adb1eede009852e264e0fb973778c24bfc2191001f442663e3`、`9779660776852fbaa7aad90188dd22c90b7a10efd8d7f1d7003d04300cd06367`；服务租约 epoch 从 6 增至 7。最终固定指纹 SFTP 核对了 173 份启动/资源原件，另核对 12 份独立观察原件。全部 24 个资源已关闭、24 个 effect 已完成，scratch 为空；三次启动资格检查通过，21 个测试服务及管理 SSH 仍在运行，且无默认路由。ISO 保持卸载。上述用例覆盖首次试验中断，不覆盖后续试验之间或结束后的故障。

@@ -9,13 +9,35 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
-    io::Read,
+    io::{Read, Write},
     os::windows::fs::OpenOptionsExt,
     path::{Path, PathBuf},
 };
 use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ};
 
 pub(crate) const LIMIT: usize = 8 * 1024 * 1024;
+/// Shared bounded evidence writer for external debugger and interactive I/O.
+pub(crate) struct Transcript {
+    file: File,
+    retained: usize,
+}
+impl Transcript {
+    pub(crate) fn new(file: File) -> Self {
+        Self { file, retained: 0 }
+    }
+    pub(crate) fn append(&mut self, value: &serde_json::Value) -> Result<()> {
+        let bytes = serde_json::to_vec(value)?;
+        ensure!(
+            self.retained + bytes.len() < LIMIT,
+            "native session transcript exceeded its resource budget"
+        );
+        self.file.write_all(&bytes)?;
+        self.file.write_all(b"\n")?;
+        self.file.sync_all()?;
+        self.retained += bytes.len() + 1;
+        Ok(())
+    }
+}
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Prefix {
@@ -32,7 +54,7 @@ fn path(root: &Path, id: &str, suffix: &str) -> Result<PathBuf> {
             && id
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
-        "invalid debugger artifact resource"
+        "invalid session artifact resource"
     );
     Ok(root
         .join("metadata/resource-results")
@@ -41,7 +63,7 @@ fn path(root: &Path, id: &str, suffix: &str) -> Result<PathBuf> {
 fn receipt(root: &Path, id: &str, sequence: u64) -> Result<PathBuf> {
     ensure!(
         (1..=4096).contains(&sequence),
-        "debugger call count exceeds its bound"
+        "session call count exceeds its bound"
     );
     path(root, id, &format!("transcript-{sequence}.json"))
 }
@@ -49,7 +71,7 @@ pub(crate) fn create(root: &Path, id: &str) -> Result<File> {
     create_with_policy(root, id, &AclPolicy::private_vm())
 }
 fn create_with_policy(root: &Path, id: &str, policy: &AclPolicy) -> Result<File> {
-    let path = path(root, id, "debugger.jsonl")?;
+    let path = path(root, id, "session.jsonl")?;
     drop(policy.create_file(&path)?);
     // Keep the writer exclusive and deny replacement, while permitting the
     // service to read previously published prefixes through separate handles.
@@ -73,7 +95,7 @@ fn snapshot_with_policy(
     policy: &AclPolicy,
 ) -> Result<String> {
     let destination = receipt(root, id, sequence)?;
-    let source = path(root, id, "debugger.jsonl")?;
+    let source = path(root, id, "session.jsonl")?;
     policy.verify(&source, false)?;
     let data = deployment::read_bytes(&source, LIMIT as u64)?;
     let prefix = Prefix {
@@ -106,9 +128,9 @@ fn read_with_policy(
             && prefix.sequence == sequence
             && prefix.bytes <= LIMIT as u64
             && prefix.request_sha256 == request_hash,
-        "debugger transcript prefix belongs to another request or exceeds its bound"
+        "session transcript prefix belongs to another request or exceeds its bound"
     );
-    let source = path(root, id, "debugger.jsonl")?;
+    let source = path(root, id, "session.jsonl")?;
     policy.verify(&source, false)?;
     security::no_links(&source)?;
     let mut bytes = Vec::new();
@@ -117,7 +139,7 @@ fn read_with_policy(
         .read_to_end(&mut bytes)?;
     ensure!(
         bytes.len() as u64 == prefix.bytes && hex::encode(Sha256::digest(&bytes)) == prefix.sha256,
-        "debugger transcript prefix changed or was truncated"
+        "session transcript prefix changed or was truncated"
     );
     Ok(bytes)
 }
@@ -152,17 +174,17 @@ mod tests {
         assert!(
             OpenOptions::new()
                 .write(true)
-                .open(path(root, &id, "debugger.jsonl")?)
+                .open(path(root, &id, "session.jsonl")?)
                 .is_err()
         );
-        assert!(std::fs::remove_file(path(root, &id, "debugger.jsonl")?).is_err());
+        assert!(std::fs::remove_file(path(root, &id, "session.jsonl")?).is_err());
         writer.seek(SeekFrom::Start(0))?;
         writer.write_all(b"other\n")?;
         writer.sync_all()?;
         assert!(read_with_policy(root, &id, 1, &hash, &policy).is_err());
         assert!(receipt(root, &id, 0).is_err());
         assert!(receipt(root, &id, 4097).is_err());
-        assert!(path(root, "../escape", "debugger.jsonl").is_err());
+        assert!(path(root, "../escape", "session.jsonl").is_err());
         Ok(())
     }
 }

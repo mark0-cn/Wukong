@@ -23,6 +23,13 @@ pub struct PreparedIo {
     error_reader: PipeReader,
     limit: usize,
 }
+pub(crate) struct LaunchedIo {
+    pub process: OwnedProcess,
+    pub input: PipeWriter,
+    pub output: PipeReader,
+    pub error: PipeReader,
+    pub limit: usize,
+}
 impl PreparedIo {
     pub fn new(limit: usize) -> Result<Self> {
         ensure!(
@@ -52,6 +59,37 @@ impl PreparedIo {
         &self.error
     }
 
+    pub(crate) fn merged(limit: usize) -> Result<Self> {
+        let mut io = Self::new(limit)?;
+        io.error = io.output.try_clone()?;
+        Ok(io)
+    }
+
+    /// Complete thread-affine station/profile setup before adapting any pipe.
+    pub(crate) fn launch_pipes(
+        self,
+        launch: impl FnOnce(&Self) -> Result<OwnedProcess>,
+    ) -> Result<LaunchedIo> {
+        let process = launch(&self)?;
+        let Self {
+            input,
+            output,
+            error,
+            input_writer,
+            output_reader,
+            error_reader,
+            limit,
+        } = self;
+        drop((input, output, error));
+        Ok(LaunchedIo {
+            process,
+            input: input_writer,
+            output: output_reader,
+            error: error_reader,
+            limit,
+        })
+    }
+
     /// The callback performs private station/profile setup on this thread.
     /// Only after it returns do we create I/O threads and close parent copies.
     pub fn launch(
@@ -59,17 +97,13 @@ impl PreparedIo {
         input: Option<Box<dyn Read + Send>>,
         launch: impl FnOnce(&Self) -> Result<OwnedProcess>,
     ) -> Result<CapturedProcess> {
-        let process = launch(&self)?;
-        let Self {
-            input: parent_input,
-            output: parent_output,
-            error: parent_error,
-            input_writer,
-            output_reader,
-            error_reader,
+        let LaunchedIo {
+            process,
+            input: input_writer,
+            output: output_reader,
+            error: error_reader,
             limit,
-        } = self;
-        drop((parent_input, parent_output, parent_error));
+        } = self.launch_pipes(launch)?;
         let budget = Arc::new(Budget {
             remaining: AtomicUsize::new(limit),
             exceeded: AtomicBool::new(false),

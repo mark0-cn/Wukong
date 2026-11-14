@@ -1,4 +1,4 @@
-//! Service-side ownership of one persistent debugger host. A pending exchange
+//! Service-side ownership of one persistent session host. A pending exchange
 //! takes only the pipe channel out of the resource lock; Job ownership stays.
 use crate::{
     deployment,
@@ -39,6 +39,7 @@ pub(crate) struct Pending {
     request: Request,
     hash: String,
     exit: Option<ExitSignal>,
+    timeout: Duration,
 }
 pub(crate) struct Completed {
     channel: Pipes,
@@ -47,15 +48,18 @@ pub(crate) struct Completed {
 }
 impl Pending {
     pub(crate) async fn exchange(mut self) -> Completed {
-        let result = tokio::time::timeout(CALL_TIMEOUT, async {
+        let result = tokio::time::timeout(self.timeout, async {
             let value = self.channel.exchange(&self.request, &self.hash).await?;
-            if let Some(exit) = &self.exit {
+            if let Some(exit) = &self.exit
+                && (matches!(self.request.operation, Some(Operation::Close(_)))
+                    || value["state"] == "exited")
+            {
                 exit.wait().await?;
             }
             Ok(value)
         })
         .await
-        .context("native debugger exchange timed out; reconcile its owned host")
+        .context("native session exchange timed out; reconcile its owned host")
         .and_then(|r| r);
         Completed {
             channel: self.channel,
@@ -69,15 +73,16 @@ impl Live {
         request.validate()?;
         let installation = &request.target.owner.identity.installation_id;
         let id = &request.target.resource_id;
+        let prefix = crate::session_request::prefix(request.kind())?;
         let private = AclPolicy::private_vm();
         let request_path = root
             .join("metadata/resource-requests")
-            .join(format!("{id}.debug.json"));
+            .join(format!("{id}.{prefix}.json"));
         deployment::publish_json(&request_path, &request, &private)?;
         let log = private.create_file(
             &root
                 .join("metadata/resource-requests")
-                .join(format!("{id}.debug.log")),
+                .join(format!("{id}.{prefix}.log")),
         )?;
         let (input, writer) = std::io::pipe()?;
         let (reader, output) = std::io::pipe()?;
@@ -87,7 +92,7 @@ impl Live {
         let host = Spawn {
             executable,
             arguments: &[
-                "resource-debugger".into(),
+                "resource-session".into(),
                 installation.into(),
                 root.join("metadata/deployment.json").into_os_string(),
                 request_path.into_os_string(),
@@ -114,26 +119,41 @@ impl Live {
     }
     pub(crate) fn prepare(&mut self, operation: Operation) -> Result<Pending> {
         ensure!(
+            match &operation {
+                Operation::Write(write) => {
+                    write.validate()?;
+                    self.request.kind() == crate::resource_journal::ResourceKind::Interactive
+                }
+                Operation::Inspect(_) | Operation::Control(_) =>
+                    self.request.kind() == crate::resource_journal::ResourceKind::Debugger,
+                _ => true,
+            },
+            "native session operation does not match its admitted kind"
+        );
+        ensure!(
             !self.request.read_only() || !matches!(&operation, Operation::Control(_)),
             "dump sessions permit inspection and close only"
         );
         ensure!(
             self.failed.is_none() && !self.cancel_requested && !self.host.exited(),
-            "native debugger host is not live"
+            "native session host is not live"
         );
-        ensure!(
-            self.sequence < 4096,
-            "native debugger call budget exhausted"
-        );
-        let exit = matches!(&operation, Operation::Close(_))
+        ensure!(self.sequence < 4096, "native session call budget exhausted");
+        let timeout = match &operation {
+            Operation::Write(write) => {
+                Duration::from_secs(u64::from(write.read_timeout_seconds) + 30)
+            }
+            _ => CALL_TIMEOUT,
+        };
+        let exit = matches!(&operation, Operation::Close(_) | Operation::Write(_))
             .then(|| self.host.exit_signal())
             .transpose()?;
         let channel = self
             .channel
             .take()
-            .context("native debugger already has an in-flight exchange")?;
+            .context("native session already has an in-flight exchange")?;
         self.sequence += 1;
-        self.deadline = Some(Instant::now() + CALL_TIMEOUT);
+        self.deadline = Some(Instant::now() + timeout);
         Ok(Pending {
             channel,
             request: Request {
@@ -144,6 +164,7 @@ impl Live {
             },
             hash: self.request_hash.clone(),
             exit,
+            timeout,
         })
     }
     pub(crate) fn complete(&mut self, completed: Completed) -> Result<Value> {
@@ -151,13 +172,13 @@ impl Live {
             self.channel.is_none()
                 && completed.request.resource == self.request.target.resource_id
                 && completed.request.sequence == self.sequence,
-            "native debugger completion is stale"
+            "native session completion is stale"
         );
         self.deadline = None;
         let result = completed.result.and_then(|value| {
             ensure!(
                 !self.cancel_requested,
-                "native debugger was cancelled while its reply was in flight"
+                "native session was cancelled while its reply was in flight"
             );
             ensure!(
                 value["transcript"]
@@ -165,7 +186,7 @@ impl Live {
                         "native-results/{}/transcript-{}",
                         self.request.target.resource_id, self.sequence
                     ),
-                "native debugger transcript sequence differs"
+                "native session transcript sequence differs"
             );
             Ok(value)
         });
@@ -200,7 +221,7 @@ impl Live {
     pub(crate) fn finish(&self) -> Result<()> {
         ensure!(
             self.host.stop(Duration::from_secs(10))? == 0,
-            "native debugger host did not confirm clean exit"
+            "native session host did not confirm clean exit"
         );
         Ok(())
     }

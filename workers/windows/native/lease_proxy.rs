@@ -405,7 +405,12 @@ impl LeaseProxy {
             || native_resource
                 && matches!(
                     method.as_str(),
-                    "job.start" | "debug.start" | "py.run" | "crash.replay" | "poc.verify"
+                    "job.start"
+                        | "debug.start"
+                        | "interact.start"
+                        | "py.run"
+                        | "crash.replay"
+                        | "poc.verify"
                 ) {
             Some(self.inputs.lock().await)
         } else {
@@ -440,7 +445,7 @@ impl LeaseProxy {
                 Dispatch::Ready(value) => {
                     return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":value}));
                 }
-                Dispatch::Debug(pending) => pending,
+                Dispatch::Session(pending) => pending,
             };
             drop(resources);
             drop(inputs);
@@ -450,7 +455,7 @@ impl LeaseProxy {
             let value = runtime
                 .as_mut()
                 .context("native resource runtime vanished")?
-                .complete_debugger(journal, completed)?;
+                .complete_session(journal, completed)?;
             return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":value}));
         }
         let input = if let Some(inputs) = &inputs {

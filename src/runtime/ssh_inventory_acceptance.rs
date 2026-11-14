@@ -4,6 +4,13 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 
 pub(super) async fn inventory(client: &RuntimeClient) -> Result<Value> {
+    inventory_kind(client, "process").await
+}
+pub(super) async fn inventory_kind(client: &RuntimeClient, kind: &str) -> Result<Value> {
+    ensure!(
+        matches!(kind, "process" | "interactive" | "debugger"),
+        "invalid inventory fixture kind"
+    );
     let mut jobs = Vec::new();
     let mut after: Option<String> = None;
     for _ in 0..32 {
@@ -51,7 +58,7 @@ pub(super) async fn inventory(client: &RuntimeClient) -> Result<Value> {
                 .context("listed resource ID is absent")?;
             ensure!(
                 after.as_deref().is_none_or(|previous| id > previous)
-                    && record["kind"] == "process"
+                    && record["kind"] == kind
                     && record["specification_sha256"]
                         .as_str()
                         .is_some_and(|hash| hash.len() == 64)
@@ -70,8 +77,14 @@ pub(super) async fn inventory(client: &RuntimeClient) -> Result<Value> {
         );
     }
     ensure!(
-        resources.len() < 64 && jobs.len() == resources.len(),
-        "native process inventory lost or duplicated records"
+        resources.len() < 64
+            && jobs.len()
+                == if kind == "process" {
+                    resources.len()
+                } else {
+                    0
+                },
+        "native resource inventory lost or duplicated records"
     );
     for (job, resource) in jobs.iter().zip(&resources) {
         ensure!(

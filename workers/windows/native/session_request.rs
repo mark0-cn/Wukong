@@ -1,8 +1,15 @@
-//! Protected debugger intent. The process description binds an image bundle;
-//! only Launch authorizes creating its target process.
+//! Protected persistent-session intent bound to one admitted image bundle.
 use crate::{resource_input::Reference, resource_process};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
+
+pub(crate) fn prefix(kind: crate::resource_journal::ResourceKind) -> Result<&'static str> {
+    match kind {
+        crate::resource_journal::ResourceKind::Debugger => Ok("debug"),
+        crate::resource_journal::ResourceKind::Interactive => Ok("interact"),
+        _ => anyhow::bail!("native resource is not a persistent session"),
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -17,18 +24,31 @@ pub(crate) struct Request {
 pub(crate) enum Mode {
     Launch,
     Dump { file: Reference },
+    Interactive,
 }
 impl Request {
     pub(crate) fn validate(&self) -> Result<()> {
         ensure!(
             self.schema == crate::session_host::SCHEMA,
-            "unsupported debugger request schema"
+            "unsupported native session request schema"
         );
         self.target.validate()?;
         ensure!(
             self.target.interpreter.is_none() && self.target.replay.is_none(),
-            "debugger admission requires a native target image"
+            "native session admission requires a native target image"
         );
+        if self.kind() == crate::resource_journal::ResourceKind::Interactive {
+            ensure!(
+                self.target.input.is_none()
+                    || self
+                        .target
+                        .launch
+                        .as_ref()
+                        .is_some_and(|launch| launch.input_mode
+                            == crate::resource_launch::InputMode::ArgvFile),
+                "interactive stdin is supplied through serialized writes; initial input requires argv_file"
+            );
+        }
         if let Some(dump) = self.dump() {
             ensure!(
                 self.target.input.is_none(),
@@ -61,11 +81,23 @@ impl Request {
     }
     pub(crate) fn dump(&self) -> Option<&Reference> {
         match &self.mode {
-            Mode::Launch => None,
+            Mode::Launch | Mode::Interactive => None,
             Mode::Dump { file } => Some(file),
         }
     }
     pub(crate) fn read_only(&self) -> bool {
         self.dump().is_some()
+    }
+    pub(crate) fn kind(&self) -> crate::resource_journal::ResourceKind {
+        match self.mode {
+            Mode::Interactive => crate::resource_journal::ResourceKind::Interactive,
+            _ => crate::resource_journal::ResourceKind::Debugger,
+        }
+    }
+    pub(crate) fn scope(&self) -> &'static str {
+        match self.mode {
+            Mode::Interactive => "native_interactive_host",
+            _ => "native_debugger_host",
+        }
     }
 }

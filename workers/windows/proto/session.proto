@@ -12,10 +12,17 @@ message Request {
     Inspect inspect = 5;
     Control control = 6;
     Close close = 7;
+    Write write = 8;
   }
 }
 message Open {}
 message Close {}
+// Empty data polls output without closing stdin. A failed/uncertain write must
+// be reconciled against its original journal effect, never replayed.
+message Write {
+  bytes data = 1;
+  uint32 read_timeout_seconds = 2;
+}
 enum Inspection {
   INSPECTION_UNSPECIFIED = 0;
   REGISTERS = 1;

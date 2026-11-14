@@ -1,4 +1,4 @@
-//! Journal admission and completion for the owned debugger host. No pipe wait
+//! Journal admission and completion for an owned persistent session. No pipe wait
 //! holds the resource/input locks; upstream owns execution scheduling.
 use super::*;
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
 
 pub(crate) enum Dispatch {
     Ready(Value),
-    Debug(Box<Pending>),
+    Session(Box<Pending>),
 }
 
 pub(crate) struct Pending {
@@ -47,29 +47,41 @@ struct Start {
     input: Option<String>,
     launch_spec: Option<String>,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InteractiveStart {
+    argv: Vec<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    input: Option<String>,
+    launch_spec: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InteractiveWrite {
+    data_base64: String,
+    #[serde(default = "read_timeout")]
+    read_timeout_secs: u32,
+}
+fn read_timeout() -> u32 {
+    10
+}
+impl InteractiveWrite {
+    fn decode(self) -> Result<session_wire::Write> {
+        ensure!(
+            self.data_base64.len() <= 1_398_104,
+            "interactive input encoding exceeds 1 MiB"
+        );
+        let request = session_wire::Write {
+            data: STANDARD.decode(self.data_base64)?,
+            read_timeout_seconds: self.read_timeout_secs,
+        };
+        request.validate()?;
+        Ok(request)
+    }
+}
 fn auto() -> String {
     "auto".into()
-}
-fn clean(params: &Map<String, Value>) -> Map<String, Value> {
-    let mut params = params.clone();
-    for key in ["_binding", "_lease", "request_id", "call_id"] {
-        params.remove(key);
-    }
-    params.retain(|_, v| !v.is_null());
-    params
-}
-fn request_id(params: &Map<String, Value>) -> Result<&str> {
-    let id = params
-        .get("request_id")
-        .and_then(Value::as_str)
-        .context("native debugger requires a stable request_id")?;
-    ensure!(
-        params
-            .get("call_id")
-            .is_none_or(|call| call.as_str() == Some(id)),
-        "native call_id and request_id differ"
-    );
-    Ok(id)
 }
 fn cached(reservation: Reservation) -> Result<Value> {
     match reservation {
@@ -78,10 +90,10 @@ fn cached(reservation: Reservation) -> Result<Value> {
             ..
         } => Ok(value),
         Reservation::Completed { .. } => {
-            anyhow::bail!("native debugger outcome is unknown after cleanup; it cannot be replayed")
+            anyhow::bail!("native session outcome is unknown after cleanup; it cannot be replayed")
         }
         _ => anyhow::bail!(
-            "native debugger request is pending or uncertain; reconcile the original resource"
+            "native session request is pending or uncertain; reconcile the original resource"
         ),
     }
 }
@@ -94,33 +106,57 @@ impl Runtime {
         method: &str,
         params: &Map<String, Value>,
     ) -> Result<Dispatch> {
-        if !method.starts_with("debug.") {
+        if !method.starts_with("debug.") && !method.starts_with("interact.") {
             return self
                 .call(journal, inputs, owner, method, params)
                 .map(Dispatch::Ready);
         }
         self.poll(journal)?;
-        if method == "debug.start" {
-            return self.start_debugger(
+        if method == "interact.start" {
+            return self.start_interactive(
                 journal,
-                inputs.context("native debugger input store missing")?,
+                inputs.context("native interactive input store missing")?,
                 owner,
                 params,
             );
         }
-        if matches!(method, "debug.control" | "debug.close") {
+        if method == "debug.start" {
+            return self.start_debugger(
+                journal,
+                inputs.context("native session input store missing")?,
+                owner,
+                params,
+            );
+        }
+        let interactive = method.starts_with("interact.");
+        let close = matches!(method, "debug.close" | "interact.close");
+        if method != "debug.inspect" {
             request_id(params)?;
         }
         let mut fields = clean(params);
         let id = fields
             .remove("session_id")
             .and_then(|v| v.as_str().map(str::to_owned))
-            .context("native debugger session_id missing")?;
+            .context("native session session_id missing")?;
         let record = journal.resource(owner, &id)?;
         ensure!(
-            record.kind == ResourceKind::Debugger,
-            "native resource is not a debugger"
+            record.kind
+                == if interactive {
+                    ResourceKind::Interactive
+                } else {
+                    ResourceKind::Debugger
+                },
+            "native resource session kind differs"
         );
+        if interactive && close && record.phase == Phase::Closed {
+            ensure!(
+                fields.is_empty(),
+                "interactive close accepts only session_id"
+            );
+            return self
+                .session_terminal(&record, &AclPolicy::private_vm())
+                .map(Dispatch::Ready);
+        }
         let operation = match method {
             "debug.inspect" => {
                 let query: session_wire::Inspect =
@@ -128,7 +164,7 @@ impl Runtime {
                 let kind = query.validate()?;
                 if kind == session_wire::Inspection::State && record.phase == Phase::Closed {
                     return self
-                        .debugger_terminal(&record, &AclPolicy::private_vm())
+                        .session_terminal(&record, &AclPolicy::private_vm())
                         .map(Dispatch::Ready);
                 }
                 Operation::Inspect(query)
@@ -143,32 +179,39 @@ impl Runtime {
                 control.validate()?;
                 Operation::Control(control)
             }
-            "debug.close" => {
+            "interact.write" => {
+                let write: InteractiveWrite = serde_json::from_value(Value::Object(fields))?;
+                let write = write.decode()?;
+                // Effects retain a content identity, not megabytes of base64.
+                fields = json!({"bytes":write.data.len(),"sha256":hex::encode(Sha256::digest(&write.data)),"read_timeout_secs":write.read_timeout_seconds}).as_object().unwrap().clone();
+                Operation::Write(write)
+            }
+            "debug.close" | "interact.close" => {
                 ensure!(
                     fields.is_empty(),
-                    "native debugger close accepts only session_id"
+                    "native session close accepts only session_id"
                 );
                 Operation::Close(session_wire::Close {})
             }
-            _ => anyhow::bail!("unsupported native debugger method"),
+            _ => anyhow::bail!("unsupported native session method"),
         };
-        if method == "debug.close"
+        if close
             && self
-                .debugger
+                .session
                 .as_ref()
                 .is_some_and(|live| live.request.target.resource_id == id && live.busy())
         {
             self.cancel(&id)?;
-            self.debugger.as_mut().unwrap().request_cancel();
+            self.session.as_mut().unwrap().request_cancel();
             journal.start_closing(&id)?;
-            anyhow::bail!("native debugger cancellation requested; owned cleanup is still pending");
+            anyhow::bail!("native session cancellation requested; owned cleanup is still pending");
         }
         ensure!(
             !self
-                .debugger
+                .session
                 .as_ref()
                 .is_some_and(|live| live.request.target.resource_id == id && live.busy()),
-            "native debugger already has an in-flight exchange"
+            "native session already has an in-flight exchange"
         );
         let ticket = if method == "debug.inspect" {
             None
@@ -177,7 +220,11 @@ impl Runtime {
                 owner,
                 request_id(params)?,
                 &id,
-                MutationKind::DebugControl,
+                if interactive {
+                    MutationKind::InteractiveWrite
+                } else {
+                    MutationKind::DebugControl
+                },
                 &json!({"method":method,"params":fields}),
             )?;
             let Reservation::Reserved { effect, .. } = reservation else {
@@ -187,13 +234,13 @@ impl Runtime {
         };
         ensure!(
             record.phase == Phase::Live,
-            "native debugger is not live; reconcile its original resource"
+            "native session is not live; reconcile its original resource"
         );
         let live = self
-            .debugger
+            .session
             .as_mut()
             .filter(|live| live.request.target.resource_id == id)
-            .context("native debugger host ownership was interrupted")?;
+            .context("native session host ownership was interrupted")?;
         let exchange = match live.prepare(operation) {
             Ok(exchange) => exchange,
             Err(error) => {
@@ -201,25 +248,28 @@ impl Runtime {
                 return Err(error);
             }
         };
-        if method == "debug.close" {
+        if close {
             journal.start_closing(&id)?;
         }
-        Ok(Dispatch::Debug(Box::new(Pending {
+        Ok(Dispatch::Session(Box::new(Pending {
             resource: id,
             ticket,
-            close: method == "debug.close",
+            close,
             exchange,
         })))
     }
     /// Read only after journal-confirmed cleanup. The same run's successor can
     /// inspect original ownership; it cannot turn this projection into a start.
-    pub(super) fn debugger_terminal(
+    pub(super) fn session_terminal(
         &self,
         record: &ResourceRecord,
         policy: &AclPolicy,
     ) -> Result<Value> {
         ensure!(
-            record.kind == ResourceKind::Debugger && record.phase == Phase::Closed,
+            matches!(
+                record.kind,
+                ResourceKind::Debugger | ResourceKind::Interactive
+            ) && record.phase == Phase::Closed,
             "debugger terminal observation requires confirmed closure"
         );
         let status_path = self.result_path(&record.id, "status.json");
@@ -231,7 +281,7 @@ impl Runtime {
                 value["session_id"] == record.id
                     && value["worker_session_id"] == record.id
                     && value["native_owner"] == serde_json::to_value(&record.owner)?
-                    && value["kind"] == "debugger"
+                    && value["kind"] == serde_json::to_value(record.kind)?
                     && value["production_execution"] == false
                     && value["state"] == "lost"
                     && value["cleanup_pending"] == false
@@ -265,12 +315,18 @@ impl Runtime {
             );
             return Ok(value);
         }
-        let proof_path = self.result_path(&record.id, "debug-result.json");
+        let prefix = crate::session_request::prefix(record.kind)?;
+        let proof_path = self.result_path(&record.id, &format!("{prefix}-result.json"));
         policy.verify(&proof_path, false)?;
         let proof: Value = serde_json::from_slice(&deployment::read_bytes(&proof_path, 65536)?)?;
         ensure!(
             proof["schema"] == crate::session_host::SCHEMA
-                && proof["scope"] == "native_debugger_host"
+                && proof["scope"]
+                    == if record.kind == ResourceKind::Interactive {
+                        "native_interactive_host"
+                    } else {
+                        "native_debugger_host"
+                    }
                 && proof["resource_id"] == record.id
                 && proof["owner"] == serde_json::to_value(&record.owner)?
                 && proof["outcome"] == "closed"
@@ -281,7 +337,7 @@ impl Runtime {
         );
         Ok(
             json!({"session_id":record.id,"worker_session_id":record.id,"native_owner":record.owner,
-            "kind":"debugger","state":"closed","cleanup_pending":false,"result":proof,"production_execution":false}),
+            "kind":record.kind,"state":"closed","cleanup_pending":false,"result":proof,"production_execution":false}),
         )
     }
     fn start_debugger(
@@ -297,11 +353,11 @@ impl Runtime {
             matches!(start.mode.as_str(), "launch" | "dump")
                 && matches!(start.engine.as_str(), "auto" | "dbgeng")
                 && (start.mode == "dump") == start.dump.is_some(),
-            "native debugger requires launch or dump with auto/dbgeng; only dump mode requires a dump"
+            "native session requires launch or dump with auto/dbgeng; only dump mode requires a dump"
         );
         ensure!(
             start.launch_spec.is_some() || start.target.is_some(),
-            "native debugger requires a target or LaunchSpec"
+            "native session requires a target or LaunchSpec"
         );
         ensure!(
             start.launch_spec.is_none() || start.target.is_none() && start.args.is_empty(),
@@ -327,9 +383,61 @@ impl Runtime {
         };
         spec.validate()?;
         let specification = json!({"native_debugger_schema":crate::session_host::SCHEMA,"debugger":start,"process":spec});
-        if let Some(existing) =
-            journal.lookup_start(owner, request_id, ResourceKind::Debugger, &specification)?
-        {
+        self.start_session(
+            journal,
+            inputs,
+            owner,
+            request_id,
+            ResourceKind::Debugger,
+            specification,
+        )
+    }
+    fn start_interactive(
+        &mut self,
+        journal: &mut Journal,
+        inputs: &Inputs,
+        owner: &Owner,
+        params: &Map<String, Value>,
+    ) -> Result<Dispatch> {
+        let (request_id, start): (_, InteractiveStart) = start_parameters(params)?;
+        ensure!(!start.argv.is_empty(), "interactive argv cannot be empty");
+        ensure!(
+            start.launch_spec.is_none() || start.env.is_empty(),
+            "LaunchSpec owns interactive environment overrides"
+        );
+        let spec = Specification {
+            argv: if start.launch_spec.is_some() {
+                Vec::new()
+            } else {
+                start.argv
+            },
+            timeout_secs: start.launch_spec.is_none().then_some(3600),
+            launch_spec: start.launch_spec,
+            input: start.input,
+            env: start.env,
+            cwd: default_cwd(),
+            output_limit: default_output(),
+        };
+        spec.validate()?;
+        self.start_session(
+            journal,
+            inputs,
+            owner,
+            request_id,
+            ResourceKind::Interactive,
+            json!({"native_interactive_schema":crate::session_host::SCHEMA,"process":spec}),
+        )
+    }
+    fn start_session(
+        &mut self,
+        journal: &mut Journal,
+        inputs: &Inputs,
+        owner: &Owner,
+        request_id: &str,
+        kind: ResourceKind,
+        specification: Value,
+    ) -> Result<Dispatch> {
+        if let Some(existing) = journal.lookup_start(owner, request_id, kind, &specification)? {
             if matches!(
                 &existing,
                 Reservation::Completed {
@@ -337,7 +445,7 @@ impl Runtime {
                     ..
                 }
             ) {
-                anyhow::bail!("native debugger start is already closed and cannot be replayed");
+                anyhow::bail!("native session start is already closed and cannot be replayed");
             }
             if let Reservation::Completed {
                 resource, phase, ..
@@ -345,34 +453,38 @@ impl Runtime {
             {
                 ensure!(
                     *phase == Phase::Live
-                        && self.debugger.as_ref().is_some_and(|live| live
+                        && self.session.as_ref().is_some_and(|live| live
                             .request
                             .target
                             .resource_id
                             == *resource
                             && !live.needs_recovery()),
-                    "native debugger start was completed but host ownership is unavailable; reconcile the original resource"
+                    "native session start was completed but host ownership is unavailable; reconcile the original resource"
                 );
             }
             return cached(existing).map(Dispatch::Ready);
         }
+        let spec: Specification = serde_json::from_value(specification["process"].clone())?;
+        let mode = if kind == ResourceKind::Interactive {
+            crate::session_request::Mode::Interactive
+        } else if let Some(path) = specification["debugger"]["dump"].as_str() {
+            crate::session_request::Mode::Dump {
+                file: inputs.reference(owner, path, Purpose::Inspect)?,
+            }
+        } else {
+            crate::session_request::Mode::Launch
+        };
         let mut request = crate::session_request::Request {
             schema: crate::session_host::SCHEMA,
             target: spec.prepare(inputs, owner)?,
-            mode: match &start.dump {
-                Some(path) => crate::session_request::Mode::Dump {
-                    file: inputs.reference(owner, path, Purpose::Inspect)?,
-                },
-                None => crate::session_request::Mode::Launch,
-            },
+            mode,
         };
         request.validate()?;
         ensure!(
-            self.running.is_none() && self.debugger.is_none() && self.recovery.is_none(),
+            self.running.is_none() && self.session.is_none() && self.recovery.is_none(),
             "native host remains owned"
         );
-        let reserved =
-            journal.reserve_start(owner, request_id, ResourceKind::Debugger, &specification)?;
+        let reserved = journal.reserve_start(owner, request_id, kind, &specification)?;
         let Reservation::Reserved {
             effect, resource, ..
         } = reserved
@@ -381,33 +493,34 @@ impl Runtime {
         };
         request.target.resource_id = resource.clone();
         let ticket = journal.begin(&effect)?;
-        self.debugger = Some(session_runtime::Live::spawn(
+        self.session = Some(session_runtime::Live::spawn(
             &self.root,
             &self.executable,
             request,
         )?);
         let exchange = self
-            .debugger
+            .session
             .as_mut()
             .unwrap()
             .prepare(Operation::Open(session_wire::Open {}))?;
-        Ok(Dispatch::Debug(Box::new(Pending {
+        Ok(Dispatch::Session(Box::new(Pending {
             resource,
             ticket: Some(ticket),
             close: false,
             exchange,
         })))
     }
-    pub(crate) fn complete_debugger(
+    pub(crate) fn complete_session(
         &mut self,
         journal: &mut Journal,
         completed: Completed,
     ) -> Result<Value> {
         let live = self
-            .debugger
+            .session
             .as_mut()
             .filter(|live| live.request.target.resource_id == completed.resource)
-            .context("native debugger completion lost its original host; reconcile the journal")?;
+            .context("native session completion lost its original host; reconcile the journal")?;
+        let mut closed = completed.close;
         let result = (|| -> Result<Value> {
             let value = live.complete(completed.exchange)?;
             let record = journal.resource(&live.request.target.owner, &completed.resource)?;
@@ -417,30 +530,35 @@ impl Runtime {
                 } else {
                     matches!(record.phase, Phase::Preparing | Phase::Live)
                 },
-                "native debugger was cancelled while its operation was in flight"
+                "native session was cancelled while its operation was in flight"
             );
             ensure!(
                 value["session_id"] == completed.resource
                     && value["worker_session_id"] == completed.resource
                     && value["native_owner"] == serde_json::to_value(&live.request.target.owner)?,
-                "native debugger reply ownership differs"
+                "native session reply ownership differs"
             );
+            let exited =
+                live.request.kind() == ResourceKind::Interactive && value["state"] == "exited";
             ensure!(
-                value["state"] == if completed.close { "closed" } else { "running" },
-                "native debugger reply lifecycle differs"
+                value["state"] == if completed.close { "closed" } else { "running" }
+                    || !completed.close && exited,
+                "native session reply lifecycle differs"
             );
-            if completed.close {
+            closed |= exited;
+            if closed {
                 live.finish()?;
+                let prefix = crate::session_request::prefix(live.request.kind())?;
                 let path = self
                     .root
                     .join("metadata/resource-results")
-                    .join(format!("{}.debug-result.json", completed.resource));
+                    .join(format!("{}.{prefix}-result.json", completed.resource));
                 AclPolicy::private_vm().verify(&path, false)?;
                 let proof: Value = serde_json::from_slice(&deployment::read_bytes(&path, 65536)?)?;
                 ensure!(
                     proof == value["response"]["cleanup"]
                         && proof["schema"] == crate::session_host::SCHEMA
-                        && proof["scope"] == "native_debugger_host"
+                        && proof["scope"] == live.request.scope()
                         && proof["owner"] == serde_json::to_value(&live.request.target.owner)?
                         && proof["resource_id"] == completed.resource
                         && proof["request_sha256"] == live.request_hash
@@ -450,7 +568,7 @@ impl Runtime {
                         && proof["jobs_empty"] == true
                         && proof["profiles_removed"] == true
                         && proof["scratch_removed"] == true,
-                    "native debugger cleanup proof differs"
+                    "native session cleanup proof differs"
                 );
             }
             if let Some(ticket) = &completed.ticket {
@@ -461,7 +579,8 @@ impl Runtime {
                     },
                 )?;
             }
-            if completed.close {
+            if closed {
+                journal.start_closing(&completed.resource)?;
                 journal.close(
                     &completed.resource,
                     Cleanup {
@@ -474,8 +593,8 @@ impl Runtime {
             Ok(value)
         })();
         match &result {
-            Ok(_) if completed.close => {
-                self.debugger = None;
+            Ok(_) if closed => {
+                self.session = None;
             }
             Err(error) => {
                 live.failed = Some(format!("{error:#}").chars().take(2048).collect());
@@ -490,6 +609,124 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn completed_binary_write_retries_return_original_result_without_a_live_host() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let owner = owner();
+        let policy = AclPolicy::current_user()?;
+        policy.apply(directory.path(), true)?;
+        let mut journal = Journal::with_policy(directory.path(), owner.identity.clone(), policy)?;
+        let mut runtime = Runtime {
+            root: directory.path().into(),
+            executable: directory.path().join("never-execute"),
+            installation: owner.identity.installation_id.clone(),
+            running: None,
+            recovery: None,
+            session: None,
+        };
+        let specification = json!({"native_interactive_schema":crate::session_host::SCHEMA,"process":{"argv":["files/target.exe"],"timeout_secs":3600,"env":{},"cwd":".","output_limit":1048576}});
+        let Reservation::Reserved {
+            effect, resource, ..
+        } = journal.reserve_start(&owner, "start", ResourceKind::Interactive, &specification)?
+        else {
+            anyhow::bail!("start not reserved")
+        };
+        let ticket = journal.begin(&effect)?;
+        journal.complete(
+            &ticket,
+            &Outcome::Result {
+                value: json!({"state":"running"}),
+            },
+        )?;
+        let data = vec![255; 1024 * 1024];
+        let intent = json!({"method":"interact.write","params":{"bytes":data.len(),"sha256":hex::encode(Sha256::digest(&data)),"read_timeout_secs":10}});
+        let Reservation::Reserved { effect, .. } = journal.reserve_mutation(
+            &owner,
+            "write",
+            &resource,
+            MutationKind::InteractiveWrite,
+            &intent,
+        )?
+        else {
+            anyhow::bail!("write not reserved")
+        };
+        let ticket = journal.begin(&effect)?;
+        let expected = json!({"state":"exited","session_id":resource,"captured":"original"});
+        journal.complete(
+            &ticket,
+            &Outcome::Result {
+                value: expected.clone(),
+            },
+        )?;
+        journal.start_closing(&resource)?;
+        journal.close(
+            &resource,
+            Cleanup {
+                jobs_empty: true,
+                profiles_removed: true,
+                scratch_removed: true,
+            },
+        )?;
+        let mut params = json!({"session_id":resource,"request_id":"write","data_base64":STANDARD.encode(&data)});
+        let Dispatch::Ready(value) = runtime.prepare_rpc(
+            &mut journal,
+            None,
+            &owner,
+            "interact.write",
+            params.as_object().unwrap(),
+        )?
+        else {
+            anyhow::bail!("completed write was executed")
+        };
+        assert_eq!(value, expected);
+        params["data_base64"] = json!(STANDARD.encode(b"different"));
+        assert!(
+            runtime
+                .prepare_rpc(
+                    &mut journal,
+                    None,
+                    &owner,
+                    "interact.write",
+                    params.as_object().unwrap()
+                )
+                .is_err()
+        );
+        params["data_base64"] = json!(STANDARD.encode(&data));
+        params["read_timeout_secs"] = json!(11);
+        assert!(
+            runtime
+                .prepare_rpc(
+                    &mut journal,
+                    None,
+                    &owner,
+                    "interact.write",
+                    params.as_object().unwrap()
+                )
+                .is_err()
+        );
+        params["read_timeout_secs"] = json!(301);
+        assert!(
+            runtime
+                .prepare_rpc(
+                    &mut journal,
+                    None,
+                    &owner,
+                    "interact.write",
+                    params.as_object().unwrap()
+                )
+                .is_err()
+        );
+        assert!(journal.idle()?);
+        let inputs = Inputs::open(directory.path(), AclPolicy::current_user()?)?;
+        let params = json!({"request_id":"start","argv":["files/target.exe"]});
+        let Err(error) =
+            runtime.start_interactive(&mut journal, &inputs, &owner, params.as_object().unwrap())
+        else {
+            anyhow::bail!("closed start was executed")
+        };
+        assert!(error.to_string().contains("already closed"));
+        Ok(())
+    }
     fn owner() -> Owner {
         Owner {
             identity: crate::lease_proxy::Identity {
@@ -518,7 +755,7 @@ mod tests {
             installation: owner.identity.installation_id.clone(),
             running: None,
             recovery: None,
-            debugger: None,
+            session: None,
         };
         for params in [
             json!({"request_id":"invalid","mode":"launch","args":["files/not-a-target.exe"]}),
@@ -596,90 +833,95 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn terminal_debugger_observation_preserves_unknown_outcomes_and_binds_receipt_bytes()
+    fn terminal_session_observation_preserves_unknown_outcomes_and_binds_receipt_bytes()
     -> Result<()> {
-        let directory = tempfile::tempdir()?;
-        let policy = AclPolicy::current_user()?;
-        policy.apply(directory.path(), true)?;
-        policy.create_directory(&directory.path().join("metadata"))?;
-        policy.create_directory(&directory.path().join("metadata/resource-results"))?;
-        let runtime = Runtime {
-            root: directory.path().into(),
-            executable: directory.path().join("never-execute"),
-            installation: owner().identity.installation_id,
-            running: None,
-            recovery: None,
-            debugger: None,
-        };
-        let record = ResourceRecord {
-            id: "d".repeat(32),
-            phase: Phase::Closed,
-            start_effect: "e".repeat(64),
-            owner: owner(),
-            kind: ResourceKind::Debugger,
-            specification: json!({}),
-        };
-        let artifact = format!("recovery-{}", "f".repeat(32));
-        let proof = json!({"schema":crate::resource_process::SCHEMA,"scope":"owned_resource_recovery",
+        for kind in [ResourceKind::Debugger, ResourceKind::Interactive] {
+            let directory = tempfile::tempdir()?;
+            let policy = AclPolicy::current_user()?;
+            policy.apply(directory.path(), true)?;
+            policy.create_directory(&directory.path().join("metadata"))?;
+            policy.create_directory(&directory.path().join("metadata/resource-results"))?;
+            let runtime = Runtime {
+                root: directory.path().into(),
+                executable: directory.path().join("never-execute"),
+                installation: owner().identity.installation_id,
+                running: None,
+                recovery: None,
+                session: None,
+            };
+            let record = ResourceRecord {
+                id: "d".repeat(32),
+                phase: Phase::Closed,
+                start_effect: "e".repeat(64),
+                owner: owner(),
+                kind,
+                specification: json!({}),
+            };
+            let artifact = format!("recovery-{}", "f".repeat(32));
+            let proof = json!({"schema":crate::resource_process::SCHEMA,"scope":"owned_resource_recovery",
             "resource_id":record.id,"owner":record.owner,"jobs_empty":true,"profiles_removed":true,"scratch_removed":true});
-        let proof_path = runtime.result_path(&record.id, &artifact_suffix(&artifact)?);
-        deployment::publish_json(&proof_path, &proof, &policy)?;
-        let original = fs::read(&proof_path)?;
-        let status = json!({"session_id":record.id,"worker_session_id":record.id,"native_owner":record.owner,"kind":"debugger","production_execution":false,
+            let proof_path = runtime.result_path(&record.id, &artifact_suffix(&artifact)?);
+            deployment::publish_json(&proof_path, &proof, &policy)?;
+            let original = fs::read(&proof_path)?;
+            let status = json!({"session_id":record.id,"worker_session_id":record.id,"native_owner":record.owner,"kind":kind,"production_execution":false,
             "state":"lost","cleanup_pending":false,"result":{"outcome":"unknown","jobs_empty":true,
             "profiles_removed":true,"scratch_removed":true,"recovery_artifact":artifact,
             "recovery_receipt_sha256":hex::encode(Sha256::digest(&original))}});
-        let status_path = runtime.result_path(&record.id, "status.json");
-        deployment::publish_json(&status_path, &status, &policy)?;
-        assert_eq!(runtime.debugger_terminal(&record, &policy)?, status);
-        let mut foreign_epoch = record.clone();
-        foreign_epoch.owner.epoch += 1;
-        let mut foreign_run = record.clone();
-        foreign_run.owner.run_id = "another-run".into();
-        let mut foreign_resource = record.clone();
-        foreign_resource.id = "0".repeat(32);
-        for changed in [&foreign_epoch, &foreign_run, &foreign_resource] {
-            assert!(runtime.debugger_terminal(changed, &policy).is_err());
-        }
-        let mut live = record.clone();
-        live.phase = Phase::Closing;
-        assert!(runtime.debugger_terminal(&live, &policy).is_err());
-        let mut process = record.clone();
-        process.kind = ResourceKind::Process;
-        assert!(runtime.debugger_terminal(&process, &policy).is_err());
-        let mut altered = proof.clone();
-        altered["owner"]["epoch"] = json!(99);
-        fs::write(&proof_path, serde_json::to_vec(&altered)?)?;
-        assert!(runtime.debugger_terminal(&record, &policy).is_err());
-        fs::write(&proof_path, &original)?;
-        for (field, value) in [
-            ("outcome", json!("closed")),
-            ("jobs_empty", json!(false)),
-            ("recovery_artifact", json!("stdout")),
-            ("recovery_artifact", json!("recovery-../other")),
-        ] {
-            let mut changed = status.clone();
-            changed["result"][field] = value;
-            fs::write(&status_path, serde_json::to_vec(&changed)?)?;
-            assert!(
-                runtime.debugger_terminal(&record, &policy).is_err(),
-                "{field}"
-            );
-        }
-        fs::remove_file(&status_path)?;
-        assert!(runtime.debugger_terminal(&record, &policy).is_err());
-        let clean = json!({"schema":crate::session_host::SCHEMA,"scope":"native_debugger_host",
+            let status_path = runtime.result_path(&record.id, "status.json");
+            deployment::publish_json(&status_path, &status, &policy)?;
+            assert_eq!(runtime.session_terminal(&record, &policy)?, status);
+            let mut foreign_epoch = record.clone();
+            foreign_epoch.owner.epoch += 1;
+            let mut foreign_run = record.clone();
+            foreign_run.owner.run_id = "another-run".into();
+            let mut foreign_resource = record.clone();
+            foreign_resource.id = "0".repeat(32);
+            for changed in [&foreign_epoch, &foreign_run, &foreign_resource] {
+                assert!(runtime.session_terminal(changed, &policy).is_err());
+            }
+            let mut live = record.clone();
+            live.phase = Phase::Closing;
+            assert!(runtime.session_terminal(&live, &policy).is_err());
+            let mut process = record.clone();
+            process.kind = ResourceKind::Process;
+            assert!(runtime.session_terminal(&process, &policy).is_err());
+            let mut altered = proof.clone();
+            altered["owner"]["epoch"] = json!(99);
+            fs::write(&proof_path, serde_json::to_vec(&altered)?)?;
+            assert!(runtime.session_terminal(&record, &policy).is_err());
+            fs::write(&proof_path, &original)?;
+            for (field, value) in [
+                ("outcome", json!("closed")),
+                ("jobs_empty", json!(false)),
+                ("recovery_artifact", json!("stdout")),
+                ("recovery_artifact", json!("recovery-../other")),
+            ] {
+                let mut changed = status.clone();
+                changed["result"][field] = value;
+                fs::write(&status_path, serde_json::to_vec(&changed)?)?;
+                assert!(
+                    runtime.session_terminal(&record, &policy).is_err(),
+                    "{field}"
+                );
+            }
+            fs::remove_file(&status_path)?;
+            assert!(runtime.session_terminal(&record, &policy).is_err());
+            let clean = json!({"schema":crate::session_host::SCHEMA,"scope":if kind == ResourceKind::Debugger {"native_debugger_host"} else {"native_interactive_host"},
             "resource_id":record.id,"owner":record.owner,"outcome":"closed",
             "jobs_empty":true,"profiles_removed":true,"scratch_removed":true});
-        deployment::publish_json(
-            &runtime.result_path(&record.id, "debug-result.json"),
-            &clean,
-            &policy,
-        )?;
-        let closed = runtime.debugger_terminal(&record, &policy)?;
-        assert_eq!(closed["state"], "closed");
-        assert_eq!(closed["result"], clean);
-        assert_eq!(fs::read(&proof_path)?, original);
+            deployment::publish_json(
+                &runtime.result_path(
+                    &record.id,
+                    &format!("{}-result.json", crate::session_request::prefix(kind)?),
+                ),
+                &clean,
+                &policy,
+            )?;
+            let closed = runtime.session_terminal(&record, &policy)?;
+            assert_eq!(closed["state"], "closed");
+            assert_eq!(closed["result"], clean);
+            assert_eq!(fs::read(&proof_path)?, original);
+        }
         Ok(())
     }
 }

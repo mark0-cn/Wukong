@@ -52,6 +52,20 @@ int wmain(int argc, wchar_t **argv) {
         return 0;
     }
     if (argc == 2 && wcscmp(argv[1], L"--copy-stdin") == 0) return copy_input(GetStdHandle(STD_INPUT_HANDLE));
+    /* Fixed byte counts let acceptance verify a binary interactive exchange
+     * and natural exit without inventing another command protocol. */
+    if (argc == 2 && wcscmp(argv[1], L"--interactive-once") == 0) {
+        BYTE buffer[4096] = {0}; DWORD count = 0, written = 0;
+        for (int i = 0; i < 16; ++i)
+            if (!WriteFile(GetStdHandle(STD_ERROR_HANDLE), buffer, sizeof(buffer), &written, NULL) || written != sizeof(buffer)) return 52;
+        DWORD remaining = 65536;
+        while (remaining) {
+            if (!ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, min(remaining, sizeof(buffer)), &count, NULL) || !count) return 53;
+            if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, count, &written, NULL) || written != count) return 54;
+            remaining -= count;
+        }
+        return 0;
+    }
     if ((argc == 3 && wcscmp(argv[1], L"--launch-stdin") == 0) ||
         (argc == 4 && wcscmp(argv[1], L"--launch-argv") == 0)) {
         wchar_t module[32768];

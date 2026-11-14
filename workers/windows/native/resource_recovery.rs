@@ -42,7 +42,9 @@ impl Request {
                         record.specification["native_debugger_schema"]
                             == crate::session_host::SCHEMA
                             && record.specification["debugger"].is_object(),
-                    _ => false,
+                    ResourceKind::Interactive =>
+                        record.specification["native_interactive_schema"]
+                            == crate::session_host::SCHEMA,
                 },
             "unsupported native resource recovery contract"
         );

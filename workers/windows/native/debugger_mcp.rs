@@ -11,18 +11,16 @@ use rmcp::{
     transport::async_rw::JsonRpcMessageCodec,
 };
 use serde_json::{Value, json};
-use std::{fs::File, io::Write, time::Duration};
+use std::{fs::File, time::Duration};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 const TIMEOUT: Duration = Duration::from_secs(40);
 const MAX_FRAME: usize = 2 * 1024 * 1024;
-const MAX_TRANSCRIPT: usize = crate::session_artifacts::LIMIT;
 
 pub(crate) struct Client {
     service: RunningService<RoleClient, ClientConfig>,
-    transcript: File,
-    retained: usize,
+    transcript: crate::session_artifacts::Transcript,
 }
 
 impl Client {
@@ -86,8 +84,7 @@ impl Client {
             .context("external debugger MCP initialization timed out")??;
         Ok(Self {
             service,
-            transcript,
-            retained: 0,
+            transcript: crate::session_artifacts::Transcript::new(transcript),
         })
     }
 
@@ -111,16 +108,8 @@ impl Client {
         let result = tokio::time::timeout(TIMEOUT, self.service.peer().call_tool(request))
             .await
             .context("external debugger outcome is unknown after MCP timeout")??;
-        let bytes =
-            serde_json::to_vec(&json!({"tool":name,"arguments":arguments,"result":result}))?;
-        ensure!(
-            self.retained + bytes.len() < MAX_TRANSCRIPT,
-            "external debugger transcript exceeded its resource budget"
-        );
-        self.transcript.write_all(&bytes)?;
-        self.transcript.write_all(b"\n")?;
-        self.transcript.sync_all()?;
-        self.retained += bytes.len() + 1;
+        self.transcript
+            .append(&json!({"tool":name,"arguments":arguments,"result":result}))?;
         Ok(result)
     }
 
@@ -132,7 +121,6 @@ impl Client {
     }
 
     pub(crate) async fn close(mut self) -> Result<()> {
-        self.transcript.sync_all()?;
         tokio::time::timeout(Duration::from_secs(5), self.service.close())
             .await
             .context("external debugger MCP shutdown timed out")??;

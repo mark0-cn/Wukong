@@ -231,6 +231,9 @@ mod debugger_fault_acceptance;
 #[path = "ssh_dump_acceptance.rs"]
 mod dump_acceptance;
 #[cfg(test)]
+#[path = "ssh_interactive_acceptance.rs"]
+mod interactive_acceptance;
+#[cfg(test)]
 #[path = "ssh_inventory_acceptance.rs"]
 mod inventory_acceptance;
 #[cfg(test)]

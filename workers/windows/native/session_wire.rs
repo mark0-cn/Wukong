@@ -86,7 +86,10 @@ mod tests {
             schema: SCHEMA,
             resource: "a".repeat(32),
             sequence: 1,
-            operation: Some(request::Operation::Open(Open {})),
+            operation: Some(request::Operation::Write(Write {
+                data: vec![0, 255, 10],
+                read_timeout_seconds: 10,
+            })),
         };
         let hash = "b".repeat(64);
         let expected = serde_json::json!({"state":"running","text":"binary \u{0} and 中文"});

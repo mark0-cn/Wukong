@@ -51,27 +51,33 @@ fn default_timeout() -> u64 {
 fn default_output() -> usize {
     1024 * 1024
 }
-fn start_parameters<T: serde::de::DeserializeOwned>(
-    params: &Map<String, Value>,
-) -> Result<(&str, T)> {
+fn request_id(params: &Map<String, Value>) -> Result<&str> {
     let request_id = params
         .get("request_id")
         .and_then(Value::as_str)
-        .context("native start requires a stable request_id")?;
+        .context("native request requires a stable request_id")?;
     ensure!(
         params
             .get("call_id")
             .is_none_or(|call| call.as_str() == Some(request_id)),
         "native call_id and request_id differ"
     );
+    Ok(request_id)
+}
+fn clean(params: &Map<String, Value>) -> Map<String, Value> {
     let mut parameters = params.clone();
     for name in ["request_id", "call_id", "_binding", "_lease"] {
         parameters.remove(name);
     }
     parameters.retain(|_, value| !value.is_null());
+    parameters
+}
+fn start_parameters<T: serde::de::DeserializeOwned>(
+    params: &Map<String, Value>,
+) -> Result<(&str, T)> {
     Ok((
-        request_id,
-        serde_json::from_value(Value::Object(parameters))?,
+        request_id(params)?,
+        serde_json::from_value(Value::Object(clean(params)))?,
     ))
 }
 fn job_kind(record: &ResourceRecord) -> Result<&'static str> {
@@ -228,22 +234,22 @@ struct Recovering {
     host: SystemHost,
     deadline: Instant,
 }
-#[path = "resource_runtime_debugger.rs"]
-mod debugger;
 #[path = "resource_runtime_python.rs"]
 mod python;
 #[path = "resource_runtime_recovery.rs"]
 mod recovery;
 #[path = "resource_runtime_replay.rs"]
 mod replay;
-pub(crate) use debugger::Dispatch;
+#[path = "resource_runtime_session.rs"]
+mod session;
+pub(crate) use session::Dispatch;
 pub(crate) struct Runtime {
     root: PathBuf,
     executable: PathBuf,
     installation: String,
     running: Option<Running>,
     recovery: Option<Recovering>,
-    debugger: Option<crate::session_runtime::Live>,
+    session: Option<crate::session_runtime::Live>,
 }
 impl Runtime {
     pub(crate) fn open(
@@ -269,7 +275,7 @@ impl Runtime {
             installation: deployment.installation_id.clone(),
             running: None,
             recovery: None,
-            debugger: None,
+            session: None,
         })
     }
     pub(crate) fn handles(method: &str, params: &Map<String, Value>) -> bool {
@@ -279,6 +285,9 @@ impl Runtime {
                 | "debug.inspect"
                 | "debug.control"
                 | "debug.close"
+                | "interact.start"
+                | "interact.write"
+                | "interact.close"
                 | "job.start"
                 | "py.run"
                 | "crash.replay"
@@ -412,7 +421,7 @@ impl Runtime {
             return self.reserved_status(journal, owner, existing);
         }
         ensure!(
-            self.running.is_none() && self.debugger.is_none(),
+            self.running.is_none() && self.session.is_none(),
             "native host remains owned"
         );
         let mut request = prepare()?;
@@ -551,12 +560,12 @@ impl Runtime {
     }
     pub(crate) fn cancel_active(&mut self) -> Result<()> {
         if let Some(id) = self
-            .debugger
+            .session
             .as_ref()
             .map(|debugger| debugger.request.target.resource_id.clone())
         {
             self.cancel(&id)?;
-            self.debugger.as_mut().unwrap().request_cancel();
+            self.session.as_mut().unwrap().request_cancel();
         }
         if let Some(running) = &self.running {
             self.cancel(&running.request.resource_id)?;
@@ -577,7 +586,7 @@ impl Runtime {
         if self.recovery.is_some() {
             return self.poll_recovery(journal);
         }
-        if let Some(debugger) = &self.debugger {
+        if let Some(debugger) = &self.session {
             return if debugger.needs_recovery() {
                 self.recover(journal)
             } else {
@@ -715,15 +724,19 @@ impl Runtime {
         let record = journal.resource(owner, parts[1])?;
         let data = if let Some(sequence) = parts[2].strip_prefix("transcript-") {
             ensure!(
-                record.kind == ResourceKind::Debugger,
-                "native transcript requires its debugger resource"
+                matches!(
+                    record.kind,
+                    ResourceKind::Debugger | ResourceKind::Interactive
+                ),
+                "native transcript requires its session resource"
             );
             let parsed: u64 = sequence.parse()?;
             ensure!(
                 parsed.to_string() == sequence,
                 "noncanonical native transcript sequence"
             );
-            let request_path = self.request_path(parts[1], "debug.json");
+            let prefix = crate::session_request::prefix(record.kind)?;
+            let request_path = self.request_path(parts[1], &format!("{prefix}.json"));
             AclPolicy::private_vm().verify(&request_path, false)?;
             let request: crate::session_request::Request =
                 serde_json::from_slice(&deployment::read_bytes(&request_path, 65536)?)?;
@@ -734,15 +747,20 @@ impl Runtime {
                 request.target.resource_id == record.id
                     && request.target.owner == record.owner
                     && spec.matches(&request.target)
-                    && record.specification["native_debugger_schema"] == request.schema
-                    && record.specification["debugger"]["mode"]
-                        == if request.read_only() {
-                            "dump"
-                        } else {
-                            "launch"
-                        }
-                    && record.specification["debugger"]["dump"].as_str()
-                        == request.dump().map(|file| file.path.as_str()),
+                    && request.kind() == record.kind
+                    && if record.kind == ResourceKind::Interactive {
+                        record.specification["native_interactive_schema"] == request.schema
+                    } else {
+                        record.specification["native_debugger_schema"] == request.schema
+                            && record.specification["debugger"]["mode"]
+                                == if request.read_only() {
+                                    "dump"
+                                } else {
+                                    "launch"
+                                }
+                            && record.specification["debugger"]["dump"].as_str()
+                                == request.dump().map(|file| file.path.as_str())
+                    },
                 "native debugger transcript request differs from its journal intent"
             );
             crate::session_artifacts::read(
@@ -756,8 +774,8 @@ impl Runtime {
                 record.phase == Phase::Closed,
                 "native artifacts require completed cleanup"
             );
-            let suffix = if parts[2] == "receipt" && record.kind == ResourceKind::Debugger {
-                let status = self.debugger_terminal(&record, &AclPolicy::private_vm())?;
+            let suffix = if parts[2] == "receipt" && record.kind != ResourceKind::Process {
+                let status = self.session_terminal(&record, &AclPolicy::private_vm())?;
                 if status["state"] == "lost" {
                     artifact_suffix(
                         status["result"]["recovery_artifact"]
@@ -765,7 +783,10 @@ impl Runtime {
                             .context("debugger recovery selector missing")?,
                     )?
                 } else {
-                    "debug-result.json".into()
+                    format!(
+                        "{}-result.json",
+                        crate::session_request::prefix(record.kind)?
+                    )
                 }
             } else {
                 artifact_suffix(parts[2])?

@@ -1,4 +1,4 @@
-//! Fixed System child for one admitted live or dump debugger. It owns the
+//! Fixed System child for one admitted debugger or interactive session. It owns the
 //! contained identities and Jobs; model PIDs and tool paths are never authority.
 use crate::{
     accounts::Role,
@@ -200,6 +200,9 @@ async fn serve(
                     .context("native debugger control outcome is unknown after timeout")?
                 }
                 Operation::Close(_) => unreachable!(),
+                Operation::Write(_) => {
+                    anyhow::bail!("debugger sessions do not accept interactive writes")
+                }
             }
         };
         let result = tokio::select! {
@@ -227,9 +230,10 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
     request.validate()?;
     let id = &request.target.resource_id;
     let root = &host.root;
+    let prefix = crate::session_request::prefix(request.kind())?;
     ensure!(
         root.join("metadata/resource-requests")
-            .join(format!("{id}.debug.json"))
+            .join(format!("{id}.{prefix}.json"))
             .canonicalize()?
             == request_path.canonicalize()?
             && request.target.owner.identity.installation_id == installation
@@ -244,6 +248,9 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         !cancel.try_exists()?,
         "native debugger cancelled before preparation"
     );
+    if request.kind() == crate::resource_journal::ResourceKind::Interactive {
+        return crate::interactive_host::run(&host, &request, &cancel);
+    }
     let debugger_nonce = nonce(installation, id)?;
     let (mut debugger, _) = crate::resource_host::create_persona_named(
         &host.deployment,

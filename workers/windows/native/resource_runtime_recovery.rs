@@ -15,7 +15,7 @@ impl Runtime {
             "cannot recover an executing native host"
         );
         ensure!(
-            self.debugger
+            self.session
                 .as_ref()
                 .is_none_or(|debugger| debugger.needs_recovery()),
             "cannot recover a live debugger host"
@@ -28,7 +28,7 @@ impl Runtime {
         };
         request.validate()?;
         drop(self.running.take());
-        drop(self.debugger.take());
+        drop(self.session.take());
         let path = self.request_path(&request.resource.id, &format!("recovery-{attempt}.json"));
         let policy = AclPolicy::private_vm();
         deployment::publish_json(&path, &request, &policy)?;
@@ -134,7 +134,7 @@ impl Runtime {
             AclPolicy::private_vm().verify(&path, false)?;
             let prior: Value = serde_json::from_slice(&deployment::read_bytes(&path, 65536)?)?;
             ensure!(
-                prior[if record.kind == ResourceKind::Debugger {
+                prior[if record.kind != ResourceKind::Process {
                     "session_id"
                 } else {
                     "job_id"
@@ -146,7 +146,7 @@ impl Runtime {
             );
         } else {
             let mut value = json!({"job_id":record.id,"kind":record.kind,"state":"lost","native_owner":record.owner,"cleanup_pending":false,"result":{"outcome":"unknown","jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"recovery_artifact":artifact,"recovery_receipt_sha256":hex::encode(Sha256::digest(receipt))},"production_execution":false});
-            if record.kind == ResourceKind::Debugger {
+            if record.kind != ResourceKind::Process {
                 value.as_object_mut().unwrap().remove("job_id");
                 value["session_id"] = json!(record.id);
                 value["worker_session_id"] = json!(record.id);

@@ -8,9 +8,9 @@ fn main() -> Result<()> {
     ensure!(cfg!(windows), "native Windows worker requires Windows");
     let args: Vec<_> = std::env::args_os().collect();
     #[cfg(windows)]
-    if args.len() == 5 && args[1] == "resource-debugger" {
+    if args.len() == 5 && args[1] == "resource-session" {
         return wukong_windows_worker::session_host::run(
-            args[2].to_str().context("invalid debugger installation")?,
+            args[2].to_str().context("invalid session installation")?,
             Path::new(&args[3]),
             Path::new(&args[4]),
         );
