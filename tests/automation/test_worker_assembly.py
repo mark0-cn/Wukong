@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.worker.assemble import BINARIES, file_index, native_build
+from scripts.worker.assemble import BINARIES, SUPPLEMENTAL_LICENSES, file_index, native_build
 from scripts.worker.notices import collect
 from scripts._lib.checksums import sha256
 from scripts._lib.repository import ROOT
@@ -14,6 +14,33 @@ from tests.automation.test_worker_pe import fixture
 
 
 class AssemblyChecks(unittest.TestCase):
+    def test_native_supplement_preserves_exact_upstream_license_and_version(self):
+        original = SUPPLEMENTAL_LICENSES[("fixture3-ddmin", "0.1.1")]
+        provenance = json.loads(original.with_name("source.json").read_text(encoding="utf-8"))
+        self.assertEqual(sha256(original), provenance["sha256"])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dependency = root / "dependency"
+            dependency.mkdir()
+            sysroot = root / "rust"
+            library = sysroot / "share/doc/rust/COPYRIGHT-library.html"
+            library.parent.mkdir(parents=True)
+            library.write_bytes(b"<p>Rust fixture notice</p>")
+            package = dict(name="fixture3-ddmin", version="0.1.1", source="registry+fixture",
+                           license="MIT OR Apache-2.0", manifest_path=str(dependency / "Cargo.toml"))
+            with patch("scripts.worker.notices.subprocess.check_output", side_effect=[
+                json.dumps(dict(packages=[package])).encode(), str(sysroot), "rustc fixture",
+            ]):
+                paths = collect(root / "notices", supplemental=SUPPLEMENTAL_LICENSES)
+            copied = root / "notices/fixture3-ddmin-0.1.1/LICENSE"
+            self.assertIn(copied, paths)
+            self.assertEqual(copied.read_bytes(), original.read_bytes())
+            package["version"] = "0.1.2"
+            with patch("scripts.worker.notices.subprocess.check_output",
+                       return_value=json.dumps(dict(packages=[package])).encode()):
+                with self.assertRaisesRegex(ValueError, "Missing native dependency license"):
+                    collect(root / "different-version", supplemental=SUPPLEMENTAL_LICENSES)
+
     def test_native_notices_preserve_license_text_shipped_as_copyright(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

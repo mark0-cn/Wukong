@@ -18,6 +18,9 @@ from scripts.worker.toolchain import load_lock
 from scripts.worker.build_debugger import BINARY as DEBUGGER_BINARY, validate as validate_debugger
 
 BINARIES = ["wukong-worker.exe", "wukong-package.exe"]
+SUPPLEMENTAL_LICENSES = {
+    ("fixture3-ddmin", "0.1.1"): ROOT / "workers/windows/licenses/fixture3-ddmin-0.1.1/LICENSE",
+}
 
 
 def native_build(directory):
@@ -123,7 +126,7 @@ def assemble(cache, output, native, keys):
             target=output/'runtime'/probe['dependency']['binary']
             shutil.copyfile(native/probe['dependency']['binary'],target)
     shutil.copyfile(native / "native-build.json", output / "native-build.json")
-    notices = collect(output / "licenses/native") + debugger_notices
+    notices = collect(output / "licenses/native", supplemental=SUPPLEMENTAL_LICENSES) + debugger_notices
     lock = load_lock()
     license_paths = {"python": ["runtime/python/LICENSE.txt"], "openssh": ["runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"],
                      "debugging_tools": ["licenses/debugging-tools.rtf"],

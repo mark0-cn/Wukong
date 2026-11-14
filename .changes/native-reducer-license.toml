@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Include the pinned native reducer's original MIT license in offline Windows worker packages when its published crate omits the license file. Preserve the upstream revision and document hash."
+zh_CN = "当固定版本原生缩减库的发布包缺少许可证文件时，在离线 Windows worker 包中补入其原始 MIT 许可证，并保留上游提交及文档哈希。"
