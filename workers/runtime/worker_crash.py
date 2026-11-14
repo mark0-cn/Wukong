@@ -66,7 +66,6 @@ def debugger_snapshot(session):
 
 
 class CrashService:
-    methods=frozenset(["core.snapshot","cyclic.offset"])
     def __init__(self,root,trusted,isolated): self.root=Path(root).resolve()
     def dispatch(self,method,params):
         if method == "cyclic.offset":

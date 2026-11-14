@@ -101,3 +101,6 @@ mod worker_catalog;
 mod worker_identity;
 #[cfg(windows)]
 mod worker_leases;
+
+#[cfg(windows)]
+mod worker_rpc;

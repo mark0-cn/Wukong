@@ -19,7 +19,7 @@ pub(crate) fn fixture() -> Result<(tempfile::TempDir, Journal, Inputs, Runtime)>
 pub(super) fn owner() -> Owner {
     Owner {
         identity: crate::worker::Identity {
-            protocol: 2,
+            protocol: 3,
             installation_id: "a".repeat(32),
             boot_id: format!("windows:{}:1", "b".repeat(32)),
             package_sha256: "c".repeat(64),

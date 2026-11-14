@@ -14,13 +14,13 @@ from support.client import Client
 class SessionLaunchTests(unittest.TestCase):
     def test_lost_session_error_kind_survives_durable_replay(self):
         import worker_runtime as bridge
-        from worker_common import WorkerError,rpc_error
+        from worker_common import WorkerError,error_kind
         with tempfile.TemporaryDirectory() as directory:
             runtime = bridge.Runtime(Path(directory), trusted=True)
             for _ in range(2):
                 with self.assertRaises(WorkerError) as error:
                     runtime.dispatch("debug.close", {"session_id": "missing", "request_id": "lost-debug"})
-                self.assertEqual(rpc_error(error.exception)["data"]["kind"], "session_lost")
+                self.assertEqual(error_kind(error.exception), "session_lost")
 
     def test_isolated_interactive_launch_drops_credentials(self):
         import worker_interactive as bridge
@@ -269,7 +269,7 @@ class RuntimeTests(unittest.TestCase):
     def test_worker_receives_no_provider_credentials(self):
         result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(','.join(k for k in os.environ if 'API_KEY' in k or 'TOKEN' in k))"]))
         self.assertEqual(result["result"]["stdout"].strip(), "")
-        self.assertEqual(self.client.call("doctor")["protocol"], 2)
+        self.assertEqual(self.client.call("doctor")["protocol"], 3)
 
     def test_job_environment_carries_state_and_job_dirs(self):
         result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(os.environ['WUKONG_STATE_DIR']);print(os.environ['WUKONG_JOB_DIR'])"]))

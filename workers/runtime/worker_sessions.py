@@ -10,7 +10,6 @@ from worker_debugger import DebugSession
 from worker_interactive import InteractSession
 
 class SessionManager:
-    methods = frozenset(['interact.start', 'interact.close', 'interact.write', 'interact.profile', 'debug.start', 'debug.close', 'debug.command', 'debug.inspect', 'debug.control', 'debug.events', 'debug.profile', 'debug.snapshot'])
 
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated

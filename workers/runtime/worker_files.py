@@ -4,7 +4,6 @@ import threading
 from worker_common import MAX_FILE, artifact, bounded_int, confined, public_file
 
 class FileService:
-    methods = frozenset(['file.put', 'file.get'])
 
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated

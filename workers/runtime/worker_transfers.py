@@ -21,8 +21,6 @@ def integer(value, minimum, maximum):
 
 
 class TransferService:
-    methods = frozenset({"file.upload.begin", "file.upload.write", "file.upload.status",
-                         "file.upload.commit", "file.stat", "file.read"})
 
     def __init__(self, root):
         self.root = Path(root).resolve()

@@ -159,7 +159,7 @@ for line in sys.stdin:
  request=json.loads(line)
  if request['method']=='doctor':
   (root/'probing').write_text('ready');time.sleep(60)
- result={'identity':{'protocol':2,'installation_id':'slow-fixture','boot_id':'boot','package_sha256':'0'*64}}
+ result={'identity':{'protocol':3,'installation_id':'slow-fixture','boot_id':'boot','package_sha256':'0'*64}}
  print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
 "#).unwrap();
             config.default_environment=Some("slow".into());

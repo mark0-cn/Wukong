@@ -140,7 +140,7 @@ def assemble(cache, output, native, keys):
     components = {name: dict(component, original_payloads=["originals/" + item["path"] for item in lock["assets"] if item["component"] == name],
                             licenses=license_paths[name]) for name, component in lock["components"].items()}
     manifest = dict(schema=1, platform="windows-amd64", version=version(), source_revision=native_metadata["source_revision"],
-        toolchain_lock_sha256=sha256(output / "toolchain.lock.json"), toolchain_lock_path="toolchain.lock.json", runtime_protocol=2,
+        toolchain_lock_sha256=sha256(output / "toolchain.lock.json"), toolchain_lock_path="toolchain.lock.json", runtime_protocol=3,
         minimum_controller_version=version(), entrypoints=dict(worker="runtime/native/wukong-worker.exe", python="runtime/python/python.exe",
             bridge="runtime/worker/bridge.py", windbg_mcp="runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe",
             dbgeng_library="runtime/sdk/Windows Kits/10/Debuggers/x64/dbgeng.dll", sshd="runtime/openssh/sshd.exe", ssh_keygen="runtime/openssh/ssh-keygen.exe"),

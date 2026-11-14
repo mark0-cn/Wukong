@@ -7,7 +7,7 @@ import re
 import time
 from atomicwrites import AtomicWriter, atomic_write
 
-PROTOCOL = 2
+from worker_contract import PROTOCOL
 MAX_RPC = 48 * 1024 * 1024
 MAX_FILE = 32 * 1024 * 1024
 TERMINAL = {"completed", "failed", "cancelled", "timed_out", "lost"}
@@ -19,9 +19,8 @@ class WorkerError(ValueError):
         super().__init__(message)
         self.kind = kind
 
-def rpc_error(error):
-    kind = getattr(error, "kind", "invalid_request" if isinstance(error, (ValueError, KeyError, TypeError)) else "internal")
-    return {"code": -32000, "message": str(error)[:4096], "data": {"kind": kind}}
+def error_kind(error):
+    return getattr(error, "kind", "invalid_request" if isinstance(error, (ValueError, KeyError, TypeError)) else "internal")
 
 def safe_env(extra=None):
     # Windows enumerates environment names in upper case; SYSTEMROOT is needed

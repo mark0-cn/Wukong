@@ -392,7 +392,7 @@ mod tests {
             resource_id: "a".repeat(32),
             owner: Owner {
                 identity: crate::resource_journal::Binding {
-                    protocol: 2,
+                    protocol: 3,
                     installation_id: "b".repeat(32),
                     boot_id: format!("windows:{}:1", "c".repeat(32)),
                     package_sha256: "d".repeat(64),

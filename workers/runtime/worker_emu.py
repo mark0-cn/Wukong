@@ -111,7 +111,6 @@ def _segments(path):
 
 
 class EmuService:
-    methods = frozenset(["emu.run"])
 
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated

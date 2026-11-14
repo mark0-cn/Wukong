@@ -56,7 +56,6 @@ def inspect_candidate(path, leaks, target_abi=None):
 
 
 class LibcService:
-    methods = frozenset(["libc.identify"])
 
     def __init__(self, root, trusted, isolated):
         self.root = root

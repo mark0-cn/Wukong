@@ -88,7 +88,6 @@ def process_profile(pid):
 
 
 class ProfileService:
-    methods = frozenset(["runtime.profile", "runtime.prepare"])
     def __init__(self, root, trusted, isolated):
         self.root = Path(root).resolve()
         self.lock = threading.RLock()

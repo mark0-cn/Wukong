@@ -1,5 +1,7 @@
 //! Built-in schemas and visibility metadata share one registry.
+use super::requirements::Requirement;
 use super::*;
+use wukong_worker_protocol::Method;
 
 pub(super) struct Spec {
     pub(super) handler: Handler,
@@ -43,6 +45,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
     target: bool,
     handler: Handler,
     visibility: Visibility,
+    requirement: Requirement,
 ) -> Spec {
     let side_effecting = policy.side_effecting();
     Spec {
@@ -62,7 +65,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         parse: |value| Ok(serde_json::to_value(serde_json::from_value::<A>(value)?)?),
         side_effecting,
         model_visible: !matches!(visibility, Visibility::Internal),
-        requirement: super::requirements::Requirement::for_tool(name),
+        requirement,
         root_only: matches!(visibility, Visibility::Root),
         child_only: matches!(visibility, Visibility::Child) || (target && name != "runtime_doctor"),
     }
@@ -83,6 +86,11 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_artifact_stage,
             Visibility::Child,
+            Requirement::Worker(&[
+                Method::UploadBegin,
+                Method::UploadWrite,
+                Method::UploadCommit,
+            ]),
         ),
         spec::<args::RuntimeDoctorArgs>(
             "environment_list",
@@ -92,6 +100,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_environment_list,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::EnvironmentDoctorArgs>(
             "environment_doctor",
@@ -101,6 +110,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_environment_doctor,
             Visibility::All,
+            Requirement::Probe,
         ),
         spec::<args::SeccompAnalyzeArgs>(
             "seccomp_analyze",
@@ -110,6 +120,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_seccomp_analyze,
             Visibility::Child,
+            Requirement::Worker(&[Method::SeccompAnalyze]),
         ),
         spec::<args::MitigationProfileArgs>(
             "mitigation_profile",
@@ -119,6 +130,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_mitigation_profile,
             Visibility::Child,
+            Requirement::Worker(&[Method::RuntimeProfile]),
         ),
         spec::<args::CrashSnapshotArgs>(
             "crash_snapshot",
@@ -128,6 +140,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_crash_snapshot,
             Visibility::Child,
+            Requirement::Worker(&[Method::CoreSnapshot]),
         ),
         spec::<args::CyclicOffsetArgs>(
             "cyclic_offset",
@@ -137,6 +150,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_crash_snapshot,
             Visibility::Child,
+            Requirement::Worker(&[Method::CyclicOffset]),
         ),
         spec::<args::RuntimeProfileArgs>(
             "runtime_profile",
@@ -146,6 +160,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_runtime_profile,
             Visibility::Child,
+            Requirement::Worker(&[Method::RuntimeProfile]),
         ),
         spec::<args::RuntimeProfileArgs>(
             "runtime_prepare",
@@ -155,6 +170,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_runtime_profile,
             Visibility::Child,
+            Requirement::Worker(&[Method::RuntimePrepare]),
         ),
         spec::<args::FunctionInstructionsArgs>(
             "function_instructions",
@@ -164,6 +180,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_functions_search,
             Visibility::Child,
+            Requirement::Ghidra,
         ),
         spec::<args::DifferentialTestArgs>(
             "differential_test",
@@ -173,6 +190,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_differential_test,
             Visibility::Child,
+            Requirement::Worker(&[Method::JobStart]),
         ),
         spec::<args::AnalysisVerifyArgs>(
             "analysis_verify",
@@ -182,6 +200,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_analysis_verify,
             Visibility::Child,
+            Requirement::Controller,
         ),
         spec::<args::CreateAgentArgs>(
             "create_agent",
@@ -191,6 +210,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_create_agent,
             Visibility::Internal,
+            Requirement::Controller,
         ),
         spec::<args::ViewAgentGraphArgs>(
             "view_agent_graph",
@@ -200,6 +220,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_view_agent_graph,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::SendMessageToAgentArgs>(
             "send_message_to_agent",
@@ -209,6 +230,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_send_message_to_agent,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::FollowUpAgentArgs>(
             "follow_up_agent",
@@ -218,6 +240,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_send_message_to_agent,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::MessageStatusArgs>(
             "message_status",
@@ -227,6 +250,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_message_status,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::WaitForAgentsArgs>(
             "wait_for_agents",
@@ -236,6 +260,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_wait_for_agents,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::StopAgentArgs>(
             "stop_agent",
@@ -245,6 +270,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_stop_agent,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::AgentFinishArgs>(
             "agent_finish",
@@ -254,6 +280,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_agent_finish,
             Visibility::Child,
+            Requirement::Controller,
         ),
         spec::<args::FinishScanArgs>(
             "finish_scan",
@@ -263,6 +290,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_agent_finish,
             Visibility::Root,
+            Requirement::Controller,
         ),
         spec::<args::ThreatModelGetArgs>(
             "threat_model_get",
@@ -272,6 +300,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_threat_model_get,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::ThreatModelSaveArgs>(
             "threat_model_save",
@@ -281,6 +310,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_threat_model_save,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::ThreatModelAmendArgs>(
             "threat_model_amend",
@@ -290,6 +320,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_threat_model_amend,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::NoteSaveArgs>(
             "note_save",
@@ -299,6 +330,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_threat_model_save,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::NotesListArgs>(
             "notes_list",
@@ -308,6 +340,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_notes_list,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::ContextSearchArgs>(
             "context_search",
@@ -317,6 +350,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_context_search,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::ContextReadArgs>(
             "context_read",
@@ -326,6 +360,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_context_read,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::TodoSaveArgs>(
             "todo_save",
@@ -335,6 +370,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_threat_model_save,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::TodoUpdateArgs>(
             "todo_update",
@@ -344,6 +380,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_threat_model_amend,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::TodosListArgs>(
             "todos_list",
@@ -353,6 +390,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_todos_list,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::CoverageRecordArgs>(
             "coverage_record",
@@ -362,6 +400,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_coverage_record,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::CoverageUpdateArgs>(
             "coverage_update",
@@ -371,6 +410,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_coverage_record,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::CoverageListArgs>(
             "coverage_list",
@@ -380,6 +420,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_coverage_list,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::FindingFileArgs>(
             "finding_file",
@@ -389,6 +430,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_finding_file,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::FindingUpdateArgs>(
             "finding_update",
@@ -398,6 +440,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_finding_file,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::FindingsListArgs>(
             "findings_list",
@@ -407,6 +450,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_findings_list,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::FindingGetArgs>(
             "finding_get",
@@ -416,6 +460,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_finding_get,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::VerificationRecordArgs>(
             "verification_record",
@@ -425,6 +470,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_verification_record,
             Visibility::All,
+            Requirement::Worker(&[Method::JobStatus, Method::JobArtifacts]),
         ),
         spec::<args::EvidenceReadArgs>(
             "evidence_read",
@@ -434,6 +480,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_evidence_read,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::LoadSkillArgs>(
             "load_skill",
@@ -443,6 +490,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_load_skill,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::ThinkArgs>(
             "think",
@@ -452,6 +500,7 @@ fn build_catalog() -> Vec<Spec> {
             false,
             handlers::handle_think,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::BinaryInspectArgs>(
             "binary_inspect",
@@ -461,6 +510,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_binary_inspect,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::BinaryStringsArgs>(
             "binary_strings",
@@ -470,6 +520,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_binary_strings,
             Visibility::All,
+            Requirement::Controller,
         ),
         spec::<args::FunctionsSearchArgs>(
             "functions_search",
@@ -479,6 +530,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_functions_search,
             Visibility::All,
+            Requirement::Ghidra,
         ),
         spec::<args::FunctionDecompileArgs>(
             "function_decompile",
@@ -488,6 +540,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_functions_search,
             Visibility::All,
+            Requirement::Ghidra,
         ),
         spec::<args::XrefsQueryArgs>(
             "xrefs_query",
@@ -497,6 +550,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_functions_search,
             Visibility::All,
+            Requirement::Ghidra,
         ),
         spec::<args::RuntimeDoctorArgs>(
             "runtime_doctor",
@@ -506,6 +560,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_runtime_doctor,
             Visibility::All,
+            Requirement::Probe,
         ),
         spec::<args::StageTargetArgs>(
             "stage_target",
@@ -515,6 +570,11 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_stage_target,
             Visibility::All,
+            Requirement::Worker(&[
+                Method::UploadBegin,
+                Method::UploadWrite,
+                Method::UploadCommit,
+            ]),
         ),
         spec::<args::FilePutArgs>(
             "file_put",
@@ -524,6 +584,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_file_put,
             Visibility::All,
+            Requirement::Worker(&[Method::FilePut]),
         ),
         spec::<args::FileGetArgs>(
             "file_get",
@@ -533,6 +594,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_file_get,
             Visibility::All,
+            Requirement::Worker(&[Method::FileStat, Method::FileRead]),
         ),
         spec::<args::ExecCommandArgs>(
             "exec_command",
@@ -542,6 +604,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::ExecRun]),
         ),
         spec::<args::JobStartArgs>(
             "job_start",
@@ -551,6 +614,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::JobStart]),
         ),
         spec::<args::JobStatusArgs>(
             "job_status",
@@ -560,6 +624,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::JobStatus]),
         ),
         spec::<args::JobCancelArgs>(
             "job_cancel",
@@ -569,6 +634,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::JobCancel]),
         ),
         spec::<args::JobArtifactsArgs>(
             "job_artifacts",
@@ -578,6 +644,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::JobArtifacts]),
         ),
         spec::<args::FuzzStartArgs>(
             "fuzz_start",
@@ -587,6 +654,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::FuzzStart]),
         ),
         spec::<args::FuzzStatusArgs>(
             "fuzz_status",
@@ -596,6 +664,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::JobStatus]),
         ),
         spec::<args::DebugStartArgs>(
             "debug_start",
@@ -605,6 +674,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::DebugStart]),
         ),
         spec::<args::DebugCommandArgs>(
             "debug_command",
@@ -614,6 +684,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::DebugCommand]),
         ),
         spec::<args::DebugInspectArgs>(
             "debug_inspect",
@@ -623,6 +694,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::Child,
+            Requirement::Worker(&[Method::DebugInspect]),
         ),
         spec::<args::DebugControlArgs>(
             "debug_control",
@@ -632,6 +704,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::Child,
+            Requirement::Worker(&[Method::DebugControl]),
         ),
         spec::<args::DebugCloseArgs>(
             "debug_close",
@@ -641,6 +714,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::DebugClose]),
         ),
         spec::<args::InteractiveStartArgs>(
             "interactive_start",
@@ -650,6 +724,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::InteractStart]),
         ),
         spec::<args::InteractiveSendArgs>(
             "interactive_send",
@@ -659,6 +734,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::InteractWrite]),
         ),
         spec::<args::InteractiveCloseArgs>(
             "interactive_close",
@@ -668,6 +744,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::InteractClose]),
         ),
         spec::<args::AngrSolveArgs>(
             "angr_solve",
@@ -677,6 +754,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::AngrSolve]),
         ),
         spec::<args::PyRunArgs>(
             "py_run",
@@ -686,6 +764,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::PythonRun]),
         ),
         spec::<args::LibcIdentifyArgs>(
             "libc_identify",
@@ -695,6 +774,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_libc_identify,
             Visibility::All,
+            Requirement::Worker(&[Method::LibcIdentify]),
         ),
         spec::<args::EmulateRunArgs>(
             "emulate_run",
@@ -704,6 +784,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_emulate_run,
             Visibility::All,
+            Requirement::Worker(&[Method::EmulateRun]),
         ),
         spec::<args::CrashReplayArgs>(
             "crash_replay",
@@ -713,6 +794,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::CrashReplay]),
         ),
         spec::<args::InputMinimizeArgs>(
             "input_minimize",
@@ -722,6 +804,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::InputMinimize]),
         ),
         spec::<args::PocVerifyArgs>(
             "poc_verify",
@@ -731,6 +814,7 @@ fn build_catalog() -> Vec<Spec> {
             true,
             handlers::handle_job_start,
             Visibility::All,
+            Requirement::Worker(&[Method::PocVerify]),
         ),
     ]
 }

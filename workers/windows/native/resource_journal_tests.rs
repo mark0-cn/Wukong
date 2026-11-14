@@ -4,7 +4,7 @@ use serde_json::json;
 fn owner() -> Owner {
     Owner {
         identity: Binding {
-            protocol: 2,
+            protocol: 3,
             installation_id: "a".repeat(32),
             boot_id: format!("windows:{}:40", "b".repeat(32)),
             package_sha256: "c".repeat(64),

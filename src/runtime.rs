@@ -315,7 +315,8 @@ impl RuntimeClient {
     /// failed request itself is never re-sent, so a timed-out side effect
     /// still follows the durable reconcile path instead of being replayed.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
-        let starts_resource = wukong_worker_protocol::starts_resource(method);
+        let starts_resource = wukong_worker_protocol::Method::parse(method)?.resources()
+            == wukong_worker_protocol::ResourceDemand::Execution;
         let deadline =
             tokio::time::Instant::now() + Duration::from_secs(self.config.request_timeout_secs);
         // Tokio's FIFO mutex orders new starts. Observation/close/lease calls do

@@ -1,15 +1,13 @@
 //! Backend requirements live beside schemas and apply to selection and dispatch.
 use super::*;
+use wukong_worker_protocol::Method;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Requirement {
     Controller,
     Probe,
     Ghidra,
-    Worker {
-        linux: bool,
-        any: &'static [&'static str],
-    },
+    Worker(&'static [Method]),
 }
 
 impl Requirement {
@@ -25,91 +23,19 @@ impl Requirement {
             observation.is_some_and(|value| value["capabilities"][capability] == true)
         })
     }
-    pub(super) fn for_tool(name: &str) -> Self {
-        use Requirement::*;
-        let (linux, any): (bool, &'static [&'static str]) = match name {
-            "runtime_doctor" | "environment_doctor" => return Probe,
-            "functions_search" | "function_decompile" | "function_instructions" | "xrefs_query" => {
-                return Ghidra;
-            }
-            "artifact_stage" | "stage_target" | "file_put" | "file_get" => {
-                (false, &["resumable_file_transfer"])
-            }
-            "job_start" | "differential_test" => (false, &["process_jobs"]),
-            "job_status" | "job_cancel" | "job_artifacts" | "fuzz_status" | "debug_close"
-            | "interactive_close" => (false, &[]),
-            "debug_start" | "debug_inspect" | "debug_control" => {
-                (false, &["debug_gdb_mi", "debug_dbgeng"])
-            }
-            "debug_command" => (true, &["debug_gdb_mi"]),
-            "interactive_start" | "interactive_send" => (false, &["interactive_process"]),
-            "exec_command" => (false, &["shell_exec"]),
-            "py_run" => (false, &["py_run"]),
-            "fuzz_start" => (true, &["fuzz_qemu"]),
-            "crash_replay" => (false, &["crash_replay"]),
-            "input_minimize" => (false, &["input_minimize", "input_minimize_signal_only"]),
-            "poc_verify" | "verification_record" => (false, &["poc_verify"]),
-            "angr_solve" => (false, &["symbolic_execution"]),
-            "emulate_run" => (false, &["emulation"]),
-            "libc_identify" => (false, &["libc_identify"]),
-            "seccomp_analyze" => (false, &["seccomp_analyze"]),
-            "runtime_profile" => (false, &["runtime_profile"]),
-            "runtime_prepare" => (false, &["runtime_prepare"]),
-            "mitigation_profile" => (false, &["mitigation_profile"]),
-            "crash_snapshot" => (true, &["core_snapshot"]),
-            "cyclic_offset" => (false, &["cyclic_offset"]),
-            "environment_list"
-            | "analysis_verify"
-            | "create_agent"
-            | "view_agent_graph"
-            | "send_message_to_agent"
-            | "follow_up_agent"
-            | "message_status"
-            | "wait_for_agents"
-            | "stop_agent"
-            | "agent_finish"
-            | "finish_scan"
-            | "threat_model_get"
-            | "threat_model_save"
-            | "threat_model_amend"
-            | "note_save"
-            | "notes_list"
-            | "context_search"
-            | "context_read"
-            | "todo_save"
-            | "todo_update"
-            | "todos_list"
-            | "coverage_record"
-            | "coverage_update"
-            | "coverage_list"
-            | "finding_file"
-            | "finding_update"
-            | "findings_list"
-            | "finding_get"
-            | "evidence_read"
-            | "load_skill"
-            | "think"
-            | "binary_inspect"
-            | "binary_strings" => return Controller,
-            _ => panic!("tool has no registered backend requirement: {name}"),
-        };
-        Worker { linux, any }
-    }
-
     pub(super) fn available(self, observation: Option<&Value>, local_ghidra: bool) -> bool {
         match self {
             Self::Controller | Self::Probe => true,
             Self::Ghidra => {
                 local_ghidra
-                    || observation
-                        .is_some_and(|value| value["capabilities"]["ghidra_query"] == true)
+                    || observation.is_some_and(|value| {
+                        value["methods"][Method::GhidraQuery.name()]["ready"] == true
+                    })
             }
-            Self::Worker { linux, any } => observation.is_some_and(|value| {
-                (!linux || value["os"] == "linux")
-                    && (any.is_empty()
-                        || any
-                            .iter()
-                            .any(|capability| value["capabilities"][capability] == true))
+            Self::Worker(methods) => observation.is_some_and(|value| {
+                methods
+                    .iter()
+                    .all(|method| value["methods"][method.name()]["ready"] == true)
             }),
         }
     }
@@ -119,10 +45,11 @@ impl Requirement {
             Self::Controller => "controller".into(),
             Self::Probe => "explicit probe".into(),
             Self::Ghidra => "controller Ghidra or ghidra_query".into(),
-            Self::Worker { any: [], .. } => "worker transport".into(),
-            Self::Worker { linux, any } => {
-                format!("{}{}", if linux { "linux: " } else { "" }, any.join(" / "))
-            }
+            Self::Worker(methods) => methods
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+                .join(" + "),
         }
     }
 }
@@ -140,7 +67,7 @@ impl ToolService {
         match spec.requirement {
             Requirement::Controller | Requirement::Probe => false,
             Requirement::Ghidra => self.local_ghidra().is_none(),
-            Requirement::Worker { .. } => true,
+            Requirement::Worker(_) => true,
         }
     }
 
@@ -194,6 +121,7 @@ impl ToolService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wukong_worker_protocol::Method;
     #[test]
     fn new_job_inputs_require_observed_support_without_hiding_basic_jobs() {
         let old = json!({"os":"linux","capabilities":{"process_jobs":true}});
@@ -214,10 +142,15 @@ mod tests {
 
     #[test]
     fn windows_debugger_never_enables_linux_tools_or_unobserved_execution() {
-        let doctor = json!({"os":"windows","capabilities":{"debug_dbgeng":true,"debug_gdb_mi":true,"fuzz_qemu":true,"resumable_file_transfer":true}});
+        let doctor = json!({"os":"windows","capabilities":{"debug_dbgeng":true,"debug_gdb_mi":true,"fuzz_qemu":true,"resumable_file_transfer":true},"methods":{"debug.start":{"ready":true},"debug.control":{"ready":true},"file.put":{"ready":true}}});
         for name in ["debug_start", "debug_control", "file_put"] {
             assert!(
-                Requirement::for_tool(name).available(Some(&doctor), false),
+                catalog::builtins()
+                    .iter()
+                    .find(|spec| spec.definition.name.as_str() == name)
+                    .unwrap()
+                    .requirement
+                    .available(Some(&doctor), false),
                 "{name}"
             );
         }
@@ -230,11 +163,16 @@ mod tests {
             "interactive_start",
         ] {
             assert!(
-                !Requirement::for_tool(name).available(Some(&doctor), false),
+                !catalog::builtins()
+                    .iter()
+                    .find(|spec| spec.definition.name.as_str() == name)
+                    .unwrap()
+                    .requirement
+                    .available(Some(&doctor), false),
                 "{name}"
             );
         }
-        assert!(!Requirement::for_tool("debug_start").available(None, false));
-        assert!(Requirement::for_tool("binary_inspect").available(None, false));
+        assert!(!Requirement::Worker(&[Method::DebugStart]).available(None, false));
+        assert!(Requirement::Controller.available(None, false));
     }
 }

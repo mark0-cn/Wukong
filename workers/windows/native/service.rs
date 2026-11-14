@@ -263,6 +263,7 @@ async fn serve_client(
     worker: Arc<Worker>,
     _permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<()> {
+    let rpc = crate::worker_rpc::Server::new(worker)?;
     let mut stream = BufReader::new(server);
     loop {
         let Some(frame) = tokio::time::timeout(
@@ -274,7 +275,7 @@ async fn serve_client(
             return Ok(());
         };
         pipe_transport::authenticate_client(stream.get_ref(), &sid)?;
-        let reply = worker.call(&frame).await?;
+        let reply = rpc.call(&frame).await?;
         pipe_transport::write_frame(stream.get_mut(), &reply).await?;
     }
 }
@@ -295,7 +296,7 @@ async fn run(context: &ContextState) -> Result<()> {
         serde_json::from_slice(&deployment::read_bytes(&root.join("binding.json"), 4096)?)?;
     ensure!(
         binding
-            == json!({"schema":1,"protocol":2,"installation_id":deployment.installation_id,"package_sha256":manifest.sha256()}),
+            == json!({"schema":1,"protocol":3,"installation_id":deployment.installation_id,"package_sha256":manifest.sha256()}),
         "native worker binding differs from active signed payload"
     );
     let identity =

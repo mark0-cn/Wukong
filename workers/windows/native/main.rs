@@ -104,7 +104,7 @@ fn main() -> Result<()> {
             Path::new(&args[2]),
             &key,
             &Compatibility {
-                runtime_protocol: 2,
+                runtime_protocol: 3,
                 controller_version: controller,
             },
         )?;
@@ -144,7 +144,7 @@ fn main() -> Result<()> {
         Path::new(&args[2]),
         &key,
         &Compatibility {
-            runtime_protocol: 2,
+            runtime_protocol: 3,
             controller_version: controller,
         },
     )?;

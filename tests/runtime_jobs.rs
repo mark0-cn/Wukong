@@ -52,7 +52,7 @@ for line in sys.stdin:
     method, params = request['method'], request.get('params', {})
     error = None
     if method == 'ping':
-        result = {'identity':{'protocol':2,'installation_id':'capacity-fixture','boot_id':'boot','package_sha256':'0'*64}}
+        result = {'identity':{'protocol':3,'installation_id':'capacity-fixture','boot_id':'boot','package_sha256':'0'*64}}
     elif method == 'job.start':
         calls += 1
         if params.get('request_id') == 'unknown':
@@ -140,7 +140,7 @@ for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
     if method == "ping":
-        result = {'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}
+        result = {'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}
     elif method == "slow":
         if not marker.exists():
             marker.write_text("slow", encoding="utf-8")
@@ -347,7 +347,7 @@ for line in sys.stdin:
     request=json.loads(line)
     method=request['method']
     if method=='ping':
-        reply={'jsonrpc':'2.0','id':request['id'],'result':{'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}
+        reply={'jsonrpc':'2.0','id':request['id'],'result':{'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}
     elif method=='rpc_error':
         reply={'jsonrpc':'2.0','id':request['id'],'error':{'code':-32000,'message':'fixture rejection'}}
     elif method=='malformed':
@@ -435,7 +435,7 @@ for line in sys.stdin:
   print('{invalid-json',flush=True);continue
  if r['method']=='ping':
   boot=(root/'boot').read_text() if (root/'boot').exists() else 'first'
-  result={'identity':{'protocol':2,'installation_id':'fixture','boot_id':boot,'package_sha256':'0'*64}}
+  result={'identity':{'protocol':3,'installation_id':'fixture','boot_id':boot,'package_sha256':'0'*64}}
  else:
   (root/'effect').write_text('executed');result={}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
@@ -492,7 +492,7 @@ sys.stderr.write('x' * 131072)
 sys.stderr.flush()
 for line in sys.stdin:
     request = json.loads(line)
-    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True,'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}), flush=True)
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': {'ready': True,'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}}}), flush=True)
 "#,
     )?;
     let config = RuntimeConfig {

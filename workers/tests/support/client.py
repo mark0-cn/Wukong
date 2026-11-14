@@ -17,7 +17,7 @@ class Client:
 
     def call(self, method, **params):
         self.counter += 1
-        self.process.stdin.write(json.dumps({"id": self.counter, "method": method, "params": params}) + "\n")
+        self.process.stdin.write(json.dumps({"jsonrpc": "2.0", "id": self.counter, "method": method, "params": params}) + "\n")
         self.process.stdin.flush()
         reply = json.loads(self.process.stdout.readline())
         assert "error" not in reply, reply

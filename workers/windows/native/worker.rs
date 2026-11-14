@@ -5,7 +5,7 @@ use crate::{
     resource_journal::Journal,
     resource_runtime::{Dispatch, Runtime},
     security::AclPolicy,
-    worker_leases::{Leases, Rejected, require},
+    worker_leases::{Leases, require},
 };
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
@@ -89,40 +89,13 @@ impl Worker {
             Err(_) => Ok(false),
         }
     }
-    pub async fn call(&self, bytes: &[u8]) -> Result<Vec<u8>> {
-        let mut request: Value = serde_json::from_slice(bytes)?;
-        let id = request.get("id").cloned().unwrap_or(Value::Null);
-        match self.dispatch(&mut request).await {
-            Ok(reply) => Ok(reply),
-            Err(error) => {
-                let kind = error.downcast_ref::<Rejected>().map(|e| e.kind).unwrap_or(
-                    if error.is::<wukong_worker_protocol::CapacityBusy>() {
-                        wukong_worker_protocol::WorkerErrorKind::ResourceBusy
-                    } else if error.is::<serde_json::Error>() {
-                        wukong_worker_protocol::WorkerErrorKind::InvalidRequest
-                    } else {
-                        wukong_worker_protocol::WorkerErrorKind::Internal
-                    },
-                );
-                encode(&json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,
-                "message":format!("{error:#}").chars().take(2048).collect::<String>(),
-                "data":{"kind":kind}}}))
-            }
-        }
-    }
-    async fn dispatch(&self, request: &mut Value) -> Result<Vec<u8>> {
-        ensure!(
-            request["jsonrpc"] == "2.0" && request.is_object(),
-            "invalid native RPC envelope"
-        );
-        let method = request["method"]
-            .as_str()
-            .context("missing native RPC method")?
-            .to_owned();
-        ensure!(
-            !request.as_object().unwrap().contains_key("auth"),
-            "authentication is service-owned"
-        );
+    pub(crate) async fn dispatch(
+        &self,
+        operation: wukong_worker_protocol::Method,
+        params: Value,
+    ) -> Result<Value> {
+        let method = operation.name().to_owned();
+        let request = json!({"params": params});
         if matches!(method.as_str(), "ping" | "doctor") {
             let result = if method == "ping" {
                 json!({"protocol":self.identity.protocol,"identity":self.identity,
@@ -133,7 +106,7 @@ impl Worker {
                     self.qualified.load(std::sync::atomic::Ordering::Acquire),
                 )
             };
-            return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":result}));
+            return Ok(result);
         }
         if !request.get("params").is_some_and(Value::is_object) {
             anyhow::bail!("native RPC parameters must be an object");
@@ -144,7 +117,7 @@ impl Worker {
                 .acquire(request["params"].as_object().unwrap(), || {
                     self.resources_idle()
                 })?;
-            return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":lease}));
+            return Ok(serde_json::to_value(lease)?);
         }
         if method == "environment.lease.release" {
             let epoch = self
@@ -152,9 +125,7 @@ impl Worker {
                 .release(request["params"].as_object().unwrap(), || {
                     self.resources_idle()
                 })?;
-            return encode(
-                &json!({"jsonrpc":"2.0","id":request["id"],"result":{"released":true,"epoch":epoch}}),
-            );
+            return Ok(json!({"released":true,"epoch":epoch}));
         }
         require(
             crate::worker_catalog::route(&method).is_some(),
@@ -246,7 +217,7 @@ impl Worker {
                     .context("resource observation timed out; reconcile its original request")??
                 }
             };
-            return encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":value}));
+            return Ok(value);
         }
         let result = if let Some(inputs) = &inputs {
             self.leases.validate(&outer_lease)?;
@@ -260,7 +231,7 @@ impl Worker {
                 "Windows execution runtime is not initialized"
             ))
         };
-        encode(&json!({"jsonrpc":"2.0","id":request["id"],"result":result?}))
+        result
     }
     pub(crate) fn qualify(&self) {
         self.qualified
@@ -268,11 +239,6 @@ impl Worker {
     }
 }
 
-fn encode(value: &Value) -> Result<Vec<u8>> {
-    let mut bytes = serde_json::to_vec(value)?;
-    bytes.push(b'\n');
-    Ok(bytes)
-}
 #[cfg(test)]
 #[path = "worker_tests.rs"]
 mod tests;

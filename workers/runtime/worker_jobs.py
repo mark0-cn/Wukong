@@ -8,15 +8,14 @@ import sys
 import threading
 import time
 import uuid
-from worker_capabilities import doctor
 from worker_common import BRIDGE_PATH, MAX_FILE, TERMINAL, artifact, atomic_json, bounded_int, confined, job_dir, load_json, parse_address, public_file, safe_env, tail
 from worker_processes import detached_options, process_identity
 
 class JobManager:
-    methods = frozenset(['angr.solve', 'py.run', 'job.start', 'fuzz.status', 'job.status', 'job.list', 'fuzz.stop', 'job.cancel', 'job.artifacts', 'fuzz.start', 'crash.replay', 'input.minimize', 'poc.verify'])
 
-    def __init__(self, root, trusted, isolated):
+    def __init__(self, root, trusted, isolated, observe=None):
         self.root, self.trusted, self.isolated = root, trusted, isolated
+        self.observe = observe
         self.lock = threading.RLock()
         (root / "jobs").mkdir(exist_ok=True)
 
@@ -176,7 +175,7 @@ class JobManager:
         return meta
 
     def doctor(self):
-        return doctor(self.root, self.trusted, self.isolated)
+        return self.observe() if self.observe else {"capabilities": {}}
 
     def dispatch(self, method, params):
         if method == "angr.solve":

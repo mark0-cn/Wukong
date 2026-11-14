@@ -113,7 +113,6 @@ def probe(program, rows, query, endian):
 
 
 class SeccompService:
-    methods = frozenset(["seccomp.analyze"])
     def __init__(self, root, trusted, isolated): self.root = root
 
     def dispatch(self, method, params):

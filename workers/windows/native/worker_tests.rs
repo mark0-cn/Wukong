@@ -4,18 +4,18 @@ use std::{sync::Arc, time::Instant};
 
 fn identity() -> Identity {
     Identity {
-        protocol: 2,
+        protocol: 3,
         installation_id: "a".repeat(32),
         boot_id: format!("windows:{}:40", "b".repeat(32)),
         package_sha256: "c".repeat(64),
     }
 }
-fn fixture() -> Result<(tempfile::TempDir, Worker)> {
+fn fixture() -> Result<(tempfile::TempDir, Arc<Worker>)> {
     let temp = tempfile::tempdir()?;
     let policy = AclPolicy::current_user()?;
     policy.apply(temp.path(), true)?;
     let worker = Worker::with_policy(identity(), temp.path(), policy)?;
-    Ok((temp, worker))
+    Ok((temp, Arc::new(worker)))
 }
 fn request(method: &str, params: Value) -> Value {
     json!({"jsonrpc":"2.0","id":1,"method":method,"params":params})
@@ -46,18 +46,15 @@ async fn replay_and_minimization_dispatch_reach_owned_input_admission() -> Resul
     .await?;
     assert!(uploaded.get("error").is_none(), "{uploaded}");
     for method in ["input.minimize", "crash.replay", "poc.verify"] {
-        let reply = call(
-            &worker,
-            &request(
-                method,
-                json!({
-                    "target":"files/fixture.bin","input":"files/fixture.bin","args":["@@"],
-                    "producer_agent_id":"producer","verifier_agent_id":"verifier",
-                    "request_id":method,"_lease":lease,"_binding":identity()
-                }),
-            ),
-        )
-        .await?;
+        let mut params = json!({
+            "target":"files/fixture.bin","input":"files/fixture.bin","args":["@@"],
+            "request_id":method,"_lease":lease,"_binding":identity()
+        });
+        if method == "poc.verify" {
+            params["producer_agent_id"] = json!("producer");
+            params["verifier_agent_id"] = json!("verifier");
+        }
+        let reply = call(&worker, &request(method, params)).await?;
         assert_eq!(
             reply["error"]["message"],
             "native logical input differs from admitted owner or execution policy"
@@ -143,7 +140,6 @@ async fn native_resource_state_blocks_release_and_expired_takeover_but_not_renew
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn busy_native_resources_do_not_block_renewal_or_allow_idle_transitions() -> Result<()> {
     let (_root, worker) = fixture()?;
-    let worker = Arc::new(worker);
     let first = call(&worker, &acquire("run", "controller")).await?["result"].clone();
     let (ready, locked) = tokio::sync::oneshot::channel();
     let (release, finish) = std::sync::mpsc::channel();
@@ -226,16 +222,22 @@ async fn persisted_native_resource_state_still_blocks_takeover_after_worker_reop
         )?;
     }
     drop(worker);
-    let worker = Worker::with_policy(identity(), root.path(), AclPolicy::current_user()?)?;
+    let worker = Arc::new(Worker::with_policy(
+        identity(),
+        root.path(),
+        AclPolicy::current_user()?,
+    )?);
     assert_eq!(
         call(&worker, &acquire("next", "successor")).await?["error"]["data"]["kind"],
         "conflict"
     );
     Ok(())
 }
-async fn call(worker: &Worker, value: &Value) -> Result<Value> {
+async fn call(worker: &Arc<Worker>, value: &Value) -> Result<Value> {
     Ok(serde_json::from_slice(
-        &worker.call(&encode(value)?).await?,
+        &crate::worker_rpc::Server::new(worker.clone())?
+            .call(&serde_json::to_vec(value)?)
+            .await?,
     )?)
 }
 fn release(lease: &Value) -> Value {
@@ -247,7 +249,7 @@ fn release(lease: &Value) -> Value {
 fn effect(lease: &Value) -> Value {
     request(
         "job.status",
-        json!({"request_id":"stable","_lease":lease,"_binding":identity()}),
+        json!({"job_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","request_id":"stable","_lease":lease,"_binding":identity()}),
     )
 }
 
@@ -290,7 +292,11 @@ async fn one_authority_owns_handshake_fencing_and_files() -> Result<()> {
         "lease_lost"
     );
     drop(worker);
-    let worker = Worker::with_policy(identity(), root.path(), AclPolicy::current_user()?)?;
+    let worker = Arc::new(Worker::with_policy(
+        identity(),
+        root.path(),
+        AclPolicy::current_user()?,
+    )?);
     let successor = call(&worker, &acquire("next", "controller")).await?["result"].clone();
     assert!(successor["epoch"].as_u64().unwrap() > lease["epoch"].as_u64().unwrap());
     assert_eq!(

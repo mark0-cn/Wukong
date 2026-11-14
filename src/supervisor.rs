@@ -161,7 +161,7 @@ for line in sys.stdin:
  r=json.loads(line)
  if r['method']=='job.status':
   (root/'polling').write_text('ready');time.sleep(60)
- result={'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {'os':platform.system().lower()} if r['method']=='doctor' else {}
+ result={'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {'os':platform.system().lower()} if r['method']=='doctor' else {}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
 "#,
             )?;

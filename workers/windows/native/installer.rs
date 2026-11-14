@@ -65,7 +65,7 @@ impl Plan {
             &base.join("payload"),
             pinned,
             &Compatibility {
-                runtime_protocol: 2,
+                runtime_protocol: 3,
                 controller_version: &setup.controller_version,
             },
         )?;
@@ -329,7 +329,7 @@ pub fn install(plan: Plan) -> Result<Value> {
         &package,
         &key,
         &Compatibility {
-            runtime_protocol: 2,
+            runtime_protocol: 3,
             controller_version: &deployment.controller_version,
         },
         &code,
@@ -353,7 +353,7 @@ pub fn install(plan: Plan) -> Result<Value> {
     )?;
     deployment::write_new_json(
         &root.join("binding.json"),
-        &json!({"schema":1,"protocol":2,"installation_id":deployment.installation_id,"package_sha256":plan.manifest.sha256()}),
+        &json!({"schema":1,"protocol":3,"installation_id":deployment.installation_id,"package_sha256":plan.manifest.sha256()}),
         &private.clone().with_account(&worker.sid, false)?,
     )?;
     let entry = &plan.manifest.manifest().entrypoints;

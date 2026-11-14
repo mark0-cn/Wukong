@@ -11,7 +11,9 @@ class ImmutableDeployment(unittest.TestCase):
     def test_bridge_entry_does_not_generate_unsigned_bytecode(self):
         source = Path(__file__).resolve().parents[2] / "runtime"
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "runtime"
+            root.mkdir()
+            shutil.copytree(source.parent / "protocol/schema", root.parent / "protocol/schema")
             for path in source.glob("*.py"):
                 shutil.copyfile(path, root / path.name)
             before = {path.name: path.read_bytes() for path in root.iterdir()}

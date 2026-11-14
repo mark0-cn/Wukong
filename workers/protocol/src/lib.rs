@@ -1,14 +1,26 @@
 //! Shared public JSON-RPC contract. Transport framing belongs to the transport libraries.
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL: u32 = 2;
+mod resources;
+pub use resources::*;
+mod methods;
+pub mod params;
+pub use methods::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub const PROTOCOL: u32 = 3;
+pub const MAX_RPC_BYTES: usize = 48 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerIdentity {
+    #[schemars(range(min = 3, max = 3))]
     pub protocol: u32,
+    #[schemars(length(min = 1, max = 256))]
     pub installation_id: String,
+    #[schemars(length(min = 1, max = 256))]
     pub boot_id: String,
+    #[schemars(regex(pattern = "^[0-9a-f]{64}$"))]
     pub package_sha256: String,
 }
 
@@ -33,7 +45,7 @@ impl WorkerIdentity {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentLease {
     pub epoch: u64,
@@ -77,7 +89,7 @@ impl EnvironmentLease {
 }
 
 /// Limits advertised by the worker, independent of controller Agent concurrency.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerCapacity {
     pub max_active_resources: usize,
@@ -94,25 +106,7 @@ impl std::fmt::Display for CapacityBusy {
 }
 impl std::error::Error for CapacityBusy {}
 
-pub fn starts_resource(method: &str) -> bool {
-    matches!(
-        method,
-        "job.start"
-            | "debug.start"
-            | "interact.start"
-            | "exec.run"
-            | "py.run"
-            | "crash.replay"
-            | "input.minimize"
-            | "poc.verify"
-            | "libc.identify"
-            | "seccomp.analyze"
-            | "cyclic.offset"
-            | "emu.run"
-    )
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkerErrorKind {
     InvalidRequest,
@@ -125,4 +119,25 @@ pub enum WorkerErrorKind {
     Internal,
     #[default]
     Unknown,
+}
+
+/// Authentication and request identity are separate from operation parameters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RequestContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = 256))]
+    pub request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    #[serde(rename = "_binding", default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<WorkerIdentity>,
+    #[serde(rename = "_lease", default, skip_serializing_if = "Option::is_none")]
+    pub lease: Option<EnvironmentLease>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerErrorData {
+    pub kind: WorkerErrorKind,
 }

@@ -40,17 +40,19 @@ class WorkerFenceTests(unittest.TestCase):
 
     def test_unisolated_worker_does_not_advertise_native_execution(self):
         from worker_capabilities import doctor
-        capabilities=doctor(self.root,False,False)['capabilities']
+        from worker_runtime import Runtime
+        capabilities=doctor(self.root,False,False,Runtime(self.root,True).registrations)['capabilities']
         for name in ['process_jobs','persistent_jobs','crash_replay','poc_verify','shell_exec','py_run','native_target_execution']:
             self.assertFalse(capabilities[name],name)
 
     def test_windows_probe_keeps_portable_analysis_but_excludes_linux_engines(self):
         from unittest.mock import patch
         from worker_capabilities import doctor
+        from worker_runtime import Runtime
         with patch('worker_capabilities.sys', SimpleNamespace(platform='win32')), \
                 patch('worker_capabilities.platform.system', return_value='Windows'), \
                 patch('worker_capabilities._python_module', return_value=True):
-            capabilities=doctor(self.root,True,False)['capabilities']
+            capabilities=doctor(self.root,True,False,Runtime(self.root,True).registrations)['capabilities']
         self.assertFalse(capabilities['debug_dbgeng'])
         self.assertTrue(capabilities['resumable_file_transfer'])
         for name in ['debug_gdb_mi','fuzz_qemu','ghidra_query','core_snapshot']:

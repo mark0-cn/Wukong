@@ -8,7 +8,6 @@ from worker_common import bounded_int, public_file, safe_env
 from worker_processes import run_process
 
 class CommandService:
-    methods = frozenset(['exec.run'])
 
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated
