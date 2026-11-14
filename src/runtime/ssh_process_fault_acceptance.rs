@@ -42,6 +42,8 @@ struct Profile {
     resource_inventory: bool,
     #[serde(default)]
     python: bool,
+    #[serde(default)]
+    replay: bool,
     ready: PathBuf,
     resume: PathBuf,
     output: PathBuf,
@@ -135,6 +137,14 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
                 && profile.resource_inventory),
         "Python fault acceptance requires host/service interruption with resource discovery"
     );
+    ensure!(
+        !profile.replay
+            || (matches!(profile.fault, Fault::Host | Fault::Service)
+                && !profile.python
+                && !profile.launch_spec
+                && profile.resource_inventory),
+        "replay fault acceptance requires host/service interruption with resource discovery"
+    );
     for path in [&profile.ready, &profile.resume, &profile.output] {
         ensure!(
             path.is_absolute() && !path.try_exists()?,
@@ -181,12 +191,33 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     } else {
         None
     };
-    let method = if profile.python {
+    let replay_input = if profile.replay {
+        Some(
+            bound
+                .call(
+                    "file.put",
+                    json!({"path":"fault/replay-input.bin",
+            "data_base64":STANDARD.encode(b"trusted replay interruption"),"executable":false,
+            "request_id":"replay-input-upload"}),
+                )
+                .await?,
+        )
+    } else {
+        None
+    };
+    let method = if profile.replay {
+        "poc.verify"
+    } else if profile.python {
         "py.run"
     } else {
         "job.start"
     };
-    let request = if profile.python {
+    let request = if let Some(input) = &replay_input {
+        json!({"target":uploaded["path"],"input":input["path"],"input_mode":"stdin",
+            "args":["--fault-ready"],"trials":3,"timeout_secs":60,
+            "producer_agent_id":"fixture-producer","verifier_agent_id":"fixture-verifier",
+            "request_id":"interrupted-start","call_id":"interrupted-start"})
+    } else if profile.python {
         json!({"source":PYTHON_SOURCE,"target":uploaded["path"],"timeout_secs":120,"request_id":"interrupted-start","call_id":"interrupted-start"})
     } else if let Some(launch) = &launch {
         json!({"launch_spec":launch["path"],"request_id":"interrupted-start","call_id":"interrupted-start"})
@@ -207,7 +238,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     if profile.fault != Fault::Preparation {
         publish(
             &profile.ready,
-            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"launch":launch,"method":method,"request":request,"job":started}),
+            &json!({"scope":"dedicated_native_fault_ready","fault":profile.fault,"identity":client.identity(),"run_id":run,"owner_id":"fault-controller-fixture","input":uploaded,"replay_input":replay_input,"launch":launch,"method":method,"request":request,"job":started}),
         )?;
         resume(&profile.resume, profile.fault).await?;
     }
@@ -384,6 +415,27 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             "source conflict changed the interrupted resource"
         );
     }
+    if profile.replay {
+        ensure!(
+            status["kind"] == "verify",
+            "interrupted replay lost its kind"
+        );
+        let mut changed = request.clone();
+        changed["trials"] = json!(4);
+        let rejected = rebound
+            .call(method, changed)
+            .await
+            .err()
+            .context("interrupted replay accepted changed trials")?;
+        ensure!(
+            rejected.downcast_ref::<WorkerError>().is_some(),
+            "changed trial count failed outside worker admission: {rejected:#}"
+        );
+        ensure!(
+            rebound.call("job.status", json!({"job_id":id})).await? == status,
+            "trial-count conflict changed the interrupted resource"
+        );
+    }
     let artifacts = rebound.call("job.artifacts", json!({"job_id":id})).await?;
     let artifacts = artifacts.as_array().context("recovery artifacts missing")?;
     ensure!(
@@ -414,7 +466,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
             && proof["scratch_removed"] == true,
         "native recovery receipt does not bind cleanup to the original resource"
     );
-    if profile.fault == Fault::Service {
+    if profile.fault == Fault::Service || profile.replay {
         ensure!(
             proof["guardian_found"] == true,
             "service recovery did not reopen the externally retained guardian Job"
@@ -428,7 +480,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     client.close().await?;
     publish(
         &profile.output,
-        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"launch":launch,"method":method,"python_source_conflict_rejected":profile.python,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
+        &json!({"passed":true,"scope":"interrupted_native_process_vm","fault":profile.fault,"identity":active.identity(),"first_epoch":lease.epoch,"last_epoch":current.epoch,"original_input":uploaded,"replay_input":replay_input,"launch":launch,"method":method,"python_source_conflict_rejected":profile.python,"replay_trials_conflict_rejected":profile.replay,"request":request,"started":started,"reconciled":status,"inventory":recovered_inventory,"recovery_receipt":proof,"recovery_artifact":original,"after_recovery":after,"production_execution":false}),
     )?;
     Ok(())
 }
