@@ -48,3 +48,5 @@
 ## 结构化方法产物
 
 规范产物名 `formats`、`algorithms`、`state_machine`、`binary_diff` 要求匹配 `structured.kind`，包含 1–256 行；每行引用同 run 的 `evidence_id`。必需字段分别为 formats：offset/width/encoding/meaning/confidence；algorithms：input/expected/observed/arithmetic；state_machine：from/action/to/expected/observed；binary_diff：baseline_sha256/target_sha256/before/after。摘要为 64 位十六进制。另行关联原始产物；结构完整不等于正确，独立 verifier 必须挑战语义声明。旧的非规范产物名继续支持。
+
+普通交付物只需契约中的精确名称和原始 `evidence_id`；不要求方法行时省略 `structured`。完成条件使用契约中的精确标签。校验会指出缺失的交付物名称，并一次列出首个无效行的全部缺失字段，避免每轮猜测一个字段来修正结果。

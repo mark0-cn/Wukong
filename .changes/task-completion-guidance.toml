@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Give agents precise task-completion guidance: ordinary deliverables link original evidence without unrelated method rows, and validation identifies missing names and fields in one correction."
+zh_CN = "明确 Agent 的任务完成协议：普通交付物直接关联原始证据，无需无关的方法行；校验集中指出缺失名称和字段，减少反复试错。"

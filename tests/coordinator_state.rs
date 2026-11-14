@@ -864,10 +864,12 @@ fn task_contract_requires_real_deliverables_and_preserves_each_generation_result
     let mut conflicting = task.clone();
     conflicting.contract.deliverables.push("decoder".into());
     assert!(c.create_child(&run.root_id, conflicting).is_err());
-    assert!(
-        c.finish(&child.id, "prose without required deliverable")
-            .is_err()
-    );
+    let error = c
+        .finish(&child.id, "prose without required deliverable")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("field table"));
+    assert!(error.contains("Omit structured"));
     let mut answer = TaskResult {
         answer: "fixture answer".into(),
         artifacts: vec![TaskArtifact {
@@ -878,6 +880,12 @@ fn task_contract_requires_real_deliverables_and_preserves_each_generation_result
         ..Default::default()
     };
     assert!(c.finish_result(&child.id, answer.clone()).is_err());
+    answer.completed_conditions = vec!["paraphrased condition".into()];
+    let error = c
+        .finish_result(&child.id, answer.clone())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("account for each field"));
     answer.completed_conditions = task.contract.completion_conditions;
     c.finish_result(&child.id, answer).unwrap();
     let completed: AgentSnapshot = store.require("agent", &child.id).unwrap();
@@ -1190,7 +1198,11 @@ fn structured_deliverables_reject_missing_semantics() {
     };
     assert!(artifact.validate().is_ok());
     artifact.rows[0].as_object_mut().unwrap().remove("encoding");
-    assert!(artifact.validate().is_err());
+    artifact.rows[0].as_object_mut().unwrap().remove("meaning");
+    assert_eq!(
+        artifact.validate().unwrap_err().to_string(),
+        "structured formats row 0 missing fields: encoding, meaning"
+    );
     artifact.kind = "invented".into();
     assert!(artifact.validate().is_err());
 }

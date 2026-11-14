@@ -302,9 +302,12 @@ pub enum TaskOutcome {
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskArtifact {
+    /// Exact deliverable name from the task contract.
     pub name: String,
     pub evidence_id: String,
     /// Structured summary of the linked original artifact; never a replacement for original evidence.
+    /// Omit for ordinary evidence-linked deliverables. Only formats, algorithms,
+    /// state_machine and binary_diff method deliverables require this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured: Option<StructuredArtifact>,
 }
@@ -314,7 +317,10 @@ pub struct TaskArtifact {
 pub struct StructuredArtifact {
     /// formats, algorithms, state_machine or binary_diff.
     pub kind: String,
-    /// Each row includes evidence_id plus the fields required by its kind.
+    /// Every row includes evidence_id. Required fields by kind: formats:
+    /// offset, width, encoding, meaning, confidence; algorithms: input, expected,
+    /// observed, arithmetic; state_machine: from, action, to, expected, observed;
+    /// binary_diff: baseline_sha256, target_sha256, before, after.
     pub rows: Vec<serde_json::Value>,
 }
 impl StructuredArtifact {
@@ -330,19 +336,27 @@ impl StructuredArtifact {
             !self.rows.is_empty() && self.rows.len() <= 256,
             "invalid structured row count"
         );
-        for row in &self.rows {
+        for (index, row) in self.rows.iter().enumerate() {
             anyhow::ensure!(
                 serde_json::to_vec(row)?.len() <= 16384,
                 "structured row too large"
             );
-            for key in required.iter().copied().chain(["evidence_id"]) {
-                anyhow::ensure!(
-                    row.get(key).is_some_and(
-                        |v| !v.is_null() && v.as_str().is_none_or(|s| !s.trim().is_empty())
-                    ),
-                    "missing structured field {key}"
-                );
-            }
+            let missing: Vec<_> = required
+                .iter()
+                .copied()
+                .chain(["evidence_id"])
+                .filter(|key| {
+                    row.get(*key).is_none_or(|v| {
+                        v.is_null() || v.as_str().is_some_and(|s| s.trim().is_empty())
+                    })
+                })
+                .collect();
+            anyhow::ensure!(
+                missing.is_empty(),
+                "structured {} row {index} missing fields: {}",
+                self.kind,
+                missing.join(", ")
+            );
             anyhow::ensure!(
                 row["evidence_id"].as_str().is_some(),
                 "evidence_id must be a string"
@@ -371,6 +385,7 @@ pub struct TaskResult {
     pub evidence_ids: Vec<String>,
     #[serde(default)]
     pub artifacts: Vec<TaskArtifact>,
+    /// Exact labels copied from contract.completion_conditions; do not paraphrase or add labels.
     #[serde(default)]
     pub completed_conditions: Vec<String>,
     #[serde(default)]

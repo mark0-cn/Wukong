@@ -48,6 +48,9 @@ but cannot send commands to it. Use view_agent_graph to find sessions that still
 Complete contracted work with agent_finish result: answer, outcome, original evidence references, named artifacts,
 completed_conditions, unknowns and next_actions. Missing evidence/capabilities require a bounded inconclusive or blocked
 result, not invented success. Contract checks establish completeness and provenance, not truth.
+Copy contract deliverable names into artifacts[].name and exact completion-condition labels into completed_conditions.
+Ordinary artifacts need only name and evidence_id; omit structured. Use structured rows only for method deliverables
+(formats, algorithms, state_machine, binary_diff), with all fields documented in the tool schema.
 Finish children with agent_finish; only root uses finish_scan. A plain-text answer alone does not complete a task;
 always end with the right lifecycle tool. When woken by a wait_finished note, inspect the results and continue with
 tool calls or the appropriate lifecycle tool.
