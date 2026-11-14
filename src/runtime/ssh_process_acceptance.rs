@@ -386,8 +386,13 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
                 .is_err(),
             "active native job did not block lease release"
         );
-        let queued_start = bound.call("job.start", json!({"argv":[uploaded["path"],"--echo"],"request_id":format!("queued-{architecture}")}));
-        tokio::pin!(queued_start);
+        // Keep the queued request polled while observing/cancelling the active
+        // resource. Suspending this future inside call_once can retain the
+        // serialized transport lock and deadlock the following lease query.
+        let queued_client = bound.clone();
+        let queued_request = json!({"argv":[uploaded["path"],"--echo"],"request_id":format!("queued-{architecture}")});
+        let mut queued_start =
+            tokio::spawn(async move { queued_client.call("job.start", queued_request).await });
         ensure!(
             tokio::time::timeout(Duration::from_millis(500), &mut queued_start)
                 .await
@@ -411,7 +416,7 @@ async fn remote_installed_windows_worker_process_acceptance() -> Result<()> {
             cancelled["state"] == "cancelled" && cancelled["result"]["jobs_empty"] == true,
             "native cancellation did not clean up: {cancelled}"
         );
-        let queued = queued_start.await?;
+        let queued = queued_start.await??;
         let queued = terminal(
             &bound,
             queued["job_id"].as_str().context("queued job ID absent")?,
