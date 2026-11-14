@@ -4,9 +4,11 @@
 
 [English](README.md) · 简体中文
 
-被忽略的 `remote_installed_windows_worker_minimize_acceptance` 夹具读取 `WUKONG_REMOTE_WORKER_MINIMIZE_TEST`：绝对路径 JSON 配置，包含 `config`、`manifest_sha256`、x64/x86 的已签名 `probes`（`path`、`sha256`），以及全新绝对路径 `output`。覆盖强/弱等价性、异常码相同但位置不同的故障、二进制 stdin/argv 和 LaunchSpec、空输入、一次尝试预算、无崩溃或无法确定的基线、取消/期限、原始试验证据及重试/冲突处理。轮询会续租。只能使用独立登记的离线开发 VM。已安装最小化仍待通过资格验收。已完成清理的用例不匹配会汇总到失败批次报告；所有权不确定时必须先验证恢复清理，再开始下一个用例。这不代表对抗隔离或其余生命周期验收。
+被忽略的 `remote_installed_windows_worker_minimize_acceptance` 夹具读取 `WUKONG_REMOTE_WORKER_MINIMIZE_TEST`：绝对路径 JSON 配置，包含 `config`、`manifest_sha256`、x64/x86 的已签名 `probes`（`path`、`sha256`），以及全新绝对路径 `output`。覆盖强/弱等价性、异常码相同但位置不同的故障、二进制 stdin/argv 和 LaunchSpec、空输入、一次尝试预算、无崩溃或无法确定的基线、取消/期限、原始试验证据及重试/冲突处理。轮询会续租。只能使用独立登记的离线开发 VM。全部 20 个已安装用例已在源码 `b05b7fc` 上通过；夹具还将捕获的寄存器、模块及两次异常停止与 MCP 原始响应核对。见 [Windows 资格记录](../windows/README.zh-CN.md)。已完成清理的用例不匹配会汇总到失败批次报告；所有权不确定时必须先验证恢复清理，再开始下一个用例。这不代表对抗隔离或其余生命周期验收。
 
-独立观察服务重启后，`remote_native_completed_minimize_recovery_acceptance` 读取 `WUKONG_REMOTE_WORKER_MINIMIZE_RECOVERY_TEST`，其中包含 `config`、带哈希的 `previous` 验收报告（`path`、`sha256`）及全新绝对路径 `output`。它以递增 epoch 取得并续租原所有者租约，不上传输入便重试全部 20 个请求，并与原报告比较终态、完整候选/崩溃/输出证据及资源清单。此恢复夹具仍需已安装验证。
+独立观察服务重启后，`remote_native_completed_minimize_recovery_acceptance` 读取 `WUKONG_REMOTE_WORKER_MINIMIZE_RECOVERY_TEST`，其中包含 `config`、带哈希的 `previous` 验收报告（`path`、`sha256`）及全新绝对路径 `output`。它以递增 epoch 取得并续租原所有者租约，不上传输入便重试全部 20 个请求，并与原报告比较终态、完整候选/崩溃/输出证据及资源清单。同一源码上的全部 20 个已完成结果已通过已安装恢复验证，见上述资格记录。
+
+同一中断夹具接受 `minimize: true` 和 `resource_inventory: true`，不能同时启用 Python、回放或 LaunchSpec 模式。它仅在独立核对受保护的输入／计划、首轮试验身份、可信标记及所属进程后，中断三次尝试计划的基线试验。检查要求 `kind=minimize`、未知且丢失的结果、精确重试一致、改变尝试次数被拒绝、只读守护 Job 观察确认清理，以及后续执行成功。宿主和服务两种用例均在源码 `b05b7fc` 上通过。这只覆盖基线中断；调试观测及后续候选阶段仍待完成。
 
 `python workers/tests/run.py unit -p test_native_shell.py` 在 Windows 的临时目录运行可信固定 CMD 命令，其他平台明确跳过。它核对普通及扩展盘符路径下适配器的真实 stdin/stdout/stderr 句柄和 cwd，不进行安装或隔离配置变更。已安装 shell 夹具通过独立控制端连接观察同步调用并续租，与生产租约通道安排一致。
 
