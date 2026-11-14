@@ -63,22 +63,7 @@ impl Runtime {
         owner: &Owner,
         params: &Map<String, Value>,
     ) -> Result<Value> {
-        let request_id = params
-            .get("request_id")
-            .and_then(Value::as_str)
-            .context("native Python start requires a stable request_id")?;
-        ensure!(
-            params
-                .get("call_id")
-                .is_none_or(|call| call.as_str() == Some(request_id)),
-            "native call_id and request_id differ"
-        );
-        let mut parameters = params.clone();
-        for name in ["request_id", "call_id", "_binding", "_lease"] {
-            parameters.remove(name);
-        }
-        parameters.retain(|_, value| !value.is_null());
-        let python: Python = serde_json::from_value(Value::Object(parameters))?;
+        let (request_id, python): (_, Python) = start_parameters(params)?;
         let spec = python.process()?;
         let specification = json!({"native_process_schema":crate::resource_process::SCHEMA,
             "process":spec,"interpreter":Interpreter::Python});

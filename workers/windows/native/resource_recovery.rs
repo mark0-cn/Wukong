@@ -46,8 +46,41 @@ impl Request {
                 },
             "unsupported native resource recovery contract"
         );
+        owned_personas(record)?;
         Ok(())
     }
+}
+fn owned_personas(record: &ResourceRecord) -> Result<Vec<(Role, String)>> {
+    let installation = &record.owner.identity.installation_id;
+    let replay: Option<crate::resource_replay::Configuration> =
+        serde_json::from_value(record.specification["replay"].clone())?;
+    let mut personas = if let Some(replay) = replay {
+        replay.validate()?;
+        ensure!(
+            record.kind == ResourceKind::Process && record.specification["interpreter"].is_null(),
+            "replay recovery cannot adopt another resource kind"
+        );
+        (0..replay.trials)
+            .map(|trial| {
+                Ok((
+                    Role::Target,
+                    crate::resource_replay::nonce(installation, &record.id, trial)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        vec![(
+            Role::Target,
+            resource_process::nonce(installation, &record.id)?,
+        )]
+    };
+    if record.kind == ResourceKind::Debugger {
+        personas.push((
+            Role::Debugger,
+            crate::session_host::nonce(installation, &record.id)?,
+        ));
+    }
+    Ok(personas)
 }
 pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Result<Value> {
     security::require_system()?;
@@ -76,17 +109,7 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
     let found =
         crate::processes::resource_job::drain(installation, &record.id, Duration::from_secs(15))
             .context("drain original resource guardian")?;
-    let mut personas = vec![(
-        Role::Target,
-        resource_process::nonce(installation, &record.id)?,
-    )];
-    if record.kind == ResourceKind::Debugger {
-        personas.push((
-            Role::Debugger,
-            crate::session_host::nonce(installation, &record.id)?,
-        ));
-    }
-    for (role, nonce) in personas {
+    for (role, nonce) in owned_personas(record)? {
         let metadata = root.join("metadata");
         let profile_path = metadata.join(format!("resource-profile-{nonce}.json"));
         let scratch_path = resources.join(&nonce);

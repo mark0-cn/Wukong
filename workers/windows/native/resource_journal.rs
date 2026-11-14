@@ -42,7 +42,6 @@ CREATE UNIQUE INDEX one_pending_mutation ON effects(resource) WHERE state <> 'co
 pub enum ResourceKind {
     Process,
     Debugger,
-    Replay,
     Interactive,
 }
 

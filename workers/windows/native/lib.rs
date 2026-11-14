@@ -52,6 +52,8 @@ pub mod resource_process;
 #[cfg(windows)]
 pub mod resource_recovery;
 #[cfg(windows)]
+mod resource_replay;
+#[cfg(windows)]
 mod resource_runtime;
 #[cfg(windows)]
 mod resource_target;

@@ -26,7 +26,7 @@ impl Request {
         );
         self.target.validate()?;
         ensure!(
-            self.target.interpreter.is_none(),
+            self.target.interpreter.is_none() && self.target.replay.is_none(),
             "debugger admission requires a native target image"
         );
         if let Some(dump) = self.dump() {

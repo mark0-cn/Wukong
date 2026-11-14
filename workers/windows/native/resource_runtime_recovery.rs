@@ -105,6 +105,12 @@ impl Runtime {
                     && serde_json::from_value::<Option<crate::resource_process::Interpreter>>(
                         record.specification["interpreter"].clone()
                     )? == request.interpreter
+                    && serde_json::from_value::<Option<crate::resource_replay::Configuration>>(
+                        record.specification["replay"].clone()
+                    )? == request
+                        .replay
+                        .as_ref()
+                        .map(|replay| replay.configuration.clone())
                     && request.owner == record.owner
                     && request.resource_id == record.id,
                 "recovered result request differs from its journal intent"
@@ -144,6 +150,8 @@ impl Runtime {
                 value.as_object_mut().unwrap().remove("job_id");
                 value["session_id"] = json!(record.id);
                 value["worker_session_id"] = json!(record.id);
+            } else {
+                value["kind"] = json!(job_kind(record)?);
             }
             self.retain(&path, &serde_json::to_vec(&value)?)?;
         }

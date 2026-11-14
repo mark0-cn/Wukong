@@ -22,6 +22,8 @@ pub struct Request {
     pub program: Reference,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interpreter: Option<Interpreter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<crate::resource_replay::Replay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub argument_files: Vec<Reference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,6 +63,11 @@ pub(crate) fn nonce(installation: &str, resource: &str) -> Result<String> {
     Ok(digest(&("native.process.persona.v1", installation, resource))?[..48].to_owned())
 }
 impl Request {
+    pub(crate) fn kind(&self) -> &'static str {
+        self.replay
+            .as_ref()
+            .map_or("process", |replay| replay.configuration.kind.name())
+    }
     pub fn validate(&self) -> Result<()> {
         crate::resource_journal::bounded_identifier(&self.owner.run_id, 128)?;
         crate::resource_journal::bounded_identifier(&self.owner.owner_id, 128)?;
@@ -148,6 +155,9 @@ impl Request {
             );
         }
         ResourceLimits::new(self.processes, self.memory_bytes)?;
+        if let Some(replay) = &self.replay {
+            replay.validate(self)?;
+        }
         ensure!(
             serde_json::to_vec(self)?.len() <= 65536,
             "native process request exceeds protected record bound"
@@ -187,20 +197,36 @@ pub fn execute(
     let cancel = root
         .join("metadata/resource-requests")
         .join(format!("{}.cancel", request.resource_id));
+    if request.replay.is_some() {
+        return crate::resource_replay::execute(&host, &request, &cancel);
+    }
+    execute_one(&host, &request, &cancel, None)
+}
+
+pub(crate) fn execute_one(
+    host: &crate::resource_host::Host,
+    request: &Request,
+    cancel: &Path,
+    trial: Option<u8>,
+) -> Result<serde_json::Value> {
     if cancel.try_exists()? {
         return finish(
-            &request,
-            not_started(&request),
+            request,
+            not_started(request),
             String::new(),
             String::new(),
+            trial,
         );
     }
-    let mut target = crate::resource_target::Prepared::open(&host, &request, None)?;
+    let mut target = match trial {
+        Some(index) => crate::resource_target::Prepared::open_trial(host, request, index)?,
+        None => crate::resource_target::Prepared::open(host, request, None)?,
+    };
     let appcontainer = target.persona.sid_text()?;
     let logon = target.persona.logon_sid().to_owned();
     if cancel.try_exists()? {
         target.close()?;
-        return finish(&request, not_started(&request), appcontainer, logon);
+        return finish(request, not_started(request), appcontainer, logon, trial);
     }
     let limits = ResourceLimits::new(request.processes, request.memory_bytes)?;
     let input = target
@@ -213,7 +239,7 @@ pub fn execute(
         Ok(cancel.try_exists()?)
     })?;
     target.close()?;
-    finish(&request, result, appcontainer, logon)
+    finish(request, result, appcontainer, logon, trial)
 }
 
 /// Publish full binary-output evidence only after successful owned cleanup.
@@ -253,6 +279,7 @@ fn finish(
     result: CaptureResult,
     appcontainer: String,
     logon: String,
+    trial: Option<u8>,
 ) -> Result<serde_json::Value> {
     use base64::Engine;
     use sha2::{Digest, Sha256};
@@ -263,14 +290,79 @@ fn finish(
         crate::process_capture::StopReason::IoFailure => "io_failure",
         crate::process_capture::StopReason::Cancelled => "cancelled",
     };
-    Ok(
-        serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,"interpreter":request.interpreter,"argument_files":request.argument_files,"launch":request.launch,"input":request.input,"request_sha256":digest(request)?,
+    let mut value = serde_json::json!({"schema":1,"resource_id":request.resource_id,"owner":request.owner,"program":request.program,"interpreter":request.interpreter,"argument_files":request.argument_files,"launch":request.launch,"input":request.input,"request_sha256":digest(request)?,
         "pid":result.pid,"execution_started":result.pid != 0,"exit_code":result.exit_code,"stop_reason":reason,"appcontainer_sid":appcontainer,"logon_sid":logon,
         "stdout_base64":base64::engine::general_purpose::STANDARD.encode(&result.stdout),"stderr_base64":base64::engine::general_purpose::STANDARD.encode(&result.stderr),
         "stdout_sha256":hex::encode(Sha256::digest(&result.stdout)),"stderr_sha256":hex::encode(Sha256::digest(&result.stderr)),
         "stdin_written":result.input.written,"stdin_complete":result.input.completed,"stdin_error":result.input.error,
-        "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"scope":"native_process_host","production_execution":false}),
-    )
+        "jobs_empty":true,"profiles_removed":true,"scratch_removed":true,"scope":"native_process_host","production_execution":false});
+    if let Some(trial) = trial {
+        value["trial"] = serde_json::json!(trial);
+        value["scratch_nonce"] = serde_json::json!(crate::resource_replay::nonce(
+            &request.owner.identity.installation_id,
+            &request.resource_id,
+            trial,
+        )?);
+    }
+    Ok(value)
+}
+
+pub(crate) fn output(request: &Request, result: &serde_json::Value) -> Result<[Vec<u8>; 2]> {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let pid = result["pid"]
+        .as_u64()
+        .filter(|pid| *pid <= u64::from(u32::MAX))
+        .ok_or_else(|| anyhow::anyhow!("native target PID is missing or invalid"))?;
+    ensure!(
+        result["execution_started"] == (pid != 0)
+            && result["exit_code"]
+                .as_u64()
+                .is_some_and(|code| code <= u64::from(u32::MAX))
+            && matches!(
+                result["stop_reason"].as_str(),
+                Some("exited" | "cancelled" | "deadline" | "output_limit" | "io_failure")
+            ),
+        "native execution/termination observation differs"
+    );
+    ensure!(
+        result["schema"] == 1
+            && result["scope"] == "native_process_host"
+            && result["resource_id"] == request.resource_id
+            && result["owner"] == serde_json::to_value(&request.owner)?
+            && result["program"] == serde_json::to_value(&request.program)?
+            && result["interpreter"] == serde_json::to_value(request.interpreter)?
+            && result["request_sha256"] == digest(request)?
+            && result["input"] == serde_json::to_value(&request.input)?
+            && result["launch"] == serde_json::to_value(&request.launch)?
+            && result
+                .get("argument_files")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]))
+                == serde_json::to_value(&request.argument_files)?
+            && result["jobs_empty"] == true
+            && result["profiles_removed"] == true
+            && result["scratch_removed"] == true,
+        "native result or cleanup binding differs"
+    );
+    let mut streams = [Vec::new(), Vec::new()];
+    for (index, name) in ["stdout", "stderr"].into_iter().enumerate() {
+        let data = base64::engine::general_purpose::STANDARD.decode(
+            result[format!("{name}_base64")]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("native binary output is missing"))?,
+        )?;
+        ensure!(
+            result[format!("{name}_sha256")] == hex::encode(Sha256::digest(&data)),
+            "native stream content hash differs"
+        );
+        streams[index] = data;
+    }
+    ensure!(
+        streams.iter().map(Vec::len).sum::<usize>() <= request.output_limit,
+        "native output exceeds the admitted bound"
+    );
+    Ok(streams)
 }
 
 #[cfg(test)]
@@ -281,6 +373,7 @@ mod tests {
         Request {
             schema: SCHEMA,
             interpreter: None,
+            replay: None,
             resource_id: "a".repeat(32),
             owner: Owner {
                 identity: Binding {

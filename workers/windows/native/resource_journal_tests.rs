@@ -594,7 +594,7 @@ fn changed_parameters_and_old_boot_run_bindings_never_create_another_effect() ->
             .reserve_start(
                 &owner(),
                 "same-id",
-                ResourceKind::Replay,
+                ResourceKind::Debugger,
                 &json!({"target_sha256":"different"})
             )
             .is_err()

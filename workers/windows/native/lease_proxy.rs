@@ -402,8 +402,11 @@ impl LeaseProxy {
         // Serialize input publication independently of lease controls: hashing
         // or a slow worker upload must never prevent heartbeat renewal.
         let inputs = if Inputs::handles(&method)
-            || native_resource && matches!(method.as_str(), "job.start" | "debug.start" | "py.run")
-        {
+            || native_resource
+                && matches!(
+                    method.as_str(),
+                    "job.start" | "debug.start" | "py.run" | "crash.replay" | "poc.verify"
+                ) {
             Some(self.inputs.lock().await)
         } else {
             None

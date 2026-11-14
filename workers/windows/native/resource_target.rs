@@ -57,6 +57,28 @@ impl Prepared {
     /// The caller has already checked the protected request and guardian Job.
     /// Resolve all inputs before creating the target's persona or scratch.
     pub(crate) fn open(host: &Host, request: &Request, debugger: Option<&Persona>) -> Result<Self> {
+        let nonce = nonce(&host.deployment.installation_id, &request.resource_id)?;
+        Self::open_named(host, request, debugger, nonce)
+    }
+    pub(crate) fn open_trial(host: &Host, request: &Request, trial: u8) -> Result<Self> {
+        let replay = request.replay.as_ref().context("replay plan is absent")?;
+        ensure!(
+            trial < replay.configuration.trials,
+            "trial exceeds admitted count"
+        );
+        let nonce = crate::resource_replay::nonce(
+            &host.deployment.installation_id,
+            &request.resource_id,
+            trial,
+        )?;
+        Self::open_named(host, request, None, nonce)
+    }
+    fn open_named(
+        host: &Host,
+        request: &Request,
+        debugger: Option<&Persona>,
+        nonce: String,
+    ) -> Result<Self> {
         let metadata = host.root.join("metadata");
         let mut sources = image_sources(host, request)?;
         let identity = debugger
@@ -73,7 +95,6 @@ impl Prepared {
             .map(|input| resource_input::open(&metadata, &request.owner, input, Purpose::Inspect))
             .transpose()?;
         let installation = &host.deployment.installation_id;
-        let nonce = nonce(installation, &request.resource_id)?;
         let (persona, _) = crate::resource_host::create_persona_named(
             &host.deployment,
             &host.root,

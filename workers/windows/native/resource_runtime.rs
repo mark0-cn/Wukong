@@ -51,6 +51,34 @@ fn default_timeout() -> u64 {
 fn default_output() -> usize {
     1024 * 1024
 }
+fn start_parameters<T: serde::de::DeserializeOwned>(
+    params: &Map<String, Value>,
+) -> Result<(&str, T)> {
+    let request_id = params
+        .get("request_id")
+        .and_then(Value::as_str)
+        .context("native start requires a stable request_id")?;
+    ensure!(
+        params
+            .get("call_id")
+            .is_none_or(|call| call.as_str() == Some(request_id)),
+        "native call_id and request_id differ"
+    );
+    let mut parameters = params.clone();
+    for name in ["request_id", "call_id", "_binding", "_lease"] {
+        parameters.remove(name);
+    }
+    parameters.retain(|_, value| !value.is_null());
+    Ok((
+        request_id,
+        serde_json::from_value(Value::Object(parameters))?,
+    ))
+}
+fn job_kind(record: &ResourceRecord) -> Result<&'static str> {
+    let replay: Option<crate::resource_replay::Configuration> =
+        serde_json::from_value(record.specification["replay"].clone())?;
+    Ok(replay.map_or("process", |replay| replay.kind.name()))
+}
 
 impl Specification {
     fn validate(&self) -> Result<()> {
@@ -161,6 +189,7 @@ impl Specification {
             owner: owner.clone(),
             program,
             interpreter,
+            replay: None,
             argument_files: argument_files.into_values().collect(),
             launch,
             arguments,
@@ -205,6 +234,8 @@ mod debugger;
 mod python;
 #[path = "resource_runtime_recovery.rs"]
 mod recovery;
+#[path = "resource_runtime_replay.rs"]
+mod replay;
 pub(crate) use debugger::Dispatch;
 pub(crate) struct Runtime {
     root: PathBuf,
@@ -250,6 +281,8 @@ impl Runtime {
                 | "debug.close"
                 | "job.start"
                 | "py.run"
+                | "crash.replay"
+                | "poc.verify"
                 | "job.status"
                 | "job.cancel"
                 | "job.artifacts"
@@ -289,6 +322,19 @@ impl Runtime {
                 params,
             );
         }
+        if matches!(method, "crash.replay" | "poc.verify") {
+            return self.start_replay(
+                journal,
+                inputs.context("native replay input store is missing")?,
+                owner,
+                if method == "poc.verify" {
+                    crate::resource_replay::Kind::Verify
+                } else {
+                    crate::resource_replay::Kind::Replay
+                },
+                params,
+            );
+        }
         if method.starts_with("file.") {
             return self.read_artifact(journal, owner, method, params);
         }
@@ -315,6 +361,17 @@ impl Runtime {
                     .context("native recovery artifact is absent")?;
                 return Ok(json!([self.artifact(id, name)?]));
             }
+            if record.specification["replay"].is_object() {
+                let count = status["result"]["trials"]
+                    .as_u64()
+                    .context("replay trial count missing")?;
+                ensure!(count <= 16, "replay artifact count exceeds its bound");
+                let mut artifacts = vec![self.artifact(id, "receipt")?];
+                for index in 0..count {
+                    artifacts.push(self.artifact(id, &format!("trial-{index}"))?);
+                }
+                return Ok(Value::Array(artifacts));
+            }
             return Ok(json!([
                 self.artifact(id, "stdout")?,
                 self.artifact(id, "stderr")?,
@@ -330,23 +387,7 @@ impl Runtime {
         owner: &Owner,
         params: &Map<String, Value>,
     ) -> Result<Value> {
-        let request_id = params
-            .get("request_id")
-            .and_then(Value::as_str)
-            .context("native process start requires a stable request_id")?;
-        if let Some(call) = params.get("call_id") {
-            ensure!(
-                call.as_str() == Some(request_id),
-                "native call_id and request_id differ"
-            );
-        }
-        let mut specification = params.clone();
-        for name in ["request_id", "call_id", "_binding", "_lease"] {
-            specification.remove(name);
-        }
-        // Null optional fields mean the same thing as omitted defaults.
-        specification.retain(|_, value| !value.is_null());
-        let mut spec: Specification = serde_json::from_value(Value::Object(specification))?;
+        let (request_id, mut spec): (_, Specification) = start_parameters(params)?;
         if spec.launch_spec.is_none() && spec.timeout_secs.is_none() {
             spec.timeout_secs = Some(default_timeout());
         }
@@ -405,9 +446,18 @@ impl Runtime {
             input: &input,
         }
         .system_host(&self.installation, &resource)?;
-        let value = json!({"job_id":resource,"kind":"process","state":"running","call_id":request_id,"native_host_pid":host.pid(),"production_execution":false});
+        let value = json!({"job_id":resource,"kind":request.kind(),"state":"running","call_id":request_id,"native_host_pid":host.pid(),"production_execution":false});
         self.running = Some(Running {
-            deadline: Instant::now() + Duration::from_secs(request.timeout_secs + 120),
+            deadline: Instant::now()
+                + Duration::from_secs(
+                    (request.timeout_secs + 120)
+                        * u64::from(
+                            request
+                                .replay
+                                .as_ref()
+                                .map_or(1, |replay| replay.configuration.trials),
+                        ),
+                ),
             request,
             host,
             failed: None,
@@ -492,11 +542,11 @@ impl Runtime {
             .filter(|running| running.request.resource_id == id)
         {
             return Ok(
-                json!({"job_id":id,"kind":"process","state":if running.failed.is_some() {"lost"} else {"running"},"native_host_pid":running.host.pid(),"error":running.failed,"cleanup_pending":running.failed.is_some(),"production_execution":false}),
+                json!({"job_id":id,"kind":running.request.kind(),"state":if running.failed.is_some() {"lost"} else {"running"},"native_host_pid":running.host.pid(),"error":running.failed,"cleanup_pending":running.failed.is_some(),"production_execution":false}),
             );
         }
         Ok(
-            json!({"job_id":id,"kind":"process","state":"lost","cleanup_pending":true,"error":"native host ownership was interrupted; cleanup reconciliation is required","production_execution":false}),
+            json!({"job_id":id,"kind":job_kind(&record)?,"state":"lost","cleanup_pending":true,"error":"native host ownership was interrupted; cleanup reconciliation is required","production_execution":false}),
         )
     }
     pub(crate) fn cancel_active(&mut self) -> Result<()> {
@@ -564,49 +614,16 @@ impl Runtime {
         Ok(())
     }
     fn finish_result(&self, journal: &mut Journal, request: &Request) -> Result<()> {
+        if request.replay.is_some() {
+            return self.finish_replay_result(journal, request);
+        }
         let id = &request.resource_id;
         let private = AclPolicy::private_vm();
         let path = self.result_path(id, "json");
         private.verify(&path, false)?;
         let bytes = deployment::read_bytes(&path, 12 * 1024 * 1024)?;
         let result: Value = serde_json::from_slice(&bytes)?;
-        ensure!(
-            result["schema"] == 1
-                && result["scope"] == "native_process_host"
-                && result["resource_id"] == *id
-                && result["owner"] == serde_json::to_value(&request.owner)?
-                && result["program"] == serde_json::to_value(&request.program)?
-                && result["interpreter"] == serde_json::to_value(request.interpreter)?
-                && result["request_sha256"] == crate::inputs::digest(request)?
-                && result["input"] == serde_json::to_value(&request.input)?
-                && result["launch"] == serde_json::to_value(&request.launch)?
-                && result
-                    .get("argument_files")
-                    .cloned()
-                    .unwrap_or_else(|| json!([]))
-                    == serde_json::to_value(&request.argument_files)?
-                && result["jobs_empty"] == true
-                && result["profiles_removed"] == true
-                && result["scratch_removed"] == true,
-            "native result or cleanup binding differs"
-        );
-        let mut streams = Vec::new();
-        for name in ["stdout", "stderr"] {
-            let data = STANDARD.decode(
-                result[format!("{name}_base64")]
-                    .as_str()
-                    .context("native binary output is missing")?,
-            )?;
-            ensure!(
-                result[format!("{name}_sha256")] == hex::encode(Sha256::digest(&data)),
-                "native stream content hash differs"
-            );
-            streams.push(data);
-        }
-        ensure!(
-            streams.iter().map(Vec::len).sum::<usize>() <= request.output_limit,
-            "native output exceeds the admitted bound"
-        );
+        let streams = crate::resource_process::output(request, &result)?;
         for (name, data) in ["stdout", "stderr"].into_iter().zip(&streams) {
             self.retain(&self.result_path(id, name), data)?;
         }
@@ -788,6 +805,14 @@ impl Runtime {
 }
 
 fn artifact_suffix(name: &str) -> Result<String> {
+    if let Some(trial) = name.strip_prefix("trial-") {
+        let index: u8 = trial.parse()?;
+        ensure!(
+            index < 16 && index.to_string() == trial,
+            "invalid replay artifact index"
+        );
+        return Ok(format!("{name}.json"));
+    }
     match name {
         "stdout" | "stderr" => Ok(name.into()),
         "receipt" => Ok("json".into()),

@@ -246,6 +246,9 @@ mod process_fault_acceptance;
 #[path = "ssh_python_acceptance.rs"]
 mod python_acceptance;
 #[cfg(test)]
+#[path = "ssh_replay_acceptance.rs"]
+mod replay_acceptance;
+#[cfg(test)]
 mod tests {
     use super::*;
     /// The installer fixture retains its hosted-machine isolation checks.
