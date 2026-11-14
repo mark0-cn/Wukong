@@ -335,6 +335,181 @@ struct Recovery {
 }
 
 #[tokio::test]
+#[ignore = "requires an independently enrolled offline Windows VM and signed x64/x86 fixtures"]
+async fn remote_native_interactive_profile_acceptance() -> Result<()> {
+    let profile: Profile = read_fixture_profile("WUKONG_REMOTE_WORKER_INTERACTIVE_PROFILE_TEST")?;
+    enrolled_fixture_address(&profile.config, false)?;
+    ensure!(
+        profile.output.is_absolute()
+            && !profile.output.try_exists()?
+            && profile
+                .probes
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                == ["x64", "x86"],
+        "interactive profile fixture differs"
+    );
+    let client = RuntimeClient::connect(profile.config).await?;
+    ensure!(
+        client.identity().package_sha256 == profile.manifest_sha256,
+        "profile package differs"
+    );
+    let run = format!(
+        "native-profile-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    );
+    let acquire = json!({"run_id":run,"owner_id":"profile-controller-fixture"});
+    let lease: EnvironmentLease = serde_json::from_value(
+        client
+            .call("environment.lease.acquire", acquire.clone())
+            .await?,
+    )?;
+    lease.validate(&run, "profile-controller-fixture", client.identity())?;
+    let bound = client.with_lease(lease.clone());
+    let mut calls = Calls {
+        client: &bound,
+        log: fs::File::create_new(profile.output.with_extension("jsonl"))?,
+        count: 0,
+    };
+    let mut cases = Vec::new();
+    for (architecture, probe) in &profile.probes {
+        let target = upload(
+            &bound,
+            &format!("profile-fixture/{architecture}/target.exe"),
+            &bytes(probe)?,
+            true,
+        )
+        .await?;
+        let opened = calls
+            .call(
+                "interact.start",
+                json!({"argv":[target["path"],"--copy-stdin"],
+            "request_id":format!("profile-start-{architecture}")}),
+            )
+            .await?;
+        let id = opened["session_id"]
+            .as_str()
+            .context("profile session ID absent")?;
+        // Wait for the trusted program's actual I/O, not an assumed loader delay.
+        let payload = b"profile-before\0\xff\n";
+        let (_, before) = send(&mut calls, id, payload, 10).await?;
+        ensure!(
+            STANDARD.decode(
+                before["captured_base64"]
+                    .as_str()
+                    .context("initial bytes absent")?
+            )? == payload,
+            "profile fixture did not reach its input loop"
+        );
+        for extra in [
+            json!({"pid":1}),
+            json!({"path":"C:/Windows/System32/cmd.exe"}),
+        ] {
+            let mut bad = json!({"session_id":id});
+            bad.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            ensure!(
+                calls.call("interact.profile", bad).await.is_err(),
+                "profile accepted a caller-selected target"
+            );
+        }
+        let first = calls
+            .call("interact.profile", json!({"session_id":id}))
+            .await?;
+        ensure!(
+            first["state"] == "running"
+                && first["process"]["status"] == "observed"
+                && first["process"]["pid"] == opened["pid"]
+                && first["process"]["created_filetime"]
+                    .as_u64()
+                    .is_some_and(|n| n > 0)
+                && first["launch_identity"]["sha256"] == probe.sha256,
+            "profile identity differs from the owned target"
+        );
+        let (artifact, raw) = original(
+            &bound,
+            first["transcript"]
+                .as_str()
+                .context("profile transcript missing")?,
+        )
+        .await?;
+        let events: Vec<Value> = raw
+            .split(|b| *b == b'\n')
+            .filter(|b| !b.is_empty())
+            .map(serde_json::from_slice)
+            .collect::<std::result::Result<_, _>>()?;
+        let observed = &events.last().context("profile original absent")?["process"];
+        ensure!(
+            observed["pid"] == opened["pid"]
+                && observed["maps"].as_array().is_some_and(|m| !m.is_empty())
+                && observed["modules"].as_array().is_some_and(|m| !m.is_empty()
+                    && m.iter().any(|v| v["mapped_file"]["path"]
+                        .as_str()
+                        .is_some_and(|p| p.ends_with("target.exe")))
+                    && m.iter().all(|v| v["sha256"].is_null()))
+                && observed["protections"]["aslr"]["status"] == "observed"
+                && observed["protections"]["cfg"]["status"] == "observed",
+            "original profile lacks OS observations or invented mapped hashes"
+        );
+        let second = calls
+            .call("interact.profile", json!({"session_id":id}))
+            .await?;
+        ensure!(
+            first["transcript"] != second["transcript"]
+                && first["process"]["created_filetime"] == second["process"]["created_filetime"],
+            "fresh observation changed the owned process or reused stale evidence"
+        );
+        let payload = b"profile-after\0\xfe\n";
+        let (_, after) = send(&mut calls, id, payload, 10).await?;
+        ensure!(
+            STANDARD.decode(
+                after["captured_base64"]
+                    .as_str()
+                    .context("later bytes absent")?
+            )? == payload,
+            "profile disturbed interactive I/O"
+        );
+        let terminal = closed(&mut calls, id).await?;
+        ensure!(
+            calls
+                .call("interact.profile", json!({"session_id":id}))
+                .await
+                .is_err(),
+            "closed target admitted a new profile"
+        );
+        let (again, later) = original(&bound, artifact["path"].as_str().unwrap()).await?;
+        ensure!(
+            later == raw && again["sha256"] == artifact["sha256"],
+            "profile original changed after closure"
+        );
+        cases.push(
+            json!({"architecture":architecture,"opened":opened,"first":first,"second":second,
+            "original":artifact,"terminal":terminal}),
+        );
+    }
+    let discovered = inventory_kind(&bound, "interactive").await?;
+    ensure!(
+        discovered["resources"]
+            .as_array()
+            .is_some_and(|rows| rows.len() == 2 && rows.iter().all(|v| v["phase"] == "closed")),
+        "profile resources did not close"
+    );
+    client
+        .call("environment.lease.release", json!({"lease":lease}))
+        .await?;
+    client.close().await?;
+    publish(
+        &profile.output,
+        &json!({"passed":true,"scope":"native_interactive_profile_controller_vm",
+        "identity":client.identity(),"epoch":lease.epoch,"calls":calls.count,"cases":cases,
+        "inventory":discovered,"production_execution":false}),
+    )
+}
+
+#[tokio::test]
 #[ignore = "requires completed interactive acceptance and an independently observed dedicated VM service restart"]
 async fn remote_native_completed_interactive_recovery_acceptance() -> Result<()> {
     let profile: Recovery = read_fixture_profile("WUKONG_REMOTE_WORKER_INTERACTIVE_RECOVERY_TEST")?;

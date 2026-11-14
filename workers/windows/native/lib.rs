@@ -36,6 +36,8 @@ mod process_access;
 #[cfg(windows)]
 pub mod process_capture;
 #[cfg(windows)]
+mod process_profile;
+#[cfg(windows)]
 pub mod processes;
 #[cfg(windows)]
 pub mod recovery;

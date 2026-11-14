@@ -120,7 +120,8 @@ impl Runtime {
         }
         let interactive = method.starts_with("interact.");
         let close = matches!(method, "debug.close" | "interact.close");
-        if method != "debug.inspect" {
+        let observation = matches!(method, "debug.inspect" | "interact.profile");
+        if !observation {
             request_id(params)?;
         }
         let mut fields = clean(params);
@@ -148,6 +149,13 @@ impl Runtime {
                 .map(Dispatch::Ready);
         }
         let operation = match method {
+            "interact.profile" => {
+                ensure!(
+                    fields.is_empty(),
+                    "interactive profile accepts only session_id"
+                );
+                Operation::Profile(session_wire::Profile {})
+            }
             "debug.inspect" => {
                 let query: session_wire::Inspect =
                     serde_json::from_value(Value::Object(fields.clone()))?;
@@ -203,7 +211,7 @@ impl Runtime {
                 .is_some_and(|live| live.request.target.resource_id == id && live.busy()),
             "native session already has an in-flight exchange"
         );
-        let ticket = if method == "debug.inspect" {
+        let ticket = if observation {
             None
         } else {
             let reservation = journal.reserve_mutation(

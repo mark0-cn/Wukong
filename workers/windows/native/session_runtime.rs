@@ -124,6 +124,8 @@ impl Live {
                     write.validate()?;
                     self.request.kind() == crate::resource_journal::ResourceKind::Interactive
                 }
+                Operation::Profile(_) =>
+                    self.request.kind() == crate::resource_journal::ResourceKind::Interactive,
                 Operation::Inspect(_) | Operation::Control(_) =>
                     self.request.kind() == crate::resource_journal::ResourceKind::Debugger,
                 _ => true,

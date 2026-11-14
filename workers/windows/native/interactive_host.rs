@@ -109,6 +109,21 @@ async fn serve(
                 value["exit_code"] = Value::Null;
                 value
             }
+            Operation::Profile(_) => {
+                ensure!(sequence > 1, "interactive session is not open");
+                // Observation errors (including natural exit) must not terminate
+                // an otherwise usable session or consume its pending stdout.
+                let observed = match process.profile() {
+                    Ok(value) => value,
+                    Err(error) => json!({"status":"unavailable",
+                        "error":format!("{error:#}").chars().take(512).collect::<String>()}),
+                };
+                io.output
+                    .event(&json!({"operation":"profile","sequence":sequence,
+                    "process":observed,"launch_identity":target.target.program}))?;
+                json!({"process":crate::process_profile::preview(observed),
+                    "launch_identity":target.target.program})
+            }
             Operation::Close(_) => {
                 ensure!(sequence > 1, "interactive session is not open");
                 return Ok(End {
@@ -118,7 +133,7 @@ async fn serve(
                     state: "closed",
                 });
             }
-            _ => anyhow::bail!("interactive session accepts only open, write and close"),
+            _ => anyhow::bail!("unsupported interactive session operation"),
         };
         channel
             .send(&response(target, &next, result, "running", root)?)

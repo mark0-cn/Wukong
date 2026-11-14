@@ -13,10 +13,13 @@ message Request {
     Control control = 6;
     Close close = 7;
     Write write = 8;
+    Profile profile = 9;
   }
 }
 message Open {}
 message Close {}
+// Observes only the host's held target; callers cannot select a PID or path.
+message Profile {}
 // Empty data polls output without closing stdin. A failed/uncertain write must
 // be reconciled against its original journal effect, never replayed.
 message Write {

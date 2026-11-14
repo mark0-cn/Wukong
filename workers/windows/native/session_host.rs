@@ -200,8 +200,8 @@ async fn serve(
                     .context("native debugger control outcome is unknown after timeout")?
                 }
                 Operation::Close(_) => unreachable!(),
-                Operation::Write(_) => {
-                    anyhow::bail!("debugger sessions do not accept interactive writes")
+                Operation::Write(_) | Operation::Profile(_) => {
+                    anyhow::bail!("debugger sessions do not accept interactive operations")
                 }
             }
         };

@@ -603,6 +603,12 @@ impl OwnedProcess {
     pub fn pid(&self) -> u32 {
         self.pid
     }
+    pub(crate) fn profile(&self) -> Result<serde_json::Value> {
+        ensure!(!self.exited(), "owned interactive target has exited");
+        let result = crate::process_profile::observe(self.process.0, self.pid)?;
+        ensure!(!self.exited(), "owned target exited during observation");
+        Ok(result)
+    }
     pub fn exited(&self) -> bool {
         unsafe { WaitForSingleObject(self.process.0, 0) == WAIT_OBJECT_0 }
     }

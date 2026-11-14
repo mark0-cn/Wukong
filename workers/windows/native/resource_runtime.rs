@@ -293,6 +293,7 @@ impl Runtime {
                 | "debug.close"
                 | "interact.start"
                 | "interact.write"
+                | "interact.profile"
                 | "interact.close"
                 | "exec.run"
                 | "job.start"
