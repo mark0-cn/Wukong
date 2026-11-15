@@ -1,5 +1,6 @@
 //! Relocatable bulk cache; recovery journals and process locks stay at a stable address.
 use super::{maintenance, manifest::Manifest, recovery};
+use crate::adapters::files::locks::FileLock;
 use crate::i18n::Message as UiMessage;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -26,11 +27,11 @@ pub fn cache_root() -> Result<PathBuf> {
         Ok(control)
     }
 }
-pub fn cache_lock(exclusive: bool) -> Result<fs::File> {
+pub fn cache_lock(exclusive: bool) -> Result<FileLock> {
     let root = recovery::root()?;
     cache_lock_at(&root, exclusive)
 }
-pub(crate) fn cache_lock_at(root: &Path, exclusive: bool) -> Result<fs::File> {
+pub(crate) fn cache_lock_at(root: &Path, exclusive: bool) -> Result<FileLock> {
     fs::create_dir_all(root)?;
     let file = fs::OpenOptions::new()
         .create(true)
@@ -38,19 +39,20 @@ pub(crate) fn cache_lock_at(root: &Path, exclusive: bool) -> Result<fs::File> {
         .read(true)
         .write(true)
         .open(root.join("cache.lock"))?;
-    if exclusive {
-        file.try_lock().context(UiMessage::new(
+    let guard = if exclusive {
+        FileLock::try_lock(file).context(UiMessage::new(
             "system-an-update-download-or-recovery-is-using-the",
-        ))?;
+        ))?
     } else {
-        file.try_lock_shared()
+        let guard = FileLock::try_lock_shared(file)
             .context(UiMessage::new("system-the-cache-location-is-changing"))?;
         ensure!(
             !root.join("cleanup-in-progress.json").exists(),
             "uninstall cleanup is in progress"
         );
-    }
-    Ok(file)
+        guard
+    };
+    Ok(guard)
 }
 
 pub fn set_cache(destination: &Path) -> Result<PathBuf> {

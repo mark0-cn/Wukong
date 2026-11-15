@@ -158,9 +158,9 @@ impl Cleanup {
                 .truncate(false)
                 .write(true)
                 .open(root.join("operation.lock"))?;
-            file.try_lock()
+            let lock = crate::adapters::files::locks::FileLock::try_lock(file)
                 .context("another workbench operation is active")?;
-            workbench_locks.push((root, file));
+            workbench_locks.push((root, lock));
         }
         let current = self.plan(reviewed.selection)?;
         ensure!(

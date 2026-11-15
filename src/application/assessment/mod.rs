@@ -24,7 +24,7 @@ pub struct AssessmentService {
 }
 
 pub struct PreparedAssessment {
-    _maintenance: std::fs::File,
+    _maintenance: crate::adapters::files::locks::FileLock,
     runner: AssessmentRunner,
     run: RunRecord,
     budget: Option<Budget>,

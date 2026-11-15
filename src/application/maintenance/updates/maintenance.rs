@@ -1,17 +1,15 @@
 //! Cross-process admission: a pending switch blocks new GUI and CLI assessments.
+use crate::adapters::files::locks::FileLock;
 use anyhow::{Context, Result, ensure};
-use std::{
-    fs::{File, OpenOptions},
-    path::Path,
-};
+use std::{fs::OpenOptions, path::Path};
 
-pub fn lock(root: &Path, exclusive: bool) -> Result<File> {
+pub fn lock(root: &Path, exclusive: bool) -> Result<FileLock> {
     acquire(root, exclusive, false)
 }
-pub(crate) fn cleanup_lock(root: &Path) -> Result<File> {
+pub(crate) fn cleanup_lock(root: &Path) -> Result<FileLock> {
     acquire(root, true, true)
 }
-fn acquire(root: &Path, exclusive: bool, cleanup: bool) -> Result<File> {
+fn acquire(root: &Path, exclusive: bool, cleanup: bool) -> Result<FileLock> {
     std::fs::create_dir_all(root)
         .with_context(|| format!("create maintenance directory {}", root.display()))?;
     let file = OpenOptions::new()
@@ -21,20 +19,18 @@ fn acquire(root: &Path, exclusive: bool, cleanup: bool) -> Result<File> {
         .write(true)
         .open(root.join("maintenance.lock"))
         .with_context(|| format!("open maintenance lock in {}", root.display()))?;
-    if exclusive {
-        file.try_lock()
-            .context("another application task or update is active")?;
+    let guard = if exclusive {
+        FileLock::try_lock(file).context("another application task or update is active")?
     } else {
-        file.try_lock_shared()
-            .context("application maintenance is in progress")?;
-    }
+        FileLock::try_lock_shared(file).context("application maintenance is in progress")?
+    };
     ensure!(
         cleanup || !root.join("cleanup-in-progress.json").exists(),
         "uninstall cleanup is in progress; finish or retry the uninstaller"
     );
-    Ok(file)
+    Ok(guard)
 }
-pub fn assessment_guard() -> Result<File> {
+pub fn assessment_guard() -> Result<FileLock> {
     let root = crate::adapters::files::paths::home()?.join("updates");
     let guard = lock(&root, false)?;
     ensure!(

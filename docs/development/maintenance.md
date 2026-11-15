@@ -26,6 +26,8 @@ Project Python uses the development-only Ruff version pinned in `scripts/dev/req
 
 Workbench operations hold `OperationLock` for their complete ownership scope. The guard explicitly unlocks before closing its file; do not replace it with a bare file whose drop only closes a descriptor. On Unix, an unrelated concurrent fork can temporarily inherit the open file description before exec, extending a close-only lock past its owner's scope. The clone-descriptor regression checks immediate successor admission while preserving mutual exclusion.
 
+Maintenance admission, update-cache access and cleanup's workbench locks use `adapters/files/locks::FileLock` with the same explicit-release rule. Acquire the guard before any policy check that may return early, and retain it for the full protected operation. Assessment clones share one guard through `Arc`; the last owner releases it. Shared and exclusive modes retain their existing admission rules. Do not apply scope-based release to analyzer locks whose ownership deliberately extends until child processes are reaped.
+
 ## Local files and task artifacts
 
 The checked-in `.vscode/settings.json` hides dependency caches and generated outputs in the file explorer. It does not delete files or change build inputs. New task-specific logs, inventories and receipts belong under ignored `target/tasks/<task-id>/`; tool-owned build/cache locations keep their existing paths. Preserve older evidence at its recorded path and hash. Keep source, fixtures, licenses, release fragments and bilingual guides visible and versioned; cleanup still requires explicit ownership and retention checks.
