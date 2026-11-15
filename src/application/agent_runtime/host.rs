@@ -305,6 +305,7 @@ impl KernelHost {
                 "full_checkpoint_evidence_id":checkpoint_evidence,
                 "task":agent.task,"scope":agent.scope,"target_sha256":run.target_sha256,
                 "shared_context":crate::application::context::snapshot(tx,agent)?,
+                "working_state":crate::application::context::working_snapshot(tx,agent)?,
                 "ledger_counts":{
                     "tasks":tx.records::<AgentMetadata>(&run.id)?.len(),
                     "findings":tx.records::<Finding>(&run.id)?.len(),

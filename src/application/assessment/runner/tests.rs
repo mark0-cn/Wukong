@@ -392,6 +392,54 @@ async fn native_skills_and_usage_survive_rig_memory_compaction() {
         updated_at: now(),
     };
     runner.store.put("note", &note.id, &run.id, &note).unwrap();
+    // A useful early result must survive later jobs and repeated compaction,
+    // even when no model has copied it into a note yet.
+    let observation = runner
+        .store
+        .artifact(
+            &run.id,
+            &run.root_id,
+            "early-experiment",
+            "stdout",
+            b"candidate=fixture-secret",
+            "text/plain",
+            json!({"fixture":true}),
+        )
+        .unwrap();
+    for index in 0..24 {
+        let job = JobRecord {
+            id: format!("memory-job-{index:02}"),
+            worker_resource_id: format!("worker-{index}"),
+            run_id: run.id.clone(),
+            agent_id: run.root_id.clone(),
+            worker_id: "fixture".into(),
+            owner_generation: 0,
+            tool_name: "py_run".into(),
+            finding_id: None,
+            call_id: format!("memory-call-{index}"),
+            worker_request_id: format!("request-{index}"),
+            parameters: json!({}),
+            target_sha256: run.target_sha256.clone(),
+            status: JobStatus {
+                job_id: format!("worker-{index}"),
+                state: JobState::Completed,
+                result: None,
+                stdout: if index == 0 {
+                    "candidate=fixture-secret".into()
+                } else {
+                    "x".repeat(10000)
+                },
+                stderr: String::new(),
+                extra: Default::default(),
+            },
+            status_evidence_id: Some(observation.id.clone()),
+            imported_artifacts: None,
+            notification_message_id: Some(1),
+            created_at: now(),
+            updated_at: now(),
+        };
+        runner.store.put("job", &job.id, &run.id, &job).unwrap();
+    }
     let server = tokio::spawn(async move {
         let mut inputs = vec![];
         for (name, args) in [
@@ -427,6 +475,8 @@ async fn native_skills_and_usage_survive_rig_memory_compaction() {
         assert!(!text.contains("DO_NOT_INJECT_FULL_LEDGER"));
     }
     for input in &inputs[1..] {
+        assert!(input.to_string().contains("candidate=fixture-secret"));
+        assert!(input.to_string().contains("jobs_omitted"));
         assert!(
             input
                 .to_string()

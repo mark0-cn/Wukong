@@ -10,6 +10,8 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 const KINDS: [&str; 3] = ["note", "todo", "threat_model"];
+mod working;
+pub(crate) use working::snapshot as working_snapshot;
 const PREVIEW_CHARS: usize = 400;
 const SNAPSHOT_LIMIT: usize = 6;
 
