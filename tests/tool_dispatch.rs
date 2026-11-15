@@ -80,6 +80,76 @@ fn worker_config(path: &Path) -> AppConfig {
 }
 
 #[tokio::test]
+async fn immutable_revisions_replay_and_do_not_change_original_bytes() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let config = worker_config(temp.path());
+    let (store, _, _, agent) = fixture_with_config(temp.path(), &config)?;
+    let service = ToolService::new(config, store.clone()).await?;
+    let original = service
+        .execute(
+            &agent.id,
+            "put-version",
+            "file_put",
+            json!({"path":"script.py","path_policy":"versioned","text":"print(1)\n"}),
+        )
+        .await?;
+    assert!(!original.is_error, "{original:?}");
+    let original = result(&original).clone();
+    let args = json!({"base_evidence_id":original["content_evidence_id"],"name":"script.py","replacements":[{"old_text":"print(1)","new_text":"print(2)"}]});
+    let revision = service
+        .execute(&agent.id, "revise-version", "file_revise", args.clone())
+        .await?;
+    assert!(!revision.is_error, "{revision:?}");
+    assert_ne!(result(&revision)["file"]["path"], original["file"]["path"]);
+    let replay = service
+        .execute(&agent.id, "revise-version", "file_revise", args)
+        .await?;
+    assert_eq!(result(&revision), result(&replay));
+    assert_eq!(
+        store.read_evidence(
+            &agent.run_id,
+            original["content_evidence_id"].as_str().unwrap()
+        )?,
+        b"print(1)\n"
+    );
+    let invalid = service.execute(&agent.id,"nonunique","file_revise",json!({"base_evidence_id":original["content_evidence_id"],"name":"script.py","replacements":[{"old_text":"absent","new_text":"2"}]})).await?;
+    assert!(invalid.is_error);
+    assert_eq!(result(&invalid)["effect_state"], "rejected");
+    assert!(
+        service
+            .execute(
+                &agent.id,
+                "worker-path-as-name",
+                "file_put",
+                json!({"path":"files/script.py","path_policy":"versioned","text":"x"})
+            )
+            .await?
+            .is_error
+    );
+    service
+        .execute(
+            &agent.id,
+            "exact-original",
+            "file_put",
+            json!({"path":"exact.py","text":"a"}),
+        )
+        .await?;
+    let conflict = service
+        .execute(
+            &agent.id,
+            "exact-conflict",
+            "file_put",
+            json!({"path":"exact.py","text":"b"}),
+        )
+        .await?;
+    assert!(conflict.is_error);
+    assert_eq!(result(&conflict)["kind"], "conflict");
+    assert_eq!(result(&conflict)["effect_state"], "rejected");
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn agent_graph_pages_remain_compact_and_details_are_explicit() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, mut owner) = fixture(temp.path())?;

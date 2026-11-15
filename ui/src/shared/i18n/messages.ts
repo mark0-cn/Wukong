@@ -393,6 +393,7 @@ export interface Messages {
   'tool-file-get': undefined;
   'tool-file-list': undefined;
   'tool-file-put': undefined;
+  'tool-file-revise': undefined;
   'tool-finding-file': undefined;
   'tool-finding-get': undefined;
   'tool-finding-update': undefined;

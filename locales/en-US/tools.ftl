@@ -48,6 +48,7 @@ tool-environment-doctor = Check selected environment
 tool-artifact-stage = Stage shared artifact
 tool-stage-target = Prepare analysis target
 tool-file-put = Save workspace file
+tool-file-revise = Revise immutable file
 tool-file-get = Read workspace file
 tool-exec-command = Execute analysis command
 tool-job-start = Start background analysis

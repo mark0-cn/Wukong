@@ -156,7 +156,7 @@ fn static_address(args: &Value, run: &RunRecord) -> Result<u64> {
                 .map(|relative| format!(" If {offset:#x} is a link-time VA, its module offset is {relative:#x} (image_base={:#x}); confirm with binary_inspect before retrying.",profile.image_base))
                 .unwrap_or_default();
         anyhow::bail!(
-            "module-relative byte offset {offset:#x} is outside the target mapped segments.{hint}"
+            "module-relative byte offset {offset:#x} is outside the target mapped segments.{hint} Retrieve the symbol with functions_search and reuse its target-bound AddressRef; never guess offsets."
         );
     }
     Ok(offset)

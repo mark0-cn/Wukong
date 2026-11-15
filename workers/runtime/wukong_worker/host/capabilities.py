@@ -67,6 +67,10 @@ def doctor(root, trusted, isolated, registrations):
         "socat",
         "gdbserver",
         "eu-unstrip",
+        "readelf",
+        "objdump",
+        "od",
+        "xxd",
     ]:
         executable = shutil.which(name)
         version = None

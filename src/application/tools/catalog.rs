@@ -583,7 +583,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::FilePutArgs>(
             "file_put",
             "tool-file-put",
-            "Create an immutable worker file from base64 bytes (data_base64), UTF-8 text (text — preferred for scripts: no base64 encoding needed) or an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program.",
+            "Create an immutable worker file from base64 bytes (data_base64), UTF-8 text (text — preferred for scripts: no base64 encoding needed) or an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program. path_policy=versioned requires a logical filename (solve.py) and stores a content-hash version; reuse the returned files/... path. Use file_revise for small changes.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_file_put,
@@ -600,6 +600,16 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::All,
             Requirement::Worker(&[Method::FileStat, Method::FileRead]),
         ),
+        spec::<args::FileReviseArgs>(
+            "file_revise",
+            "tool-file-revise",
+            "Create an immutable UTF-8 revision from original content evidence and 1..64 sequential, uniquely matching text replacements. name is a logical filename; reuse the returned hash-bound worker path and content_evidence_id. Originals are never overwritten. Prefer small revisions over retransmitting a complete script.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_file_revise,
+            Visibility::Child,
+            Requirement::Worker(&[Method::FilePut]),
+        ),
         spec::<args::ExecCommandArgs>(
             "exec_command",
             "tool-exec-command",
@@ -613,7 +623,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::JobStartArgs>(
             "job_start",
             "tool-job-start",
-            "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. On isolated Linux, argv[0] and explicitly listed executable_inputs get executable copies; other file arguments are read-only data. Execution results include cwd and input hashes/access. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
+            "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv and executable_inputs may use {target}; files/... references resolve only as direct entries, never inside shell strings. On isolated Linux, argv[0] and explicitly listed executable_inputs get executable copies; other file arguments are read-only data. Execution results include cwd and input hashes/access. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,
