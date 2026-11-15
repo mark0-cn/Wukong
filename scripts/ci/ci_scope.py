@@ -1,4 +1,5 @@
-"""Conservative PR check selection and a fail-closed CI result gate."""
+"""Conservative PR/master check selection and a fail-closed CI result gate."""
+from fnmatch import fnmatchcase
 import json
 import os
 from pathlib import Path
@@ -8,19 +9,32 @@ import tomllib
 from scripts.release.note_entries import FRAGMENT
 
 
+APT_PATHS = ("scripts/ci/install_apt.py", "tests/automation/test_install_apt.py",
+             "tests/acceptance/check_ci_apt.py")
+UNINSTALL_PATHS = ("src/cleanup/*", "src/desktop/cleanup.rs", "src/desktop/paths.rs",
+                   "src/main.rs", "src/updates/recovery.rs", "packaging/windows/*",
+                   "tauri*.json", "tests/acceptance/check_cleanup*",
+                   "tests/acceptance/review-window.ps1", "ui/src/components/CleanupReview.tsx",
+                   "ui/src/main.tsx", "ui/src/commands.ts", "locales/*/cleanup.ftl")
+SCOPE_FLAGS = ("rust", "frontend", "linux", "apt", "uninstall")
+
+
 def select_scope(paths, event_name, head_branch="", force_full=False):
-    full = dict(rust=True, frontend=True, linux=True, reason="Full checks: non-PR or shared changes")
-    if force_full:
-        return dict(full, reason="Full checks: explicit installed-worker acceptance")
-    if event_name != "pull_request" or head_branch.startswith("codex/release-") or not paths:
+    full = dict.fromkeys(SCOPE_FLAGS, True)
+    full["reason"] = "Full checks: explicit request, release, or unavailable change range"
+    if force_full or event_name not in ("pull_request", "push") or head_branch.startswith("codex/release-") or not paths:
         return full
-    result = dict(rust=False, frontend=False, linux=False, reason="PR checks selected from changed paths")
+    workflow = any(p.startswith((".github/workflows/", ".github/actions/")) for p in paths)
+    acceptance = dict(apt=workflow or any(p in APT_PATHS for p in paths),
+                      uninstall=workflow or any(fnmatchcase(p, pattern) for p in paths for pattern in UNINSTALL_PATHS))
+    result = dict(rust=False, frontend=False, linux=False, **acceptance,
+                  reason="Checks selected from changed paths")
     for path in paths:
         # Required commit-policy checks validate these data-only release notes.
         # Keep unknown files under .changes conservative, just like other paths.
         if FRAGMENT.fullmatch(path):
             continue
-        if path in ("README.md", "README.en.md", "README.zh-CN.md", "docs/translations.json") or (path.startswith("docs/") and path.endswith(".md")):
+        if path in ("README.md", "README.en.md", "README.zh-CN.md", "AGENTS.md", "AGENTS.zh-CN.md", "docs/translations.json") or (path.startswith("docs/") and path.endswith(".md")):
             continue
         if path.startswith("ui/"):
             result["frontend"] = True
@@ -28,7 +42,7 @@ def select_scope(paths, event_name, head_branch="", force_full=False):
             result["linux"] = True
         else:
             # Workflow, build, protocol, installer and unknown changes run everything.
-            return full
+            return dict(full, **acceptance, reason="Full component checks: shared or unknown paths")
     return result
 
 
@@ -36,20 +50,25 @@ def checks_passed(needs):
     if needs.get("changes", {}).get("result") != "success":
         return False
     outputs = needs["changes"].get("outputs", {})
-    if any(outputs.get(name) not in ("true", "false") for name in ("rust", "frontend", "linux")):
+    if any(outputs.get(name) not in ("true", "false") for name in (*SCOPE_FLAGS, "release_clients")):
         return False
-    if needs.get("windows", {}).get("result") != "success":
-        return False
-    expected_linux = "success" if outputs["linux"] == "true" else "skipped"
-    if needs.get("linux", {}).get("result") != expected_linux:
-        return False
-    # Older callers omit these jobs; new CI explicitly gates every selected prebuild.
-    if "release_clients" in outputs or "windows-client" in needs or "linux-client" in needs:
-        if outputs.get("release_clients") not in ("true", "false"):
-            return False
-        expected = "success" if outputs["release_clients"] == "true" else "skipped"
-        return all(needs.get(name, {}).get("result") == expected for name in ("windows-client", "linux-client", "linux-desktop-client"))
-    return True
+    selected = dict(windows=any(outputs[k] == "true" for k in ("rust", "frontend", "linux")),
+                    linux=outputs["linux"] == "true",
+                    acceptance=any(outputs[k] == "true" for k in ("apt", "uninstall")),
+                    **{name: outputs["release_clients"] == "true" for name in
+                       ("windows-client", "linux-client", "linux-desktop-client")})
+    return all(needs.get(name, {}).get("result") == ("success" if enabled else "skipped")
+               for name, enabled in selected.items())
+
+
+def changed_paths(base, head, *, pull_request=False):
+    if not all(re.fullmatch(r"[0-9a-f]{40}", sha) and sha != "0" * 40 for sha in (base, head)):
+        raise ValueError("Invalid change-range commit SHA")
+    # Renames must expose both paths. Pushes compare the entire pushed range,
+    # not only HEAD^1, which would miss earlier commits in a multi-commit push.
+    revision = base + ("..." if pull_request else "..") + head
+    raw = subprocess.check_output(["git", "diff", "--name-only", "--no-renames", "-z", revision])
+    return [p.decode("utf-8", errors="replace") for p in raw.split(b"\0") if p]
 
 
 def prebuild_clients(event_name, ref, requested, previous, current):
@@ -67,20 +86,19 @@ def main():
     if event_name == "pull_request":
         pr = event["pull_request"]
         base, head = pr["base"]["sha"], pr["head"]["sha"]
-        if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (base, head)):
-            raise ValueError("Invalid PR commit SHA")
-        # --no-renames includes both old and new paths; a renamed shared file
-        # must not evade full checks by moving into a selectively checked path.
-        raw = subprocess.check_output(["git", "diff", "--name-only", "--no-renames", "-z", base + "..." + head])
-        paths = [p.decode("utf-8", errors="replace") for p in raw.split(b"\0") if p]
+        paths = changed_paths(base, head, pull_request=True)
         head_branch = pr["head"]["ref"]
-    scope = select_scope(paths, event_name, head_branch, force_full=os.environ.get("WINDOWS_WORKER_ACCEPTANCE") == "true")
+    elif event_name == "push" and os.environ.get("GITHUB_REF") == "refs/heads/master":
+        paths = changed_paths(event["before"], event["after"])
     previous = current = "0.0.0"
     if event_name == "push" and os.environ.get("GITHUB_REF") == "refs/heads/master":
         previous = tomllib.loads(subprocess.check_output(["git", "show", "HEAD^1:Cargo.toml"]).decode())["package"]["version"]
         current = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
-    scope["release_clients"] = prebuild_clients(event_name, os.environ.get("GITHUB_REF", ""),
-                                                 os.environ.get("BUILD_RELEASE_CLIENTS") == "true", previous, current)
+    clients = prebuild_clients(event_name, os.environ.get("GITHUB_REF", ""),
+                              os.environ.get("BUILD_RELEASE_CLIENTS") == "true", previous, current)
+    scope = select_scope(paths, event_name, head_branch,
+                         force_full=clients or os.environ.get("WINDOWS_WORKER_ACCEPTANCE") == "true")
+    scope["release_clients"] = clients
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
         for key, value in scope.items():
             stream.write(f"{key}={str(value).lower() if isinstance(value, bool) else value}\n")
