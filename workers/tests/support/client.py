@@ -3,12 +3,16 @@
 import base64
 import json
 from pathlib import Path
+import queue
 import subprocess
 import sys
+import threading
 import time
 
 
 class Client:
+    """Serial test RPCs; owns the stdio relay, never the persistent daemon."""
+
     def __init__(self, state, environment=None, trusted_local=False):
         command = [
             sys.executable,
@@ -23,15 +27,59 @@ class Client:
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=environment
         )
         self.counter = 0
+        self.closed = False
+        self.exchange = None
 
-    def call(self, method, **params):
+    def call(self, method, *, rpc_timeout=None, **params):
+        if self.closed:
+            raise AssertionError("test relay is closed; reconnect explicitly")
         self.counter += 1
-        self.process.stdin.write(
-            json.dumps({"jsonrpc": "2.0", "id": self.counter, "method": method, "params": params})
-            + "\n"
-        )
-        self.process.stdin.flush()
-        reply = json.loads(self.process.stdout.readline())
+        request_id = self.counter
+        replies = queue.Queue(maxsize=1)
+
+        def exchange():
+            try:
+                self.process.stdin.write(
+                    json.dumps(
+                        {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+                    )
+                    + "\n"
+                )
+                self.process.stdin.flush()
+                raw = self.process.stdout.readline()
+                if not raw:
+                    raise AssertionError(f"test relay ended before {method} reply {request_id}")
+                replies.put(json.loads(raw))
+            except Exception as error:
+                replies.put(error)
+
+        # A stalled write is just as capable of hanging a test as a stalled read.
+        # Timeout terminates this relay, leaving daemon/job reconciliation to the test.
+        self.exchange = threading.Thread(target=exchange, daemon=True)
+        self.exchange.start()
+        timeout = rpc_timeout
+        if timeout is None:
+            timeout = max(
+                60,
+                (params.get("timeout_secs") or 0) + 30,
+                (params.get("read_timeout_secs") or 0) + 30,
+            )
+        try:
+            reply = replies.get(timeout=max(0, timeout))
+        except queue.Empty as error:
+            self.close()
+            raise AssertionError(
+                f"test RPC {method} reply {request_id} exceeded {timeout}s"
+            ) from error
+        self.exchange.join(timeout=5)
+        if isinstance(reply, Exception):
+            self.close()
+            raise reply
+        if reply.get("id") != request_id:
+            self.close()
+            raise AssertionError(
+                f"test RPC {method} expected reply {request_id}, got {reply.get('id')}"
+            )
         assert "error" not in reply, reply
         return reply["result"]
 
@@ -46,14 +94,28 @@ class Client:
     def finish(self, job, timeout=60):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            status = self.call("job.status", job_id=job["job_id"])
+            status = self.call(
+                "job.status", job_id=job["job_id"], rpc_timeout=deadline - time.monotonic()
+            )
             if status["state"] in {"completed", "failed", "cancelled", "timed_out", "lost"}:
                 return status
-            time.sleep(0.05)
+            time.sleep(min(0.05, max(0, deadline - time.monotonic())))
         raise AssertionError("job remained active past test deadline: " + str(job))
 
     def close(self):
-        self.process.terminate()
-        self.process.wait(timeout=5)
-        self.process.stdin.close()
-        self.process.stdout.close()
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            if self.process.poll() is None:
+                self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
+        finally:
+            if self.exchange is not None:
+                self.exchange.join(timeout=5)
+            self.process.stdin.close()
+            self.process.stdout.close()
