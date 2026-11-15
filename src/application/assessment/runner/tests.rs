@@ -184,16 +184,29 @@ async fn native_kernel_accepts_gated_completion_without_an_extra_provider_call()
 }
 
 async fn drive_bounded(runner: &AssessmentRunner, run_id: &str) -> RunRecord {
+    // Multi-agent fixtures persist many turns and exchange loopback HTTP requests.
+    // Bound completion without treating shared-runner throughput as a latency contract.
+    const SCENARIO_TIMEOUT: Duration = Duration::from_secs(30);
     let cancel = CancellationToken::new();
-    let result = tokio::time::timeout(
-        Duration::from_secs(10),
-        runner.drive(run_id, cancel.clone()),
-    )
-    .await;
-    if result.is_err() {
-        cancel.cancel();
+    let result = tokio::time::timeout(SCENARIO_TIMEOUT, runner.drive(run_id, cancel.clone())).await;
+    match result {
+        Ok(result) => result.unwrap(),
+        Err(error) => {
+            cancel.cancel();
+            let progress = runner
+                .store
+                .list::<AgentSnapshot>("agent", run_id)
+                .map(|agents| {
+                    agents
+                        .into_iter()
+                        .map(|agent| (agent.role, agent.status, agent.turns, agent.generation))
+                        .collect::<Vec<_>>()
+                });
+            panic!(
+                "native runtime timed out after {SCENARIO_TIMEOUT:?}: {error}; agent progress: {progress:?}"
+            );
+        }
     }
-    result.expect("native runtime timed out").unwrap()
 }
 
 #[tokio::test]
