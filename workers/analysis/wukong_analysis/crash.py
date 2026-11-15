@@ -4,16 +4,18 @@ import base64
 import hashlib
 import json
 import re
+from pathlib import Path
+from typing import Any
 
 MAX_FILE = 32 * 1024 * 1024
 
 
-def integer(value):
+def integer(value: object) -> int | None:
     match = re.match(r"^(0x[0-9a-fA-F]+|[0-9]+)(?:\s|$)", str(value))
     return int(match.group(1), 16 if match.group(1).startswith("0x") else 10) if match else None
 
 
-def normalize_address(address, profile):
+def normalize_address(address: int | None, profile: dict[str, Any]) -> dict[str, Any]:
     for mapping in profile.get("maps", []):
         if address is not None and mapping["start"] <= address < mapping["end"]:
             module = next(
@@ -33,7 +35,7 @@ def normalize_address(address, profile):
     return {"space": "runtime", "value": address, "module_sha256": None}
 
 
-def location_signature(snapshot):
+def location_signature(snapshot: dict[str, Any]) -> str | None:
     pc = snapshot.get("pc_location", {})
     if not pc.get("module_sha256") or not snapshot.get("signal"):
         return None
@@ -50,7 +52,7 @@ def location_signature(snapshot):
     return "location:" + hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
 
 
-def cyclic_offset(pattern: bytes, observed: bytes, n: int, alphabet_text: str):
+def cyclic_offset(pattern: bytes, observed: bytes, n: int, alphabet_text: str) -> dict[str, Any]:
     if len(pattern) > 1048576:
         raise ValueError("pattern exceeds 1 MiB")
     n = int(n)
@@ -84,7 +86,7 @@ def cyclic_offset(pattern: bytes, observed: bytes, n: int, alphabet_text: str):
     }
 
 
-def inspect_core(path):
+def inspect_core(path: Path) -> dict[str, Any]:
     if path.stat().st_size > MAX_FILE:
         raise ValueError("core exceeds 32 MiB; use live debugger snapshot")
     from pwn import Corefile

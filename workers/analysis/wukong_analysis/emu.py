@@ -12,6 +12,8 @@ import json
 import struct
 import threading
 import time
+from pathlib import Path
+from typing import Any
 
 from .validation import bounded_int, parse_address
 
@@ -48,9 +50,10 @@ X86_32_REGISTERS = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "eip
 # A value is (sign, exponent, mantissa): value = (-1)^sign * mantissa * 2^(exponent - 63),
 # mantissa is a 64-bit integer whose top bit is the explicit integer bit.
 X87_PI = (0, 1, 0xC90FDAA22168C235)
+Float80 = tuple[int, int, int]
 
 
-def _f80_normalize(sign, exponent, mantissa):
+def _f80_normalize(sign: int, exponent: int, mantissa: int) -> Float80:
     excess = mantissa.bit_length() - 64
     if excess > 0:
         keep = mantissa >> excess
@@ -69,13 +72,13 @@ def _f80_normalize(sign, exponent, mantissa):
     return sign, exponent, mantissa
 
 
-def _f80_mul(a, b):
+def _f80_mul(a: Float80, b: Float80) -> Float80:
     # value = mantissa * 2^(exponent - 63): the raw product carries the sum
     # of the two (exponent-63) shifts, plus one 63 back to the representation.
     return _f80_normalize(a[0] ^ b[0], a[1] + b[1] - 63, a[2] * b[2])
 
 
-def _f80_to_f32(value):
+def _f80_to_f32(value: Float80) -> int:
     """Round an 80-bit value to the IEEE-754 float32 bit pattern (nearest-even)."""
     sign, exponent, mantissa = value
     # float32: 1.f * 2^e, 23 fraction bits; value = mantissa * 2^(exponent-63).
@@ -97,7 +100,7 @@ def _f80_to_f32(value):
     return (sign << 31) | (e << 23) | (significand & 0x7FFFFF)
 
 
-def _f80_trunc_i32(value):
+def _f80_trunc_i32(value: Float80) -> int:
     """Truncate an 80-bit value to int32, like fisttp (toward zero)."""
     sign, exponent, mantissa = value
     magnitude = mantissa << max(0, exponent - 63) if exponent >= 63 else mantissa >> (63 - exponent)
@@ -110,7 +113,7 @@ def _f80_trunc_i32(value):
     return magnitude
 
 
-def _segments(path):
+def _segments(path: Path) -> tuple[int, list[tuple[int, int, bytes]]]:
     try:
         from pwn import ELF  # noqa: PLC0415 - heavy import
     except ImportError as error:
@@ -129,7 +132,7 @@ def _segments(path):
     return bits, segments
 
 
-def run(target, params):
+def run(target: Path, params: dict[str, Any]) -> dict[str, Any]:
     if not target.is_file():
         raise ValueError("emu target must be a staged file")
     try:

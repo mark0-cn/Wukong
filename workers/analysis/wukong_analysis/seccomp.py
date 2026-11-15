@@ -2,6 +2,9 @@
 
 import hashlib
 import struct
+from typing import Any
+
+Instruction = tuple[int, int, int, int]
 
 ACTIONS = {
     0: "KILL_THREAD",
@@ -28,7 +31,7 @@ ALU = {
 JUMPS = {0x10: "==", 0x20: ">", 0x30: ">=", 0x40: "&"}
 
 
-def action(value):
+def action(value: int) -> dict[str, Any]:
     return {
         "value": value,
         "action": ACTIONS.get(value & 0xFFFF0000, "UNKNOWN_ACTION"),
@@ -36,7 +39,7 @@ def action(value):
     }
 
 
-def field(offset, endian):
+def field(offset: int, endian: str) -> str:
     if offset == 0:
         return "nr"
     if offset == 4:
@@ -47,7 +50,7 @@ def field(offset, endian):
     )
 
 
-def decode(data, endian="little"):
+def decode(data: bytes, endian: str = "little") -> tuple[list[Instruction], list[dict[str, Any]]]:
     if endian not in {"little", "big"}:
         raise ValueError("invalid filter endianness")
     if not data or len(data) % 8 or len(data) > 32768:
@@ -101,7 +104,9 @@ def decode(data, endian="little"):
     return program, rows
 
 
-def probe(program, rows, query, endian):
+def probe(
+    program: list[Instruction], rows: list[dict[str, Any]], query: dict[str, Any], endian: str
+) -> dict[str, Any]:
     arch, nr = query["arch"], query["nr"]
     args, ip = query.get("args") or [], query.get("instruction_pointer") or 0
     if (
@@ -196,7 +201,9 @@ def probe(program, rows, query, endian):
     return {"status": "unknown", "reason": "no return reached", "trace": trace}
 
 
-def analyze(data: bytes, endianness="little", probes=None):
+def analyze(
+    data: bytes, endianness: str = "little", probes: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     endian = endianness
     program, rows = decode(data, endian)
     queries = probes or []

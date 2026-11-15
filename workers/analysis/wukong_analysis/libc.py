@@ -2,12 +2,16 @@
 
 import hashlib
 import io
+from pathlib import Path
+from typing import Any
 from .validation import parse_address
 
 MAX_FILE = 32 * 1024 * 1024
 
 
-def inspect_candidate(path, leaks, target_abi=None):
+def inspect_candidate(
+    path: Path, leaks: list[dict[str, Any]], target_abi: tuple[str, int, bool] | None = None
+) -> dict[str, Any]:
     from elftools.elf.elffile import ELFFile
 
     if path.stat().st_size > MAX_FILE:
@@ -89,7 +93,12 @@ def inspect_candidate(path, leaks, target_abi=None):
     return result
 
 
-def identify(params, paths, target=None, source="supplied_corpus"):
+def identify(
+    params: dict[str, Any],
+    paths: list[Path],
+    target: Path | None = None,
+    source: str = "supplied_corpus",
+) -> dict[str, Any]:
     from elftools.elf.elffile import ELFFile
     from elftools.common.exceptions import ELFError
 
