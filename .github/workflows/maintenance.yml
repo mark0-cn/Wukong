@@ -1,5 +1,5 @@
 name: Maintenance
-run-name: Maintenance · ${{ inputs.task || (github.event_name == 'push' && 'cache') || (github.event.schedule == '41 22 * * *' && 'cleanup') || 'toolchain' }} · ${{ inputs.apply && 'apply' || 'scheduled or preview' }}
+run-name: Maintenance · ${{ inputs.task || (github.event_name == 'push' && 'cache') || (github.event.schedule == '41 22 * * *' && 'cleanup') || 'toolchain' }}
 on:
   schedule:
     - cron: '41 22 * * *' # Daily 06:41 Asia/Shanghai: closed PR caches only.
@@ -24,7 +24,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: maintenance-${{ inputs.task || github.event.schedule || 'cache' }}
+  group: maintenance-${{ inputs.task || (github.event_name == 'push' && 'cache') || (github.event.schedule == '41 22 * * *' && 'cleanup') || 'toolchain' }}
   cancel-in-progress: false
 jobs:
   cleanup:
