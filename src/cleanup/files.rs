@@ -40,37 +40,7 @@ pub(super) fn absolute(path: &Path) -> Result<PathBuf> {
     }
     Ok(clean)
 }
-fn reparse(metadata: &fs::Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        metadata.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
-    {
-        metadata.file_type().is_symlink()
-    }
-}
-pub(super) fn safe(path: &Path) -> Result<()> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component);
-        // A verbatim drive prefix alone (\\?\C:) is not a queryable Win32 path.
-        if matches!(component, std::path::Component::Prefix(_)) {
-            continue;
-        }
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) => ensure!(
-                !reparse(&metadata),
-                "refusing link/reparse path {}",
-                current.display()
-            ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Ok(())
-}
+pub(super) use crate::adapters::files::safety::safe;
 fn identity(path: &Path, record: bool) -> Result<FileEntry> {
     safe(path)?;
     let metadata = fs::symlink_metadata(path)?;

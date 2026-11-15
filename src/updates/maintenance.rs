@@ -35,7 +35,7 @@ fn acquire(root: &Path, exclusive: bool, cleanup: bool) -> Result<File> {
     Ok(file)
 }
 pub fn assessment_guard() -> Result<File> {
-    let root = crate::desktop::paths::home()?.join("updates");
+    let root = crate::adapters::files::paths::home()?.join("updates");
     let guard = lock(&root, false)?;
     ensure!(
         !root.join("pending.json").exists(),

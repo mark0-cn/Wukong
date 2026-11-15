@@ -72,7 +72,7 @@ impl Drop for OperationLock {
 impl Workbench {
     pub fn open(config: &AppConfig) -> Result<Self> {
         ensure!(
-            !crate::desktop::paths::home()?
+            !crate::adapters::files::paths::home()?
                 .join("updates/cleanup-in-progress.json")
                 .exists(),
             "uninstall cleanup is in progress"
@@ -134,19 +134,7 @@ pub fn valid_id(value: &str) -> Result<()> {
     );
     Ok(())
 }
-pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
-    serde_json::from_slice(&fs::read(path).with_context(|| format!("read {}", path.display()))?)
-        .context("invalid workbench JSON")
-}
-pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    fs::create_dir_all(path.parent().context("file needs a parent")?)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
-    use std::io::Write;
-    temporary.write_all(&serde_json::to_vec_pretty(value)?)?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(path).map_err(|e| e.error)?;
-    Ok(())
-}
+pub use crate::adapters::files::json::{read_json, write_json};
 #[cfg(test)]
 mod tests {
     use super::*;

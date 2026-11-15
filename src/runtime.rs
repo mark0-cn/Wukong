@@ -59,7 +59,7 @@ fn remote_quote(value: &str) -> String {
 impl RuntimeClient {
     pub async fn connect(config: RuntimeConfig) -> Result<Self> {
         if let TransportConfig::TrustedLocal(local) = &config.transport {
-            crate::cleanup::create_owned_directory(&local.state_dir)?;
+            crate::adapters::files::owned::create_owned_directory(&local.state_dir)?;
         }
         if config.backend() == RuntimeBackend::Disabled {
             bail!(

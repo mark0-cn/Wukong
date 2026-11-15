@@ -60,7 +60,10 @@ fn remove_integration(home: &Path, exe: &Path) -> Result<bool> {
         if desktop.is_file() {
             files::safe(&desktop)?;
             let content = std::fs::read_to_string(&desktop)?;
-            let expected = format!("Exec={}", crate::desktop::paths::desktop_exec(&installed)?);
+            let expected = format!(
+                "Exec={}",
+                crate::adapters::files::paths::desktop_exec(&installed)?
+            );
             ensure!(
                 content.lines().any(|line| line == expected),
                 "desktop launcher ownership changed"
@@ -105,7 +108,7 @@ mod tests {
             &launcher,
             format!(
                 "[Desktop Entry]\nExec={}\n",
-                crate::desktop::paths::desktop_exec(&installed)?
+                crate::adapters::files::paths::desktop_exec(&installed)?
             ),
         )?;
         assert!(remove_integration(&home, &installed)?);

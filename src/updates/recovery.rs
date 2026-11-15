@@ -18,7 +18,7 @@ pub struct Journal {
 }
 
 pub fn root() -> Result<PathBuf> {
-    Ok(crate::desktop::paths::home()?.join("updates"))
+    Ok(crate::adapters::files::paths::home()?.join("updates"))
 }
 pub fn cache(version: &str) -> Result<PathBuf> {
     semver::Version::parse(version)?;
@@ -169,7 +169,7 @@ pub fn integrate_linux() -> Result<PathBuf> {
     );
     let source = std::env::var_os("APPIMAGE")
         .context("launch the AppImage to install desktop integration")?;
-    let directory = crate::desktop::paths::home()?.join("application");
+    let directory = crate::adapters::files::paths::home()?.join("application");
     std::fs::create_dir_all(&directory)?;
     let destination = directory.join("Wukong.AppImage");
     if Path::new(&source) != destination {
@@ -177,7 +177,7 @@ pub fn integrate_linux() -> Result<PathBuf> {
     }
     let icon = directory.join("wukong.svg");
     std::fs::write(&icon, include_bytes!("../../icons/icon.svg"))?;
-    let apps = crate::desktop::paths::home()?
+    let apps = crate::adapters::files::paths::home()?
         .parent()
         .context("missing data home")?
         .join("applications");
@@ -186,7 +186,7 @@ pub fn integrate_linux() -> Result<PathBuf> {
         apps.join("io.wukong.desktop.desktop"),
         format!(
             "[Desktop Entry]\nType=Application\nName=Wukong\nComment=Binary analysis and verification workspace\nComment[zh_CN]=二进制分析与验证工作区\nExec={}\nIcon={}\nTerminal=false\nCategories=Development;\n",
-            crate::desktop::paths::desktop_exec(&destination)?,
+            crate::adapters::files::paths::desktop_exec(&destination)?,
             icon.display()
         ),
     )?;

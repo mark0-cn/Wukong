@@ -212,7 +212,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         std::env::current_exe().ok().as_deref(),
     );
     if path.is_none() && matches!(command, Command::Gui { .. }) {
-        path = Some(crate::desktop::paths::default_config()?);
+        path = Some(crate::adapters::files::paths::default_config()?);
     }
     let mut config = AppConfig::load(path.as_deref())?;
     if let Some(language) = cli.output_language {

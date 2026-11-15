@@ -4,7 +4,7 @@ pub mod cleanup;
 pub mod configuration;
 #[cfg(feature = "desktop")]
 pub mod host;
-pub mod paths;
+pub use crate::adapters::files::paths;
 pub mod preferences;
 pub mod presentation;
 pub mod service;

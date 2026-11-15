@@ -18,6 +18,8 @@ See [worker components](../../workers/runtime/README.md). Deploy the Linux runti
 
 Keep cross-module calls typed and ownership/completion gates centralized. General metadata queries do not read checkpoints. Inheritance, follow-ups and complete export explicitly request full reads. Metadata writes must not clear conversations; checkpoints/mailbox acknowledgments still commit atomically.
 
+`adapters/files` owns host paths, directory ownership markers, link/reparse checks and durable JSON publication. Storage uses these filesystem capabilities directly. Maintenance still owns configuration registration, inventory and cleanup policy; moving helpers does not change locks, adoption rules or deletion scope.
+
 Workbench operations hold `OperationLock` for their complete ownership scope. The guard explicitly unlocks before closing its file; do not replace it with a bare file whose drop only closes a descriptor. On Unix, an unrelated concurrent fork can temporarily inherit the open file description before exec, extending a close-only lock past its owner's scope. The clone-descriptor regression checks immediate successor admission while preserving mutual exclusion.
 
 <a id="桌面界面样式"></a>

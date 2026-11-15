@@ -72,7 +72,7 @@ pub struct Cleanup {
 }
 impl Cleanup {
     pub fn current() -> Result<Self> {
-        Self::at(crate::desktop::paths::home()?)
+        Self::at(crate::adapters::files::paths::home()?)
     }
     pub fn at(home: impl AsRef<Path>) -> Result<Self> {
         Ok(Self {

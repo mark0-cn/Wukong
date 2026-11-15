@@ -1,3 +1,4 @@
+pub mod adapters;
 pub mod agents;
 pub mod application;
 pub mod binary;

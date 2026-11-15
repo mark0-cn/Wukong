@@ -9,6 +9,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExecutionBoundaries(unittest.TestCase):
+    def test_filesystem_capabilities_do_not_depend_on_frontend_or_maintenance(self):
+        for path in (ROOT / "src/adapters/files").glob("*.rs"):
+            source = path.read_text(encoding="utf-8")
+            self.assertNotRegex(source, r"\b(?:desktop|cleanup|updates|workbench|bootstrap)\s*::", str(path))
+        store = (ROOT / "src/store.rs").read_text(encoding="utf-8")
+        self.assertNotRegex(store, r"\b(?:cleanup|desktop)\s*::")
+
     def test_storage_snapshots_do_not_depend_on_desktop_presentation(self):
         for path in (ROOT / "src/store").rglob("*.rs"):
             production = path.read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
