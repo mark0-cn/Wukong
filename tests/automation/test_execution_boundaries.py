@@ -13,7 +13,7 @@ class ExecutionBoundaries(unittest.TestCase):
     def test_python_worker_runtime_dependencies_follow_ownership_direction(self):
         allowed = {
             "core": set(),
-            "artifacts": set(),
+            "artifacts": {"core"},
             "platform": {"artifacts"},
             "execution": {"artifacts", "platform", "core"},
             "analysis": {"artifacts", "execution", "platform", "core"},

@@ -1,6 +1,6 @@
 //! Sessions tool operations.
 use super::*;
-use crate::adapters::worker::protocol::{SessionHandle, SessionState};
+use crate::adapters::worker::protocol::{SessionHandle, SessionObservation, SessionState};
 
 #[cfg(test)]
 mod tests {
@@ -71,7 +71,7 @@ pub(super) struct SessionsService {
 }
 impl SessionsService {
     fn cleanup_confirmed(raw: &Value) -> bool {
-        serde_json::from_value::<crate::adapters::worker::protocol::SessionObservation>(raw.clone())
+        serde_json::from_value::<SessionObservation>(raw.clone())
             .is_ok_and(|observation| observation.observation().settled())
     }
     fn closing(&self, kind: SessionKind, session: &mut SessionRecord) -> Result<()> {
