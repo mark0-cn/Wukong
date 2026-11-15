@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Persist session cleanup intent, reconcile owned Linux process groups and scratch after interruption, and keep uncertain sessions or cleanup-pending jobs visible until cleanup is confirmed. Serialize manual and automatic closure and block completion or environment maintenance while resources remain unresolved."
+zh_CN = "持久化会话清理意图，中断后核对并回收 Linux 自有进程组与临时目录；无法确认清理的会话或作业保持可见。手动与自动关闭统一串行化，资源未解决时阻止任务完成及环境维护。"

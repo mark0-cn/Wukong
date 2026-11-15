@@ -26,13 +26,28 @@ def restore(root, archive):
     for pattern in ["debug/*/session.json", "interact/*/session.json", "jobs/*/status.json"]:
         for path in root.glob(pattern):
             value = json.loads(path.read_text())
-            if value.get("state") in {"running", "queued", "starting"}:
+            if value.get("state") in {
+                "running",
+                "queued",
+                "starting",
+                "closing",
+                "recovery_required",
+                "lost",
+            }:
                 value.update(
-                    state="lost", reconciliation="imported_snapshot_requires_new_execution"
+                    state="lost",
+                    cleanup_confirmed=True,
+                    cleanup_pending=False,
+                    reconciliation="imported_snapshot_requires_new_execution",
                 )
             for key in ["pid", "gdb_pid", "daemon_pid", "supervisor_pid", "supervisor_identity"]:
                 value.pop(key, None)
             path.write_text(json.dumps(value))
+    # Imported process journals are evidence of the source, never authority to
+    # signal PIDs or delete scratch paths in the destination environment.
+    for kind in ["debug", "interact"]:
+        for path in (root / kind).glob("*/processes.json"):
+            path.unlink()
     for path in root.glob("*.sock"):
         path.unlink()
     for name in ["daemon.json", "bridge-daemon.json", "endpoint.json", "daemon.lock"]:

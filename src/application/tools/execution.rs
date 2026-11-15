@@ -20,12 +20,13 @@ impl ExecutionService {
             store: store.clone(),
             gateway: gateway.clone(),
             files: files.clone(),
-            locks,
+            locks: locks.clone(),
         };
         let sessions = SessionsService {
             store: store.clone(),
             gateway: gateway.clone(),
             files: files.clone(),
+            locks,
         };
         Self {
             store,

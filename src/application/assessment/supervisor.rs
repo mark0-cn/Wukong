@@ -67,7 +67,10 @@ impl RunSupervisor {
                     _ = timer.tick() => {
                         tokio::select! {
                             _ = monitor_cancel.cancelled() => break,
-                            result = monitor_runner.tools.refresh_jobs(&monitor_run) => {
+                            result = async {
+                                monitor_runner.tools.reconcile_resources(&monitor_run).await?;
+                                monitor_runner.tools.refresh_jobs(&monitor_run).await
+                            } => {
                                 if let Err(error) = result { tracing::warn!(%error, "job monitor failed"); }
                             }
                         }
@@ -80,6 +83,7 @@ impl RunSupervisor {
         let run = run_id.to_owned();
         let owner = lease.owner.clone();
         let kernel_cancel = supervisor.cancel.clone();
+        let cleanup_tools = runner.tools.clone();
         let mut kernel = tokio::task::spawn_blocking(move || {
             crate::application::agent_runtime::drive(
                 runner.kernel_host(),
@@ -89,7 +93,7 @@ impl RunSupervisor {
                 runtime,
             )
         });
-        tokio::select! {
+        let result = tokio::select! {
             result = &mut kernel => result.context("Rig kernel thread failed")?,
             result = &mut heartbeat => {
                 supervisor.cancel.cancel();
@@ -103,7 +107,15 @@ impl RunSupervisor {
                 result.context("environment lease supervision failed")??;
                 anyhow::bail!("environment lease supervision ended unexpectedly")
             }
-        }
+        };
+        // Persisted intents survive a timeout or unreachable worker. Never
+        // turn a lost transport into a false cleanup confirmation.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(10),
+            cleanup_tools.reconcile_resources(run_id),
+        )
+        .await;
+        result
     }
 
     fn environment_heartbeat(&self, runner: AssessmentRunner) -> JoinHandle<Result<()>> {

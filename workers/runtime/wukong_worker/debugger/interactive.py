@@ -91,7 +91,9 @@ class InteractSession:
             import pty
 
             self.pty_master, terminal_slave = pty.openpty()
-        self.process_resources = ProcessResources()
+        self.process_resources = ProcessResources(
+            self.directory / "processes.json", self.experiment
+        )
         owned_master = self.pty_master
         try:
             self.process = self.process_resources.spawn(
@@ -248,6 +250,10 @@ class InteractSession:
             with self.lock:
                 self.dead = True
                 self.closed = True
-            self.process_resources.close()
+            try:
+                self.persist("closing")
+            finally:
+                # A metadata failure must not skip cleanup of live owned children.
+                self.process_resources.close()
             self.persist("closed")
         return {"session_id": self.id, "state": "closed"}

@@ -6,15 +6,21 @@ grandchildren belong to the container init (or VM init), not waitpid(-1).
 """
 
 import subprocess
+import sys
 import threading
 import time
 
 
 class ProcessResources:
-    def __init__(self):
+    def __init__(self, journal=None, experiment=None):
         self._lock = threading.RLock()
         self._children = {}
         self._closed = False
+        self._journal = None
+        if journal is not None and sys.platform.startswith("linux"):
+            from wukong_worker.resources.process_journal import ProcessJournal
+
+            self._journal = ProcessJournal(journal, experiment)
 
     def spawn(self, argv, *, durable=False, **options):
         from wukong_worker.execution.processes import attach_windows_job, detached_options
@@ -22,8 +28,21 @@ class ProcessResources:
         with self._lock:
             if self._closed:
                 raise ValueError("process resource owner is closed")
-            process = subprocess.Popen(argv, **detached_options(), **options)
+            if self._journal:
+                self._journal.starting()
+            try:
+                process = subprocess.Popen(argv, **detached_options(), **options)
+            except BaseException:
+                if self._journal:
+                    self._journal.spawn_failed()
+                raise
             self._children[process.pid] = process
+            if self._journal:
+                try:
+                    self._journal.spawned(process)
+                except BaseException:
+                    self.close()
+                    raise
             if not durable:
                 attach_windows_job(process)
             else:
@@ -55,8 +74,15 @@ class ProcessResources:
         with self._lock:
             self._closed = True
             failures = []
+            if self._journal:
+                try:
+                    self._journal.closing()
+                except Exception as error:
+                    failures.append(error)
             for pid, process in list(self._children.items()):
                 try:
+                    if self._journal:
+                        self._journal.check_owned(process.pid)
                     terminate_tree(process)
                     process.wait(timeout=5)
                 except Exception as error:
@@ -66,6 +92,8 @@ class ProcessResources:
                     del self._children[pid]
             if failures:
                 raise failures[0]
+            if self._journal:
+                self._journal.closed()
 
     def __enter__(self):
         return self

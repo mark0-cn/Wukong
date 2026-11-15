@@ -1,16 +1,6 @@
 //! Sessions tool operations.
 use super::*;
-use crate::adapters::worker::protocol::{
-    SessionHandle, SessionState, WorkerError, WorkerErrorKind,
-};
-
-fn session_lost(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| {
-        cause
-            .downcast_ref::<WorkerError>()
-            .is_some_and(|error| error.kind == WorkerErrorKind::SessionLost)
-    })
-}
+use crate::adapters::worker::protocol::{SessionHandle, SessionState};
 
 #[cfg(test)]
 mod tests {
@@ -57,8 +47,49 @@ pub(super) struct SessionsService {
     pub(super) store: Store,
     pub(super) gateway: WorkerGateway,
     pub(super) files: FilesService,
+    pub(super) locks: ResourceLocks,
 }
 impl SessionsService {
+    fn closing(&self, kind: SessionKind, session: &mut SessionRecord) -> Result<()> {
+        session.state = SessionState::Closing;
+        session.updated_at = now();
+        self.store.save_session(kind, session)
+    }
+    fn close_failed(
+        &self,
+        kind: SessionKind,
+        session: &mut SessionRecord,
+        error: &anyhow::Error,
+    ) -> Result<()> {
+        session.state = SessionState::RecoveryRequired;
+        session.updated_at = now();
+        let worker = session.worker.get_or_insert_with(|| json!({}));
+        worker["cleanup"] = json!({"desired":"closed","confirmed":false,"error":error.to_string().chars().take(512).collect::<String>()});
+        self.store.save_session(kind, session)
+    }
+    fn confirm_close(
+        &self,
+        kind: SessionKind,
+        session: &mut SessionRecord,
+        raw: &Value,
+    ) -> Result<()> {
+        let confirmed = raw["state"] == "closed"
+            || (raw["state"] == "lost" && raw["cleanup_confirmed"] == true);
+        if !confirmed {
+            let error = anyhow::anyhow!("worker did not confirm session cleanup");
+            self.close_failed(kind, session, &error)?;
+            return Err(error);
+        }
+        session.state = if raw["state"] == "lost" {
+            SessionState::Lost
+        } else {
+            SessionState::Closed
+        };
+        session.worker.get_or_insert_with(|| json!({}))["cleanup"] =
+            json!({"desired":"closed","confirmed":true});
+        session.updated_at = now();
+        self.store.save_session(kind, session)
+    }
     fn record_start(
         store: &Store,
         worker_id: String,
@@ -137,6 +168,25 @@ impl SessionsService {
         name: &str,
         mut args: Value,
     ) -> Result<Value> {
+        let lock = if let Some(id) = args["session_id"].as_str() {
+            let mut locks = self.locks.lock().await;
+            if locks.len() >= 256 {
+                locks.retain(|_, held| Arc::strong_count(held) > 1);
+            }
+            Some(
+                locks
+                    .entry(format!("resource:session:{id}"))
+                    .or_insert_with(|| Arc::new(Mutex::new(())))
+                    .clone(),
+            )
+        } else {
+            None
+        };
+        let _guard = if let Some(lock) = &lock {
+            Some(lock.lock().await)
+        } else {
+            None
+        };
         match name {
             "debug_command" | "debug_inspect" | "debug_control" | "debug_close"
             | "debug_profile" | "debug_snapshot" => {
@@ -159,10 +209,18 @@ impl SessionsService {
                     return Ok(json!({"session_id":session_id,"state":current,"reconciled":true}));
                 }
                 ensure!(
-                    current == SessionState::Running,
+                    current == SessionState::Running
+                        || (name == "debug_close"
+                            && matches!(
+                                current,
+                                SessionState::Closing | SessionState::RecoveryRequired
+                            )),
                     "debug session is closed or lost"
                 );
                 args["session_id"] = json!(session.worker_resource_id);
+                if name == "debug_close" {
+                    self.closing(SessionKind::Debugger, &mut session)?;
+                }
                 let raw = match self
                     .gateway
                     .worker_call(
@@ -187,19 +245,18 @@ impl SessionsService {
                 {
                     Ok(raw) => raw,
                     Err(error) => {
-                        // Worker lost the session (daemon restart): reconcile
-                        // the local record so agent_finish is not blocked.
-                        if name == "debug_close" && session_lost(&error) {
-                            session.state = SessionState::Lost;
-                            session.updated_at = now();
-                            self.store.save_session(SessionKind::Debugger, &session)?;
-                            return Ok(
-                                json!({"session_id":session_id,"state":"lost","reconciled":true}),
-                            );
+                        if name == "debug_close" {
+                            self.close_failed(SessionKind::Debugger, &mut session, &error)?;
                         }
                         return Err(error);
                     }
                 };
+                if name == "debug_close" {
+                    self.confirm_close(SessionKind::Debugger, &mut session, &raw)?;
+                    if session.state == SessionState::Lost {
+                        return Self::present(&session, raw);
+                    }
+                }
                 let transcript = raw["transcript"]
                     .as_str()
                     .map(str::to_owned)
@@ -216,9 +273,6 @@ impl SessionsService {
                     .await?;
                 let evidence = self.files.import_file(agent, call_id, &transcript)?;
                 session.transcript_evidence_id = Some(evidence.id.clone());
-                if name == "debug_close" {
-                    session.state = SessionState::Closed;
-                }
                 session.updated_at = now();
                 self.store.save_session(SessionKind::Debugger, &session)?;
                 Ok(
@@ -309,10 +363,19 @@ impl SessionsService {
                 }
                 ensure!(
                     current == SessionState::Running
-                        || (name == "interactive_close" && current == SessionState::Exited),
+                        || (name == "interactive_close"
+                            && matches!(
+                                current,
+                                SessionState::Exited
+                                    | SessionState::Closing
+                                    | SessionState::RecoveryRequired
+                            )),
                     "interactive session is closed or lost"
                 );
                 args["session_id"] = json!(session.worker_resource_id);
+                if name == "interactive_close" {
+                    self.closing(SessionKind::Interactive, &mut session)?;
+                }
                 let raw = match self
                     .gateway
                     .worker_call(
@@ -331,23 +394,14 @@ impl SessionsService {
                 {
                     Ok(raw) => raw,
                     Err(error) => {
-                        // The worker no longer knows the session (daemon
-                        // restart): the local record must not stay "running"
-                        // and block agent_finish forever.
-                        let lost = session_lost(&error);
-                        if name == "interactive_close" && lost {
-                            json!({"session_id":session.worker_resource_id,"state":"lost","reconciled":true})
-                        } else {
-                            return Err(error);
+                        if name == "interactive_close" {
+                            self.close_failed(SessionKind::Interactive, &mut session, &error)?;
                         }
+                        return Err(error);
                     }
                 };
                 if name == "interactive_close" {
-                    session.state = if raw["state"].as_str() == Some("lost") {
-                        SessionState::Lost
-                    } else {
-                        SessionState::Closed
-                    };
+                    self.confirm_close(SessionKind::Interactive, &mut session, &raw)?;
                 } else if raw["state"].as_str() == Some("exited") {
                     session.state = SessionState::Exited;
                 }

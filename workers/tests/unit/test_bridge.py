@@ -43,7 +43,8 @@ class SessionLaunchTests(unittest.TestCase):
                     )
                 self.assertEqual(error_kind(error.exception), "session_lost")
 
-    def test_isolated_interactive_launch_drops_credentials(self):
+    @patch("wukong_worker.resources.process_journal.remove_scratch")
+    def test_isolated_interactive_launch_drops_credentials(self, _remove_scratch):
         import wukong_worker.debugger.interactive as bridge
         import wukong_worker.platform.isolation as isolation
 

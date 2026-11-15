@@ -692,7 +692,7 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
 }
 
 #[tokio::test]
-async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Result<()> {
+async fn closed_sessions_are_idempotent_but_missing_ownership_requires_recovery() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let config = worker_config(temp.path());
     let (store, _coordinator, run, owner) = fixture_with_config(temp.path(), &config)?;
@@ -729,9 +729,7 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
     assert!(!again.is_error, "{again:?}");
     let record: Value = store.require("interact_session", &session_id)?;
     assert_eq!(record["state"], "closed");
-    // A session the worker lost (daemon restart): the local record says
-    // running but the bridge knows nothing; close must reconcile it to lost
-    // instead of stranding agent_finish.
+    // An absent worker session is not proof that its OS resources were cleaned.
     let real: Value = store.require("interact_session", &session_id)?;
     store.put(
         "interact_session",
@@ -747,9 +745,9 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
             json!({"session_id":"ghost-session"}),
         )
         .await?;
-    assert!(!ghost.is_error, "{ghost:?}");
+    assert!(ghost.is_error, "{ghost:?}");
     let record: Value = store.require("interact_session", "ghost-session")?;
-    assert_eq!(record["state"], "lost");
+    assert_eq!(record["state"], "recovery_required");
     store.put("debug_session", "ghost-debug", &run.id,
         &json!({"id":"ghost-debug","worker_resource_id":"ghost-debug","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}))?;
     let debug = service
@@ -760,10 +758,20 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
             json!({"session_id":"ghost-debug"}),
         )
         .await?;
-    assert!(!debug.is_error, "{debug:?}");
+    assert!(debug.is_error, "{debug:?}");
     assert_eq!(
         store.require::<Value>("debug_session", "ghost-debug")?["state"],
-        "lost"
+        "recovery_required"
+    );
+    let graph = service
+        .execute(&run.root_id, "pending:graph", "view_agent_graph", json!({}))
+        .await?;
+    assert!(
+        result(&graph)["open_sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "ghost-session")
     );
     service.close().await;
     Ok(())

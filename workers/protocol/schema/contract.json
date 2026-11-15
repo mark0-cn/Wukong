@@ -832,6 +832,8 @@
             "enum": [
               "running",
               "exited",
+              "closing",
+              "recovery_required",
               "closed",
               "lost"
             ],
@@ -1223,6 +1225,8 @@
             "enum": [
               "running",
               "exited",
+              "closing",
+              "recovery_required",
               "closed",
               "lost"
             ],
@@ -3233,7 +3237,7 @@
       }
     },
     "interact.close": {
-      "effect": "once",
+      "effect": "reconcile",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -3256,6 +3260,8 @@
             "enum": [
               "running",
               "exited",
+              "closing",
+              "recovery_required",
               "closed",
               "lost"
             ],
@@ -3353,6 +3359,8 @@
             "enum": [
               "running",
               "exited",
+              "closing",
+              "recovery_required",
               "closed",
               "lost"
             ],
@@ -4898,6 +4906,8 @@
         "enum": [
           "running",
           "exited",
+          "closing",
+          "recovery_required",
           "closed",
           "lost"
         ],

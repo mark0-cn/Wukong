@@ -75,7 +75,7 @@ methods! {
     InteractStart => ("interact.start", InteractiveStartArgs, SessionHandle, Once, Execution),
     InteractWrite => ("interact.write", InteractiveSendArgs, RawEvidence, Once, None),
     InteractProfile => ("interact.profile", InteractiveCloseArgs, RawEvidence, Read, None),
-    InteractClose => ("interact.close", InteractiveCloseArgs, SessionHandle, Once, None),
+    InteractClose => ("interact.close", InteractiveCloseArgs, SessionHandle, Reconcile, None),
     ExecRun => ("exec.run", ExecCommandArgs, RawEvidence, Once, Execution),
     PythonRun => ("py.run", PyRunArgs, JobStatus, Once, Execution),
     CrashReplay => ("crash.replay", CrashReplayArgs, JobStatus, Reconcile, Execution),

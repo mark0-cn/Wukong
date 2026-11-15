@@ -47,12 +47,20 @@ pub struct JobStatus {
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
+impl JobStatus {
+    /// A terminal result is not cleanup confirmation while the worker retains ownership.
+    pub fn settled(&self) -> bool {
+        self.state.terminal() && self.extra.get("cleanup_pending") != Some(&Value::Bool(true))
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
     Running,
     Exited,
+    Closing,
+    RecoveryRequired,
     Closed,
     Lost,
 }
