@@ -48,6 +48,12 @@ macro_rules! entry {
 
 pub(crate) static REGISTRY: &[Entry] = &[
     entry!(
+        validation,
+        Kind::Support,
+        "support",
+        "Build standalone Python or Shell self-check scripts with independent, hash-bound predicate acceptance."
+    ),
+    entry!(
         root,
         Kind::Role(Role::Root),
         "roles",

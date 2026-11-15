@@ -1,4 +1,9 @@
 report-title = 二进制分析报告
+report-artifact-validation = 脚本判定验收
+report-predicate-limit = 仅覆盖模拟判定检查。真实目标复现、采集路径连接和完整声明覆盖仍需单独的独立证据。
+report-predicate-pass = 通过
+report-predicate-fail = 未通过
+report-predicate-pending = 待验收
 report-run = 任务
 report-target = 目标 SHA256
 report-status = 状态

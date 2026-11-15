@@ -1,6 +1,19 @@
 //! Analysis tool handlers.
 use super::*;
 
+pub(in crate::application::tools) fn handle_artifact_validate<'a>(
+    tools: &'a ToolContext<'_>,
+    agent: &'a AgentMetadata,
+    call: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        super::super::artifact_validation::start(tools, agent, call, serde_json::from_value(args)?)
+            .await
+    })
+}
+
 pub(in crate::application::tools) fn handle_binary_inspect<'a>(
     tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,
@@ -91,7 +104,7 @@ pub(in crate::application::tools) fn handle_analysis_verify<'a>(
             agent.role == Role::Verifier,
             "independent verifier required"
         );
-        let input: args::AnalysisVerifyArgs = serde_json::from_value(args.clone())?;
+        let mut input: args::AnalysisVerifyArgs = serde_json::from_value(args.clone())?;
         for field in [&input.claim, &input.scope, &input.expected, &input.observed] {
             ensure!(
                 !field.trim().is_empty() && field.len() <= 16384,
@@ -111,6 +124,7 @@ pub(in crate::application::tools) fn handle_analysis_verify<'a>(
             .store
             .verify_evidence_links(&agent.run_id, &input.evidence_ids)?;
         tools.effect(agent, call_id, |tx| {
+            analysis_verification::resolve_status_evidence(tx, agent, &mut input)?;
             let producer: AgentMetadata = tx
                 .get("agent", &input.producer_id)?
                 .context("claim producer missing")?;
@@ -131,7 +145,7 @@ pub(in crate::application::tools) fn handle_analysis_verify<'a>(
             let coverage = analysis_verification::validate(tx, agent, &run, &input)?;
             let id = stable("analysis-verification", call_id);
             let record = json!({"id":id,"run_id":agent.run_id,"verifier_id":agent.id,
-                "target_sha256":run.target_sha256,"created_at":now(),"result":args,"coverage":coverage});
+                "target_sha256":run.target_sha256,"created_at":now(),"requested":args,"result":serde_json::to_value(&input)?,"coverage":coverage});
             ensure!(
                 tx.get::<Value>("analysis_verification", &id)?.is_none(),
                 "verification is immutable"

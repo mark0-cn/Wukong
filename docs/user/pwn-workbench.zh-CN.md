@@ -202,3 +202,9 @@ wukong --config 新机器配置.toml challenge up demo
 验收脚本：`python tests/acceptance/check_workbench.py --docker <docker路径>`。这是开发验收工具，不是日常运行依赖，也不是 Pwn 题库评测套件。
 
 GUI 启动与 CLI `env up` 共用初始化、不可变镜像选择、资源归属检查和轻量 worker 身份探测。已有本地镜像时，GUI 可在尚无环境记录的新工作区直接初始化。启动中断会保留 `environment.pending.json`，重试时核对并复用自有资源；成功后写入生效环境和配置，并移除待完成记录。GUI 不隐式拉取镜像：镜像缺失走可见且可取消的初始化或修复流程；CLI `env up` 保留显式拉取行为。轻量探测检查 worker 加载及身份，不代替 `env doctor` 的完整工具自检。
+
+## 生成脚本输入
+
+控制器 `file_put` 默认保留现有的精确不可变路径策略。生成脚本可用 `path_policy=versioned`，传入 `solve.py` 等逻辑文件名，得到 `files/generated/<sha256>/solve.py`。`file_revise` 接受原始 UTF-8 内容证据及 1–64 个按顺序且唯一匹配的文本替换，创建新版本，绝不覆盖原件。后续复用返回的路径和内容证据 ID，不使用工具结果信封代替内容。
+
+原始 `job_start` 在校验权限前统一解析 `argv` 和 `executable_inputs` 中的 `{target}`。解释器要执行嵌套二进制时须显式列出；普通输入文件保持只读。`py_run.target` 已提供可执行副本。Doctor 报告 `readelf`、`objdump`、`od`、`xxd` 是否存在；选择可用替代工具，不假设命令已经安装。错误区分已拒绝操作和不确定副作用：可修正已拒绝输入；不确定写操作须先协调现有请求，再改变参数。

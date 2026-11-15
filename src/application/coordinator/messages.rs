@@ -1,6 +1,49 @@
 use super::*;
 
 impl Coordinator {
+    pub(crate) fn tx_follow_up_contract(
+        tx: &crate::storage::StateSession<'_>,
+        caller: &AgentMetadata,
+        recipient: &str,
+        content: &str,
+        options: MessageOptions,
+        dedupe_key: &str,
+        mut contract: TaskContract,
+    ) -> Result<MessageReceipt> {
+        let all: Vec<AgentMetadata> = tx.records(&caller.run_id)?;
+        let mut target = TaskGraph::resolve(&all, recipient)?.clone();
+        ensure!(
+            caller.role == Role::Root || TaskGraph::is_descendant(&target, &caller.id, &all),
+            "only an owning ancestor may replace a follow-up contract"
+        );
+        ensure!(
+            target.status == Status::Completed,
+            "replace a contract only when explicitly following up a completed child"
+        );
+        for constraint in &target.contract.constraints {
+            if !contract.constraints.contains(constraint) {
+                contract.constraints.push(constraint.clone());
+            }
+        }
+        CompletionRules::validate_contract(&contract)?;
+        Self::validate_evidence(tx, &caller.run_id, &contract.input_evidence_ids)?;
+        let receipt = Self::tx_send(
+            tx,
+            &caller.id,
+            recipient,
+            content,
+            options,
+            Some(dedupe_key),
+        )?;
+        if receipt.delivery != MessageDelivery::Stale {
+            target = tx
+                .get_record(&target.id)?
+                .context("follow-up task missing")?;
+            target.contract = contract;
+            tx.save_record(&target)?;
+        }
+        Ok(receipt)
+    }
     /// Informational messages never reopen a completed task or interrupt a wait.
     pub fn message(&self, sender: &str, recipient: &str, content: &str) -> Result<()> {
         self.send(sender, recipient, content, MessageOptions::default())

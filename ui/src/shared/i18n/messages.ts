@@ -159,6 +159,7 @@ export interface Messages {
   'progress-text-truncated': undefined;
   'report-accounting': undefined;
   'report-accounting-body': { agents: string | number; calls: string | number; cost: string | number; evidence: string | number; tokens: string | number };
+  'report-artifact-validation': undefined;
   'report-attempts': undefined;
   'report-bundle-readme': undefined;
   'report-coverage': undefined;
@@ -170,6 +171,10 @@ export interface Messages {
   'report-no-summary': undefined;
   'report-notes': undefined;
   'report-outcome': undefined;
+  'report-predicate-fail': undefined;
+  'report-predicate-limit': undefined;
+  'report-predicate-pass': undefined;
+  'report-predicate-pending': undefined;
   'report-raw-guide': undefined;
   'report-replay': undefined;
   'report-root-cause': undefined;
@@ -368,6 +373,7 @@ export interface Messages {
   'tool-analysis-verify': undefined;
   'tool-angr-solve': undefined;
   'tool-artifact-stage': undefined;
+  'tool-artifact-validate': undefined;
   'tool-binary-inspect': undefined;
   'tool-binary-strings': undefined;
   'tool-context-read': undefined;
@@ -393,6 +399,7 @@ export interface Messages {
   'tool-file-get': undefined;
   'tool-file-list': undefined;
   'tool-file-put': undefined;
+  'tool-file-revise': undefined;
   'tool-finding-file': undefined;
   'tool-finding-get': undefined;
   'tool-finding-update': undefined;

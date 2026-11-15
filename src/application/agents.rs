@@ -225,6 +225,18 @@ pub fn preamble(
             text.push_str(&load_skill(skill, custom_dir)?);
         }
     }
+    // A declared output protocol must reach its producer even when task routing
+    // omitted the optional method skill. Active snapshots are appended by the host.
+    if !agent.contract.artifact_acceptance.is_empty()
+        && !agent.skills.iter().any(|skill| skill == "validation")
+        && !agent
+            .active_skills
+            .iter()
+            .any(|skill| skill.name == "validation")
+    {
+        text.push('\n');
+        text.push_str(&load_skill("validation", custom_dir)?);
+    }
     if let Some(dir) = demos_dir
         && let Some(demo) = load_demo(dir, agent.role.as_str())?
     {
@@ -314,6 +326,61 @@ mod tests {
         for name in available_skills() {
             assert!(message.contains(name), "{message}");
         }
+    }
+
+    #[test]
+    fn script_acceptance_contract_installs_validation_without_explicit_selection() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let store = Store::open(dir.path().join("state"))?;
+        let coordinator = crate::application::coordinator::Coordinator::new(store.clone());
+        let target = dir.path().join("sample.bin");
+        fs::write(&target, b"fixture")?;
+        let run = coordinator.create_run(&target, "task", Default::default(), json!({}))?;
+        let mut agent: AgentSnapshot = store.require("agent", &run.root_id)?;
+        agent.role = Role::Analyst;
+        agent.skills = vec!["reverse".into(), "tooling".into()];
+        let marker = "# Testable script validation (self_check_v1)";
+        assert!(!preamble(&agent, &run, &store, None, None)?.contains(marker));
+
+        // The same agent can gain a delivery contract on an explicit follow-up.
+        agent.contract.deliverables.push("solve.py".into());
+        agent.contract.artifact_acceptance.insert(
+            "solve.py".into(),
+            crate::domain::ArtifactAcceptanceProfile::SelfCheckV1,
+        );
+        let prompt = preamble(&agent, &run, &store, None, None)?;
+        assert_eq!(prompt.matches(marker).count(), 1);
+        assert!(prompt.contains("--validation-io"));
+        assert!(prompt.contains("baseline.json"));
+        assert_eq!(agent.role, Role::Analyst);
+        assert_eq!(agent.skills, ["reverse", "tooling"]);
+
+        agent.skills.push("validation".into());
+        assert_eq!(
+            preamble(&agent, &run, &store, None, None)?
+                .matches(marker)
+                .count(),
+            1
+        );
+        let custom = dir.path().join("custom");
+        fs::create_dir(&custom)?;
+        fs::write(custom.join("validation.md"), "CUSTOM_VALIDATION_METHOD")?;
+        agent.skills.pop();
+        let prompt = preamble(&agent, &run, &store, Some(&custom), None)?;
+        assert!(prompt.contains("CUSTOM_VALIDATION_METHOD"));
+        assert!(!prompt.contains(marker));
+        agent.active_skills.push(crate::domain::ActiveSkill {
+            name: "validation".into(),
+            sha256: String::new(),
+            content: "ACTIVE_VALIDATION_SNAPSHOT".into(),
+            evidence_id: String::new(),
+        });
+        // The host owns snapshot installation and hash validation. Do not also
+        // load a newer file or the built-in body into the stable preamble.
+        let prompt = preamble(&agent, &run, &store, Some(&custom), None)?;
+        assert!(!prompt.contains("CUSTOM_VALIDATION_METHOD"));
+        assert!(!prompt.contains(marker));
+        Ok(())
     }
 
     #[test]

@@ -89,6 +89,9 @@ impl ExecutionService {
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
             | "angr_solve" | "py_run" => {
                 let run: RunRecord = self.store.load(&agent.run_id)?;
+                if name == "job_start" {
+                    args = substitute_target_argv(&args, &run.target_sha256);
+                }
                 if name == "angr_solve" {
                     ensure!(
                         !address_list(&args, "find")?.is_empty(),

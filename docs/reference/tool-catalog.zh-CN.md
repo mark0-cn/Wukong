@@ -9,9 +9,10 @@
 | 工具 | 可见角色 | 有副作用 | 后端要求 | 用途 |
 |---|---|---|---|---|
 | `agent_finish` | analyst / verifier | 是 | controller | 以结构化结果结束子任务，覆盖契约、证据和缺口。summary 仅用于无必需产物的任务；提供 result 时忽略 summary，以 result.answer 为准。活动后代必须先结束。 |
-| `analysis_verify` | analyst / verifier | 是 | controller | 仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。 |
+| `analysis_verify` | analyst / verifier | 是 | controller | 仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。 validator_integration 检查绑定真实 --verify 任务与共用采集/判定路径的独立代码审查。自动解析自有任务原始状态证据；错误按索引标明无效检查。 |
 | `angr_solve` | analyst / verifier | 是 | angr.solve | 对 stdin 校验路径进行有界符号输入还原。提供模块相对成功/失败地址与输入长度，返回候选输入和探索统计的后台 job。简单可逆变换优先直接求逆，大状态空间使用切片或明确约束；必须在真实目标重放候选字节。 |
 | `artifact_stage` | analyst / verifier | 是 | file.upload.begin + file.upload.write + file.upload.commit | 通过有界可恢复传输，将同一 run 中通过哈希校验的证据制品传入分配的环境，返回 worker 文件和原始证据 ID。 |
+| `artifact_validate` | verifier | 是 | Linux self_check_v1 + py_run + file.put + job.status + job.artifacts | 仅 verifier 可用：对 self_check_v1 Python 或 Shell 脚本独立测试正常、异常退出、信号、超时、缺失、截断和矛盾观测。绑定生产者内容证据、verifier 成功执行同一目标 --verify 的基线任务及导入的 baseline.json。启动可信有界驱动任务；观察结果后才能声明验收通过。覆盖模拟判定，不证明目标行为或采集路径连接。 |
 | `binary_inspect` | analyst / verifier | 否 | controller | 检查本 run 的精确目标、架构、节、导入、符号和缓解机制。 |
 | `binary_strings` | analyst / verifier | 否 | controller | 分页搜索可打印字符串，附文件偏移地址引用。 |
 | `context_read` | 全部 | 否 | controller | 按字符范围读取同 run 的确切共享文档 JSON，含 amendments。kind/id 来自 context_search；沿 content.next_offset 读取所需完整内容。 |
@@ -34,7 +35,8 @@
 | `evidence_read` | 全部 | 否 | controller | 读取完整性已核对证据的有界字节范围；非 UTF-8 使用 base64。 |
 | `exec_command` | analyst / verifier | 是 | exec.run | 在 worker 同步执行一条有界 shell 命令，返回 stdout/stderr/退出码。每次使用新临时目录；target 接收 stage_target 路径，并通过 $TARGET 暴露解析后文件（例如 "printf '<payload>' \| $TARGET"）。适合快速检查和 stdin PoC；长任务用 job_start 并重定向日志。files/... 只在直接 argv 项解析，不在 shell 字符串中解析；状态根使用 $WUKONG_STATE_DIR。 |
 | `file_get` | analyst / verifier | 否 | file.stat + file.read | 取回同 run 已声明的 worker 文件，并将原始字节保存为证据。 |
-| `file_put` | analyst / verifier | 是 | file.put | 从 data_base64、UTF-8 text（脚本优先，无需 base64）或已有证据创建不可变 worker 文件。evidence_id 必须是所需内容记录（工具结果 content_evidence_id），而非工具结果信封 ID；传信封会写入信封 JSON 而非目标字节。要执行的程序设置 executable=true。 |
+| `file_put` | analyst / verifier | 是 | file.put | 通过 base64 字节（data_base64）、UTF-8 文本（text，脚本首选，无需 base64 编码）或已有证据创建不可变工作区文件。evidence_id 必须是内容证据 ID（工具结果的 content_evidence_id），不能使用工具结果信封，否则写入的是信封 JSON。需作为程序执行时使用 executable=true。path_policy=versioned 接受 solve.py 等逻辑文件名并存储内容哈希版本；复用返回的 files/... 路径。小改动使用 file_revise。 |
+| `file_revise` | analyst / verifier | 是 | file.put | 从原始 UTF-8 内容证据和 1–64 个按顺序唯一匹配的文本替换创建不可变修订。name 是逻辑文件名；后续复用返回的哈希绑定工作区路径和 content_evidence_id。绝不覆盖原件。小改动优先使用局部修订，避免重传整份脚本。 |
 | `finding_file` | 全部 | 是 | controller | 提交有证据的疑似或已复现发现。验证影响需要独立不可变 verifier 记录；critical/high 要求 reproduced 或更高阶段。 |
 | `finding_get` | 全部 | 否 | controller | 读取发现及其独立验证记录。 |
 | `finding_update` | 全部 | 是 | controller | 更新已有发现；提升影响必须有独立执行证据。 |
@@ -52,7 +54,7 @@
 | `interactive_start` | analyst / verifier | 是 | interact.start | 启动本 Agent 所属的持久化交互进程（REPL），返回 session_id；worker 路径只在直接 argv 项解析。 |
 | `job_artifacts` | analyst / verifier | 否 | job.artifacts | 列出并导入同 run job 的原始产物。 |
 | `job_cancel` | analyst / verifier | 是 | job.cancel | 请求取消所属的同 run job。 |
-| `job_start` | analyst / verifier | 是 | job.start | 在配置 worker 启动持久进程，立即返回 job_id。使用 argv，或使用已暂存的 launch_spec 统一记录目标、文件、参数、cwd、环境和输入模式；input 选择已暂存的数据文件。使用 launch_spec 时省略 argv/env/cwd 覆盖，并保持配置所记期限。原始 argv 可用 {target}；files/... 只在直接参数项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。 Linux 隔离环境将 argv[0] 和 executable_inputs 显式列出的参数复制为可执行文件，其余文件参数保持只读数据；结果包含 cwd、输入哈希和访问权限。 |
+| `job_start` | analyst / verifier | 是 | job.start | 在配置的 worker 启动持久进程任务，立即返回 job_id。使用 argv，或已暂存的 launch_spec（记录目标、文件、参数、cwd、环境和输入模式）；input 选择已暂存数据文件。有 launch_spec 时省略 argv/env/cwd 覆盖并保留其超时。原始 argv 与 executable_inputs 可使用 {target}；files/... 引用只解析直接参数，不解析 shell 字符串。隔离 Linux 中 argv[0] 和显式 executable_inputs 获得可执行副本，其余文件参数只读。结果包含 cwd、输入哈希与权限。可通过环境变量 WUKONG_STATE_DIR 和 WUKONG_JOB_DIR 读取路径。 |
 | `job_status` | analyst / verifier | 否 | job.status | 观察同 run job，刷新持久状态并导入原始观察。 |
 | `libc_identify` | analyst / verifier | 否 | libc.identify | 使用同进程符号泄漏比较最多 16 份同 run ELF libc 候选；省略时只检查 worker libc。保留哈希、Build ID、架构、不一致泄漏和歧义。候选不确认映射身份，无匹配仅描述搜索集合。 |
 | `load_skill` | 全部 | 是 | controller | 激活内置或自定义能力/方法。root/analyst/verifier 角色指令自动安装，不能在此加载。初始与动态能力合计最多五个名称。精确正文/哈希持久化，下一新模型边界生效，替代同名初始正文并跨压缩/恢复保留。加载不改变角色、权限或完成条件。 |

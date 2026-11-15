@@ -26,8 +26,8 @@
       "zh-CN": "7d5e90c23f5ae0905ef076614f39e8d6b9721deecfacef51fdba5bf139edd381"
     },
     "docs/design/implementation-contract.md": {
-      "en": "9a463e59cd95c3be8e085d10d124eab12c747c5eaa0b9ce42e1071005f64c687",
-      "zh-CN": "7fe0966cd10a4411ab15d13b6dc9b91f8a5e1d12479a638146a851cf34083649"
+      "en": "824e462d09ccc92d21abae62c87876b4d842e078eedb8a13646ae6e617b9880f",
+      "zh-CN": "0d15119755da63e6de2e660135c8e70c167c7f5cfa0aadcb8424c3db0849bd67"
     },
     "docs/development/commits.md": {
       "en": "328bb6704645a84d522c3b2a6a122d0c7c580287ec5321f7e70b5b3aadf52bf5",
@@ -98,16 +98,16 @@
       "zh-CN": "b911263c1fdd3314d409f6b34623a181f6104eb85a5fec36eb12c60616958c19"
     },
     "docs/reference/report-format.md": {
-      "en": "097d65534c4993967d9c2899ed7f2455ce537d52cbdae3316955c6cdc79e4ca6",
-      "zh-CN": "0cdedfecb9d32bd55d7f8308b3a588accbc1fdd6e90b952e10c66fdb84fe5789"
+      "en": "02d16ba3826d78e0b10632f7451639699528d12ba72d30245c3855fbf70872fd",
+      "zh-CN": "23406501c7614bdcd665a1a5d95b420d5b0054c574820a174bd197bcfca2ad88"
     },
     "docs/reference/skill-coverage.md": {
-      "en": "9f60c64d872e0fe01f0b10ddd33dfb0e589d69fc445834ed513ddf64a4514609",
-      "zh-CN": "39c142f85e35eba625ee588a9fd5dd18d0f327e51e4c1a5ca724422b4987bf20"
+      "en": "0b9272912e2d2afc463663723c2532d1d6b56ff83572fff507eac663d4cf4826",
+      "zh-CN": "81b10521dedf204f2e8a8627014f53fc239969ee50034f81e477386ad51773c1"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "33f520990cbab511f6c1a17f52101a343ca818c457825fcd7c5637d0c1841018",
-      "zh-CN": "9c435c3f65b8b7423706778c58addc4c11e41f884347c6b42ae44ff7586fe389"
+      "en": "04c0bf047d202717a4a74be81ab7980e2243113e981055888ca6ac90d8d4f0d9",
+      "zh-CN": "763fada93d60711f7beab0bc397725bc6ae4435ed72499723929c5e9a1d19b85"
     },
     "docs/user/languages.md": {
       "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
@@ -118,8 +118,8 @@
       "zh-CN": "c0e705f102318fcc24d8f4a2e6aa1b469d19dd36f4fdbd0d5b751d17d558b488"
     },
     "docs/user/pwn-workbench.md": {
-      "en": "09ce51bde15148cd603a1f1a0769879c342caf8f1f9294715e55d7ccdb75a413",
-      "zh-CN": "067cb8ff127dc2e74ac3513fcac023c69e90efdb65c44c667f9d2c3531fc5bd6"
+      "en": "5c064ad692cd7051b6dd6dbb8ac777274cda9595de165abe8cb20cef49cd6bef",
+      "zh-CN": "11b6e828ccc1953a223f868a234c45ea53abed0a94d3b3602866035e5b1fd483"
     },
     "docs/user/usage.md": {
       "en": "51946b3df34d8f38fdc90243c2029a1b43cc0c4f9d51ae6c6b18cf567abe229c",

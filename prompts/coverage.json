@@ -105,5 +105,16 @@
     "fixtures": [
       "pwn/musl-format"
     ]
+  },
+  "validation": {
+    "related_tools": [
+      "artifact_validate",
+      "analysis_verify",
+      "file_revise"
+    ],
+    "sources": [
+      "docs/reference/report-format.md"
+    ],
+    "fixtures": []
   }
 }

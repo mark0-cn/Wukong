@@ -4,8 +4,8 @@
     "text": "以结构化结果结束子任务，覆盖契约、证据和缺口。summary 仅用于无必需产物的任务；提供 result 时忽略 summary，以 result.answer 为准。活动后代必须先结束。"
   },
   "analysis_verify": {
-    "source": "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes.",
-    "text": "仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。"
+    "source": "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes. Validator integration checks bind the real --verify job and an independent review of shared collector/evaluator wiring. Original owned job-status evidence is resolved automatically; errors identify invalid check indexes.",
+    "text": "仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。 validator_integration 检查绑定真实 --verify 任务与共用采集/判定路径的独立代码审查。自动解析自有任务原始状态证据；错误按索引标明无效检查。"
   },
   "angr_solve": {
     "source": "Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target.",
@@ -104,8 +104,8 @@
     "text": "取回同 run 已声明的 worker 文件，并将原始字节保存为证据。"
   },
   "file_put": {
-    "source": "Create an immutable worker file from base64 bytes (data_base64), UTF-8 text (text — preferred for scripts: no base64 encoding needed) or an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program.",
-    "text": "从 data_base64、UTF-8 text（脚本优先，无需 base64）或已有证据创建不可变 worker 文件。evidence_id 必须是所需内容记录（工具结果 content_evidence_id），而非工具结果信封 ID；传信封会写入信封 JSON 而非目标字节。要执行的程序设置 executable=true。"
+    "source": "Create an immutable worker file from base64 bytes (data_base64), UTF-8 text (text — preferred for scripts: no base64 encoding needed) or an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program. path_policy=versioned requires a logical filename (solve.py) and stores a content-hash version; reuse the returned files/... path. Use file_revise for small changes.",
+    "text": "通过 base64 字节（data_base64）、UTF-8 文本（text，脚本首选，无需 base64 编码）或已有证据创建不可变工作区文件。evidence_id 必须是内容证据 ID（工具结果的 content_evidence_id），不能使用工具结果信封，否则写入的是信封 JSON。需作为程序执行时使用 executable=true。path_policy=versioned 接受 solve.py 等逻辑文件名并存储内容哈希版本；复用返回的 files/... 路径。小改动使用 file_revise。"
   },
   "finding_file": {
     "source": "File a suspected or reproduced finding with evidence. Verified impact requires a separate immutable verifier record. severity critical/high requires a reproduced-or-better stage.",
@@ -176,8 +176,8 @@
     "text": "请求取消所属的同 run job。"
   },
   "job_start": {
-    "source": "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. On isolated Linux, argv[0] and explicitly listed executable_inputs get executable copies; other file arguments are read-only data. Execution results include cwd and input hashes/access. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
-    "text": "在配置 worker 启动持久进程，立即返回 job_id。使用 argv，或使用已暂存的 launch_spec 统一记录目标、文件、参数、cwd、环境和输入模式；input 选择已暂存的数据文件。使用 launch_spec 时省略 argv/env/cwd 覆盖，并保持配置所记期限。原始 argv 可用 {target}；files/... 只在直接参数项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。 Linux 隔离环境将 argv[0] 和 executable_inputs 显式列出的参数复制为可执行文件，其余文件参数保持只读数据；结果包含 cwd、输入哈希和访问权限。"
+    "source": "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv and executable_inputs may use {target}; files/... references resolve only as direct entries, never inside shell strings. On isolated Linux, argv[0] and explicitly listed executable_inputs get executable copies; other file arguments are read-only data. Execution results include cwd and input hashes/access. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
+    "text": "在配置的 worker 启动持久进程任务，立即返回 job_id。使用 argv，或已暂存的 launch_spec（记录目标、文件、参数、cwd、环境和输入模式）；input 选择已暂存数据文件。有 launch_spec 时省略 argv/env/cwd 覆盖并保留其超时。原始 argv 与 executable_inputs 可使用 {target}；files/... 引用只解析直接参数，不解析 shell 字符串。隔离 Linux 中 argv[0] 和显式 executable_inputs 获得可执行副本，其余文件参数只读。结果包含 cwd、输入哈希与权限。可通过环境变量 WUKONG_STATE_DIR 和 WUKONG_JOB_DIR 读取路径。"
   },
   "job_status": {
     "source": "Observe an in-run job, refresh persisted status and import raw observations.",
@@ -286,5 +286,13 @@
   "xrefs_query": {
     "source": "Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
     "text": "Ghidra：查询绑定目标的 module_relative AddressRef 或兼容字节偏移的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。"
+  },
+  "artifact_validate": {
+    "source": "Verifier only: independently test self_check_v1 Python or Shell script predicates with normal, abnormal-exit, signal, timeout, missing, truncated and contradictory observations. Bind the producer content evidence, verifier's successful same-target --verify baseline job, and its imported baseline.json. Starts a trusted bounded driver job; observe it before claiming acceptance. Tests simulated predicates, not target behavior or collector wiring.",
+    "text": "仅 verifier 可用：对 self_check_v1 Python 或 Shell 脚本独立测试正常、异常退出、信号、超时、缺失、截断和矛盾观测。绑定生产者内容证据、verifier 成功执行同一目标 --verify 的基线任务及导入的 baseline.json。启动可信有界驱动任务；观察结果后才能声明验收通过。覆盖模拟判定，不证明目标行为或采集路径连接。"
+  },
+  "file_revise": {
+    "source": "Create an immutable UTF-8 revision from original content evidence and 1..64 sequential, uniquely matching text replacements. name is a logical filename; reuse the returned hash-bound worker path and content_evidence_id. Originals are never overwritten. Prefer small revisions over retransmitting a complete script.",
+    "text": "从原始 UTF-8 内容证据和 1–64 个按顺序唯一匹配的文本替换创建不可变修订。name 是逻辑文件名；后续复用返回的哈希绑定工作区路径和 content_evidence_id。绝不覆盖原件。小改动优先使用局部修订，避免重传整份脚本。"
   }
 }

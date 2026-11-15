@@ -57,3 +57,16 @@ After recovery, record what was retried and the resulting state, then resume the
 original assignment. If the blocker remains, preserve the call/job/session IDs,
 evidence and unresolved effects; report the limitation through the primary role's
 completion protocol. Recovery alone is not a reason to finish the task.
+# File, process and schema recovery
+
+Use the diagnostic effect_state: rejected means correct the specific arguments;
+unknown requires reconciling the existing request before changing any write.
+For immutable file conflicts, use a versioned logical filename or file_revise,
+never overwrite the original or blindly repeat the same upload. Preserve file
+and AddressRef identities from successful results across corrections.
+For raw interpreter jobs that execute a binary argument, declare executable_inputs;
+do not chmod immutable staging files. Use doctor-advertised od/Python if xxd is absent.
+agent_finish arguments are {"result":{"answer":"...","outcome":"success",
+"evidence_ids":[],"artifacts":[],"completed_conditions":[],"unknowns":[],"next_actions":[]}};
+the result fields are nested, not top-level. Use the current schema and exact
+contract labels. Rig owns argument rejection/continuation; do not replay completed work.

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Reduce script delivery retries with immutable file revisions, content-addressed paths, consistent executable target references and actionable verification diagnostics."
+zh_CN = "通过不可变文件修订、内容寻址路径、一致的目标执行引用和明确的验证诊断，减少脚本交付试错。"

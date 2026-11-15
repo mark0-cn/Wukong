@@ -10,6 +10,9 @@ use wukong::{
     tools::{ToolOutcome, ToolService},
 };
 
+#[path = "support/artifact_validation.rs"]
+mod artifact_validation_acceptance;
+
 fn child(coordinator: &Coordinator, root: &str, role: Role, scope: &str) -> Result<AgentSnapshot> {
     Ok(coordinator
         .create_child(
@@ -77,6 +80,128 @@ fn worker_config(path: &Path) -> AppConfig {
         )]),
         ..Default::default()
     }
+}
+
+#[tokio::test]
+async fn immutable_revisions_replay_and_do_not_change_original_bytes() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let config = worker_config(temp.path());
+    let (store, _, _, agent) = fixture_with_config(temp.path(), &config)?;
+    let service = ToolService::new(config, store.clone()).await?;
+    let original = service
+        .execute(
+            &agent.id,
+            "put-version",
+            "file_put",
+            json!({"path":"script.py","path_policy":"versioned","text":"print(1)\n"}),
+        )
+        .await?;
+    assert!(!original.is_error, "{original:?}");
+    let original = result(&original).clone();
+    let args = json!({"base_evidence_id":original["content_evidence_id"],"name":"script.py","replacements":[{"old_text":"print(1)","new_text":"print(2)"}]});
+    let revision = service
+        .execute(&agent.id, "revise-version", "file_revise", args.clone())
+        .await?;
+    assert!(!revision.is_error, "{revision:?}");
+    assert_ne!(result(&revision)["file"]["path"], original["file"]["path"]);
+    let replay = service
+        .execute(&agent.id, "revise-version", "file_revise", args)
+        .await?;
+    assert_eq!(result(&revision), result(&replay));
+    assert_eq!(
+        store.read_evidence(
+            &agent.run_id,
+            original["content_evidence_id"].as_str().unwrap()
+        )?,
+        b"print(1)\n"
+    );
+    let invalid = service.execute(&agent.id,"nonunique","file_revise",json!({"base_evidence_id":original["content_evidence_id"],"name":"script.py","replacements":[{"old_text":"absent","new_text":"2"}]})).await?;
+    assert!(invalid.is_error);
+    assert_eq!(result(&invalid)["effect_state"], "rejected");
+    assert!(
+        service
+            .execute(
+                &agent.id,
+                "worker-path-as-name",
+                "file_put",
+                json!({"path":"files/script.py","path_policy":"versioned","text":"x"})
+            )
+            .await?
+            .is_error
+    );
+    service
+        .execute(
+            &agent.id,
+            "exact-original",
+            "file_put",
+            json!({"path":"exact.py","text":"a"}),
+        )
+        .await?;
+    let conflict = service
+        .execute(
+            &agent.id,
+            "exact-conflict",
+            "file_put",
+            json!({"path":"exact.py","text":"b"}),
+        )
+        .await?;
+    assert!(conflict.is_error);
+    assert_eq!(result(&conflict)["kind"], "conflict");
+    assert_eq!(result(&conflict)["effect_state"], "rejected");
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn follow_up_assigns_delivery_contract_atomically_without_stale_mutation() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, child) = fixture(temp.path())?;
+    let mut metadata: AgentMetadata = store.load(&child.id)?;
+    metadata.contract.constraints = vec!["preserve original target".into()];
+    store.save_record(&metadata)?;
+    coordinator.finish(&child.id, "recovered input with evidence")?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let mut args = json!({"agent_id":child.id,"message":"produce final script", "recipient_generation":42,
+        "contract":{"objective":"deliver script","deliverables":["script"],"artifact_acceptance":{"script":"self_check_v1"}}});
+    let stale = service
+        .execute(
+            &run.root_id,
+            "stale-contract",
+            "follow_up_agent",
+            args.clone(),
+        )
+        .await?;
+    assert!(!stale.is_error, "{stale:?}");
+    assert_eq!(
+        store.load::<AgentMetadata>(&child.id)?.contract,
+        metadata.contract
+    );
+    args.as_object_mut().unwrap().remove("recipient_generation");
+    let sent = service
+        .execute(
+            &run.root_id,
+            "new-contract",
+            "follow_up_agent",
+            args.clone(),
+        )
+        .await?;
+    assert!(!sent.is_error, "{sent:?}");
+    let updated: AgentMetadata = store.load(&child.id)?;
+    assert_eq!(updated.generation, 1);
+    assert_eq!(updated.contract.deliverables, vec!["script"]);
+    assert_eq!(updated.contract.constraints, metadata.contract.constraints);
+    assert_eq!(updated.role, metadata.role);
+    let archived: Vec<Value> = store.list("task_result", &run.id)?;
+    assert_eq!(
+        archived[0]["contract"]["constraints"],
+        json!(["preserve original target"])
+    );
+    service
+        .execute(&run.root_id, "new-contract", "follow_up_agent", args)
+        .await?;
+    assert_eq!(store.load::<AgentMetadata>(&child.id)?.generation, 1);
+    service.close().await;
+    Ok(())
 }
 
 #[tokio::test]
@@ -1913,10 +2038,41 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
             &verifier.id,
             "executed-reproduction",
             "analysis_verify",
-            reproduction,
+            reproduction.clone(),
         )
         .await?;
     assert!(!accepted.is_error, "{accepted:?}");
+    job.status.state = JobState::Failed;
+    job.status.result = Some(serde_json::from_value(
+        json!({"exit_code":7,"state":"completed","signal":null}),
+    )?);
+    store.save_record(&job)?;
+    let mut negative = reproduction.clone();
+    negative["checks"][0]["expected_exit_code"] = json!(7);
+    negative["checks"][0]["evidence_ids"] = json!([]);
+    // The backend resolves the verifier's original status evidence; callers need not copy it.
+    let accepted_negative = service
+        .execute(
+            &verifier.id,
+            "expected-negative-exit",
+            "analysis_verify",
+            negative.clone(),
+        )
+        .await?;
+    assert!(!accepted_negative.is_error, "{accepted_negative:?}");
+    job.status.state = JobState::TimedOut;
+    store.save_record(&job)?;
+    assert!(
+        service
+            .execute(
+                &verifier.id,
+                "timeout-is-not-negative",
+                "analysis_verify",
+                negative
+            )
+            .await?
+            .is_error
+    );
     let first = service
         .execute(
             &verifier.id,
@@ -1931,7 +2087,7 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
         .await?;
     assert_eq!(result(&first), result(&replay));
     let records: Vec<Value> = store.list("analysis_verification", &run.id)?;
-    assert_eq!(records.len(), 2);
+    assert_eq!(records.len(), 3);
     assert_eq!(records[0]["target_sha256"], run.target_sha256);
     assert_eq!(records[0]["coverage"]["whole_report_verified"], false);
     assert_eq!(records[0]["coverage"]["applies_only_to"], "result.checks");

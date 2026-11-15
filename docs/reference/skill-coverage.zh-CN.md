@@ -35,3 +35,4 @@
 | `state_machine` | 未登记 | 未登记 | 未登记 |
 | `tooling` | 未登记 | 未登记 | 未登记 |
 | `types` | 未登记 | 未登记 | 未登记 |
+| `validation` | `artifact_validate`, `analysis_verify`, `file_revise` | [docs/reference/report-format.md](../../docs/reference/report-format.zh-CN.md) | 未登记 |

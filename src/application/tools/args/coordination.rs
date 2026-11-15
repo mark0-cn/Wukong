@@ -77,6 +77,9 @@ pub(in crate::application::tools) struct FollowUpAgentArgs {
     pub correlation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_ids: Option<Vec<String>>,
+    /// Replacement deliverables for a completed owned child; prior constraints are retained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<TaskContract>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

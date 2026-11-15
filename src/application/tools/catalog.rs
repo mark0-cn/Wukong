@@ -12,12 +12,15 @@ pub(super) struct Spec {
     pub(super) side_effecting: bool,
     pub(super) root_only: bool,
     pub(super) child_only: bool,
+    pub(super) verifier_only: bool,
     pub(super) model_visible: bool,
     pub(super) requirement: super::requirements::Requirement,
 }
 impl Spec {
     pub(super) fn allows(&self, role: Role) -> bool {
-        (!self.root_only || role == Role::Root) && (!self.child_only || role != Role::Root)
+        (!self.root_only || role == Role::Root)
+            && (!self.child_only || role != Role::Root)
+            && (!self.verifier_only || role == Role::Verifier)
     }
 }
 
@@ -34,6 +37,7 @@ enum Visibility {
     All,
     Root,
     Child,
+    Verifier,
     Internal,
 }
 
@@ -71,6 +75,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         model_visible: !matches!(visibility, Visibility::Internal),
         requirement,
         root_only: matches!(visibility, Visibility::Root),
+        verifier_only: matches!(visibility, Visibility::Verifier),
         child_only: matches!(visibility, Visibility::Child) || (target && name != "runtime_doctor"),
     }
 }
@@ -82,6 +87,16 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::ArtifactValidateArgs>(
+            "artifact_validate",
+            "tool-artifact-validate",
+            "Verifier only: independently test self_check_v1 Python or Shell script predicates with normal, abnormal-exit, signal, timeout, missing, truncated and contradictory observations. Bind the producer content evidence, verifier's successful same-target --verify baseline job, and its imported baseline.json. Starts a trusted bounded driver job; observe it before claiming acceptance. Tests simulated predicates, not target behavior or collector wiring.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_artifact_validate,
+            Visibility::Verifier,
+            Requirement::ScriptValidation,
+        ),
         spec::<args::ArtifactStageArgs>(
             "artifact_stage",
             "tool-artifact-stage",
@@ -199,7 +214,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::AnalysisVerifyArgs>(
             "analysis_verify",
             "tool-analysis-verify",
-            "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes.",
+            "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes. Validator integration checks bind the real --verify job and an independent review of shared collector/evaluator wiring. Original owned job-status evidence is resolved automatically; errors identify invalid check indexes.",
             ReplayPolicy::Transactional,
             false,
             handlers::handle_analysis_verify,
@@ -583,7 +598,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::FilePutArgs>(
             "file_put",
             "tool-file-put",
-            "Create an immutable worker file from base64 bytes (data_base64), UTF-8 text (text — preferred for scripts: no base64 encoding needed) or an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program.",
+            "Create an immutable worker file from base64 bytes (data_base64), UTF-8 text (text — preferred for scripts: no base64 encoding needed) or an existing evidence artifact. evidence_id must be the CONTENT evidence id — the record whose bytes you actually want (a tool result's content_evidence_id), NOT the tool-result envelope id: passing the envelope id writes the envelope JSON, not the bytes. Use executable=true when the file will be executed as a program. path_policy=versioned requires a logical filename (solve.py) and stores a content-hash version; reuse the returned files/... path. Use file_revise for small changes.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_file_put,
@@ -600,6 +615,16 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::All,
             Requirement::Worker(&[Method::FileStat, Method::FileRead]),
         ),
+        spec::<args::FileReviseArgs>(
+            "file_revise",
+            "tool-file-revise",
+            "Create an immutable UTF-8 revision from original content evidence and 1..64 sequential, uniquely matching text replacements. name is a logical filename; reuse the returned hash-bound worker path and content_evidence_id. Originals are never overwritten. Prefer small revisions over retransmitting a complete script.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_file_revise,
+            Visibility::Child,
+            Requirement::Worker(&[Method::FilePut]),
+        ),
         spec::<args::ExecCommandArgs>(
             "exec_command",
             "tool-exec-command",
@@ -613,7 +638,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::JobStartArgs>(
             "job_start",
             "tool-job-start",
-            "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. On isolated Linux, argv[0] and explicitly listed executable_inputs get executable copies; other file arguments are read-only data. Execution results include cwd and input hashes/access. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
+            "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv and executable_inputs may use {target}; files/... references resolve only as direct entries, never inside shell strings. On isolated Linux, argv[0] and explicitly listed executable_inputs get executable copies; other file arguments are read-only data. Execution results include cwd and input hashes/access. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,
@@ -831,6 +856,13 @@ mod role_tests {
     use super::*;
     #[test]
     fn target_operations_are_never_root_tools() {
+        let validator = builtins()
+            .iter()
+            .find(|s| s.definition.name == "artifact_validate")
+            .unwrap();
+        assert!(!validator.allows(Role::Root));
+        assert!(!validator.allows(Role::Analyst));
+        assert!(validator.allows(Role::Verifier));
         for name in [
             "binary_inspect",
             "function_decompile",

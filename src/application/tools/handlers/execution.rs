@@ -1,6 +1,22 @@
 //! Execution tool handlers.
 use super::*;
 
+pub(in crate::application::tools) fn handle_file_revise<'a>(
+    tools: &'a ToolContext<'_>,
+    agent: &'a AgentMetadata,
+    call: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        tools
+            .execution
+            .files
+            .revise(agent, call, serde_json::from_value(args)?)
+            .await
+    })
+}
+
 pub(in crate::application::tools) fn handle_artifact_stage<'a>(
     tools: &'a ToolContext<'_>,
     agent: &'a AgentMetadata,

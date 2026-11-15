@@ -33,6 +33,92 @@ fn request(scope: &str) -> ChildRequest {
 }
 
 #[test]
+fn generated_validator_acceptance_binds_final_hash_and_independent_role() {
+    let (_dir, store, coordinator, run) = fixture();
+    let mut task = request("validator script");
+    task.contract = serde_json::from_value(
+        json!({"objective":"deliver script", "deliverables":["script"],
+        "artifact_acceptance":{"script":"self_check_v1"}}),
+    )
+    .unwrap();
+    let producer = coordinator.create_child(&run.root_id, task).unwrap().agent;
+    let script = store
+        .artifact(
+            &run.id,
+            &producer.id,
+            "script",
+            "file_put.original",
+            b"fixture",
+            "text/plain",
+            json!({}),
+        )
+        .unwrap();
+    coordinator
+        .finish_result(
+            &producer.id,
+            TaskResult {
+                answer: "script ready".into(),
+                artifacts: vec![TaskArtifact {
+                    name: "script".into(),
+                    evidence_id: script.id.clone(),
+                    structured: None,
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mut verifier_request = request("independent validator");
+    verifier_request.role = Role::Verifier;
+    let verifier = coordinator
+        .create_child(&run.root_id, verifier_request)
+        .unwrap()
+        .agent;
+    coordinator
+        .finish(&verifier.id, "predicate evidence")
+        .unwrap();
+    let messages = store.inbox(&run.root_id).unwrap();
+    store
+        .checkpoint_and_ack(
+            &run.root_id,
+            json!({"delivered":messages}),
+            &messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+        )
+        .unwrap();
+    assert!(
+        coordinator
+            .finish(&run.root_id, "ready")
+            .unwrap_err()
+            .to_string()
+            .contains("self_check_v1")
+    );
+    let mut record = ArtifactValidation {
+        id: "validation".into(),
+        run_id: run.id.clone(),
+        verifier_id: verifier.id.clone(),
+        worker_id: "fixture".into(),
+        target_sha256: run.target_sha256.clone(),
+        artifact_evidence_id: script.id.clone(),
+        artifact_sha256: "stale hash".into(),
+        baseline_evidence_id: script.id.clone(),
+        baseline_sha256: script.sha256.clone(),
+        baseline_job_id: "normal".into(),
+        job_id: "checks".into(),
+        passed: true,
+        status_evidence_id: Some(script.id.clone()),
+        result: Some(json!({"passed":true})),
+    };
+    store.save_record(&record).unwrap();
+    assert!(coordinator.finish(&run.root_id, "ready").is_err());
+    record.artifact_sha256 = script.sha256;
+    record.verifier_id = producer.id.clone();
+    store.save_record(&record).unwrap();
+    assert!(coordinator.finish(&run.root_id, "ready").is_err());
+    record.verifier_id = verifier.id.clone();
+    store.save_record(&record).unwrap();
+    coordinator.finish(&run.root_id, "ready").unwrap();
+}
+
+#[test]
 fn new_tasks_default_to_private_context_and_cannot_delegate_their_own_scope() {
     let (_dir, _store, coordinator, run) = fixture();
     let request: ChildRequest = serde_json::from_value(json!({
@@ -921,6 +1007,7 @@ fn task_contract_requires_real_deliverables_and_preserves_each_generation_result
         constraints: vec!["static only".into()],
         deliverables: vec!["field table".into()],
         completion_conditions: vec!["account for each field".into()],
+        ..Default::default()
     };
     let child = c.create_child(&run.root_id, task.clone()).unwrap().agent;
     let mut conflicting = task.clone();
