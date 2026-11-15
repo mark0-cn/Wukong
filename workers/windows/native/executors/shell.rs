@@ -1,4 +1,4 @@
-use crate::artifacts::inputs::Owner;
+use crate::core::Owner;
 use crate::executors::resource_process::Interpreter;
 use crate::executors::specification::{Specification, default_cwd};
 use crate::executors::specification::{default_output, default_timeout};
@@ -7,7 +7,7 @@ use crate::{
     executors::parameters::start_parameters,
     executors::plan::{Plan, Response},
 };
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -96,7 +96,7 @@ pub(crate) fn plan(params: &Map<String, Value>) -> Result<Plan> {
             "native_shell_schema":1,"process":spec,"interpreter":Interpreter::Python});
 
     Ok(Plan {
-        kind: crate::resources::models::ResourceKind::Process,
+        kind: crate::core::resource::ResourceKind::Process,
         request_id: request_id.into(),
         specification,
         response: Response::Command(command.command.clone()),
@@ -115,17 +115,39 @@ pub(crate) fn plan(params: &Map<String, Value>) -> Result<Plan> {
         }),
     })
 }
+pub(crate) fn result(pending: &Pending, status: &Value) -> Result<Value> {
+    let result = &status["result"];
+    let unknown = status["state"] == "lost";
+    let artifact = if unknown {
+        result["recovery_artifact"]
+            .as_str()
+            .context("native shell recovery receipt absent")?
+    } else {
+        "receipt"
+    };
+    Ok(
+        json!({"state":status["state"],"command":pending.command,"engine":"cmd",
+            "resource_id":pending.resource,"native_owner":status["native_owner"],
+            "exit_code":result["exit_code"],"signal":null,"duration_secs":result["duration_secs"],
+            "stdout":status["stdout"],"stderr":status["stderr"],
+            "output_bytes_retained":result["output_bytes_retained"],"output_truncated":result["output_truncated"],
+            "receipt":format!("native-results/{}/{artifact}",pending.resource),
+            "stdout_artifact":if unknown {None}else{Some(format!("native-results/{}/stdout",pending.resource))},
+            "stderr_artifact":if unknown {None}else{Some(format!("native-results/{}/stderr",pending.resource))},
+            "cleanup_pending":false,"result":result,"isolation":"appcontainer"}),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::resource::ResourceKind;
     use crate::resources::state::tests::{fixture, owner};
     use crate::resources::{
         journal::{Cleanup, Outcome, Reservation},
-        models::ResourceKind,
         state::Dispatch,
     };
-    use crate::{artifacts::inputs::Owner, isolation::security::AclPolicy};
-    use anyhow::Context;
+    use crate::{core::Owner, isolation::security::AclPolicy};
     use std::fs;
     use std::io::Read;
 

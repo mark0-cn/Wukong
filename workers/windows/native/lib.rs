@@ -1,6 +1,7 @@
 //! Native worker boundaries: host, resources, executors, artifacts, isolation and RPC.
 #[cfg(windows)]
 pub mod artifacts;
+pub mod core;
 #[cfg(windows)]
 pub mod executors;
 #[cfg(windows)]

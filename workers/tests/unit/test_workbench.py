@@ -81,7 +81,7 @@ class LaunchTests(unittest.TestCase):
             self.assertIn("expected:hello", result["captured"])
         finally:
             session.close()
-        from wukong_worker.execution.supervisor import replay
+        from wukong_worker.operations.replay import replay
 
         # Match the real supervisor's public artifact namespace. Root-level
         # scratch paths deliberately remain private to the worker.
@@ -107,7 +107,7 @@ class LaunchTests(unittest.TestCase):
 
     def test_argv_file_interaction_and_replay_use_staged_input(self):
         from wukong_worker.debugger.interactive import InteractSession
-        from wukong_worker.execution.supervisor import replay
+        from wukong_worker.operations.replay import replay
 
         spec = json.loads((self.base / "launch.json").read_text())
         spec.update(input_mode="argv_file", args=["@@"])

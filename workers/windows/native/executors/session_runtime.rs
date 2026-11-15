@@ -23,11 +23,11 @@ type Pipes = Channel<
 const CALL_TIMEOUT: Duration = Duration::from_secs(75);
 
 fn validate_operation(
-    kind: crate::resources::models::ResourceKind,
+    kind: crate::core::resource::ResourceKind,
     read_only: bool,
     operation: &Operation,
 ) -> Result<()> {
-    use crate::resources::models::ResourceKind::{Debugger, Interactive};
+    use crate::core::resource::ResourceKind::{Debugger, Interactive};
     ensure!(
         matches!(kind, Debugger | Interactive),
         "operation requires a session resource"
@@ -242,7 +242,7 @@ impl Live {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resources::models::ResourceKind;
+    use crate::core::resource::ResourceKind;
     #[test]
     fn shared_profile_operation_preserves_session_kind_and_dump_permissions() -> Result<()> {
         let profile = Operation::Profile(session_wire::Profile {});

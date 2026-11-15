@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import time
 from support.client import Client
-from wukong_worker.execution.processes import process_identity
+from wukong_worker.platform.process_control import process_identity
 
 
 def cancellation_proof(client, root):

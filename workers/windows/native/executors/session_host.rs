@@ -251,7 +251,7 @@ pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Res
         !cancel.try_exists()?,
         "native debugger cancelled before preparation"
     );
-    if request.kind() == crate::resources::models::ResourceKind::Interactive {
+    if request.kind() == crate::core::resource::ResourceKind::Interactive {
         return crate::executors::interactive_host::run(&host, &request, &cancel);
     }
     let debugger_nonce = nonce(installation, id)?;

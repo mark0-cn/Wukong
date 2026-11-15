@@ -11,20 +11,19 @@ import threading
 import time
 from filelock import FileLock
 from wukong_worker import BRIDGE_PATH
-from wukong_worker.rpc.contract import MAX_RPC
+from wukong_worker.core.contract import MAX_RPC
 from wukong_worker.artifacts.common import tail
-from wukong_worker.rpc.contract import PROTOCOL
+from wukong_worker.core.contract import PROTOCOL
 from wukong_worker.artifacts.metadata import atomic_json, load_json
-from wukong_worker.host.environment import safe_env
-from wukong_worker.resources.processes import ProcessResources
-from wukong_worker.host.runtime import Runtime
+from wukong_worker.platform.environment import safe_env
+from wukong_worker.platform.process_owner import ProcessResources
 from wukong_worker.rpc.server import Server as RpcServer
 
 
-def serve(root, trusted):
+def serve(root, trusted, runtime_factory):
     # The daemon owns this lock independently of a relay that may crash.
     with FileLock(root / "daemon.guard", timeout=0):
-        runtime = Runtime(root, trusted)
+        runtime = runtime_factory(root, trusted)
         token = secrets.token_hex(32)
         rpc = RpcServer(runtime)
 

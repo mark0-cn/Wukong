@@ -8,8 +8,8 @@ import threading
 import time
 import uuid
 from wukong_worker.artifacts.metadata import atomic_json
-from wukong_worker.host.environment import safe_env
-from wukong_worker.resources.processes import ProcessResources
+from wukong_worker.platform.environment import safe_env
+from wukong_worker.platform.process_owner import ProcessResources
 
 
 class InteractSession:

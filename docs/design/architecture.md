@@ -27,6 +27,8 @@ Windows groups code into `host`, `resources`, `executors`, `artifacts`, `isolati
 The controller store requires schema 5, the Windows resource journal version 2 and package manifests schema 2. Older formats/protocols fail closed. Use new workspaces and worker instances for v3; there is no migration, automatic deletion or legacy configuration adapter. Existing directories and evidence stay intact. Current acceptance is recorded separately from historical results.
 
 
+Worker dependencies are enforced by architecture tests: native core ownership types are independent of artifact storage; RPC routes into resource operations; tool-specific plans and result adapters stay outside lifecycle commits. Python core/platform/execution/debugger/resources/operations follow explicit dependency directions. Both platforms consume a shared lifecycle corpus covering outcome certainty, cleanup and durable retry semantics. See [worker boundaries](../../workers/runtime/README.md#module-boundaries) and [protocol semantics](../../workers/protocol/README.md).
+
 Windows has one native worker authority. The controller owns business tasks/evidence, `workers/protocol` shares public types, and the native service owns capabilities, leases, files and resources. Python on Windows is a disposable isolated analysis tool; Linux retains its Python worker. See [cross-platform environments](cross-platform-environments.md) and the [current Windows component guide](../../workers/windows/README.md).
 
 | Module | Responsibility |

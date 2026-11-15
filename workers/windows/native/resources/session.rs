@@ -133,8 +133,13 @@ mod tests {
             },
         )?;
         let mut params = json!({"session_id":resource,"request_id":"write","data_base64":STANDARD.encode(&data)});
-        let Dispatch::Ready(value) =
-            runtime.prepare_rpc(&owner, "interact.write", params.as_object().unwrap())?
+        let Dispatch::Ready(value) = runtime.prepare(
+            &owner,
+            crate::resources::operation::Operation::Session(
+                wukong_worker_protocol::Method::InteractWrite,
+            ),
+            params.as_object().unwrap(),
+        )?
         else {
             anyhow::bail!("completed write was executed")
         };
@@ -142,20 +147,38 @@ mod tests {
         params["data_base64"] = json!(STANDARD.encode(b"different"));
         assert!(
             runtime
-                .prepare_rpc(&owner, "interact.write", params.as_object().unwrap())
+                .prepare(
+                    &owner,
+                    crate::resources::operation::Operation::Session(
+                        wukong_worker_protocol::Method::InteractWrite
+                    ),
+                    params.as_object().unwrap()
+                )
                 .is_err()
         );
         params["data_base64"] = json!(STANDARD.encode(&data));
         params["read_timeout_secs"] = json!(11);
         assert!(
             runtime
-                .prepare_rpc(&owner, "interact.write", params.as_object().unwrap())
+                .prepare(
+                    &owner,
+                    crate::resources::operation::Operation::Session(
+                        wukong_worker_protocol::Method::InteractWrite
+                    ),
+                    params.as_object().unwrap()
+                )
                 .is_err()
         );
         params["read_timeout_secs"] = json!(301);
         assert!(
             runtime
-                .prepare_rpc(&owner, "interact.write", params.as_object().unwrap())
+                .prepare(
+                    &owner,
+                    crate::resources::operation::Operation::Session(
+                        wukong_worker_protocol::Method::InteractWrite
+                    ),
+                    params.as_object().unwrap()
+                )
                 .is_err()
         );
         assert!(runtime.journal.idle()?);

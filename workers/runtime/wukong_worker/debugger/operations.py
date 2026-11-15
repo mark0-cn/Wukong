@@ -210,7 +210,7 @@ def gdb_control(session, params, timeout):
                     checked(session, "-exec-interrupt --all", 2)
                     interruption = "deadline"
                     if not wait_for_stop(session, before, 2):
-                        from wukong_worker.rpc.errors import WorkerError
+                        from wukong_worker.core.errors import WorkerError
 
                         session.dead = True
                         session.process_resources.close()

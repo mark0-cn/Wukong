@@ -117,9 +117,10 @@ class MinimizeTests(unittest.TestCase):
 
     def test_ignored_replay_fields_are_rejected_before_minimization_admission(self):
         from wukong_worker.resources.jobs import JobManager
+        from wukong_worker.operations.jobs import JobService
 
         with tempfile.TemporaryDirectory() as root:
-            manager = JobManager(Path(root), True, False)
+            manager = JobService(Path(root), True, False, jobs=JobManager(Path(root), True, False))
             for field, value in (("trials", 1), ("expected", {"exit_code": 0})):
                 with (
                     self.subTest(field=field),

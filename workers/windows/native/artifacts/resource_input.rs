@@ -2,7 +2,7 @@
 //! authority: the native caller supplies the already validated current owner.
 use crate::{
     artifacts::inputs::Inputs,
-    artifacts::inputs::Owner,
+    core::Owner,
     isolation::security::{self, AclPolicy},
 };
 use anyhow::Result;

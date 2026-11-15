@@ -94,6 +94,7 @@ COPY workers/analysis /opt/wukong/analysis
 RUN pip3 install --break-system-packages --no-deps --no-build-isolation /opt/wukong/analysis
 COPY workers/runtime /opt/wukong/runtime
 COPY workers/protocol/schema /opt/wukong/protocol/schema
+COPY workers/protocol/fixtures /opt/wukong/protocol/fixtures
 COPY workers/tests /opt/wukong/tests
 COPY workers/ghidra /opt/wukong/ghidra
 COPY workers/deps/gef.py /opt/gef.py

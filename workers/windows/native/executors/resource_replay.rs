@@ -3,10 +3,10 @@
 use crate::{
     artifacts::inputs::digest,
     artifacts::resource_input::Reference,
+    core::resource::bounded_identifier,
     executors::resource_process::{self, Request},
     host::resource_host::Host,
     isolation::security::AclPolicy,
-    resources::models::bounded_identifier,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};

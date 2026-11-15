@@ -8,7 +8,8 @@ from unittest.mock import patch
 from wukong_worker.artifacts.metadata import atomic_json, load_json
 from wukong_worker.debugger.crash import CrashService
 from wukong_analysis.crash import location_signature, normalize_address
-from wukong_worker.execution.supervisor import supervise_job
+from wukong_worker.resources.supervisor import supervise_job
+from wukong_worker.operations.executors import execute_job
 
 
 class CrashTests(unittest.TestCase):
@@ -76,8 +77,8 @@ class CrashTests(unittest.TestCase):
                     result["location_signature"] = "location:" + ("A" if b"A" in data else "other")
                 return result
 
-            with patch("wukong_worker.execution.supervisor.replay", side_effect=replay):
-                supervise_job(root, job)
+            with patch("wukong_worker.operations.reduce_job.replay", side_effect=replay):
+                supervise_job(root, job, execute_job)
             status = load_json(job / "status.json")
             return status, (job / "minimized.bin").read_bytes() if (
                 job / "minimized.bin"

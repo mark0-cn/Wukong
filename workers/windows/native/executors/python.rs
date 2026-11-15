@@ -73,7 +73,7 @@ pub(crate) fn plan(params: &Map<String, Value>) -> Result<Plan> {
             "process":spec,"interpreter":Interpreter::Python});
 
     Ok(Plan {
-        kind: crate::resources::models::ResourceKind::Process,
+        kind: crate::core::resource::ResourceKind::Process,
         request_id: request_id.into(),
         specification,
         response: Response::Job,
@@ -92,8 +92,9 @@ pub(crate) fn plan(params: &Map<String, Value>) -> Result<Plan> {
 mod tests {
     use super::*;
     use crate::artifacts::resource_input::Purpose;
+    use crate::core::resource::ResourceKind;
+    use crate::resources::journal::Reservation;
     use crate::resources::state::tests::{fixture, owner};
-    use crate::resources::{journal::Reservation, models::ResourceKind};
     use std::fs;
     use std::io::Read;
 

@@ -1,12 +1,12 @@
 //! Debugger and interactive startup factories; resource ownership stays in the manager.
 use crate::{
     artifacts::resource_input::Purpose,
+    core::resource::ResourceKind,
     executors::{
         parameters::{clean, request_id, start_parameters},
         plan::Plan,
         specification::{Specification, default_cwd, default_output},
     },
-    resources::models::ResourceKind,
 };
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};

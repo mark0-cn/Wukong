@@ -1,6 +1,7 @@
 //! Serializes reservations and commits; external waits never retain the state/input locks.
 use crate::{
-    artifacts::inputs::{Inputs, Owner},
+    artifacts::inputs::Inputs,
+    core::Owner,
     host::context::RuntimeContext,
     isolation::security::AclPolicy,
     resources::journal::Journal,
@@ -70,7 +71,7 @@ impl ResourceManager {
         &self,
         inputs: Option<OwnedMutexGuard<Inputs>>,
         owner: &Owner,
-        method: &str,
+        operation: super::operation::Operation,
         params: &Map<String, Value>,
         mut revalidate: impl FnMut() -> Result<()>,
     ) -> Result<Value> {
@@ -78,7 +79,7 @@ impl ResourceManager {
             let mut state = self.state.lock().await;
             // Recheck the lease after either independent lock has been acquired.
             revalidate()?;
-            state.prepare_rpc(owner, method, params)?
+            state.prepare(owner, operation, params)?
         };
         let mut inputs = inputs;
         if !matches!(prepared, Dispatch::Admission(_)) {

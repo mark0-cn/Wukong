@@ -12,7 +12,7 @@ from filelock import FileLock, Timeout
 from wukong_worker.artifacts.common import artifact, confined, sha256_file as digest
 from wukong_worker.artifacts.metadata import atomic_json, load_json
 from wukong_analysis.validation import bounded_int
-from wukong_worker.host.environment import safe_env
+from wukong_worker.platform.environment import safe_env
 from wukong_worker.execution.processes import run_process
 
 

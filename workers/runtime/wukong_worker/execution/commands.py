@@ -7,7 +7,7 @@ import threading
 import uuid
 from wukong_analysis.validation import bounded_int
 from wukong_worker.artifacts.common import public_file
-from wukong_worker.host.environment import safe_env
+from wukong_worker.platform.environment import safe_env
 from wukong_worker.execution.processes import run_process
 
 

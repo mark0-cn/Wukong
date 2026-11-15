@@ -24,6 +24,57 @@ fn old_resource_database_is_rejected_without_migrating_or_clearing_it() -> Resul
 }
 use serde_json::json;
 
+#[test]
+fn shared_durable_effect_scenarios_preserve_native_ownership_across_reopen() -> Result<()> {
+    let corpus: Value =
+        serde_json::from_str(include_str!("../../../protocol/fixtures/lifecycle.json"))?;
+    for case in corpus["effects"].as_array().unwrap() {
+        let (root, policy, mut journal) = fixture()?;
+        let (effect, resource) = reserve(&mut journal, &owner(), "stable")?;
+        let ticket = journal.begin(&effect)?;
+        let reply = json!({"session_id":resource,"state":"running"});
+        if case["interrupt"] == false {
+            journal.complete(
+                &ticket,
+                &Outcome::Result {
+                    value: reply.clone(),
+                },
+            )?;
+        }
+        if case["closed"] == true {
+            journal.start_closing(&resource)?;
+            journal.close(&resource, cleanup())?;
+        }
+        drop(journal);
+        let mut journal = Journal::with_policy(root.path(), owner().identity, policy)?;
+        let spec = json!({"target_sha256":if case["changed"] == true {"e".repeat(64)} else {"d".repeat(64)},"args":[]});
+        let repeated = journal.reserve_start(&owner(), "stable", ResourceKind::Debugger, &spec);
+        match case["expect"].as_str().unwrap() {
+            "conflict" => assert!(repeated.is_err(), "{}", case["name"]),
+            "unknown" => {
+                assert!(matches!(repeated?, Reservation::Pending { .. }));
+                assert!(journal.begin(&effect).is_err());
+                assert!(!journal.idle()?);
+            }
+            "reuse" => {
+                let Reservation::Completed {
+                    outcome: Outcome::Result { value },
+                    phase,
+                    ..
+                } = repeated?
+                else {
+                    anyhow::bail!("completed receipt was not reused: {}", case["name"]);
+                };
+                assert_eq!(value, reply);
+                assert_eq!(phase == Phase::Closed, case["closed"] == true);
+                assert_eq!(journal.idle()?, case["closed"] == true);
+            }
+            _ => anyhow::bail!("unknown lifecycle case"),
+        }
+    }
+    Ok(())
+}
+
 fn owner() -> Owner {
     Owner {
         identity: Binding {

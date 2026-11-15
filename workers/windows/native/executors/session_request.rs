@@ -3,10 +3,10 @@ use crate::{artifacts::resource_input::Reference, executors::resource_process};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 
-pub(crate) fn prefix(kind: crate::resources::models::ResourceKind) -> Result<&'static str> {
+pub(crate) fn prefix(kind: crate::core::resource::ResourceKind) -> Result<&'static str> {
     match kind {
-        crate::resources::models::ResourceKind::Debugger => Ok("debug"),
-        crate::resources::models::ResourceKind::Interactive => Ok("interact"),
+        crate::core::resource::ResourceKind::Debugger => Ok("debug"),
+        crate::core::resource::ResourceKind::Interactive => Ok("interact"),
         _ => anyhow::bail!("native resource is not a persistent session"),
     }
 }
@@ -37,7 +37,7 @@ impl Request {
             self.target.interpreter.is_none() && self.target.replay.is_none(),
             "native session admission requires a native target image"
         );
-        if self.kind() == crate::resources::models::ResourceKind::Interactive {
+        if self.kind() == crate::core::resource::ResourceKind::Interactive {
             ensure!(
                 self.target.input.is_none()
                     || self
@@ -88,10 +88,10 @@ impl Request {
     pub(crate) fn read_only(&self) -> bool {
         self.dump().is_some()
     }
-    pub(crate) fn kind(&self) -> crate::resources::models::ResourceKind {
+    pub(crate) fn kind(&self) -> crate::core::resource::ResourceKind {
         match self.mode {
-            Mode::Interactive => crate::resources::models::ResourceKind::Interactive,
-            _ => crate::resources::models::ResourceKind::Debugger,
+            Mode::Interactive => crate::core::resource::ResourceKind::Interactive,
+            _ => crate::core::resource::ResourceKind::Debugger,
         }
     }
     pub(crate) fn scope(&self) -> &'static str {

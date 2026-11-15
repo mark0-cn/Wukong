@@ -136,7 +136,7 @@ fn plan(params: &Map<String, Value>, kind: Kind) -> Result<Plan> {
             "process":spec,"replay":configuration});
 
     Ok(Plan {
-        kind: crate::resources::models::ResourceKind::Process,
+        kind: crate::core::resource::ResourceKind::Process,
         request_id: request_id.into(),
         specification,
         response: Response::Job,
@@ -166,10 +166,12 @@ pub(crate) fn minimize(params: &Map<String, Value>) -> Result<Plan> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::resource::ResourceKind;
+    use crate::resources::journal::Reservation;
     use crate::resources::state::tests::owner;
-    use crate::resources::{journal::Reservation, models::ResourceKind};
     use crate::{
-        artifacts::inputs::{Inputs, Owner},
+        artifacts::inputs::Inputs,
+        core::Owner,
         executors::{resource_process::Request, specification::Specification},
     };
     use base64::{Engine, engine::general_purpose::STANDARD};

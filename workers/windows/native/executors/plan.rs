@@ -1,7 +1,8 @@
 //! Prepared execution intent; factories own tool-specific inputs, never the journal.
 use crate::executors::parameters::start_parameters;
 use crate::{
-    artifacts::inputs::{Inputs, Owner},
+    artifacts::inputs::Inputs,
+    core::Owner,
     executors::resource_process::Request,
     executors::specification::{Specification, default_timeout},
 };
@@ -32,12 +33,12 @@ impl Target {
 pub(crate) struct Prepared {
     pub(crate) request_id: String,
     pub(crate) specification: Value,
-    pub(crate) kind: crate::resources::models::ResourceKind,
+    pub(crate) kind: crate::core::resource::ResourceKind,
     pub(crate) response: Response,
     pub(crate) target: Target,
 }
 pub(crate) struct Plan {
-    pub(crate) kind: crate::resources::models::ResourceKind,
+    pub(crate) kind: crate::core::resource::ResourceKind,
 
     pub(crate) request_id: String,
     pub(crate) specification: Value,
@@ -51,7 +52,7 @@ pub(crate) fn process(params: &Map<String, Value>) -> Result<Plan> {
     }
     spec.validate()?;
     Ok(Plan {
-        kind: crate::resources::models::ResourceKind::Process,
+        kind: crate::core::resource::ResourceKind::Process,
         request_id: request_id.into(),
         specification: json!({"native_process_schema":crate::executors::resource_process::SCHEMA,"process":spec}),
         response: Response::Job,

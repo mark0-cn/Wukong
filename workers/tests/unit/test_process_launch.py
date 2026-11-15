@@ -7,13 +7,14 @@ import tempfile
 import unittest
 from unittest.mock import patch, Mock
 from wukong_worker.resources.jobs import JobManager
+from wukong_worker.operations.jobs import JobService
 
 
 class ProcessLaunchPlanningTests(unittest.TestCase):
     def test_normalized_request_fingerprint_and_duplicate_do_not_depend_on_runner_token(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manager = JobManager(root, True, False)
+            manager = JobService(root, True, False, jobs=JobManager(root, True, False))
             params = {
                 "argv": ["fixture", "arg"],
                 "request_id": "job-admission-fixture",
@@ -22,7 +23,7 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
             }
             original = json.loads(json.dumps(params))
             with patch(
-                "wukong_worker.resources.processes.subprocess.Popen", return_value=Mock(pid=123)
+                "wukong_worker.platform.process_owner.subprocess.Popen", return_value=Mock(pid=123)
             ) as spawn:
                 first = manager.start_job(params)
                 duplicate = manager.start_job(params)
@@ -42,10 +43,10 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
     def test_failed_spawn_keeps_reservation_and_retry_never_reexecutes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manager = JobManager(root, True, False)
+            manager = JobService(root, True, False, jobs=JobManager(root, True, False))
             params = {"argv": ["fixture"], "request_id": "spawn-failure"}
             with patch(
-                "wukong_worker.resources.processes.subprocess.Popen",
+                "wukong_worker.platform.process_owner.subprocess.Popen",
                 side_effect=OSError("fixture spawn failed"),
             ) as spawn:
                 with patch("wukong_worker.resources.jobs.time.time", return_value=100):
@@ -77,10 +78,10 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
                 timeout_secs=5,
             )
             (base / "launch.json").write_text(json.dumps(spec))
-            manager = JobManager(root, True, False)
+            manager = JobService(root, True, False, jobs=JobManager(root, True, False))
             params = dict(launch_spec="files/case/launch.json", input="files/case/input.bin")
             with patch(
-                "wukong_worker.resources.processes.subprocess.Popen", return_value=Mock(pid=123)
+                "wukong_worker.platform.process_owner.subprocess.Popen", return_value=Mock(pid=123)
             ) as spawn:
                 result = manager.start_job(params)
                 saved = json.loads((root / "jobs" / result["job_id"] / "spec.json").read_text())

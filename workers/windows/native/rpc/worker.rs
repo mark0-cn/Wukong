@@ -5,7 +5,6 @@ use crate::{
     host::deployment,
     isolation::security::AclPolicy,
     resources::manager::ResourceManager,
-    resources::state::ResourceState,
     rpc::worker_leases::{Leases, require},
 };
 use anyhow::Result;
@@ -94,11 +93,13 @@ impl Worker {
         )?;
         let outer_lease = params["_lease"].clone();
         let admission = self.leases.admit(params.as_object().unwrap())?;
-        let native_resource = ResourceState::handles(&method, params.as_object().unwrap())
-            && self.resources.initialized().await;
+        let native_resource =
+            crate::rpc::catalog::owns_resource(&method, params.as_object().unwrap())
+                && self.resources.initialized().await;
         // Serialize input publication independently of lease controls: hashing
         // or a slow worker upload must never prevent heartbeat renewal.
-        let inputs = if Inputs::handles(&method)
+        let inputs = if crate::rpc::catalog::route(&method)
+            == Some(crate::rpc::catalog::Route::Files)
             || crate::rpc::catalog::route(&method) == Some(crate::rpc::catalog::Route::Analysis)
             || native_resource
                 && operation.resources() == wukong_worker_protocol::ResourceDemand::Execution
@@ -113,7 +114,10 @@ impl Worker {
                 .execute(
                     inputs,
                     &admission.owner,
-                    &method,
+                    crate::rpc::catalog::resource_operation(
+                        operation,
+                        params.as_object().unwrap(),
+                    )?,
                     params.as_object().unwrap(),
                     || self.leases.validate(&outer_lease),
                 )

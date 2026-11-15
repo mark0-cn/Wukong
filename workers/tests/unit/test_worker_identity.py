@@ -26,7 +26,7 @@ class WorkerFenceTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows boot identity requires Windows")
     def test_native_windows_boot_epoch_matches_a_fresh_minimal_environment_process(self):
         import subprocess, sys
-        from wukong_worker.host.environment import safe_env
+        from wukong_worker.platform.environment import safe_env
 
         runtime = Path(__file__).resolve().parents[2] / "runtime"
         code = f"import sys;sys.path.insert(0,{str(runtime)!r});from wukong_worker.host.identity import boot_identity;print(boot_identity())"
@@ -102,7 +102,7 @@ class WorkerFenceTests(unittest.TestCase):
         from wukong_worker.host.runtime import Runtime
 
         def assemble(runtime):
-            self.assertIsNone(runtime.jobs.observe)
+            self.assertIsNone(runtime.job_tools.observe)
             return register(runtime)
 
         with (
@@ -113,7 +113,7 @@ class WorkerFenceTests(unittest.TestCase):
         ):
             runtime = Runtime(self.root, True)
             self.assertTrue(all(callable(item.handler) for item in runtime.registrations.values()))
-            self.assertEqual(runtime.jobs.doctor(), {"capabilities": {}})
+            self.assertEqual(runtime.job_tools.doctor(), {"capabilities": {}})
             self.assertIs(observe.call_args.args[3], runtime.registrations)
 
     def test_windows_probe_keeps_portable_analysis_but_excludes_linux_engines(self):

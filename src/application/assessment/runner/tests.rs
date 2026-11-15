@@ -545,6 +545,7 @@ async fn native_skills_and_usage_survive_rig_memory_compaction() {
                     "x".repeat(10000)
                 },
                 stderr: String::new(),
+                cleanup_pending: None,
                 extra: Default::default(),
             },
             status_evidence_id: Some(observation.id.clone()),

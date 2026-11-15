@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from wukong_worker.resources.jobs import JobManager
+from wukong_worker.operations.jobs import JobService
 
 
 class FuzzPlanningTests(unittest.TestCase):
@@ -15,7 +16,12 @@ class FuzzPlanningTests(unittest.TestCase):
             (root / "files/seeds").mkdir(parents=True)
             (root / "files/fixture").write_bytes(b"trusted inert fixture: never executed")
             (root / "files/seeds/seed").write_bytes(b"input")
-            manager = JobManager(root, trusted=True, isolated=False)
+            manager = JobService(
+                root,
+                trusted=True,
+                isolated=False,
+                jobs=JobManager(root, trusted=True, isolated=False),
+            )
             params = {"target": "files/fixture", "seeds": "files/seeds"}
             with (
                 patch.object(manager, "doctor", return_value={"capabilities": {"fuzz_qemu": True}}),

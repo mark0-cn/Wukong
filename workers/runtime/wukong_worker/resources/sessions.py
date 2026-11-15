@@ -8,7 +8,7 @@ import re
 import shutil
 import sys
 import threading
-from wukong_worker.rpc.errors import WorkerError
+from wukong_worker.core.errors import WorkerError
 from wukong_worker.artifacts.metadata import atomic_json, load_json
 from wukong_analysis.validation import bounded_int
 import wukong_worker.debugger.gdb as worker_debugger
@@ -28,7 +28,7 @@ def _recover_sessions(directory: Path) -> None:
             # A crash between spawn and publishing the session still owns resources.
             state = load_json(path) if path.exists() else {"state": "recovery_required"}
             if state["state"] != "closed":
-                from wukong_worker.resources.process_journal import ProcessJournal
+                from wukong_worker.platform.process_journal import ProcessJournal
 
                 journal = path.parent / "processes.json"
                 confirmed = journal.exists() and ProcessJournal.reconcile(journal)
@@ -115,7 +115,7 @@ class SessionManager:
         state = load_json(metadata)
         if state["state"] == "closed":
             return {"session_id": identifier, "state": "closed", "cleanup_confirmed": True}
-        from wukong_worker.resources.process_journal import ProcessJournal
+        from wukong_worker.platform.process_journal import ProcessJournal
 
         journal = directory / "processes.json"
         confirmed = journal.exists() and ProcessJournal.reconcile(journal)

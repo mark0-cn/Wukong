@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from jsonschema import ValidationError
-from wukong_worker.rpc.contract import CONTRACT, validator, validate_request, validate_result
+from wukong_worker.core.contract import CONTRACT, validator, validate_request, validate_result
 from wukong_worker.rpc.server import Server
 
 

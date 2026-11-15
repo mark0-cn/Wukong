@@ -32,7 +32,7 @@ class SessionLaunchTests(unittest.TestCase):
 
     def test_lost_session_error_kind_survives_durable_replay(self):
         import wukong_worker.host.runtime as bridge
-        from wukong_worker.rpc.errors import WorkerError, error_kind
+        from wukong_worker.core.errors import WorkerError, error_kind
 
         with tempfile.TemporaryDirectory() as directory:
             runtime = bridge.Runtime(Path(directory), trusted=True)
@@ -43,7 +43,7 @@ class SessionLaunchTests(unittest.TestCase):
                     )
                 self.assertEqual(error_kind(error.exception), "session_lost")
 
-    @patch("wukong_worker.resources.process_journal.remove_scratch")
+    @patch("wukong_worker.platform.process_journal.remove_scratch")
     def test_isolated_interactive_launch_drops_credentials(self, _remove_scratch):
         import wukong_worker.debugger.interactive as bridge
         import wukong_worker.platform.isolation as isolation
@@ -549,7 +549,7 @@ class OperationLedgerTests(unittest.TestCase):
 
     def test_owner_death_does_not_repeat_an_unknown_interactive_write(self):
         from wukong_worker.resources.operations import OperationLedger
-        from wukong_worker.rpc.errors import WorkerError
+        from wukong_worker.core.errors import WorkerError
 
         with tempfile.TemporaryDirectory() as directory:
             calls = []

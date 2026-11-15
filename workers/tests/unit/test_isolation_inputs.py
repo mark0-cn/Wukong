@@ -9,6 +9,7 @@ import unittest
 from wukong_worker.platform.isolation import stage_file, stage_directory
 from wukong_worker.artifacts.common import public_file
 from wukong_worker.resources.jobs import JobManager
+from wukong_worker.operations.jobs import JobService
 from wukong_worker.execution.staging import executable_inputs, stage_argv
 
 
@@ -88,7 +89,12 @@ class StagedInputPolicyTests(unittest.TestCase):
     def test_private_verification_input_is_denied_before_a_job_can_be_created(self):
         target = self.root / "files/target"
         target.write_bytes(b"inert target: never executed")
-        manager = JobManager(self.root, trusted=True, isolated=False)
+        manager = JobService(
+            self.root,
+            trusted=True,
+            isolated=False,
+            jobs=JobManager(self.root, trusted=True, isolated=False),
+        )
         with self.assertRaisesRegex(ValueError, "private worker metadata"):
             manager.start_job({"target": "files/target", "input": "endpoint.json"}, "replay")
         self.assertEqual(list((self.root / "jobs").iterdir()), [])

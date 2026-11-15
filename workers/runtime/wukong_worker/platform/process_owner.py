@@ -18,12 +18,12 @@ class ProcessResources:
         self._closed = False
         self._journal = None
         if journal is not None and sys.platform.startswith("linux"):
-            from wukong_worker.resources.process_journal import ProcessJournal
+            from wukong_worker.platform.process_journal import ProcessJournal
 
             self._journal = ProcessJournal(journal, experiment)
 
     def spawn(self, argv, *, durable=False, **options):
-        from wukong_worker.execution.processes import attach_windows_job, detached_options
+        from wukong_worker.platform.process_control import attach_windows_job, detached_options
 
         with self._lock:
             if self._closed:
@@ -69,7 +69,7 @@ class ProcessResources:
                     del self._children[process.pid]
 
     def close(self):
-        from wukong_worker.execution.processes import terminate_tree
+        from wukong_worker.platform.process_control import terminate_tree
 
         with self._lock:
             self._closed = True

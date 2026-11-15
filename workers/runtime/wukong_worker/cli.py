@@ -5,11 +5,12 @@ import sys
 
 from pathlib import Path
 import argparse
-import json
 import os
-from wukong_worker.rpc.contract import MAX_RPC
+from wukong_worker.core.contract import MAX_RPC
 from wukong_worker.artifacts.common import job_dir
-from wukong_worker.execution.supervisor import supervise_job
+from wukong_worker.host.runtime import Runtime
+from wukong_worker.resources.supervisor import supervise_job
+from wukong_worker.operations.executors import execute_job
 from wukong_worker.rpc.transport import ensure_daemon, relay_call, serve
 
 
@@ -31,9 +32,9 @@ def main():
             "or drop the flag and use isolated execution"
         )
     if args.run_job:
-        supervise_job(root, job_dir(root, args.run_job))
+        supervise_job(root, job_dir(root, args.run_job), execute_job)
     elif args.daemon:
-        serve(root, args.trusted_local)
+        serve(root, args.trusted_local, Runtime)
     elif args.stdio:
         endpoint = ensure_daemon(root, args.trusted_local)
         while True:

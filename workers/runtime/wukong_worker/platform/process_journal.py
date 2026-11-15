@@ -72,7 +72,7 @@ class ProcessJournal:
         atomic_json(self.path, self.state)
 
     def spawned(self, process):
-        from wukong_worker.execution.processes import process_identity
+        from wukong_worker.platform.process_control import process_identity
 
         identity = process_identity(process.pid)
         self.state["children"].append(
@@ -83,7 +83,7 @@ class ProcessJournal:
         atomic_json(self.path, self.state)
 
     def check_owned(self, pid):
-        from wukong_worker.execution.processes import process_identity
+        from wukong_worker.platform.process_control import process_identity
 
         child = next(child for child in self.state["children"] if child["pid"] == pid)
         current = process_identity(pid)
@@ -109,7 +109,7 @@ class ProcessJournal:
 
     @staticmethod
     def reconcile(path):
-        from wukong_worker.execution.processes import process_identity
+        from wukong_worker.platform.process_control import process_identity
 
         path = Path(path)
         state = load_json(path)
