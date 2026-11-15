@@ -6,14 +6,14 @@ from pathlib import Path
 import tempfile
 import unittest
 from jsonschema import ValidationError
-from worker_contract import CONTRACT, validator, validate_request, validate_result
-from worker_rpc import Server
+from wukong_worker.rpc.contract import CONTRACT, validator, validate_request, validate_result
+from wukong_worker.rpc.server import Server
 
 
 class ContractTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "requires a POSIX fixture shell")
     def test_shell_output_limit_reaches_the_executor(self):
-        from worker_commands import CommandService
+        from wukong_worker.execution.commands import CommandService
 
         params = {"command": "printf '%4096s' x", "output_limit": 1024}
         validate_request("exec.run", params)

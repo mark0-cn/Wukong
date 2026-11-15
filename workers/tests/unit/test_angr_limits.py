@@ -3,7 +3,7 @@
 import importlib.util
 import unittest
 
-from angr_solve import bounded_explore
+from wukong_worker.execution.angr_solve import bounded_explore
 
 
 @unittest.skipUnless(importlib.util.find_spec("angr"), "angr is not installed")

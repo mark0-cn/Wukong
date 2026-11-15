@@ -14,7 +14,10 @@ sys.path[:0] = [str(ROOT), str(RUNTIME), str(ROOT.parent / "analysis")]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=["unit", "integration", "isolation", "ghidra", "launch"])
+    parser.add_argument(
+        "suite",
+        choices=["unit", "integration", "isolation", "ghidra", "launch"],
+    )
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     remaining = args.arguments

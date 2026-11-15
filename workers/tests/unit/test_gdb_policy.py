@@ -3,7 +3,7 @@
 import json
 import unittest
 
-from worker_gdb_policy import permitted_command
+from wukong_worker.debugger.policy import permitted_command
 
 
 class GdbPolicyTests(unittest.TestCase):

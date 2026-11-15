@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from worker_sessions import SessionManager
+from wukong_worker.resources.sessions import SessionManager
 
 
 class SessionRecoveryTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class SessionRecoveryTests(unittest.TestCase):
             terminal.parent.mkdir(parents=True)
             original = b'{"state": "closed", "evidence": "unchanged"}\n'
             terminal.write_bytes(original)
-            with self.assertLogs("worker_sessions", level="WARNING") as logs:
+            with self.assertLogs("wukong_worker.resources.sessions", level="WARNING") as logs:
                 manager = SessionManager(root, True, False)
             self.assertEqual(len(logs.output), 17)
             self.assertNotIn("DO_NOT_LOG_THIS", "\n".join(logs.output))

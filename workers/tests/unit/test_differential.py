@@ -3,7 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from differential_runner import compare, observe
+from wukong_worker.execution.differential import compare, observe
 
 
 class DifferentialTests(unittest.TestCase):

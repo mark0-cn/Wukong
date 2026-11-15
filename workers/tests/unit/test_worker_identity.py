@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-from worker_identity import installation_identity, boot_identity
+from wukong_worker.host.identity import installation_identity, boot_identity
 
 
 class WorkerFenceTests(unittest.TestCase):
@@ -26,10 +26,10 @@ class WorkerFenceTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows boot identity requires Windows")
     def test_native_windows_boot_epoch_matches_a_fresh_minimal_environment_process(self):
         import subprocess, sys
-        from worker_environment import safe_env
+        from wukong_worker.host.environment import safe_env
 
         runtime = Path(__file__).resolve().parents[2] / "runtime"
-        code = f"import sys;sys.path.insert(0,{str(runtime)!r});from worker_identity import boot_identity;print(boot_identity())"
+        code = f"import sys;sys.path.insert(0,{str(runtime)!r});from wukong_worker.host.identity import boot_identity;print(boot_identity())"
         result = subprocess.run(
             [sys.executable, "-I", "-c", code],
             env=safe_env(),
@@ -51,9 +51,36 @@ class WorkerFenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             installation_identity(self.root)
 
+    def test_content_identity_binds_nested_module_bytes_and_relative_names(self):
+        from unittest.mock import patch
+        import wukong_worker.host.identity as identity
+
+        runtime = self.root / "runtime"
+        package = runtime / "wukong_worker"
+        source = package / "execution" / "fixture.py"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"original fixture")
+        bridge = runtime / "bridge.py"
+        bridge.write_bytes(b"stable entry")
+        schema = self.root / "protocol/schema/contract.json"
+        schema.parent.mkdir(parents=True)
+        schema.write_bytes(b"fixture contract")
+        with patch.multiple(
+            identity, RUNTIME_ROOT=runtime, PACKAGE_ROOT=package, BRIDGE_PATH=bridge
+        ):
+            original = identity.content_identity(self.root)
+            source.write_bytes(b"changed fixture")
+            changed = identity.content_identity(self.root)
+            self.assertNotEqual(original, changed)
+            source.rename(source.with_name("renamed.py"))
+            renamed = identity.content_identity(self.root)
+            self.assertNotEqual(changed, renamed)
+            (package / "ignored.pyc").write_bytes(b"cache noise")
+            self.assertEqual(identity.content_identity(self.root), renamed)
+
     def test_unisolated_worker_does_not_advertise_native_execution(self):
-        from worker_capabilities import doctor
-        from worker_runtime import Runtime
+        from wukong_worker.host.capabilities import doctor
+        from wukong_worker.host.runtime import Runtime
 
         capabilities = doctor(self.root, False, False, Runtime(self.root, True).registrations)[
             "capabilities"
@@ -71,16 +98,18 @@ class WorkerFenceTests(unittest.TestCase):
 
     def test_job_capability_observer_is_bound_after_all_handlers_exist(self):
         from unittest.mock import patch
-        from worker_catalog import register
-        from worker_runtime import Runtime
+        from wukong_worker.rpc.catalog import register
+        from wukong_worker.host.runtime import Runtime
 
         def assemble(runtime):
             self.assertIsNone(runtime.jobs.observe)
             return register(runtime)
 
         with (
-            patch("worker_runtime.register", side_effect=assemble),
-            patch("worker_runtime.doctor", return_value={"capabilities": {}}) as observe,
+            patch("wukong_worker.host.runtime.register", side_effect=assemble),
+            patch(
+                "wukong_worker.host.runtime.doctor", return_value={"capabilities": {}}
+            ) as observe,
         ):
             runtime = Runtime(self.root, True)
             self.assertTrue(all(callable(item.handler) for item in runtime.registrations.values()))
@@ -89,13 +118,13 @@ class WorkerFenceTests(unittest.TestCase):
 
     def test_windows_probe_keeps_portable_analysis_but_excludes_linux_engines(self):
         from unittest.mock import patch
-        from worker_capabilities import doctor
-        from worker_runtime import Runtime
+        from wukong_worker.host.capabilities import doctor
+        from wukong_worker.host.runtime import Runtime
 
         with (
-            patch("worker_capabilities.sys", SimpleNamespace(platform="win32")),
-            patch("worker_capabilities.platform.system", return_value="Windows"),
-            patch("worker_capabilities._python_module", return_value=True),
+            patch("wukong_worker.host.capabilities.sys", SimpleNamespace(platform="win32")),
+            patch("wukong_worker.host.capabilities.platform.system", return_value="Windows"),
+            patch("wukong_worker.host.capabilities._python_module", return_value=True),
         ):
             capabilities = doctor(self.root, True, False, Runtime(self.root, True).registrations)[
                 "capabilities"

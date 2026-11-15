@@ -197,7 +197,7 @@ pub(in crate::application::tools) fn handle_differential_test<'a>(
                 call_id,
                 "py_run",
                 json!({
-                    "source":include_str!("../../../../workers/runtime/differential_runner.py"),
+                    "source":include_str!("../../../../workers/runtime/wukong_worker/execution/differential.py"),
                     "argv":[input.reference,config], "target":input.target,
                     "timeout_secs":(input.case_timeout_seconds*128+20).min(3600)
                 }),

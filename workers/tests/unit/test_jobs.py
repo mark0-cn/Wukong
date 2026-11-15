@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from worker_jobs import JobManager
+from wukong_worker.resources.jobs import JobManager
 
 
 class FuzzPlanningTests(unittest.TestCase):

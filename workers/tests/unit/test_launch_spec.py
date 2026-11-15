@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from worker_launch import load
-from worker_network import network_profile
+from wukong_worker.execution.launch import load
+from wukong_worker.network.service import network_profile
 
 
 class SharedLaunchTests(unittest.TestCase):

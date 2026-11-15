@@ -5,7 +5,11 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
-from worker_mitigations import gnu_property_features, parse_status, thread_observations
+from wukong_worker.analysis.mitigations import (
+    gnu_property_features,
+    parse_status,
+    thread_observations,
+)
 
 
 class MitigationTests(unittest.TestCase):
@@ -22,7 +26,7 @@ class MitigationTests(unittest.TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("elftools"), "optional pyelftools dependency")
     def test_real_elf_parser_preserves_declaration_without_enabling_runtime(self):
-        from worker_profile import file_identity
+        from wukong_worker.analysis.profile import file_identity
 
         prop = struct.pack("<IIII", 0xC0000002, 4, 3, 0)
         note = struct.pack("<III", 4, len(prop), 5) + b"GNU\0" + prop

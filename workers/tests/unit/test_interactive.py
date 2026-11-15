@@ -8,7 +8,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from worker_interactive import InteractSession
+from wukong_worker.debugger.interactive import InteractSession
 
 
 class InteractiveDrainTests(unittest.TestCase):

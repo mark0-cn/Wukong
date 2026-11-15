@@ -2,7 +2,7 @@
 
 import unittest
 
-from worker_debug_operations import control_request, inspect_request
+from wukong_worker.debugger.operations import control_request, inspect_request
 
 
 class TypedDebugRequests(unittest.TestCase):

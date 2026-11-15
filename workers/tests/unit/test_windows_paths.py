@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import worker_windows_paths
+import wukong_worker.platform.windows_paths as worker_windows_paths
 
 
 @contextmanager

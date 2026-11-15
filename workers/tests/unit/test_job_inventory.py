@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from worker_metadata import atomic_json
-from worker_jobs import JobManager
+from wukong_worker.artifacts.metadata import atomic_json
+from wukong_worker.resources.jobs import JobManager
 
 
 class JobInventoryTests(unittest.TestCase):

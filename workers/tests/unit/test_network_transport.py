@@ -1,8 +1,8 @@
 import socket
 import unittest
 from unittest.mock import Mock
-from worker_network_evidence import Transcript
-from worker_network_transport import ReplayConnection
+from wukong_worker.network.evidence import Transcript
+from wukong_worker.network.transport import ReplayConnection
 
 
 class TransportTests(unittest.TestCase):

@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch, Mock
-from worker_jobs import JobManager
+from wukong_worker.resources.jobs import JobManager
 
 
 class ProcessLaunchPlanningTests(unittest.TestCase):
@@ -21,7 +21,9 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
                 "output_limit": None,
             }
             original = json.loads(json.dumps(params))
-            with patch("worker_jobs.subprocess.Popen", return_value=Mock(pid=123)) as spawn:
+            with patch(
+                "wukong_worker.resources.jobs.subprocess.Popen", return_value=Mock(pid=123)
+            ) as spawn:
                 first = manager.start_job(params)
                 duplicate = manager.start_job(params)
                 self.assertEqual(first["job_id"], duplicate["job_id"])
@@ -43,12 +45,13 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
             manager = JobManager(root, True, False)
             params = {"argv": ["fixture"], "request_id": "spawn-failure"}
             with patch(
-                "worker_jobs.subprocess.Popen", side_effect=OSError("fixture spawn failed")
+                "wukong_worker.resources.jobs.subprocess.Popen",
+                side_effect=OSError("fixture spawn failed"),
             ) as spawn:
-                with patch("worker_jobs.time.time", return_value=100):
+                with patch("wukong_worker.resources.jobs.time.time", return_value=100):
                     with self.assertRaisesRegex(OSError, "fixture spawn failed"):
                         manager.start_job(params)
-                with patch("worker_jobs.time.time", return_value=111):
+                with patch("wukong_worker.resources.jobs.time.time", return_value=111):
                     retry = manager.start_job(params)
                 self.assertEqual(spawn.call_count, 1)
                 self.assertEqual(retry["state"], "lost")
@@ -76,7 +79,9 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
             (base / "launch.json").write_text(json.dumps(spec))
             manager = JobManager(root, True, False)
             params = dict(launch_spec="files/case/launch.json", input="files/case/input.bin")
-            with patch("worker_jobs.subprocess.Popen", return_value=Mock(pid=123)) as spawn:
+            with patch(
+                "wukong_worker.resources.jobs.subprocess.Popen", return_value=Mock(pid=123)
+            ) as spawn:
                 result = manager.start_job(params)
                 saved = json.loads((root / "jobs" / result["job_id"] / "spec.json").read_text())
                 self.assertEqual(saved["timeout_secs"], 5)

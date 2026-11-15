@@ -6,8 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from worker_runtime import Runtime
-from worker_transfers import CHUNK_BYTES, MAX_TRANSFER_BYTES
+from wukong_worker.host.runtime import Runtime
+from wukong_worker.artifacts.transfers import CHUNK_BYTES, MAX_TRANSFER_BYTES
 
 
 class TransferTests(unittest.TestCase):

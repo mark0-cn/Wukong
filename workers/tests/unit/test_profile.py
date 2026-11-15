@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from worker_profile import file_identity, parse_maps, ProfileService
+from wukong_worker.analysis.profile import file_identity, parse_maps, ProfileService
 
 
 class ProfileTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class ProfileTests(unittest.TestCase):
                 }
 
             service = ProfileService(root, True, False)
-            with patch("worker_profile.file_identity", side_effect=fake):
+            with patch("wukong_worker.analysis.profile.file_identity", side_effect=fake):
                 result = service.prepare({"target": "target", "libc": "libc", "loader": "loader"})
                 self.assertEqual(
                     result,

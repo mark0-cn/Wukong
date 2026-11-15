@@ -4,7 +4,7 @@ import struct
 import unittest
 import uuid
 
-from worker_windows_identity import SHARED_PREFIX_BYTES, _decode_boot_identity
+from wukong_worker.platform.windows_identity import SHARED_PREFIX_BYTES, _decode_boot_identity
 
 
 class NativeBootIdentityTests(unittest.TestCase):

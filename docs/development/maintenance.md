@@ -74,7 +74,7 @@ These are maintenance/query fields, not permissions or proof of backend availabi
 
 `domain/claims` parses flag-shaped claims centrally. Completion tools reject placeholders; coordinator applies independent verification to specific claims. Parsing classifies text, not exploitation success.
 
-Rust file hashes/actual byte counts live in `content`; `adapters/binary` keeps its public hash API. Workers use `worker_common.sha256_file`; build/release scripts use `scripts._lib.checksums.sha256`. Independently injected sandbox scripts remain self-contained without controller imports. Path limits, size budgets and independent controller/worker identity checks remain at call boundaries; shared hashing does not merge/remove them.
+Rust file hashes/actual byte counts live in `adapters/files/content`; `adapters/binary` keeps its public hash API. Workers use `wukong_worker.artifacts.common.sha256_file`; build/release scripts use `scripts._lib.checksums.sha256`. Independently injected sandbox scripts remain self-contained without controller imports. Path limits, size budgets and independent controller/worker identity checks remain at call boundaries; shared hashing does not merge/remove them.
 
 <a id="验证"></a>
 

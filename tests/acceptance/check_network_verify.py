@@ -39,7 +39,7 @@ while True:
 
 
 def client(output):
-    from worker_network import network_profile, replay_network
+    from wukong_worker.network.service import network_profile, replay_network
 
     root = Path("/tmp/replay")
     root.mkdir()
@@ -236,8 +236,10 @@ def main():
                         (root / "workers/protocol/schema/contract.json").read_bytes()
                     ).hexdigest(),
                     "runtime_hashes": {
-                        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-                        for p in (root / "workers/runtime").glob("worker_*.py")
+                        p.relative_to(root / "workers/runtime").as_posix(): hashlib.sha256(
+                            p.read_bytes()
+                        ).hexdigest()
+                        for p in (root / "workers/runtime").rglob("*.py")
                     },
                 },
                 indent=2,

@@ -6,9 +6,9 @@ import hashlib
 import tempfile
 import unittest
 
-from isolation import stage_file, stage_directory
-from worker_common import public_file
-from worker_jobs import JobManager
+from wukong_worker.platform.isolation import stage_file, stage_directory
+from wukong_worker.artifacts.common import public_file
+from wukong_worker.resources.jobs import JobManager
 
 
 class StagedInputPolicyTests(unittest.TestCase):

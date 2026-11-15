@@ -4,7 +4,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
-from workbench_archive import export, restore
+from wukong_worker.workbench.archive import export, restore
 
 
 class ArchiveTests(unittest.TestCase):

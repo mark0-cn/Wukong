@@ -180,7 +180,7 @@ impl Workbench {
     }
     pub fn doctor(&self) -> Result<Value> {
         let result = self.worker_json(&[
-            "/opt/wukong/runtime/workbench_control.py",
+            "/opt/wukong/runtime/wukong_worker/workbench/control.py",
             "doctor",
             "/state",
         ])?;
@@ -199,7 +199,7 @@ impl Workbench {
             self.owned(&container, &env.container)?;
             if container["State"]["Running"] == true {
                 let result = self.worker_json(&[
-                    "/opt/wukong/runtime/workbench_control.py",
+                    "/opt/wukong/runtime/wukong_worker/workbench/control.py",
                     "idle",
                     "/state",
                 ])?;

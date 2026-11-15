@@ -185,8 +185,10 @@ Ghidra 套件编译自己的 C 夹具，通过只读适配器导入，定位 mai
 
 ## 模块边界
 
-`bridge.py` 只选择 stdio relay、daemon 或独立监督；部署整个 runtime 目录，Docker 已整体复制。`worker_transport` 管认证帧与启动；`worker_runtime` 装配/路由；`worker_operations` 管持久化保留与重放，`worker_sessions` 提供会话存活；`worker_jobs` 管记录/取消，`worker_job_supervisor` 管独立执行。调试、交互、文件、同步命令独立组件。`worker_processes` 管有界 I/O/进程树；`worker_common` 管协议值、路径约束、流式哈希和原子元数据。后端直接导入这些组件。
+`bridge.py` 保留 CLI 参数，在导入 `wukong_worker.cli` 前禁用字节码写入。部署整个 `workers/runtime` 目录及相邻的生成协议 schema，无需额外安装运行时包。内部显式导入 `wukong_worker` 包。`rpc/` 管帧、契约校验、错误和可调用注册；`host/` 管身份、能力观察、环境策略和服务装配。身份哈希覆盖 bridge 及所有嵌套包源码的路径/字节，以及共享 schema 和分析包。
 
-`worker_seccomp`、`worker_libc`、`worker_emu` 和 `worker_crash` 将受限输入及真实调试观察适配到独立[分析包](../analysis/README.zh-CN.md)。该包负责 BPF 解码/探测、有界 ELF 候选比较、Unicorn 模拟与崩溃数据解释，不拥有 Worker 状态或传输。`worker_network` 校验准备好的服务绑定并执行声明式 TCP 验证。监督器仍拥有生命周期/取消；不会在特权 supervisor 内运行模型提供的程序。见 [Pwn 工具契约](../../docs/reference/pwn-tools.zh-CN.md)。
+包内 `resources/` 管作业、会话和持久化副作用；`execution/` 管准入计划、监督执行、进程树 IO、重放和最小化。`debugger/` 管 GDB/MI 和交互进程；`artifacts/` 管受限路径、哈希、传输及原子元数据。`platform/` 保留 Linux 隔离及可信本地夹具使用的 Windows 身份/路径帮助函数。`workbench/` 管宿主调用的帮助脚本，control/prepare 通过明确的入口引导支持直接执行。注入隔离执行环境的分析和收集脚本保持自包含。
 
-`worker_launch_spec` 管公共解析、受限成员查找、流式产物哈希。原生启动和网络重放各自保留执行策略/预算。`worker_network` 协调试验；`worker_network_plan` 校验步骤/捕获；`worker_network_transport` 管有界 TCP 与新响应边界；`worker_network_evidence` 保存精确收发块及哈希 transcript。取消仍由 supervisor 管理。
+`analysis/adapters.py` 在同一文件内保留 `SeccompService`、`LibcService` 和 `EmuService` 各自的准入；`debugger/crash.py` 保留真实 GDB 观察。它们将输入适配到独立[分析包](../analysis/README.zh-CN.md)，该包负责 BPF 解码/探测、有界 ELF 候选比较、Unicorn 模拟与崩溃数据解释，不拥有 Worker 状态或传输。`network/service.py` 校验准备好的服务绑定并执行声明式 TCP 验证。监督器仍拥有生命周期/取消；不会在特权 supervisor 内运行模型提供的程序。见 [Pwn 工具契约](../../docs/reference/pwn-tools.zh-CN.md)。
+
+`execution/launch_spec.py` 管公共解析、受限成员查找、流式产物哈希。原生启动和网络重放各自保留执行策略/预算。`network/service.py` 协调试验；`network/plan.py` 校验步骤/捕获；`network/transport.py` 管有界 TCP 与新响应边界；`network/evidence.py` 保存精确收发块及哈希 transcript。取消仍由 supervisor 管理。

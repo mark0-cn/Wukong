@@ -17,6 +17,7 @@ playwright-report
 **/__pycache__
 **/*.pyc
 **/*.egg-info
+.ruff_cache
 workers/analysis/build
 workers/analysis/dist
 

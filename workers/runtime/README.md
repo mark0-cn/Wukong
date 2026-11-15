@@ -290,27 +290,20 @@ clearing that claim; absence of a lock owner alone does not prove its child exit
 
 ## Module boundaries
 
-`bridge.py` only selects stdio relay, daemon or detached job supervision. Deploy
-the complete `workers/runtime` directory; the Docker image already copies it as
-a unit. `worker_transport` owns authenticated framing and daemon startup;
-`worker_runtime` assembles and routes services. `worker_operations` owns durable
-reservation and replay, with session liveness supplied by `worker_sessions`.
-`worker_jobs` manages job records and cancellation; `worker_job_supervisor` owns
-detached execution. Debugger, interactive processes, files and synchronous
-commands have separate components. `worker_processes` contains bounded process
-IO and process-tree ownership; `worker_common` contains protocol values, confined
-paths, streamed file hashes and atomic metadata IO. Backend adapters import these components directly.
+`bridge.py` retains its CLI arguments and disables bytecode writes before importing `wukong_worker.cli`. Deploy the complete `workers/runtime` directory with the sibling generated protocol schema; no additional runtime-package installation is required. Internal imports use the `wukong_worker` package explicitly. `rpc/` owns framing, contract validation, errors and callable registration; `host/` owns identity, capability observation, environment policy and service assembly. Identity hashes the bridge and all nested package source paths/bytes, plus the shared schema and analysis package.
 
-`worker_seccomp`, `worker_libc`, `worker_emu` and `worker_crash` adapt confined inputs and live debugger observations to the independent [analysis package](../analysis/README.md). The package owns BPF decoding/probes, bounded ELF candidate comparison, Unicorn simulation and crash-data interpretation; it owns no worker state or transport.
-`worker_network` validates the prepared service binding and performs declarative
+Within the package, `resources/` owns jobs, sessions and durable effects; `execution/` owns admission plans, supervisor execution, process-tree IO, replay and minimization. `debugger/` owns GDB/MI and interactive processes; `artifacts/` owns confined paths, hashes, transfers and atomic metadata. `platform/` retains Linux isolation and the Windows identity/path helpers used by trusted local fixtures. `workbench/` contains host-invoked helpers; control/prepare support direct script execution with an explicit entry bootstrap. The analysis and collection scripts injected into isolated execution remain self-contained.
+
+`analysis/adapters.py` keeps separate `SeccompService`, `LibcService` and `EmuService` admission paths in one file. `debugger/crash.py` retains live GDB observations. They adapt inputs to the independent [analysis package](../analysis/README.md), which owns BPF decoding/probes, bounded ELF candidate comparison, Unicorn simulation and crash-data interpretation, with no worker state or transport.
+`network/service.py` validates the prepared service binding and performs declarative
 TCP verification. The job supervisor retains lifecycle/cancellation ownership;
 network replay never executes a model-provided program inside the privileged
 supervisor. See [Pwn tool contracts](../../docs/reference/pwn-tools.md).
 
-`worker_launch_spec` owns shared LaunchSpec parsing, confined member lookup and
+`execution/launch_spec.py` owns shared LaunchSpec parsing, confined member lookup and
 streamed artifact hashes. Local launch and network replay retain their own
-execution policy and explicit resource budgets. `worker_network` coordinates each
-trial; `worker_network_plan` validates steps and tracks captures,
-`worker_network_transport` owns bounded TCP IO and fresh-response boundaries,
-and `worker_network_evidence` persists exact transmitted/received chunks and their
+execution policy and explicit resource budgets. `network/service.py` coordinates each
+trial; `network/plan.py` validates steps and tracks captures,
+`network/transport.py` owns bounded TCP IO and fresh-response boundaries,
+and `network/evidence.py` persists exact transmitted/received chunks and their
 hash-bound transcript. Cancellation remains owned by the job supervisor.

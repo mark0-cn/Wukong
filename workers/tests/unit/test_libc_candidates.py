@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from worker_libc import LibcService
+from wukong_worker.analysis.adapters import LibcService
 
 
 @unittest.skipUnless(

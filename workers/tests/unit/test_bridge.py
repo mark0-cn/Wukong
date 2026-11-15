@@ -14,7 +14,7 @@ from support.client import Client
 
 class SessionLaunchTests(unittest.TestCase):
     def test_interactive_cleanup_failure_retains_the_owned_session(self):
-        from worker_sessions import SessionManager
+        from wukong_worker.resources.sessions import SessionManager
         from unittest.mock import Mock
 
         with tempfile.TemporaryDirectory() as directory:
@@ -31,8 +31,8 @@ class SessionLaunchTests(unittest.TestCase):
             self.assertNotIn(session.id, manager.interact)
 
     def test_lost_session_error_kind_survives_durable_replay(self):
-        import worker_runtime as bridge
-        from worker_errors import WorkerError, error_kind
+        import wukong_worker.host.runtime as bridge
+        from wukong_worker.rpc.errors import WorkerError, error_kind
 
         with tempfile.TemporaryDirectory() as directory:
             runtime = bridge.Runtime(Path(directory), trusted=True)
@@ -44,8 +44,8 @@ class SessionLaunchTests(unittest.TestCase):
                 self.assertEqual(error_kind(error.exception), "session_lost")
 
     def test_isolated_interactive_launch_drops_credentials(self):
-        import worker_interactive as bridge
-        import isolation
+        import wukong_worker.debugger.interactive as bridge
+        import wukong_worker.platform.isolation as isolation
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -75,13 +75,13 @@ class SessionLaunchTests(unittest.TestCase):
 class GdbMiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        import worker_debugger
+        import wukong_worker.debugger.gdb as worker_debugger
 
         if worker_debugger.parse_mi_response is None:
             raise unittest.SkipTest("pygdbmi is not installed; GDB/MI parsing tests skipped")
 
     def session(self, directory, output):
-        import worker_debugger as bridge
+        import wukong_worker.debugger.gdb as bridge
         import collections
         import io
         import queue
@@ -154,7 +154,7 @@ class GdbMiTests(unittest.TestCase):
             self.assertEqual((Path(directory) / "transcript.mi").read_text(), records)
 
     def test_oversized_mi_records_invalidate_the_session(self):
-        import worker_debugger as bridge
+        import wukong_worker.debugger.gdb as bridge
 
         with tempfile.TemporaryDirectory() as directory:
             session = self.session(directory, '1^done,value="' + "x" * 70000 + '"\n')
@@ -167,7 +167,7 @@ class GdbMiTests(unittest.TestCase):
 
 class GhidraProjectLockTests(unittest.TestCase):
     def test_unknown_analyzer_claim_prevents_reentry_after_lock_release(self):
-        import ghidra_backend
+        import wukong_worker.analysis.ghidra as ghidra_backend
         import hashlib
         from filelock import FileLock, Timeout
 
@@ -524,7 +524,7 @@ class RuntimeTests(unittest.TestCase):
 
 class OperationLedgerTests(unittest.TestCase):
     def test_completed_effect_replays_after_ledger_reconstruction(self):
-        from worker_operations import OperationLedger
+        from wukong_worker.resources.operations import OperationLedger
 
         with tempfile.TemporaryDirectory() as directory:
             calls = []
@@ -545,8 +545,8 @@ class OperationLedgerTests(unittest.TestCase):
                 )
 
     def test_owner_death_does_not_repeat_an_unknown_interactive_write(self):
-        from worker_operations import OperationLedger
-        from worker_errors import WorkerError
+        from wukong_worker.resources.operations import OperationLedger
+        from wukong_worker.rpc.errors import WorkerError
 
         with tempfile.TemporaryDirectory() as directory:
             calls = []

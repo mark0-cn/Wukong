@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from worker_metadata import atomic_json, load_json
-from worker_operations import OperationLedger
+from wukong_worker.artifacts.metadata import atomic_json, load_json
+from wukong_worker.resources.operations import OperationLedger
 
 
 class AtomicMetadataTests(unittest.TestCase):
@@ -65,7 +65,7 @@ class AtomicMetadataTests(unittest.TestCase):
                 "atomicwrites.replace_atomic",
                 side_effect=PermissionError("injected sharing violation"),
             ),
-            patch("worker_metadata.time.sleep"),
+            patch("wukong_worker.artifacts.metadata.time.sleep"),
         ):
             with self.assertRaises(PermissionError):
                 atomic_json(path, {"generation": 2})

@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from worker_minimize import reduce_input
+from wukong_worker.execution.minimize import reduce_input
 
 
 class MinimizeTests(unittest.TestCase):
@@ -67,7 +67,7 @@ class MinimizeTests(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "cancelled")
 
     def test_expired_deadline_does_not_execute_a_candidate(self):
-        with patch("worker_minimize.time.monotonic", return_value=10):
+        with patch("wukong_worker.execution.minimize.time.monotonic", return_value=10):
             data, result = reduce_input(
                 b"A",
                 lambda *_: self.fail("executed after deadline"),
@@ -92,18 +92,21 @@ class MinimizeTests(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "candidate outcome unresolved")
 
     def test_missing_reducer_dependency_hides_both_minimization_capabilities(self):
-        from worker_capabilities import doctor
-        from worker_runtime import Runtime
+        from wukong_worker.host.capabilities import doctor
+        from wukong_worker.host.runtime import Runtime
 
         with (
             tempfile.TemporaryDirectory() as root,
-            patch("worker_capabilities.shutil.which", return_value=None),
-            patch("worker_capabilities._ghidra_ready", return_value=False),
+            patch("wukong_worker.host.capabilities.shutil.which", return_value=None),
+            patch("wukong_worker.host.capabilities._ghidra_ready", return_value=False),
         ):
             for absent in ("picire", "chardet", "inators"):
                 with (
                     self.subTest(absent=absent),
-                    patch("worker_capabilities._python_module", side_effect=lambda n: n != absent),
+                    patch(
+                        "wukong_worker.host.capabilities._python_module",
+                        side_effect=lambda n: n != absent,
+                    ),
                 ):
                     result = doctor(
                         Path(root), True, False, Runtime(Path(root), True).registrations
@@ -113,7 +116,7 @@ class MinimizeTests(unittest.TestCase):
                     self.assertFalse(result["capabilities"]["input_minimize_signal_only"])
 
     def test_ignored_replay_fields_are_rejected_before_minimization_admission(self):
-        from worker_jobs import JobManager
+        from wukong_worker.resources.jobs import JobManager
 
         with tempfile.TemporaryDirectory() as root:
             manager = JobManager(Path(root), True, False)

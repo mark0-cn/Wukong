@@ -23,7 +23,7 @@ impl Workbench {
                     "exec",
                     &env.container,
                     "python3",
-                    "/opt/wukong/runtime/workbench_control.py",
+                    "/opt/wukong/runtime/wukong_worker/workbench/control.py",
                     "idle",
                     "/state",
                 ])?)?;
@@ -68,7 +68,7 @@ impl Workbench {
             "exec",
             &env.container,
             "python3",
-            "/opt/wukong/runtime/workbench_prepare.py",
+            "/opt/wukong/runtime/wukong_worker/workbench/prepare.py",
             "/state/files/challenge",
         ])?)?;
         self.docker.copy_from(
@@ -261,7 +261,7 @@ impl Workbench {
             "--entrypoint",
             "python3",
             &env.image_id,
-            "/opt/wukong/runtime/workbench_relay.py",
+            "/opt/wukong/runtime/wukong_worker/workbench/relay.py",
             challenge.network.host.as_deref().unwrap(),
             &challenge.network.port.to_string(),
         ])?;
@@ -491,7 +491,7 @@ impl Workbench {
             let cached_symbols = r#"import sys,re,json,subprocess
 from pathlib import Path
 sys.path.insert(0,'/opt/wukong/runtime')
-from worker_profile import file_identity
+from wukong_worker.analysis.profile import file_identity
 identity=file_identity('libc.so.6'); build=identity.get('build_id') or ''
 source='pwninit_download'
 if re.fullmatch('[0-9a-fA-F]{4,128}',build):

@@ -38,7 +38,7 @@ impl Workbench {
                         "exec",
                         name,
                         "python3",
-                        "/opt/wukong/runtime/workbench_control.py",
+                        "/opt/wukong/runtime/wukong_worker/workbench/control.py",
                         "idle",
                         "/state",
                     ])?)?;
@@ -247,7 +247,7 @@ impl Workbench {
                 "--entrypoint",
                 "python3",
                 image,
-                "/opt/wukong/runtime/workbench_archive.py",
+                "/opt/wukong/runtime/wukong_worker/workbench/archive.py",
                 action,
                 "/snapshot",
                 &format!("/bundle/{suffix}.tar"),

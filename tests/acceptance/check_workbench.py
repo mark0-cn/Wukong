@@ -138,7 +138,7 @@ def main():
             "--entrypoint",
             "python3",
             args.image,
-            "/opt/wukong/runtime/workbench_relay.py",
+            "/opt/wukong/runtime/wukong_worker/workbench/relay.py",
             "upstream",
             "1337",
         )
@@ -181,7 +181,7 @@ def main():
                     "--entrypoint",
                     "python3",
                     args.image,
-                    "/opt/wukong/runtime/workbench_archive.py",
+                    "/opt/wukong/runtime/wukong_worker/workbench/archive.py",
                     action,
                     "/snapshot",
                     "/bundle/state.tar",

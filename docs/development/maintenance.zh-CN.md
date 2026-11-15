@@ -79,7 +79,7 @@ cargo test --test tool_catalog
 
 `domain/claims` 统一解析 flag 形状的声明；完成工具拒绝占位符，协调器按具体声明执行独立验证门槛。解析结果只表示文本分类，不证明利用成功。
 
-Rust 文件哈希和实际读取字节计数放在 `content`，`adapters/binary` 保留公开哈希接口；worker 使用 `worker_common.sha256_file`，构建与发布脚本使用 `scripts._lib.checksums.sha256`。独立注入沙箱的脚本保持自包含，不引入控制端模块。路径限制、大小预算和控制端/worker 的独立身份核对仍留在调用边界，不因共用哈希函数而合并或删除。
+Rust 文件哈希和实际读取字节计数放在 `adapters/files/content`，`adapters/binary` 保留公开哈希接口；worker 使用 `wukong_worker.artifacts.common.sha256_file`，构建与发布脚本使用 `scripts._lib.checksums.sha256`。独立注入沙箱的脚本保持自包含，不引入控制端模块。路径限制、大小预算和控制端/worker 的独立身份核对仍留在调用边界，不因共用哈希函数而合并或删除。
 
 <a id="validation"></a>
 

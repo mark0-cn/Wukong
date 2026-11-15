@@ -20,12 +20,33 @@ class ExecutionBoundaries(unittest.TestCase):
             "parse_address",
             "atomic_json",
             "load_json",
+            "BRIDGE_PATH",
+            "MAX_RPC",
+            "TERMINAL",
         }
-        for path in (ROOT / "workers/runtime").glob("*.py"):
+        for path in (ROOT / "workers/runtime/wukong_worker").rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if isinstance(node, ast.ImportFrom) and node.module == "worker_common":
+                if (
+                    isinstance(node, ast.ImportFrom)
+                    and node.module == "wukong_worker.artifacts.common"
+                ):
                     self.assertFalse(
                         indirect.intersection(alias.name for alias in node.names), str(path)
+                    )
+
+    def test_worker_imports_use_explicit_package_paths(self):
+        for path in (ROOT / "workers/runtime/wukong_worker").rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                names = (
+                    [alias.name for alias in node.names]
+                    if isinstance(node, ast.Import)
+                    else [node.module or ""]
+                    if isinstance(node, ast.ImportFrom)
+                    else []
+                )
+                for name in names:
+                    self.assertNotRegex(
+                        name, r"^(worker_|workbench_|isolation$|ghidra_backend$)", str(path)
                     )
 
     def test_application_services_do_not_assemble_through_bootstrap(self):
@@ -85,7 +106,7 @@ class ExecutionBoundaries(unittest.TestCase):
             for name in imports:
                 self.assertNotRegex(
                     name,
-                    r"^(worker_|isolation|subprocess|multiprocessing|filelock|sqlite3)",
+                    r"^(worker_|wukong_worker|isolation|subprocess|multiprocessing|filelock|sqlite3)",
                     str(path),
                 )
 
@@ -104,26 +125,28 @@ class ExecutionBoundaries(unittest.TestCase):
 
     def test_linux_registry_calls_concrete_operations(self):
         for name in [
-            "worker_files",
-            "worker_transfers",
-            "worker_jobs",
-            "worker_sessions",
-            "worker_commands",
-            "worker_seccomp",
-            "worker_crash",
-            "worker_emu",
-            "worker_libc",
-            "worker_profile",
-            "worker_network",
+            "artifacts/files",
+            "artifacts/transfers",
+            "resources/jobs",
+            "resources/sessions",
+            "execution/commands",
+            "analysis/adapters",
+            "debugger/crash",
+            "analysis/profile",
+            "network/service",
         ]:
-            tree = ast.parse((ROOT / f"workers/runtime/{name}.py").read_text(encoding="utf-8"))
+            tree = ast.parse(
+                (ROOT / f"workers/runtime/wukong_worker/{name}.py").read_text(encoding="utf-8")
+            )
             self.assertFalse(
                 any(
                     isinstance(n, ast.FunctionDef) and n.name == "dispatch" for n in ast.walk(tree)
                 ),
                 name,
             )
-        registry = (ROOT / "workers/runtime/worker_catalog.py").read_text(encoding="utf-8")
+        registry = (ROOT / "workers/runtime/wukong_worker/rpc/catalog.py").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn(".dispatch", registry)
 
     def test_controller_gateway_preserves_resource_ids_in_raw_receipts(self):

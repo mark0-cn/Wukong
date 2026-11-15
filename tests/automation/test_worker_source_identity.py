@@ -13,7 +13,7 @@ class WorkerSourceIdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             analysis = root / "workers/analysis/wukong_analysis/seccomp.py"
-            linux = root / "workers/runtime/worker_jobs.py"
+            linux = root / "workers/runtime/wukong_worker/resources/jobs.py"
             generated = root / "workers/analysis/build/lib/wukong_analysis/seccomp.py"
             for path in (analysis, linux, generated):
                 path.parent.mkdir(parents=True, exist_ok=True)

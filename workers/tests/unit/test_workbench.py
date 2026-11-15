@@ -8,8 +8,8 @@ import subprocess
 import tempfile
 import time
 import unittest
-from workbench_prepare import prepare
-from worker_launch import load, resolve, digest
+from wukong_worker.workbench.prepare import prepare
+from wukong_worker.execution.launch import load, resolve, digest
 
 
 @unittest.skipUnless(os.name == "posix" and shutil.which("gcc"), "Linux compiler required")
@@ -73,7 +73,7 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o555)
 
     def test_interaction_and_replay_share_loader_cwd_and_env(self):
-        from worker_interactive import InteractSession
+        from wukong_worker.debugger.interactive import InteractSession
 
         session = InteractSession(self.root, {**self.params, "argv": ["unused"]}, self.isolated)
         try:
@@ -81,7 +81,7 @@ class LaunchTests(unittest.TestCase):
             self.assertIn("expected:hello", result["captured"])
         finally:
             session.close()
-        from worker_job_supervisor import replay
+        from wukong_worker.execution.supervisor import replay
 
         # Match the real supervisor's public artifact namespace. Root-level
         # scratch paths deliberately remain private to the worker.
@@ -106,8 +106,8 @@ class LaunchTests(unittest.TestCase):
         self.assertTrue(result["launch_identity"])
 
     def test_argv_file_interaction_and_replay_use_staged_input(self):
-        from worker_interactive import InteractSession
-        from worker_job_supervisor import replay
+        from wukong_worker.debugger.interactive import InteractSession
+        from wukong_worker.execution.supervisor import replay
 
         spec = json.loads((self.base / "launch.json").read_text())
         spec.update(input_mode="argv_file", args=["@@"])
@@ -144,7 +144,7 @@ class LaunchTests(unittest.TestCase):
         self.assertTrue(result["launch_identity"])
 
     def test_debugger_uses_declared_libc(self):
-        from worker_debugger import DebugSession
+        from wukong_worker.debugger.gdb import DebugSession
 
         params = {key: value for key, value in self.params.items() if key != "target"}
         session = DebugSession(self.root, params, self.isolated)
@@ -175,7 +175,7 @@ class LaunchTests(unittest.TestCase):
             load(self.root, self.params)
 
     def test_pty_interaction(self):
-        from worker_interactive import InteractSession
+        from wukong_worker.debugger.interactive import InteractSession
 
         spec = json.loads((self.base / "launch.json").read_text())
         spec["input_mode"] = "pty"
