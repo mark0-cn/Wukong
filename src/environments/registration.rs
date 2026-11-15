@@ -103,7 +103,7 @@ pub fn prepare(
     };
     ssh.validate()?;
     let value = json!({"name":input.name.trim(),"platform":"windows","installation_id":receipt.installation_id,
-        "runtime":{"backend":"ssh","ssh_host":host,"managed_ssh":ssh}});
+        "runtime":{"backend":"managed_ssh","ssh_host":host,"managed_ssh":ssh}});
     let environment: EnvironmentConfig = serde_json::from_value(value.clone())?;
     environment.validate()?;
     Ok((receipt.environment_id, value))
@@ -118,7 +118,7 @@ pub(crate) fn prepare_pin_files(
 ) -> Result<Vec<PathBuf>> {
     let mut pins = Vec::new();
     for environment in environments.values() {
-        let Some(ssh) = &environment.runtime.managed_ssh else {
+        let Some(ssh) = &environment.runtime.managed_ssh() else {
             continue;
         };
         let path = pin_path(home, &ssh.installation_id, &ssh.host_key)?;

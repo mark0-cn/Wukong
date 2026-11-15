@@ -4,17 +4,18 @@
 
 ## 职责与请求链路
 
-原生 Rust Worker 是 Windows 上唯一的执行管理入口。托管 SSH 调用固定 relay，经命名管道认证已登记的 SCM 服务。服务负责启动、资格检查、恢复和关闭，`worker.rs` 分发公开 API。不再存在常驻 Python 元数据 Worker、内层 Python 租约、回环 Worker 端点或反向 broker-health 通道。
+原生 Rust Worker 是 Windows 上唯一的执行管理入口。托管 SSH 调用固定 relay，经命名管道认证已登记的 SCM 服务。服务负责启动、资格检查、恢复和关闭，`native/rpc/worker.rs` 分发公开 API。不再存在常驻 Python 元数据 Worker、内层 Python 租约、回环 Worker 端点或反向 broker-health 通道。
 
 | 组件 | 职责 |
 | --- | --- |
 | 控制器 / Rig | Agent 调度、角色、持久化业务请求、证据与独立验证 |
 | `workers/protocol` | 共用身份、租约、错误和容量类型；公开 JSON-RPC 语义 |
-| `worker_catalog.rs` | 请求路由与能力发现共用的唯一方法/能力注册表 |
-| `worker_identity.rs`、`worker_leases.rs` | 操作系统启动身份与控制器/运行独占租约 |
-| `inputs.rs`、`inputs_transfers.rs` | 不可变上传、续传偏移、所有者范围内的读取与执行输入证明 |
-| `resource_runtime*`、`resource_journal.rs` | 作业/会话、持久化副作用、观测与恢复 |
-| 资源/会话宿主 | 受控 Windows 进程、AppContainer、Job、ACL/WFP 边界和清理 |
+| `native/host/` | 安装、SCM 生命周期、已验证运行上下文及启动资格检查 |
+| `native/rpc/` | JSON-RPC 注册、传输、启动身份绑定及控制器／运行隔离 |
+| `native/resources/` | 单一资源管理器拥有准入、操作票据、账本及恢复 |
+| `native/executors/` | 进程／会话计划及受控执行观察；不修改账本 |
+| `native/artifacts/` | 租约范围内的不可变输入、运行／资源范围内的输出及受限保护文件 IO |
+| `native/isolation/` | Windows Token、AppContainer、Job、ACL/WFP 及进程启动 |
 | 外部 WinDbg MCP / Python | 在受控资源内执行调试或有界分析，不独立管理 Worker |
 
 公开传输继续使用 JSON-RPC 2.0。控制器使用 `jsonrpsee`，共用 Rust 类型使用 Serde。内部会话消息采用 Prost 生成的 protobuf 和 Tokio 帧处理，外部调试器使用 `rmcp`。原始调试回复保留为带哈希的证据，不重新实现一套调试协议。Linux 保留现有 Python Worker。
@@ -26,6 +27,8 @@
 原生 Worker 管理一份 120 秒的运行/控制器租约。控制器通过独立传输每 15 秒续租。受保护的 `metadata/lease-epochs/` 在发放令牌前保留单调递增 epoch，使用独占写入句柄，上限为 100,000 个 epoch。续租保持同一租约标识。访问缓存副作用前检查身份和租约。过期会请求取消，但不能证明资源已清理；活动请求/资源阻止接管和释放。
 
 `doctor.capacity.max_active_resources` 当前为 **1**，由作业、持久会话和分析辅助进程共享。SQLite 唯一约束强制执行此容量。容量被占用时，Worker 在接纳新副作用之前返回 `resource_busy`。控制器通过 Tokio FIFO 准入互斥锁和有界重试等待；等待期间仍可观测、关闭、取消和续租。启动另一资源前必须关闭活动会话。传输失败和未知结果不会自动重放。控制器业务账本和 Worker 资源账本保持各自职责。
+
+资源账本使用 schema **2**，拒绝旧数据库，不迁移或删除。协议 v3 应使用新的 Worker 安装实例，并保留旧实例与证据。显式生命周期状态保证进程、会话和恢复操作不能同时占用唯一槽位。输入准备在资源锁外运行，并持有独立的输入锁；准入随后重新核对租约和容量。管理器预留操作、签发票据，在锁外启动自有 Tokio 任务，再按原票据提交观察结果。启动、进程退出及恢复等待的归属不依赖发起 RPC 是否仍在等待。查询和取消可观察尚未完成的启动或失败的清理；失败不会释放账本中的资源占用。
 
 上传只在受保护的原生存储中落盘一次。`file.put` 最大 32 MiB；续传使用 1 MiB 块，最大 16 GiB。上传声明、内容 SHA256、可执行策略和发布回执绑定 Worker 身份、运行、控制器和租约 epoch。重复块必须与原始字节一致；状态报告原生持久化偏移。读取和执行都要求完整回执。工具需要输入时才复制到其受控临时目录；普通账户的文件回执不能授权 System 读取。原始附件保持不变。
 
@@ -59,4 +62,6 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 
 原生构建身份包含共用协议 crate、原生/Python 源码、锁定输入和构建脚本。组装时验证该身份并保留依赖许可证。登记绑定控制器签名者和安装身份；SSH 独立绑定 Worker 主机密钥。连接与任务绑定见[跨平台环境指南](../../docs/design/cross-platform-environments.zh-CN.md)，实际安装后的进程/调试器/恢复用例见[Worker 验收指南](../tests/README.zh-CN.md)。
 
-单元测试验证契约和所有权不变量，不能证明 VM 隔离或真实模型效果。安装验收必须匹配准确的签名源码/包，并包含正常 Wukong 工具发现与分发路径。[历史记录](VALIDATION-HISTORY.zh-CN.md)保留旧提交、哈希、失败和限制，包括未完成的维护及对抗性验收；这些记录不能为当前重构提供验收证明。内核调试、自动创建 VM/快照和 GUI 目标交互仍不属于此 Worker 契约。
+单元测试验证契约和所有权不变量，不能证明 VM 隔离或真实模型效果。安装验收必须匹配准确的签名源码/包，并包含正常 Wukong 工具发现与分发路径。[2026-11-15 v3 验收记录](../../docs/history/validation/2026-11-15-execution-contract-v3.zh-CN.md)将新安装实例、x64/x86 执行与调试、重启恢复及完整 Wukong 流程绑定到准确源码/包和原始证据。较早的[历史记录](VALIDATION-HISTORY.zh-CN.md)保留各自的提交、失败和限制，包括未完成的维护及对抗性验收；正常路径验收不会取代这些限制。内核调试、自动创建 VM/快照和 GUI 目标交互仍不属于此 Worker 契约。
+
+Windows Python 源码由 `python-components.json` 选择：独立[分析包](../analysis/README.zh-CN.md)与 `python/selftest.py`。辅助程序仅需 CPython 标准库；`python/requirements.txt` 与 Linux bridge 依赖分开。离线打包不安装或复制 Linux Worker 模块。签名源码身份包含分析包与组件清单。

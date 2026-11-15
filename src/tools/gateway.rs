@@ -1,15 +1,25 @@
 //! Stable worker requests and their durable replies; no tool routing or role policy.
 use super::*;
 #[derive(Clone)]
+pub(super) struct BoundWorker {
+    client: RuntimeClient,
+    identity: String,
+}
+impl BoundWorker {
+    pub(super) fn new(client: RuntimeClient) -> Result<Self> {
+        let identity = stable("worker", &serde_json::to_string(client.identity())?);
+        Ok(Self { client, identity })
+    }
+}
+#[derive(Clone)]
 pub(super) struct WorkerGateway {
     pub(super) store: Store,
-    pub(super) client: Option<RuntimeClient>,
-    pub(super) identity: String,
+    pub(super) worker: Option<BoundWorker>,
     pub(super) output_limit: usize,
 }
 impl WorkerGateway {
     pub(super) fn runtime(&self) -> Result<&RuntimeClient> {
-        self.client.as_ref().context(
+        self.worker.as_ref().map(|worker| &worker.client).context(
             "execution runtime is disabled; configure Docker/SSH or explicitly trusted_local",
         )
     }
@@ -17,7 +27,12 @@ impl WorkerGateway {
         DurableEffects::new(&self.store, self.output_limit)
     }
     pub(crate) fn worker_identity(&self) -> Result<String> {
-        Ok(self.identity.clone())
+        Ok(self
+            .worker
+            .as_ref()
+            .context("worker context is unbound")?
+            .identity
+            .clone())
     }
 
     pub(super) fn request_identity(&self, agent: &AgentMetadata, call_id: &str) -> String {
@@ -28,9 +43,10 @@ impl WorkerGateway {
         &self,
         agent: &AgentMetadata,
         call_id: &str,
-        method: &str,
-        mut params: Value,
+        request: wukong_worker_protocol::Request,
     ) -> Result<Value> {
+        let method = request.method().name();
+        let mut params = request.parameters()?;
         let request_id = self.request_identity(agent, call_id);
         params["request_id"] = json!(request_id);
         params["call_id"] = json!(request_id);
@@ -40,13 +56,12 @@ impl WorkerGateway {
         {
             return Ok(reply);
         }
-        let reply = self
-            .worker_query(agent, method, params.clone())
-            .await
-            .context(crate::effects::WorkerDispatch {
+        let reply = self.runtime()?.call(method, params.clone()).await.context(
+            crate::effects::WorkerDispatch {
                 method: method.into(),
                 request_id: request_id.clone(),
-            })?;
+            },
+        )?;
         self.effects()
             .record_worker_reply(agent, call_id, method, params, reply.clone())
             .context(crate::effects::WorkerDispatch {
@@ -56,44 +71,13 @@ impl WorkerGateway {
         Ok(reply)
     }
 
-    /// Resolve controller resource references only within their pinned worker.
+    /// Returns the original worker observation. Resource ownership belongs to use cases.
     pub(super) async fn worker_query(
         &self,
-        agent: &AgentMetadata,
-        method: &str,
-        mut params: Value,
+        request: wukong_worker_protocol::Request,
     ) -> Result<Value> {
-        if let Some(id) = params["job_id"].as_str() {
-            let job: JobRecord = require_in_run(&self.store, id, &agent.run_id)?;
-            ensure!(
-                job.worker_id == self.worker_identity()?,
-                "job belongs to another environment"
-            );
-            params["job_id"] = json!(job.worker_resource_id);
-        }
-        if let Some(id) = params["session_id"].as_str() {
-            let kind = if method.starts_with("interact.") {
-                SessionKind::Interactive
-            } else {
-                SessionKind::Debugger
-            };
-            let session = require_session(&self.store, kind, id, &agent.run_id)?;
-            ensure!(
-                session.worker_id == self.worker_identity()?,
-                "session belongs to another environment"
-            );
-            params["session_id"] = json!(session.worker_resource_id);
-        }
-        let mut raw = self.runtime()?.call(method, params).await?;
-        for (field, kind) in [("job_id", "job"), ("session_id", "session")] {
-            if let Some(local) = raw[field].as_str().map(str::to_owned) {
-                raw[format!("worker_{field}")] = json!(local);
-                raw[field] = json!(stable(
-                    kind,
-                    &format!("{}:{local}", self.worker_identity()?)
-                ));
-            }
-        }
-        Ok(raw)
+        self.runtime()?
+            .call(request.method().name(), request.parameters()?)
+            .await
     }
 }

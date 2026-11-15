@@ -145,7 +145,7 @@ impl RunSupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{config::AppConfig, llm::Provider, runtime::RuntimeBackend};
+    use crate::{config::AppConfig, llm::Provider};
 
     #[tokio::test]
     async fn stalled_worker_does_not_block_renewal_cancellation_or_wall_budget() -> Result<()> {
@@ -161,7 +161,7 @@ for line in sys.stdin:
  r=json.loads(line)
  if r['method']=='job.status':
   (root/'polling').write_text('ready');time.sleep(60)
- result={'identity':{'protocol':2,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {'os':platform.system().lower()} if r['method']=='doctor' else {}
+ result={'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {'os':platform.system().lower()} if r['method']=='doctor' else {}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
 "#,
             )?;
@@ -181,9 +181,13 @@ for line in sys.stdin:
                     platform: crate::environments::Platform::current(),
                     installation_id: None,
                     runtime: crate::runtime::RuntimeConfig {
-                        backend: RuntimeBackend::TrustedLocal,
-                        state_dir: root.join("worker"),
-                        bridge_path: bridge,
+                        transport: crate::runtime::TransportConfig::TrustedLocal(
+                            crate::runtime::TrustedLocalConfig {
+                                state_dir: root.join("worker"),
+                                bridge_path: bridge,
+                                ..Default::default()
+                            },
+                        ),
                         ..Default::default()
                     },
                 },

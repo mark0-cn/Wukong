@@ -70,7 +70,8 @@ class LaunchTests(unittest.TestCase):
         self.assertTrue(result["launch_identity"])
     def test_debugger_uses_declared_libc(self):
         from worker_debugger import DebugSession
-        session=DebugSession(self.root,self.params,self.isolated)
+        params = {key: value for key, value in self.params.items() if key != "target"}
+        session=DebugSession(self.root,params,self.isolated)
         try:
             self.assertNotEqual(session.command("-break-insert main",5)["class"],"error")
             self.assertNotEqual(session.command("-exec-run",5)["class"],"error")

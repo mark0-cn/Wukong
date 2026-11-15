@@ -38,7 +38,11 @@ class AtomicMetadataTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 ledger.invoke('debug.control', params, execute, lambda _method, result: result)
         self.assertEqual(calls, [])
-        self.assertEqual(list((self.root / 'operations').iterdir()), [])
+        # Unix filelock keeps its lock inode after unlock; it is not a durable
+        # reservation and must not be unlinked while another caller can own it.
+        self.assertEqual(list((self.root / 'operations').glob('*.json')), [])
+        self.assertTrue(all(path.name.endswith('.json.lock')
+                            for path in (self.root / 'operations').iterdir()))
         result = ledger.invoke('debug.control', params, execute, lambda _method, value: value)
         self.assertEqual(result, {'completed': True})
         self.assertEqual(ledger.invoke('debug.control', params, execute, lambda _method, value: value), result)

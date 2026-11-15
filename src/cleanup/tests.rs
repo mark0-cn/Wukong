@@ -29,8 +29,22 @@ fn named_local_workers_are_inventoried_without_adopting_remote_state_paths() -> 
                 platform: crate::environments::Platform::current(),
                 installation_id: None,
                 runtime: crate::runtime::RuntimeConfig {
-                    backend,
-                    state_dir: temporary.path().join(id),
+                    transport: if backend == crate::runtime::RuntimeBackend::TrustedLocal {
+                        crate::runtime::TransportConfig::TrustedLocal(
+                            crate::runtime::TrustedLocalConfig {
+                                state_dir: temporary.path().join(id),
+                                ..Default::default()
+                            },
+                        )
+                    } else if backend == crate::runtime::RuntimeBackend::Ssh {
+                        crate::runtime::TransportConfig::Ssh(crate::runtime::SshConfig::new(
+                            "fixture".into(),
+                        ))
+                    } else {
+                        crate::runtime::TransportConfig::Docker(crate::runtime::DockerConfig::new(
+                            "fixture".into(),
+                        ))
+                    },
                     ..Default::default()
                 },
             },

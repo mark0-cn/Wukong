@@ -4,17 +4,18 @@ English · [简体中文](README.zh-CN.md)
 
 ## Ownership and request flow
 
-The native Rust worker is the sole Windows execution authority. Managed SSH invokes the fixed relay, which authenticates the enrolled SCM service through its named pipe. The service owns startup, qualification, recovery and shutdown; `worker.rs` routes the public API. There is no persistent Python metadata worker, inner Python lease, loopback worker endpoint or reverse broker-health channel.
+The native Rust worker is the sole Windows execution authority. Managed SSH invokes the fixed relay, which authenticates the enrolled SCM service through its named pipe. The service owns startup, qualification, recovery and shutdown; `native/rpc/worker.rs` routes the public API. There is no persistent Python metadata worker, inner Python lease, loopback worker endpoint or reverse broker-health channel.
 
 | Component | Responsibility |
 | --- | --- |
 | Controller / Rig | Agent scheduling, roles, durable business requests, evidence and independent verification |
 | `workers/protocol` | Shared identity, lease, error and capacity types; public JSON-RPC semantics |
-| `worker_catalog.rs` | One method/capability registry for routing and discovery |
-| `worker_identity.rs`, `worker_leases.rs` | OS boot binding and exclusive controller/run fencing |
-| `inputs.rs`, `inputs_transfers.rs` | Immutable uploads, resumable offsets, owner-scoped reads and execution-input proofs |
-| `resource_runtime*`, `resource_journal.rs` | Jobs/sessions, durable side effects, observation and recovery |
-| Resource/session hosts | Owned Windows processes, AppContainers, Jobs, ACL/WFP boundaries and cleanup |
+| `native/host/` | Installation, SCM lifecycle, verified runtime context and qualification |
+| `native/rpc/` | JSON-RPC registration, transport, boot binding and controller/run fencing |
+| `native/resources/` | One resource manager owns admission, operation tickets, journal and recovery |
+| `native/executors/` | Process/session plans and owned execution observations; no journal mutation |
+| `native/artifacts/` | Lease-scoped immutable inputs, run/resource-scoped outputs and bounded protected IO |
+| `native/isolation/` | Windows tokens, AppContainers, Jobs, ACL/WFP and process launch |
 | External WinDbg MCP / Python | Debugging or bounded analysis inside owned resources; no independent worker authority |
 
 The public transport remains JSON-RPC 2.0. The controller uses `jsonrpsee`; shared Rust types use Serde. Private session messages use generated Prost protobuf and Tokio framing; the external debugger uses `rmcp`. Raw debugger replies remain hashed evidence instead of being reimplemented as a new debugger protocol. Linux retains its existing Python worker.
@@ -26,6 +27,8 @@ The public transport remains JSON-RPC 2.0. The controller uses `jsonrpsee`; shar
 The native worker owns one 120-second run/controller lease. The controller renews it over a separate transport every 15 seconds. Protected `metadata/lease-epochs/` records reserve monotonically increasing epochs before issuance, with an exclusive writer handle and a 100,000-epoch bound. Renewal preserves the fence. Identity and lease checks precede cached-effect access. Expiry requests cancellation and does not prove resource cleanup; active requests/resources prevent takeover or release.
 
 `doctor.capacity.max_active_resources` is currently **1**, shared by jobs, persistent sessions and analysis helpers. The SQLite uniqueness constraint enforces this capacity. An occupied worker returns `resource_busy` before admitting a new effect. The controller uses a FIFO Tokio admission mutex and bounded retries; observation, close, cancellation and lease renewal remain available while a start waits. A live session must be closed before another resource can start. Transport failures and unknown outcomes are never automatically replayed. The controller business ledger and worker resource journal retain distinct responsibilities.
+
+The resource journal uses schema **2** and rejects older databases without migration or deletion. Use a fresh Worker installation for protocol v3 and retain earlier installations/evidence. Explicit lifecycle variants prevent a process, session and recovery operation from simultaneously occupying the single slot. Input preparation runs outside the resource lock and retains its separate input lock; admission then revalidates the lease and capacity. The manager reserves and issues a ticket, starts the owned Tokio task outside its lock, and commits the original observation against that ticket. Startup, process draining and recovery waits retain ownership independently of the calling RPC. Queries and cancellation can inspect an unfinished start or failed cleanup; failure never releases the journal blocker.
 
 Uploads are stored once in protected native storage. `file.put` accepts at most 32 MiB; resumable uploads use 1-MiB chunks and accept at most 16 GiB. Upload declarations, content SHA256, executable policy and published receipts bind the worker identity, run, controller and lease epoch. Duplicate chunks must match original bytes; status reports the native durable offset. Reads and execution require completed receipts. Inputs are copied into owned resource scratch only when a tool needs them; no ordinary-account file receipt can authorize System reads. Original attachments remain unchanged.
 
@@ -59,4 +62,6 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 
 Native build identity includes the shared protocol crate, native/Python sources, locked inputs and build scripts. Assembly verifies this identity and preserves dependency licenses. Enrollment pins the controller signer and installation; SSH independently pins the worker host key. Use the [cross-platform environment guide](../../docs/design/cross-platform-environments.md) for connection and task binding, and [worker acceptance guide](../tests/README.md) for installed process/debugger/recovery fixtures.
 
-Unit tests establish contract and ownership invariants; they do not establish VM isolation or live-model effectiveness. Installed acceptance must match the exact signed source/package and include the normal Wukong discovery/dispatch path. Existing [historical records](VALIDATION-HISTORY.md) preserve prior commits, hashes, failures and limits, including unfinished maintenance and adversarial acceptance. They do not qualify the current refactor. Kernel debugging, automatic VM creation/snapshots and GUI target interaction remain outside this worker contract.
+Unit tests establish contract and ownership invariants; they do not establish VM isolation or live-model effectiveness. Installed acceptance must match the exact signed source/package and include the normal Wukong discovery/dispatch path. The [2026-11-15 v3 acceptance record](../../docs/history/validation/2026-11-15-execution-contract-v3.md) binds the fresh installation, x64/x86 execution/debugging, restart recovery and complete Wukong workflow to their exact source/package and original evidence. Earlier [historical records](VALIDATION-HISTORY.md) retain their own commits, failures and limits, including unfinished maintenance and adversarial acceptance; those limits are not superseded by normal-path acceptance. Kernel debugging, automatic VM creation/snapshots and GUI target interaction remain outside this worker contract.
+
+Windows Python sources are selected by `python-components.json`: the independent [analysis package](../analysis/README.md) and `python/selftest.py`. Helpers need only CPython standard libraries; `python/requirements.txt` is separate from Linux bridge dependencies. Offline packaging neither installs nor copies Linux worker modules. The signed source identity includes the analysis package and component inventory.

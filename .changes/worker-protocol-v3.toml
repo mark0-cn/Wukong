@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Execution workers use protocol v3 with shared typed contracts and registered method discovery. Protocol v2 workers are rejected. Create new worker instances and workspaces for v3; retain previous directories and evidence. No automatic migration or deletion is performed."
+zh_CN = "执行 Worker 使用带共用类型契约和注册方法发现的协议 v3，拒绝协议 v2 Worker。请为 v3 创建新的 Worker 实例和工作区，保留旧目录及证据；不自动迁移或删除。"

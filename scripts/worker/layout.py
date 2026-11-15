@@ -16,7 +16,7 @@ from scripts.worker.paths import member, no_links, regular, unique_paths
 from scripts.worker.toolchain import LOCK, acquire, load_lock, validate_asset
 
 
-def unpack_zip(archive, output, prefix="", wheel=False):
+def unpack_zip(archive, output, prefix=""):
     output = no_links(output)
     with zipfile.ZipFile(regular(archive)) as source:
         entries = []
@@ -34,8 +34,6 @@ def unpack_zip(archive, output, prefix="", wheel=False):
                     or stat.S_IFMT(mode) not in {0, stat.S_IFREG, stat.S_IFDIR}
                     or entry.file_size > 2 * 1024**3):
                 raise ValueError("Unsafe archive member")
-            if wheel and (".data/" in name or name.lower().endswith(".pth")):
-                raise ValueError("Offline wheels must be self-contained pure Python libraries")
             entries.append((entry, name))
         if not entries or len(entries) > 20_000 or sum(e.file_size for e, _ in entries) > 2 * 1024**3:
             raise ValueError("Archive exceeds offline layout budget")
@@ -54,16 +52,6 @@ def unpack_zip(archive, output, prefix="", wheel=False):
                 if folded in names and names[folded] != current:
                     raise ValueError("Case-colliding archive directories")
                 names[folded] = current
-        if wheel:
-            wheel_metadata = [entry for entry, name in entries if name.endswith(".dist-info/WHEEL")]
-            package_metadata = [entry for entry, name in entries if name.endswith(".dist-info/METADATA")]
-            if len(wheel_metadata) != 1 or len(package_metadata) != 1:
-                raise ValueError("Invalid pure Python wheel metadata")
-            if any(entry.file_size > 1024 * 1024 for entry in [*wheel_metadata, *package_metadata]):
-                raise ValueError("Wheel metadata exceeds the offline size limit")
-            metadata = source.read(wheel_metadata[0]).decode("utf-8")
-            if "Root-Is-Purelib: true" not in metadata or "Tag: py3-none-any" not in metadata:
-                raise ValueError("Offline wheels must be pure Python")
         output.mkdir(parents=True, exist_ok=True)
         for entry, name in entries:
             target = no_links(output / name)
@@ -127,6 +115,33 @@ def sdk_metadata(cache, lock, scratch):
     return ux / member(specification["license"])
 
 
+def install_python_components(runtime):
+    """Explicit offline components; adding Linux worker files is never implicit."""
+    components = json.loads((ROOT / "workers/windows/python-components.json").read_text(encoding="utf-8"))
+    if components.get("schema") != 1 or set(components) != {"schema", "analysis", "helpers"}:
+        raise ValueError("Unsupported Windows Python component inventory")
+    requirements = (ROOT / "workers/windows/python/requirements.txt").read_text(encoding="utf-8")
+    if any(line.strip() and not line.lstrip().startswith("#") for line in requirements.splitlines()):
+        raise ValueError("Windows helper dependencies need an explicit offline lock and license inventory")
+    for key, source, target in [
+        ("analysis", ROOT / "workers/analysis/wukong_analysis", runtime / "python/Lib/site-packages/wukong_analysis"),
+        ("helpers", ROOT / "workers/windows/python", runtime / "helpers"),
+    ]:
+        names = components[key]
+        unique_paths(names)
+        if not names or any(member(name) != Path(name).name or not name.endswith(".py") for name in names):
+            raise ValueError("Invalid Windows Python component")
+        target.mkdir(parents=True)
+        for name in names:
+            shutil.copyfile(regular(source / name), target / name)
+    path_files = list((runtime / "python").glob("python*._pth"))
+    if len(path_files) != 1:
+        raise ValueError("Embedded Python path configuration is missing")
+    # Keep site disabled. Only the embedded standard library and explicit analysis package are importable.
+    path_files[0].write_bytes(b"python313.zip\n.\nLib/site-packages\n")
+    shutil.copyfile(ROOT / "workers/windows/python/requirements.txt", runtime / "helpers/requirements.txt")
+
+
 def prepare(cache, output, lock_path=LOCK):
     lock = load_lock(lock_path)
     acquire(cache, lock)  # read/validate only; this entry has no download option
@@ -147,23 +162,7 @@ def prepare(cache, output, lock_path=LOCK):
         runtime = output / "runtime"
         unpack_zip(cache / python_asset["path"], runtime / "python")
         unpack_zip(cache / ssh_asset["path"], runtime / "openssh", prefix="OpenSSH-Win64/")
-        from scripts.worker.python_wheels import verify as verify_wheels
-        wheels = [validate_asset(cache, item) for item in lock["assets"]
-                  if item["component"] == "worker_python_dependencies"]
-        verify_wheels(wheels, ROOT / "workers/runtime/requirements.txt", lock["components"]["python"]["version"])
-        for item in lock["assets"]:
-            if item["component"] == "worker_python_dependencies":
-                unpack_zip(cache / item["path"], runtime / "python/Lib/site-packages", wheel=True)
-        # Embeddable Python ignores registry/environment paths. Keep site disabled,
-        # adding only the shipped worker and the already unpacked offline wheels.
-        path_files = list((runtime / "python").glob("python*._pth"))
-        if len(path_files) != 1:
-            raise ValueError("Embedded Python path configuration is missing")
-        path_files[0].write_bytes(b"python313.zip\n.\nLib/site-packages\n../worker\n")
-        (runtime / "worker").mkdir()
-        for path in sorted((ROOT / "workers/runtime").glob("*.py")):
-            shutil.copyfile(regular(path), runtime / "worker" / member(path.name))
-        shutil.copyfile(ROOT / "workers/runtime/requirements.txt", runtime / "worker/requirements.txt")
+        install_python_components(runtime)
         files = msi_layout(cache / lock["sdk"]["database"], cache / "sdk/Installers",
                            runtime / "sdk", scratch / "sdk-files")
         debugger_asset = next(item for item in lock["assets"] if item["component"] == "windbg_mcp")

@@ -94,7 +94,7 @@ jobs:
       - name: Windows Python worker tests
         if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.linux == 'true'
         run: |
-          python -m pip install --disable-pip-version-check -r workers/runtime/requirements.txt
+          python -m pip install --disable-pip-version-check -e workers/analysis -r workers/runtime/requirements.txt
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python workers/tests/run.py unit -p 'test_*.py' -v
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -212,7 +212,7 @@ jobs:
         run: python -m scripts.ci.install_apt gdb patchelf gcc-multilib musl-tools libwayland-dev libxkbcommon-dev
       - name: Python runtime and release tests
         run: |
-          python -m pip install -r workers/runtime/requirements.txt pyelftools
+          python -m pip install -e workers/analysis -r workers/runtime/requirements.txt pyelftools
           python -m compileall -q workers/runtime scripts
           python -m unittest discover -s tests/automation -p 'test_*.py' -v
           python workers/tests/run.py unit -p 'test_*.py' -v
@@ -259,7 +259,7 @@ jobs:
       - name: Verify replay between sibling containers
         run: |
           docker build --tag wukong-network-acceptance \
-            --file tests/acceptance/network.Dockerfile workers/runtime
+            --file tests/acceptance/network.Dockerfile .
           python tests/acceptance/check_network_verify.py \
             --image wukong-network-acceptance \
             --output-dir "$RUNNER_TEMP/pwn-network"

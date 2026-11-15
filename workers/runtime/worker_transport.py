@@ -9,35 +9,33 @@ import sys
 import threading
 import time
 from filelock import FileLock
-from worker_common import BRIDGE_PATH, MAX_RPC, PROTOCOL, atomic_json, load_json, rpc_error, safe_env, tail
+from worker_common import BRIDGE_PATH, MAX_RPC, PROTOCOL, atomic_json, load_json, safe_env, tail
 from worker_processes import detached_options
 from worker_runtime import Runtime
+from worker_rpc import Server as RpcServer
 
 def serve(root, trusted):
     # The daemon owns this lock independently of a relay that may crash.
     with FileLock(root / "daemon.guard", timeout=0):
         runtime = Runtime(root, trusted)
         token = secrets.token_hex(32)
+        rpc = RpcServer(runtime)
 
         class Handler(socketserver.StreamRequestHandler):
             def handle(self):
                 self.connection.settimeout(310)
-                try:
-                    line = self.rfile.readline(MAX_RPC + 1)
-                    if len(line) > MAX_RPC:
-                        raise ValueError("request exceeds size limit")
-                    request = json.loads(line)
-                    if not secrets.compare_digest(str(request.pop("auth", "")), token):
-                        raise ValueError("worker authentication failed")
-                    result = runtime.dispatch(request["method"], request.get("params") or {})
-                    response = {"jsonrpc": "2.0", "id": request.get("id"), "result": result}
-                except Exception as error:
-                    response = {"jsonrpc": "2.0", "id": locals().get("request", {}).get("id"), "error": rpc_error(error)}
-                encoded = json.dumps(response, ensure_ascii=False).encode() + b"\n"
+                auth = self.rfile.readline(66).strip()
+                if not secrets.compare_digest(auth, token.encode("ascii")):
+                    return
+                line = self.rfile.readline(MAX_RPC + 1)
+                if not line or len(line) > MAX_RPC:
+                    return
+                response = rpc.call(line.decode("utf-8"))
+                encoded = response.encode("utf-8") + b"\n"
                 if len(encoded) > MAX_RPC:
-                    encoded = json.dumps({"jsonrpc": "2.0", "id": response.get("id"), "error": {"code": -32001, "message": "response exceeds size limit"}}).encode() + b"\n"
+                    return  # uncertain transport outcome; reconcile the durable request
                 self.wfile.write(encoded)
-                if locals().get("request", {}).get("method") == "worker.shutdown" and "error" not in response:
+                if runtime.stopping:
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
 
         class Server(socketserver.ThreadingTCPServer):
@@ -51,15 +49,15 @@ def serve(root, trusted):
             server.serve_forever(poll_interval=0.25)
 
 def relay_call(endpoint, request, timeout=305):
-    request = {**request, "auth": endpoint["auth"]}
+    raw = request if isinstance(request, bytes) else json.dumps(request).encode("utf-8")
     with socket.create_connection(("127.0.0.1", int(endpoint["port"])), timeout=min(5, timeout)) as connection:
         connection.settimeout(timeout)
-        connection.sendall(json.dumps(request).encode() + b"\n")
+        connection.sendall(endpoint["auth"].encode("ascii") + b"\n" + raw.rstrip(b"\n") + b"\n")
         with connection.makefile("rb") as stream:
             line = stream.readline(MAX_RPC + 1)
             if not line or len(line) > MAX_RPC:
                 raise ValueError("invalid daemon response")
-            return json.loads(line)
+            return line if isinstance(request, bytes) else json.loads(line)
 
 def ensure_daemon(root, trusted):
     endpoint_path = root / "endpoint.json"
@@ -67,7 +65,7 @@ def ensure_daemon(root, trusted):
     def existing():
         try:
             endpoint = load_json(endpoint_path)
-            reply = relay_call(endpoint, {"id": 0, "method": "ping"}, timeout=1)
+            reply = relay_call(endpoint, {"jsonrpc": "2.0", "id": 0, "method": "ping"}, timeout=1)
             if reply.get("result", {}).get("protocol") == PROTOCOL:
                 return endpoint
         except (OSError, ValueError, KeyError, socket.timeout):

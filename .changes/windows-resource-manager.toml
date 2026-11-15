@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Unify Windows resource admission, execution observations and recovery under one manager, keeping control calls available during launch and cleanup. Native resource journals now require schema 2: validate with a fresh Worker installation and preserve old directories and evidence; no automatic migration or deletion is performed."
+zh_CN = "统一由 Windows 资源管理器负责准入、执行观察和恢复，在启动与清理期间保持控制调用可用。原生资源账本改为 schema 2：请使用新的 Worker 安装实例验证，并保留旧目录与证据；不执行自动迁移或删除。"

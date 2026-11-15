@@ -20,6 +20,7 @@ class InteractSession:
         self.directory = root / "interact" / self.id
         self.directory.mkdir(parents=True)
         self.lock = threading.Lock()
+        self.operation_lock = threading.Lock()
         self.drained = threading.Event()
         self.dead = False
         self.closed = False
@@ -102,6 +103,10 @@ class InteractSession:
         self.persist(state)
 
     def write(self, data, read_timeout_secs, quiet_ms=250):
+        with self.operation_lock:
+            return self.exchange(data, read_timeout_secs, quiet_ms)
+
+    def exchange(self, data, read_timeout_secs, quiet_ms):
         with self.lock:
             exited = self.dead or self.process.poll() is not None
             if not exited:
@@ -114,7 +119,7 @@ class InteractSession:
         while time.monotonic() < deadline:
             with self.lock:
                 exited = self.process.poll() is not None
-                quiet = time.time() - self.last_data >= quiet_ms / 1000.0
+                quiet = bool(self.buffer) and time.time() - self.last_data >= quiet_ms / 1000.0
             if exited:
                 return self.exited_snapshot(deadline)
             if quiet:

@@ -122,7 +122,7 @@ impl FilesService {
             bytes.len() <= 32 * 1024 * 1024,
             "file upload exceeds 32 MiB"
         );
-        let raw=self.gateway.worker_call(agent,call_id,"file.put",json!({"path":text(args,"path")?,"data_base64":BASE64.encode(&bytes),"executable":args["executable"].as_bool().unwrap_or(false)})).await?;
+        let raw=self.gateway.worker_call(agent, call_id, Request::FilePut(serde_json::from_value(json!({"path":text(args,"path")?,"data_base64":BASE64.encode(&bytes),"executable":args["executable"].as_bool().unwrap_or(false)}))?)).await?;
         ensure!(
             raw["sha256"] == binary::sha256_bytes(&bytes),
             "worker upload hash mismatch"

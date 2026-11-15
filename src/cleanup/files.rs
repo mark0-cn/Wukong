@@ -430,7 +430,7 @@ fn valid_database(path: &Path) -> bool {
                     [],
                     |row| row.get::<_, String>(0),
                 )
-                .is_ok_and(|schema| matches!(schema.as_str(), "3" | "4"))
+                .is_ok_and(|schema| matches!(schema.as_str(), "3" | "4" | "5"))
                 && connection
                     .prepare("SELECT id,run_id,data FROM entities LIMIT 0")
                     .is_ok()

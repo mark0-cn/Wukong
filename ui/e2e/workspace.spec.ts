@@ -363,6 +363,37 @@ test('settings categories retain drafts and separate tool and challenge actions'
   await expect(page.getByRole('button', { name: '启动环境', exact: true })).toHaveCount(0);
 });
 
+test('switching execution transport drops obsolete fields and saves the selected variant', async ({ page }) => {
+  await page.goto('/');
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.host.execution = null;
+    (window as any).__emitDesktop('workspace-changed', null);
+    const native = (window as any).__TAURI_INTERNALS__, invoke = native.invoke;
+    native.invoke = (command: string, args: unknown) => command === 'config_read' ? Promise.resolve({
+      path: '/tmp/wukong.toml', source: '# transport fixture\n', original: '# transport fixture\n',
+      form: { model: { provider: 'openai', model: 'fixture' }, budget: state.host.budget,
+        default_environment: 'linux', environments: { linux: { name: 'Linux fixture', platform: 'linux',
+          runtime: { backend: 'ssh', ssh_host: 'old-host', ssh_executable: 'ssh', remote_bridge_path: '/opt/wukong/runtime/bridge.py', request_timeout_secs: 120 } } } },
+    }) : invoke(command, args);
+  });
+  await page.getByRole('button', { name: '工作区设置', exact: true }).click();
+  await page.getByRole('button', { name: '高级配置', exact: true }).click();
+  await page.getByRole('combobox', { name: '动态分析后端', exact: true }).selectOption('docker');
+  await expect(page.getByLabel('SSH 主机', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Docker 容器', { exact: true }).fill('new-container');
+  await page.screenshot({ path: 'target/v3-transport-switch.png' });
+  await page.getByRole('button', { name: '保存并应用', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const edits = await page.evaluate(() => (window as any).__desktopTest.requests.findLast((request: any) => request.command === 'config_save').args.edits);
+  expect(edits[0]).toEqual({ path: ['environments', 'linux', 'runtime'], value: {
+    backend: 'docker', request_timeout_secs: 120, remote_bridge_path: '/opt/wukong/runtime/bridge.py', docker_container: '',
+  } });
+  expect(edits[1]).toEqual({ path: ['environments', 'linux', 'runtime', 'docker_container'], value: 'new-container' });
+  expect(JSON.stringify(edits)).not.toContain('old-host');
+  expect(JSON.stringify(edits)).not.toContain('ssh_executable');
+});
+
 test('named Windows environment settings save only scoped configuration paths', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(() => {
@@ -409,7 +440,7 @@ for (const locale of ['zh-CN', 'en-US'] as const) test(`Windows connection enrol
         state.requests.push({ command, args });
         const receipt = JSON.parse(args.input.connection_json);
         const environment = { name: args.input.name, platform: 'windows', installation_id: receipt.installation_id,
-          runtime: { backend: 'ssh', ssh_host: args.input.host, managed_ssh: { installation_id: receipt.installation_id,
+          runtime: { backend: 'managed_ssh', ssh_host: args.input.host, managed_ssh: { installation_id: receipt.installation_id,
             user: receipt.ssh_user, port: receipt.ssh_port, identity_file: args.input.identity_file,
             known_hosts_file: '/controller/ssh-host-fixture.known_hosts', host_key: receipt.host_key } } };
         return { ...args.document, source: '# retain this comment\ndefault_environment="windows"\n[environments.windows]\nname="Analysis Windows"\nplatform="windows"\n',

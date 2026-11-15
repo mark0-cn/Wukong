@@ -68,12 +68,13 @@ class MinimizeTests(unittest.TestCase):
 
     def test_missing_reducer_dependency_hides_both_minimization_capabilities(self):
         from worker_capabilities import doctor
+        from worker_runtime import Runtime
         with tempfile.TemporaryDirectory() as root, \
                 patch("worker_capabilities.shutil.which", return_value=None), \
                 patch("worker_capabilities._ghidra_ready", return_value=False):
             for absent in ("picire", "chardet", "inators"):
                 with self.subTest(absent=absent), patch("worker_capabilities._python_module", side_effect=lambda n: n != absent):
-                    result = doctor(Path(root), True, False)
+                    result = doctor(Path(root), True, False, Runtime(Path(root), True).registrations)
                     self.assertFalse(result["python_toolchain"]["picire"])
                     self.assertFalse(result["capabilities"]["input_minimize"])
                     self.assertFalse(result["capabilities"]["input_minimize_signal_only"])

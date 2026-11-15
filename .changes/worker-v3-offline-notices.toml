@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Include the original upstream license notices omitted from the published JSON-RPC and SIMD dependency crates so complete v3 Windows offline packages can be assembled."
+zh_CN = "补齐已发布 JSON-RPC 和 SIMD 依赖 crate 中缺少的上游原始许可证，使 v3 Windows 完整离线包能够完成组装。"

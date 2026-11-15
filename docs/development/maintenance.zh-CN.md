@@ -14,7 +14,7 @@
 - `coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
 - `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 4，不提供旧数据库迁移。
 
-worker 组件划分见 `workers/runtime/README.md`。部署整个运行时目录，入口文件不承担模块重导出。
+worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目录及生成的协议 schema，并安装独立 `workers/analysis` 包；入口文件不承担模块重导出。Windows 打包使用显式组件清单，不复制 Linux 运行时。
 
 跨模块调用保持类型化，资源归属和业务完成门槛保留在统一入口。通用元数据查询不读取 checkpoint；需要继承、follow-up 或完整导出时显式使用完整读取接口。元数据写入不得清空会话，checkpoint 与邮箱确认仍在同一持久化事务提交。
 
@@ -84,9 +84,9 @@ cargo test --offline --all-targets
 python workers/tests/run.py unit -p test_bridge.py
 ```
 
-运行 worker 测试前，在虚拟环境中安装 `workers/runtime/requirements.txt` 并确保 `python` 命令可用。普通测试使用可信本地夹具和回环服务；被忽略的真实 Ghidra/Docker 验收需要按各测试说明配置环境。
+运行 worker 测试前，在虚拟环境中安装 `workers/analysis` 和 `workers/runtime/requirements.txt` 并确保 `python` 命令可用。普通测试使用可信本地夹具和回环服务；被忽略的真实 Ghidra/Docker 验收需要按各测试说明配置环境。
 
-同级容器网络验收以 `workers/runtime` 为构建上下文，构建 `tests/acceptance/network.Dockerfile`，先安装相同的固定版本 worker 依赖，再进入隔离网络。裸 Python 镜像不包含 worker 发布元数据所需的依赖。
+同级容器网络验收以仓库根目录为构建上下文，构建 `tests/acceptance/network.Dockerfile`，先安装分析包及相同的固定版本 Linux worker 依赖，再进入隔离网络。裸 Python 镜像不包含 worker 发布元数据所需的依赖。
 
 <a id="repeatable-performance-baseline"></a>
 

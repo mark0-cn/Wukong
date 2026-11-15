@@ -214,8 +214,7 @@ mod tests {
         assert_eq!(document.form.model.model, "after");
         let pin = document.form.environments["windows"]
             .runtime
-            .managed_ssh
-            .as_ref()
+            .managed_ssh()
             .unwrap()
             .known_hosts_file
             .clone();
@@ -266,7 +265,7 @@ mod tests {
         blob.extend_from_slice(&[0, 0, 0, 32]);
         blob.extend_from_slice(&[7; 32]);
         let environment = serde_json::json!({"name":"Windows VM","platform":"windows",
-            "installation_id":"a".repeat(32),"runtime":{"backend":"ssh","ssh_host":"192.0.2.1",
+            "installation_id":"a".repeat(32),"runtime":{"backend":"managed_ssh","ssh_host":"192.0.2.1",
             "managed_ssh":{"installation_id":"a".repeat(32),"user":format!("wkgm{}","a".repeat(16)),
             "port":22,"identity_file":root.path().join("private-key"),"known_hosts_file":root.path().join("host-pin"),
             "host_key":{"algorithm":"ssh-ed25519","key":base64::engine::general_purpose::STANDARD.encode(blob)}}}});
@@ -291,8 +290,7 @@ mod tests {
         assert_eq!(
             config.environments["windows"]
                 .runtime
-                .managed_ssh
-                .as_ref()
+                .managed_ssh()
                 .unwrap()
                 .user,
             format!("wkgm{}", "a".repeat(16))

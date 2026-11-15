@@ -160,11 +160,14 @@ impl Workbench {
                 platform: crate::environments::Platform::Linux,
                 installation_id: None,
                 runtime: crate::runtime::RuntimeConfig {
-                    backend: crate::runtime::RuntimeBackend::Docker,
-                    docker_executable: config.workbench.docker_executable.clone(),
-                    docker_container: Some(env.container.clone()),
-                    remote_state_dir: "/state".into(),
-                    remote_bridge_path: "/opt/wukong/runtime/bridge.py".into(),
+                    transport: crate::runtime::TransportConfig::Docker(
+                        crate::runtime::DockerConfig {
+                            docker_executable: config.workbench.docker_executable.clone(),
+                            remote_state_dir: "/state".into(),
+                            remote_bridge_path: "/opt/wukong/runtime/bridge.py".into(),
+                            ..crate::runtime::DockerConfig::new(env.container.clone())
+                        },
+                    ),
                     ..Default::default()
                 },
             },

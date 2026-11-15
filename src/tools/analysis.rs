@@ -59,7 +59,7 @@ impl AnalysisService {
             .ghidra_executable
             .clone()
             .or_else(|| std::env::var_os("WUKONG_GHIDRA_HEADLESS").map(PathBuf::from));
-        if executable.is_none() && self.gateway.client.is_some() {
+        if executable.is_none() && self.gateway.worker.is_some() {
             let staged = if secondary.is_some() {
                 self.files.file_put(agent, &format!("{call_id}:target"), &json!({"path":format!("files/{}.bin",run.target_sha256),"evidence_id":args["target_evidence_id"],"executable":false})).await?["file"].clone()
             } else {
@@ -67,7 +67,7 @@ impl AnalysisService {
                     .stage_target(agent, &format!("{call_id}:target"))
                     .await?
             };
-            let result=self.gateway.worker_call(agent,call_id,"ghidra.query",json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.timeout_seconds,"analysis_timeout_secs":self.config.analysis_timeout_seconds,"max_cpu":self.config.max_cpu})).await?;
+            let result=self.gateway.worker_call(agent, call_id, Request::GhidraQuery(serde_json::from_value(json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.timeout_seconds,"analysis_timeout_secs":self.config.analysis_timeout_seconds,"max_cpu":self.config.max_cpu}))?)).await?;
             ensure!(
                 result["target_sha256"] == run.target_sha256,
                 "remote Ghidra analyzed another target"

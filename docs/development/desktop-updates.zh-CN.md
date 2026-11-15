@@ -23,7 +23,7 @@ Linux 支持范围以桌面安装验收矩阵为准，AppImage 不承诺兼容�
 `desktop/updates.rs` 处理检查、下载、独立候选自检、安装和 GUI 进度。准备阶段不替换现用 worker。
 安装前缓存并验证当前版本安装文件，原子保存恢复助手与 `updates/pending.json`。新进程只有在版本匹配且配套环境 doctor 通过后才将记录转为 `previous.json`。
 未确认更新阻止新任务启动；`maintenance.lock` 以共享/独占文件锁协调 GUI、CLI 和更新操作。
-模型设置及题目环境不参加版本替换；只接受数据 schema 4，不执行不兼容数据库迁移。
+模型设置及题目环境不参加版本替换；只接受数据 schema 5，不执行不兼容数据库迁移。
 
 `updates/recovery.rs` 不依赖 WebView：Windows 使用经过验证的上一版 NSIS 安装器，Linux 原子替换 AppImage。
 恢复后检查实际客户端版本，失败时保留记录。用户通过独立恢复程序确认恢复，不在超时后擅自覆盖仍可能运行的安装器。

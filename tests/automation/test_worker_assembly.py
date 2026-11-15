@@ -116,7 +116,7 @@ class AssemblyChecks(unittest.TestCase):
 
     def test_manifest_index_assigns_originals_licenses_sources_and_runtime(self):
         entries = {"originals/payload.zip": "original_installer", "licenses/native/LICENSE": "license",
-                   "runtime/python/LICENSE.txt": "license", "runtime/worker/bridge.py": "worker_source",
+                   "runtime/python/LICENSE.txt": "license", "runtime/helpers/selftest.py": "python_source",
                    "runtime/python/Lib/site-packages/example.dist-info/LICENSE": "license",
                    "runtime/native/wukong-worker.exe": "runtime", "native-build.json": "data"}
         with tempfile.TemporaryDirectory() as temporary:

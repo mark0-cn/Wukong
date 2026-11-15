@@ -10,7 +10,7 @@ pub const MAX_PACKAGE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 #[serde(rename_all = "snake_case")]
 pub enum PayloadKind {
     Runtime,
-    WorkerSource,
+    PythonSource,
     OriginalInstaller,
     License,
     Data,
@@ -29,13 +29,8 @@ pub struct FileEntry {
 pub struct EntryPoints {
     pub worker: String,
     pub python: String,
-    pub bridge: String,
-    /// Legacy packages can still be authenticated for maintenance, but their
-    /// helper is never executed by the new native debugger backend.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dbgeng_helper: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub windbg_mcp: Option<String>,
+    pub selftest: String,
+    pub windbg_mcp: String,
     pub dbgeng_library: String,
     pub sshd: String,
     pub ssh_keygen: String,
@@ -75,7 +70,7 @@ pub struct Compatibility<'a> {
 impl Manifest {
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.schema == 1 && self.platform == "windows-amd64",
+            self.schema == 2 && self.platform == "windows-amd64",
             "unsupported worker package format or platform"
         );
         ensure!(self.runtime_protocol > 0, "missing worker protocol");
@@ -134,20 +129,8 @@ impl Manifest {
         ] {
             self.require_kind(path, PayloadKind::Runtime)?;
         }
-        let external_debugger = self.entrypoints.windbg_mcp.is_some();
-        ensure!(
-            external_debugger != self.entrypoints.dbgeng_helper.is_some(),
-            "package must select one debugger backend"
-        );
-        self.require_kind(
-            self.entrypoints
-                .windbg_mcp
-                .as_ref()
-                .or(self.entrypoints.dbgeng_helper.as_ref())
-                .unwrap(),
-            PayloadKind::Runtime,
-        )?;
-        self.require_kind(&self.entrypoints.bridge, PayloadKind::WorkerSource)?;
+        self.require_kind(&self.entrypoints.windbg_mcp, PayloadKind::Runtime)?;
+        self.require_kind(&self.entrypoints.selftest, PayloadKind::PythonSource)?;
         self.require_kind(&self.toolchain_lock_path, PayloadKind::Data)?;
         ensure!(
             self.files[&self.toolchain_lock_path].sha256 == self.toolchain_lock_sha256,
@@ -161,15 +144,7 @@ impl Manifest {
             self.require_kind(path, PayloadKind::License)?;
         }
         let mut original_payloads = BTreeSet::new();
-        let mut required_components = vec![
-            "python",
-            "debugging_tools",
-            "openssh",
-            "worker_python_dependencies",
-        ];
-        if external_debugger {
-            required_components.push("windbg_mcp");
-        }
+        let required_components = ["python", "debugging_tools", "openssh", "windbg_mcp"];
         for name in &required_components {
             let component = self
                 .components

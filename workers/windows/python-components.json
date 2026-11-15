@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "analysis": [
+    "__init__.py",
+    "validation.py",
+    "seccomp.py",
+    "crash.py",
+    "emu.py",
+    "libc.py"
+  ],
+  "helpers": [
+    "selftest.py"
+  ]
+}

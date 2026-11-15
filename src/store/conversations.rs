@@ -2,8 +2,8 @@
 use super::*;
 
 pub(super) fn initialize(conn: &Connection, version: &str) -> Result<()> {
-    if version != "4" {
-        bail!("unsupported state schema {version}; expected 4; select a fresh state directory");
+    if version != "5" {
+        bail!("unsupported state schema {version}; expected 5; select a fresh state directory");
     }
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS agent_conversations(

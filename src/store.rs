@@ -44,7 +44,7 @@ impl Store {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
           CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-          INSERT OR IGNORE INTO meta VALUES('schema_version','4');
+          INSERT OR IGNORE INTO meta VALUES('schema_version','5');
           ",
         )?;
         let version: String = conn.query_row(
@@ -629,7 +629,7 @@ mod tests {
             Ok(_) => panic!("old schema accepted"),
             Err(error) => error,
         };
-        assert!(error.to_string().contains("expected 4"));
+        assert!(error.to_string().contains("expected 5"));
         let history: String =
             conn.query_row("SELECT data FROM legacy_history", [], |row| row.get(0))?;
         assert_eq!(history, "retained");

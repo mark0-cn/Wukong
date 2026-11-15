@@ -433,7 +433,7 @@ async fn remote_native_interrupted_process_acceptance() -> Result<()> {
     );
     let cached = rebound.call(method, request.clone()).await?;
     ensure!(
-        cached == status,
+        cached == started && rebound.call("job.status", json!({"job_id":id})).await? == status,
         "interrupted start was relaunched or its result changed"
     );
     if profile.python {

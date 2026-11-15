@@ -51,10 +51,17 @@ impl ExecutionService {
             }
             "job_cancel" => {
                 let job_id = text(&args, "job_id")?;
-                self.jobs.known_job(agent, job_id, true)?;
-                self.gateway
-                    .worker_call(agent, call_id, "job.cancel", args)
-                    .await
+                let job = self.jobs.known_job(agent, job_id, true)?;
+                args["job_id"] = json!(job.worker_resource_id);
+                let raw = self
+                    .gateway
+                    .worker_call(
+                        agent,
+                        call_id,
+                        Request::JobCancel(serde_json::from_value(args)?),
+                    )
+                    .await?;
+                self.jobs.present(&job, raw)
             }
             "job_artifacts" => {
                 self.jobs
@@ -71,7 +78,11 @@ impl ExecutionService {
                     self.files.known_file(agent, target, true)?;
                 }
                 self.gateway
-                    .worker_call(agent, call_id, "exec.run", args)
+                    .worker_call(
+                        agent,
+                        call_id,
+                        Request::ExecRun(serde_json::from_value(args)?),
+                    )
                     .await
             }
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
@@ -130,13 +141,13 @@ impl ExecutionService {
                     );
                 }
                 let method = match name {
-                    "job_start" => "job.start",
-                    "fuzz_start" => "fuzz.start",
-                    "crash_replay" => "crash.replay",
-                    "input_minimize" => "input.minimize",
-                    "angr_solve" => "angr.solve",
-                    "py_run" => "py.run",
-                    _ => "poc.verify",
+                    "job_start" => Method::JobStart,
+                    "fuzz_start" => Method::FuzzStart,
+                    "crash_replay" => Method::CrashReplay,
+                    "input_minimize" => Method::InputMinimize,
+                    "angr_solve" => Method::AngrSolve,
+                    "py_run" => Method::PythonRun,
+                    _ => Method::PocVerify,
                 };
                 // job_start argv may reference the staged target via the
                 // {target} placeholder; the harness resolves it to the worker
@@ -149,12 +160,14 @@ impl ExecutionService {
                 };
                 let raw = self
                     .gateway
-                    .worker_call(agent, call_id, method, params.clone())
+                    .worker_call(agent, call_id, (method).decode(params.clone())?)
                     .await?;
-                let job_id = raw["job_id"].as_str().context("worker job ID missing")?;
+                let status: JobStatus = serde_json::from_value(raw.clone())?;
+                let worker_id = self.gateway.worker_identity()?;
+                let job_id = stable("job", &format!("{worker_id}:{}", status.job_id));
                 let record = JobRecord {
-                    id: job_id.into(),
-                    worker_resource_id: text(&raw, "worker_job_id")?.into(),
+                    id: job_id.clone(),
+                    worker_resource_id: status.job_id.clone(),
                     run_id: agent.run_id.clone(),
                     agent_id: agent.id.clone(),
                     worker_id: self.gateway.worker_identity()?,
@@ -165,7 +178,7 @@ impl ExecutionService {
                     worker_request_id: self.gateway.request_identity(agent, call_id),
                     parameters: params,
                     target_sha256: run.target_sha256,
-                    status: serde_json::from_value(raw.clone())?,
+                    status,
                     status_evidence_id: None,
                     imported_artifacts: None,
                     notification_message_id: None,
@@ -173,7 +186,7 @@ impl ExecutionService {
                     updated_at: now(),
                 };
                 self.store.write(|tx| {
-                    if let Some(previous) = tx.get_record::<JobRecord>(job_id)? {
+                    if let Some(previous) = tx.get_record::<JobRecord>(&job_id)? {
                         ensure!(
                             previous.run_id == agent.run_id
                                 && previous.agent_id == agent.id
@@ -184,7 +197,7 @@ impl ExecutionService {
                     }
                     tx.save_record(&record)
                 })?;
-                Ok(raw)
+                self.jobs.present(&record, raw)
             }
             _ => bail!("unsupported runtime tool {name}"),
         }

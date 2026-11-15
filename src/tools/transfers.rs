@@ -27,14 +27,17 @@ impl FilesService {
             .worker_call(
                 agent,
                 &format!("{call}:begin"),
-                "file.upload.begin",
-                json!({"path":path,"sha256":expected_hash,"size":size,"executable":executable}),
+                Request::UploadBegin(serde_json::from_value(
+                    json!({"path":path,"sha256":expected_hash,"size":size,"executable":executable}),
+                )?),
             )
             .await?;
         let transfer = text(&begin, "transfer_id")?;
         let status = self
             .gateway
-            .worker_query(agent, "file.upload.status", json!({"transfer_id":transfer}))
+            .worker_query(Request::UploadStatus(serde_json::from_value(
+                json!({"transfer_id":transfer}),
+            )?))
             .await?;
         let mut offset = status["offset"].as_u64().context("upload offset missing")?;
         ensure!(offset <= size, "invalid worker upload offset");
@@ -43,8 +46,7 @@ impl FilesService {
         while offset < size {
             let count = file.read(&mut buffer)?;
             ensure!(count > 0, "source artifact was truncated during transfer");
-            let next = self.gateway.worker_call(agent, &format!("{call}:chunk:{offset}"), "file.upload.write",
-                json!({"transfer_id":transfer,"offset":offset,"data_base64":BASE64.encode(&buffer[..count])})).await?;
+            let next = self.gateway.worker_call(agent, &format!("{call}:chunk:{offset}"), Request::UploadWrite(serde_json::from_value(json!({"transfer_id":transfer,"offset":offset,"data_base64":BASE64.encode(&buffer[..count])}))?)).await?;
             offset += count as u64;
             ensure!(
                 next["offset"].as_u64() == Some(offset),
@@ -56,8 +58,7 @@ impl FilesService {
             .worker_call(
                 agent,
                 call,
-                "file.upload.commit",
-                json!({"transfer_id":transfer}),
+                Request::UploadCommit(serde_json::from_value(json!({"transfer_id":transfer}))?),
             )
             .await?;
         ensure!(
@@ -106,7 +107,9 @@ impl FilesService {
     ) -> Result<Value> {
         let metadata = self
             .gateway
-            .worker_query(agent, "file.stat", json!({"path":path}))
+            .worker_query(Request::FileStat(serde_json::from_value(
+                json!({"path":path}),
+            )?))
             .await?;
         let size = metadata["size"].as_u64().context("artifact size missing")?;
         ensure!(
@@ -119,11 +122,9 @@ impl FilesService {
         while offset < size {
             let raw = self
                 .gateway
-                .worker_query(
-                    agent,
-                    "file.read",
+                .worker_query(Request::FileRead(serde_json::from_value(
                     json!({"path":path,"offset":offset,"max_bytes":CHUNK_BYTES}),
-                )
+                )?))
                 .await?;
             let bytes = BASE64.decode(text(&raw, "data_base64")?)?;
             ensure!(

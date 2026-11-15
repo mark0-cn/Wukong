@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from worker_selftest import checked_file, ssh_probe_environment
+import importlib.util
+_spec = importlib.util.spec_from_file_location("windows_selftest", Path(__file__).resolve().parents[2] / "windows/python/selftest.py")
+_selftest = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_selftest)
+checked_file, ssh_probe_environment = _selftest.checked_file, _selftest.ssh_probe_environment
 
 
 class VerifiedSelftestMembers(unittest.TestCase):

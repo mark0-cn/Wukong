@@ -48,7 +48,7 @@ pub fn check(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
     };
     if config.default_environment.as_deref() != Some("workbench")
         || environment.platform != crate::environments::Platform::Linux
-        || environment.runtime.backend != crate::runtime::RuntimeBackend::Docker
+        || environment.runtime.backend() != crate::runtime::RuntimeBackend::Docker
     {
         let mut health = Health {
             configured: true,
@@ -171,8 +171,9 @@ mod tests {
                 platform: crate::environments::Platform::Windows,
                 installation_id: None,
                 runtime: crate::runtime::RuntimeConfig {
-                    backend: crate::runtime::RuntimeBackend::Ssh,
-                    ssh_host: Some("fixture.invalid".into()),
+                    transport: crate::runtime::TransportConfig::Ssh(crate::runtime::SshConfig {
+                        ..crate::runtime::SshConfig::new("fixture.invalid".into())
+                    }),
                     ..Default::default()
                 },
             },
@@ -197,8 +198,11 @@ mod tests {
                 platform: crate::environments::Platform::Linux,
                 installation_id: None,
                 runtime: crate::runtime::RuntimeConfig {
-                    backend: crate::runtime::RuntimeBackend::Docker,
-                    docker_container: Some("fixture".into()),
+                    transport: crate::runtime::TransportConfig::Docker(
+                        crate::runtime::DockerConfig {
+                            ..crate::runtime::DockerConfig::new("fixture".into())
+                        },
+                    ),
                     ..Default::default()
                 },
             },

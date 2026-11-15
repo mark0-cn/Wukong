@@ -5,7 +5,7 @@ import struct
 import subprocess
 import sys
 import unittest
-from worker_seccomp import decode, probe
+from wukong_analysis.seccomp import decode, probe
 
 
 def packed(rows, endian="little"):

@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from worker_common import atomic_json, load_json
-from worker_crash import CrashService, location_signature, normalize_address
+from worker_crash import CrashService
+from wukong_analysis.crash import location_signature, normalize_address
 from worker_job_supervisor import supervise_job
 
 
@@ -24,7 +25,7 @@ class CrashTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory); (root/"pattern").write_bytes(b"aaaabaaacaaa")
             with self.assertRaisesRegex(ValueError,"exactly n"):
-                CrashService(root,True,False).dispatch("cyclic.offset",{"pattern":"pattern",
+                CrashService(root,True,False).cyclic_offset({"pattern":"pattern",
                     "observed_base64":base64.b64encode(b"aaaabaaa").decode(),"alphabet":"abcd","n":4})
 
     def minimize(self, strong, weak=False):

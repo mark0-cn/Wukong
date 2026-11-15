@@ -7,7 +7,8 @@ import re
 import time
 from atomicwrites import AtomicWriter, atomic_write
 
-PROTOCOL = 2
+from worker_contract import PROTOCOL
+from wukong_analysis.validation import bounded_int, parse_address
 MAX_RPC = 48 * 1024 * 1024
 MAX_FILE = 32 * 1024 * 1024
 TERMINAL = {"completed", "failed", "cancelled", "timed_out", "lost"}
@@ -19,9 +20,8 @@ class WorkerError(ValueError):
         super().__init__(message)
         self.kind = kind
 
-def rpc_error(error):
-    kind = getattr(error, "kind", "invalid_request" if isinstance(error, (ValueError, KeyError, TypeError)) else "internal")
-    return {"code": -32000, "message": str(error)[:4096], "data": {"kind": kind}}
+def error_kind(error):
+    return getattr(error, "kind", "invalid_request" if isinstance(error, (ValueError, KeyError, TypeError)) else "internal")
 
 def safe_env(extra=None):
     # Windows enumerates environment names in upper case; SYSTEMROOT is needed
@@ -83,30 +83,6 @@ def job_dir(root, job_id):
     if not re.fullmatch(r"[0-9a-f]{32}", str(job_id)):
         raise ValueError("invalid job_id")
     return confined(root, "jobs/" + job_id, True)
-
-def bounded_int(value, default, minimum, maximum):
-    value = int(value if value is not None else default)
-    if not minimum <= value <= maximum:
-        raise ValueError("numeric parameter outside allowed range")
-    return value
-
-def parse_address(value):
-    """Accept the controller's interchangeable integer spellings for module-relative
-    addresses: JSON integers, plain decimal strings and 0x-hex strings."""
-    if isinstance(value, bool) or isinstance(value, float):
-        raise ValueError("address must be a nonnegative integer or 0x-hex string")
-    if isinstance(value, int):
-        parsed = value
-    elif isinstance(value, str):
-        text = value.strip().replace("_", "")
-        if not text:
-            raise ValueError("address must be a nonnegative integer or 0x-hex string")
-        parsed = int(text, 16) if text.lower().startswith("0x") else int(text, 10)
-    else:
-        raise ValueError("address must be a nonnegative integer or 0x-hex string")
-    if not 0 <= parsed < 2**64:
-        raise ValueError("address outside the 64-bit module-relative range")
-    return parsed
 
 def tail(path, limit=8192):
     if not Path(path).is_file():

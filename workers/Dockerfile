@@ -90,7 +90,10 @@ FROM toolchain AS worker
 COPY workers/runtime/requirements.txt /tmp/wukong-runtime-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --break-system-packages -i "$PIP_INDEX_URL" -r /tmp/wukong-runtime-requirements.txt
+COPY workers/analysis /opt/wukong/analysis
+RUN pip3 install --break-system-packages --no-deps --no-build-isolation /opt/wukong/analysis
 COPY workers/runtime /opt/wukong/runtime
+COPY workers/protocol/schema /opt/wukong/protocol/schema
 COPY workers/tests /opt/wukong/tests
 COPY workers/ghidra /opt/wukong/ghidra
 COPY workers/deps/gef.py /opt/gef.py

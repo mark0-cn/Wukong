@@ -23,11 +23,12 @@ def crash_signature(result):
 def expectation_matches(result, expected):
     if result["state"] != "completed":
         return False
+    allowed = {"exit_code", "signal", "stdout_contains", "stderr_contains"}
+    if set(expected or {}) - allowed:
+        raise ValueError("unsupported verification expectation")
+    expected = {key: value for key, value in (expected or {}).items() if value is not None}
     if not expected:
         return crash_signature(result) is not None
-    allowed = {"exit_code", "signal", "stdout_contains", "stderr_contains"}
-    if set(expected) - allowed:
-        raise ValueError("unsupported verification expectation")
     return all((str(value) in result[key[:-9]]) if key.endswith("_contains") else result.get(key) == value
                for key, value in expected.items())
 

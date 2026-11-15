@@ -1,0 +1,4911 @@
+{
+  "capabilities": {
+    "$defs": {
+      "MethodAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "ready": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "ready"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "angr.solve": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "core.snapshot": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "crash.replay": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "cyclic.offset": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "debug.close": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "debug.command": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "debug.control": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "debug.events": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "debug.inspect": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "debug.profile": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "debug.snapshot": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "debug.start": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "doctor": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "emu.run": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "environment.lease.acquire": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "environment.lease.release": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "exec.run": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "file.get": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "file.put": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "file.read": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "file.stat": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "file.upload.begin": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "file.upload.commit": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "file.upload.status": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "file.upload.write": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "fuzz.start": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "fuzz.status": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "fuzz.stop": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "ghidra.query": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "input.minimize": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "interact.close": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "interact.profile": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "interact.start": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "interact.write": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "job.artifacts": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "job.cancel": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "job.list": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "job.start": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "job.status": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "libc.identify": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "network.profile": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "ping": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "poc.verify": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "py.run": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "resource.list": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "runtime.prepare": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "runtime.profile": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "seccomp.analyze": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
+      "worker.shutdown": {
+        "$ref": "#/$defs/MethodAvailability"
+      }
+    },
+    "title": "Map_from_Method_to_MethodAvailability",
+    "type": "object"
+  },
+  "capacity": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "description": "Limits advertised by the worker, independent of controller Agent concurrency.",
+    "properties": {
+      "exclusive_run_lease": {
+        "type": "boolean"
+      },
+      "max_active_resources": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "max_active_resources",
+      "exclusive_run_lease"
+    ],
+    "title": "WorkerCapacity",
+    "type": "object"
+  },
+  "context": {
+    "$defs": {
+      "EnvironmentLease": {
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "type": "string"
+          },
+          "epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "double",
+            "type": "number"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "epoch",
+          "run_id",
+          "owner_id",
+          "boot_id",
+          "token",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "WorkerIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "installation_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "package_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "protocol": {
+            "format": "uint32",
+            "maximum": 3,
+            "minimum": 3,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "protocol",
+          "installation_id",
+          "boot_id",
+          "package_sha256"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "description": "Authentication and request identity are separate from operation parameters.",
+    "properties": {
+      "_binding": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/WorkerIdentity"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "_lease": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EnvironmentLease"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "call_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "request_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "title": "RequestContext",
+    "type": "object"
+  },
+  "error": {
+    "$defs": {
+      "WorkerErrorKind": {
+        "enum": [
+          "invalid_request",
+          "session_lost",
+          "conflict",
+          "resource_busy",
+          "binding_changed",
+          "lease_lost",
+          "outcome_unknown",
+          "internal",
+          "unknown"
+        ],
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "$ref": "#/$defs/WorkerErrorKind"
+      }
+    },
+    "required": [
+      "kind"
+    ],
+    "title": "WorkerErrorData",
+    "type": "object"
+  },
+  "identity": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "boot_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "installation_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "package_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "protocol": {
+        "format": "uint32",
+        "maximum": 3,
+        "minimum": 3,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "protocol",
+      "installation_id",
+      "boot_id",
+      "package_sha256"
+    ],
+    "title": "WorkerIdentity",
+    "type": "object"
+  },
+  "methods": {
+    "angr.solve": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "avoid": {
+            "items": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "find": {
+            "items": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "max_steps": {
+            "format": "uint64",
+            "maximum": 10000000,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "printable_only": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "stdin_length": {
+            "format": "uint64",
+            "maximum": 4096,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 3600,
+            "minimum": 10,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "target",
+          "find"
+        ],
+        "title": "AngrSolveArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "core.snapshot": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "core": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "Choose exactly one: owned stopped debugger session or in-run core file.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "CrashSnapshotArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "crash.replay": {
+      "effect": "reconcile",
+      "params": {
+        "$defs": {
+          "Expected": {
+            "additionalProperties": false,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "signal": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "stderr_contains": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stdout_contains": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "InputMode": {
+            "enum": [
+              "argv",
+              "stdin"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Expected"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "input_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InputMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "launch_spec": {
+            "description": "Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_attempts": {
+            "format": "uint64",
+            "maximum": 4096,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "minimize_timeout_secs": {
+            "format": "uint64",
+            "maximum": 3600,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_limit": {
+            "description": "Maximum retained output per trial in bytes (default 1 MiB).",
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 60,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "trials": {
+            "format": "uint64",
+            "maximum": 16,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "target",
+          "input"
+        ],
+        "title": "CrashReplayArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "cyclic.offset": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "alphabet": {
+            "type": "string"
+          },
+          "n": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "observed_base64": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern",
+          "observed_base64",
+          "alphabet",
+          "n"
+        ],
+        "title": "CyclicOffsetArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "debug.close": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "DebugCloseArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "SessionState": {
+            "enum": [
+              "running",
+              "exited",
+              "closed",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/SessionState"
+          }
+        },
+        "required": [
+          "session_id",
+          "state"
+        ],
+        "title": "SessionHandle",
+        "type": "object"
+      }
+    },
+    "debug.command": {
+      "effect": "once",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 60,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "command"
+        ],
+        "title": "DebugCommandArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "debug.control": {
+      "effect": "once",
+      "params": {
+        "$defs": {
+          "DebugAction": {
+            "enum": [
+              "run",
+              "continue",
+              "interrupt",
+              "step",
+              "next",
+              "finish",
+              "breakpoint_add",
+              "breakpoint_remove",
+              "breakpoint_enable",
+              "breakpoint_disable"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/$defs/DebugAction"
+          },
+          "address": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "breakpoint_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "symbol": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 60,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "action"
+        ],
+        "title": "DebugControlArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "debug.events": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "DebugCloseArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "debug.inspect": {
+      "effect": "read",
+      "params": {
+        "$defs": {
+          "DebugInspectKind": {
+            "enum": [
+              "registers",
+              "stack",
+              "memory",
+              "modules",
+              "threads",
+              "disassembly",
+              "exception",
+              "state"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/$defs/DebugInspectKind"
+          },
+          "length": {
+            "format": "uint64",
+            "maximum": 65536,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "uint64",
+            "maximum": 256,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 60,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "session_id",
+          "kind"
+        ],
+        "title": "DebugInspectArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "debug.profile": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "DebugCloseArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "debug.snapshot": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "core": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "Choose exactly one: owned stopped debugger session or in-run core file.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "CrashSnapshotArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "debug.start": {
+      "effect": "once",
+      "params": {
+        "$defs": {
+          "DebugEngine": {
+            "enum": [
+              "auto",
+              "gdb_mi",
+              "dbgeng"
+            ],
+            "type": "string"
+          },
+          "DebugMode": {
+            "enum": [
+              "launch",
+              "dump"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "dump": {
+            "description": "Staged dump artifact; required in dump mode, separate from the target image.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DebugEngine"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input": {
+            "description": "Input artifact for argv_file LaunchSpecs.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "launch_spec": {
+            "description": "Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DebugMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "description": "Staged target image; may be omitted when launch_spec owns the target.",
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "DebugStartArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "SessionState": {
+            "enum": [
+              "running",
+              "exited",
+              "closed",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/SessionState"
+          }
+        },
+        "required": [
+          "session_id",
+          "state"
+        ],
+        "title": "SessionHandle",
+        "type": "object"
+      }
+    },
+    "doctor": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "title": "Empty",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "CapabilityValue": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "MethodAvailability": {
+            "additionalProperties": false,
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "ready"
+            ],
+            "type": "object"
+          },
+          "WorkerCapacity": {
+            "additionalProperties": false,
+            "description": "Limits advertised by the worker, independent of controller Agent concurrency.",
+            "properties": {
+              "exclusive_run_lease": {
+                "type": "boolean"
+              },
+              "max_active_resources": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "max_active_resources",
+              "exclusive_run_lease"
+            ],
+            "type": "object"
+          },
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "capabilities": {
+            "additionalProperties": {
+              "$ref": "#/$defs/CapabilityValue"
+            },
+            "type": "object"
+          },
+          "capacity": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/WorkerCapacity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exclusive_run_lease": {
+            "type": "boolean"
+          },
+          "identity": {
+            "$ref": "#/$defs/WorkerIdentity"
+          },
+          "isolation": {
+            "type": "string"
+          },
+          "methods": {
+            "additionalProperties": false,
+            "properties": {
+              "angr.solve": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "core.snapshot": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "crash.replay": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "cyclic.offset": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.close": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.command": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.control": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.events": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.inspect": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.profile": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.snapshot": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "debug.start": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "doctor": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "emu.run": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "environment.lease.acquire": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "environment.lease.release": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "exec.run": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.get": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.put": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.read": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.stat": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.upload.begin": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.upload.commit": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.upload.status": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "file.upload.write": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "fuzz.start": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "fuzz.status": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "fuzz.stop": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "ghidra.query": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "input.minimize": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "interact.close": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "interact.profile": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "interact.start": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "interact.write": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.artifacts": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.cancel": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.list": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.start": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "job.status": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "libc.identify": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "network.profile": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "ping": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "poc.verify": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "py.run": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "resource.list": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "runtime.prepare": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "runtime.profile": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "seccomp.analyze": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "worker.shutdown": {
+                "$ref": "#/$defs/MethodAvailability"
+              }
+            },
+            "type": "object"
+          },
+          "os": {
+            "type": "string"
+          },
+          "protocol": {
+            "format": "uint32",
+            "maximum": 3,
+            "minimum": 3,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "protocol",
+          "identity",
+          "os",
+          "isolation",
+          "exclusive_run_lease",
+          "methods",
+          "capabilities"
+        ],
+        "title": "DoctorResult",
+        "type": "object"
+      }
+    },
+    "emu.run": {
+      "effect": "once",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "format": "uint64",
+            "maximum": 10000000,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "dump": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "init_regs": {
+            "additionalProperties": true,
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "memory": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "start": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 600,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "until": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "target",
+          "start"
+        ],
+        "title": "EmulateRunArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "environment.lease.acquire": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "owner_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "ttl_secs": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "owner_id"
+        ],
+        "title": "LeaseAcquire",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "type": "string"
+          },
+          "epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expires_at": {
+            "format": "double",
+            "type": "number"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "epoch",
+          "run_id",
+          "owner_id",
+          "boot_id",
+          "token",
+          "expires_at"
+        ],
+        "title": "EnvironmentLease",
+        "type": "object"
+      }
+    },
+    "environment.lease.release": {
+      "effect": "reconcile",
+      "params": {
+        "$defs": {
+          "EnvironmentLease": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "type": "string"
+              },
+              "epoch": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "expires_at": {
+                "format": "double",
+                "type": "number"
+              },
+              "owner_id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "token": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "epoch",
+              "run_id",
+              "owner_id",
+              "boot_id",
+              "token",
+              "expires_at"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "lease": {
+            "$ref": "#/$defs/EnvironmentLease"
+          }
+        },
+        "required": [
+          "lease"
+        ],
+        "title": "LeaseRelease",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "released": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "released",
+          "epoch"
+        ],
+        "title": "LeaseReleased",
+        "type": "object"
+      }
+    },
+    "exec.run": {
+      "effect": "once",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "output_limit": {
+            "description": "Maximum retained shell output in bytes (default 1 MiB).",
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "target": {
+            "description": "Optional staged worker path (from stage_target); the worker places the\nresolved file at $TARGET in the command environment.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 120,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "ExecCommandArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "file.get": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "max_bytes": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "FileGet",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "data_base64": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "size",
+          "data_base64"
+        ],
+        "title": "FileContents",
+        "type": "object"
+      }
+    },
+    "file.put": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "data_base64": {
+            "type": "string"
+          },
+          "executable": {
+            "default": false,
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "data_base64"
+        ],
+        "title": "FilePut",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "NativeInputReceipt": {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "executable": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "identity": {
+                "$ref": "#/$defs/WorkerIdentity"
+              },
+              "owner_id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "schema": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schema",
+              "id",
+              "identity",
+              "run_id",
+              "owner_id",
+              "epoch",
+              "sha256",
+              "size",
+              "executable"
+            ],
+            "type": "object"
+          },
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "native_input": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NativeInputReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "size"
+        ],
+        "title": "FileReceipt",
+        "type": "object"
+      }
+    },
+    "file.read": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "max_bytes": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "offset"
+        ],
+        "title": "FileRead",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "chunk_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "data_base64": {
+            "type": "string"
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "offset",
+          "size",
+          "data_base64",
+          "chunk_sha256"
+        ],
+        "title": "FileChunk",
+        "type": "object"
+      }
+    },
+    "file.stat": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "FileStat",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "size"
+        ],
+        "title": "FileReference",
+        "type": "object"
+      }
+    },
+    "file.upload.begin": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "executable": {
+            "default": false,
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "format": "uint64",
+            "maximum": 17179869184,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "size",
+          "sha256"
+        ],
+        "title": "UploadBegin",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "chunk_bytes": {
+            "format": "uint64",
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id",
+          "chunk_bytes"
+        ],
+        "title": "TransferStarted",
+        "type": "object"
+      }
+    },
+    "file.upload.commit": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id"
+        ],
+        "title": "Transfer",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "NativeInputReceipt": {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "executable": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "identity": {
+                "$ref": "#/$defs/WorkerIdentity"
+              },
+              "owner_id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "schema": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schema",
+              "id",
+              "identity",
+              "run_id",
+              "owner_id",
+              "epoch",
+              "sha256",
+              "size",
+              "executable"
+            ],
+            "type": "object"
+          },
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "native_input": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NativeInputReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "size"
+        ],
+        "title": "FileReceipt",
+        "type": "object"
+      }
+    },
+    "file.upload.status": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id"
+        ],
+        "title": "Transfer",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "FileReceipt": {
+            "properties": {
+              "native_input": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/NativeInputReceipt"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "size"
+            ],
+            "type": "object"
+          },
+          "NativeInputReceipt": {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "executable": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "identity": {
+                "$ref": "#/$defs/WorkerIdentity"
+              },
+              "owner_id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "schema": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schema",
+              "id",
+              "identity",
+              "run_id",
+              "owner_id",
+              "epoch",
+              "sha256",
+              "size",
+              "executable"
+            ],
+            "type": "object"
+          },
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FileReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id",
+          "offset",
+          "complete"
+        ],
+        "title": "TransferStatus",
+        "type": "object"
+      }
+    },
+    "file.upload.write": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "data_base64": {
+            "type": "string"
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id",
+          "offset",
+          "data_base64"
+        ],
+        "title": "UploadWrite",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "FileReceipt": {
+            "properties": {
+              "native_input": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/NativeInputReceipt"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "size"
+            ],
+            "type": "object"
+          },
+          "NativeInputReceipt": {
+            "additionalProperties": false,
+            "properties": {
+              "epoch": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "executable": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "identity": {
+                "$ref": "#/$defs/WorkerIdentity"
+              },
+              "owner_id": {
+                "type": "string"
+              },
+              "run_id": {
+                "type": "string"
+              },
+              "schema": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "schema",
+              "id",
+              "identity",
+              "run_id",
+              "owner_id",
+              "epoch",
+              "sha256",
+              "size",
+              "executable"
+            ],
+            "type": "object"
+          },
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FileReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "transfer_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transfer_id",
+          "offset",
+          "complete"
+        ],
+        "title": "TransferStatus",
+        "type": "object"
+      }
+    },
+    "fuzz.start": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "exec_timeout_ms": {
+            "format": "uint64",
+            "maximum": 60000,
+            "minimum": 10,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "memory_mb": {
+            "format": "uint64",
+            "maximum": 65536,
+            "minimum": 16,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "seeds": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 86400,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "target",
+          "seeds"
+        ],
+        "title": "FuzzStartArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "fuzz.status": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "FuzzStatusArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "fuzz.stop": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "JobCancelArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "ghidra.query": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "analysis_timeout_secs": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_cpu": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "query": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "target": {
+            "type": "string"
+          },
+          "target_sha256": {
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target",
+          "target_sha256",
+          "query",
+          "timeout_secs",
+          "analysis_timeout_secs",
+          "max_cpu"
+        ],
+        "title": "GhidraQuery",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "input.minimize": {
+      "effect": "reconcile",
+      "params": {
+        "$defs": {
+          "InputMode": {
+            "enum": [
+              "argv",
+              "stdin"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "allow_signal_only": {
+            "description": "Explicit weak fallback; default requires module-hash/location crash equivalence.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "input": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "input_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InputMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "launch_spec": {
+            "description": "Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_attempts": {
+            "format": "uint64",
+            "maximum": 4096,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "minimize_timeout_secs": {
+            "format": "uint64",
+            "maximum": 3600,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "output_limit": {
+            "description": "Maximum retained output per trial in bytes (default 1 MiB).",
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 60,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "target",
+          "input"
+        ],
+        "title": "InputMinimizeArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "interact.close": {
+      "effect": "once",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "InteractiveCloseArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "SessionState": {
+            "enum": [
+              "running",
+              "exited",
+              "closed",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/SessionState"
+          }
+        },
+        "required": [
+          "session_id",
+          "state"
+        ],
+        "title": "SessionHandle",
+        "type": "object"
+      }
+    },
+    "interact.profile": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "InteractiveCloseArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "interact.start": {
+      "effect": "once",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "input": {
+            "description": "Input artifact for argv_file LaunchSpecs.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "launch_spec": {
+            "description": "Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "argv"
+        ],
+        "title": "InteractiveStartArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "SessionState": {
+            "enum": [
+              "running",
+              "exited",
+              "closed",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "session_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/$defs/SessionState"
+          }
+        },
+        "required": [
+          "session_id",
+          "state"
+        ],
+        "title": "SessionHandle",
+        "type": "object"
+      }
+    },
+    "interact.write": {
+      "effect": "once",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "data_base64": {
+            "type": "string"
+          },
+          "read_timeout_secs": {
+            "format": "uint64",
+            "maximum": 300,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "data_base64"
+        ],
+        "title": "InteractiveSendArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "job.artifacts": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "JobArtifactsArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "FileReference": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "size": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "size"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "$ref": "#/$defs/FileReference"
+        },
+        "title": "Array_of_FileReference",
+        "type": "array"
+      }
+    },
+    "job.cancel": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "JobCancelArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "job.list": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "uint64",
+            "maximum": 64,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "title": "ResourceList",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          },
+          "JobStatus": {
+            "additionalProperties": true,
+            "properties": {
+              "job_id": {
+                "type": "string"
+              },
+              "result": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/JobResult"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "$ref": "#/$defs/JobState"
+              },
+              "stderr": {
+                "default": "",
+                "type": "string"
+              },
+              "stdout": {
+                "default": "",
+                "type": "string"
+              }
+            },
+            "required": [
+              "job_id",
+              "state"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "items": {
+          "$ref": "#/$defs/JobStatus"
+        },
+        "title": "Array_of_JobStatus",
+        "type": "array"
+      }
+    },
+    "job.start": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "argv": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "input": {
+            "description": "Admitted input file; LaunchSpec selects stdin_pipe or argv_file delivery.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "launch_spec": {
+            "description": "Existing prepared LaunchSpec; omit argv/env/cwd overrides when supplied.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output_limit": {
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 86400,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "title": "JobStartArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "job.status": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "JobStatusArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "libc.identify": {
+      "effect": "read",
+      "params": {
+        "$defs": {
+          "LibcLeak": {
+            "additionalProperties": false,
+            "properties": {
+              "addend": {
+                "default": 0,
+                "description": "Bytes after the named symbol, e.g. an identified return site.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "address": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "symbol": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "address",
+              "symbol"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "description": "In-run ELF candidate paths. Omission checks only the worker's own libc.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "leaked": {
+            "description": "Legacy single leak, optionally combined with leaks from the same process.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "leaks": {
+            "items": {
+              "$ref": "#/$defs/LibcLeak"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "symbol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "description": "Optional staged target for architecture/word-width/byte-order comparison.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "LibcIdentifyArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "network.profile": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "launch_spec": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "launch_spec"
+        ],
+        "title": "NetworkProfile",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "ping": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "title": "Empty",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "WorkerIdentity": {
+            "additionalProperties": false,
+            "properties": {
+              "boot_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "installation_id": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "package_sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "protocol": {
+                "format": "uint32",
+                "maximum": 3,
+                "minimum": 3,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "protocol",
+              "installation_id",
+              "boot_id",
+              "package_sha256"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "daemon_id": {
+            "type": "string"
+          },
+          "daemon_pid": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "identity": {
+            "$ref": "#/$defs/WorkerIdentity"
+          },
+          "protocol": {
+            "format": "uint32",
+            "maximum": 3,
+            "minimum": 3,
+            "type": "integer"
+          },
+          "state_dir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "protocol",
+          "identity",
+          "daemon_id",
+          "daemon_pid"
+        ],
+        "title": "PingResult",
+        "type": "object"
+      }
+    },
+    "poc.verify": {
+      "effect": "reconcile",
+      "params": {
+        "$defs": {
+          "ByteOrder": {
+            "enum": [
+              "little",
+              "big"
+            ],
+            "type": "string"
+          },
+          "CaptureEncoding": {
+            "enum": [
+              "hex",
+              "little",
+              "big"
+            ],
+            "type": "string"
+          },
+          "Expected": {
+            "additionalProperties": false,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "signal": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "stderr_contains": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stdout_contains": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "InputMode": {
+            "enum": [
+              "argv",
+              "stdin"
+            ],
+            "type": "string"
+          },
+          "NetworkPatch": {
+            "additionalProperties": false,
+            "properties": {
+              "addend": {
+                "default": 0,
+                "format": "int64",
+                "type": "integer"
+              },
+              "capture": {
+                "type": "string"
+              },
+              "endianness": {
+                "$ref": "#/$defs/ByteOrder"
+              },
+              "offset": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "width": {
+                "description": "1, 2, 4 or 8 bytes; values that do not fit are rejected.",
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "offset",
+              "capture",
+              "width",
+              "endianness"
+            ],
+            "type": "object"
+          },
+          "NetworkReplay": {
+            "additionalProperties": false,
+            "properties": {
+              "steps": {
+                "items": {
+                  "$ref": "#/$defs/NetworkStep"
+                },
+                "maxItems": 64,
+                "minItems": 2,
+                "type": "array"
+              }
+            },
+            "required": [
+              "steps"
+            ],
+            "type": "object"
+          },
+          "NetworkStep": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "length": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "offset": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "op": {
+                    "const": "send",
+                    "type": "string"
+                  },
+                  "patches": {
+                    "default": [],
+                    "items": {
+                      "$ref": "#/$defs/NetworkPatch"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "op",
+                  "offset",
+                  "length"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "max_bytes": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "op": {
+                    "const": "receive",
+                    "type": "string"
+                  },
+                  "until_base64": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "until_base64",
+                  "max_bytes"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "encoding": {
+                    "$ref": "#/$defs/CaptureEncoding"
+                  },
+                  "length": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "offset": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "op": {
+                    "const": "capture",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "name",
+                  "offset",
+                  "length",
+                  "encoding"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "description": "Assert bytes in the latest response after a send. Required as the last step.",
+                "properties": {
+                  "contains_base64": {
+                    "type": "string"
+                  },
+                  "op": {
+                    "const": "expect",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "op",
+                  "contains_base64"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Expected"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "input_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InputMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the input reaches the target: \"argv\" (AFL-style @@ file path,\ndefault) or \"stdin\" (bytes piped to stdin)."
+          },
+          "launch_spec": {
+            "description": "Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_attempts": {
+            "format": "uint64",
+            "maximum": 4096,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "minimize_timeout_secs": {
+            "format": "uint64",
+            "maximum": 3600,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "network": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NetworkReplay"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bounded TCP replay through the prepared challenge service. Requires launch_spec;\nexcludes input_mode/args/env/expected. Input supplies the bytes for send slices."
+          },
+          "network_binding": true,
+          "output_limit": {
+            "description": "Maximum retained output per trial in bytes (default 1 MiB).",
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "producer_agent_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 60,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "trials": {
+            "format": "uint64",
+            "maximum": 16,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "verifier_agent_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "producer_agent_id",
+          "verifier_agent_id",
+          "target",
+          "input"
+        ],
+        "title": "PocVerifyRequest",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "py.run": {
+      "effect": "once",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "argv": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "output_limit": {
+            "format": "uint64",
+            "maximum": 8388608,
+            "minimum": 1024,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source": {
+            "maxLength": 262144,
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timeout_secs": {
+            "format": "uint64",
+            "maximum": 3600,
+            "minimum": 10,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "PyRunArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
+        "type": "object"
+      }
+    },
+    "resource.list": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "uint64",
+            "maximum": 64,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "title": "ResourceList",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "runtime.prepare": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "interactive_session_id": {
+            "description": "Alternatively observe an owned interactive process (e.g. a prepared runtime bundle).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "libc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "loader": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "Owned live debugger session; never an arbitrary PID.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "RuntimeProfileArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "runtime.profile": {
+      "effect": "read",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "interactive_session_id": {
+            "description": "Alternatively observe an owned interactive process (e.g. a prepared runtime bundle).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "libc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "loader": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "description": "Owned live debugger session; never an arbitrary PID.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "RuntimeProfileArgs",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "seccomp.analyze": {
+      "effect": "read",
+      "params": {
+        "$defs": {
+          "ByteOrder": {
+            "enum": [
+              "little",
+              "big"
+            ],
+            "type": "string"
+          },
+          "SeccompProbe": {
+            "additionalProperties": false,
+            "properties": {
+              "arch": {
+                "description": "AUDIT_ARCH value, not the ELF machine number.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "args": {
+                "default": [],
+                "items": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "maxItems": 6,
+                "type": "array"
+              },
+              "instruction_pointer": {
+                "default": 0,
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "nr": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "arch",
+              "nr"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "endianness": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ByteOrder"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "filter": {
+            "description": "In-run raw sock_filter array, without a sock_fprog header.",
+            "type": "string"
+          },
+          "probes": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/SeccompProbe"
+            },
+            "maxItems": 64,
+            "type": "array"
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "title": "SeccompAnalyzeArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "worker.shutdown": {
+      "effect": "reconcile",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "title": "Empty",
+        "type": "object"
+      },
+      "resources": "none",
+      "result": {
+        "$defs": {
+          "ShutdownState": {
+            "enum": [
+              "shutdown"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "state": {
+            "$ref": "#/$defs/ShutdownState"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "ShutdownResult",
+        "type": "object"
+      }
+    }
+  },
+  "protocol": 3,
+  "session": {
+    "$defs": {
+      "SessionState": {
+        "enum": [
+          "running",
+          "exited",
+          "closed",
+          "lost"
+        ],
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "session_id": {
+        "type": "string"
+      },
+      "state": {
+        "$ref": "#/$defs/SessionState"
+      }
+    },
+    "required": [
+      "session_id",
+      "state"
+    ],
+    "title": "SessionHandle",
+    "type": "object"
+  }
+}

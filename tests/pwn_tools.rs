@@ -7,7 +7,6 @@ use wukong::{
     config::AppConfig,
     coordinator::Coordinator,
     domain::{Budget, Role},
-    runtime::RuntimeBackend,
     store::Store,
     tools::{ToolOutcome, ToolService},
 };
@@ -26,8 +25,12 @@ fn worker_config(path: &std::path::Path) -> AppConfig {
                 platform: wukong::environments::Platform::current(),
                 installation_id: None,
                 runtime: wukong::runtime::RuntimeConfig {
-                    backend: RuntimeBackend::TrustedLocal,
-                    state_dir: path.join("worker"),
+                    transport: wukong::runtime::TransportConfig::TrustedLocal(
+                        wukong::runtime::TrustedLocalConfig {
+                            state_dir: path.join("worker"),
+                            ..Default::default()
+                        },
+                    ),
                     ..Default::default()
                 },
             },

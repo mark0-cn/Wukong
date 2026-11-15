@@ -16,6 +16,9 @@ test-results
 playwright-report
 **/__pycache__
 **/*.pyc
+**/*.egg-info
+workers/analysis/build
+workers/analysis/dist
 
 # Additional local credentials and state
 re-agent.toml

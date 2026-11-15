@@ -107,6 +107,21 @@ impl Store {
     }
 }
 
+impl StateSession<'_> {
+    pub(crate) fn session(&self, kind: SessionKind, id: &str) -> Result<Option<SessionRecord>> {
+        Store::tx_get(self.connection, kind.key(), id)
+    }
+    pub(crate) fn save_session(&self, kind: SessionKind, session: &SessionRecord) -> Result<()> {
+        Store::tx_put(
+            self.connection,
+            kind.key(),
+            &session.id,
+            &session.run_id,
+            session,
+        )
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum SessionKind {
     Debugger,

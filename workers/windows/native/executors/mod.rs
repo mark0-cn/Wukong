@@ -1,0 +1,27 @@
+//! Execution plans and owned OS observations; no ledger writes.
+pub(crate) mod analysis;
+pub(crate) mod debugger_mcp;
+pub(crate) mod interactive_host;
+pub(crate) mod interactive_io;
+pub(crate) mod launcher;
+pub(crate) mod parameters;
+pub(crate) mod plan;
+pub(crate) mod python;
+pub(crate) mod replay_plan;
+pub(crate) mod resource_launch;
+pub(crate) mod resource_minimize;
+pub mod resource_process;
+pub(crate) mod resource_replay;
+pub(crate) mod resource_target;
+pub(crate) mod session_backend;
+pub(crate) mod session_commands;
+pub(crate) mod session_crash;
+pub mod session_host;
+pub(crate) mod session_identity;
+pub(crate) mod session_plan;
+pub(crate) mod session_request;
+pub(crate) mod session_runtime;
+pub(crate) mod session_target;
+pub(crate) mod session_wire;
+pub(crate) mod shell;
+pub(crate) mod specification;

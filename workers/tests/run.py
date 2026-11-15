@@ -8,7 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT.parent / "runtime"
 # One test bootstrap owns these paths; production runtime imports stay unchanged.
-sys.path[:0] = [str(ROOT), str(RUNTIME)]
+sys.path[:0] = [str(ROOT), str(RUNTIME), str(ROOT.parent / "analysis")]
 
 
 def main():

@@ -38,7 +38,11 @@ class DebugSession:
         self.token = 0
         self.dead = False
         self.transcript_bytes = 0
-        target = public_file(root, params["target"])
+        if params.get("launch_spec"):
+            from worker_launch import load
+            _, _, target, _, _ = load(root, params)
+        else:
+            target = public_file(root, params["target"])
         self.mode = params.get("mode", "launch")
         if self.mode not in {"launch", "dump"}:
             raise ValueError("invalid debugger mode")

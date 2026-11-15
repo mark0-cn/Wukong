@@ -15,14 +15,14 @@ For Linux workers and trusted development fixtures, install bridge dependencies 
 (or `environments.<id>.runtime.python` for trusted local tests):
 
 ```sh
-python -m pip install -r workers/runtime/requirements.txt
+python -m pip install -e workers/analysis -r workers/runtime/requirements.txt
 ```
 
-Managed Windows VMs require the complete offline package, including Python and all dependencies; do not fetch packages or run online pip installation in the VM. The [package contract](../package/README.md) and [Windows components](../windows/README.md) describe the current implementation and remaining installer/production acceptance work.
+Managed Windows VMs require the complete offline package, including Python and all dependencies; do not fetch packages or run online pip installation in the VM. The [package contract](../package/README.md) and [Windows components](../windows/README.md) describe the implementation and source-bound installation/production acceptance limits.
 
 Bridge startup disables Python bytecode writes before importing worker modules, including in new daemon/job-supervisor processes. This keeps signed deployment files unchanged; writable state remains in the configured state directory. Launch other Python entry points from an immutable deployment with `-B` as well.
 
-Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before replacement, and failed writes clean up their temporary files. The library handles Windows write-through moves and POSIX parent-directory synchronization. Only transient Windows access/sharing violations retry, at most five times; a failed reservation never authorizes execution. Corrupted existing operation records remain errors and are never silently reset. The offline package pins the published 1.4.0 universal wheel; 1.4.1 changes only the runtime module's version and API docstring. Failure-injection checks do not establish power-loss or current-source VM reboot acceptance.
+Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before replacement, and failed writes clean up their temporary files. The library handles Windows write-through moves and POSIX parent-directory synchronization. Only transient Windows access/sharing violations retry, at most five times; a failed reservation never authorizes execution. Corrupted existing operation records remain errors and are never silently reset. Linux bridge dependencies are pinned in `requirements.txt`; native Windows metadata does not use this Python implementation. Failure-injection checks do not establish power-loss or current-source VM reboot acceptance.
 
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
@@ -79,7 +79,7 @@ request_timeout_secs = 300
 ## SSH or a VM
 
 Install Python 3.12+, GDB and AFL++ with `afl-qemu-trace` or `afl-qemu-bridge` on an
-isolated Linux guest. Copy this directory to `/opt/wukong/runtime`; configure a
+isolated Linux guest. Install `workers/analysis` into its Python environment, copy this directory to `/opt/wukong/runtime` and the generated `workers/protocol/schema` to `/opt/wukong/protocol/schema`; configure a
 dedicated management account inside that isolated guest. Production mode requires
 a root-owned daemon so it can allocate a distinct unprivileged UID per job/session
 and keep supervisor metadata private. The current SSH transport does not insert
@@ -156,6 +156,8 @@ Relay-managed daemon startup uses the existing `filelock` dependency and a kerne
 | `ghidra.query` | `target`, `target_sha256`, typed `query`, timeout; Ghidra results and hashed worker artifacts |
 | `worker.shutdown` | Rejects active jobs, closes debug sessions, shuts down daemon |
 
+Symbolic jobs use angr's native `Explorer` through `explore(n=max_steps)`, including initial-state matching and avoided-address handling. The result reports observed steps; the independent job timeout also bounds execution.
+
 Mutating requests should include the controller's stable `request_id`. The durable
 operation ledger records a reservation before effects and the result afterwards.
 Repeating the same ID with changed parameters fails. Job IDs are deterministic
@@ -192,8 +194,7 @@ timeout, cancellation, exhausted attempt budget or unresolved candidate retains
 only a previously verified result, with `complete: false` and `stop_reason`.
 Unexpected evaluation errors fail the job. `reducer: "picire"` identifies the
 algorithm. Doctor advertises minimization only when Picire and its dependencies
-are present. The offline package pins all three pure-Python wheels and their
-original license files. The native Windows route uses the Rust `fixture3-ddmin` library and WinDbg MCP
+are present. These are Linux worker dependencies and are not shipped in the Windows package. The native Windows route uses the Rust `fixture3-ddmin` library and WinDbg MCP
 for contained trials; local checks passed and installed-VM acceptance remains
 pending. Remove the
 previously ignored `trials` and `expected` fields from minimization calls.
@@ -294,8 +295,7 @@ commands have separate components. `worker_processes` contains bounded process
 IO and process-tree ownership; `worker_common` contains protocol values, confined
 paths, streamed file hashes and atomic metadata IO. Backend adapters import these components directly.
 
-`worker_seccomp` owns offline classic-BPF decoding and concrete probes;
-`worker_libc` compares bounded supplied ELF candidates without executing them.
+`worker_seccomp`, `worker_libc`, `worker_emu` and `worker_crash` adapt confined inputs and live debugger observations to the independent [analysis package](../analysis/README.md). The package owns BPF decoding/probes, bounded ELF candidate comparison, Unicorn simulation and crash-data interpretation; it owns no worker state or transport.
 `worker_network` validates the prepared service binding and performs declarative
 TCP verification. The job supervisor retains lifecycle/cancellation ownership;
 network replay never executes a model-provided program inside the privileged

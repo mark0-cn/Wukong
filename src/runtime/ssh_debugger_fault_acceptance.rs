@@ -318,8 +318,12 @@ async fn remote_native_interrupted_debugger_acceptance() -> Result<()> {
         "interrupted debugger did not retain its original unknown outcome"
     );
     ensure!(
-        rebound.call("debug.start", request).await.is_err(),
-        "interrupted start replayed"
+        rebound.call("debug.start", request).await? == started,
+        "completed opener lost its original receipt after interruption"
+    );
+    ensure!(
+        terminal(&rebound, id).await? == status,
+        "start retry changed the interrupted debugger outcome"
     );
     if let Some(control) = &control {
         ensure!(

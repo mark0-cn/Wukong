@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Independent Linux verification now ignores unset optional expectations, so successful trials are no longer rejected by null output filters. Empty expectations still require an observed crash."
+zh_CN = "Linux 独立验证现在会忽略未设置的可选期望，成功的试验不会再因空输出筛选条件而被判为失败。未指定任何期望时仍须观测到崩溃。"
