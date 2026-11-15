@@ -1,101 +1,14 @@
-"""Protocol values, confined paths and atomic metadata IO."""
+"""Worker artifact confinement, hashes and bounded file reads."""
 
 from pathlib import Path
 import hashlib
-import json
-import os
 import re
-import time
-from atomicwrites import AtomicWriter, atomic_write
 
-from worker_contract import PROTOCOL
-from wukong_analysis.validation import bounded_int, parse_address
 
 MAX_RPC = 48 * 1024 * 1024
 MAX_FILE = 32 * 1024 * 1024
 TERMINAL = {"completed", "failed", "cancelled", "timed_out", "lost"}
-ENV_KEYS = {
-    "PATH",
-    "SystemRoot",
-    "WINDIR",
-    "TEMP",
-    "TMP",
-    "PATHEXT",
-    "COMSPEC",
-    "HOME",
-    "USERPROFILE",
-    "LANG",
-    "LC_ALL",
-    "JAVA_HOME",
-    "WUKONG_GHIDRA_HEADLESS",
-    "WUKONG_GHIDRA_SCRIPT_DIR",
-}
 BRIDGE_PATH = Path(__file__).with_name("bridge.py").resolve()
-
-
-class WorkerError(ValueError):
-    def __init__(self, kind, message):
-        super().__init__(message)
-        self.kind = kind
-
-
-def error_kind(error):
-    return getattr(
-        error,
-        "kind",
-        "invalid_request" if isinstance(error, (ValueError, KeyError, TypeError)) else "internal",
-    )
-
-
-def safe_env(extra=None):
-    # Windows enumerates environment names in upper case; SYSTEMROOT is needed
-    # by Winsock even when Python itself launches successfully without it.
-    allowed = {key.upper() for key in ENV_KEYS}
-    env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
-    env.update({"LANG": "C.UTF-8", "PYTHONUNBUFFERED": "1"})
-    for k, v in (extra or {}).items():
-        if not re.fullmatch(r"(?:AFL_[A-Z0-9_]+|QEMU_[A-Z0-9_]+|ASAN_OPTIONS|UBSAN_OPTIONS)", k):
-            raise ValueError("environment variable not permitted: " + k)
-        if len(str(v)) > 4096:
-            raise ValueError("environment value too long")
-        env[k] = str(v)
-    return env
-
-
-class _MetadataWriter(AtomicWriter):
-    def commit(self, stream):
-        # Preserve the bounded Windows sharing retry. The library owns temporary
-        # files, fsync, write-through replacement and rollback on every failure.
-        for attempt in range(5):
-            try:
-                return super().commit(stream)
-            except OSError as error:
-                if (
-                    os.name != "nt"
-                    or getattr(error, "winerror", None) not in {5, 32, 33}
-                    or attempt == 4
-                ):
-                    raise
-                time.sleep(0.02 * (attempt + 1))
-
-
-def atomic_json(path, data):
-    encoded = json.dumps(data, ensure_ascii=False)
-    with atomic_write(path, writer_cls=_MetadataWriter, overwrite=True, encoding="utf-8") as stream:
-        stream.write(encoded)
-
-
-def load_json(path):
-    # Windows: a concurrent atomic replacement can fail the open with a
-    # transient sharing violation; retry briefly like atomic_json does.
-    path = Path(path)
-    for attempt in range(5):
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except OSError:
-            if attempt == 4:
-                raise
-            time.sleep(0.02 * (attempt + 1))
 
 
 def confined(root, relative, exists=False):

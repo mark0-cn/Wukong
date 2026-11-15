@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from worker_common import atomic_json, load_json
+from worker_metadata import atomic_json, load_json
 from worker_crash import CrashService
 from wukong_analysis.crash import location_signature, normalize_address
 from worker_job_supervisor import supervise_job

@@ -32,7 +32,7 @@ class SessionLaunchTests(unittest.TestCase):
 
     def test_lost_session_error_kind_survives_durable_replay(self):
         import worker_runtime as bridge
-        from worker_common import WorkerError, error_kind
+        from worker_errors import WorkerError, error_kind
 
         with tempfile.TemporaryDirectory() as directory:
             runtime = bridge.Runtime(Path(directory), trusted=True)
@@ -509,7 +509,7 @@ class RuntimeTests(unittest.TestCase):
             )
 
     def test_parse_address_accepts_integer_and_hex_spellings(self):
-        from worker_common import parse_address
+        from wukong_analysis.validation import parse_address
 
         self.assertEqual(parse_address(0), 0)
         self.assertEqual(parse_address(4198400), 4198400)
@@ -546,7 +546,7 @@ class OperationLedgerTests(unittest.TestCase):
 
     def test_owner_death_does_not_repeat_an_unknown_interactive_write(self):
         from worker_operations import OperationLedger
-        from worker_common import WorkerError
+        from worker_errors import WorkerError
 
         with tempfile.TemporaryDirectory() as directory:
             calls = []

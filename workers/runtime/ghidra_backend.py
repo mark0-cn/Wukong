@@ -9,15 +9,10 @@ import time
 import uuid
 from contextlib import contextmanager
 from filelock import FileLock, Timeout
-from worker_common import (
-    artifact,
-    atomic_json,
-    bounded_int,
-    confined,
-    load_json,
-    safe_env,
-    sha256_file as digest,
-)
+from worker_common import artifact, confined, sha256_file as digest
+from worker_metadata import atomic_json, load_json
+from wukong_analysis.validation import bounded_int
+from worker_environment import safe_env
 from worker_processes import run_process
 
 

@@ -7,7 +7,8 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from worker_common import WorkerError, atomic_json
+from worker_errors import WorkerError
+from worker_metadata import atomic_json
 from worker_operations import OperationLedger
 
 

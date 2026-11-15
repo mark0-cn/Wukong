@@ -10,6 +10,24 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExecutionBoundaries(unittest.TestCase):
+    def test_worker_imports_environment_errors_and_validation_from_their_owners(self):
+        indirect = {
+            "safe_env",
+            "WorkerError",
+            "error_kind",
+            "PROTOCOL",
+            "bounded_int",
+            "parse_address",
+            "atomic_json",
+            "load_json",
+        }
+        for path in (ROOT / "workers/runtime").glob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ImportFrom) and node.module == "worker_common":
+                    self.assertFalse(
+                        indirect.intersection(alias.name for alias in node.names), str(path)
+                    )
+
     def test_application_services_do_not_assemble_through_bootstrap(self):
         for name in [
             "application/assessment/mod.rs",

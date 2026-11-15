@@ -1,7 +1,8 @@
 """Original wire chunks and trial evidence, independent of the replay policy."""
 
 import base64
-from worker_common import atomic_json, sha256_file
+from worker_metadata import atomic_json
+from worker_common import sha256_file
 
 
 class Transcript:

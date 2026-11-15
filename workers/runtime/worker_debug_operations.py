@@ -5,7 +5,7 @@ import json
 import re
 import time
 
-from worker_common import parse_address as address, bounded_int
+from wukong_analysis.validation import parse_address as address, bounded_int
 
 INSPECTIONS = {
     "registers",
@@ -211,7 +211,7 @@ def gdb_control(session, params, timeout):
                     interruption = "deadline"
                     if not wait_for_stop(session, before, 2):
                         from worker_processes import terminate_tree
-                        from worker_common import WorkerError
+                        from worker_errors import WorkerError
 
                         session.dead = True
                         terminate_tree(session.process)

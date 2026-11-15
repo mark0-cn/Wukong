@@ -6,7 +6,9 @@ import os
 import platform
 import threading
 import time
-from worker_common import artifact, atomic_json, confined, load_json, safe_env
+from worker_common import artifact, confined
+from worker_metadata import atomic_json, load_json
+from worker_environment import safe_env
 from worker_processes import process_identity, run_process
 
 

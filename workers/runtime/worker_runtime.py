@@ -4,7 +4,8 @@ import os
 import sys
 from worker_capabilities import doctor
 from worker_commands import CommandService
-from worker_common import PROTOCOL, TERMINAL
+from worker_contract import PROTOCOL
+from worker_common import TERMINAL
 from worker_emu import EmuService
 from worker_files import FileService
 from worker_jobs import JobManager

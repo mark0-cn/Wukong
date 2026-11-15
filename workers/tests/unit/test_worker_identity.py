@@ -26,7 +26,7 @@ class WorkerFenceTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows boot identity requires Windows")
     def test_native_windows_boot_epoch_matches_a_fresh_minimal_environment_process(self):
         import subprocess, sys
-        from worker_common import safe_env
+        from worker_environment import safe_env
 
         runtime = Path(__file__).resolve().parents[2] / "runtime"
         code = f"import sys;sys.path.insert(0,{str(runtime)!r});from worker_identity import boot_identity;print(boot_identity())"

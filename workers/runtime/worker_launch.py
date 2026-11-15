@@ -8,7 +8,8 @@ import os
 import shutil
 import subprocess
 import tempfile
-from worker_common import public_file, safe_env
+from worker_common import public_file
+from worker_environment import safe_env
 
 
 from worker_common import sha256_file as digest

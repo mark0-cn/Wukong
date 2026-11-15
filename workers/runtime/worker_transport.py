@@ -10,7 +10,10 @@ import sys
 import threading
 import time
 from filelock import FileLock
-from worker_common import BRIDGE_PATH, MAX_RPC, PROTOCOL, atomic_json, load_json, safe_env, tail
+from worker_common import BRIDGE_PATH, MAX_RPC, tail
+from worker_contract import PROTOCOL
+from worker_metadata import atomic_json, load_json
+from worker_environment import safe_env
 from worker_processes import detached_options
 from worker_runtime import Runtime
 from worker_rpc import Server as RpcServer

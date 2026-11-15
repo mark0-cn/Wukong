@@ -10,7 +10,9 @@ import subprocess
 import threading
 import time
 import uuid
-from worker_common import atomic_json, public_file, safe_env, sha256_file
+from worker_metadata import atomic_json
+from worker_common import public_file, sha256_file
+from worker_environment import safe_env
 from worker_processes import detached_options, terminate_tree
 
 try:  # GDB/MI parsing is optional: the bridge must serve jobs without it.

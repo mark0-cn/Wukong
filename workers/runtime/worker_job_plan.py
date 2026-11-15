@@ -10,7 +10,9 @@ import json
 from pathlib import Path
 import secrets
 from typing import Any
-from worker_common import MAX_FILE, bounded_int, confined, public_file, safe_env
+from worker_common import MAX_FILE, confined, public_file
+from wukong_analysis.validation import bounded_int
+from worker_environment import safe_env
 
 
 @dataclass(frozen=True)

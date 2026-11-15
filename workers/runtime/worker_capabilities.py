@@ -8,7 +8,8 @@ import platform
 import shutil
 import subprocess
 import sys
-from worker_common import PROTOCOL, safe_env
+from worker_contract import PROTOCOL
+from worker_environment import safe_env
 from worker_catalog import capabilities
 
 

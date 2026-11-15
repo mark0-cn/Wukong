@@ -4,7 +4,8 @@ import hashlib
 import json
 import time
 from filelock import FileLock
-from worker_common import WorkerError, atomic_json, load_json, error_kind
+from worker_errors import WorkerError, error_kind
+from worker_metadata import atomic_json, load_json
 from worker_contract import METHODS
 
 

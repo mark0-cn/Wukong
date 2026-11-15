@@ -5,7 +5,9 @@ import os
 import shutil
 import threading
 import uuid
-from worker_common import bounded_int, public_file, safe_env
+from wukong_analysis.validation import bounded_int
+from worker_common import public_file
+from worker_environment import safe_env
 from worker_processes import run_process
 
 

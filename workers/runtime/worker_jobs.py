@@ -15,16 +15,14 @@ from worker_common import (
     MAX_FILE,
     TERMINAL,
     artifact,
-    atomic_json,
-    bounded_int,
     confined,
     job_dir,
-    load_json,
-    parse_address,
     public_file,
-    safe_env,
     tail,
 )
+from worker_metadata import atomic_json, load_json
+from wukong_analysis.validation import bounded_int, parse_address
+from worker_environment import safe_env
 from worker_job_plan import JobPlan, prepare_job
 from worker_processes import detached_options, process_identity
 

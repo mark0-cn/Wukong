@@ -26,6 +26,8 @@ Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before 
 
 Job admission builds a typed internal plan before reserving resources. Network/LaunchSpec/replay/process validation normalizes a private parameter copy and computes the existing request fingerprint; the job manager retains one lock across duplicate lookup, reservation, UID allocation and supervisor creation. A failed spawn leaves its reservation for reconciliation and never authorizes an automatic respawn. Wire schemas and state formats remain owned by the shared protocol and existing ledgers.
 
+Child environment policy, RPC error categories and atomic metadata IO have separate owners. Consumers import them directly; numerical/address validation comes from `wukong_analysis.validation`, and protocol definitions come from the generated contract. Artifact helpers retain path confinement, hashes and bounded reads. Metadata retries, error categories and child environment filtering keep their existing behavior.
+
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
 and the original `record`. Original MI transcripts remain available as evidence.

@@ -6,7 +6,8 @@ import subprocess
 import threading
 import time
 import uuid
-from worker_common import atomic_json, safe_env
+from worker_metadata import atomic_json
+from worker_environment import safe_env
 from worker_processes import attach_windows_job, detached_options, terminate_tree
 
 

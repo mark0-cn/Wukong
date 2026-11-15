@@ -2,7 +2,7 @@
 
 from jsonrpcserver import dispatch, Success, Error
 from jsonschema import ValidationError
-from worker_common import error_kind
+from worker_errors import error_kind
 from worker_contract import validate_request, validate_result
 
 

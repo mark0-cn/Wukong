@@ -6,7 +6,9 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from worker_common import load_json, safe_env, TERMINAL
+from worker_metadata import load_json
+from worker_environment import safe_env
+from worker_common import TERMINAL
 from worker_processes import process_identity
 
 

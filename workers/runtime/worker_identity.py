@@ -8,7 +8,9 @@ from pathlib import Path
 import re
 import uuid
 
-from worker_common import PROTOCOL, WorkerError, load_json
+from worker_contract import PROTOCOL
+from worker_errors import WorkerError
+from worker_metadata import load_json
 
 
 @functools.lru_cache(maxsize=1)

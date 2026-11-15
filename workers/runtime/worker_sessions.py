@@ -5,7 +5,9 @@ import os
 import shutil
 import sys
 import threading
-from worker_common import WorkerError, atomic_json, bounded_int, load_json
+from worker_errors import WorkerError
+from worker_metadata import atomic_json, load_json
+from wukong_analysis.validation import bounded_int
 import worker_debugger
 from worker_debugger import DebugSession
 from worker_interactive import InteractSession

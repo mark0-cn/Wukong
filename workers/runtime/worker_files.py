@@ -2,7 +2,8 @@
 
 import base64
 import threading
-from worker_common import MAX_FILE, artifact, bounded_int, confined, public_file
+from worker_common import MAX_FILE, artifact, confined, public_file
+from wukong_analysis.validation import bounded_int
 
 
 class FileService:

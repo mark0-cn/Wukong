@@ -10,7 +10,8 @@ import re
 import shutil
 
 from filelock import FileLock
-from worker_common import artifact, atomic_json, confined, load_json, public_file, sha256_file
+from worker_common import artifact, confined, public_file, sha256_file
+from worker_metadata import atomic_json, load_json
 
 CHUNK_BYTES = 1024 * 1024
 MAX_TRANSFER_BYTES = 16 * 1024**3
