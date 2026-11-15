@@ -34,6 +34,8 @@ The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
 and the original `record`. Original MI transcripts remain available as evidence.
 
+Isolated shell targets, Python targets and process inputs share the execution-copy preparation path. `py_run.target` is appended as a read-only executable copy, not as data requiring chmod. Raw `job_start` can name up to sixteen staged argv files in `executable_inputs`; other argv files stay read-only data. LaunchSpec retains authority over its executable files, cwd and input mode. Results expose execution cwd and each prepared file's source hash, executed hash and access mode. Copy hash mismatches fail preparation; original attachments are never chmodded. Each isolated invocation has a fresh writable working directory, so retrieve artifacts explicitly instead of assuming another call sees relative files.
+
 ## Docker
 
 From the repository root (PowerShell):

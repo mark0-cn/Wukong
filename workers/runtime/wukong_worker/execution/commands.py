@@ -96,4 +96,7 @@ class CommandService:
             experiment,
         )
         result["command"] = command
+        from wukong_worker.execution.staging import execution_metadata
+
+        result["execution"] = execution_metadata(cwd, experiment)
         return result

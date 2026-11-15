@@ -38,6 +38,11 @@ choices!(CaptureEncoding { Hex, Little, Big });
 pub struct JobStartArgs {
     #[serde(default)]
     pub argv: Vec<String>,
+    /// Public argv files that need executable copies (e.g. a binary launched by an interpreter).
+    /// Other file arguments are staged read-only. LaunchSpec owns this when supplied.
+    #[schemars(length(max = 16))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_inputs: Option<Vec<String>>,
     /// Existing prepared LaunchSpec; omit argv/env/cwd overrides when supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_spec: Option<String>,
@@ -274,6 +279,7 @@ pub struct PyRunArgs {
     #[schemars(length(min = 1, max = 262144))]
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Target appended to sys.argv as an immutable executable copy in isolation.
     pub target: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub argv: Option<Vec<String>>,

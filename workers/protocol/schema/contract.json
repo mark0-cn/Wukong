@@ -3684,6 +3684,17 @@
               "null"
             ]
           },
+          "executable_inputs": {
+            "description": "Public argv files that need executable copies (e.g. a binary launched by an interpreter).\nOther file arguments are staged read-only. LaunchSpec owns this when supplied.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "input": {
             "description": "Admitted input file; LaunchSpec selects stdin_pipe or argv_file delivery.",
             "type": [
@@ -4533,6 +4544,7 @@
             "type": "string"
           },
           "target": {
+            "description": "Target appended to sys.argv as an immutable executable copy in isolation.",
             "type": [
               "string",
               "null"

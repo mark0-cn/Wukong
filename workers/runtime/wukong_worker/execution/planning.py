@@ -119,11 +119,19 @@ def _admit_replay(root: Path, spec: dict[str, Any], kind: str) -> None:
 
 
 def _admit_process(root: Path, spec: dict[str, Any], kind: str) -> None:
+    from wukong_worker.execution.staging import executable_inputs
+
+    if spec.get("executable_inputs") and spec.get("launch_spec"):
+        raise ValueError("LaunchSpec owns executable inputs")
     if spec.get("launch_spec"):
         if kind != "process":
             raise ValueError("LaunchSpec owns process argv, environment and cwd")
     elif not isinstance(spec.get("argv"), list) or not spec["argv"]:
         raise ValueError("argv is required")
+    if spec.get("executable_inputs") is not None:
+        spec["executable_inputs"] = sorted(
+            executable_inputs(root, spec.get("argv", []), spec["executable_inputs"])
+        )
     cwd = confined(root, spec.get("cwd", "."), True)
     if not cwd.is_dir():
         raise ValueError("cwd must be a worker directory")

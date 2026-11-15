@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Prepare Python targets as immutable executable copies, preserve data-only arguments, and expose execution cwd, copy hashes and access modes. Raw jobs can explicitly select staged executable arguments without changing original attachments."
+zh_CN = "Python 目标统一准备为不可变的可执行副本，普通数据参数保持只读，并公开工作目录、副本哈希和访问权限；原始作业可显式选择需执行的已暂存参数，不修改原始附件。"

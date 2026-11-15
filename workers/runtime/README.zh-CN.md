@@ -30,6 +30,8 @@ Bridge 启动时会在导入 worker 模块前禁用 Python 字节码写入，新
 
 Docker 镜像自动安装依赖。GDB/MI 结果含解析后的 `payload`；异步事件是 type、message、payload、原始 `record` 的结构化记录。原始 MI transcript 保留为证据。
 
+隔离 shell 目标、Python 目标和进程输入共用执行副本准备路径。`py_run.target` 作为只读、可执行的副本追加到参数，无需 chmod。原始 `job_start` 可用 `executable_inputs` 指定最多十六个已暂存的 argv 文件，其余文件参数保持只读数据。LaunchSpec 继续决定可执行文件、cwd 和输入方式。结果公开执行 cwd 以及各准备文件的源哈希、执行哈希和访问权限；复制哈希不一致时准备失败，绝不修改原始附件权限。每次隔离调用都有新的可写工作目录，应显式提取产物，不能假定下一次调用能看到相对路径文件。
+
 ## Docker
 
 在仓库根目录执行（PowerShell）：

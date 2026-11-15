@@ -52,7 +52,7 @@
 | `interactive_start` | analyst / verifier | 是 | interact.start | 启动本 Agent 所属的持久化交互进程（REPL），返回 session_id；worker 路径只在直接 argv 项解析。 |
 | `job_artifacts` | analyst / verifier | 否 | job.artifacts | 列出并导入同 run job 的原始产物。 |
 | `job_cancel` | analyst / verifier | 是 | job.cancel | 请求取消所属的同 run job。 |
-| `job_start` | analyst / verifier | 是 | job.start | 在配置 worker 启动持久进程，立即返回 job_id。使用 argv，或使用已暂存的 launch_spec 统一记录目标、文件、参数、cwd、环境和输入模式；input 选择已暂存的数据文件。使用 launch_spec 时省略 argv/env/cwd 覆盖，并保持配置所记期限。原始 argv 可用 {target}；files/... 只在直接参数项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。 |
+| `job_start` | analyst / verifier | 是 | job.start | 在配置 worker 启动持久进程，立即返回 job_id。使用 argv，或使用已暂存的 launch_spec 统一记录目标、文件、参数、cwd、环境和输入模式；input 选择已暂存的数据文件。使用 launch_spec 时省略 argv/env/cwd 覆盖，并保持配置所记期限。原始 argv 可用 {target}；files/... 只在直接参数项解析，不在 shell 字符串中解析。job 可读取 WUKONG_STATE_DIR、WUKONG_JOB_DIR。 Linux 隔离环境将 argv[0] 和 executable_inputs 显式列出的参数复制为可执行文件，其余文件参数保持只读数据；结果包含 cwd、输入哈希和访问权限。 |
 | `job_status` | analyst / verifier | 否 | job.status | 观察同 run job，刷新持久状态并导入原始观察。 |
 | `libc_identify` | analyst / verifier | 否 | libc.identify | 使用同进程符号泄漏比较最多 16 份同 run ELF libc 候选；省略时只检查 worker libc。保留哈希、Build ID、架构、不一致泄漏和歧义。候选不确认映射身份，无匹配仅描述搜索集合。 |
 | `load_skill` | 全部 | 是 | controller | 激活内置或自定义能力/方法。root/analyst/verifier 角色指令自动安装，不能在此加载。初始与动态能力合计最多五个名称。精确正文/哈希持久化，下一新模型边界生效，替代同名初始正文并跨压缩/恢复保留。加载不改变角色、权限或完成条件。 |
@@ -61,7 +61,7 @@
 | `note_save` | 全部 | 是 | controller | 保存关联本任务的共享笔记。 |
 | `notes_list` | 全部 | 否 | controller | 列出本分析共享笔记。 |
 | `poc_verify` | analyst / verifier | 是 | poc.verify | 在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。成功以 worker 观察为准。 |
-| `py_run` | analyst / verifier | 是 | py.run | 一步在 worker 运行 Python 源文，无需 base64/file_put。先语法检查并直接返回编译错误，再创建后台 job（job_status 读输出）。可选 argv 对应 sys.argv[1..]；可选 target 暂存路径附加为最后参数，在隔离 job 自动暂存，用 sys.argv[-1] 读取。多行脚本优先于 file_put+job_start。 |
+| `py_run` | analyst / verifier | 是 | py.run | 一步在 worker 运行 Python 源文，无需 base64/file_put。先语法检查并直接返回编译错误，再创建后台 job（job_status 读输出）。可选 argv 对应 sys.argv[1..]；可选 target 暂存路径附加为最后参数，在隔离 job 自动暂存，用 sys.argv[-1] 读取。多行脚本优先于 file_put+job_start。 隔离环境中的 target 是只读、可执行的副本；原始附件保持不变。 |
 | `runtime_doctor` | 全部 | 否 | explicit probe | 检查已配置 worker 的真实平台、版本及能力。 |
 | `runtime_prepare` | analyst / verifier | 是 | runtime.prepare | 为提供的 target/libc/loader 创建不可变执行副本并返回直接 argv。三份 ELF 架构须一致。不执行或修改原件；真实映射另行确认。 |
 | `runtime_profile` | analyst / verifier | 否 | runtime.profile | 检查同 run target/libc/loader 的 SHA256、ELF Build ID 和架构；可选观察所属存活调试会话真实映射。文件候选不代表确认运行时。 |

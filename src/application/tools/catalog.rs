@@ -613,7 +613,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::JobStartArgs>(
             "job_start",
             "tool-job-start",
-            "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
+            "Start a persistent process job in the configured worker; returns a job_id immediately. Use argv, or a staged launch_spec with its recorded target, files, arguments, cwd, environment and input mode; input selects a staged data file. With launch_spec, omit argv/env/cwd overrides and keep its recorded timeout. Raw argv may use {target}; files/... references resolve only as direct entries, never inside shell strings. On isolated Linux, argv[0] and explicitly listed executable_inputs get executable copies; other file arguments are read-only data. Execution results include cwd and input hashes/access. Jobs may read WUKONG_STATE_DIR and WUKONG_JOB_DIR from the environment.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,
@@ -763,7 +763,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::PyRunArgs>(
             "py_run",
             "tool-py-run",
-            "Run a Python script in the worker in ONE step: pass the source text directly (no base64, no file_put). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv and staged automatically in isolated jobs — read it from sys.argv[-1]. Prefer this over file_put+job_start for any script longer than one line.",
+            "Run a Python script in the worker in ONE step: pass the source text directly (no base64, no file_put). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv as a read-only executable copy in isolated jobs — read it from sys.argv[-1]. Prefer this over file_put+job_start for any script longer than one line.",
             ReplayPolicy::WorkerIdempotent,
             true,
             handlers::handle_job_start,

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from wukong_worker.artifacts.common import sha256_file
 import shutil
 import subprocess
 import sys
@@ -129,8 +130,22 @@ def stage_file(source, experiment, name=None, executable=False, *, derived_sha25
     ):
         raise ValueError("staged file name must stay inside readonly storage")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    source_sha256 = sha256_file(source)
     shutil.copyfile(source, destination)
+    executed_sha256 = sha256_file(destination)
+    if source_sha256 != executed_sha256:
+        raise ValueError("execution input changed while preparing its copy")
     destination.chmod(0o555 if executable else 0o444)
+    experiment.setdefault("inputs", []).append(
+        {
+            "source": str(source),
+            "path": str(destination),
+            "source_sha256": source_sha256,
+            "executed_sha256": executed_sha256,
+            "access": "execute" if executable else "read",
+            "writable": False,
+        }
+    )
     return destination
 
 
@@ -156,8 +171,7 @@ def stage_directory(source, experiment, name):
     for item in approved:
         path = destination / item.relative_to(source)
         path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(item, path)
-        path.chmod(0o444)
+        stage_file(item, experiment, path.relative_to(Path(experiment["readonly"])).as_posix())
     for directory in sorted(destination.rglob("*"), reverse=True):
         if directory.is_dir():
             directory.chmod(0o555)

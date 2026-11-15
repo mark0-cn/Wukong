@@ -254,6 +254,7 @@ class JobManager:
             argv.append(str(params["target"]))
         spec = {
             "argv": argv,
+            "executable_inputs": [params["target"]] if params.get("target") else [],
             "call_id": params.get("call_id"),
             "request_id": params.get("request_id"),
             "timeout_secs": bounded_int(params.get("timeout_secs"), 120, 10, 3600),
