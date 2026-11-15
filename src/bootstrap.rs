@@ -11,7 +11,7 @@ pub(crate) async fn build_runner(mut config: AppConfig, store: Store) -> Result<
     config.validate()?;
     let models = Arc::new(ModelCatalog::new(config.model.clone())?);
     config.model = models.config().clone();
-    let tools = Arc::new(ToolService::new(config.clone(), store.clone()).await?);
+    let tools = Arc::new(build_tools(config.clone(), store.clone()).await?);
     Ok(AssessmentRunner {
         _maintenance: maintenance,
         coordinator: Coordinator::new(store.clone()),
@@ -28,4 +28,24 @@ pub(crate) async fn build_tools(config: AppConfig, store: Store) -> Result<ToolS
     config.validate()?;
     let mcp = crate::mcp::McpRegistry::connect(&config.mcp).await?;
     ToolService::from_dependencies(config, store, mcp)
+}
+
+// Keep the public constructors at the composition boundary. Application use cases
+// receive a runner factory and never call back into bootstrap to assemble dependencies.
+impl crate::application::AssessmentService {
+    pub fn new(config: AppConfig, store: Store) -> Self {
+        Self::from_dependencies(config, store, |config, store| {
+            Box::pin(build_runner(config, store))
+        })
+    }
+}
+impl AssessmentRunner {
+    pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
+        build_runner(config, store).await
+    }
+}
+impl ToolService {
+    pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
+        build_tools(config, store).await
+    }
 }

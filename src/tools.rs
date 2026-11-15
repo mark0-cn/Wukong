@@ -94,9 +94,6 @@ impl ToolService {
             ..self.clone()
         }
     }
-    pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
-        crate::bootstrap::build_tools(config, store).await
-    }
     pub(crate) fn from_dependencies(
         config: AppConfig,
         store: Store,

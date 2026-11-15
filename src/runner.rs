@@ -24,9 +24,6 @@ pub struct AssessmentRunner {
     pub(crate) events: broadcast::Sender<Value>,
 }
 impl AssessmentRunner {
-    pub async fn new(config: AppConfig, store: Store) -> Result<Self> {
-        crate::bootstrap::build_runner(config, store).await
-    }
     pub fn config(&self) -> &AppConfig {
         &self.config
     }

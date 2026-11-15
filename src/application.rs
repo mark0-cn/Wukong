@@ -10,10 +10,15 @@ use std::path::Path;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
+/// Construct a runner only after the use case selects and validates its config.
+pub(crate) type RunnerFactory =
+    fn(AppConfig, Store) -> futures::future::BoxFuture<'static, Result<AssessmentRunner>>;
+
 #[derive(Clone)]
 pub struct AssessmentService {
     config: AppConfig,
     store: Store,
+    runner_factory: RunnerFactory,
 }
 
 pub struct PreparedAssessment {
@@ -41,8 +46,16 @@ impl PreparedAssessment {
 }
 
 impl AssessmentService {
-    pub fn new(config: AppConfig, store: Store) -> Self {
-        Self { config, store }
+    pub(crate) fn from_dependencies(
+        config: AppConfig,
+        store: Store,
+        runner_factory: RunnerFactory,
+    ) -> Self {
+        Self {
+            config,
+            store,
+            runner_factory,
+        }
     }
 
     pub async fn start(&self, target: &Path, task: &str) -> Result<PreparedAssessment> {
@@ -54,7 +67,7 @@ impl AssessmentService {
         config.output_language.get_or_insert_with(|| {
             crate::i18n::Locale::for_task(task, crate::i18n::Locale::system())
         });
-        let runner = AssessmentRunner::new(config, self.store.clone()).await?;
+        let runner = (self.runner_factory)(config, self.store.clone()).await?;
         let created = runner.coordinator.create_run(
             &target,
             task,
@@ -84,7 +97,7 @@ impl AssessmentService {
         saved.state_dir = self.store.root().to_owned();
         saved.budget = budget.clone().unwrap_or_else(|| run.budget.clone());
         saved.validate()?;
-        let runner = AssessmentRunner::new(saved, self.store.clone()).await?;
+        let runner = (self.runner_factory)(saved, self.store.clone()).await?;
         // Applying a budget is a supervised write, after ownership is acquired.
         Ok(PreparedAssessment {
             _maintenance: maintenance,
