@@ -184,27 +184,63 @@ async fn native_kernel_accepts_gated_completion_without_an_extra_provider_call()
 }
 
 async fn drive_bounded(runner: &AssessmentRunner, run_id: &str) -> RunRecord {
-    // Multi-agent fixtures persist many turns and exchange loopback HTTP requests.
-    // Bound completion without treating shared-runner throughput as a latency contract.
-    const SCENARIO_TIMEOUT: Duration = Duration::from_secs(30);
+    // Allow many persisted turns while independently bounding lack of progress.
+    // Heartbeats and repeated writes are not progress.
+    const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+    const SCENARIO_TIMEOUT: Duration = Duration::from_secs(120);
+    let progress = || {
+        let mut agents = runner
+            .store
+            .list::<AgentSnapshot>("agent", run_id)
+            .unwrap()
+            .into_iter()
+            .map(|agent| {
+                (
+                    agent.id.clone(),
+                    agent.role,
+                    agent.status,
+                    agent.turns,
+                    agent.generation,
+                )
+            })
+            .collect::<Vec<_>>();
+        agents.sort_by(|left, right| left.0.cmp(&right.0));
+        agents
+    };
+    let started = tokio::time::Instant::now();
+    let mut last_progress = started;
+    let mut previous = progress();
+    let mut history = vec![(Duration::ZERO, previous.clone())];
     let cancel = CancellationToken::new();
-    let result = tokio::time::timeout(SCENARIO_TIMEOUT, runner.drive(run_id, cancel.clone())).await;
-    match result {
-        Ok(result) => result.unwrap(),
-        Err(error) => {
-            cancel.cancel();
-            let progress = runner
-                .store
-                .list::<AgentSnapshot>("agent", run_id)
-                .map(|agents| {
-                    agents
-                        .into_iter()
-                        .map(|agent| (agent.role, agent.status, agent.turns, agent.generation))
-                        .collect::<Vec<_>>()
+    let drive = runner.drive(run_id, cancel.clone());
+    tokio::pin!(drive);
+    let mut poll = tokio::time::interval(Duration::from_millis(250));
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        let deadline = (last_progress + STALL_TIMEOUT).min(started + SCENARIO_TIMEOUT);
+        tokio::select! {
+            biased;
+            result = &mut drive => return result.unwrap(),
+            _ = tokio::time::sleep_until(deadline) => {
+                cancel.cancel();
+                let events = runner.store.recent_events(run_id, 16).map(|events| {
+                    events.into_iter().map(|event| {
+                        (event.seq, event.created_at, event.agent_id, event.kind)
+                    }).collect::<Vec<_>>()
                 });
-            panic!(
-                "native runtime timed out after {SCENARIO_TIMEOUT:?}: {error}; agent progress: {progress:?}"
-            );
+                panic!(
+                    "native runtime timed out: elapsed {:?}, unchanged for {:?}; progress: {history:?}; recent events: {events:?}",
+                    started.elapsed(), last_progress.elapsed()
+                );
+            }
+            _ = poll.tick() => {
+                let current = progress();
+                if current != previous {
+                    last_progress = tokio::time::Instant::now();
+                    history.push((started.elapsed(), current.clone()));
+                    previous = current;
+                }
+            }
         }
     }
 }
