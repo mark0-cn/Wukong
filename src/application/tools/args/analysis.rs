@@ -81,6 +81,37 @@ pub(in crate::application::tools) struct AnalysisVerifyArgs {
     pub verdict: AnalysisVerdict,
     pub evidence_ids: Vec<String>,
     pub counterexamples: Vec<String>,
+    /// Individually tested claims; supported applies only to these checks.
+    pub checks: Vec<AnalysisCheck>,
+    /// Untested claims, boundary cases and environment limitations (empty if none).
+    pub limitations: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct AnalysisCheck {
+    pub claim: String,
+    pub expected: String,
+    pub observed: String,
+    pub verdict: AnalysisVerdict,
+    pub evidence_ids: Vec<String>,
+    /// The exact report/script evidence being checked, if any.
+    pub artifact_evidence_id: Option<String>,
+    /// Required for a reproduction check; links the verifier's executed argv.
+    pub reproduction_job_id: Option<String>,
+    /// Expected process exit status for reproduction checks (including negative controls).
+    pub expected_exit_code: Option<i64>,
+    pub kind: AnalysisCheckKind,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(in crate::application::tools) enum AnalysisCheckKind {
+    Behavior,
+    Algorithm,
+    Boundary,
+    Reproduction,
+    Static,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

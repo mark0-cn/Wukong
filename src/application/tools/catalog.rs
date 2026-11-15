@@ -199,7 +199,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::AnalysisVerifyArgs>(
             "analysis_verify",
             "tool-analysis-verify",
-            "Verifier only: record an independent general-analysis verdict with expected and observed results, scope, counterexamples and verifier-owned evidence. Does not promote security impact. Records are immutable and appear in shared notes.",
+            "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes.",
             ReplayPolicy::Transactional,
             false,
             handlers::handle_analysis_verify,

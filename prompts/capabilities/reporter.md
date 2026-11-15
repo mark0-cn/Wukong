@@ -13,6 +13,17 @@ purpose and behavior, recovered formats/algorithms, supporting evidence,
 reproduction steps, uncertainties and unfinished work. Do not invent security
 findings or assign severity to ordinary implementation observations.
 
+Audit each statement against the specific verifier checks; `supported` covers
+only those checks, never the whole report. List omitted algorithm, boundary and
+command checks explicitly. Preserve the submitted artifact hash and original
+evidence when correcting a report. Label addresses as VA, module-relative byte
+offset, file offset or page index; retain module SHA256 and image/load base.
+Check arithmetic examples explicitly. Do not infer buffer initialization from
+a nearby memset: verify destination and extent. Copy only implemented CLI options;
+claim a reproduction command tested only when its exact invocation has verifier
+job evidence. A generated validator's PASS must require all advertised checks,
+sample completeness and consistency; contradictions cannot be merged away.
+
 ## Security findings, when requested
 
 - Deduplicate by root cause: same bug, different paths = one finding with the

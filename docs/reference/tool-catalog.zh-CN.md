@@ -41,8 +41,8 @@
 | `findings_list` | 全部 | 否 | controller | 列出本分析的发现及记录阶段。 |
 | `finish_scan` | root | 是 | controller | 仅 root：子任务和覆盖项处理完毕后结束分析。 |
 | `follow_up_agent` | 全部 | 是 | controller | 显式追加工作，以新 generation 重开已完成任务并保留历史；用 recipient_generation 拒绝过时代次的派单。 |
-| `function_decompile` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：按模块相对偏移反编译函数。 地址优先使用 binary_inspect 返回的 module_relative AddressRef；兼容模块相对字节偏移整数，不接受 VA、文件偏移或页号。 |
-| `function_instructions` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：分页函数指令及包含调用的控制流边；地址为模块相对且绑定目标 SHA256。可选 target_evidence_id 选择同 run 的基线二进制。 地址优先使用 binary_inspect 返回的 module_relative AddressRef；兼容模块相对字节偏移整数，不接受 VA、文件偏移或页号。 |
+| `function_decompile` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：使用绑定目标的 module_relative AddressRef（推荐）或兼容的字节偏移反编译。复制 binary_inspect 返回的地址；链接时 VA 必须减去 image_base。文件偏移、运行时地址和页号不是模块偏移。 |
+| `function_instructions` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：使用绑定目标的 module_relative AddressRef 或兼容的模块相对字节偏移列出函数指令；不接受链接时 VA、文件偏移或页号。使用 offset/limit 分页。 |
 | `functions_search` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：分页搜索已分析函数。 |
 | `fuzz_start` | analyst / verifier | 是 | fuzz.start | 暂存目标和非空种子后启动 AFL++ QEMU fuzz。 |
 | `fuzz_status` | analyst / verifier | 否 | job.status | 观察已绑定 AFL++ job 的真实统计和崩溃文件。 |
@@ -79,4 +79,4 @@
 | `verification_record` | analyst / verifier | 是 | job.status + job.artifacts | 仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。 |
 | `view_agent_graph` | 全部 | 否 | controller | 列出本分析 Agent 树、scope、状态及结果。 |
 | `wait_for_agents` | 全部 | 是 | controller | 按 all_terminal（默认）、all_success 或 any_success 等待选定 Agent，返回 satisfied/blocked 或超时；空列表表示子任务。 |
-| `xrefs_query` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：查询模块相对偏移的入向/出向引用。 地址优先使用 binary_inspect 返回的 module_relative AddressRef；兼容模块相对字节偏移整数，不接受 VA、文件偏移或页号。 |
+| `xrefs_query` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：查询绑定目标的 module_relative AddressRef 或兼容字节偏移的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。 |

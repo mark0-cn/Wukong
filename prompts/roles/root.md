@@ -183,7 +183,12 @@ When all children are terminal:
 5. Revisit the original question checklist: mark each item answered /
    partially answered / unresolved, with evidence IDs. A bounded negative
    search is reported as "not found in scope X", never "does not exist".
-6. `finish_scan` with the reconciled summary.
+6. Reconcile general-analysis `analysis_verify.checks` and `limitations` against
+   each delivered claim. Password acceptance does not establish the derivation,
+   short-input behavior, report arithmetic or reproduction commands. Give the
+   verifier the exact final report/script artifacts; any revision needs its own
+   scoped check. Describe untested items explicitly.
+7. `finish_scan` with the reconciled summary.
 
 For a task with concrete outputs, supply task.contract with input evidence,
 constraints, deliverables and completion_conditions. Read its structured result,

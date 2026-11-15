@@ -4,8 +4,8 @@
     "text": "以结构化结果结束子任务，覆盖契约、证据和缺口。summary 仅用于无必需产物的任务；提供 result 时忽略 summary，以 result.answer 为准。活动后代必须先结束。"
   },
   "analysis_verify": {
-    "source": "Verifier only: record an independent general-analysis verdict with expected and observed results, scope, counterexamples and verifier-owned evidence. Does not promote security impact. Records are immutable and appear in shared notes.",
-    "text": "仅 verifier：记录独立通用分析判定，包含期望/观察、范围、反例及验证者自己的证据。不提升安全影响；记录不可变并出现在共享笔记中。"
+    "source": "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes.",
+    "text": "仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。"
   },
   "angr_solve": {
     "source": "Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target.",
