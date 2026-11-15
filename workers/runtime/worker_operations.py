@@ -3,6 +3,9 @@
 import hashlib
 import json
 import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 from filelock import FileLock
 from worker_errors import WorkerError, error_kind
 from worker_metadata import atomic_json, load_json
@@ -10,11 +13,17 @@ from worker_contract import METHODS
 
 
 class OperationLedger:
-    def __init__(self, root):
+    def __init__(self, root: Path) -> None:
         self.root = root
         (root / "operations").mkdir(exist_ok=True)
 
-    def invoke(self, method, params, execute, reconcile):
+    def invoke(
+        self,
+        method: str,
+        params: dict[str, Any],
+        execute: Callable[[str, dict[str, Any]], Any],
+        reconcile: Callable[[str, Any], Any],
+    ) -> Any:
         effect = METHODS[method]["effect"]
         request_id = params.get("request_id")
         if effect == "read" or not request_id:

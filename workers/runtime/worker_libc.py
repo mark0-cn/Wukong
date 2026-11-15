@@ -1,15 +1,16 @@
 """Linux corpus selection and confinement; comparison lives in wukong_analysis."""
 
 from pathlib import Path
+from typing import Any
 from worker_common import confined
 from wukong_analysis.libc import identify
 
 
 class LibcService:
-    def __init__(self, root, trusted, isolated):
+    def __init__(self, root: Path) -> None:
         self.root = root
 
-    def identify(self, params):
+    def identify(self, params: dict[str, Any]) -> dict[str, Any]:
         paths = params.get("candidates")
         supplied = paths is not None
         if supplied:

@@ -2,17 +2,26 @@
 
 from functools import partial
 from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from typing import Any, TYPE_CHECKING
 from worker_contract import METHODS
+
+if TYPE_CHECKING:
+    from worker_runtime import Runtime
+
+Handler = Callable[[dict[str, Any]], Any]
 
 
 @dataclass(frozen=True)
 class Registration:
-    handler: object
+    handler: Handler
     readiness: str
-    capabilities: tuple
+    capabilities: tuple[str, ...]
 
 
-def capabilities(registrations, ready):
+def capabilities(
+    registrations: Mapping[str, Registration], ready: Mapping[str, bool]
+) -> dict[str, bool]:
     result = {}
     for operation in registrations.values():
         for name in operation.capabilities:
@@ -20,10 +29,12 @@ def capabilities(registrations, ready):
     return result
 
 
-def register(runtime):
-    registrations = {}
+def register(runtime: "Runtime") -> dict[str, Registration]:
+    registrations: dict[str, Registration] = {}
 
-    def add(name, handler, readiness, capabilities=()):
+    def add(
+        name: str, handler: Handler, readiness: str, capabilities: tuple[str, ...] = ()
+    ) -> None:
         if name not in METHODS or name in registrations:
             raise ValueError("invalid or duplicate worker registration: " + name)
         registrations[name] = Registration(handler, readiness, capabilities)

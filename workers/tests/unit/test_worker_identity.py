@@ -69,6 +69,24 @@ class WorkerFenceTests(unittest.TestCase):
         ]:
             self.assertFalse(capabilities[name], name)
 
+    def test_job_capability_observer_is_bound_after_all_handlers_exist(self):
+        from unittest.mock import patch
+        from worker_catalog import register
+        from worker_runtime import Runtime
+
+        def assemble(runtime):
+            self.assertIsNone(runtime.jobs.observe)
+            return register(runtime)
+
+        with (
+            patch("worker_runtime.register", side_effect=assemble),
+            patch("worker_runtime.doctor", return_value={"capabilities": {}}) as observe,
+        ):
+            runtime = Runtime(self.root, True)
+            self.assertTrue(all(callable(item.handler) for item in runtime.registrations.values()))
+            self.assertEqual(runtime.jobs.doctor(), {"capabilities": {}})
+            self.assertIs(observe.call_args.args[3], runtime.registrations)
+
     def test_windows_probe_keeps_portable_analysis_but_excludes_linux_engines(self):
         from unittest.mock import patch
         from worker_capabilities import doctor

@@ -24,7 +24,7 @@ class LibcCandidateTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.service = LibcService(self.root, True, False)
+        self.service = LibcService(self.root)
         for name, padding in [("a", 16), ("b", 64)]:
             source = self.root / (name + ".S")
             source.write_text(
