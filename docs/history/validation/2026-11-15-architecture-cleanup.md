@@ -4,7 +4,7 @@ English · [简体中文](2026-11-15-architecture-cleanup.zh-CN.md)
 
 ## Scope and identities
 
-The approved file organization and Python design work is implemented. The final controller/worker implementation revision is `c7ed9bcf76c25adae08b6bbab3e63e70eff99a11`; `d9af37fa321fd02451508f9ce77634247404787a` subsequently corrects only a doctor test mock. The final workbench acceptance used that corrected test image. Native input hashing confirmed unchanged packaged source inputs. Documentation-only followups do not change these execution identities. Final integration and revision-bound hosted checks are tracked in [PR #29](https://github.com/mark0-cn/Wukong/pull/29).
+The approved file organization and Python design work is implemented. The original matrix and workflow used controller/worker revision `c7ed9bcf76c25adae08b6bbab3e63e70eff99a11`; `d9af37fa321fd02451508f9ce77634247404787a` subsequently corrects only a doctor test mock. The final workbench acceptance used that corrected test image. Native input hashing confirmed unchanged packaged source inputs. The later controller maintenance-lock fix and its fresh workflow are qualified separately below; worker package inputs remained unchanged. Final integration and revision-bound hosted checks are tracked in [PR #29](https://github.com/mark0-cn/Wukong/pull/29).
 
 | Identity | Value |
 | --- | --- |
@@ -23,7 +23,7 @@ Frontend implementation and tests are grouped by feature, with shared API/UI/tes
 
 Python work includes pinned Ruff formatting/static checks, immutable job admission plans, typed callbacks and analysis inputs, explicit imports and startup dependency order, consolidated thin analysis adapters, bounded test transport and documented resource ownership. Formatting preserved all 197 baseline Python ASTs. A 768-case admission comparison preserved normalized specifications, fingerprints and errors. The 214 Python files at this acceptance revision have an AST/import/risk inventory; this is not an exhaustive manual proof of every algorithm.
 
-Three separately committed behavior fixes have bilingual release fragments: unreadable recovery metadata produces bounded sanitized diagnostics; workbench doctor collects the live registry using disposable state; blocked interactive stdin respects a deadline and permits session termination. Partial or uncertain input delivery is not retried. Protocol v3, controller schema 5, native journal 2 and package schema 2 are unchanged.
+Four separately committed behavior fixes have bilingual release fragments: unreadable recovery metadata produces bounded sanitized diagnostics; workbench doctor collects the live registry using disposable state; blocked interactive stdin respects a deadline and permits session termination. Maintenance/cache/cleanup locks now explicitly unlock when the owning operation ends, including early rejection. Partial or uncertain input delivery is not retried. Protocol v3, controller schema 5, native journal 2 and package schema 2 are unchanged.
 
 ## Validation results
 
@@ -58,6 +58,16 @@ The native journal ended with 74 closed resources and 114 completed effects. Own
 Seven explicitly labelled Linux acceptance containers and their seven named state volumes were removed after 583 original files were archived and hash-verified. No task-labelled container remained. Unattributed volumes were preserved; cleanup did not use global or date-based pruning.
 
 Local raw records remain under the task's `target/architecture-plan` and `target/windows-vm-native73-*` paths. The fresh workflow is under `target/tasks/architecture-cleanup/workflow`. The migration reconciliation, Python decisions, validation summary and cleanup receipt reference the retained originals. These private local records are not release attachments or CI artifacts.
+
+## Final controller maintenance recheck
+
+Integrated [run 43679968463](https://github.com/mark0-cn/Wukong/actions/runs/43679968463) passed Windows Rust tests and actual NSIS uninstall acceptance, but Linux exposed a separate production maintenance-lock lifetime defect: a rejected cleanup closed its file without explicitly unlocking, allowing a transiently inherited descriptor to retain admission. Ubuntu 22.04 APT setup also timed out downloading indexes before tests started. The remaining native build was cancelled; that run is not a pass.
+
+Commit `6326f7eecdc9089b0a7e48b89d9aa2a0cae7f9bc` adds a filesystem-owned lock guard for maintenance admission, update-cache access and cleanup's workbench locks. Shared/exclusive modes and last-`Arc` ownership are preserved; policy failures drop the guard too. Analyzer locks retain their separate child-reaping lifecycle. A Unix clone-descriptor regression covers both modes, immediate successor admission and continued exclusion after closing an old inherited descriptor. A Linux experiment using the actual guard source reproduced the close-only failure and passed the fix; repository CI uses the pinned toolchain. Local default-desktop all-target tests again passed 232 tests with 31 ignores, and Clippy passed.
+
+The newly built controller SHA256 is `aa322caf5ccd8fef6d7f858f98f8531f6888a3816ab307e65431736f0b80ff5f`. Fresh run `run_bc7995ea16b5456db0979bf6c2bc7ec3` used `target/tasks/architecture-cleanup/workflow-lock-fix` and the same qualified native73 package. Root, analyst and independent verifier completed in 8, 17 and 8 turns, with no tool errors and 1,195,180 reported tokens. All three AppContainer jobs completed with exit code 0 and verified Job/profile/scratch cleanup. Both roles independently obtained the exact probe output. All 59 evidence records matched their bytes and hashes; bundle verification passed for 62 files totaling 2,171,658 bytes.
+
+The subsequent native observation found 78 closed resources and 118 completed effects, no owned execution processes or scratch, and unchanged private-journal protections and retained services. All 821 original archive members were hash-verified; the archive SHA256 is `5c1a602e894299f9c855ac7965a833b4e42c112ec9e2ef25c5539a310a76a84e`. The original workflow/archive remain intact. `maintenance-workflow-validation.json` and `native73-maintenance-*` records under the task's artifact directory bind this recheck to its controller and originals.
 
 ## Corrections and limits
 
