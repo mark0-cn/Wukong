@@ -415,6 +415,22 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    async fn released_project_lock(project: &Path) -> Result<ProjectLock> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match ProjectLock::try_acquire(project) {
+                    Ok(lock) => return Ok(lock),
+                    Err(fs::TryLockError::WouldBlock) => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(fs::TryLockError::Error(error)) => return Err(error.into()),
+                }
+            }
+        })
+        .await
+        .context("project kernel lock remained busy after owner release")?
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn process_wrap_cancels_descendants_after_the_launcher_exits() -> Result<()> {
@@ -554,12 +570,15 @@ subprocess.Popen([sys.executable,'-c',"import pathlib,time,sys;pathlib.Path(sys.
             }
         })
         .await?;
-        ProjectLock::try_acquire(directory.path())?.require_idle()?;
+        released_project_lock(directory.path())
+            .await?
+            .require_idle()?;
         Ok(())
     }
 
-    #[test]
-    fn project_lock_releases_without_unlinking_and_preserves_uncertain_analysis() -> Result<()> {
+    #[tokio::test]
+    async fn project_lock_releases_without_unlinking_and_preserves_uncertain_analysis() -> Result<()>
+    {
         let directory = tempfile::tempdir()?;
         let lock = ProjectLock::try_acquire(directory.path())?;
         assert!(matches!(
@@ -567,9 +586,26 @@ subprocess.Popen([sys.executable,'-c',"import pathlib,time,sys;pathlib.Path(sys.
             Err(fs::TryLockError::WouldBlock)
         ));
         lock.begin()?;
+        // Parallel fork/exec can transiently inherit the locked descriptor on Unix.
+        // Retain a duplicate to exercise delayed kernel release deterministically.
+        #[cfg(unix)]
+        let inherited = lock._file.try_clone()?;
         drop(lock); // Simulate an owner lost before analysis completion.
+        #[cfg(unix)]
+        let inherited_owner = {
+            assert!(matches!(
+                ProjectLock::try_acquire(directory.path()),
+                Err(fs::TryLockError::WouldBlock)
+            ));
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                drop(inherited);
+            })
+        };
         assert!(directory.path().join("worker.lock").exists());
-        let successor = ProjectLock::try_acquire(directory.path())?;
+        let successor = released_project_lock(directory.path()).await?;
+        #[cfg(unix)]
+        inherited_owner.await?;
         assert!(successor.require_idle().is_err());
         successor.finish()?;
         successor.require_idle()?;
