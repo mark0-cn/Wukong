@@ -12,37 +12,15 @@ if __name__ == "__main__" and not __package__:
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from wukong_worker.artifacts.metadata import load_json
-from wukong_worker.host.environment import safe_env
-from wukong_worker.resources import TERMINAL
+from wukong_worker.platform.environment import safe_env
 
 
 def idle(root):
     from wukong_worker.resources.jobs import JobManager
 
-    active = []
-    jobs = JobManager(root, False, True)
-    for path in (root / "jobs").glob("*/status.json"):
-        status = jobs.status(path.parent.name)
-        if status["state"] not in TERMINAL or status.get("cleanup_pending"):
-            active.append({"kind": "job", "id": path.parent.name, "state": status["state"]})
-    for kind in ["debug", "interact"]:
-        records = set((root / kind).glob("*/session.json"))
-        records.update(p.parent / "session.json" for p in (root / kind).glob("*/processes.json"))
-        for path in records:
-            state = load_json(path) if path.exists() else {}
-            journal = path.parent / "processes.json"
-            confirmed = state.get("state") == "closed" or (
-                state.get("state") == "lost" and state.get("cleanup_confirmed")
-            )
-            if not confirmed or (journal.exists() and load_json(journal)["observed"] != "closed"):
-                active.append(
-                    {
-                        "kind": kind,
-                        "id": path.parent.name,
-                        "state": state.get("state", "recovery_required"),
-                    }
-                )
+    from wukong_worker.resources.inventory import pending_resources
+
+    active = pending_resources(root, JobManager(root, False, True))
     return {"idle": not active, "active": active}
 
 

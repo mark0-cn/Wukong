@@ -19,3 +19,7 @@
 拒绝接入协议 v2 Worker。Linux 状态记录固定为协议 v3，并拒绝旧版安装记录；请使用新的 Worker 状态目录。保留旧目录和证据，不自动迁移或清理。
 
 副作用回执与控制器任务收据分开。已完成请求复用原结果；标记为 `once` 的中断操作返回 `outcome_unknown`，不能自动重放。只有注册为 `reconcile` 的操作可以核对各自的持久化状态。独立控制请求不会等待无关操作的执行回执。
+
+生命周期字段（`cleanup_pending`、结果确定性及清理证明）采用明确类型；第三方扩展证据保持完整。v3 线上字段名及省略字段的默认语义保持兼容。作业终态与资源完成不同；丢失会话要求显式清理确认或完整原生证明，pending 标志始终阻止完成。
+
+`fixtures/lifecycle.json` 是 Rust/Python 完成规则及 Python 操作账本/原生 Windows 账本共用的语义样本。覆盖活动/终态、取消、待清理/部分清理、未知结果、非法字段类型、重新打开后的副作用重试、参数变化和清理后的回执。这些属于语义及持久状态检查，不是真实 OS 中断或隔离验收。运行 `cargo test --locked --manifest-path workers/protocol/Cargo.toml`、`python workers/tests/run.py unit -p test_lifecycle.py` 及原生 Windows 库测试。控制端的 `tests/worker_lifecycle.rs` 也在两个平台的 CI 门禁中运行由协议模块维护的语义套件。OS 资格检查仍需现有容器/已安装 VM 套件。

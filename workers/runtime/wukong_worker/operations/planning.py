@@ -4,7 +4,6 @@ No job directory, isolation UID or process is created here. The fingerprint is
 computed before reservation adds an execution UID, excluding only runner_token.
 """
 
-from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -12,13 +11,10 @@ import secrets
 from typing import Any
 from wukong_worker.artifacts.common import MAX_FILE, confined, public_file
 from wukong_analysis.validation import bounded_int
-from wukong_worker.host.environment import safe_env
+from wukong_worker.platform.environment import safe_env
 
 
-@dataclass(frozen=True)
-class JobPlan:
-    spec: dict[str, Any]
-    fingerprint: str
+from wukong_worker.core.jobs import JobPlan
 
 
 def prepare_job(

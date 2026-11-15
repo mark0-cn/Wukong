@@ -172,6 +172,27 @@ pub(crate) fn route(method: &str) -> Option<Route> {
         .map(|group| group.route)
 }
 
+pub(crate) fn owns_resource(method: &str, params: &serde_json::Map<String, Value>) -> bool {
+    matches!(route(method), Some(Route::Execution | Route::Analysis))
+        || matches!(method, "file.get" | "file.stat" | "file.read")
+            && params
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path.starts_with("native-results/"))
+}
+pub(crate) fn resource_operation(
+    method: Method,
+    params: &serde_json::Map<String, Value>,
+) -> anyhow::Result<crate::resources::operation::Operation> {
+    use crate::resources::operation::Operation;
+    Ok(match handler(method) {
+        Some(Handler::Launch(factory)) => Operation::Start(factory(params)?),
+        Some(Handler::Session) => Operation::Session(method),
+        Some(Handler::Jobs | Handler::Files) => Operation::Query(method),
+        _ => anyhow::bail!("method does not own a native resource"),
+    })
+}
+
 pub(crate) fn doctor(identity: &WorkerIdentity, qualified: bool) -> Value {
     let mut capabilities = serde_json::Map::new();
     for group in GROUPS {

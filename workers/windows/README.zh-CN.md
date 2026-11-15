@@ -10,13 +10,16 @@
 | --- | --- |
 | 控制器 / Rig | Agent 调度、角色、持久化业务请求、证据与独立验证 |
 | `workers/protocol` | 共用身份、租约、错误和容量类型；公开 JSON-RPC 语义 |
+| `native/core/` | 所有权身份及不可变资源类型，不依赖 RPC、存储或 OS API |
 | `native/host/` | 安装、SCM 生命周期、已验证运行上下文及启动资格检查 |
 | `native/rpc/` | JSON-RPC 注册、传输、启动身份绑定及控制器／运行隔离 |
 | `native/resources/` | 单一资源管理器拥有准入、操作票据、账本及恢复 |
-| `native/executors/` | 进程／会话计划及受控执行观察；不修改账本 |
+| `native/executors/` | 进程／会话计划、受控执行观察及结果适配；不修改账本 |
 | `native/artifacts/` | 租约范围内的不可变输入、运行／资源范围内的输出及受限保护文件 IO |
 | `native/isolation/` | Windows Token、AppContainer、Job、ACL/WFP 及进程启动 |
 | 外部 WinDbg MCP / Python | 在受控资源内执行调试或有界分析，不独立管理 Worker |
+
+RPC 在调用管理器前，将已注册处理器解析为资源操作；资源和制品模块不查询 RPC 注册表。`executors/results.rs` 校验并发布进程/重放观察，管理器独占清理和账本状态转换的提交。Shell 和分析适配器负责各自的响应投影。共享协议提供有类型的结果/清理观察；原生账本保留更严格的 OS 清理证明。
 
 公开传输继续使用 JSON-RPC 2.0。控制器使用 `jsonrpsee`，共用 Rust 类型使用 Serde。内部会话消息采用 Prost 生成的 protobuf 和 Tokio 帧处理，外部调试器使用 `rmcp`。原始调试回复保留为带哈希的证据，不重新实现一套调试协议。Linux 保留现有 Python Worker。
 

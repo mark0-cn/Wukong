@@ -5,7 +5,7 @@ import hashlib
 import threading
 from wukong_worker.artifacts.common import MAX_FILE, artifact, confined, public_file
 from wukong_analysis.validation import bounded_int
-from wukong_worker.rpc.errors import WorkerError
+from wukong_worker.core.errors import WorkerError
 
 
 class FileService:

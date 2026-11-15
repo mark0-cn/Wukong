@@ -1,6 +1,6 @@
 import unittest
 
-from wukong_worker.execution.supervisor import expectation_matches
+from wukong_worker.operations.replay import expectation_matches
 
 
 class VerificationExpectationsTests(unittest.TestCase):

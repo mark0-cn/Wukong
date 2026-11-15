@@ -1,8 +1,8 @@
 //! Stage admitted logical files before any target instruction. The same held
 //! source readers and sealed destination handles support programs and data.
 use crate::{
-    artifacts::inputs::Owner,
     artifacts::resource_input::{self, AdmittedInput, Purpose, Reference},
+    core::Owner,
     isolation::security::{self, AclPolicy},
 };
 use anyhow::{Result, ensure};

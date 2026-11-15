@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from wukong_worker.artifacts.common import public_file
-from wukong_worker.host.environment import safe_env
+from wukong_worker.platform.environment import safe_env
 
 
 from wukong_worker.artifacts.common import sha256_file as digest

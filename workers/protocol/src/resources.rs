@@ -30,6 +30,10 @@ pub struct JobResult {
     pub exit_code: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<crate::OutcomeCertainty>,
+    #[serde(flatten)]
+    pub cleanup: crate::CleanupProof,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -44,13 +48,22 @@ pub struct JobStatus {
     pub stdout: String,
     #[serde(default)]
     pub stderr: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleanup_pending: Option<bool>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
 impl JobStatus {
     /// A terminal result is not cleanup confirmation while the worker retains ownership.
     pub fn settled(&self) -> bool {
-        self.state.terminal() && self.extra.get("cleanup_pending") != Some(&Value::Bool(true))
+        self.observation().settled()
+    }
+    pub fn observation(&self) -> crate::ResourceObservation {
+        crate::ResourceObservation::job(
+            self.state,
+            self.cleanup_pending,
+            self.result.as_ref().and_then(|result| result.outcome),
+        )
     }
 }
 

@@ -10,13 +10,16 @@ The native Rust worker is the sole Windows execution authority. Managed SSH invo
 | --- | --- |
 | Controller / Rig | Agent scheduling, roles, durable business requests, evidence and independent verification |
 | `workers/protocol` | Shared identity, lease, error and capacity types; public JSON-RPC semantics |
+| `native/core/` | Ownership identity and immutable resource types, independent of RPC, storage and OS APIs |
 | `native/host/` | Installation, SCM lifecycle, verified runtime context and qualification |
 | `native/rpc/` | JSON-RPC registration, transport, boot binding and controller/run fencing |
 | `native/resources/` | One resource manager owns admission, operation tickets, journal and recovery |
-| `native/executors/` | Process/session plans and owned execution observations; no journal mutation |
+| `native/executors/` | Process/session plans, owned execution observations and result adapters; no journal mutation |
 | `native/artifacts/` | Lease-scoped immutable inputs, run/resource-scoped outputs and bounded protected IO |
 | `native/isolation/` | Windows tokens, AppContainers, Jobs, ACL/WFP and process launch |
 | External WinDbg MCP / Python | Debugging or bounded analysis inside owned resources; no independent worker authority |
+
+RPC resolves registered handlers into resource operations before calling the manager; resources and artifacts never query the RPC registry. `executors/results.rs` validates and publishes process/replay observations, while the manager alone commits cleanup and journal transitions. Shell and analysis adapters own their response projection. The shared protocol provides typed outcome/cleanup observations; the native journal retains its stricter OS cleanup proof.
 
 The public transport remains JSON-RPC 2.0. The controller uses `jsonrpsee`; shared Rust types use Serde. Private session messages use generated Prost protobuf and Tokio framing; the external debugger uses `rmcp`. Raw debugger replies remain hashed evidence instead of being reimplemented as a new debugger protocol. Linux retains its existing Python worker.
 

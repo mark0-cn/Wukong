@@ -1,0 +1,425 @@
+{
+  "observations": [
+    {
+      "name": "job-queued",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "queued"
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "job-running",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "running"
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "job-completed-cleanup-None",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "completed"
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "job-completed-cleanup-True",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "completed",
+        "cleanup_pending": true
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "job-completed-cleanup-False",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "completed",
+        "cleanup_pending": false
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "job-failed-cleanup-None",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "failed"
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "job-failed-cleanup-True",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "failed",
+        "cleanup_pending": true
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "job-failed-cleanup-False",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "failed",
+        "cleanup_pending": false
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "job-cancelled-cleanup-None",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "cancelled"
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "job-cancelled-cleanup-True",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "cancelled",
+        "cleanup_pending": true
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "job-cancelled-cleanup-False",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "cancelled",
+        "cleanup_pending": false
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "job-timed_out-cleanup-None",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "timed_out"
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "job-timed_out-cleanup-True",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "timed_out",
+        "cleanup_pending": true
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "job-timed_out-cleanup-False",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "timed_out",
+        "cleanup_pending": false
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "job-lost-cleanup-None",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "lost"
+      },
+      "settled": true,
+      "outcome": "unknown"
+    },
+    {
+      "name": "job-lost-cleanup-True",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "lost",
+        "cleanup_pending": true
+      },
+      "settled": false,
+      "outcome": "unknown"
+    },
+    {
+      "name": "job-lost-cleanup-False",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "lost",
+        "cleanup_pending": false
+      },
+      "settled": true,
+      "outcome": "unknown"
+    },
+    {
+      "name": "session-running",
+      "kind": "session",
+      "wire": {
+        "state": "running"
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "session-exited",
+      "kind": "session",
+      "wire": {
+        "state": "exited"
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "session-closing",
+      "kind": "session",
+      "wire": {
+        "state": "closing"
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "session-recovery_required",
+      "kind": "session",
+      "wire": {
+        "state": "recovery_required"
+      },
+      "settled": false,
+      "outcome": "unknown"
+    },
+    {
+      "name": "session-closed",
+      "kind": "session",
+      "wire": {
+        "state": "closed"
+      },
+      "settled": true,
+      "outcome": "known"
+    },
+    {
+      "name": "session-lost",
+      "kind": "session",
+      "wire": {
+        "state": "lost"
+      },
+      "settled": false,
+      "outcome": "unknown"
+    },
+    {
+      "name": "closed-but-pending",
+      "kind": "session",
+      "wire": {
+        "state": "closed",
+        "cleanup_pending": true
+      },
+      "settled": false,
+      "outcome": "known"
+    },
+    {
+      "name": "lost-with-linux-proof",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "cleanup_confirmed": true
+      },
+      "settled": true,
+      "outcome": "unknown"
+    },
+    {
+      "name": "lost-with-native-proof",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "cleanup_pending": false,
+        "result": {
+          "jobs_empty": true,
+          "profiles_removed": true,
+          "scratch_removed": true
+        }
+      },
+      "settled": true,
+      "outcome": "unknown"
+    },
+    {
+      "name": "lost-incomplete-jobs_empty",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "cleanup_pending": false,
+        "result": {
+          "jobs_empty": false,
+          "profiles_removed": true,
+          "scratch_removed": true
+        }
+      },
+      "settled": false,
+      "outcome": "unknown"
+    },
+    {
+      "name": "lost-incomplete-profiles_removed",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "cleanup_pending": false,
+        "result": {
+          "jobs_empty": true,
+          "profiles_removed": false,
+          "scratch_removed": true
+        }
+      },
+      "settled": false,
+      "outcome": "unknown"
+    },
+    {
+      "name": "lost-incomplete-scratch_removed",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "cleanup_pending": false,
+        "result": {
+          "jobs_empty": true,
+          "profiles_removed": true,
+          "scratch_removed": false
+        }
+      },
+      "settled": false,
+      "outcome": "unknown"
+    },
+    {
+      "name": "lost-proof-with-pending",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "cleanup_pending": true,
+        "result": {
+          "jobs_empty": true,
+          "profiles_removed": true,
+          "scratch_removed": true
+        }
+      },
+      "settled": false,
+      "outcome": "unknown"
+    }
+  ],
+  "effects": [
+    {
+      "name": "completed-retry",
+      "interrupt": false,
+      "changed": false,
+      "closed": false,
+      "expect": "reuse"
+    },
+    {
+      "name": "interrupted-start",
+      "interrupt": true,
+      "changed": false,
+      "closed": false,
+      "expect": "unknown"
+    },
+    {
+      "name": "changed-parameters",
+      "interrupt": false,
+      "changed": true,
+      "closed": false,
+      "expect": "conflict"
+    },
+    {
+      "name": "completed-after-cleanup",
+      "interrupt": false,
+      "changed": false,
+      "closed": true,
+      "expect": "reuse"
+    }
+  ],
+  "invalid_observations": [
+    {
+      "name": "numeric-pending",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "completed",
+        "cleanup_pending": 0
+      }
+    },
+    {
+      "name": "empty-outcome",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "lost",
+        "result": {
+          "outcome": ""
+        }
+      }
+    },
+    {
+      "name": "non-object-result",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "completed",
+        "result": []
+      }
+    },
+    {
+      "name": "invalid-job-proof",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "lost",
+        "result": {
+          "jobs_empty": false,
+          "scratch_removed": "true"
+        }
+      }
+    },
+    {
+      "name": "invalid-later-session-proof",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "result": {
+          "jobs_empty": false,
+          "scratch_removed": "true"
+        }
+      }
+    },
+    {
+      "name": "string-confirmed",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "cleanup_confirmed": "true"
+      }
+    }
+  ]
+}

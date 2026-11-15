@@ -12,8 +12,8 @@ import time
 import uuid
 from wukong_worker.artifacts.metadata import atomic_json
 from wukong_worker.artifacts.common import public_file, sha256_file
-from wukong_worker.host.environment import safe_env
-from wukong_worker.resources.processes import ProcessResources
+from wukong_worker.platform.environment import safe_env
+from wukong_worker.platform.process_owner import ProcessResources
 
 try:  # GDB/MI parsing is optional: the bridge must serve jobs without it.
     from pygdbmi.gdbmiparser import parse_response as parse_mi_response

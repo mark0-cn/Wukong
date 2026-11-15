@@ -2,8 +2,8 @@
 //! native input receipts, not worker filesystem paths, supply every member.
 use crate::{
     artifacts::inputs::Inputs,
-    artifacts::inputs::Owner,
     artifacts::resource_input::{AdmittedInput, Purpose, Reference},
+    core::Owner,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};

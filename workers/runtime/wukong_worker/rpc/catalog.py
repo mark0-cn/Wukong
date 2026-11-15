@@ -4,7 +4,7 @@ from functools import partial
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping
 from typing import Any, TYPE_CHECKING
-from wukong_worker.rpc.contract import METHODS
+from wukong_worker.core.contract import METHODS
 
 if TYPE_CHECKING:
     from wukong_worker.host.runtime import Runtime
@@ -41,7 +41,7 @@ def register(runtime: "Runtime") -> dict[str, Registration]:
 
     add(
         "job.start",
-        runtime.jobs.start,
+        runtime.job_tools.start,
         "execution",
         (
             "process_jobs",
@@ -53,17 +53,22 @@ def register(runtime: "Runtime") -> dict[str, Registration]:
     )
     add(
         "crash.replay",
-        partial(runtime.jobs.start_job, kind="replay"),
+        partial(runtime.job_tools.start_job, kind="replay"),
         "execution",
         ("crash_replay",),
     )
-    add("poc.verify", partial(runtime.jobs.start_job, kind="verify"), "execution", ("poc_verify",))
-    add("py.run", runtime.jobs.python, "execution", ("py_run",))
-    add("fuzz.start", runtime.jobs.fuzz, "fuzz", ("fuzz_qemu",))
-    add("angr.solve", runtime.jobs.solve, "symbolic", ("symbolic_execution",))
+    add(
+        "poc.verify",
+        partial(runtime.job_tools.start_job, kind="verify"),
+        "execution",
+        ("poc_verify",),
+    )
+    add("py.run", runtime.job_tools.python, "execution", ("py_run",))
+    add("fuzz.start", runtime.job_tools.fuzz, "fuzz", ("fuzz_qemu",))
+    add("angr.solve", runtime.job_tools.solve, "symbolic", ("symbolic_execution",))
     add(
         "input.minimize",
-        partial(runtime.jobs.start_job, kind="minimize"),
+        partial(runtime.job_tools.start_job, kind="minimize"),
         "minimize",
         ("input_minimize_signal_only",),
     )
@@ -95,12 +100,12 @@ def register(runtime: "Runtime") -> dict[str, Registration]:
     add("doctor", runtime.doctor, "control")
     add("worker.shutdown", runtime.shutdown, "control")
     add("ghidra.query", runtime.ghidra_query, "ghidra", ("ghidra_query",))
-    add("job.status", runtime.jobs.query, "control")
-    add("job.cancel", runtime.jobs.cancel, "control")
-    add("job.list", runtime.jobs.list, "control")
+    add("job.status", runtime.job_tools.query, "control")
+    add("job.cancel", runtime.job_tools.cancel, "control")
+    add("job.list", runtime.job_tools.list, "control")
     add("job.artifacts", runtime.jobs.artifacts, "control")
-    add("fuzz.status", runtime.jobs.query, "control")
-    add("fuzz.stop", runtime.jobs.cancel, "control")
+    add("fuzz.status", runtime.job_tools.query, "control")
+    add("fuzz.stop", runtime.job_tools.cancel, "control")
     add("interact.write", runtime.sessions.interact_write, "control")
     add("interact.profile", runtime.sessions.interact_profile, "control")
     add("interact.close", runtime.sessions.interact_close, "control")

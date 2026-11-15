@@ -1,5 +1,5 @@
 //! Service-owned run fencing. No transport, Python state or resource dispatch.
-use crate::{artifacts::inputs::Owner, host::accounts, isolation::security::AclPolicy};
+use crate::{core::Owner, host::accounts, isolation::security::AclPolicy};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};

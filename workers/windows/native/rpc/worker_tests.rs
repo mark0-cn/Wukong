@@ -1,6 +1,6 @@
 use super::*;
-use crate::artifacts::inputs::Owner;
-use crate::resources::models::ResourceKind;
+use crate::core::Owner;
+use crate::core::resource::ResourceKind;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -210,7 +210,7 @@ async fn busy_native_resources_do_not_block_renewal_or_allow_idle_transitions() 
 
 #[tokio::test]
 async fn persisted_native_resource_state_still_blocks_takeover_after_worker_reopen() -> Result<()> {
-    use crate::resources::models::ResourceKind;
+    use crate::core::resource::ResourceKind;
     let (root, worker) = fixture()?;
     let lease = call(&worker, &acquire("run", "controller")).await?["result"].clone();
     {

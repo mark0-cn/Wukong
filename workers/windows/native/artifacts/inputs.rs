@@ -19,6 +19,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_SHARE_READ, GetFileInformationByHandle,
 };
+#[cfg(test)]
 use wukong_worker_protocol::WorkerIdentity as Identity;
 
 const MAX_PUT: usize = 32 * 1024 * 1024;
@@ -27,14 +28,7 @@ const MAX_SCOPE_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 
 #[path = "inputs_transfers.rs"]
 mod transfers;
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Owner {
-    pub identity: Identity,
-    pub run_id: String,
-    pub owner_id: String,
-    pub epoch: u64,
-}
+use crate::core::Owner;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Declaration {
@@ -90,9 +84,6 @@ pub(crate) struct Inputs {
     policy: AclPolicy,
 }
 impl Inputs {
-    pub fn handles(method: &str) -> bool {
-        crate::rpc::catalog::route(method) == Some(crate::rpc::catalog::Route::Files)
-    }
     pub fn call(
         &self,
         owner: Owner,

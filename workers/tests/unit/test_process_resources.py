@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 from wukong_worker.execution.processes import run_process
 from wukong_worker.host.runtime import Runtime
-from wukong_worker.resources.processes import ProcessResources
+from wukong_worker.platform.process_owner import ProcessResources
 
 
 class ProcessResourceTests(unittest.TestCase):
@@ -32,10 +32,10 @@ class ProcessResourceTests(unittest.TestCase):
     def test_failed_cleanup_retains_ownership_for_retry(self):
         process = Mock(pid=42)
         owner = ProcessResources()
-        with patch("wukong_worker.resources.processes.subprocess.Popen", return_value=process):
-            with patch("wukong_worker.execution.processes.attach_windows_job"):
+        with patch("wukong_worker.platform.process_owner.subprocess.Popen", return_value=process):
+            with patch("wukong_worker.platform.process_control.attach_windows_job"):
                 owner.spawn(["fixture"])
-        with patch("wukong_worker.execution.processes.terminate_tree") as terminate:
+        with patch("wukong_worker.platform.process_control.terminate_tree") as terminate:
             terminate.side_effect = [OSError("retry close"), None]
             with self.assertRaises(OSError):
                 owner.close()
@@ -47,12 +47,12 @@ class ProcessResourceTests(unittest.TestCase):
         owner = ProcessResources()
         first, second = Mock(pid=41), Mock(pid=42)
         with patch(
-            "wukong_worker.resources.processes.subprocess.Popen", side_effect=[first, second]
+            "wukong_worker.platform.process_owner.subprocess.Popen", side_effect=[first, second]
         ):
-            with patch("wukong_worker.execution.processes.attach_windows_job"):
+            with patch("wukong_worker.platform.process_control.attach_windows_job"):
                 owner.spawn(["first"])
                 owner.spawn(["second"])
-        with patch("wukong_worker.execution.processes.terminate_tree") as terminate:
+        with patch("wukong_worker.platform.process_control.terminate_tree") as terminate:
             terminate.side_effect = [OSError("retry"), None, None]
             with self.assertRaises(OSError):
                 owner.close()
@@ -80,7 +80,7 @@ class ProcessResourceTests(unittest.TestCase):
             return child
 
         with tempfile.TemporaryDirectory() as directory:
-            with patch("wukong_worker.resources.processes.subprocess.Popen", side_effect=spawn):
+            with patch("wukong_worker.platform.process_owner.subprocess.Popen", side_effect=spawn):
                 with patch(
                     "wukong_worker.execution.processes.time.monotonic",
                     side_effect=[0, OSError("clock failed")],
@@ -109,7 +109,7 @@ class ProcessResourceTests(unittest.TestCase):
             return child
 
         with tempfile.TemporaryDirectory() as directory:
-            with patch("wukong_worker.resources.processes.subprocess.Popen", side_effect=spawn):
+            with patch("wukong_worker.platform.process_owner.subprocess.Popen", side_effect=spawn):
                 with patch.object(
                     InteractSession, "persist", side_effect=OSError("publication failed")
                 ):

@@ -1,8 +1,8 @@
 //! System-owned resource/effect state, using SQLite transactions rather than a
 //! second filesystem transaction engine. This is not an execution broker API.
-use crate::artifacts::inputs::Owner;
-use crate::resources::models::bounded_identifier;
-use crate::resources::models::{MutationKind, Phase, ResourceKind, ResourceRecord};
+use crate::core::Owner;
+use crate::core::resource::bounded_identifier;
+use crate::core::resource::{MutationKind, Phase, ResourceKind, ResourceRecord};
 use crate::{
     artifacts::inputs::digest,
     isolation::security::{self, AclPolicy},
@@ -513,7 +513,12 @@ impl Journal {
     }
     pub fn close(&mut self, resource: &str, cleanup: Cleanup) -> Result<()> {
         ensure!(
-            cleanup.jobs_empty && cleanup.profiles_removed && cleanup.scratch_removed,
+            wukong_worker_protocol::CleanupProof {
+                jobs_empty: Some(cleanup.jobs_empty),
+                profiles_removed: Some(cleanup.profiles_removed),
+                scratch_removed: Some(cleanup.scratch_removed)
+            }
+            .confirmed(),
             "native resource cleanup is not quiescent and complete"
         );
         let transaction = self

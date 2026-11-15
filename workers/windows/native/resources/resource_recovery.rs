@@ -1,10 +1,10 @@
 //! Reconcile only a System-private resource intent; never execute its target.
 use crate::{
     artifacts::inputs::digest,
+    core::resource::{ResourceKind, ResourceRecord},
     executors::resource_process::{self, ScratchIntent},
     host::accounts::Role,
     isolation::security::{self, AclPolicy},
-    resources::models::{ResourceKind, ResourceRecord},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,7 @@ impl Request {
         );
         resource_process::nonce(&record.owner.identity.installation_id, &record.id)?;
         ensure!(
-            record.phase != crate::resources::models::Phase::Closed
+            record.phase != crate::core::resource::Phase::Closed
                 && record.specification["process"].is_object()
                 && match record.kind {
                     ResourceKind::Process =>

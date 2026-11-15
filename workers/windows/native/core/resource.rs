@@ -1,5 +1,5 @@
 //! Immutable resource identity and lifecycle observations; no storage implementation.
-use crate::artifacts::inputs::Owner;
+use crate::core::Owner;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

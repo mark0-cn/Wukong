@@ -10,6 +10,70 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExecutionBoundaries(unittest.TestCase):
+    def test_python_worker_runtime_dependencies_follow_ownership_direction(self):
+        allowed = {
+            "core": set(),
+            "artifacts": {"core"},
+            "platform": {"artifacts"},
+            "execution": {"artifacts", "platform", "core"},
+            "analysis": {"artifacts", "execution", "platform", "core"},
+            "debugger": {"analysis", "artifacts", "core", "execution", "platform"},
+            "network": {"artifacts", "execution", "core"},
+            "resources": {"analysis", "artifacts", "core", "debugger", "platform"},
+            "operations": {
+                "artifacts",
+                "core",
+                "debugger",
+                "execution",
+                "network",
+                "platform",
+                "resources",
+            },
+            "rpc": {"artifacts", "core", "platform"},
+        }
+
+        class Imports(ast.NodeVisitor):
+            def __init__(self):
+                self.names = []
+
+            def visit_If(self, node):
+                if isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+                    return
+                self.generic_visit(node)
+
+            def visit_Import(self, node):
+                self.names.extend(alias.name for alias in node.names)
+
+            def visit_ImportFrom(self, node):
+                self.names.append(node.module or "")
+
+        root = ROOT / "workers/runtime/wukong_worker"
+        for path in root.rglob("*.py"):
+            owner = path.relative_to(root).parts[0]
+            if owner not in allowed:
+                continue
+            imports = Imports()
+            imports.visit(ast.parse(path.read_text(encoding="utf-8")))
+            for name in imports.names:
+                if name.startswith("wukong_worker."):
+                    dependency = name.split(".")[1]
+                    self.assertIn(dependency, allowed[owner] | {owner}, f"{path}: {name}")
+
+    def test_native_core_and_resources_do_not_route_rpc(self):
+        native = ROOT / "workers/windows/native"
+        for path in (native / "core").glob("*.rs"):
+            self.assertNotRegex(
+                path.read_text(encoding="utf-8"),
+                r"crate::(?:rpc|host|artifacts|isolation|resources|executors)::",
+                str(path),
+            )
+        for directory in ["resources", "artifacts"]:
+            for path in (native / directory).glob("*.rs"):
+                if path.stem.endswith("_tests"):
+                    continue
+                production = path.read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
+                self.assertNotIn("rpc::catalog", production, str(path))
+
     def test_worker_imports_environment_errors_and_validation_from_their_owners(self):
         indirect = {
             "safe_env",

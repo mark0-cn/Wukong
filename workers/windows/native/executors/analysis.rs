@@ -1,4 +1,4 @@
-use crate::artifacts::inputs::Owner;
+use crate::core::Owner;
 use crate::executors::resource_process::Interpreter;
 use crate::executors::specification::{Specification, default_cwd};
 use crate::{
@@ -6,6 +6,7 @@ use crate::{
     executors::plan::{Plan, Response},
 };
 use anyhow::{Context, Result, ensure};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -56,7 +57,7 @@ pub(crate) fn plan(params: &Map<String, Value>) -> Result<Plan> {
     };
 
     Ok(Plan {
-        kind: crate::resources::models::ResourceKind::Process,
+        kind: crate::core::resource::ResourceKind::Process,
         request_id: request_id.into(),
         specification,
         response: Response::Analysis,
@@ -67,4 +68,37 @@ pub(crate) fn plan(params: &Map<String, Value>) -> Result<Plan> {
                 .map(crate::executors::plan::Target::Process)
         }),
     })
+}
+
+pub(crate) fn result(
+    pending: &Pending,
+    owner: &Owner,
+    status: &Value,
+    output: Value,
+    receipt: Value,
+) -> Result<Value> {
+    let bytes = STANDARD.decode(
+        output["data_base64"]
+            .as_str()
+            .context("analysis output missing")?,
+    )?;
+    let reply: Value =
+        serde_json::from_slice(&bytes).context("analysis tool returned invalid JSON")?;
+    ensure!(
+        status["result"]["exit_code"] == 0 && reply.get("error").is_none(),
+        "analysis failed: {}",
+        reply["error"].as_str().unwrap_or("resource terminated")
+    );
+    let mut result = reply
+        .get("result")
+        .cloned()
+        .filter(Value::is_object)
+        .context("analysis result must be an object")?;
+    result["execution_evidence"] = json!({"resource_id":pending.resource,"native_owner":owner,
+            "stdout":output,"receipt":receipt});
+    result["execution_evidence"]["stdout"]
+        .as_object_mut()
+        .unwrap()
+        .remove("data_base64");
+    Ok(result)
 }

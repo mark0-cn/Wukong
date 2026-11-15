@@ -1,5 +1,6 @@
 //! Owned native resources use the existing controller fence,
 //! SQLite effects and suspended Job launcher, not a second worker scheduler.
+use crate::core::resource::{Phase, ResourceKind, ResourceRecord};
 use crate::executors::parameters::{clean, request_id};
 use crate::executors::specification::Specification;
 use crate::executors::{analysis, shell};
@@ -7,19 +8,17 @@ use crate::executors::{
     launcher::{Launched, Running},
     plan::{Plan, Prepared},
 };
-use crate::resources::models::{Phase, ResourceKind, ResourceRecord};
 use crate::{
-    artifacts::inputs::Owner,
+    core::Owner,
     executors::resource_process::Request,
     isolation::security::AclPolicy,
     resources::journal::{Cleanup, Journal, Outcome, Reservation},
 };
 use crate::{
+    core::resource::MutationKind,
     executors::session_wire::{self, request::Operation},
-    resources::models::MutationKind,
 };
 use anyhow::{Context, Result, ensure};
-use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
@@ -174,35 +173,24 @@ impl ResourceState {
             .as_ref()
             .context("resource host is not initialized")
     }
-    pub(crate) fn handles(method: &str, params: &Map<String, Value>) -> bool {
-        matches!(
-            crate::rpc::catalog::route(method),
-            Some(crate::rpc::catalog::Route::Execution | crate::rpc::catalog::Route::Analysis)
-        ) || matches!(method, "file.get" | "file.stat" | "file.read")
-            && params
-                .get("path")
-                .and_then(Value::as_str)
-                .is_some_and(|path| path.starts_with("native-results/"))
-    }
-    pub(crate) fn prepare_rpc(
+    pub(crate) fn prepare(
         &mut self,
         owner: &Owner,
-        method: &str,
+        operation: super::operation::Operation,
         params: &Map<String, Value>,
     ) -> Result<Dispatch> {
-        if let Some(crate::rpc::catalog::Handler::Launch(factory)) =
-            crate::rpc::catalog::handler(wukong_worker_protocol::Method::parse(method)?)
-        {
-            let _ = self.poll();
-            return self.start_plan(owner, factory(params)?);
+        match operation {
+            super::operation::Operation::Start(plan) => {
+                let _ = self.poll();
+                self.start_plan(owner, plan)
+            }
+            super::operation::Operation::Session(method) => {
+                self.prepare_session(owner, method.name(), params)
+            }
+            super::operation::Operation::Query(method) => {
+                self.call(owner, method.name(), params).map(Dispatch::Ready)
+            }
         }
-        if matches!(
-            crate::rpc::catalog::handler(wukong_worker_protocol::Method::parse(method)?),
-            Some(crate::rpc::catalog::Handler::Session)
-        ) {
-            return self.prepare_session(owner, method, params);
-        }
-        self.call(owner, method, params).map(Dispatch::Ready)
     }
     pub(crate) fn call(
         &mut self,
@@ -603,59 +591,16 @@ impl ResourceState {
         self.host()?.artifacts.read(&record, method, params)
     }
     fn finish_result(&mut self, request: &Request) -> Result<()> {
-        if request.replay.is_some() {
-            return self.finish_replay_result(request);
-        }
-        let id = &request.resource_id;
-        let private = AclPolicy::private_vm();
-        let path = self.host()?.artifacts.result_path(id, "json")?;
-        private.verify(&path, false)?;
-        let bytes = crate::artifacts::io::read_bytes(&path, 12 * 1024 * 1024)?;
-        let result: Value = serde_json::from_slice(&bytes)?;
-        let streams = crate::executors::resource_process::output(request, &result)?;
-        for (name, data) in ["stdout", "stderr"].into_iter().zip(&streams) {
-            self.host()?
-                .artifacts
-                .retain(&self.host()?.artifacts.result_path(id, name)?, data)?;
-        }
-        let reason = result["stop_reason"]
-            .as_str()
-            .context("native stop reason is absent")?;
-        let exit = result["exit_code"]
-            .as_u64()
-            .context("native exit is absent")?;
-        let state = match reason {
-            "exited" => {
-                if exit == 0 {
-                    "completed"
-                } else {
-                    "failed"
-                }
-            }
-            "cancelled" => "cancelled",
-            "deadline" => "timed_out",
-            "output_limit" | "io_failure" => "failed",
-            _ => anyhow::bail!("invalid native stop reason"),
-        };
-        fn tail(bytes: &[u8]) -> String {
-            String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(4096)..]).into()
-        }
-        let value = json!({"job_id":id,"kind":"process","state":state,"native_owner":request.owner,"stdout":tail(&streams[0]),"stderr":tail(&streams[1]),"result":{"exit_code":exit,"stop_reason":reason,"stdout_sha256":result["stdout_sha256"],"stderr_sha256":result["stderr_sha256"],"stdin_written":result["stdin_written"],"stdin_complete":result["stdin_complete"],"stdin_error":result["stdin_error"],"native_receipt_sha256":hex::encode(Sha256::digest(&bytes)),"jobs_empty":true,"profiles_removed":true,"scratch_removed":true,
-            "duration_secs":result["duration_secs"],"output_bytes_retained":{"stdout":streams[0].len(),"stderr":streams[1].len()},"output_truncated":reason == "output_limit" || streams.iter().any(|stream|stream.len()>4096)},"isolation":"appcontainer"});
-        self.host()?.artifacts.retain(
-            &self.host()?.artifacts.result_path(id, "status.json")?,
-            &serde_json::to_vec(&value)?,
-        )?;
-        self.journal.start_closing(id)?;
+        crate::executors::results::publish(&self.host()?.artifacts, request)?;
+        self.journal.start_closing(&request.resource_id)?;
         self.journal.close(
-            id,
+            &request.resource_id,
             Cleanup {
                 jobs_empty: true,
                 profiles_removed: true,
                 scratch_removed: true,
             },
-        )?;
-        Ok(())
+        )
     }
 
     pub(crate) fn poll_command(&mut self, pending: &shell::Pending) -> Result<Option<Value>> {
@@ -670,26 +615,7 @@ impl ResourceState {
             return Ok(None);
         }
         let status = self.status(&pending.owner, &pending.resource)?;
-        let result = &status["result"];
-        let unknown = status["state"] == "lost";
-        let artifact = if unknown {
-            result["recovery_artifact"]
-                .as_str()
-                .context("native shell recovery receipt absent")?
-        } else {
-            "receipt"
-        };
-        Ok(Some(
-            json!({"state":status["state"],"command":pending.command,"engine":"cmd",
-            "resource_id":pending.resource,"native_owner":status["native_owner"],
-            "exit_code":result["exit_code"],"signal":null,"duration_secs":result["duration_secs"],
-            "stdout":status["stdout"],"stderr":status["stderr"],
-            "output_bytes_retained":result["output_bytes_retained"],"output_truncated":result["output_truncated"],
-            "receipt":format!("native-results/{}/{artifact}",pending.resource),
-            "stdout_artifact":if unknown {None}else{Some(format!("native-results/{}/stdout",pending.resource))},
-            "stderr_artifact":if unknown {None}else{Some(format!("native-results/{}/stderr",pending.resource))},
-            "cleanup_pending":false,"result":result,"isolation":"appcontainer"}),
-        ))
+        shell::result(pending, &status).map(Some)
     }
 
     pub(crate) fn poll_analysis(&mut self, pending: &analysis::Pending) -> Result<Option<Value>> {
@@ -714,77 +640,11 @@ impl ResourceState {
                 .as_object()
                 .unwrap(),
         )?;
-        let bytes = STANDARD.decode(
-            output["data_base64"]
-                .as_str()
-                .context("analysis output missing")?,
-        )?;
-        let reply: Value =
-            serde_json::from_slice(&bytes).context("analysis tool returned invalid JSON")?;
-        ensure!(
-            status["result"]["exit_code"] == 0 && reply.get("error").is_none(),
-            "analysis failed: {}",
-            reply["error"].as_str().unwrap_or("resource terminated")
-        );
-        let mut result = reply
-            .get("result")
-            .cloned()
-            .filter(Value::is_object)
-            .context("analysis result must be an object")?;
-        result["execution_evidence"] = json!({"resource_id":pending.resource,"native_owner":record.owner,
-            "stdout":output,"receipt":self.host()?.artifacts.artifact(&pending.resource,"receipt")?});
-        result["execution_evidence"]["stdout"]
-            .as_object_mut()
-            .unwrap()
-            .remove("data_base64");
-        Ok(Some(result))
-    }
-
-    pub(super) fn finish_replay_result(&mut self, request: &Request) -> Result<()> {
-        let id = &request.resource_id;
-        let path = self.host()?.artifacts.result_path(id, "json")?;
-        AclPolicy::private_vm().verify(&path, false)?;
-        let minimizing = request
-            .replay
-            .as_ref()
-            .is_some_and(|replay| replay.configuration.minimization.is_some());
-        let bytes = crate::artifacts::io::read_bytes(
-            &path,
-            if minimizing { 4 * 1024 * 1024 } else { 65536 },
-        )?;
-        let receipt: Value = serde_json::from_slice(&bytes)?;
-        let mut result = if minimizing {
-            crate::executors::resource_minimize::summarize(request, &receipt, |suffix| {
-                let path = self.host()?.artifacts.result_path(id, suffix)?;
-                AclPolicy::private_vm().verify(&path, false)?;
-                crate::artifacts::io::read_bytes(&path, 32 * 1024 * 1024)
-            })?
-        } else {
-            crate::executors::resource_replay::summarize(request, &receipt, |index| {
-                let path = self
-                    .host()?
-                    .artifacts
-                    .result_path(id, &format!("trial-{index}.json"))?;
-                AclPolicy::private_vm().verify(&path, false)?;
-                crate::artifacts::io::read_bytes(&path, 12 * 1024 * 1024)
-            })?
-        };
-        result["native_receipt_sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
-        let status = json!({"job_id":id,"kind":request.kind(),"state":if receipt["cancelled"] == true {"cancelled"} else if minimizing && !receipt["failed"].is_null() {"failed"} else {"completed"},
-            "native_owner":request.owner,"result":result,"isolation":"appcontainer"});
-        self.host()?.artifacts.retain(
-            &self.host()?.artifacts.result_path(id, "status.json")?,
-            &serde_json::to_vec(&status)?,
-        )?;
-        self.journal.start_closing(id)?;
-        self.journal.close(
-            id,
-            Cleanup {
-                jobs_empty: true,
-                profiles_removed: true,
-                scratch_removed: true,
-            },
-        )
+        let receipt = self
+            .host()?
+            .artifacts
+            .artifact(&pending.resource, "receipt")?;
+        analysis::result(pending, &record.owner, &status, output, receipt).map(Some)
     }
 
     pub(super) fn prepare_session(

@@ -1,6 +1,6 @@
 //! Sessions tool operations.
 use super::*;
-use crate::adapters::worker::protocol::{SessionHandle, SessionState};
+use crate::adapters::worker::protocol::{SessionHandle, SessionObservation, SessionState};
 
 #[cfg(test)]
 mod tests {
@@ -71,16 +71,8 @@ pub(super) struct SessionsService {
 }
 impl SessionsService {
     fn cleanup_confirmed(raw: &Value) -> bool {
-        if raw["cleanup_pending"] == true {
-            return false;
-        }
-        raw["state"] == "closed"
-            || (raw["state"] == "lost"
-                && (raw["cleanup_confirmed"] == true
-                    || (raw["cleanup_pending"] == false
-                        && raw["result"]["jobs_empty"] == true
-                        && raw["result"]["profiles_removed"] == true
-                        && raw["result"]["scratch_removed"] == true)))
+        serde_json::from_value::<SessionObservation>(raw.clone())
+            .is_ok_and(|observation| observation.observation().settled())
     }
     fn closing(&self, kind: SessionKind, session: &mut SessionRecord) -> Result<()> {
         session.state = SessionState::Closing;

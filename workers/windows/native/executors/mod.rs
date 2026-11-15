@@ -13,6 +13,7 @@ pub(crate) mod resource_minimize;
 pub mod resource_process;
 pub(crate) mod resource_replay;
 pub(crate) mod resource_target;
+pub(crate) mod results;
 pub(crate) mod session_backend;
 pub(crate) mod session_commands;
 pub(crate) mod session_crash;

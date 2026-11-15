@@ -2,8 +2,8 @@
 
 from jsonrpcserver import dispatch, Success, Error
 from jsonschema import ValidationError
-from wukong_worker.rpc.errors import error_kind
-from wukong_worker.rpc.contract import validate_request, validate_result
+from wukong_worker.core.errors import error_kind
+from wukong_worker.core.contract import validate_request, validate_result
 
 
 class Server:

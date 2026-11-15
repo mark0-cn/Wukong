@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from wukong_worker.execution.processes import terminate_tree
+from wukong_worker.platform.process_control import terminate_tree
 from wukong_worker.rpc.transport import ensure_daemon, relay_call
 
 
@@ -33,9 +33,10 @@ class DaemonStartupTests(unittest.TestCase):
                 "from pathlib import Path\n"
                 f"sys.path.insert(0,{str(runtime)!r})\n"
                 "from wukong_worker.rpc.transport import serve\n"
+                "from wukong_worker.host.runtime import Runtime\n"
                 "Path(sys.argv[sys.argv.index('--state')+1],'fixture.pid').write_text(str(os.getpid()))\n"
                 "time.sleep(6)\n"
-                "serve(Path(sys.argv[sys.argv.index('--state')+1]),True)\n",
+                "serve(Path(sys.argv[sys.argv.index('--state')+1]),True,Runtime)\n",
                 encoding="utf-8",
             )
             state = root / "state"
@@ -45,7 +46,7 @@ class DaemonStartupTests(unittest.TestCase):
                 with (
                     patch("wukong_worker.rpc.transport.BRIDGE_PATH", script),
                     patch(
-                        "wukong_worker.resources.processes.subprocess.Popen",
+                        "wukong_worker.platform.process_owner.subprocess.Popen",
                         side_effect=spawn,
                     ),
                 ):
@@ -68,7 +69,8 @@ class DaemonStartupTests(unittest.TestCase):
                         "import sys; from pathlib import Path; "
                         f"sys.path.insert(0,{str(runtime)!r}); "
                         "from wukong_worker.rpc.transport import serve; "
-                        f"serve(Path({str(state)!r}),True)",
+                        "from wukong_worker.host.runtime import Runtime; "
+                        f"serve(Path({str(state)!r}),True,Runtime)",
                     ],
                     capture_output=True,
                     timeout=10,

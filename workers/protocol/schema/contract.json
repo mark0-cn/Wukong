@@ -456,7 +456,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -476,11 +504,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -712,7 +753,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -732,11 +801,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -2770,7 +2852,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -2790,11 +2900,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -2858,7 +2981,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -2878,11 +3029,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -2946,7 +3110,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -2966,11 +3158,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -3178,7 +3383,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -3198,11 +3431,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -3504,7 +3750,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -3524,11 +3798,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -3600,7 +3887,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -3624,6 +3939,12 @@
           "JobStatus": {
             "additionalProperties": true,
             "properties": {
+              "cleanup_pending": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
               "job_id": {
                 "type": "string"
               },
@@ -3654,6 +3975,13 @@
               "state"
             ],
             "type": "object"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3752,7 +4080,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -3772,11 +4128,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -3840,7 +4209,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -3860,11 +4257,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -4464,7 +4874,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -4484,11 +4922,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },
@@ -4587,7 +5038,35 @@
                   "null"
                 ]
               },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
                 "type": [
                   "boolean",
                   "null"
@@ -4607,11 +5086,24 @@
               "lost"
             ],
             "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
           }
         },
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "job_id": {
             "type": "string"
           },

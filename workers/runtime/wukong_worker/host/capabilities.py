@@ -8,8 +8,8 @@ import platform
 import shutil
 import subprocess
 import sys
-from wukong_worker.rpc.contract import PROTOCOL
-from wukong_worker.host.environment import safe_env
+from wukong_worker.core.contract import PROTOCOL
+from wukong_worker.platform.environment import safe_env
 from wukong_worker.rpc.catalog import capabilities
 
 

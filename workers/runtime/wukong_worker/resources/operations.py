@@ -7,9 +7,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from filelock import FileLock
-from wukong_worker.rpc.errors import WorkerError, error_kind
+from wukong_worker.core.errors import WorkerError, error_kind
 from wukong_worker.artifacts.metadata import atomic_json, load_json
-from wukong_worker.rpc.contract import METHODS
+from wukong_worker.core.contract import METHODS
 
 
 class OperationLedger:

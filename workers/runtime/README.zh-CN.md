@@ -189,9 +189,11 @@ Ghidra 套件编译自己的 C 夹具，通过只读适配器导入，定位 mai
 
 ## 模块边界
 
-`bridge.py` 保留 CLI 参数，在导入 `wukong_worker.cli` 前禁用字节码写入。部署整个 `workers/runtime` 目录及相邻的生成协议 schema，无需额外安装运行时包。内部显式导入 `wukong_worker` 包。`rpc/` 管帧、契约校验、错误和可调用注册；`host/` 管身份、能力观察、环境策略和服务装配。身份哈希覆盖 bridge 及所有嵌套包源码的路径/字节，以及共享 schema 和分析包。
+`bridge.py` 保留 CLI 参数，在导入 `wukong_worker.cli` 前禁用字节码写入。部署整个 `workers/runtime` 目录及相邻生成的协议 schema，无需额外安装运行时包。内部显式导入 `wukong_worker` 包。`core/` 负责 schema 校验、稳定错误、有类型的作业意图及纯完成规则。`rpc/` 负责帧、协议错误转换及可调用注册；`host/` 负责身份、能力观察和服务装配。CLI 向 daemon 传输注入运行时构造。身份哈希覆盖所有嵌套包源码路径/字节、bridge、共享 schema 和分析包。
 
-包内 `resources/` 管作业、会话和持久化副作用；`execution/` 管准入计划、监督执行、进程树 IO、重放和最小化。`debugger/` 管 GDB/MI 和交互进程；`artifacts/` 管受限路径、哈希、传输及原子元数据。`platform/` 保留 Linux 隔离及可信本地夹具使用的 Windows 身份/路径帮助函数。`workbench/` 管宿主调用的帮助脚本，control/prepare 通过明确的入口引导支持直接执行。注入隔离执行环境的分析和收集脚本保持自包含。
+`operations/` 负责工具专属准入及进程/fuzz/重放/验证/缩减流程。`JobService` 准备 `JobPlan`；`resources/jobs.py` 预留和启动计划，无需了解工具专属参数。`resources/supervisor.py` 负责心跳和最终发布，接收返回 `JobOutcome` 的执行器；执行器不写作业状态。`resources/` 还负责会话、持久副作用及关闭和维护共用的完成清单。
+
+`execution/` 负责有界进程 IO、启动解析、输入暂存和缩减适配。`debugger/` 负责 GDB/MI 和交互会话；`artifacts/` 负责受限路径、哈希、传输及原子元数据。`platform/` 负责环境策略、OS 进程控制、进程所有权/日志、Linux 隔离及可信夹具使用的 Windows 身份/路径辅助。这些原语不导入资源服务或 RPC。`workbench/` 包含宿主调用的辅助程序；control/prepare 通过显式入口引导支持直接脚本执行。注入的分析/收集脚本保持自包含。架构测试约束运行时依赖方向，不计仅用于类型注解的导入。
 
 `analysis/adapters.py` 在同一文件内保留 `SeccompService`、`LibcService` 和 `EmuService` 各自的准入；`debugger/crash.py` 保留真实 GDB 观察。它们将输入适配到独立[分析包](../analysis/README.zh-CN.md)，该包负责 BPF 解码/探测、有界 ELF 候选比较、Unicorn 模拟与崩溃数据解释，不拥有 Worker 状态或传输。`network/service.py` 校验准备好的服务绑定并执行声明式 TCP 验证。监督器仍拥有生命周期/取消；不会在特权 supervisor 内运行模型提供的程序。见 [Pwn 工具契约](../../docs/reference/pwn-tools.zh-CN.md)。
 
@@ -202,8 +204,8 @@ Ghidra 套件编译自己的 C 夹具，通过只读适配器导入，定位 mai
 | 资源 | 所有者与生命周期 |
 | --- | --- |
 | 守护进程与端点 | `rpc/transport.py` 持有独立于 stdio 转发进程的守护锁；重连不会重新启动已有归属的作业。 |
-| 作业预留与回执 | `resources/jobs.py` 串行执行去重、UID/目录预留和监督器启动；`execution/planning.py` 在加锁前准备规范化输入。失败或未知的启动仍保留持久身份。 |
-| 作业进程树与输出 | 监督器负责取消和最终发布；`execution/processes.py` 负责进程组/Job 终止与有界输出收集。主进程死亡不能证明后代已退出。 |
+| 作业预留与回执 | `resources/jobs.py` 串行执行去重、UID/目录预留和监督器启动；`operations/planning.py` 在加锁前准备规范化输入。失败或未知的启动仍保留持久身份。 |
+| 作业进程树与输出 | 监督器负责取消和最终发布；`platform/process_owner.py` 负责进程组/Job 终止，`execution/processes.py` 收集有界输出。主进程死亡不能证明后代已退出。 |
 | GDB 与交互会话 | `resources/sessions.py` 保留活动所有者；会话类串行处理操作并保存观察。恢复将旧会话标为 lost，报告无法读取的元数据，但不修复原记录。 |
 | 网络试验 | `network/service.py` 持有 socket 上下文并最终发布 transcript；传输层检查取消/期限，保留旧响应与新响应的边界。 |
 | 输入缩减 | `execution/minimize.py` 管尝试次数和期限；注入的求值器负责每次执行及崩溃等价性。中断时保留的候选不代表已经最小化。 |
@@ -212,3 +214,5 @@ Ghidra 套件编译自己的 C 夹具，通过只读适配器导入，定位 mai
 管理命令 `doctor` 在临时状态上绑定真实注册表，再观察能力。它不会在运行中的守护进程状态上构造 Runtime，避免错误恢复活动会话。关闭传输、取消执行和删除保留证据是由不同所有者负责的不同操作。
 
 会话清理在调用 worker 前持久化关闭意图。Linux 进程管理器记录启动与命名空间身份、进程创建身份、进程组和自有临时目录；即使会话记录尚未发布就中断，重启恢复也会扫描这些日志。worker 中查不到会话不等于清理成功：无法确认归属时保留 `recovery_required`，关闭中或待恢复的会话、以及带 `cleanup_pending` 的终态作业，都会阻止任务完成和环境维护。控制器重试关闭中的会话及已失败或停止的所有者资源，不重放调试命令。Windows 继续使用原生 ResourceManager。PID 身份或命名空间不匹配时需要恢复所属环境，不向无关进程发信号。导入的日志不赋予目标环境的进程归属权。
+
+关闭实时会话后，worker 关停与环境维护检查同一份持久资源清单。恢复中或尚未发布的会话若未确认清理，即使没有内存会话对象，也会阻止关停。生命周期观察将执行结果的确定性与清理确认分开。

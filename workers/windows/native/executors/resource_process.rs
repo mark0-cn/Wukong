@@ -1,9 +1,9 @@
 //! One System child per native execution resource. Controller admission owns
 //! the fence and journal; this host accepts only its protected fixed request.
 use crate::{
-    artifacts::inputs::Owner,
     artifacts::inputs::digest,
     artifacts::resource_input::Reference,
+    core::Owner,
     isolation::process_capture::{CaptureResult, PreparedIo},
     isolation::processes::ResourceLimits,
     isolation::security::{self, AclPolicy},
@@ -68,8 +68,8 @@ impl Request {
             .map_or("process", |replay| replay.configuration.kind.name())
     }
     pub fn validate(&self) -> Result<()> {
-        crate::resources::models::bounded_identifier(&self.owner.run_id, 128)?;
-        crate::resources::models::bounded_identifier(&self.owner.owner_id, 128)?;
+        crate::core::resource::bounded_identifier(&self.owner.run_id, 128)?;
+        crate::core::resource::bounded_identifier(&self.owner.owner_id, 128)?;
         ensure!(
             self.schema == SCHEMA
                 && self.resource_id.len() == 32

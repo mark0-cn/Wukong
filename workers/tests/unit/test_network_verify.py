@@ -260,7 +260,7 @@ class NetworkVerificationTests(unittest.TestCase):
         self.assertEqual(len(self.server.nonces), 2)
         # Terminal metadata precedes process exit; wait for the owned supervisor
         # to release Windows handles before the temporary state is removed.
-        from wukong_worker.execution.processes import process_identity
+        from wukong_worker.platform.process_control import process_identity
 
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline and process_identity(status["supervisor_pid"]) not in {

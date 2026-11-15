@@ -235,10 +235,13 @@ fn interrupted_native_start_retry_reads_original_intent_before_new_input_scope()
 }
 #[test]
 fn native_routing_and_request_schema_never_select_privileged_paths() -> Result<()> {
-    assert!(ResourceState::handles("job.start", &Map::new()));
-    assert!(ResourceState::handles("job.list", &Map::new()));
-    assert!(ResourceState::handles("resource.list", &Map::new()));
-    assert!(!ResourceState::handles(
+    assert!(crate::rpc::catalog::owns_resource("job.start", &Map::new()));
+    assert!(crate::rpc::catalog::owns_resource("job.list", &Map::new()));
+    assert!(crate::rpc::catalog::owns_resource(
+        "resource.list",
+        &Map::new()
+    ));
+    assert!(!crate::rpc::catalog::owns_resource(
         "file.get",
         json!({"path":"metadata/resource-results/x.json"})
             .as_object()

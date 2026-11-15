@@ -9,8 +9,8 @@ import re
 import uuid
 from wukong_worker import PACKAGE_ROOT, RUNTIME_ROOT, BRIDGE_PATH
 
-from wukong_worker.rpc.contract import PROTOCOL
-from wukong_worker.rpc.errors import WorkerError
+from wukong_worker.core.contract import PROTOCOL
+from wukong_worker.core.errors import WorkerError
 from wukong_worker.artifacts.metadata import load_json
 
 

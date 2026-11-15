@@ -8,11 +8,12 @@ from typing import Any
 from wukong_worker.host.capabilities import doctor
 from wukong_worker.rpc.catalog import register
 from wukong_worker.execution.commands import CommandService
-from wukong_worker.rpc.contract import PROTOCOL
-from wukong_worker.resources import TERMINAL
+from wukong_worker.core.contract import PROTOCOL
+from wukong_worker.core.lifecycle import TERMINAL
 from wukong_worker.analysis.adapters import EmuService
 from wukong_worker.artifacts.files import FileService
 from wukong_worker.resources.jobs import JobManager
+from wukong_worker.operations.jobs import JobService
 from wukong_worker.analysis.adapters import LibcService
 from wukong_worker.analysis.adapters import SeccompService
 from wukong_worker.network.service import NetworkService
@@ -33,6 +34,7 @@ class Runtime:
         self.identity = WorkerIdentity(self.root)
         self.isolated = sys.platform.startswith("linux") and os.geteuid() == 0 and not trusted
         self.jobs = JobManager(self.root, trusted, self.isolated)
+        self.job_tools = JobService(self.root, trusted, self.isolated, self.jobs)
         self.sessions = SessionManager(self.root, trusted, self.isolated)
         self.files = FileService(self.root, trusted, self.isolated)
         self.commands = CommandService(self.root, trusted, self.isolated)
@@ -50,7 +52,7 @@ class Runtime:
         }
         # Capability observation needs the complete registry; inject it only
         # after every service and callable handler has been assembled.
-        self.jobs.observe = self._observe_capabilities
+        self.job_tools.observe = self._observe_capabilities
 
     def _observe_capabilities(self) -> dict[str, Any]:
         return doctor(self.root, self.trusted, self.isolated, self.registrations)
@@ -115,6 +117,10 @@ class Runtime:
                 "cannot shut down worker while jobs are active; cancel and reconcile them first"
             )
         self.sessions.close_all()
+        from wukong_worker.resources.inventory import pending_resources
+
+        if pending_resources(self.root, self.jobs):
+            raise ValueError("cannot shut down worker while resource cleanup remains unconfirmed")
         self.jobs.process_resources.wait()
         self.stopping = True
         return {"state": "shutdown"}

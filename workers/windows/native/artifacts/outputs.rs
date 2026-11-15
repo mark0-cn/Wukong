@@ -1,8 +1,8 @@
 //! Immutable resource outputs. The manager supplies an authorized journal record.
 use crate::{
+    core::resource::{Phase, ResourceKind, ResourceRecord},
     executors::specification::Specification,
     isolation::security::AclPolicy,
-    resources::models::{Phase, ResourceKind, ResourceRecord},
 };
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};

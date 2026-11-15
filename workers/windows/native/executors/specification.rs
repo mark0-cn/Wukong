@@ -1,7 +1,6 @@
 //! Execution request preparation uses admitted inputs and owns no lifecycle or ledger.
 use crate::{
-    artifacts::inputs::{Inputs, Owner},
-    artifacts::resource_input::Purpose,
+    artifacts::inputs::Inputs, artifacts::resource_input::Purpose, core::Owner,
     executors::resource_process::Request,
 };
 use anyhow::{Result, ensure};

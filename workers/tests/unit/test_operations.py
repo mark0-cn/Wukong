@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from wukong_worker.rpc.errors import WorkerError
+from wukong_worker.core.errors import WorkerError
 from wukong_worker.artifacts.metadata import atomic_json
 from wukong_worker.resources.operations import OperationLedger
 
