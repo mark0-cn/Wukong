@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -24,6 +25,7 @@ class InteractSession:
         self.directory.mkdir(parents=True)
         self.lock = threading.Lock()
         self.operation_lock = threading.Lock()
+        self.close_lock = threading.Lock()
         self.drained = threading.Event()
         self.dead = False
         self.closed = False
@@ -147,15 +149,14 @@ class InteractSession:
             return self.exchange(data, read_timeout_secs, quiet_ms)
 
     def exchange(self, data, read_timeout_secs, quiet_ms):
+        deadline = time.monotonic() + read_timeout_secs
         with self.lock:
             exited = self.dead or self.process.poll() is not None
-            if not exited:
-                self.process.stdin.write(data)
-                self.process.stdin.flush()
-                self.last_data = time.time()
-        deadline = time.monotonic() + read_timeout_secs
         if exited:
             return self.exited_snapshot(deadline, data_sent=False)
+        self.send_input(data, deadline)
+        with self.lock:
+            self.last_data = time.time()
         while time.monotonic() < deadline:
             with self.lock:
                 exited = self.process.poll() is not None
@@ -166,6 +167,44 @@ class InteractSession:
                 return self.snapshot("running")
             time.sleep(0.02)
         return self.snapshot("running", timed_out=True)
+
+    def send_input(self, data: bytes, deadline: float) -> None:
+        """Own one bounded write; partial/unknown delivery must never be retried."""
+        if not data:
+            return
+        completed = queue.Queue(maxsize=1)
+
+        def send():
+            try:
+                remaining = memoryview(data)
+                while remaining:
+                    written = self.process.stdin.write(remaining)
+                    if not written:
+                        raise BrokenPipeError("interactive stdin closed during write")
+                    remaining = remaining[written:]
+                self.process.stdin.flush()
+                completed.put(None)
+            except (OSError, ValueError) as error:
+                completed.put(error)
+
+        sender = threading.Thread(target=send, daemon=True)
+        sender.start()
+        try:
+            error = completed.get(timeout=max(0, deadline - time.monotonic()))
+        except queue.Empty as error:
+            # Terminate through the session owner, without holding the output
+            # lock. Killing the process tree releases a blocked pipe writer.
+            self.close()
+            sender.join(timeout=5)
+            raise ValueError(
+                "interactive stdin timeout; session closed, delivery uncertain"
+            ) from error
+        sender.join(timeout=5)
+        if error is not None:
+            self.close()
+            raise ValueError(
+                "interactive stdin failed; session closed, delivery uncertain"
+            ) from error
 
     def exited_snapshot(self, deadline, data_sent=True):
         # A signaled leader can still have unread bytes in its stdout pipe.
@@ -191,9 +230,10 @@ class InteractSession:
         }
 
     def close(self):
-        with self.lock:
-            self.dead = True
-            self.closed = True
+        with self.close_lock:
+            with self.lock:
+                self.dead = True
+                self.closed = True
             terminate_tree(self.process)
-        self.persist("closed")
+            self.persist("closed")
         return {"session_id": self.id, "state": "closed"}

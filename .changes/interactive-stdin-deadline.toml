@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Bound interactive input writes when a target stops reading stdin. A timed-out or failed write closes the owned session and reports uncertain delivery instead of hanging or retrying the input."
+zh_CN = "目标停止读取 stdin 时，交互输入写入现在有明确期限。写入超时或失败会关闭所属会话并报告投递结果不确定，避免挂起或重复发送输入。"
