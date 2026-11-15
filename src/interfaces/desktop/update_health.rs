@@ -92,6 +92,11 @@ pub fn check(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
         }
         return Ok(health);
     }
+    check_workbench(config, full, epoch)
+}
+
+/// Observe the explicitly managed Linux tools even before it is selected for new tasks.
+pub(super) fn check_workbench(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     let environment = workbench.environment().ok();

@@ -1268,3 +1268,48 @@ fn structured_deliverables_reject_missing_semantics() {
     artifact.kind = "invented".into();
     assert!(artifact.validate().is_err());
 }
+
+#[test]
+fn lifecycle_replay_does_not_reset_agents_or_publish_duplicate_transitions() {
+    let (_dir, store, c, run) = fixture();
+    c.resume_once(&run.id, None, "controller-1").unwrap();
+    let mut root: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
+    root.metadata.status = Status::Running;
+    store.save_record(&root).unwrap();
+    c.resume_once(&run.id, None, "controller-1").unwrap();
+    assert_eq!(
+        store
+            .require::<AgentSnapshot>("agent", &run.root_id)
+            .unwrap()
+            .status,
+        Status::Running
+    );
+    c.pause_operator(&run.id, "clicked pause").unwrap();
+    c.pause_operator(&run.id, "duplicate pause").unwrap();
+    c.pause_budget(&run.id, "late accounting observation")
+        .unwrap();
+    // Retrying the old start cannot reopen this later pause.
+    c.resume_once(&run.id, None, "controller-1").unwrap();
+    assert_eq!(
+        store.require::<RunRecord>("run", &run.id).unwrap().status,
+        Status::BudgetPaused
+    );
+    c.resume_once(&run.id, None, "controller-2").unwrap();
+    let events = store.events(&run.id, 0, 100).unwrap();
+    for kind in ["run.started", "run.paused", "run.resumed"] {
+        assert_eq!(events.iter().filter(|event| event.kind == kind).count(), 1);
+    }
+    assert!(!events.iter().any(|event| event.kind == "run.budget_paused"));
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.kind == "run.paused")
+            .unwrap()
+            .data["cause"],
+        "operator"
+    );
+    assert!(
+        c.resume_once(&run.id, Some(Budget::default()), "controller-2")
+            .is_err()
+    );
+}

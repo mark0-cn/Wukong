@@ -8,6 +8,11 @@ pub struct Environment {
     pub volume: String,
     pub network: String,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImageAcquisition {
+    AllowPull,
+    LocalOnly,
+}
 impl Workbench {
     pub fn environment(&self) -> Result<Environment> {
         read_json(&self.root.join("environment.json"))
@@ -41,12 +46,25 @@ impl Workbench {
         Ok(())
     }
     pub fn up(&self, image: Option<&str>) -> Result<Value> {
+        self.ensure_up(image, ImageAcquisition::AllowPull)
+    }
+    pub(crate) fn ensure_up(
+        &self,
+        image: Option<&str>,
+        acquisition: ImageAcquisition,
+    ) -> Result<Value> {
+        let pending = self.root.join("environment.pending.json");
         let selected = image
             .map(str::to_owned)
             .or_else(|| self.environment().ok().map(|e| e.image_id))
+            .or_else(|| read_json::<Environment>(&pending).ok().map(|e| e.image_id))
             .unwrap_or_else(|| self.config.workbench.image.clone());
         let image = selected.as_str();
         if self.docker.inspect("image", image)?.is_none() {
+            ensure!(
+                acquisition == ImageAcquisition::AllowPull,
+                crate::i18n::Message::new("system-tool-image-needs-repair")
+            );
             self.docker
                 .logged(&["pull", image], &self.root.join("logs/pull.log"))?;
         }
@@ -69,11 +87,28 @@ impl Workbench {
             volume: self.name("state"),
             network: self.name("offline"),
         };
+        // Persist the selected immutable image before creating any resources.
+        // Retry reconciles owned names/labels and reuses an interrupted start.
+        write_json(&pending, &env)?;
         self.start_worker(&env)?;
+        let health: Value = serde_json::from_str(&self.docker.run(&[
+            "exec",
+            &env.container,
+            "python3",
+            "/opt/wukong/runtime/wukong_worker/workbench/control.py",
+            "health",
+            "/state",
+        ])?)?;
+        ensure!(
+            health["healthy"] == true
+                && health["identity"]["protocol"] == wukong_worker_protocol::PROTOCOL,
+            "worker startup health probe failed: {health}"
+        );
         write_json(&self.root.join("environment.json"), &env)?;
         self.write_worker_config(&env, &self.root.join("wukong.toml"))?;
+        fs::remove_file(pending)?;
         Ok(
-            json!({"environment":env,"config":self.root.join("wukong.toml"),"transport":"host docker exec; no Docker socket mounted"}),
+            json!({"environment":env,"health":health,"config":self.root.join("wukong.toml"),"transport":"host docker exec; no Docker socket mounted"}),
         )
     }
     pub fn start_worker(&self, env: &Environment) -> Result<()> {

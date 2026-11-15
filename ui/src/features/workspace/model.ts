@@ -25,6 +25,7 @@ export function useWorkspace() {
   useEffect(() => {
     let alive = true, inFlight = false, requested = false, revision: string | undefined;
     let unlisten: (() => void) | undefined;
+    let subscribing = false;
     const selection = `${run ?? ''}|${agent ?? ''}|${refreshKey}`;
     if (previousSelection.current !== selection) setData(undefined);
     previousSelection.current = selection;
@@ -55,12 +56,26 @@ export function useWorkspace() {
       }
     };
     reload.current = () => { void load(); };
-    void load();
-    void subscribe('workspace-changed', () => { void load(); }).then(dispose => {
-      if (alive) unlisten = dispose; else dispose();
-    }).catch(() => {});
-    const interval = window.setInterval(() => { void load(); }, 3000);
-    return () => { alive = false; window.clearInterval(interval); unlisten?.(); };
+    const attach = async () => {
+      if (!alive || unlisten || subscribing) return;
+      subscribing = true;
+      try {
+        const dispose = await subscribe('workspace-changed', () => { void load(); });
+        if (alive) unlisten = dispose; else dispose();
+      } catch { /* Polling remains available while the event bridge reconnects. */ }
+      finally { subscribing = false; if (alive) void load(); }
+    };
+    void attach();
+    const catchUp = () => { void attach(); void load(); };
+    const visible = () => { if (document.visibilityState === 'visible') catchUp(); };
+    window.addEventListener('focus', catchUp);
+    document.addEventListener('visibilitychange', visible);
+    const interval = window.setInterval(catchUp, 3000);
+    return () => {
+      alive = false; window.clearInterval(interval); unlisten?.();
+      window.removeEventListener('focus', catchUp);
+      document.removeEventListener('visibilitychange', visible);
+    };
   }, [run, agent, limit, refreshKey]);
   return { run, agent, host, data, error, loading, refresh, reset, selectRun, selectAgent,
     loadEarlier: () => setLimit(value => Math.min(10_000, value + 500)), historyLimit: limit };

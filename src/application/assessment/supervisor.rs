@@ -48,9 +48,11 @@ impl RunSupervisor {
             tasks: vec![],
         };
         let runner = runner.with_store(runner.store.fenced(lease.clone()));
-        if let Some(budget) = budget {
-            runner.coordinator.resume(run_id, Some(budget))?;
-        }
+        runner.coordinator.resume_once(
+            run_id,
+            budget,
+            &format!("{}:{}", lease.owner, lease.epoch()),
+        )?;
         let mut heartbeat = supervisor.heartbeat(runner.clone());
         supervisor.tasks.push(heartbeat.abort_handle());
         let mut environment_heartbeat = supervisor.environment_heartbeat(runner.clone());

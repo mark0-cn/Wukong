@@ -205,6 +205,16 @@ impl Controller {
             result = future => result,
         }
     }
+    fn observe_tool_action(&self, snapshot: super::update_health::Health) {
+        let mut state = self.edit();
+        state.needs_setup = !snapshot.configured;
+        state.diagnosis = snapshot
+            .error
+            .as_ref()
+            .map(super::update_diagnostics::classify);
+        state.health = snapshot;
+    }
+
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
     }
@@ -389,13 +399,18 @@ impl Controller {
                     crate::application::maintenance::workbench::DesktopRequest::Select { id: None }
                 }
             };
+            self.edit().health = Default::default();
             let worker_service = service.clone();
             tokio::task::spawn_blocking(move || worker_service.workbench(epoch, request)).await??;
-            let configured = self.status().health.configured;
-            self.edit().health = super::update_health::Health {
-                configured,
-                ..Default::default()
-            };
+            // Selection changes the context epoch. Observe the successful action
+            // from its current context, never reuse a pre-start readiness flag.
+            let current_epoch = service.status().epoch;
+            let (config, _, _operation) = service.maintenance_context(current_epoch)?;
+            let snapshot = tokio::task::spawn_blocking(move || {
+                super::update_health::check_workbench(&config, false, current_epoch)
+            })
+            .await??;
+            self.observe_tool_action(snapshot);
             self.phase("idle", UiMessage::new("system-tool-action-completed"));
             return Ok(());
         }
@@ -687,6 +702,26 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tool_start_replaces_setup_state_with_current_health_without_claiming_self_tests() {
+        let controller = Controller::default();
+        controller.initialization(&AppConfig::default());
+        assert!(controller.status().needs_setup);
+        controller.observe_tool_action(super::super::update_health::Health {
+            configured: true,
+            running: Some(true),
+            docker: Some(true),
+            epoch: Some(2),
+            checked_at: Some("observed".into()),
+            ..Default::default()
+        });
+        let state = controller.status();
+        assert!(!state.needs_setup);
+        assert_eq!(state.health.running, Some(true));
+        assert_eq!(state.health.epoch, Some(2));
+        assert_eq!(state.health.tools, None);
+    }
+
     #[test]
     fn cancellation_is_bound_to_operation_and_sealed_before_activation() {
         let controller = Controller::default();

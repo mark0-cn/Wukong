@@ -115,7 +115,6 @@ impl KernelHost {
     pub(crate) fn prepare_run(&self, run_id: &str) -> Result<RunRecord> {
         let mut run = self.run(run_id)?;
         ensure!(!run.status.terminal(), "cannot drive a terminal assessment");
-        self.coordinator.resume(run_id, None)?;
         let root = self.store.agent_snapshot(&run.root_id)?;
         ensure!(
             root.checkpoint.is_none()
@@ -228,7 +227,7 @@ impl KernelHost {
             .checkpoint_and_ack_generation(id, checkpoint, messages, generation)
     }
     pub(crate) fn pause_budget(&self, run: &str, reason: &str) -> Result<()> {
-        self.coordinator.pause_budget(run, reason)
+        self.coordinator.pause_interrupted(run, reason)
     }
     pub(crate) fn release_dependencies(&self, run: &str) -> Result<usize> {
         self.coordinator.release_dependencies(run)

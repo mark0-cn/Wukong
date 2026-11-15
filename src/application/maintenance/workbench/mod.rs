@@ -219,7 +219,7 @@ impl Workbench {
     pub fn desktop(&self, request: DesktopRequest) -> Result<Value> {
         match request {
             DesktopRequest::Status => self.status(),
-            DesktopRequest::Up => self.up(None),
+            DesktopRequest::Up => self.ensure_up(None, environment::ImageAcquisition::LocalOnly),
             DesktopRequest::Down => self.down(),
             DesktopRequest::Doctor => self.doctor(),
             DesktopRequest::List => self.challenges(),

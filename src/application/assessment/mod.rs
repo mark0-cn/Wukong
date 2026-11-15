@@ -112,7 +112,7 @@ impl AssessmentService {
     }
 
     pub fn pause(&self, run: &str, reason: &str) -> Result<()> {
-        Coordinator::new(self.store.clone()).pause_budget(run, reason)
+        Coordinator::new(self.store.clone()).pause_operator(run, reason)
     }
     pub fn stop(&self, agent: &str, reason: &str) -> Result<Vec<String>> {
         Coordinator::new(self.store.clone()).stop(agent, reason)

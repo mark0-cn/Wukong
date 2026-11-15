@@ -46,6 +46,13 @@ def idle(root):
     return {"idle": not active, "active": active}
 
 
+def health(root):
+    """Cheap startup probe; full tool self-tests remain an explicit doctor action."""
+    from wukong_worker.host.identity import WorkerIdentity
+
+    return {"healthy": True, "identity": WorkerIdentity(root).value}
+
+
 def doctor(root):
     from wukong_worker.host.capabilities import doctor as inventory
     from wukong_worker.host.runtime import Runtime
@@ -150,6 +157,6 @@ if __name__ == "__main__":
     action = sys.argv[1]
     root = Path(sys.argv[2]).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    if action not in {"idle", "doctor"}:
+    if action not in {"idle", "doctor", "health"}:
         raise ValueError("unknown management probe")
-    print(json.dumps(idle(root) if action == "idle" else doctor(root)))
+    print(json.dumps({"idle": idle, "doctor": doctor, "health": health}[action](root)))

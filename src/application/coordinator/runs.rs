@@ -90,9 +90,18 @@ impl Coordinator {
         Ok(run)
     }
     pub fn pause_budget(&self, run_id: &str, reason: &str) -> Result<()> {
+        self.pause(run_id, reason, "budget")
+    }
+    pub fn pause_operator(&self, run_id: &str, reason: &str) -> Result<()> {
+        self.pause(run_id, reason, "operator")
+    }
+    pub(crate) fn pause_interrupted(&self, run_id: &str, reason: &str) -> Result<()> {
+        self.pause(run_id, reason, "interrupted")
+    }
+    fn pause(&self, run_id: &str, reason: &str, cause: &str) -> Result<()> {
         self.store.write(|tx| {
             let mut run: RunRecord = tx.get_record(run_id)?.context("run missing")?;
-            if run.status.terminal() {
+            if run.status.terminal() || run.status == Status::BudgetPaused {
                 return Ok(());
             }
             run.status = Status::BudgetPaused;
@@ -105,12 +114,39 @@ impl Coordinator {
                     tx.save_record(&agent)?;
                 }
             }
-            tx.event(run_id, None, "run.budget_paused", json!({"reason":reason}))?;
+            tx.event(
+                run_id,
+                None,
+                if cause == "budget" {
+                    "run.budget_paused"
+                } else {
+                    "run.paused"
+                },
+                json!({"reason":reason,"cause":cause}),
+            )?;
             Ok(())
         })
     }
     pub fn resume(&self, run_id: &str, budget: Option<Budget>) -> Result<()> {
+        self.resume_once(run_id, budget, &id("resume"))
+    }
+    /// One controller ownership epoch is one logical lifecycle transition.
+    /// Replayed attempts cannot reset running agents or publish duplicate events.
+    pub fn resume_once(&self, run_id: &str, budget: Option<Budget>, operation: &str) -> Result<()> {
+        ensure!(
+            !operation.is_empty() && operation.len() <= 256,
+            "invalid resume operation identity"
+        );
+        let key = format!("{run_id}:resume:{operation}");
+        let request = json!({"budget":budget});
         self.store.write(|tx| {
+            if let Some(previous) = tx.get::<Value>("run_transition", &key)? {
+                ensure!(
+                    previous == request,
+                    "resume operation identity reused with different arguments"
+                );
+                return Ok(());
+            }
             let mut run: RunRecord = tx.get_record(run_id)?.context("run missing")?;
             if run.status.terminal() {
                 bail!("terminal run cannot be resumed");
@@ -155,8 +191,9 @@ impl Coordinator {
                 } else {
                     "run.resumed"
                 },
-                json!({}),
+                json!({"operation_id":operation}),
             )?;
+            tx.put("run_transition", &key, run_id, &request)?;
             Ok(())
         })
     }
