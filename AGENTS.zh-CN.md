@@ -106,6 +106,7 @@
 ## CI、版本与发布
 
 - 优先使用 GitHub 标准托管 runner，只维护在线发行包；具体工作流按发布文档执行。
+- PR CI 是合入门禁，master CI 是独立的合入后验证，两者都须跟踪至完成。保持 `summary` 与 `commit-policy` 检查名稳定，选中的专项验收必须汇入 `summary`。使用文档中的 [Actions 入口](docs/development/github-maintenance.zh-CN.md#actions-entry-points)。
 - 版本通过版本准备流程同步，版本 PR 保持纯版本变更；tag 使用 `vMAJOR.MINOR.PATCH`，与项目版本一致，指向已合入 `master` 的提交。
 - **合并版本 PR 会自动触发正式发布，必须已有明确的发布授权。** 普通开发改动的合并授权不自动包含版本发布；会话中已有的明确授权无需重复索取。
 - 配置或验证发布流水线不等于要求立即发布版本；未要求发布时使用手动演练。

@@ -6,8 +6,8 @@
       "zh-CN": "966058f71a165fe85983985ce485ec1df0469e01bc6b90e28af88dc17eaab1e9"
     },
     "AGENTS.md": {
-      "en": "7456860599aac23c62b62462baf72e3596964a34f5389897c5fe8e6d12b24083",
-      "zh-CN": "4734da7f27ae5ffdfb68e69c28faa8caa8fd446b331374ef91f661228e2d6a17"
+      "en": "ba25c1b30881a0676e7ef77b9af0ee9de353ce7560154d3c198812d0ea415df6",
+      "zh-CN": "d1df1e41e1b87b740712d33a98edb92a2bc1bb246de619d912966b510c8ca622"
     },
     "README.md": {
       "en": "d77b454b37bfab80fdbec80b9927ac81eefba878d25667e3d4773c0b82ba5baa",
@@ -76,6 +76,10 @@
     "docs/history/validation/2026-11-09/agent-skills.md": {
       "en": "f779acf4567947ae4d61b13e77c585cbbaf5d13e15337773661797e9a0ba6502",
       "zh-CN": "ec336fceccf444883a143ffdbd299f726b012b30981115a6d114e21dd04d5d72"
+    },
+    "docs/history/validation/2026-11-15-actions-redesign.md": {
+      "en": "91f56a0ec78a3d5a664cb7f8aa895c93b56c719dfa8fe18a8c41ff232fe72415",
+      "zh-CN": "41ca38a3b622f2ac8f93215bc1c34b44f536e094794c0079edcea4be842eb1d1"
     },
     "docs/history/validation/2026-11-15-architecture-cleanup.md": {
       "en": "381a6cbdf952c4230016ea96e18e293f2c603fc94d3a7a986a930fd817d8520c",
