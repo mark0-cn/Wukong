@@ -1,4 +1,5 @@
 """Build one native desktop distribution; tool images are downloaded on first use."""
+
 import argparse
 import os
 import subprocess
@@ -13,9 +14,21 @@ def build(platform, signed=False):
     npm = "npm.cmd" if os.name == "nt" else "npm"
     npx = "npx.cmd" if os.name == "nt" else "npx"
     subprocess.run([npm, "ci"], cwd=ROOT, check=True)
-    subprocess.run([npx, "--no-install", "tauri", "build", "--ci", "--config",
-                    '{"bundle":{"createUpdaterArtifacts":' + str(signed).lower() + '}}', '--', '--locked'],
-                   cwd=ROOT, check=True)
+    subprocess.run(
+        [
+            npx,
+            "--no-install",
+            "tauri",
+            "build",
+            "--ci",
+            "--config",
+            '{"bundle":{"createUpdaterArtifacts":' + str(signed).lower() + "}}",
+            "--",
+            "--locked",
+        ],
+        cwd=ROOT,
+        check=True,
+    )
 
 
 if __name__ == "__main__":

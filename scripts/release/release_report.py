@@ -1,4 +1,5 @@
 """Copy only compact package metadata for the Actions summary."""
+
 import json
 from pathlib import Path
 import shutil
@@ -10,8 +11,14 @@ def create(source, destination):
         path = source / name
         if path.is_file():
             shutil.copy2(path, destination / name)
-    archives = [dict(name=path.name, size_bytes=path.stat().st_size) for path in sorted(source.iterdir()) if path.suffix in {'.zip', '.exe', '.AppImage'}]
-    (destination / "archives.json").write_text(json.dumps(archives, indent=2) + "\n", encoding="utf-8")
+    archives = [
+        dict(name=path.name, size_bytes=path.stat().st_size)
+        for path in sorted(source.iterdir())
+        if path.suffix in {".zip", ".exe", ".AppImage"}
+    ]
+    (destination / "archives.json").write_text(
+        json.dumps(archives, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":

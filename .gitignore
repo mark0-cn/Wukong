@@ -42,3 +42,6 @@ __pycache__/
 
 # Local Python package build metadata
 *.egg-info/
+
+# Local Python style-check cache
+.ruff_cache/

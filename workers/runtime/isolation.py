@@ -1,4 +1,5 @@
 """Linux credential boundary between trusted worker metadata and experiments."""
+
 import base64
 import hashlib
 import json
@@ -32,6 +33,7 @@ def ensure_uid_entries(start=20000, count=512):
 
 def allocate_uid(root):
     import fcntl
+
     lock = root / "uid-allocator.lock"
     with lock.open("a+b") as stream:
         os.chmod(lock, 0o600)
@@ -50,11 +52,13 @@ def allocate_uid(root):
         # pwd.getpwuid-based tooling (pyvex/getpass) keeps working forever.
         try:
             import pwd
+
             pwd.getpwuid(value)
         except (ImportError, KeyError):
             with open("/etc/passwd", "a", encoding="utf-8") as entries:
-                entries.write("wukong-%d:x:%d:%d::/nonexistent:/bin/false\n"
-                              % (value, value, value))
+                entries.write(
+                    "wukong-%d:x:%d:%d::/nonexistent:/bin/false\n" % (value, value, value)
+                )
         return value
 
 
@@ -72,33 +76,46 @@ def sandbox(root, uid):
     try:
         os.chown(work, uid, uid)
     except PermissionError as error:
-        raise ValueError("isolated worker requires CAP_CHOWN, SETUID and SETGID to own experiment directories") from error
-    return {"root": str(directory), "readonly": str(readonly), "work": str(work), "uid": uid,
-            "state_root": str(Path(root).resolve())}
+        raise ValueError(
+            "isolated worker requires CAP_CHOWN, SETUID and SETGID to own experiment directories"
+        ) from error
+    return {
+        "root": str(directory),
+        "readonly": str(readonly),
+        "work": str(work),
+        "uid": uid,
+        "state_root": str(Path(root).resolve()),
+    }
 
 
 def _public_source(source, experiment, derived_sha256=None):
     from worker_common import public_file, sha256_file
+
     state = Path(experiment["state_root"]).resolve()
     source = Path(source).resolve()
     if source != state and state not in source.parents:
         # Only the launch resolver supplies this hash, after validating public
         # source artifacts and the immutable prepared-runtime cache. A digest
         # never authorizes worker metadata or an arbitrary external path.
-        cache = Path('/tmp/wukong-launches')
+        cache = Path("/tmp/wukong-launches")
         try:
             member = source.relative_to(cache).parts
         except ValueError:
             member = ()
-        if (derived_sha256 is None or len(member) != 2 or member[1] != 'target'
-                or len(member[0]) != 64 or any(c not in '0123456789abcdef' for c in member[0])):
+        if (
+            derived_sha256 is None
+            or len(member) != 2
+            or member[1] != "target"
+            or len(member[0]) != 64
+            or any(c not in "0123456789abcdef" for c in member[0])
+        ):
             raise ValueError("staged input must be a public worker artifact")
         for path in [cache, source.parent, source]:
             status = path.lstat()
             if path.is_symlink() or status.st_uid != os.geteuid() or status.st_mode & 0o022:
-                raise ValueError('unsafe prepared launch input')
+                raise ValueError("unsafe prepared launch input")
         if not source.is_file() or sha256_file(source) != derived_sha256:
-            raise ValueError('prepared launch input identity changed')
+            raise ValueError("prepared launch input identity changed")
         return source
     return public_file(state, source.relative_to(state).as_posix())
 
@@ -106,9 +123,12 @@ def _public_source(source, experiment, derived_sha256=None):
 def stage_file(source, experiment, name=None, executable=False, *, derived_sha256=None):
     source = _public_source(source, experiment, derived_sha256)
     destination = Path(experiment["readonly"]) / (name or (uuid.uuid4().hex + "-" + source.name))
-    if not destination.is_relative_to(Path(experiment['readonly'])) or '..' in Path(name or source.name).parts:
-        raise ValueError('staged file name must stay inside readonly storage')
-    destination.parent.mkdir(parents=True,exist_ok=True)
+    if (
+        not destination.is_relative_to(Path(experiment["readonly"]))
+        or ".." in Path(name or source.name).parts
+    ):
+        raise ValueError("staged file name must stay inside readonly storage")
+    destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
     destination.chmod(0o555 if executable else 0o444)
     return destination
@@ -150,7 +170,12 @@ def seal(experiment):
 
 
 def credentials(experiment):
-    return {"user": experiment["uid"], "group": experiment["uid"], "extra_groups": [], "umask": 0o077}
+    return {
+        "user": experiment["uid"],
+        "group": experiment["uid"],
+        "extra_groups": [],
+        "umask": 0o077,
+    }
 
 
 def collect(root, experiment, destination, mode, env):
@@ -160,8 +185,14 @@ def collect(root, experiment, destination, mode, env):
     Collected target bytes remain untrusted artifacts, never job authority.
     """
     source = Path(experiment["work"]) / "fuzz" if mode == "fuzz" else Path(experiment["work"])
-    result = subprocess.run([sys.executable, str(Path(__file__).with_name("collect.py")), str(source), mode],
-                            stdin=subprocess.DEVNULL, capture_output=True, env=env, timeout=15, **credentials(experiment))
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("collect.py")), str(source), mode],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        env=env,
+        timeout=15,
+        **credentials(experiment),
+    )
     if result.returncode != 0 or len(result.stdout) > 24 * 1048576:
         raise ValueError("experiment artifact collector failed")
     data = json.loads(result.stdout)

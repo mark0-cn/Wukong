@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Bounded artifact collector, run under one experiment's unprivileged UID."""
+
 import base64
 import json
 from pathlib import Path
@@ -13,7 +14,11 @@ if root.is_dir():
         for path in sorted(root.glob("*/fuzzer_stats"))[:32]:
             if not path.is_symlink() and root in path.resolve().parents:
                 text = path.read_text(errors="replace")[:65536]
-                stats[path.parent.name] = dict((line.split(":", 1)[0].strip(), line.split(":", 1)[1].strip()) for line in text.splitlines() if ":" in line)
+                stats[path.parent.name] = dict(
+                    (line.split(":", 1)[0].strip(), line.split(":", 1)[1].strip())
+                    for line in text.splitlines()
+                    if ":" in line
+                )
         candidates = sorted(root.glob("*/crashes/id*"))[:128]
     else:
         candidates = sorted(root.rglob("*"))[:256]
@@ -27,5 +32,7 @@ if root.is_dir():
         if len(data) > 1048576:
             continue
         total += len(data)
-        files.append({"path": path.relative_to(root).as_posix(), "data": base64.b64encode(data).decode()})
+        files.append(
+            {"path": path.relative_to(root).as_posix(), "data": base64.b64encode(data).decode()}
+        )
 print(json.dumps({"stats": stats, "files": files}))

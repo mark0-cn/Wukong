@@ -1,10 +1,11 @@
 """Files."""
+
 import base64
 import threading
 from worker_common import MAX_FILE, artifact, bounded_int, confined, public_file
 
-class FileService:
 
+class FileService:
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated
         self.lock = threading.RLock()
@@ -30,4 +31,7 @@ class FileService:
         maximum = bounded_int(params.get("max_bytes"), 1048576, 1, MAX_FILE)
         if not path.is_file() or path.stat().st_size > maximum:
             raise ValueError("file exceeds max_bytes or is not a regular file")
-        return {**artifact(self.root, path), "data_base64": base64.b64encode(path.read_bytes()).decode()}
+        return {
+            **artifact(self.root, path),
+            "data_base64": base64.b64encode(path.read_bytes()).decode(),
+        }

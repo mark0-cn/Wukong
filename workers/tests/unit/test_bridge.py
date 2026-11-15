@@ -1,4 +1,5 @@
 """Portable runtime transport tests; all executed commands are trusted fixtures."""
+
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ class SessionLaunchTests(unittest.TestCase):
     def test_interactive_cleanup_failure_retains_the_owned_session(self):
         from worker_sessions import SessionManager
         from unittest.mock import Mock
+
         with tempfile.TemporaryDirectory() as directory:
             manager = SessionManager(Path(directory), trusted=True, isolated=False)
             session = Mock(id="owned")
@@ -30,28 +32,38 @@ class SessionLaunchTests(unittest.TestCase):
 
     def test_lost_session_error_kind_survives_durable_replay(self):
         import worker_runtime as bridge
-        from worker_common import WorkerError,error_kind
+        from worker_common import WorkerError, error_kind
+
         with tempfile.TemporaryDirectory() as directory:
             runtime = bridge.Runtime(Path(directory), trusted=True)
             for _ in range(2):
                 with self.assertRaises(WorkerError) as error:
-                    runtime.dispatch("debug.close", {"session_id": "missing", "request_id": "lost-debug"})
+                    runtime.dispatch(
+                        "debug.close", {"session_id": "missing", "request_id": "lost-debug"}
+                    )
                 self.assertEqual(error_kind(error.exception), "session_lost")
 
     def test_isolated_interactive_launch_drops_credentials(self):
         import worker_interactive as bridge
         import isolation
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             work = root / "work"
             work.mkdir()
             experiment = {"uid": 20000, "root": str(root), "readonly": str(root), "work": str(work)}
-            with patch.object(isolation, "allocate_uid", return_value=20000), \
-                    patch.object(isolation, "sandbox", return_value=experiment), \
-                    patch.object(isolation, "seal"), \
-                    patch.object(bridge.subprocess, "Popen", side_effect=RuntimeError("capture options")) as launch:
+            with (
+                patch.object(isolation, "allocate_uid", return_value=20000),
+                patch.object(isolation, "sandbox", return_value=experiment),
+                patch.object(isolation, "seal"),
+                patch.object(
+                    bridge.subprocess, "Popen", side_effect=RuntimeError("capture options")
+                ) as launch,
+            ):
                 with self.assertRaisesRegex(RuntimeError, "capture options"):
-                    bridge.InteractSession(root, {"argv": [sys.executable, "-c", "pass"]}, isolated=True)
+                    bridge.InteractSession(
+                        root, {"argv": [sys.executable, "-c", "pass"]}, isolated=True
+                    )
                 options = launch.call_args.kwargs
                 self.assertEqual(options["user"], 20000)
                 self.assertEqual(options["group"], 20000)
@@ -64,6 +76,7 @@ class GdbMiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import worker_debugger
+
         if worker_debugger.parse_mi_response is None:
             raise unittest.SkipTest("pygdbmi is not installed; GDB/MI parsing tests skipped")
 
@@ -74,6 +87,7 @@ class GdbMiTests(unittest.TestCase):
         import queue
         import threading
         from types import SimpleNamespace
+
         session = bridge.DebugSession.__new__(bridge.DebugSession)
         session.id = "mi-fixture"
         session.directory = Path(directory)
@@ -86,36 +100,47 @@ class GdbMiTests(unittest.TestCase):
         session.stop_sequence = 0
         session.records = queue.Queue(maxsize=8)
         session.events = collections.deque(maxlen=256)
-        session.process = SimpleNamespace(stdout=io.StringIO(output), stdin=io.StringIO(), poll=lambda: None)
+        session.process = SimpleNamespace(
+            stdout=io.StringIO(output), stdin=io.StringIO(), poll=lambda: None
+        )
         return session
 
     def test_dump_raw_commands_cannot_launch_or_modify_targets(self):
         with tempfile.TemporaryDirectory() as directory:
             session = self.session(directory, "")
             session.mode = "dump"
-            for command in ["-exec-run", "-data-write-memory-bytes 0x1 ff", '-data-evaluate-expression "function()"']:
-                with self.subTest(command=command), self.assertRaisesRegex(ValueError,"read-only"):
-                    session.command(command,1)
+            for command in [
+                "-exec-run",
+                "-data-write-memory-bytes 0x1 ff",
+                '-data-evaluate-expression "function()"',
+            ]:
+                with self.subTest(command=command), self.assertRaisesRegex(ValueError, "read-only"):
+                    session.command(command, 1)
 
     def test_unsafe_isolated_and_dump_arguments_never_reach_gdb_stdin(self):
         expression = json.dumps('$_shell("id")')
-        for mode, command in [('launch', '-data-evaluate-expression '+expression),
-                              ('launch', '-break-condition 1 '+expression),
-                              ('dump', '-data-read-memory-bytes '+expression+' 16')]:
-            with self.subTest(mode=mode,command=command), tempfile.TemporaryDirectory() as directory:
-                session = self.session(directory, '')
-                session.isolated = mode == 'launch'
+        for mode, command in [
+            ("launch", "-data-evaluate-expression " + expression),
+            ("launch", "-break-condition 1 " + expression),
+            ("dump", "-data-read-memory-bytes " + expression + " 16"),
+        ]:
+            with (
+                self.subTest(mode=mode, command=command),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                session = self.session(directory, "")
+                session.isolated = mode == "launch"
                 session.mode = mode
                 with self.assertRaises(ValueError):
-                    session.command(command,1)
-                self.assertEqual(session.process.stdin.getvalue(),'')
-                self.assertEqual(session.token,0)
+                    session.command(command, 1)
+                self.assertEqual(session.process.stdin.getvalue(), "")
+                self.assertEqual(session.token, 0)
 
     def test_nested_payloads_escaping_and_async_events(self):
-        records = r'''*stopped,reason="breakpoint-hit",frame={func="main",line="12"}
+        records = r"""*stopped,reason="breakpoint-hit",frame={func="main",line="12"}
 1^done,bkpt={number="1",fullname="a\"b.c"},stack=[frame={level="0",func="main"}]
 (gdb)
-'''
+"""
         with tempfile.TemporaryDirectory() as directory:
             session = self.session(directory, records)
             session.read_records()
@@ -130,8 +155,9 @@ class GdbMiTests(unittest.TestCase):
 
     def test_oversized_mi_records_invalidate_the_session(self):
         import worker_debugger as bridge
+
         with tempfile.TemporaryDirectory() as directory:
-            session = self.session(directory, '1^done,value="' + 'x' * 70000 + '"\n')
+            session = self.session(directory, '1^done,value="' + "x" * 70000 + '"\n')
             with patch.object(bridge, "terminate_tree") as terminate:
                 session.read_records()
             terminate.assert_called_once_with(session.process)
@@ -144,6 +170,7 @@ class GhidraProjectLockTests(unittest.TestCase):
         import ghidra_backend
         import hashlib
         from filelock import FileLock, Timeout
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             target = root / "files/sample"
@@ -159,9 +186,23 @@ class GhidraProjectLockTests(unittest.TestCase):
             scripts = root / "scripts"
             scripts.mkdir()
             (scripts / "WukongBridge.java").write_text("fixture bridge")
-            params = {"target": "files/sample", "target_sha256": hashlib.sha256(b"fixture").hexdigest(), "query": {"operation": "functions"}}
-            with patch.dict(os.environ, {"WUKONG_GHIDRA_HEADLESS": str(headless), "WUKONG_GHIDRA_SCRIPT_DIR": str(scripts)}), \
-                    patch.object(ghidra_backend, "run_process", side_effect=RuntimeError("owner lost")) as execute:
+            params = {
+                "target": "files/sample",
+                "target_sha256": hashlib.sha256(b"fixture").hexdigest(),
+                "query": {"operation": "functions"},
+            }
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "WUKONG_GHIDRA_HEADLESS": str(headless),
+                        "WUKONG_GHIDRA_SCRIPT_DIR": str(scripts),
+                    },
+                ),
+                patch.object(
+                    ghidra_backend, "run_process", side_effect=RuntimeError("owner lost")
+                ) as execute,
+            ):
                 with self.assertRaisesRegex(RuntimeError, "owner lost"):
                     ghidra_backend.query(root, params)
                 project = next((root / "ghidra/projects").iterdir())
@@ -183,7 +224,15 @@ class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.client = Client(self.root, trusted_local=True, environment={**os.environ, "OPENAI_API_KEY": "fixture-secret", "ANTHROPIC_API_KEY": "fixture-secret"})
+        self.client = Client(
+            self.root,
+            trusted_local=True,
+            environment={
+                **os.environ,
+                "OPENAI_API_KEY": "fixture-secret",
+                "ANTHROPIC_API_KEY": "fixture-secret",
+            },
+        )
 
     def tearDown(self):
         try:
@@ -199,7 +248,11 @@ class RuntimeTests(unittest.TestCase):
                     time.sleep(0.05)
 
     def test_reconnect_and_request_identity(self):
-        params = {"argv": [sys.executable, "-c", "import time;time.sleep(0.5);print('durable')"], "request_id": "durable-1", "timeout_secs": 4}
+        params = {
+            "argv": [sys.executable, "-c", "import time;time.sleep(0.5);print('durable')"],
+            "request_id": "durable-1",
+            "timeout_secs": 4,
+        }
         job = self.client.call("job.start", **params)
         self.client.close()
         self.client = Client(self.root, trusted_local=True)
@@ -211,10 +264,20 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(len(self.client.call("job.list")), 1)
 
     def test_output_cap_and_timeout(self):
-        result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "print('a'*200000)"], output_limit=1024))
+        result = self.client.finish(
+            self.client.call(
+                "job.start", argv=[sys.executable, "-c", "print('a'*200000)"], output_limit=1024
+            )
+        )
         self.assertTrue(result["result"]["output_truncated"])
         self.assertLessEqual(len(result["result"]["stdout"]), 1024)
-        result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import time;time.sleep(60)"], timeout_secs=1))
+        result = self.client.finish(
+            self.client.call(
+                "job.start",
+                argv=[sys.executable, "-c", "import time;time.sleep(60)"],
+                timeout_secs=1,
+            )
+        )
         self.assertEqual(result["state"], "timed_out")
 
     def test_exec_run_sync_and_idempotent_replay(self):
@@ -228,7 +291,9 @@ class RuntimeTests(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "POSIX shell fixture")
     def test_exec_run_timeout_kills_the_process(self):
-        timed = self.client.call("exec.run", command="sleep 60", timeout_secs=1, request_id="exec-2")
+        timed = self.client.call(
+            "exec.run", command="sleep 60", timeout_secs=1, request_id="exec-2"
+        )
         self.assertEqual(timed["state"], "timed_out")
 
     @unittest.skipIf(os.name == "nt", "POSIX shell pipeline fixture")
@@ -262,7 +327,11 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result["result"]["results"][0]["input_mode"], "stdin")
 
     def test_supervisor_survives_owner_daemon_restart(self):
-        job = self.client.call("job.start", argv=[sys.executable, "-c", "import time;time.sleep(1);print('owner-recovered')"], request_id="owner-recovery")
+        job = self.client.call(
+            "job.start",
+            argv=[sys.executable, "-c", "import time;time.sleep(1);print('owner-recovered')"],
+            request_id="owner-recovery",
+        )
         daemon_pid = self.client.call("ping")["daemon_pid"]
         self.client.close()
         os.kill(daemon_pid, signal.SIGTERM)
@@ -273,8 +342,16 @@ class RuntimeTests(unittest.TestCase):
 
     def test_cancel_kills_descendants(self):
         marker = self.root / "child-survived.txt"
-        child = "import time,pathlib;time.sleep(2);pathlib.Path(" + repr(str(marker)) + ").write_text('alive')"
-        command = "import subprocess,sys,time;subprocess.Popen([sys.executable,'-c'," + repr(child) + "]);time.sleep(60)"
+        child = (
+            "import time,pathlib;time.sleep(2);pathlib.Path("
+            + repr(str(marker))
+            + ").write_text('alive')"
+        )
+        command = (
+            "import subprocess,sys,time;subprocess.Popen([sys.executable,'-c',"
+            + repr(child)
+            + "]);time.sleep(60)"
+        )
         job = self.client.call("job.start", argv=[sys.executable, "-c", command], timeout_secs=10)
         time.sleep(0.3)
         self.client.call("job.cancel", job_id=job["job_id"], request_id="cancel-1")
@@ -283,12 +360,30 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(marker.exists(), "cancelled command left a descendant running")
 
     def test_worker_receives_no_provider_credentials(self):
-        result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(','.join(k for k in os.environ if 'API_KEY' in k or 'TOKEN' in k))"]))
+        result = self.client.finish(
+            self.client.call(
+                "job.start",
+                argv=[
+                    sys.executable,
+                    "-c",
+                    "import os;print(','.join(k for k in os.environ if 'API_KEY' in k or 'TOKEN' in k))",
+                ],
+            )
+        )
         self.assertEqual(result["result"]["stdout"].strip(), "")
         self.assertEqual(self.client.call("doctor")["protocol"], 3)
 
     def test_job_environment_carries_state_and_job_dirs(self):
-        result = self.client.finish(self.client.call("job.start", argv=[sys.executable, "-c", "import os;print(os.environ['WUKONG_STATE_DIR']);print(os.environ['WUKONG_JOB_DIR'])"]))
+        result = self.client.finish(
+            self.client.call(
+                "job.start",
+                argv=[
+                    sys.executable,
+                    "-c",
+                    "import os;print(os.environ['WUKONG_STATE_DIR']);print(os.environ['WUKONG_JOB_DIR'])",
+                ],
+            )
+        )
         state_dir, job_dir = result["result"]["stdout"].strip().splitlines()
         self.assertTrue(Path(state_dir).is_dir())
         self.assertTrue(Path(job_dir).is_dir())
@@ -304,17 +399,23 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.client.call("file.put", path="../../outside", data_base64="eA==")
         with self.assertRaises(AssertionError):
-            self.client.call("job.start", argv=[sys.executable, "-c", "pass"], env={"OPENAI_API_KEY": "rejected"})
+            self.client.call(
+                "job.start", argv=[sys.executable, "-c", "pass"], env={"OPENAI_API_KEY": "rejected"}
+            )
 
     def test_interactive_session_echo_and_ownership(self):
         program = "import sys\nfor line in sys.stdin:\n    line=line.strip()\n    if line=='quit': break\n    print('echo:'+line, flush=True)\n"
         started = self.client.call("interact.start", argv=[sys.executable, "-c", program])
         session_id = started["session_id"]
         self.assertEqual(started["state"], "running")
-        first = self.client.call("interact.write", session_id=session_id, data_base64="aGVsbG8K", read_timeout_secs=5)
+        first = self.client.call(
+            "interact.write", session_id=session_id, data_base64="aGVsbG8K", read_timeout_secs=5
+        )
         self.assertIn("echo:hello", first["captured"])
         self.assertEqual(first["state"], "running")
-        second = self.client.call("interact.write", session_id=session_id, data_base64="cXVpdAo=", read_timeout_secs=5)
+        second = self.client.call(
+            "interact.write", session_id=session_id, data_base64="cXVpdAo=", read_timeout_secs=5
+        )
         self.assertEqual(second["state"], "exited")
         self.assertEqual(second["exit_code"], 0)
         closed = self.client.call("interact.close", session_id=session_id)
@@ -326,28 +427,58 @@ class RuntimeTests(unittest.TestCase):
 
     def test_interactive_writes_are_ledger_deduplicated(self):
         program = "import sys\nfor line in sys.stdin:\n    line=line.strip()\n    if line=='quit': break\n    print('echo:'+line, flush=True)\n"
-        started = self.client.call("interact.start", argv=[sys.executable, "-c", program], request_id="interact-start-dedup")
+        started = self.client.call(
+            "interact.start",
+            argv=[sys.executable, "-c", program],
+            request_id="interact-start-dedup",
+        )
         session_id = started["session_id"]
-        first = self.client.call("interact.write", session_id=session_id, data_base64="aGVsbG8K", read_timeout_secs=5, request_id="write-dedup-1")
+        first = self.client.call(
+            "interact.write",
+            session_id=session_id,
+            data_base64="aGVsbG8K",
+            read_timeout_secs=5,
+            request_id="write-dedup-1",
+        )
         self.assertIn("echo:hello", first["captured"])
         # An identical replay must return the recorded result instead of
         # writing the bytes a second time.
-        replay = self.client.call("interact.write", session_id=session_id, data_base64="aGVsbG8K", read_timeout_secs=5, request_id="write-dedup-1")
+        replay = self.client.call(
+            "interact.write",
+            session_id=session_id,
+            data_base64="aGVsbG8K",
+            read_timeout_secs=5,
+            request_id="write-dedup-1",
+        )
         self.assertEqual(first, replay)
         self.assertEqual(replay["captured"].count("echo:hello"), 1)
         # A completed start replay returns the same session instead of
         # launching a second process.
-        started_replay = self.client.call("interact.start", argv=[sys.executable, "-c", program], request_id="interact-start-dedup")
+        started_replay = self.client.call(
+            "interact.start",
+            argv=[sys.executable, "-c", program],
+            request_id="interact-start-dedup",
+        )
         self.assertEqual(started_replay["session_id"], session_id)
 
     @unittest.skipIf(os.name == "nt", "POSIX process group regression")
     def test_interactive_close_reaps_children_after_leader_exits(self):
         marker = self.root / "orphan-survived.txt"
-        child = "import pathlib,time;time.sleep(1.5);pathlib.Path(" + repr(str(marker)) + ").write_text('alive')"
-        program = "import subprocess,sys;subprocess.Popen([sys.executable,'-c'," + repr(child) + "]);print('spawned',flush=True)"
+        child = (
+            "import pathlib,time;time.sleep(1.5);pathlib.Path("
+            + repr(str(marker))
+            + ").write_text('alive')"
+        )
+        program = (
+            "import subprocess,sys;subprocess.Popen([sys.executable,'-c',"
+            + repr(child)
+            + "]);print('spawned',flush=True)"
+        )
         started = self.client.call("interact.start", argv=[sys.executable, "-c", program])
         time.sleep(0.25)
-        result = self.client.call("interact.write", session_id=started["session_id"], data_base64="", read_timeout_secs=1)
+        result = self.client.call(
+            "interact.write", session_id=started["session_id"], data_base64="", read_timeout_secs=1
+        )
         self.assertEqual(result["state"], "exited")
         self.assertFalse(result["data_sent"])
         self.client.call("interact.close", session_id=started["session_id"])
@@ -369,12 +500,17 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.client.call("angr.solve", target="files/dummy.bin", find=[])
         with self.assertRaises(AssertionError):
-            self.client.call("angr.solve", target="files/dummy.bin", find=[4194304], stdin_length=999999)
+            self.client.call(
+                "angr.solve", target="files/dummy.bin", find=[4194304], stdin_length=999999
+            )
         with self.assertRaises(AssertionError):
-            self.client.call("angr.solve", target="files/dummy.bin", find=[4194304], avoid=["not-an-int"])
+            self.client.call(
+                "angr.solve", target="files/dummy.bin", find=[4194304], avoid=["not-an-int"]
+            )
 
     def test_parse_address_accepts_integer_and_hex_spellings(self):
         from worker_common import parse_address
+
         self.assertEqual(parse_address(0), 0)
         self.assertEqual(parse_address(4198400), 4198400)
         self.assertEqual(parse_address("4198400"), 4198400)
@@ -386,16 +522,17 @@ class RuntimeTests(unittest.TestCase):
                 parse_address(invalid)
 
 
-
-
 class OperationLedgerTests(unittest.TestCase):
     def test_completed_effect_replays_after_ledger_reconstruction(self):
         from worker_operations import OperationLedger
+
         with tempfile.TemporaryDirectory() as directory:
             calls = []
+
             def execute(method, params):
                 calls.append(params)
                 return {"value": "committed"}
+
             params = {"request_id": "stable", "command": "fixture"}
             reconcile = lambda method, result: result
             first = OperationLedger(Path(directory)).invoke("exec.run", params, execute, reconcile)
@@ -403,22 +540,31 @@ class OperationLedgerTests(unittest.TestCase):
             self.assertEqual(first, replay)
             self.assertEqual(len(calls), 1)
             with self.assertRaisesRegex(ValueError, "different operation"):
-                OperationLedger(Path(directory)).invoke("exec.run", {**params, "command": "changed"}, execute, reconcile)
+                OperationLedger(Path(directory)).invoke(
+                    "exec.run", {**params, "command": "changed"}, execute, reconcile
+                )
 
     def test_owner_death_does_not_repeat_an_unknown_interactive_write(self):
         from worker_operations import OperationLedger
         from worker_common import WorkerError
+
         with tempfile.TemporaryDirectory() as directory:
             calls = []
+
             def execute(method, params):
                 calls.append(params)
                 raise SystemExit("owner died after reserving the operation")
+
             params = {"request_id": "pending", "session_id": "session", "data": "once"}
             reconcile = lambda method, result: result
             with self.assertRaises(SystemExit):
-                OperationLedger(Path(directory)).invoke("interact.write", params, execute, reconcile)
+                OperationLedger(Path(directory)).invoke(
+                    "interact.write", params, execute, reconcile
+                )
             with self.assertRaises(WorkerError) as error:
-                OperationLedger(Path(directory)).invoke("interact.write", params, execute, reconcile)
+                OperationLedger(Path(directory)).invoke(
+                    "interact.write", params, execute, reconcile
+                )
             self.assertEqual(error.exception.kind, "outcome_unknown")
             self.assertEqual(len(calls), 1)
 

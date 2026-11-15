@@ -1,4 +1,5 @@
 """Processes."""
+
 from pathlib import Path
 import os
 import signal
@@ -8,10 +9,12 @@ import threading
 import time
 from worker_common import MAX_FILE, tail
 
+
 def detached_options():
     if os.name == "nt":
         return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
     return {"start_new_session": True}
+
 
 def attach_windows_job(process):
     """A kill-on-close Job Object owns descendants, including orphaned children."""
@@ -19,28 +22,59 @@ def attach_windows_job(process):
         return
     import ctypes
     from ctypes import wintypes
+
     class BasicLimits(ctypes.Structure):
-        _fields_ = [("ProcessTime", ctypes.c_longlong), ("JobTime", ctypes.c_longlong), ("Flags", wintypes.DWORD),
-                    ("MinimumWorkingSet", ctypes.c_size_t), ("MaximumWorkingSet", ctypes.c_size_t), ("ActiveProcesses", wintypes.DWORD),
-                    ("Affinity", ctypes.c_size_t), ("Priority", wintypes.DWORD), ("Scheduling", wintypes.DWORD)]
+        _fields_ = [
+            ("ProcessTime", ctypes.c_longlong),
+            ("JobTime", ctypes.c_longlong),
+            ("Flags", wintypes.DWORD),
+            ("MinimumWorkingSet", ctypes.c_size_t),
+            ("MaximumWorkingSet", ctypes.c_size_t),
+            ("ActiveProcesses", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("Priority", wintypes.DWORD),
+            ("Scheduling", wintypes.DWORD),
+        ]
+
     class IoCounters(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_ulonglong) for name in ["ReadOps", "WriteOps", "OtherOps", "ReadBytes", "WriteBytes", "OtherBytes"]]
+        _fields_ = [
+            (name, ctypes.c_ulonglong)
+            for name in ["ReadOps", "WriteOps", "OtherOps", "ReadBytes", "WriteBytes", "OtherBytes"]
+        ]
+
     class ExtendedLimits(ctypes.Structure):
-        _fields_ = [("Basic", BasicLimits), ("Io", IoCounters), ("ProcessMemory", ctypes.c_size_t), ("JobMemory", ctypes.c_size_t),
-                    ("PeakProcessMemory", ctypes.c_size_t), ("PeakJobMemory", ctypes.c_size_t)]
+        _fields_ = [
+            ("Basic", BasicLimits),
+            ("Io", IoCounters),
+            ("ProcessMemory", ctypes.c_size_t),
+            ("JobMemory", ctypes.c_size_t),
+            ("PeakProcessMemory", ctypes.c_size_t),
+            ("PeakJobMemory", ctypes.c_size_t),
+        ]
+
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
     kernel.CreateJobObjectW.restype = wintypes.HANDLE
-    kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    kernel.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
     kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     handle = kernel.CreateJobObjectW(None, None)
     limits = ExtendedLimits()
     limits.Basic.Flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    if handle and kernel.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)) and kernel.AssignProcessToJobObject(handle, int(process._handle)):
+    if (
+        handle
+        and kernel.SetInformationJobObject(handle, 9, ctypes.byref(limits), ctypes.sizeof(limits))
+        and kernel.AssignProcessToJobObject(handle, int(process._handle))
+    ):
         process._wukong_job = (kernel, handle)
     elif handle:
         kernel.CloseHandle(handle)
+
 
 def close_windows_job(process):
     job = getattr(process, "_wukong_job", None)
@@ -50,6 +84,7 @@ def close_windows_job(process):
         return True
     return False
 
+
 def process_identity(pid):
     """Creation identity, not PID alone. Unknown access is not proof of death."""
     if not pid:
@@ -57,10 +92,13 @@ def process_identity(pid):
     if os.name == "nt":
         import ctypes
         from ctypes import wintypes
+
         kernel = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel.OpenProcess.restype = wintypes.HANDLE
-        kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+        kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [
+            ctypes.POINTER(wintypes.FILETIME)
+        ] * 4
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         handle = kernel.OpenProcess(0x1000, False, int(pid))
         if not handle:
@@ -91,6 +129,7 @@ def process_identity(pid):
     except PermissionError:
         return "unknown"
 
+
 def terminate_tree(process):
     if close_windows_job(process):
         try:
@@ -101,9 +140,13 @@ def terminate_tree(process):
     if os.name == "nt":
         if process.poll() is not None:
             return
-        subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       creationflags=subprocess.CREATE_NO_WINDOW, timeout=15)
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=15,
+        )
     else:
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -121,8 +164,24 @@ def terminate_tree(process):
     except subprocess.TimeoutExpired:
         process.kill()
 
-def run_process(argv, cwd, env, timeout_secs, output_limit, log_prefix, cancel_file=None, experiment=None, stdin_bytes=None):
-    if not isinstance(argv, list) or not argv or len(argv) > 128 or any(not isinstance(a, str) or "\0" in a or len(a) > 65536 for a in argv):
+
+def run_process(
+    argv,
+    cwd,
+    env,
+    timeout_secs,
+    output_limit,
+    log_prefix,
+    cancel_file=None,
+    experiment=None,
+    stdin_bytes=None,
+):
+    if (
+        not isinstance(argv, list)
+        or not argv
+        or len(argv) > 128
+        or any(not isinstance(a, str) or "\0" in a or len(a) > 65536 for a in argv)
+    ):
         raise ValueError("argv must be an array of 1..128 bounded strings")
     if stdin_bytes is not None and len(stdin_bytes) > MAX_FILE:
         raise ValueError("stdin payload exceeds 32 MiB")
@@ -130,10 +189,19 @@ def run_process(argv, cwd, env, timeout_secs, output_limit, log_prefix, cancel_f
     credential_options = {}
     if experiment:
         import isolation
+
         credential_options = isolation.credentials(experiment)
         env = {**env, "HOME": experiment["work"], "TMPDIR": experiment["work"]}
-    process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, **detached_options(), **credential_options)
+    process = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        **detached_options(),
+        **credential_options,
+    )
     attach_windows_job(process)
     counts = {"stdout": 0, "stderr": 0}
 
@@ -165,7 +233,10 @@ def run_process(argv, cwd, env, timeout_secs, output_limit, log_prefix, cancel_f
                 counts[name] += len(data)
         stream.close()
 
-    readers = [threading.Thread(target=drain, args=(name, getattr(process, name)), daemon=True) for name in counts]
+    readers = [
+        threading.Thread(target=drain, args=(name, getattr(process, name)), daemon=True)
+        for name in counts
+    ]
     for thread in readers:
         thread.start()
     state = "completed"
@@ -189,8 +260,15 @@ def run_process(argv, cwd, env, timeout_secs, output_limit, log_prefix, cancel_f
             pass
     for thread in readers:
         thread.join(timeout=5)
-    return {"state": state, "exit_code": process.returncode,
-            "signal": -process.returncode if process.returncode is not None and process.returncode < 0 and os.name != "nt" else None,
-            "duration_secs": round(time.monotonic() - start, 4),
-            "stdout": tail(str(log_prefix) + ".stdout"), "stderr": tail(str(log_prefix) + ".stderr"),
-            "output_bytes": counts, "output_truncated": any(v > output_limit for v in counts.values())}
+    return {
+        "state": state,
+        "exit_code": process.returncode,
+        "signal": -process.returncode
+        if process.returncode is not None and process.returncode < 0 and os.name != "nt"
+        else None,
+        "duration_secs": round(time.monotonic() - start, 4),
+        "stdout": tail(str(log_prefix) + ".stdout"),
+        "stderr": tail(str(log_prefix) + ".stderr"),
+        "output_bytes": counts,
+        "output_truncated": any(v > output_limit for v in counts.values()),
+    }

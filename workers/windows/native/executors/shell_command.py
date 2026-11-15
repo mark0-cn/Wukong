@@ -1,4 +1,5 @@
 """Fixed adapter executed only by the existing contained Python resource."""
+
 import json
 import os
 from pathlib import Path

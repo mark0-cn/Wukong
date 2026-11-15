@@ -1,9 +1,12 @@
 """Pure bounded numeric input validation."""
+
+
 def bounded_int(value, default, minimum, maximum):
     value = int(value if value is not None else default)
     if not minimum <= value <= maximum:
         raise ValueError("numeric parameter outside allowed range")
     return value
+
 
 def parse_address(value):
     """Accept the controller's interchangeable integer spellings for module-relative

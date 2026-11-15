@@ -20,6 +20,8 @@ worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目�
 
 `bootstrap` 实现公开服务构造函数并装配具体依赖。分析用例接收 runner 工厂，start/resume 先选定配置再调用工厂；runner 和工具业务实现不回调 bootstrap。公开构造函数签名及保存配置的行为保持不变。
 
+项目 Python 使用 `scripts/dev/requirements.txt` 和 `ruff.toml` 固定的开发专用 Ruff 版本。先运行 `python -m pip install -r scripts/dev/requirements.txt`，再运行 `python -m ruff format --check workers scripts tests evals fixtures` 和 `python -m ruff check workers scripts tests evals fixtures`。格式变更与逻辑变更分开提交。静态检查覆盖语法、控制流、无效比较及未定义名称，可选依赖的导入仍需人工审查。运行时包不安装 Ruff；生成产物、外部基准和缓存的第三方依赖不在格式化范围内。
+
 跨模块调用保持类型化，资源归属和业务完成门槛保留在统一入口。通用元数据查询不读取 checkpoint；需要继承、follow-up 或完整导出时显式使用完整读取接口。元数据写入不得清空会话，checkpoint 与邮箱确认仍在同一持久化事务提交。
 
 工作台操作在完整的归属作用域内持有 `OperationLock`。守卫会先显式解锁，再关闭文件；不要替换成析构时只关闭描述符的普通文件。在 Unix 上，无关的并发 fork 可能在 exec 前临时继承打开文件描述，导致只依赖关闭的锁超出归属作用域。描述符克隆回归检查在保持互斥的同时，后继操作能够立即获得锁。

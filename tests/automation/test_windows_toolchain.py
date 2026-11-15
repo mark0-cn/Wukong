@@ -23,22 +23,38 @@ class OfflineAssets(unittest.TestCase):
         self.assertEqual(len(lock["assets"]), 47)
         debugger = [item for item in lock["assets"] if item["component"] == "windbg_mcp"]
         self.assertEqual(len(debugger), 1)
-        self.assertEqual(debugger[0]["sha256"], "0250b197c8b2e25ef371a4f252f76fc05bb6c01a2c8c3227a0cc908e2301baad")
+        self.assertEqual(
+            debugger[0]["sha256"],
+            "0250b197c8b2e25ef371a4f252f76fc05bb6c01a2c8c3227a0cc908e2301baad",
+        )
         sdk = [item for item in lock["assets"] if item["path"].startswith("sdk/")]
         self.assertEqual(len(sdk), 43)
         self.assertEqual(sum(item["path"].endswith(".cab") for item in sdk), 40)
         self.assertTrue(all(len(item["vendor_sha1"]) == 40 for item in sdk))
         self.assertEqual(lock["components"]["openssh"]["channel"], "preview")
         requirements = Path("workers/windows/python/requirements.txt").read_text(encoding="utf-8")
-        self.assertFalse([line for line in requirements.splitlines() if line.strip() and not line.startswith("#")])
+        self.assertFalse(
+            [
+                line
+                for line in requirements.splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+        )
         self.assertNotIn("worker_python_dependencies", lock["components"])
 
     def test_cache_requires_exact_bytes_and_never_downloads_implicitly(self):
         payload = b"verified official payload fixture"
-        item = dict(path="python.zip", size=len(payload), sha256=hashlib.sha256(payload).hexdigest(),
-                    url="https://www.python.org/fixture.zip")
+        item = dict(
+            path="python.zip",
+            size=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            url="https://www.python.org/fixture.zip",
+        )
         lock = dict(assets=[item])
-        with tempfile.TemporaryDirectory() as temporary, patch("urllib.request.build_opener") as opener:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch("urllib.request.build_opener") as opener,
+        ):
             root = Path(temporary)
             with self.assertRaisesRegex(ValueError, "Missing offline"):
                 acquire(root, lock)
@@ -53,8 +69,12 @@ class OfflineAssets(unittest.TestCase):
 
     def test_download_is_bounded_and_only_publishes_verified_bytes(self):
         payload = b"pinned fixture"
-        item = dict(path="payload.zip", size=len(payload), sha256=hashlib.sha256(payload).hexdigest(),
-                    url="https://www.python.org/fixture.zip")
+        item = dict(
+            path="payload.zip",
+            size=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            url="https://www.python.org/fixture.zip",
+        )
         for actual in [b"truncated", b"x" * len(payload), payload + b"extra", payload]:
             with self.subTest(actual=actual), tempfile.TemporaryDirectory() as temporary:
                 with patch("urllib.request.build_opener") as opener:
@@ -69,8 +89,14 @@ class OfflineAssets(unittest.TestCase):
 
     def test_lock_rejects_insecure_origins_and_aliases(self):
         original = load_lock()
-        for changed in [dict(url="http://www.python.org/file.zip"), dict(url="https://www.python.org@evil.test/file"),
-                        dict(path="CON.zip"), dict(path="../payload"), dict(size=True), dict(sha256="a" * 63)]:
+        for changed in [
+            dict(url="http://www.python.org/file.zip"),
+            dict(url="https://www.python.org@evil.test/file"),
+            dict(path="CON.zip"),
+            dict(path="../payload"),
+            dict(size=True),
+            dict(sha256="a" * 63),
+        ]:
             lock = copy.deepcopy(original)
             lock["assets"][0].update(changed)
             with self.subTest(changed=changed), tempfile.TemporaryDirectory() as temporary:
@@ -82,22 +108,45 @@ class OfflineAssets(unittest.TestCase):
 
 class OfflinePaths(unittest.TestCase):
     def test_ambiguous_windows_names_and_file_directory_collisions_are_rejected(self):
-        for name in ["../x", "C:/x", "x\\y", "/x", "x/", "x:", "COM0.txt", "lpt9", "con.zip",
-                     "foo.", " foo", "foo .txt", "foo ", "x//y", "x/..", "非ASCII"]:
+        for name in [
+            "../x",
+            "C:/x",
+            "x\\y",
+            "/x",
+            "x/",
+            "x:",
+            "COM0.txt",
+            "lpt9",
+            "con.zip",
+            "foo.",
+            " foo",
+            "foo .txt",
+            "foo ",
+            "x//y",
+            "x/..",
+            "非ASCII",
+        ]:
             with self.subTest(name=name), self.assertRaises(ValueError):
                 member(name)
         for names in [["A.txt", "a.TXT"], ["file", "FILE/child"]]:
             with self.assertRaises(ValueError):
                 unique_paths(names)
-        self.assertEqual(member("Windows Kits/10/Debuggers/x64/dbgeng.dll"), "Windows Kits/10/Debuggers/x64/dbgeng.dll")
+        self.assertEqual(
+            member("Windows Kits/10/Debuggers/x64/dbgeng.dll"),
+            "Windows Kits/10/Debuggers/x64/dbgeng.dll",
+        )
 
     def test_linked_ancestors_are_rejected_before_resolution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "real").mkdir()
             if os.name == "nt":
-                result = subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J", str(root / "link"), str(root / "real")],
-                                        capture_output=True, text=True, check=True)
+                result = subprocess.run(
+                    ["cmd.exe", "/d", "/c", "mklink", "/J", str(root / "link"), str(root / "real")],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
                 self.assertEqual(result.returncode, 0)
             else:
                 (root / "link").symlink_to(root / "real", target_is_directory=True)
@@ -107,25 +156,37 @@ class OfflinePaths(unittest.TestCase):
 
 class MsiPlan(unittest.TestCase):
     def fixture(self):
-        return {"Directory": [["TARGETDIR", "", "SourceDir"], ["base", "TARGETDIR", "SHORT|Tools:Source"],
-                              ["inherit", "base", "."]], "Component": [["component", "inherit"]],
-                "File": [["file_id", "component", "LONG~1.DLL|long.dll", "4", "2"],
-                         ["plain", "component", "original.msi", "8", "1"]],
-                "Media": [["1", ""], ["2", "payload.cab"]]}
+        return {
+            "Directory": [
+                ["TARGETDIR", "", "SourceDir"],
+                ["base", "TARGETDIR", "SHORT|Tools:Source"],
+                ["inherit", "base", "."],
+            ],
+            "Component": [["component", "inherit"]],
+            "File": [
+                ["file_id", "component", "LONG~1.DLL|long.dll", "4", "2"],
+                ["plain", "component", "original.msi", "8", "1"],
+            ],
+            "Media": [["1", ""], ["2", "payload.cab"]],
+        }
 
     def test_msi_long_names_source_names_and_media_ranges(self):
         files = plan(self.fixture())
-        self.assertEqual([(f["path"], f["cabinet"]) for f in files],
-                         [("Tools/long.dll", "payload.cab"), ("Tools/original.msi", "")])
+        self.assertEqual(
+            [(f["path"], f["cabinet"]) for f in files],
+            [("Tools/long.dll", "payload.cab"), ("Tools/original.msi", "")],
+        )
 
     def test_rejects_cycles_unknown_media_duplicate_files_and_unsafe_targets(self):
-        for change in [lambda t: t["Directory"][1].__setitem__(1, "inherit"),
-                       lambda t: t["File"][0].__setitem__(4, "3"),
-                       lambda t: t["File"][0].__setitem__(2, "../escape.dll"),
-                       lambda t: t["File"][0].__setitem__(1, "missing"),
-                       lambda t: t["File"].append(t["File"][0]),
-                       lambda t: t["Media"][1].__setitem__(1, "#embedded"),
-                       lambda t: t["File"][1].__setitem__(2, "LONG.DLL")]:
+        for change in [
+            lambda t: t["Directory"][1].__setitem__(1, "inherit"),
+            lambda t: t["File"][0].__setitem__(4, "3"),
+            lambda t: t["File"][0].__setitem__(2, "../escape.dll"),
+            lambda t: t["File"][0].__setitem__(1, "missing"),
+            lambda t: t["File"].append(t["File"][0]),
+            lambda t: t["Media"][1].__setitem__(1, "#embedded"),
+            lambda t: t["File"][1].__setitem__(2, "LONG.DLL"),
+        ]:
             tables = self.fixture()
             change(tables)
             with self.assertRaises(ValueError):
@@ -160,15 +221,19 @@ class OfflineZip(unittest.TestCase):
                 unpack_zip(archive, root / "output")
 
 
-
-@unittest.skipUnless(os.name == "nt" and shutil.which("makecab.exe"), "Windows cabinet API acceptance")
+@unittest.skipUnless(
+    os.name == "nt" and shutil.which("makecab.exe"), "Windows cabinet API acceptance"
+)
 class CabinetAcceptance(unittest.TestCase):
     def test_native_cabinet_inventory_and_exact_extraction(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "fixture.txt").write_bytes(b"trusted cabinet fixture")
-            subprocess.run([shutil.which("makecab.exe"), str(root / "fixture.txt"), str(root / "fixture.cab")],
-                           check=True, capture_output=True)
+            subprocess.run(
+                [shutil.which("makecab.exe"), str(root / "fixture.txt"), str(root / "fixture.cab")],
+                check=True,
+                capture_output=True,
+            )
             for inventory in [{"unexpected.txt": 23}, {"fixture.txt": 999}]:
                 with tempfile.TemporaryDirectory(dir=root) as output:
                     with self.assertRaises(ValueError):

@@ -1,4 +1,5 @@
 """Version CLI and online release packaging."""
+
 import argparse
 import json
 import re
@@ -42,12 +43,17 @@ def package(binary, metadata, output, tag, *, released_image=False):
         "README.md": ROOT / "docs/user/online-install.md",
     }
     manifest = {
-        "schema_version": 2, "version": number, "source_revision": revision,
+        "schema_version": 2,
+        "version": number,
+        "source_revision": revision,
         "image_source_revision": image["source_revision"],
-        "platform": "windows-amd64", "tool_platform": "linux/amd64",
+        "platform": "windows-amd64",
+        "tool_platform": "linux/amd64",
         "image": image["repository"] + "@" + image["digest"],
-        "image_id": image["image_id"], "image_size_bytes": image["size_bytes"],
-        "runtime_protocol": 3, "data_schema": 5,
+        "image_id": image["image_id"],
+        "image_size_bytes": image["size_bytes"],
+        "runtime_protocol": 3,
+        "data_schema": 5,
         "files": {name: sha256(path) for name, path in members.items()},
     }
     if released_image:
@@ -63,7 +69,9 @@ def package(binary, metadata, output, tag, *, released_image=False):
 
 def checksums(directory):
     files = sorted(p for p in directory.iterdir() if p.is_file() and p.name != "SHA256SUMS")
-    (directory / "SHA256SUMS").write_text("".join(f"{sha256(p)}  {p.name}\n" for p in files), encoding="utf-8")
+    (directory / "SHA256SUMS").write_text(
+        "".join(f"{sha256(p)}  {p.name}\n" for p in files), encoding="utf-8"
+    )
 
 
 def main():
@@ -71,7 +79,9 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check")
     check.add_argument("--tag")
-    bump = commands.add_parser("bump", help="Synchronize all application versions without changing dependencies")
+    bump = commands.add_parser(
+        "bump", help="Synchronize all application versions without changing dependencies"
+    )
     bump.add_argument("--tag", required=True)
     pack = commands.add_parser("package")
     pack.add_argument("--tag", required=True)

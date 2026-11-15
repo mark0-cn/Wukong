@@ -1,4 +1,5 @@
 """The same golden values must be accepted/rejected by Rust and Python."""
+
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ class ContractTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "requires a POSIX fixture shell")
     def test_shell_output_limit_reaches_the_executor(self):
         from worker_commands import CommandService
+
         params = {"command": "printf '%4096s' x", "output_limit": 1024}
         validate_request("exec.run", params)
         with tempfile.TemporaryDirectory() as directory:
@@ -40,11 +42,16 @@ class ContractTests(unittest.TestCase):
     def test_library_rejects_invalid_rpc_without_dispatch(self):
         class Fixture:
             handlers = {"job.start": None}
+
             def dispatch(self, *_):
                 raise AssertionError("invalid request reached executor")
+
         server = Server(Fixture())
-        for request, code in [("{", -32700), ('{"id":1,"method":"job.start"}', -32600),
-                              ('{"jsonrpc":"2.0","id":1,"method":"invented"}', -32601),
-                              ('{"jsonrpc":"2.0","id":1,"method":"job.start","params":{"timeout_secs":0}}', -32602)]:
+        for request, code in [
+            ("{", -32700),
+            ('{"id":1,"method":"job.start"}', -32600),
+            ('{"jsonrpc":"2.0","id":1,"method":"invented"}', -32601),
+            ('{"jsonrpc":"2.0","id":1,"method":"job.start","params":{"timeout_secs":0}}', -32602),
+        ]:
             with self.subTest(request=request):
                 self.assertEqual(json.loads(server.call(request))["error"]["code"], code)

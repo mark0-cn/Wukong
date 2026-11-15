@@ -20,6 +20,7 @@ binary profile (virtual address minus the declared image base). The controller
 and angr load the same file at possibly different bases, so every entry is
 mapped into the address space angr actually created before exploration.
 """
+
 import base64
 import json
 import os
@@ -130,9 +131,7 @@ def main():
                     )
                 )
         simulation = project.factory.simulation_manager(state)
-        simulation, steps = bounded_explore(
-            simulation, find_addresses, avoid_addresses, max_steps
-        )
+        simulation, steps = bounded_explore(simulation, find_addresses, avoid_addresses, max_steps)
     except Exception as error:  # noqa: BLE001
         fail("angr exploration failed: %s" % error)
     stats = {

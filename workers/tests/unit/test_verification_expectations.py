@@ -14,9 +14,15 @@ class VerificationExpectationsTests(unittest.TestCase):
 
     def test_empty_expectations_still_require_a_crash(self):
         result = dict(state="completed", exit_code=0, signal=None, stdout="", stderr="")
-        for expected in [None, {}, dict(exit_code=None, signal=None, stdout_contains=None, stderr_contains=None)]:
+        for expected in [
+            None,
+            {},
+            dict(exit_code=None, signal=None, stdout_contains=None, stderr_contains=None),
+        ]:
             with self.subTest(expected=expected):
                 self.assertFalse(expectation_matches(result, expected))
-                self.assertTrue(expectation_matches(dict(result, exit_code=-11, signal=11), expected))
+                self.assertTrue(
+                    expectation_matches(dict(result, exit_code=-11, signal=11), expected)
+                )
         with self.assertRaises(ValueError):
             expectation_matches(result, {"unknown": None})

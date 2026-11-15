@@ -7,27 +7,49 @@ class ScopeTests(unittest.TestCase):
     def test_explicit_worker_acceptance_builds_all_required_components_even_for_documentation(self):
         scope = select_scope(["README.md"], "pull_request", force_full=True)
         self.assertTrue(all(scope[name] for name in ("rust", "frontend", "linux")))
+
     def test_release_fragments_preserve_frontend_scope_but_unknown_note_files_do_not(self):
-        selected = select_scope(["ui/src/features/maintenance/Updates.tsx", ".changes/release-notes.toml"], "pull_request")
+        selected = select_scope(
+            ["ui/src/features/maintenance/Updates.tsx", ".changes/release-notes.toml"],
+            "pull_request",
+        )
         self.assertTrue(selected["frontend"])
         self.assertFalse(selected["rust"])
         self.assertFalse(selected["linux"])
         self.assertTrue(select_scope([".changes/executable.py"], "pull_request")["rust"])
+
     def test_clients_only_for_master_version_increase_or_explicit_prewarm(self):
         self.assertTrue(prebuild_clients("push", "refs/heads/master", False, "0.1.2", "0.1.3"))
-        self.assertTrue(prebuild_clients("workflow_dispatch", "refs/heads/master", True, "0.1.2", "0.1.2"))
+        self.assertTrue(
+            prebuild_clients("workflow_dispatch", "refs/heads/master", True, "0.1.2", "0.1.2")
+        )
         for event, ref, requested, old, new in [
-                ("push", "refs/heads/master", False, "0.1.2", "0.1.2"),
-                ("push", "refs/heads/master", False, "0.2.0", "0.1.2"),
-                ("push", "refs/tags/v0.1.3", True, "0.1.2", "0.1.3"),
-                ("pull_request", "refs/heads/master", True, "0.1.2", "0.1.3"),
-                ("workflow_dispatch", "refs/heads/topic", True, "0.1.2", "0.1.3"),
-                ("workflow_dispatch", "refs/heads/master", False, "0.1.2", "0.1.3")]:
+            ("push", "refs/heads/master", False, "0.1.2", "0.1.2"),
+            ("push", "refs/heads/master", False, "0.2.0", "0.1.2"),
+            ("push", "refs/tags/v0.1.3", True, "0.1.2", "0.1.3"),
+            ("pull_request", "refs/heads/master", True, "0.1.2", "0.1.3"),
+            ("workflow_dispatch", "refs/heads/topic", True, "0.1.2", "0.1.3"),
+            ("workflow_dispatch", "refs/heads/master", False, "0.1.2", "0.1.3"),
+        ]:
             self.assertFalse(prebuild_clients(event, ref, requested, old, new))
 
     def test_required_prebuild_failure_blocks_ci(self):
-        needs = {"changes": {"result": "success", "outputs": dict(rust="true", frontend="true", linux="true", release_clients="true")},
-                 **{name: {"result": "success"} for name in ("windows", "linux", "windows-client", "linux-client", "linux-desktop-client")}}
+        needs = {
+            "changes": {
+                "result": "success",
+                "outputs": dict(rust="true", frontend="true", linux="true", release_clients="true"),
+            },
+            **{
+                name: {"result": "success"}
+                for name in (
+                    "windows",
+                    "linux",
+                    "windows-client",
+                    "linux-client",
+                    "linux-desktop-client",
+                )
+            },
+        }
         self.assertTrue(checks_passed(needs))
         needs["linux-client"]["result"] = "skipped"
         self.assertFalse(checks_passed(needs))
@@ -40,32 +62,60 @@ class ScopeTests(unittest.TestCase):
         for event in ("push", "workflow_dispatch", "workflow_call"):
             scope = select_scope(["docs/development/releases.md"], event)
             self.assertTrue(all(scope[name] for name in ("rust", "frontend", "linux")))
-        self.assertTrue(select_scope(["ui/package.json"], "pull_request", "codex/release-v0.2.0")["rust"])
+        self.assertTrue(
+            select_scope(["ui/package.json"], "pull_request", "codex/release-v0.2.0")["rust"]
+        )
 
     def test_known_paths_select_only_relevant_expensive_checks(self):
-        for paths, expected in [(["README.md", "README.en.md", "README.zh-CN.md", "docs/translations.json", "docs/development/releases.zh-CN.md"], (False, False, False)),
-                                (["ui/src/app/App.tsx"], (False, True, False)),
-                                (["workers/runtime/requirements.txt"], (False, False, True)),
-                                (["workers/tests/unit/test_profile.py"], (False, False, True)),
-                                (["evals/analysis/score.py", "fixtures/src/benign.c"], (False, False, True)),
-                                (["evals/tests/test_analysis.py", "ui/package.json"], (False, True, True))]:
+        for paths, expected in [
+            (
+                [
+                    "README.md",
+                    "README.en.md",
+                    "README.zh-CN.md",
+                    "docs/translations.json",
+                    "docs/development/releases.zh-CN.md",
+                ],
+                (False, False, False),
+            ),
+            (["ui/src/app/App.tsx"], (False, True, False)),
+            (["workers/runtime/requirements.txt"], (False, False, True)),
+            (["workers/tests/unit/test_profile.py"], (False, False, True)),
+            (["evals/analysis/score.py", "fixtures/src/benign.c"], (False, False, True)),
+            (["evals/tests/test_analysis.py", "ui/package.json"], (False, True, True)),
+        ]:
             with self.subTest(paths=paths):
                 scope = select_scope(paths, "pull_request")
-                self.assertEqual(tuple(scope[name] for name in ("rust", "frontend", "linux")), expected)
+                self.assertEqual(
+                    tuple(scope[name] for name in ("rust", "frontend", "linux")), expected
+                )
 
     def test_shared_unknown_and_renamed_paths_fail_closed(self):
-        for paths in ([], ["Cargo.lock"], ["scripts/release/cli.py"], ["src/protocol.rs"],
-                      [".github/workflows/ci.yml"], ["unknown.txt"], ["docs/example.py"],
-                      ["src/old.rs", "docs/new.md"], ["locales/en-US/common.ftl"]):
+        for paths in (
+            [],
+            ["Cargo.lock"],
+            ["scripts/release/cli.py"],
+            ["src/protocol.rs"],
+            [".github/workflows/ci.yml"],
+            ["unknown.txt"],
+            ["docs/example.py"],
+            ["src/old.rs", "docs/new.md"],
+            ["locales/en-US/common.ftl"],
+        ):
             with self.subTest(paths=paths):
                 scope = select_scope(paths, "pull_request")
                 self.assertTrue(all(scope[name] for name in ("rust", "frontend", "linux")))
 
     def test_gate_accepts_only_expected_results(self):
         for linux in ("true", "false"):
-            needs = {"changes": {"result": "success", "outputs": dict(rust="false", frontend="false", linux=linux)},
-                     "windows": {"result": "success"},
-                     "linux": {"result": "success" if linux == "true" else "skipped"}}
+            needs = {
+                "changes": {
+                    "result": "success",
+                    "outputs": dict(rust="false", frontend="false", linux=linux),
+                },
+                "windows": {"result": "success"},
+                "linux": {"result": "success" if linux == "true" else "skipped"},
+            }
             self.assertTrue(checks_passed(needs))
             for job in ("changes", "windows", "linux"):
                 for result in ("failure", "cancelled", "skipped", "success"):

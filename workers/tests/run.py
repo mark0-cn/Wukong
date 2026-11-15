@@ -1,4 +1,5 @@
 """Explicit unit/live test entry point for a checkout or the worker image."""
+
 import argparse
 from pathlib import Path
 import runpy
@@ -22,12 +23,19 @@ def main():
         options.add_argument("-p", "--pattern", default="test_*.py")
         options.add_argument("-v", "--verbose", action="store_true")
         unit = options.parse_args(remaining)
-        suite = unittest.defaultTestLoader.discover(str(ROOT / "unit"), pattern=unit.pattern, top_level_dir=str(ROOT))
+        suite = unittest.defaultTestLoader.discover(
+            str(ROOT / "unit"), pattern=unit.pattern, top_level_dir=str(ROOT)
+        )
         if suite.countTestCases() == 0:
             raise SystemExit("No worker tests matched the requested pattern")
         result = unittest.TextTestRunner(verbosity=2 if unit.verbose else 1).run(suite)
         raise SystemExit(0 if result.wasSuccessful() else 1)
-    module = {"integration": "runtime", "isolation": "isolation", "ghidra": "ghidra", "launch":"launch"}[args.suite]
+    module = {
+        "integration": "runtime",
+        "isolation": "isolation",
+        "ghidra": "ghidra",
+        "launch": "launch",
+    }[args.suite]
     sys.argv = [str(ROOT / "integration" / (module + ".py")), *remaining]
     runpy.run_module("integration." + module, run_name="__main__")
 

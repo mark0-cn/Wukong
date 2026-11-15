@@ -1,4 +1,5 @@
 """Signed runtime sources must remain unchanged across bridge process startup."""
+
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,10 +20,18 @@ class ImmutableDeployment(unittest.TestCase):
             before = {path.name: path.read_bytes() for path in root.iterdir()}
             # Do not inherit a caller's PYTHONDONTWRITEBYTECODE: the production
             # entry itself must protect daemon and job-supervisor interpreters.
-            result = subprocess.run([sys.executable, "-E", str(root / "bridge.py"), "--help"],
-                                    capture_output=True, text=True, timeout=20)
+            result = subprocess.run(
+                [sys.executable, "-E", str(root / "bridge.py"), "--help"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
-            after = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            after = {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob("*")
+                if path.is_file()
+            }
             self.assertEqual(before, after)
 
 

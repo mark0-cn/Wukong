@@ -5,6 +5,7 @@ No vulnerability finding or title/keyword match is required. Correct verdicts
 must cite evidence IDs from the actual exported report and an independent
 review rationale. Unrun tasks count as unresolved, never as correct.
 """
+
 import argparse
 import hashlib
 import json
@@ -18,7 +19,9 @@ def sha256(path):
 
 def score(tasks, build, reports, labels):
     cases = {case["id"]: case for case in tasks["cases"]}
-    questions = {(case["id"], question) for case in cases.values() for question in case["questions"]}
+    questions = {
+        (case["id"], question) for case in cases.values() for question in case["questions"]
+    }
     if set(reports) - set(cases):
         raise ValueError("reports contain an unknown case")
     evidence = {}
@@ -27,7 +30,10 @@ def score(tasks, build, reports, labels):
         snapshot = report["snapshot"]
         run = snapshot["run"]
         target = build["targets"][cases[case_id]["binary"]]
-        if sha256(Path(target["path"])) != target["sha256"] or run["target_sha256"] != target["sha256"]:
+        if (
+            sha256(Path(target["path"])) != target["sha256"]
+            or run["target_sha256"] != target["sha256"]
+        ):
             raise ValueError(f"target SHA256 mismatch for {case_id}")
         evidence[case_id] = {item["id"] for item in snapshot["evidence"]}
         values = (run.get("total_tokens", 0), run.get("cost_usd", 0.0))
@@ -51,28 +57,49 @@ def score(tasks, build, reports, labels):
         reviewed[key] = label
     expected_reviews = {key for key in questions if key[0] in reports}
     if set(reviewed) != expected_reviews:
-        raise ValueError(f"missing independent question reviews: {sorted(expected_reviews - set(reviewed))}")
+        raise ValueError(
+            f"missing independent question reviews: {sorted(expected_reviews - set(reviewed))}"
+        )
     correct = sum(label["verdict"] == "correct" for label in reviewed.values())
     incorrect = sum(label["verdict"] == "incorrect" for label in reviewed.values())
     return {
-        "schema_version": 1, "complete_suite": set(reports) == set(cases),
-        "evaluated_cases": sorted(reports), "missing_cases": sorted(set(cases) - set(reports)),
-        "total_questions": len(questions), "correct": correct, "incorrect": incorrect,
+        "schema_version": 1,
+        "complete_suite": set(reports) == set(cases),
+        "evaluated_cases": sorted(reports),
+        "missing_cases": sorted(set(cases) - set(reports)),
+        "total_questions": len(questions),
+        "correct": correct,
+        "incorrect": incorrect,
         "unresolved": len(questions) - correct - incorrect,
         "evidence_backed_correct_rate": correct / len(questions) if questions else None,
         "model_total_tokens": sum(values[0] for values in usage.values()),
         "configured_estimated_cost_usd": sum(values[1] for values in usage.values()),
         "reviews": list(reviewed.values()),
-        "note": "Correctness labels are independent reviews, not inferred from crashes or tool success."
+        "note": "Correctness labels are independent reviews, not inferred from crashes or tool success.",
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", type=Path, required=True)
-    parser.add_argument("--tasks", type=Path, default=ANALYSIS / "tasks.json", help="source-controlled task manifest used by this fixture build")
-    parser.add_argument("--reports", type=Path, required=True, help="JSON object: task case ID -> exported report.json")
-    parser.add_argument("--adjudications", type=Path, required=True, help="JSON object with independently reviewed labels")
+    parser.add_argument(
+        "--tasks",
+        type=Path,
+        default=ANALYSIS / "tasks.json",
+        help="source-controlled task manifest used by this fixture build",
+    )
+    parser.add_argument(
+        "--reports",
+        type=Path,
+        required=True,
+        help="JSON object: task case ID -> exported report.json",
+    )
+    parser.add_argument(
+        "--adjudications",
+        type=Path,
+        required=True,
+        help="JSON object with independently reviewed labels",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     tasks_path = args.tasks.resolve()
@@ -88,8 +115,12 @@ def main():
         reports[case_id] = json.loads(path.read_text())
         hashes[case_id] = sha256(path)
     try:
-        result = score(json.loads(tasks_path.read_text()), build, reports,
-                       json.loads(args.adjudications.read_text())["labels"])
+        result = score(
+            json.loads(tasks_path.read_text()),
+            build,
+            reports,
+            json.loads(args.adjudications.read_text())["labels"],
+        )
     except (ValueError, KeyError) as error:
         parser.error(str(error))
     result["report_sha256"] = hashes

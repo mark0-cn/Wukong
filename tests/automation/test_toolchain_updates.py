@@ -10,8 +10,16 @@ import scripts.toolchain.check_toolchain_updates as updates
 class ToolchainTests(unittest.TestCase):
     def setUp(self):
         self.current = {"version": "3.3.3", "sha256": "a" * 64, "file": "pwninit", "url": "old"}
-        self.release = {"tag_name": "3.3.4", "assets": [{"name": "pwninit", "digest": "sha256:" + "b" * 64,
-            "browser_download_url": "https://github.com/io12/pwninit/releases/download/3.3.4/pwninit"}]}
+        self.release = {
+            "tag_name": "3.3.4",
+            "assets": [
+                {
+                    "name": "pwninit",
+                    "digest": "sha256:" + "b" * 64,
+                    "browser_download_url": "https://github.com/io12/pwninit/releases/download/3.3.4/pwninit",
+                }
+            ],
+        }
 
     def inspect(self):
         return updates.inspect("pwninit", self.current, lambda path: self.release)
@@ -48,18 +56,36 @@ class ToolchainTests(unittest.TestCase):
     def test_gef_pins_source_commit_and_marks_review(self):
         content = b"# upstream source\n"
         blob = hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
-        replies = iter([{"tag_name": "2026.01"}, {"sha": "c" * 40},
-                        {"encoding": "base64", "type": "file", "sha": blob, "size": len(content),
-                         "content": base64.b64encode(content).decode()}])
-        row = updates.inspect("gef", {**self.current, "version": "2024.06"}, lambda path: next(replies))
+        replies = iter(
+            [
+                {"tag_name": "2026.01"},
+                {"sha": "c" * 40},
+                {
+                    "encoding": "base64",
+                    "type": "file",
+                    "sha": blob,
+                    "size": len(content),
+                    "content": base64.b64encode(content).decode(),
+                },
+            ]
+        )
+        row = updates.inspect(
+            "gef", {**self.current, "version": "2024.06"}, lambda path: next(replies)
+        )
         self.assertEqual(row["status"], "source_update_review")
         self.assertIn("c" * 40, row["candidate"]["url"])
         self.assertEqual(row["candidate"]["sha256"], hashlib.sha256(content).hexdigest())
 
     def test_one_network_failure_does_not_erase_other_findings(self):
-        manifest = {"schema_version": 1, "platform": "linux/amd64", **{k: self.current for k in updates.SOURCES}}
+        manifest = {
+            "schema_version": 1,
+            "platform": "linux/amd64",
+            **{k: self.current for k in updates.SOURCES},
+        }
+
         def unavailable(path):
             raise RuntimeError("HTTP 503")
+
         report = updates.check(manifest, unavailable)
         self.assertFalse(report["passed"])
         self.assertEqual(len(report["tools"]), 5)

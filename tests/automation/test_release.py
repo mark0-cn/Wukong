@@ -13,9 +13,15 @@ from scripts.release.cli import package, validate_image
 
 class ReleaseTests(unittest.TestCase):
     def test_formal_packaging_rejects_older_release_image(self):
-        image = dict(repository="example/wukong", digest="sha256:" + "a" * 64,
-                     image_id="sha256:" + "b" * 64, source_revision="c" * 40,
-                     platform="linux/amd64", size_bytes=10, release_version="1.2.3")
+        image = dict(
+            repository="example/wukong",
+            digest="sha256:" + "a" * 64,
+            image_id="sha256:" + "b" * 64,
+            source_revision="c" * 40,
+            platform="linux/amd64",
+            size_bytes=10,
+            release_version="1.2.3",
+        )
         with self.assertRaisesRegex(ValueError, "same source commit"):
             validate_image(image, "d" * 40)
         validate_image(image, "d" * 40, released_version="1.2.3")
@@ -49,7 +55,9 @@ class ReleaseTests(unittest.TestCase):
                         old_data = tomllib.loads(before[name].decode())
                         new_data = tomllib.loads((root / name).read_text())
                         if name == "Cargo.lock":
-                            next(p for p in new_data["package"] if p["name"] == "wukong")["version"] = old
+                            next(p for p in new_data["package"] if p["name"] == "wukong")[
+                                "version"
+                            ] = old
                         else:
                             new_data["package"]["version"] = old
                     self.assertEqual(new_data, old_data, name)
@@ -64,7 +72,9 @@ class ReleaseTests(unittest.TestCase):
             for tag in ["v" + version(root=root), "v0.0.0", "v01.2.3", "1.2.3", "v1.2.3-rc1"]:
                 with self.subTest(tag=tag), self.assertRaises(ValueError):
                     bump_version(tag, root)
-                self.assertEqual({name: (root / name).read_bytes() for name in VERSION_FILES}, before)
+                self.assertEqual(
+                    {name: (root / name).read_bytes() for name in VERSION_FILES}, before
+                )
 
     def test_bump_refuses_inconsistent_source(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -83,7 +93,10 @@ class ReleaseTests(unittest.TestCase):
             root = Path(directory)
             self.version_fixture(root)
             before = {name: (root / name).read_bytes() for name in VERSION_FILES}
-            with patch("scripts._lib.versioning.version", side_effect=[version(root=root), ValueError("postcheck")]):
+            with patch(
+                "scripts._lib.versioning.version",
+                side_effect=[version(root=root), ValueError("postcheck")],
+            ):
                 with self.assertRaisesRegex(ValueError, "postcheck"):
                     bump_version("v9999.0.0", root)
             self.assertEqual({name: (root / name).read_bytes() for name in VERSION_FILES}, before)
@@ -93,9 +106,17 @@ class ReleaseTests(unittest.TestCase):
             root = Path(directory)
             binary = root / "fixture.exe"
             binary.write_bytes(b"not executed")
-            revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-            image = dict(repository="hlmark0/wukong", digest="sha256:" + "a" * 64,
-                         image_id="sha256:" + "b" * 64, source_revision=revision, platform="linux/amd64", size_bytes=10)
+            revision = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+            ).strip()
+            image = dict(
+                repository="hlmark0/wukong",
+                digest="sha256:" + "a" * 64,
+                image_id="sha256:" + "b" * 64,
+                source_revision=revision,
+                platform="linux/amd64",
+                size_bytes=10,
+            )
             metadata = root / "image.json"
             metadata.write_text(json.dumps(image))
             output = root / "dist"
@@ -118,19 +139,46 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(validate_tag(tag), tag[1:])
 
     def test_invalid_tag_is_rejected_before_repository_files_are_read(self):
-        for tag in ["", "1.2.3", "V1.2.3", "v1", "v1.2", "v1.2.3.4", "v01.2.3", "v1.02.3",
-                    "v1.2.03", "v1.2.3-rc.1", "v1.2.3+build", "vlatest", "release/v1.2.3",
-                    "v1.2.3\n", " v1.2.3", "v1.2.٣", "v-1.2.3"]:
+        for tag in [
+            "",
+            "1.2.3",
+            "V1.2.3",
+            "v1",
+            "v1.2",
+            "v1.2.3.4",
+            "v01.2.3",
+            "v1.02.3",
+            "v1.2.03",
+            "v1.2.3-rc.1",
+            "v1.2.3+build",
+            "vlatest",
+            "release/v1.2.3",
+            "v1.2.3\n",
+            " v1.2.3",
+            "v1.2.٣",
+            "v-1.2.3",
+        ]:
             with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "Invalid release tag"):
                 version(tag, root=Path("nonexistent-repository"))
 
     def test_image_identity_and_platform(self):
-        data = dict(repository="hlmark0/wukong", digest="sha256:" + "a" * 64,
-                    image_id="sha256:" + "b" * 64, source_revision="abc", platform="linux/amd64", size_bytes=10)
+        data = dict(
+            repository="hlmark0/wukong",
+            digest="sha256:" + "a" * 64,
+            image_id="sha256:" + "b" * 64,
+            source_revision="abc",
+            platform="linux/amd64",
+            size_bytes=10,
+        )
         validate_image(data, "abc")
-        for field, value in [("source_revision", "other"), ("platform", "linux/arm64"),
-                             ("digest", "latest"), ("image_id", "wrong"),
-                             ("repository", "other.example/x"), ("size_bytes", -1)]:
+        for field, value in [
+            ("source_revision", "other"),
+            ("platform", "linux/arm64"),
+            ("digest", "latest"),
+            ("image_id", "wrong"),
+            ("repository", "other.example/x"),
+            ("size_bytes", -1),
+        ]:
             changed = copy.copy(data)
             changed[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):

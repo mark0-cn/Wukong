@@ -22,6 +22,8 @@ Keep cross-module calls typed and ownership/completion gates centralized. Genera
 
 `bootstrap` implements the public service constructors and assembles concrete dependencies. Assessment use cases receive a runner factory; start/resume select their configuration before invoking it. Runner and tool business implementations never call bootstrap. Public constructor signatures and saved-configuration behavior remain unchanged.
 
+Project Python uses the development-only Ruff version pinned in `scripts/dev/requirements.txt` and `ruff.toml`. Run `python -m pip install -r scripts/dev/requirements.txt`, then `python -m ruff format --check workers scripts tests evals fixtures` and `python -m ruff check workers scripts tests evals fixtures`. Format changes separately from logic changes. Static checks cover syntax, control flow, invalid comparisons and undefined names; optional dependency imports still require review. Runtime bundles do not install Ruff. Generated outputs, external benchmarks and cached third-party dependencies are excluded.
+
 Workbench operations hold `OperationLock` for their complete ownership scope. The guard explicitly unlocks before closing its file; do not replace it with a bare file whose drop only closes a descriptor. On Unix, an unrelated concurrent fork can temporarily inherit the open file description before exec, extending a close-only lock past its owner's scope. The clone-descriptor regression checks immediate successor admission while preserving mutual exclusion.
 
 <a id="桌面界面样式"></a>

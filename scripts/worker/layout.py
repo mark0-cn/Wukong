@@ -1,4 +1,5 @@
 """Prepare a complete private Windows runtime from the verified offline cache."""
+
 import argparse
 import hashlib
 import json
@@ -25,17 +26,24 @@ def unpack_zip(archive, output, prefix=""):
             if prefix:
                 if not name.startswith(prefix):
                     raise ValueError("Unexpected archive root")
-                name = name[len(prefix):]
+                name = name[len(prefix) :]
             if not name:
                 continue
             name = member(name.rstrip("/") if entry.is_dir() else name)
             mode = entry.external_attr >> 16
-            if (stat.S_ISLNK(mode) or entry.flag_bits & 1
-                    or stat.S_IFMT(mode) not in {0, stat.S_IFREG, stat.S_IFDIR}
-                    or entry.file_size > 2 * 1024**3):
+            if (
+                stat.S_ISLNK(mode)
+                or entry.flag_bits & 1
+                or stat.S_IFMT(mode) not in {0, stat.S_IFREG, stat.S_IFDIR}
+                or entry.file_size > 2 * 1024**3
+            ):
                 raise ValueError("Unsafe archive member")
             entries.append((entry, name))
-        if not entries or len(entries) > 20_000 or sum(e.file_size for e, _ in entries) > 2 * 1024**3:
+        if (
+            not entries
+            or len(entries) > 20_000
+            or sum(e.file_size for e, _ in entries) > 2 * 1024**3
+        ):
             raise ValueError("Archive exceeds offline layout budget")
         unique_paths(name for entry, name in entries if not entry.is_dir())
         files = {name.lower() for entry, name in entries if not entry.is_dir()}
@@ -75,8 +83,13 @@ def sdk_metadata(cache, lock, scratch):
     assets = {item["path"]: item for item in lock["assets"]}
     bootstrapper = validate_asset(cache, assets[specification["bootstrapper"]])
     offset, size = specification["ux_offset"], specification["ux_size"]
-    if (type(offset) is not int or type(size) is not int or not 0 < size < 16 * 1024**2
-            or offset < 0 or offset + size > bootstrapper.stat().st_size):
+    if (
+        type(offset) is not int
+        or type(size) is not int
+        or not 0 < size < 16 * 1024**2
+        or offset < 0
+        or offset + size > bootstrapper.stat().st_size
+    ):
         raise ValueError("Invalid SDK bootstrapper cabinet range")
     cabinet = scratch / "sdk-ux.cab"
     with bootstrapper.open("rb") as incoming, cabinet.open("xb") as outgoing:
@@ -86,26 +99,36 @@ def sdk_metadata(cache, lock, scratch):
             raise ValueError("SDK bootstrapper cabinet is missing")
         outgoing.write(payload)
     ux = scratch / "sdk-ux"
-    extract_cabinet(cabinet, ux, {name: item["size"] for name, item in specification["ux_files"].items()})
+    extract_cabinet(
+        cabinet, ux, {name: item["size"] for name, item in specification["ux_files"].items()}
+    )
     for name, item in specification["ux_files"].items():
         if sha256(ux / member(name)) != item["sha256"]:
             raise ValueError("SDK bootstrapper metadata differs from lock")
     tree = ET.parse(ux / member(specification["manifest"])).getroot()
     namespace = {"b": "http://schemas.microsoft.com/wix/2008/Burn"}
     payloads = {item.attrib["Id"]: item.attrib for item in tree.findall("b:Payload", namespace)}
-    packages = [item for item in tree.findall(".//b:MsiPackage", namespace)
-                if item.get("Id") == specification["package_id"]]
+    packages = [
+        item
+        for item in tree.findall(".//b:MsiPackage", namespace)
+        if item.get("Id") == specification["package_id"]
+    ]
     if len(packages) != 1:
         raise ValueError("SDK debugger package missing from signed bootstrapper")
-    selected = [payloads[item.attrib["Id"]] for item in packages[0].findall("b:PayloadRef", namespace)]
+    selected = [
+        payloads[item.attrib["Id"]] for item in packages[0].findall("b:PayloadRef", namespace)
+    ]
     actual = {}
     for item in selected:
         name = member("sdk/" + item["FilePath"].replace("\\", "/"))
         if name in actual:
             raise ValueError("Duplicate SDK bootstrapper payload")
         actual[name] = (int(item["FileSize"]), item["Hash"].lower())
-    expected = {item["path"]: (item["size"], item["vendor_sha1"])
-                for item in lock["assets"] if item["path"].startswith("sdk/")}
+    expected = {
+        item["path"]: (item["size"], item["vendor_sha1"])
+        for item in lock["assets"]
+        if item["path"].startswith("sdk/")
+    }
     if actual != expected:
         raise ValueError("Offline SDK inventory is incomplete or differs from signed bootstrapper")
     for name, (_, digest) in actual.items():
@@ -117,19 +140,31 @@ def sdk_metadata(cache, lock, scratch):
 
 def install_python_components(runtime):
     """Explicit offline components; adding Linux worker files is never implicit."""
-    components = json.loads((ROOT / "workers/windows/python-components.json").read_text(encoding="utf-8"))
+    components = json.loads(
+        (ROOT / "workers/windows/python-components.json").read_text(encoding="utf-8")
+    )
     if components.get("schema") != 1 or set(components) != {"schema", "analysis", "helpers"}:
         raise ValueError("Unsupported Windows Python component inventory")
     requirements = (ROOT / "workers/windows/python/requirements.txt").read_text(encoding="utf-8")
-    if any(line.strip() and not line.lstrip().startswith("#") for line in requirements.splitlines()):
-        raise ValueError("Windows helper dependencies need an explicit offline lock and license inventory")
+    if any(
+        line.strip() and not line.lstrip().startswith("#") for line in requirements.splitlines()
+    ):
+        raise ValueError(
+            "Windows helper dependencies need an explicit offline lock and license inventory"
+        )
     for key, source, target in [
-        ("analysis", ROOT / "workers/analysis/wukong_analysis", runtime / "python/Lib/site-packages/wukong_analysis"),
+        (
+            "analysis",
+            ROOT / "workers/analysis/wukong_analysis",
+            runtime / "python/Lib/site-packages/wukong_analysis",
+        ),
         ("helpers", ROOT / "workers/windows/python", runtime / "helpers"),
     ]:
         names = components[key]
         unique_paths(names)
-        if not names or any(member(name) != Path(name).name or not name.endswith(".py") for name in names):
+        if not names or any(
+            member(name) != Path(name).name or not name.endswith(".py") for name in names
+        ):
             raise ValueError("Invalid Windows Python component")
         target.mkdir(parents=True)
         for name in names:
@@ -139,7 +174,9 @@ def install_python_components(runtime):
         raise ValueError("Embedded Python path configuration is missing")
     # Keep site disabled. Only the embedded standard library and explicit analysis package are importable.
     path_files[0].write_bytes(b"python313.zip\n.\nLib/site-packages\n")
-    shutil.copyfile(ROOT / "workers/windows/python/requirements.txt", runtime / "helpers/requirements.txt")
+    shutil.copyfile(
+        ROOT / "workers/windows/python/requirements.txt", runtime / "helpers/requirements.txt"
+    )
 
 
 def prepare(cache, output, lock_path=LOCK):
@@ -163,23 +200,38 @@ def prepare(cache, output, lock_path=LOCK):
         unpack_zip(cache / python_asset["path"], runtime / "python")
         unpack_zip(cache / ssh_asset["path"], runtime / "openssh", prefix="OpenSSH-Win64/")
         install_python_components(runtime)
-        files = msi_layout(cache / lock["sdk"]["database"], cache / "sdk/Installers",
-                           runtime / "sdk", scratch / "sdk-files")
+        files = msi_layout(
+            cache / lock["sdk"]["database"],
+            cache / "sdk/Installers",
+            runtime / "sdk",
+            scratch / "sdk-files",
+        )
         debugger_asset = next(item for item in lock["assets"] if item["component"] == "windbg_mcp")
         debugger = scratch / "windbg-mcp"
         from scripts.worker.build_debugger import PREFIX
+
         unpack_zip(cache / debugger_asset["path"], debugger, prefix=PREFIX)
         # Assembly adds the source-built MCP server. Its adjacent CRT is a
         # pinned payload, not a dependency of the guest machine.
         engine = runtime / "sdk/Windows Kits/10/Debuggers/x64"
-        with regular(runtime / "python/vcruntime140.dll").open("rb") as incoming, (engine / "vcruntime140.dll").open("xb") as outgoing:
+        with (
+            regular(runtime / "python/vcruntime140.dll").open("rb") as incoming,
+            (engine / "vcruntime140.dll").open("xb") as outgoing,
+        ):
             shutil.copyfileobj(incoming, outgoing)
         shutil.copyfile(regular(debugger / "LICENSE"), licenses / "windbg-mcp-LICENSE")
         shutil.copyfile(regular(lock_path), output / "toolchain.lock.json")
-        index = {"schema": 1, "scope": "unsigned_controller_layout", "toolchain_lock_sha256": sha256(lock_path),
-                 "sdk_files": len(files), "sdk_bytes": sum(item["size"] for item in files),
-                 "components": lock["components"]}
-        (output / "layout-index.json").write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+        index = {
+            "schema": 1,
+            "scope": "unsigned_controller_layout",
+            "toolchain_lock_sha256": sha256(lock_path),
+            "sdk_files": len(files),
+            "sdk_bytes": sum(item["size"] for item in files),
+            "components": lock["components"],
+        }
+        (output / "layout-index.json").write_text(
+            json.dumps(index, indent=2) + "\n", encoding="utf-8"
+        )
     return index
 
 

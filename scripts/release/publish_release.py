@@ -1,4 +1,5 @@
 """Promote an accepted image and finish a retryable GitHub Release."""
+
 import argparse
 import json
 import os
@@ -15,7 +16,9 @@ def run(argv, **kwargs):
 
 
 def image_digest(reference, missing_ok=False):
-    result = subprocess.run(["docker", "buildx", "imagetools", "inspect", reference], capture_output=True, text=True)
+    result = subprocess.run(
+        ["docker", "buildx", "imagetools", "inspect", reference], capture_output=True, text=True
+    )
     if result.returncode:
         if missing_ok and re.search(r"not found|manifest unknown", result.stderr, re.I):
             return None
@@ -39,7 +42,9 @@ def promote(repository, digest, tag):
 
 
 def releases(repository):
-    return json.loads(run(["gh", "api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"]))
+    return json.loads(
+        run(["gh", "api", "--paginate", "--slurp", f"repos/{repository}/releases?per_page=100"])
+    )
 
 
 def release_by_tag(repository, tag):
@@ -55,13 +60,21 @@ def verify_assets(directory, release, require_immutable=False):
     expected = {path.name: path for path in directory.iterdir() if path.is_file()}
     assets = release["assets"]
     if len(assets) != len(expected) or {a["name"] for a in assets} != set(expected):
-        raise ValueError("Release assets differ from the accepted set; fix the draft before publication")
+        raise ValueError(
+            "Release assets differ from the accepted set; fix the draft before publication"
+        )
     for asset in assets:
         path = expected[asset["name"]]
-        if asset.get("state") != "uploaded" or asset.get("size") != path.stat().st_size or asset.get("digest") != "sha256:" + sha256(path):
+        if (
+            asset.get("state") != "uploaded"
+            or asset.get("size") != path.stat().st_size
+            or asset.get("digest") != "sha256:" + sha256(path)
+        ):
             raise ValueError("Uploaded release asset identity mismatch: " + path.name)
     if require_immutable and (release.get("draft") or release.get("immutable") is not True):
-        raise ValueError("Published release is not immutable; check repository release settings before advancing latest")
+        raise ValueError(
+            "Published release is not immutable; check repository release settings before advancing latest"
+        )
 
 
 def publish(directory, tag):
@@ -70,14 +83,20 @@ def publish(directory, tag):
     manifest = read_json(directory / "release.json")
     validation = read_json(directory / "validation-summary.json")
     revision = run(["git", "rev-parse", "HEAD"])
-    refs = run(["git", "ls-remote", "origin", "refs/tags/" + tag, "refs/tags/" + tag + "^{}"]).splitlines()
+    refs = run(
+        ["git", "ls-remote", "origin", "refs/tags/" + tag, "refs/tags/" + tag + "^{}"]
+    ).splitlines()
     remote = {ref: sha for sha, ref in (line.split() for line in refs)}
     tag_commit = remote.get("refs/tags/" + tag + "^{}", remote.get("refs/tags/" + tag))
     if tag_commit != revision:
         raise ValueError("Remote release tag moved or disappeared during the build")
     if manifest["source_revision"] != revision or manifest["version"] != number:
         raise ValueError("Release identity mismatch")
-    if not validation.get("passed") or validation["source_revision"] != revision or validation["image"] != manifest["image"]:
+    if (
+        not validation.get("passed")
+        or validation["source_revision"] != revision
+        or validation["image"] != manifest["image"]
+    ):
         raise ValueError("Candidate did not pass acceptance")
     # Check the complete final asset set before any registry/release mutation.
     for line in (directory / "SHA256SUMS").read_text().splitlines():
@@ -100,22 +119,70 @@ def publish(directory, tag):
         content = read_json(directory / "release-content.json")
         notes.write_text(render(content, directory=directory), encoding="utf-8")
         if not existing:
-            run(["gh", "release", "create", tag, "--repo", repository, "--verify-tag", "--draft", "--title", tag, "--notes-file", str(notes), "--target", revision])
-        run(["gh", "release", "upload", tag, "--repo", repository, "--clobber", *map(str, sorted(directory.iterdir()))])
+            run(
+                [
+                    "gh",
+                    "release",
+                    "create",
+                    tag,
+                    "--repo",
+                    repository,
+                    "--verify-tag",
+                    "--draft",
+                    "--title",
+                    tag,
+                    "--notes-file",
+                    str(notes),
+                    "--target",
+                    revision,
+                ]
+            )
+        run(
+            [
+                "gh",
+                "release",
+                "upload",
+                tag,
+                "--repo",
+                repository,
+                "--clobber",
+                *map(str, sorted(directory.iterdir())),
+            ]
+        )
         draft = release_by_tag(repository, tag)
         if not draft["draft"]:
             raise ValueError("Release changed during upload; refusing to publish")
         # Check exact bytes and remove ambiguity before publication locks the assets.
         verify_assets(directory, draft)
         promote(repo, digest, number)
-        run(["gh", "release", "edit", tag, "--repo", repository, "--draft=false", "--prerelease=" + str("-" in number).lower(), "--latest=false", "--notes-file", str(notes)])
+        run(
+            [
+                "gh",
+                "release",
+                "edit",
+                tag,
+                "--repo",
+                repository,
+                "--draft=false",
+                "--prerelease=" + str("-" in number).lower(),
+                "--latest=false",
+                "--notes-file",
+                str(notes),
+            ]
+        )
     verified = release_by_tag(repository, tag)
     verify_assets(directory, verified, require_immutable=True)
     promote(repo, digest, number)
     if "-" not in number:
         current = tuple(map(int, number.split(".")))
         published = [r for page in releases(repository) for r in page]
-        newer = any(not r["draft"] and not r["prerelease"] and re.fullmatch(r"v\d+\.\d+\.\d+", r["tag_name"]) and tuple(map(int, r["tag_name"][1:].split("."))) > current for r in published)
+        newer = any(
+            not r["draft"]
+            and not r["prerelease"]
+            and re.fullmatch(r"v\d+\.\d+\.\d+", r["tag_name"])
+            and tuple(map(int, r["tag_name"][1:].split("."))) > current
+            for r in published
+        )
         if not newer:
             promote(repo, digest, "latest")
             run(["gh", "release", "edit", tag, "--repo", repository, "--latest"])

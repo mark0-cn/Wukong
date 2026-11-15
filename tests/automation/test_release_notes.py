@@ -16,9 +16,23 @@ class FrozenNotesTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.content = dict(schema=1, tag="v1.0.1", version="1.0.1", source_revision="a" * 40,
-                            base_revision="b" * 40, previous_tag="v1.0.0", changelog="### Fixes\n\n- Repair progress display.",
-                            entries=[dict(path=".changes/progress.toml", kind="fix", en="Show live progress.", zh_CN="展示实时进度。")])
+        self.content = dict(
+            schema=1,
+            tag="v1.0.1",
+            version="1.0.1",
+            source_revision="a" * 40,
+            base_revision="b" * 40,
+            previous_tag="v1.0.0",
+            changelog="### Fixes\n\n- Repair progress display.",
+            entries=[
+                dict(
+                    path=".changes/progress.toml",
+                    kind="fix",
+                    en="Show live progress.",
+                    zh_CN="展示实时进度。",
+                )
+            ],
+        )
 
     def accepted_assets(self):
         content_file = self.root / "release-content.json"
@@ -27,12 +41,23 @@ class FrozenNotesTests(unittest.TestCase):
         shared = dict(source_revision="a" * 40, version="1.0.1", image=image)
         (self.root / "release.json").write_text(json.dumps(shared))
         (self.root / "validation-summary.json").write_text(json.dumps(dict(passed=True, **shared)))
-        updater = dict(notes=update_summary(self.content), release_content_sha256=sha256(content_file), platforms={}, **shared)
-        for platform, name in [("windows-x86_64", "Wukong_1.0.1_x64-setup.exe"), ("linux-x86_64", "Wukong_1.0.1_amd64.AppImage")]:
+        updater = dict(
+            notes=update_summary(self.content),
+            release_content_sha256=sha256(content_file),
+            platforms={},
+            **shared,
+        )
+        for platform, name in [
+            ("windows-x86_64", "Wukong_1.0.1_x64-setup.exe"),
+            ("linux-x86_64", "Wukong_1.0.1_amd64.AppImage"),
+        ]:
             path = self.root / name
             path.write_bytes(b"accepted installer bytes")
-            updater["platforms"][platform] = dict(url="https://github.com/mark0-cn/Wukong/releases/download/v1.0.1/" + name,
-                                                size=path.stat().st_size, sha256=sha256(path))
+            updater["platforms"][platform] = dict(
+                url="https://github.com/mark0-cn/Wukong/releases/download/v1.0.1/" + name,
+                size=path.stat().st_size,
+                sha256=sha256(path),
+            )
         (self.root / "latest.json").write_text(json.dumps(updater), encoding="utf-8")
 
     def test_preview_never_claims_acceptance_or_published_downloads(self):
@@ -45,7 +70,10 @@ class FrozenNotesTests(unittest.TestCase):
 
     def test_accepted_page_uses_actual_assets_and_is_independent_of_later_git_edits(self):
         self.accepted_assets()
-        with patch("scripts.release.release_notes.git", side_effect=AssertionError("Do not reread mutable history")):
+        with patch(
+            "scripts.release.release_notes.git",
+            side_effect=AssertionError("Do not reread mutable history"),
+        ):
             body = render(self.content, directory=self.root)
         self.assertIn("Wukong_1.0.1_x64-setup.exe", body)
         self.assertIn("Wukong_1.0.1_amd64.AppImage", body)
@@ -82,8 +110,15 @@ class FrozenNotesTests(unittest.TestCase):
             render(self.content, directory=self.root)
 
     def test_updater_summary_is_bounded_without_truncating_full_release_notes(self):
-        self.content["entries"] = [dict(path=f".changes/change-{index}.toml", kind="feature",
-                                        en="Describe concrete behavior. " * 60, zh_CN="完整的中文变化说明。" * 100) for index in range(50)]
+        self.content["entries"] = [
+            dict(
+                path=f".changes/change-{index}.toml",
+                kind="feature",
+                en="Describe concrete behavior. " * 60,
+                zh_CN="完整的中文变化说明。" * 100,
+            )
+            for index in range(50)
+        ]
         summary = update_summary(self.content)
         self.assertLessEqual(len(summary.encode("utf-8")), 32 * 1024)
         self.assertIn("Full release notes", summary)
@@ -92,17 +127,23 @@ class FrozenNotesTests(unittest.TestCase):
         self.assertNotIn("more changes", render(self.content))
 
 
-@unittest.skipUnless((ROOT / "node_modules/git-cliff/lib/cli/cli.js").is_file(), "npm ci required; preview CI exercises real git-cliff")
+@unittest.skipUnless(
+    (ROOT / "node_modules/git-cliff/lib/cli/cli.js").is_file(),
+    "npm ci required; preview CI exercises real git-cliff",
+)
 class RealGitCliffTests(unittest.TestCase):
     def test_tag_range_bilingual_fragments_and_breaking_changes(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
+
             def run(*args):
                 return subprocess.check_output(["git", *args], cwd=root).decode().strip()
+
             def commit(message):
                 run("add", ".")
                 run("-c", "core.hooksPath=", "commit", "--allow-empty", "-qm", message)
                 return run("rev-parse", "HEAD")
+
             run("init", "-q")
             run("config", "user.name", "Fixture")
             run("config", "user.email", "fixture@example.invalid")
@@ -112,7 +153,9 @@ class RealGitCliffTests(unittest.TestCase):
             (root / ".changes").mkdir()
             (root / ".changes/progress.toml").write_text(FRAGMENT, encoding="utf-8")
             commit("feat(ui): display live tool progress")
-            commit("chore(config)!: replace storage keys\n\nBREAKING CHANGE: migrate storage keys in settings")
+            commit(
+                "chore(config)!: replace storage keys\n\nBREAKING CHANGE: migrate storage keys in settings"
+            )
             (root / "Cargo.toml").write_text('[package]\nversion = "1.1.0"\n')
             head = commit("release: prepare v1.1.0")
             run("tag", "v1.1.0")
@@ -131,7 +174,12 @@ class RealGitCliffTests(unittest.TestCase):
             summary = preview(pr, output, root=root)
             self.assertIn("Cumulative version changes", summary)
             self.assertIn(head, summary)
-            self.assertEqual(json.loads((output / "next-release.json").read_text(encoding="utf-8"))["source_revision"], head)
+            self.assertEqual(
+                json.loads((output / "next-release.json").read_text(encoding="utf-8"))[
+                    "source_revision"
+                ],
+                head,
+            )
             self.assertTrue((output / "pr-changes.md").is_file())
             pr["head"]["ref"] = "codex/ui-progress"
             self.assertIn("Changes in this PR", preview(pr, output, root=root))

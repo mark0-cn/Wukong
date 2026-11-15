@@ -19,30 +19,52 @@ class LocalPackageTests(unittest.TestCase):
     def setUp(self):
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
-        self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory(prefix="local package ")))
+        self.root = Path(
+            self.stack.enter_context(tempfile.TemporaryDirectory(prefix="local package "))
+        )
         self.revision = "a" * 40
         self.metadata = self.root / "image metadata.json"
         self.output = self.root / "output package"
-        self.image = dict(source_revision=self.revision, repository="example/wukong",
-                          digest="sha256:" + "b" * 64, image_id="sha256:" + "c" * 64,
-                          size_bytes=12345, platform="linux/amd64")
+        self.image = dict(
+            source_revision=self.revision,
+            repository="example/wukong",
+            digest="sha256:" + "b" * 64,
+            image_id="sha256:" + "c" * 64,
+            size_bytes=12345,
+            platform="linux/amd64",
+        )
         write_json(self.metadata, self.image)
-        for name in ("packaging/windows/install-workbench.ps1", "packaging/windows/rollback-workbench.ps1",
-                     "docs/user/online-install.md"):
+        for name in (
+            "packaging/windows/install-workbench.ps1",
+            "packaging/windows/rollback-workbench.ps1",
+            "docs/user/online-install.md",
+        ):
             destination = self.root / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, destination)
         self.stack.enter_context(patch.object(local_package, "ROOT", self.root))
         self.stack.enter_context(patch("scripts.release.cli.ROOT", self.root))
-        self.stack.enter_context(patch.object(local_package.platform, "system", return_value="Windows"))
-        self.stack.enter_context(patch.object(local_package.platform, "machine", return_value="AMD64"))
-        self.stack.enter_context(patch.object(local_package.shutil, "which", side_effect=lambda name: name))
+        self.stack.enter_context(
+            patch.object(local_package.platform, "system", return_value="Windows")
+        )
+        self.stack.enter_context(
+            patch.object(local_package.platform, "machine", return_value="AMD64")
+        )
+        self.stack.enter_context(
+            patch.object(local_package.shutil, "which", side_effect=lambda name: name)
+        )
         self.stack.enter_context(patch.object(local_package, "version", return_value="1.2.3"))
         self.stack.enter_context(patch("scripts.release.cli.version", return_value="1.2.3"))
-        self.identity = self.stack.enter_context(patch.object(local_package, "checkout_identity", return_value=self.revision))
-        self.stack.enter_context(patch("scripts.release.cli.subprocess.check_output", return_value=self.revision))
+        self.identity = self.stack.enter_context(
+            patch.object(local_package, "checkout_identity", return_value=self.revision)
+        )
+        self.stack.enter_context(
+            patch("scripts.release.cli.subprocess.check_output", return_value=self.revision)
+        )
         self.commands = []
-        self.runner = self.stack.enter_context(patch.object(local_package, "run", side_effect=self.fake_run))
+        self.runner = self.stack.enter_context(
+            patch.object(local_package, "run", side_effect=self.fake_run)
+        )
 
     def fake_run(self, command):
         self.commands.append(command)
@@ -62,8 +84,16 @@ class LocalPackageTests(unittest.TestCase):
             manifest = json.loads(bundle.read("release.json"))
             self.assertEqual(manifest["source_revision"], self.revision)
             self.assertEqual(manifest["image"], "example/wukong@" + self.image["digest"])
-            self.assertEqual(set(bundle.namelist()), {"wukong.exe", "install-workbench.ps1",
-                                                     "rollback-workbench.ps1", "README.md", "release.json"})
+            self.assertEqual(
+                set(bundle.namelist()),
+                {
+                    "wukong.exe",
+                    "install-workbench.ps1",
+                    "rollback-workbench.ps1",
+                    "README.md",
+                    "release.json",
+                },
+            )
         self.assertIn(sha256(archive), (self.output / "SHA256SUMS").read_text())
 
     def test_missing_or_stale_metadata_stops_before_build(self):
@@ -100,7 +130,9 @@ class LocalPackageTests(unittest.TestCase):
         self.runner.assert_not_called()
 
     def test_release_download_failure_stops_before_compiling(self):
-        with patch.object(local_package, "release_image", side_effect=ValueError("Release asset not found")):
+        with patch.object(
+            local_package, "release_image", side_effect=ValueError("Release asset not found")
+        ):
             with self.assertRaisesRegex(ValueError, "Release asset not found"):
                 local_package.build(None, self.output)
         self.runner.assert_not_called()
@@ -135,7 +167,10 @@ class LocalPackageTests(unittest.TestCase):
 
     def test_dirty_checkout_is_rejected(self):
         # Exercise the real guard independently of the build orchestration fixture.
-        with patch("scripts.release.local_package.subprocess.check_output", side_effect=[self.revision, " M src/main.rs"]):
+        with patch(
+            "scripts.release.local_package.subprocess.check_output",
+            side_effect=[self.revision, " M src/main.rs"],
+        ):
             with self.assertRaisesRegex(ValueError, "Commit source changes first"):
                 CHECKOUT_IDENTITY()
 

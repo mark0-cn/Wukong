@@ -1,4 +1,5 @@
 """Real Explorer checks: initially matching states and bounded loops."""
+
 import importlib.util
 import unittest
 
@@ -9,6 +10,7 @@ from angr_solve import bounded_explore
 class AngrLimitTests(unittest.TestCase):
     def simulation(self):
         import angr
+
         project = angr.load_shellcode(b"\xeb\xfe", arch="amd64", load_address=0x400000)
         return project.factory.simulation_manager(project.factory.entry_state(addr=0x400000))
 

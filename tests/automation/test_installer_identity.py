@@ -14,7 +14,13 @@ class InstallerIdentityTests(unittest.TestCase):
             signature = folder / (binary.name + ".sig")
             binary.write_bytes(b"installer")
             signature.write_bytes(b"signature")
-            identity = dict(schema=1, target="windows", recipe="recipe", version="1.2.3", source_revision="a" * 40)
+            identity = dict(
+                schema=1,
+                target="windows",
+                recipe="recipe",
+                version="1.2.3",
+                source_revision="a" * 40,
+            )
             with patch.object(installer, "identity", return_value=identity):
                 installer.record("windows", folder)
                 installer.verify("windows", folder)
@@ -39,4 +45,6 @@ class InstallerIdentityTests(unittest.TestCase):
 
     def test_current_signing_config_is_in_identity(self):
         self.assertEqual(installer.identity("linux")["target"], "linux")
-        self.assertNotEqual(installer.identity("windows")["recipe"], installer.identity("linux")["recipe"])
+        self.assertNotEqual(
+            installer.identity("windows")["recipe"], installer.identity("linux")["recipe"]
+        )

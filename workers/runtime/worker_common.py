@@ -1,4 +1,5 @@
 """Protocol values, confined paths and atomic metadata IO."""
+
 from pathlib import Path
 import hashlib
 import json
@@ -9,19 +10,42 @@ from atomicwrites import AtomicWriter, atomic_write
 
 from worker_contract import PROTOCOL
 from wukong_analysis.validation import bounded_int, parse_address
+
 MAX_RPC = 48 * 1024 * 1024
 MAX_FILE = 32 * 1024 * 1024
 TERMINAL = {"completed", "failed", "cancelled", "timed_out", "lost"}
-ENV_KEYS = {"PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC", "HOME", "USERPROFILE", "LANG", "LC_ALL", "JAVA_HOME", "WUKONG_GHIDRA_HEADLESS", "WUKONG_GHIDRA_SCRIPT_DIR"}
+ENV_KEYS = {
+    "PATH",
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "PATHEXT",
+    "COMSPEC",
+    "HOME",
+    "USERPROFILE",
+    "LANG",
+    "LC_ALL",
+    "JAVA_HOME",
+    "WUKONG_GHIDRA_HEADLESS",
+    "WUKONG_GHIDRA_SCRIPT_DIR",
+}
 BRIDGE_PATH = Path(__file__).with_name("bridge.py").resolve()
+
 
 class WorkerError(ValueError):
     def __init__(self, kind, message):
         super().__init__(message)
         self.kind = kind
 
+
 def error_kind(error):
-    return getattr(error, "kind", "invalid_request" if isinstance(error, (ValueError, KeyError, TypeError)) else "internal")
+    return getattr(
+        error,
+        "kind",
+        "invalid_request" if isinstance(error, (ValueError, KeyError, TypeError)) else "internal",
+    )
+
 
 def safe_env(extra=None):
     # Windows enumerates environment names in upper case; SYSTEMROOT is needed
@@ -37,6 +61,7 @@ def safe_env(extra=None):
         env[k] = str(v)
     return env
 
+
 class _MetadataWriter(AtomicWriter):
     def commit(self, stream):
         # Preserve the bounded Windows sharing retry. The library owns temporary
@@ -45,7 +70,11 @@ class _MetadataWriter(AtomicWriter):
             try:
                 return super().commit(stream)
             except OSError as error:
-                if os.name != "nt" or getattr(error, "winerror", None) not in {5, 32, 33} or attempt == 4:
+                if (
+                    os.name != "nt"
+                    or getattr(error, "winerror", None) not in {5, 32, 33}
+                    or attempt == 4
+                ):
                     raise
                 time.sleep(0.02 * (attempt + 1))
 
@@ -54,6 +83,7 @@ def atomic_json(path, data):
     encoded = json.dumps(data, ensure_ascii=False)
     with atomic_write(path, writer_cls=_MetadataWriter, overwrite=True, encoding="utf-8") as stream:
         stream.write(encoded)
+
 
 def load_json(path):
     # Windows: a concurrent atomic replacement can fail the open with a
@@ -67,6 +97,7 @@ def load_json(path):
                 raise
             time.sleep(0.02 * (attempt + 1))
 
+
 def confined(root, relative, exists=False):
     root = Path(root).resolve()
     value = Path(str(relative))
@@ -79,10 +110,12 @@ def confined(root, relative, exists=False):
         raise ValueError("worker path does not exist: " + str(relative))
     return value
 
+
 def job_dir(root, job_id):
     if not re.fullmatch(r"[0-9a-f]{32}", str(job_id)):
         raise ValueError("invalid job_id")
     return confined(root, "jobs/" + job_id, True)
+
 
 def tail(path, limit=8192):
     if not Path(path).is_file():
@@ -90,6 +123,7 @@ def tail(path, limit=8192):
     with open(path, "rb") as stream:
         stream.seek(max(0, Path(path).stat().st_size - limit))
         return stream.read(limit).decode("utf-8", errors="replace")
+
 
 def sha256_file(path):
     with Path(path).open("rb") as stream:
@@ -102,7 +136,12 @@ def artifact(root, path):
         raise ValueError("artifact outside worker root")
     if not path.is_file():
         return None
-    return {"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path), "size": path.stat().st_size}
+    return {
+        "path": path.relative_to(root).as_posix(),
+        "sha256": sha256_file(path),
+        "size": path.stat().st_size,
+    }
+
 
 def public_file(root, relative):
     root = Path(root).resolve()
@@ -116,6 +155,13 @@ def public_file(root, relative):
         return path
     if parts[0] == "ghidra" and (len(parts) < 2 or parts[1] != "results"):
         raise ValueError("path is private Ghidra project metadata")
-    if path.name in {"spec.json", "status.json", "heartbeat.json", "cancel", "session.json", "supervisor.log"}:
+    if path.name in {
+        "spec.json",
+        "status.json",
+        "heartbeat.json",
+        "cancel",
+        "session.json",
+        "supervisor.log",
+    }:
         raise ValueError("path is private worker metadata; use status APIs")
     return path

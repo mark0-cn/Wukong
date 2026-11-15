@@ -1,4 +1,5 @@
 """Use commitlint for PR titles/commits and validate reviewed release summaries."""
+
 import argparse
 import json
 import os
@@ -14,9 +15,20 @@ def git(*args):
 
 
 def lint(message):
-    subprocess.run(["node", str(ROOT / "node_modules/@commitlint/cli/lib/cli.js"),
-                    "--config", str(ROOT / "commitlint.config.mjs"), "--verbose"],
-                   input=message, cwd=ROOT, text=True, encoding="utf-8", check=True)
+    subprocess.run(
+        [
+            "node",
+            str(ROOT / "node_modules/@commitlint/cli/lib/cli.js"),
+            "--config",
+            str(ROOT / "commitlint.config.mjs"),
+            "--verbose",
+        ],
+        input=message,
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
 
 
 def validate(pr):

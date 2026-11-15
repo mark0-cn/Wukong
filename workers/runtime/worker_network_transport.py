@@ -1,4 +1,5 @@
 """Bounded TCP framing, partial I/O and already-buffered response provenance."""
+
 import base64
 import socket
 from worker_network_plan import LIMIT
@@ -27,7 +28,7 @@ class ReplayConnection:
                     continue
                 if not amount:
                     raise EOFError("connection closed during send")
-                self.transcript.wire(index, "send", data[written:written+amount])
+                self.transcript.wire(index, "send", data[written : written + amount])
                 written += amount
                 self.count += amount
         finally:
@@ -56,11 +57,17 @@ class ReplayConnection:
                     consume(take)
                     return bytes(data), bytes(fresh)
                 if self.pending:
-                    consume(max(0, len(self.pending)-len(delimiter)+1))
-                if len(data)+len(self.pending) >= maximum or self.count >= LIMIT or len(self.transcript.events) >= 4096:
+                    consume(max(0, len(self.pending) - len(delimiter) + 1))
+                if (
+                    len(data) + len(self.pending) >= maximum
+                    or self.count >= LIMIT
+                    or len(self.transcript.events) >= 4096
+                ):
                     raise ValueError("receive/transcript budget exceeded")
                 try:
-                    chunk = self.socket.recv(min(4096, maximum-len(data)-len(self.pending), LIMIT-self.count))
+                    chunk = self.socket.recv(
+                        min(4096, maximum - len(data) - len(self.pending), LIMIT - self.count)
+                    )
                 except socket.timeout:
                     continue
                 if not chunk:

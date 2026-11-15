@@ -1,4 +1,5 @@
 """Picire owns reduction; the caller owns execution and crash equivalence."""
+
 import time
 
 from picire import DD, LimitReduction, Outcome, ReductionStopped
@@ -49,6 +50,16 @@ def reduce_input(data, evaluate, *, max_attempts, deadline, cancelled):
         if test(b"", None, None) is not Outcome.FAIL:
             best = bytes(DD(test, stop=stop, cache=NoCache())(data))
         stop()
-        return best, {"attempts": attempts, "complete": True, "reducer": "picire", "stop_reason": None}
+        return best, {
+            "attempts": attempts,
+            "complete": True,
+            "reducer": "picire",
+            "stop_reason": None,
+        }
     except ReductionStopped as error:
-        return best, {"attempts": attempts, "complete": False, "reducer": "picire", "stop_reason": str(error)}
+        return best, {
+            "attempts": attempts,
+            "complete": False,
+            "reducer": "picire",
+            "stop_reason": str(error),
+        }

@@ -6,6 +6,7 @@ stack, and returns registers and memory dumps. It is a pure simulation: the
 target never runs natively and no worker state is touched. Instruction
 count, a stop address and a wall-clock watchdog bound the run.
 """
+
 import base64
 import json
 import struct
@@ -14,8 +15,26 @@ import time
 
 from .validation import bounded_int, parse_address
 
-X86_64_REGISTERS = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip",
-                    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"]
+X86_64_REGISTERS = [
+    "rax",
+    "rbx",
+    "rcx",
+    "rdx",
+    "rsi",
+    "rdi",
+    "rbp",
+    "rsp",
+    "rip",
+    "r8",
+    "r9",
+    "r10",
+    "r11",
+    "r12",
+    "r13",
+    "r14",
+    "r15",
+    "eflags",
+]
 X86_32_REGISTERS = ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "eip", "eflags"]
 
 
@@ -110,21 +129,39 @@ def _segments(path):
     return bits, segments
 
 
-
 def run(target, params):
     if not target.is_file():
         raise ValueError("emu target must be a staged file")
     try:
         from unicorn import UC_ARCH_X86, UC_HOOK_CODE, UC_MODE_32, UC_MODE_64, UC_PROT_ALL, Uc  # noqa: PLC0415
         from unicorn.x86_const import (  # noqa: PLC0415
-            UC_X86_REG_EIP, UC_X86_REG_ESP, UC_X86_REG_RIP, UC_X86_REG_RSP,
-            UC_X86_REG_RAX, UC_X86_REG_RBX, UC_X86_REG_RCX, UC_X86_REG_RDX,
-            UC_X86_REG_RSI, UC_X86_REG_RDI, UC_X86_REG_RBP,
-            UC_X86_REG_R8, UC_X86_REG_R9, UC_X86_REG_R10, UC_X86_REG_R11,
-            UC_X86_REG_R12, UC_X86_REG_R13, UC_X86_REG_R14, UC_X86_REG_R15,
+            UC_X86_REG_EIP,
+            UC_X86_REG_ESP,
+            UC_X86_REG_RIP,
+            UC_X86_REG_RSP,
+            UC_X86_REG_RAX,
+            UC_X86_REG_RBX,
+            UC_X86_REG_RCX,
+            UC_X86_REG_RDX,
+            UC_X86_REG_RSI,
+            UC_X86_REG_RDI,
+            UC_X86_REG_RBP,
+            UC_X86_REG_R8,
+            UC_X86_REG_R9,
+            UC_X86_REG_R10,
+            UC_X86_REG_R11,
+            UC_X86_REG_R12,
+            UC_X86_REG_R13,
+            UC_X86_REG_R14,
+            UC_X86_REG_R15,
             UC_X86_REG_EFLAGS,
-            UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX,
-            UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBP,
+            UC_X86_REG_EAX,
+            UC_X86_REG_EBX,
+            UC_X86_REG_ECX,
+            UC_X86_REG_EDX,
+            UC_X86_REG_ESI,
+            UC_X86_REG_EDI,
+            UC_X86_REG_EBP,
         )
     except ImportError as error:
         raise ValueError("unicorn is not installed in this worker") from error
@@ -147,17 +184,39 @@ def run(target, params):
             mu.mem_write(address, data)
     init = params.get("init_regs") or {}
     if bits == 64:
-        table = {"rax": UC_X86_REG_RAX, "rbx": UC_X86_REG_RBX, "rcx": UC_X86_REG_RCX,
-                 "rdx": UC_X86_REG_RDX, "rsi": UC_X86_REG_RSI, "rdi": UC_X86_REG_RDI,
-                 "rbp": UC_X86_REG_RBP, "rsp": UC_X86_REG_RSP, "rip": UC_X86_REG_RIP,
-                 "r8": UC_X86_REG_R8, "r9": UC_X86_REG_R9, "r10": UC_X86_REG_R10,
-                 "r11": UC_X86_REG_R11, "r12": UC_X86_REG_R12, "r13": UC_X86_REG_R13,
-                 "r14": UC_X86_REG_R14, "r15": UC_X86_REG_R15, "eflags": UC_X86_REG_EFLAGS}
+        table = {
+            "rax": UC_X86_REG_RAX,
+            "rbx": UC_X86_REG_RBX,
+            "rcx": UC_X86_REG_RCX,
+            "rdx": UC_X86_REG_RDX,
+            "rsi": UC_X86_REG_RSI,
+            "rdi": UC_X86_REG_RDI,
+            "rbp": UC_X86_REG_RBP,
+            "rsp": UC_X86_REG_RSP,
+            "rip": UC_X86_REG_RIP,
+            "r8": UC_X86_REG_R8,
+            "r9": UC_X86_REG_R9,
+            "r10": UC_X86_REG_R10,
+            "r11": UC_X86_REG_R11,
+            "r12": UC_X86_REG_R12,
+            "r13": UC_X86_REG_R13,
+            "r14": UC_X86_REG_R14,
+            "r15": UC_X86_REG_R15,
+            "eflags": UC_X86_REG_EFLAGS,
+        }
     else:
-        table = {"eax": UC_X86_REG_EAX, "ebx": UC_X86_REG_EBX, "ecx": UC_X86_REG_ECX,
-                 "edx": UC_X86_REG_EDX, "esi": UC_X86_REG_ESI, "edi": UC_X86_REG_EDI,
-                 "ebp": UC_X86_REG_EBP, "esp": UC_X86_REG_ESP, "eip": UC_X86_REG_EIP,
-                 "eflags": UC_X86_REG_EFLAGS}
+        table = {
+            "eax": UC_X86_REG_EAX,
+            "ebx": UC_X86_REG_EBX,
+            "ecx": UC_X86_REG_ECX,
+            "edx": UC_X86_REG_EDX,
+            "esi": UC_X86_REG_ESI,
+            "edi": UC_X86_REG_EDI,
+            "ebp": UC_X86_REG_EBP,
+            "esp": UC_X86_REG_ESP,
+            "eip": UC_X86_REG_EIP,
+            "eflags": UC_X86_REG_EFLAGS,
+        }
     if "rsp" not in init and "esp" not in init:
         mu.reg_write(UC_X86_REG_RSP if bits == 64 else UC_X86_REG_ESP, stack_top - 0x1000)
     for name, value in init.items():
@@ -167,20 +226,38 @@ def run(target, params):
             raise ValueError("unknown register for this mode: " + name)
         mu.reg_write(table[name], value)
     for write in params.get("memory") or []:
-        mu.mem_write(parse_address(write["address"]),
-                     base64.b64decode(write["data_base64"], validate=True))
+        mu.mem_write(
+            parse_address(write["address"]), base64.b64decode(write["data_base64"], validate=True)
+        )
     state = {"instructions": 0, "stopped": None, "error": None}
     x87_exact = bool(params.get("x87_exact", True))
     x87_stack = []  # Python-side 80-bit shadow of ST(0..7)
     pc_register = UC_X86_REG_RIP if bits == 64 else UC_X86_REG_EIP
-    reg32 = {"eax": UC_X86_REG_EAX, "ecx": UC_X86_REG_ECX, "edx": UC_X86_REG_EDX,
-             "ebx": UC_X86_REG_EBX, "esp": UC_X86_REG_ESP, "ebp": UC_X86_REG_EBP,
-             "esi": UC_X86_REG_ESI, "edi": UC_X86_REG_EDI}
-    reg64 = {"rax": UC_X86_REG_RAX, "rcx": UC_X86_REG_RCX, "rdx": UC_X86_REG_RDX,
-             "rbx": UC_X86_REG_RBX, "rsp": UC_X86_REG_RSP, "rbp": UC_X86_REG_RBP,
-             "rsi": UC_X86_REG_RSI, "rdi": UC_X86_REG_RDI}
-    reg_by_index = {0: "rax", 1: "rcx", 2: "rdx", 3: "rbx", 4: "rsp", 5: "rbp", 6: "rsi", 7: "rdi"} \
-        if bits == 64 else {0: "eax", 1: "ecx", 2: "edx", 3: "ebx", 4: "esp", 5: "ebp", 6: "esi", 7: "edi"}
+    reg32 = {
+        "eax": UC_X86_REG_EAX,
+        "ecx": UC_X86_REG_ECX,
+        "edx": UC_X86_REG_EDX,
+        "ebx": UC_X86_REG_EBX,
+        "esp": UC_X86_REG_ESP,
+        "ebp": UC_X86_REG_EBP,
+        "esi": UC_X86_REG_ESI,
+        "edi": UC_X86_REG_EDI,
+    }
+    reg64 = {
+        "rax": UC_X86_REG_RAX,
+        "rcx": UC_X86_REG_RCX,
+        "rdx": UC_X86_REG_RDX,
+        "rbx": UC_X86_REG_RBX,
+        "rsp": UC_X86_REG_RSP,
+        "rbp": UC_X86_REG_RBP,
+        "rsi": UC_X86_REG_RSI,
+        "rdi": UC_X86_REG_RDI,
+    }
+    reg_by_index = (
+        {0: "rax", 1: "rcx", 2: "rdx", 3: "rbx", 4: "rsp", 5: "rbp", 6: "rsi", 7: "rdi"}
+        if bits == 64
+        else {0: "eax", 1: "ecx", 2: "edx", 3: "ebx", 4: "esp", 5: "ebp", 6: "esi", 7: "edi"}
+    )
     reg_table = reg64 if bits == 64 else reg32
 
     def step_x87(uc, address):
@@ -204,7 +281,9 @@ def run(target, params):
                 uc.mem_write(address_base, struct.pack("<I", _f80_to_f32(x87_stack[-1])))
                 return 2
             if opcode == 0xDB and ((modrm >> 3) & 7) == 1:  # fisttp dword [reg]
-                uc.mem_write(address_base, struct.pack("<i", _f80_trunc_i32(x87_stack.pop()) & 0xFFFFFFFF))
+                uc.mem_write(
+                    address_base, struct.pack("<i", _f80_trunc_i32(x87_stack.pop()) & 0xFFFFFFFF)
+                )
                 return 2
         if 0xD8 <= opcode <= 0xDF:
             raise ValueError("x87 instruction at %#x not covered by exact emulation" % address)
@@ -260,15 +339,28 @@ def run(target, params):
     names = X86_64_REGISTERS if bits == 64 else X86_32_REGISTERS
     registers = {}
     for name in names:
-        constant = getattr(__import__("unicorn.x86_const", fromlist=[name]), "UC_X86_REG_" + name.upper())
+        constant = getattr(
+            __import__("unicorn.x86_const", fromlist=[name]), "UC_X86_REG_" + name.upper()
+        )
         registers[name] = mu.reg_read(constant)
     dumps = []
     for dump in params.get("dump") or []:
         address = parse_address(dump["address"])
         size = bounded_int(dump.get("size"), 64, 1, 1_048_576)
-        dumps.append({"address": address, "size": size,
-                      "data_base64": base64.b64encode(bytes(mu.mem_read(address, size))).decode()})
-    return {"bits": bits, "start": start, "stopped": state["stopped"],
-            "instructions": state["instructions"], "error": state["error"],
-            "duration_secs": round(time.monotonic() - started, 4),
-            "registers": registers, "dumps": dumps}
+        dumps.append(
+            {
+                "address": address,
+                "size": size,
+                "data_base64": base64.b64encode(bytes(mu.mem_read(address, size))).decode(),
+            }
+        )
+    return {
+        "bits": bits,
+        "start": start,
+        "stopped": state["stopped"],
+        "instructions": state["instructions"],
+        "error": state["error"],
+        "duration_secs": round(time.monotonic() - started, 4),
+        "registers": registers,
+        "dumps": dumps,
+    }

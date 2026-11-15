@@ -1,4 +1,5 @@
 """Worker composition and method routing."""
+
 import os
 import sys
 from worker_capabilities import doctor
@@ -17,14 +18,19 @@ from worker_sessions import SessionManager
 from worker_transfers import TransferService
 from worker_identity import WorkerIdentity
 
+
 class Runtime:
     def __init__(self, root, trusted):
         self.root, self.trusted = root.resolve(), trusted
         self.stopping = False
         self.identity = WorkerIdentity(self.root)
         self.isolated = sys.platform.startswith("linux") and os.geteuid() == 0 and not trusted
-        self.jobs = JobManager(self.root, trusted, self.isolated,
-                              observe=lambda: doctor(self.root, self.trusted, self.isolated, self.registrations))
+        self.jobs = JobManager(
+            self.root,
+            trusted,
+            self.isolated,
+            observe=lambda: doctor(self.root, self.trusted, self.isolated, self.registrations),
+        )
         self.sessions = SessionManager(self.root, trusted, self.isolated)
         self.files = FileService(self.root, trusted, self.isolated)
         self.commands = CommandService(self.root, trusted, self.isolated)
@@ -37,34 +43,54 @@ class Runtime:
         self.operations = OperationLedger(self.root)
         self.transfers = TransferService(self.root)
         from worker_catalog import register
+
         self.registrations = register(self)
-        self.handlers = {name: registration.handler for name, registration in self.registrations.items()}
+        self.handlers = {
+            name: registration.handler for name, registration in self.registrations.items()
+        }
 
     def dispatch(self, method, params):
-        if method not in {'ping','doctor'} and '_binding' in params:
-            self.identity.validate(params['_binding'])
-            params={key:value for key,value in params.items() if key!='_binding'}
-        return self.operations.invoke(method, params, self.dispatch_inner, self.sessions.reconcile_reply)
+        if method not in {"ping", "doctor"} and "_binding" in params:
+            self.identity.validate(params["_binding"])
+            params = {key: value for key, value in params.items() if key != "_binding"}
+        return self.operations.invoke(
+            method, params, self.dispatch_inner, self.sessions.reconcile_reply
+        )
 
     def dispatch_inner(self, method, params):
         return self.handlers[method](params)
 
     def ping(self, params):
-        return {"protocol": PROTOCOL, "identity":self.identity.value, "daemon_id":self.identity.daemon_id,
-                "daemon_pid": os.getpid(), "state_dir": str(self.root)}
+        return {
+            "protocol": PROTOCOL,
+            "identity": self.identity.value,
+            "daemon_id": self.identity.daemon_id,
+            "daemon_pid": os.getpid(),
+            "state_dir": str(self.root),
+        }
 
     def doctor(self, params):
-        return {**doctor(self.root,self.trusted,self.isolated,self.registrations),'identity':self.identity.value,
-                'daemon_id':self.identity.daemon_id,'exclusive_run_lease':False}
+        return {
+            **doctor(self.root, self.trusted, self.isolated, self.registrations),
+            "identity": self.identity.value,
+            "daemon_id": self.identity.daemon_id,
+            "exclusive_run_lease": False,
+        }
 
     def ghidra_query(self, params):
         from ghidra_backend import query
+
         return query(self.root, params)
 
     def shutdown(self, params):
-        active = [self.jobs.status(path.parent.name) for path in (self.root / "jobs").glob("*/status.json")]
+        active = [
+            self.jobs.status(path.parent.name)
+            for path in (self.root / "jobs").glob("*/status.json")
+        ]
         if any(job["state"] not in TERMINAL for job in active):
-            raise ValueError("cannot shut down worker while jobs are active; cancel and reconcile them first")
+            raise ValueError(
+                "cannot shut down worker while jobs are active; cancel and reconcile them first"
+            )
         self.sessions.close_all()
         self.stopping = True
         return {"state": "shutdown"}

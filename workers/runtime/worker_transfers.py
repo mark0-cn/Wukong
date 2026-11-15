@@ -1,4 +1,5 @@
 """Resumable, bounded file transfer; uploads publish immutable hash-checked artifacts."""
+
 from contextlib import contextmanager
 import base64
 import hashlib
@@ -22,7 +23,6 @@ def integer(value, minimum, maximum):
 
 
 class TransferService:
-
     def __init__(self, root):
         self.root = Path(root).resolve()
         (self.root / "transfers").mkdir(exist_ok=True)
@@ -35,12 +35,23 @@ class TransferService:
     def status(self, directory, spec):
         destination = confined(self.root, "files/" + spec["path"])
         if destination.exists():
-            if not destination.is_file() or destination.stat().st_size != spec["size"] or sha256_file(destination) != spec["sha256"]:
+            if (
+                not destination.is_file()
+                or destination.stat().st_size != spec["size"]
+                or sha256_file(destination) != spec["sha256"]
+            ):
                 raise ValueError("destination exists with different content")
-            if os.name == "posix" and bool(destination.stat().st_mode & 0o111) != spec["executable"]:
+            if (
+                os.name == "posix"
+                and bool(destination.stat().st_mode & 0o111) != spec["executable"]
+            ):
                 raise ValueError("destination has a different executable policy")
-            return {"transfer_id": directory.name, "offset": spec["size"], "complete": True,
-                    "artifact": artifact(self.root, destination)}
+            return {
+                "transfer_id": directory.name,
+                "offset": spec["size"],
+                "complete": True,
+                "artifact": artifact(self.root, destination),
+            }
         data = directory / "data"
         offset = data.stat().st_size if data.exists() else 0
         if offset > spec["size"]:
@@ -64,9 +75,13 @@ class TransferService:
         with path.open("rb") as stream:
             stream.seek(offset)
             data = stream.read(maximum)
-        return {"path": path.relative_to(self.root).as_posix(), "offset": offset,
-                "size": size, "data_base64": base64.b64encode(data).decode(),
-                "chunk_sha256": hashlib.sha256(data).hexdigest()}
+        return {
+            "path": path.relative_to(self.root).as_posix(),
+            "offset": offset,
+            "size": size,
+            "data_base64": base64.b64encode(data).decode(),
+            "chunk_sha256": hashlib.sha256(data).hexdigest(),
+        }
 
     def begin(self, params):
         path = str(params["path"])
@@ -81,9 +96,12 @@ class TransferService:
         executable = params.get("executable", False)
         if type(executable) is not bool:
             raise ValueError("executable must be a boolean")
-        spec = {"path": destination.relative_to(self.root / "files").as_posix(),
-                "size": integer(params["size"], 0, MAX_TRANSFER_BYTES),
-                "sha256": digest, "executable": executable}
+        spec = {
+            "path": destination.relative_to(self.root / "files").as_posix(),
+            "size": integer(params["size"], 0, MAX_TRANSFER_BYTES),
+            "sha256": digest,
+            "executable": executable,
+        }
         transfer_id = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()
         directory = self.root / "transfers" / transfer_id
         directory.mkdir(exist_ok=True)
@@ -94,7 +112,10 @@ class TransferService:
             if not metadata.exists():
                 atomic_json(metadata, spec)
             status = self.status(directory, spec)
-            if not status["complete"] and shutil.disk_usage(self.root).free < spec["size"] - status["offset"]:
+            if (
+                not status["complete"]
+                and shutil.disk_usage(self.root).free < spec["size"] - status["offset"]
+            ):
                 raise ValueError("insufficient disk space for upload")
             return {"transfer_id": transfer_id, "chunk_bytes": CHUNK_BYTES}
 
@@ -133,13 +154,17 @@ class TransferService:
             with staging.open("r+b" if staging.exists() else "w+b") as stream:
                 stream.seek(offset)
                 existing = stream.read(min(len(data), status["offset"] - offset))
-                if existing != data[:len(existing)]:
+                if existing != data[: len(existing)]:
                     raise ValueError("duplicate chunk has different content")
                 stream.seek(offset + len(existing))
-                stream.write(data[len(existing):])
+                stream.write(data[len(existing) :])
                 stream.flush()
                 os.fsync(stream.fileno())
-            return {"transfer_id": directory.name, "offset": max(status["offset"], offset + len(data)), "complete": False}
+            return {
+                "transfer_id": directory.name,
+                "offset": max(status["offset"], offset + len(data)),
+                "complete": False,
+            }
 
     def commit(self, params):
         with self._transfer(params) as (directory, spec, status):
@@ -148,7 +173,11 @@ class TransferService:
             staging = directory / "data"
             if not staging.exists() and spec["size"] == 0:
                 staging.touch()
-            if not staging.is_file() or staging.stat().st_size != spec["size"] or sha256_file(staging) != spec["sha256"]:
+            if (
+                not staging.is_file()
+                or staging.stat().st_size != spec["size"]
+                or sha256_file(staging) != spec["sha256"]
+            ):
                 raise ValueError("upload is incomplete or SHA256 does not match")
             destination = confined(self.root, "files/" + spec["path"])
             destination.parent.mkdir(parents=True, exist_ok=True)

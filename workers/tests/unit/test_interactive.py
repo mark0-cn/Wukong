@@ -1,4 +1,5 @@
 """Retain final process output when leader exit precedes stdout draining."""
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
@@ -15,14 +16,22 @@ class InteractiveDrainTests(unittest.TestCase):
         original = InteractSession.drain
         release = threading.Event()
         finished = threading.Event()
+
         def delayed(session):
             try:
                 release.wait(5)
                 original(session)
             finally:
                 finished.set()
-        with tempfile.TemporaryDirectory() as temporary, patch.object(InteractSession, "drain", delayed):
-            session = InteractSession(Path(temporary), {"argv": [sys.executable, "-c", "print('final output', flush=True)"]})
+
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(InteractSession, "drain", delayed),
+        ):
+            session = InteractSession(
+                Path(temporary),
+                {"argv": [sys.executable, "-c", "print('final output', flush=True)"]},
+            )
             try:
                 self.assertEqual(session.process.wait(timeout=5), 0)
                 waiting = session.write(b"", 0.05)
@@ -38,4 +47,6 @@ class InteractiveDrainTests(unittest.TestCase):
             finally:
                 release.set()
                 session.close()
-                self.assertTrue(finished.wait(3), "fixture reader must exit before temporary cleanup")
+                self.assertTrue(
+                    finished.wait(3), "fixture reader must exit before temporary cleanup"
+                )

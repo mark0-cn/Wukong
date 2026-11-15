@@ -1,4 +1,5 @@
 """Commands."""
+
 from pathlib import Path
 import os
 import shutil
@@ -7,18 +8,25 @@ import uuid
 from worker_common import bounded_int, public_file, safe_env
 from worker_processes import run_process
 
-class CommandService:
 
+class CommandService:
     def __init__(self, root, trusted, isolated):
         self.root, self.trusted, self.isolated = root, trusted, isolated
         self.lock = threading.RLock()
 
     def run(self, params):
         command = params.get("command")
-        if not isinstance(command, str) or not command.strip() or len(command) > 65536 or "\0" in command:
+        if (
+            not isinstance(command, str)
+            or not command.strip()
+            or len(command) > 65536
+            or "\0" in command
+        ):
             raise ValueError("command must be a nonempty string <=64KiB without NUL bytes")
         if not self.trusted and not self.isolated:
-            raise ValueError("production shell execution requires a root Linux worker with isolated processes")
+            raise ValueError(
+                "production shell execution requires a root Linux worker with isolated processes"
+            )
         timeout_secs = bounded_int(params.get("timeout_secs"), 30, 1, 120)
         output_limit = bounded_int(params.get("output_limit"), 1048576, 1024, 8 * 1048576)
         # Synchronous, Strix-style shell execution: run in a fresh
@@ -51,9 +59,12 @@ class CommandService:
                 raise ValueError("exec target must be a staged file")
         if self.isolated:
             import isolation
+
             experiment = isolation.sandbox(self.root, isolation.allocate_uid(self.root))
             if resolved_target is not None:
-                env["TARGET"] = str(isolation.stage_file(resolved_target, experiment, "target.bin", True))
+                env["TARGET"] = str(
+                    isolation.stage_file(resolved_target, experiment, "target.bin", True)
+                )
             isolation.seal(experiment)
             cwd = Path(experiment["work"])
         elif resolved_target is not None:
@@ -72,7 +83,15 @@ class CommandService:
             shell = ["bash", "-lc"]
         else:
             shell = ["cmd", "/C"]
-        result = run_process([*shell, command], cwd, env, timeout_secs, output_limit,
-                             workdir / "output", None, experiment)
+        result = run_process(
+            [*shell, command],
+            cwd,
+            env,
+            timeout_secs,
+            output_limit,
+            workdir / "output",
+            None,
+            experiment,
+        )
         result["command"] = command
         return result

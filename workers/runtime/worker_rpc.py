@@ -1,4 +1,5 @@
 """JSON-RPC dispatch and standard errors belong to jsonrpcserver."""
+
 from jsonrpcserver import dispatch, Success, Error
 from jsonschema import ValidationError
 from worker_common import error_kind
@@ -22,6 +23,7 @@ class Server:
                 return Success(result)
             except Exception as error:
                 return Error(-32000, str(error)[:4096], {"kind": error_kind(error)})
+
         return invoke
 
     def call(self, request):

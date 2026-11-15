@@ -1,4 +1,5 @@
 """Shared artifact checks; execution and service policy stay with their callers."""
+
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -13,7 +14,12 @@ class LaunchDocument:
     state_root: Path
 
     def member(self, name):
-        if not isinstance(name, str) or not name or Path(name).is_absolute() or ".." in Path(name).parts:
+        if (
+            not isinstance(name, str)
+            or not name
+            or Path(name).is_absolute()
+            or ".." in Path(name).parts
+        ):
             raise ValueError("invalid launch member")
         value = (self.base / name).resolve()
         if not value.is_relative_to(self.base) or not value.exists():
@@ -30,7 +36,9 @@ class LaunchDocument:
             path = self.member(name)
             size = path.stat().st_size
             total += size
-            if (max_file is not None and size > max_file) or (max_total is not None and total > max_total):
+            if (max_file is not None and size > max_file) or (
+                max_total is not None and total > max_total
+            ):
                 raise ValueError("launch files exceed identity budget")
             if digest(path) != expected:
                 raise ValueError("launch input changed: " + name)

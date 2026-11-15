@@ -1,4 +1,5 @@
 """Conservative PR check selection and a fail-closed CI result gate."""
+
 import json
 import os
 from pathlib import Path
@@ -9,18 +10,24 @@ from scripts.release.note_entries import FRAGMENT
 
 
 def select_scope(paths, event_name, head_branch="", force_full=False):
-    full = dict(rust=True, frontend=True, linux=True, reason="Full checks: non-PR or shared changes")
+    full = dict(
+        rust=True, frontend=True, linux=True, reason="Full checks: non-PR or shared changes"
+    )
     if force_full:
         return dict(full, reason="Full checks: explicit installed-worker acceptance")
     if event_name != "pull_request" or head_branch.startswith("codex/release-") or not paths:
         return full
-    result = dict(rust=False, frontend=False, linux=False, reason="PR checks selected from changed paths")
+    result = dict(
+        rust=False, frontend=False, linux=False, reason="PR checks selected from changed paths"
+    )
     for path in paths:
         # Required commit-policy checks validate these data-only release notes.
         # Keep unknown files under .changes conservative, just like other paths.
         if FRAGMENT.fullmatch(path):
             continue
-        if path in ("README.md", "README.en.md", "README.zh-CN.md", "docs/translations.json") or (path.startswith("docs/") and path.endswith(".md")):
+        if path in ("README.md", "README.en.md", "README.zh-CN.md", "docs/translations.json") or (
+            path.startswith("docs/") and path.endswith(".md")
+        ):
             continue
         if path.startswith("ui/"):
             result["frontend"] = True
@@ -48,7 +55,10 @@ def checks_passed(needs):
         if outputs.get("release_clients") not in ("true", "false"):
             return False
         expected = "success" if outputs["release_clients"] == "true" else "skipped"
-        return all(needs.get(name, {}).get("result") == expected for name in ("windows-client", "linux-client", "linux-desktop-client"))
+        return all(
+            needs.get(name, {}).get("result") == expected
+            for name in ("windows-client", "linux-client", "linux-desktop-client")
+        )
     return True
 
 
@@ -57,7 +67,9 @@ def prebuild_clients(event_name, ref, requested, previous, current):
         return False
     if event_name == "workflow_dispatch":
         return requested
-    return event_name == "push" and tuple(map(int, current.split("."))) > tuple(map(int, previous.split(".")))
+    return event_name == "push" and tuple(map(int, current.split("."))) > tuple(
+        map(int, previous.split("."))
+    )
 
 
 def main():
@@ -71,16 +83,32 @@ def main():
             raise ValueError("Invalid PR commit SHA")
         # --no-renames includes both old and new paths; a renamed shared file
         # must not evade full checks by moving into a selectively checked path.
-        raw = subprocess.check_output(["git", "diff", "--name-only", "--no-renames", "-z", base + "..." + head])
+        raw = subprocess.check_output(
+            ["git", "diff", "--name-only", "--no-renames", "-z", base + "..." + head]
+        )
         paths = [p.decode("utf-8", errors="replace") for p in raw.split(b"\0") if p]
         head_branch = pr["head"]["ref"]
-    scope = select_scope(paths, event_name, head_branch, force_full=os.environ.get("WINDOWS_WORKER_ACCEPTANCE") == "true")
+    scope = select_scope(
+        paths,
+        event_name,
+        head_branch,
+        force_full=os.environ.get("WINDOWS_WORKER_ACCEPTANCE") == "true",
+    )
     previous = current = "0.0.0"
     if event_name == "push" and os.environ.get("GITHUB_REF") == "refs/heads/master":
-        previous = tomllib.loads(subprocess.check_output(["git", "show", "HEAD^1:Cargo.toml"]).decode())["package"]["version"]
-        current = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
-    scope["release_clients"] = prebuild_clients(event_name, os.environ.get("GITHUB_REF", ""),
-                                                 os.environ.get("BUILD_RELEASE_CLIENTS") == "true", previous, current)
+        previous = tomllib.loads(
+            subprocess.check_output(["git", "show", "HEAD^1:Cargo.toml"]).decode()
+        )["package"]["version"]
+        current = tomllib.loads(Path("Cargo.toml").read_text(encoding="utf-8"))["package"][
+            "version"
+        ]
+    scope["release_clients"] = prebuild_clients(
+        event_name,
+        os.environ.get("GITHUB_REF", ""),
+        os.environ.get("BUILD_RELEASE_CLIENTS") == "true",
+        previous,
+        current,
+    )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
         for key, value in scope.items():
             stream.write(f"{key}={str(value).lower() if isinstance(value, bool) else value}\n")
