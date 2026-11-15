@@ -232,15 +232,9 @@ pub(super) fn gate_tools(
                     .as_str()
                     .unwrap_or_default();
                 let targets = application.runner.agents(&agent.run_id)?;
-                let matching: Vec<_> = targets
-                    .iter()
-                    .filter(|target| {
-                        target.id == wanted || AgentId(target.id.clone()).short() == wanted
-                    })
-                    .collect();
-                ensure!(matching.len() == 1, "use an unambiguous agent ID");
+                let target = crate::domain::TaskGraph::resolve(&targets, wanted)?;
                 ensure!(
-                    !matching[0].status.terminal(),
+                    !target.status.terminal(),
                     "completed work requires follow_up_agent"
                 );
             }

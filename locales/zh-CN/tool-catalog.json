@@ -276,8 +276,8 @@
     "text": "仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。"
   },
   "view_agent_graph": {
-    "source": "List this assessment's agent tree, scopes, states and results.",
-    "text": "列出本分析 Agent 树、scope、状态及结果。"
+    "source": "Query compact paginated agent states with canonical IDs (default 8 per page; follow next_offset). Pass agent_id for one agent's full task, contract and result. Unique prefixes of at least 8 characters are accepted within this run; use returned full IDs for coordination.",
+    "text": "查询紧凑分页的代理状态及完整 ID（默认每页 8 条，使用 next_offset 翻页）。指定 agent_id 获取单个代理完整任务、契约和结果。同一 run 内接受至少 8 字符的唯一前缀；后续协调使用返回的完整 ID。"
   },
   "wait_for_agents": {
     "source": "Park on selected agents with policy all_terminal (default), all_success or any_success; return a satisfied/blocked outcome or timeout. Empty list means children.",

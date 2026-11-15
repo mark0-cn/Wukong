@@ -16,17 +16,26 @@ pub(in crate::application::tools) fn handle_view_agent_graph<'a>(
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
-    _args: Value,
+    args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
+        let agents = tools.store.records::<AgentMetadata>(&agent.run_id)?;
+        if let Some(reference) = args["agent_id"].as_str() {
+            let target = TaskGraph::resolve(&agents, reference)?;
+            return Ok(json!({"caller_id":agent.id,"agent":target}));
+        }
+        let offset = number(&args, "offset", 0).min(agents.len() as u64) as usize;
+        let limit = number(&args, "limit", 8).clamp(1, 16) as usize;
+        let page: Vec<_> = agents.iter().skip(offset).take(limit).collect();
+        let brief = |text: &str| text.chars().take(160).collect::<String>();
         let mut sessions = Vec::new();
         for kind in ["debug_session", "interact_session"] {
             sessions.extend(tools.store.list::<Value>(kind, &agent.run_id)?.iter()
-                        .filter(|session| !matches!(session["state"].as_str(), Some("closed" | "lost")))
+                        .filter(|session| !matches!(session["state"].as_str(), Some("closed" | "lost")) && page.iter().any(|a| session["agent_id"].as_str() == Some(a.id.as_str())))
                         .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
         }
         Ok(
-            json!({"agents":tools.store.records::<AgentMetadata>(&agent.run_id)?.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":a.name,"role":a.role,"task":a.task,"scope":a.scope,"contract":a.contract,"result":a.task_result,"status":a.status,"generation":a.generation,"dependency_policy":a.dependency_policy,"predecessors":a.wait_for_predecessors,"predecessors_released":a.predecessors_released,"wait_policy":a.wait_policy,"wait_for":a.wait_for,"summary":a.summary,"error":a.error,"turns":a.turns,"total_tokens":a.total_tokens})).collect::<Vec<_>>(),"open_sessions":sessions}),
+            json!({"caller_id":agent.id,"parent_id":agent.parent_id,"total":agents.len(),"next_offset":(offset+page.len()<agents.len()).then_some(offset+page.len()),"agents":page.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":brief(&a.name),"role":a.role,"scope":brief(&a.scope),"status":a.status,"generation":a.generation,"error":a.error.as_deref().map(brief),"can_follow_up":a.status==Status::Completed || (a.status==Status::Failed && a.error.as_deref().is_some_and(|e|e.contains("budget")))})).collect::<Vec<_>>(),"open_sessions":sessions}),
         )
     })
 }
@@ -98,9 +107,9 @@ pub(in crate::application::tools) fn handle_stop_agent<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
         let target_id = {
-            let target: AgentMetadata =
-                require_in_run(&tools.store, text(&args, "agent_id")?, &agent.run_id)?;
-            tools.authorize_control(agent, &target)?;
+            let agents = tools.store.records::<AgentMetadata>(&agent.run_id)?;
+            let target = TaskGraph::resolve(&agents, text(&args, "agent_id")?)?;
+            tools.authorize_control(agent, target)?;
             target.id.clone()
         };
         tools.effect(agent, call_id, |tx| {

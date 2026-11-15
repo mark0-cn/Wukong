@@ -77,6 +77,6 @@
 | `todo_update` | 全部 | 是 | controller | 更新共享待办正文或状态。 |
 | `todos_list` | 全部 | 否 | controller | 列出共享待办。 |
 | `verification_record` | analyst / verifier | 是 | job.status + job.artifacts | 仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。 |
-| `view_agent_graph` | 全部 | 否 | controller | 列出本分析 Agent 树、scope、状态及结果。 |
+| `view_agent_graph` | 全部 | 否 | controller | 查询紧凑分页的代理状态及完整 ID（默认每页 8 条，使用 next_offset 翻页）。指定 agent_id 获取单个代理完整任务、契约和结果。同一 run 内接受至少 8 字符的唯一前缀；后续协调使用返回的完整 ID。 |
 | `wait_for_agents` | 全部 | 是 | controller | 按 all_terminal（默认）、all_success 或 any_success 等待选定 Agent，返回 satisfied/blocked 或超时；空列表表示子任务。 |
 | `xrefs_query` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：查询绑定目标的 module_relative AddressRef 或兼容字节偏移的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。 |

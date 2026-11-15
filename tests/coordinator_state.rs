@@ -33,6 +33,68 @@ fn request(scope: &str) -> ChildRequest {
 }
 
 #[test]
+fn new_tasks_default_to_private_context_and_cannot_delegate_their_own_scope() {
+    let (_dir, _store, coordinator, run) = fixture();
+    let request: ChildRequest = serde_json::from_value(json!({
+        "name":"focused", "role":"analyst", "task":"inspect", "scope":"one function"
+    }))
+    .unwrap();
+    assert!(!request.inherit_context);
+    let child = coordinator
+        .create_child(&run.root_id, request.clone())
+        .unwrap()
+        .agent;
+    assert!(child.inherited_context.is_none());
+    let error = coordinator.create_child(&child.id, request).unwrap_err();
+    assert!(error.to_string().contains("owned by you or an ancestor"));
+}
+
+#[test]
+fn short_agent_references_are_canonical_scoped_and_unambiguous() {
+    let (_dir, store, coordinator, run) = fixture();
+    let child = coordinator
+        .create_child(&run.root_id, request("one function"))
+        .unwrap()
+        .agent;
+    let short = &child.id[..8];
+    coordinator
+        .message(&run.root_id, short, "inspect the caller")
+        .unwrap();
+    let messages = store
+        .transaction(|tx| Store::tx_messages(tx, &run.id))
+        .unwrap();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.recipient == child.id && m.content == "inspect the caller")
+    );
+    coordinator.wait(&run.root_id, &[short.into()], 30).unwrap();
+    let parent: AgentMetadata = store.load(&run.root_id).unwrap();
+    assert_eq!(parent.wait_for, vec![child.id.clone()]);
+    let mut duplicate = child.metadata.clone();
+    duplicate.id = format!("{short}another-agent");
+    store.save_record(&duplicate).unwrap();
+    let error = coordinator
+        .message(&run.root_id, short, "ambiguous")
+        .unwrap_err();
+    assert!(error.to_string().contains("ambiguous"));
+    coordinator
+        .message(&run.root_id, &child.id, "exact ID wins")
+        .unwrap();
+    let all = store.records::<AgentMetadata>(&run.id).unwrap();
+    assert!(TaskGraph::resolve(&all, "missing-agent").is_err());
+    assert!(TaskGraph::resolve(&all, &child.id[..7]).is_err());
+    let other = coordinator
+        .create_run(&run.target_path, "other run", Budget::default(), json!({}))
+        .unwrap();
+    assert!(
+        coordinator
+            .message(&other.root_id, &child.id, "cross run")
+            .is_err()
+    );
+}
+
+#[test]
 fn quota_exhausted_scope_requires_followup_instead_of_respawn() {
     let (_dir, _store, c, run) = fixture();
     let child = c

@@ -77,6 +77,6 @@ Rig provides native coordination tools `task`, `message`, `wait`; MCP tools depe
 | `todo_update` | all | yes | controller | Update the body or status of an existing shared to-do. |
 | `todos_list` | all | no | controller | List shared to-do items. |
 | `verification_record` | analyst / verifier | yes | job.status + job.artifacts | Verifier only: ingest a completed poc_verify job, its raw evidence and real trial counts. A crash verifies only crash behavior. |
-| `view_agent_graph` | all | no | controller | List this assessment's agent tree, scopes, states and results. |
+| `view_agent_graph` | all | no | controller | Query compact paginated agent states with canonical IDs (default 8 per page; follow next_offset). Pass agent_id for one agent's full task, contract and result. Unique prefixes of at least 8 characters are accepted within this run; use returned full IDs for coordination. |
 | `wait_for_agents` | all | yes | controller | Park on selected agents with policy all_terminal (default), all_success or any_success; return a satisfied/blocked outcome or timeout. Empty list means children. |
 | `xrefs_query` | analyst / verifier | no | controller Ghidra or ghidra_query | Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers. |

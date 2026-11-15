@@ -73,7 +73,10 @@ impl Coordinator {
                 .map(|other| other.id.clone())
                 .collect()
         } else {
-            targets.to_vec()
+            targets
+                .iter()
+                .map(|reference| TaskGraph::resolve(&all, reference).map(|agent| agent.id.clone()))
+                .collect::<Result<_>>()?
         };
         ensure!(
             ids.len() <= 128 && ids.iter().collect::<HashSet<_>>().len() == ids.len(),

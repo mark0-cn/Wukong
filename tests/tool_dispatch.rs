@@ -80,6 +80,73 @@ fn worker_config(path: &Path) -> AppConfig {
 }
 
 #[tokio::test]
+async fn agent_graph_pages_remain_compact_and_details_are_explicit() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, mut owner) = fixture(temp.path())?;
+    owner.metadata.task = "long task ".repeat(10_000);
+    owner.metadata.summary = Some("long report ".repeat(10_000));
+    store.save_record(&owner)?;
+    let sibling = child(&coordinator, &run.root_id, Role::Analyst, "sibling")?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let mut offset = 0;
+    let mut seen = BTreeSet::new();
+    loop {
+        let output = service
+            .execute(
+                &run.root_id,
+                &format!("graph:{offset}"),
+                "view_agent_graph",
+                json!({"offset":offset,"limit":1}),
+            )
+            .await?;
+        assert!(!output.is_error, "{output:?}");
+        let page = result(&output);
+        assert!(page.to_string().len() < 2500);
+        assert_eq!(page["caller_id"], run.root_id);
+        for item in page["agents"].as_array().unwrap() {
+            assert!(item.get("task").is_none());
+            assert!(item.get("summary").is_none());
+            seen.insert(item["id"].as_str().unwrap().to_owned());
+        }
+        match page["next_offset"].as_u64() {
+            Some(next) => offset = next,
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 3);
+    assert!(seen.contains(&sibling.id));
+    let details = service
+        .execute(
+            &run.root_id,
+            "graph:detail",
+            "view_agent_graph",
+            json!({"agent_id":sibling.id}),
+        )
+        .await?;
+    assert_eq!(result(&details)["agent"]["task"], sibling.task);
+    let denied = service
+        .execute(
+            &owner.id,
+            "stop:sibling",
+            "stop_agent",
+            json!({"agent_id":&sibling.id[..8],"reason":"not owned"}),
+        )
+        .await?;
+    assert!(denied.is_error);
+    let stopped = service
+        .execute(
+            &run.root_id,
+            "stop:child",
+            "stop_agent",
+            json!({"agent_id":&sibling.id[..8],"reason":"owned cleanup"}),
+        )
+        .await?;
+    assert!(!stopped.is_error, "{stopped:?}");
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, agent) = fixture(temp.path())?;

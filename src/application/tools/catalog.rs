@@ -209,7 +209,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::CreateAgentArgs>(
             "create_agent",
             "tool-create-agent",
-            "Create an asynchronous focused child and return immediately; inherited context is optional. wait_for_predecessors gates admission with dependency_policy (default all_success). Failed requirements block execution and notify the parent.",
+            "Create an asynchronous focused child and return immediately. New tasks default to isolated context (inherit_context=false); include a bounded brief and evidence references. wait_for_predecessors gates admission with dependency_policy (default all_success). Failed requirements block execution and notify the parent.",
             ReplayPolicy::Transactional,
             false,
             handlers::handle_create_agent,
@@ -219,7 +219,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::ViewAgentGraphArgs>(
             "view_agent_graph",
             "tool-view-agent-graph",
-            "List this assessment's agent tree, scopes, states and results.",
+            "Query compact paginated agent states with canonical IDs (default 8 per page; follow next_offset). Pass agent_id for one agent's full task, contract and result. Unique prefixes of at least 8 characters are accepted within this run; use returned full IDs for coordination.",
             ReplayPolicy::ReadOnly,
             false,
             handlers::handle_view_agent_graph,
