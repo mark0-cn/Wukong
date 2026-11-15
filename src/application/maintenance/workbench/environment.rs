@@ -81,7 +81,7 @@ impl Workbench {
             self.owned(&old, &env.container)?;
             ensure!(
                 old["HostConfig"]["Init"] == true,
-                "worker container lacks a child-process reaper; close active work and run env update to recreate it"
+                "worker container lacks a child-process reaper; close active work and recreate it: env update for the main worker, or challenge down/up for a challenge worker"
             );
             ensure!(
                 old["Image"] == env.image_id,

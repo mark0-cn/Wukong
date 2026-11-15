@@ -1,3 +1,3 @@
 kind = "fix"
-en = "Worker execution and sessions share process-resource cleanup, durable supervisors are reaped without cancelling client-disconnected jobs, and shutdown waits for owned work. Workbench containers now require Docker init; close active work and run env update to recreate older containers."
-zh_CN = "Worker 执行与会话统一管理进程资源，持久作业的监督进程会被回收而不因客户端断开取消工作，关闭时等待所属资源结束。工作台容器现在要求 Docker init；旧容器需先结束活动任务，再运行 env update 重建。"
+en = "Worker execution and sessions share process-resource cleanup, durable supervisors are reaped without cancelling client-disconnected jobs, and shutdown waits for owned work. Workbench containers now require Docker init; close active work, then use env update for the main worker or challenge down/up for existing challenge workers."
+zh_CN = "Worker 执行与会话统一管理进程资源，持久作业的监督进程会被回收而不因客户端断开取消工作，关闭时等待所属资源结束。工作台容器现在要求 Docker init；旧容器需先结束活动任务；主工具容器通过 env update 重建，已有题目工具容器通过 challenge down/up 重建。"
