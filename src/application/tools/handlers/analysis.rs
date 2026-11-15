@@ -128,9 +128,10 @@ pub(in crate::application::tools) fn handle_analysis_verify<'a>(
             }
             ensure!(own, "verification requires verifier-owned observations");
             let run: RunRecord = tx.get("run", &agent.run_id)?.context("run missing")?;
+            let coverage = analysis_verification::validate(tx, agent, &run, &input)?;
             let id = stable("analysis-verification", call_id);
             let record = json!({"id":id,"run_id":agent.run_id,"verifier_id":agent.id,
-                "target_sha256":run.target_sha256,"created_at":now(),"result":args});
+                "target_sha256":run.target_sha256,"created_at":now(),"result":args,"coverage":coverage});
             ensure!(
                 tx.get::<Value>("analysis_verification", &id)?.is_none(),
                 "verification is immutable"

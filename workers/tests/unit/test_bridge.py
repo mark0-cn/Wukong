@@ -158,9 +158,11 @@ class GdbMiTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             session = self.session(directory, '1^done,value="' + "x" * 70000 + '"\n')
-            with patch.object(bridge, "terminate_tree") as terminate:
-                session.read_records()
-            terminate.assert_called_once_with(session.process)
+            from unittest.mock import Mock
+
+            session.process_resources = Mock()
+            session.read_records()
+            session.process_resources.close.assert_called_once_with()
             self.assertTrue(session.dead)
             self.assertTrue(session.records.empty())
 

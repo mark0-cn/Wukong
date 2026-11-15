@@ -44,7 +44,7 @@ $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 & $docker build -f workers/Dockerfile -t wukong-worker:0.1 .
 & $docker volume create wukong-worker-state
-& $docker run -d --name wukong-worker --network none --cap-drop ALL `
+& $docker run -d --init --name wukong-worker --network none --cap-drop ALL `
   --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
   --security-opt no-new-privileges --security-opt seccomp=unconfined `
   --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g,exec `
@@ -55,6 +55,8 @@ Keep the container running to preserve sessions. The controller uses `docker exe
 stdio without publishing a network port. Files are uploaded into the named volume;
 the host filesystem and model credentials are not mounted. Add a stronger VM
 boundary for kernel experiments. Do not attach the Docker socket to the worker.
+
+Use Docker `--init` (or a VM init) to reap orphaned descendants, including Ghidra helpers and detached worker daemons. Workbench creates containers with this option and refuses to reuse older containers without it; close active work, then use `env update --image <image-or-ID>` for the main worker, or `challenge down <id>` followed by `challenge up <id>` for a challenge worker. Challenge recreation retains files and named tool-data volumes; `env update` alone does not recreate existing challenge workers. `ProcessResources` owns execution and session process groups and closes them on success, timeout, cancellation and exceptions. Durable job supervisors are waited by their daemon without cancelling work when a client disconnects. Shutdown rejects concurrent requests or nonterminal jobs, closes sessions and waits for supervisor exit. The registry never calls `waitpid(-1)` or performs global process cleanup.
 
 The Dockerfile pins the AFL++ base image by digest and installs GDB, GCC, Python,
 AFL++ with QEMU instrumentation, the Python analysis toolchain (pwntools,

@@ -199,7 +199,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::AnalysisVerifyArgs>(
             "analysis_verify",
             "tool-analysis-verify",
-            "Verifier only: record an independent general-analysis verdict with expected and observed results, scope, counterexamples and verifier-owned evidence. Does not promote security impact. Records are immutable and appear in shared notes.",
+            "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes.",
             ReplayPolicy::Transactional,
             false,
             handlers::handle_analysis_verify,
@@ -539,7 +539,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::FunctionDecompileArgs>(
             "function_decompile",
             "tool-function-decompile",
-            "Ghidra: decompile a function by MODULE-RELATIVE offset.",
+            "Ghidra: decompile using a target-bound module_relative AddressRef (preferred) or legacy byte offset. Copy binary_inspect addresses; a link-time VA must subtract image_base. File offsets, runtime addresses and page numbers are not module offsets.",
             ReplayPolicy::ReadOnly,
             true,
             handlers::handle_functions_search,
@@ -549,7 +549,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::XrefsQueryArgs>(
             "xrefs_query",
             "tool-xrefs-query",
-            "Ghidra: references to/from a MODULE-RELATIVE offset.",
+            "Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
             ReplayPolicy::ReadOnly,
             true,
             handlers::handle_functions_search,

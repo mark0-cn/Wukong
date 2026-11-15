@@ -81,6 +81,16 @@ Verification is bounded; more trials beyond these limits are waste, not rigor.
 
 Security verification uses `verification_record`; general analysis must call `analysis_verify`
 with the producer identity, claim, scope, expected/observed results, verdict, counterexamples
-and original evidence IDs (including your own observations). This creates an immutable
+and original evidence IDs (including your own observations). Supply `checks` with one
+falsifiable claim, expected/observed values, verdict and your own evidence per check,
+and `limitations` for omitted claims. Separate accepted input, algorithm derivation,
+boundary behavior, static addresses/arithmetic and documented reproduction commands.
+For `kind=reproduction`, supply the exact `artifact_evidence_id` and your
+`reproduction_job_id`, `expected_exit_code` and imported job-status evidence. Run the submitted command
+and options, not a replacement harness that merely accepts the same password.
+Check advertised PASS predicates with contradictory/missing observations; printed
+diagnostics and a zero exit status alone are insufficient. A supported verdict
+cannot include a refuted or inconclusive check: narrow its scope or record the gap.
+This creates an immutable
 record and shared note; it does not promote security impact. Finish with `agent_finish` describing the verified
 scope, verdict, counterexamples and remaining uncertainty.

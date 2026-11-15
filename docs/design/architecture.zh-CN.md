@@ -4,6 +4,8 @@
 
 [English](architecture.md) · 简体中文
 
+压缩后的对话包含有界的 `working_state`，由同一 Agent 的持久作业、文件、工具调用和共享文档记录重建。它跨代保留早期及近期已完成作业的观察、近期其他作业、文件哈希与路径、工具错误和笔记预览。预览保留原始证据／检索引用和省略计数；作业完成只是观察，不等于事实已验证。对话保留与摘要替换仍由 Rig 负责。分析师在关键结果后及时保存简明进度笔记，预览不全时回读原始证据。
+
 本项目按 Strix 的模块职责与运行语义重建：根 agent 编排、动态子 agent、消息、独立会话、沙箱工具、skills、证据与独立验证。[原始方案](../history/strix-rig-binary-agent-plan.zh-CN.md)是历史需求基线，[实现契约](implementation-contract.zh-CN.md)记录验收不变量。控制端使用 Rust，生产执行循环固定使用 Rig 0.46.0 的 ECS 内核及原生 SubagentsPlugin。
 
 <a id="modules-and-responsibilities"></a>

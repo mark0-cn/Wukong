@@ -9,7 +9,7 @@ Rig provides native coordination tools `task`, `message`, `wait`; MCP tools depe
 | Tool | Visible roles | Side effects | Backend requirement | Purpose |
 |---|---|---|---|---|
 | `agent_finish` | analyst / verifier | yes | controller | Finish a child task with a structured result accounting for its contract, evidence and gaps. summary is shorthand for tasks without required outputs and is ignored when result is provided (result.answer is the canonical summary). Active descendants must finish first. |
-| `analysis_verify` | analyst / verifier | yes | controller | Verifier only: record an independent general-analysis verdict with expected and observed results, scope, counterexamples and verifier-owned evidence. Does not promote security impact. Records are immutable and appear in shared notes. |
+| `analysis_verify` | analyst / verifier | yes | controller | Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes. |
 | `angr_solve` | analyst / verifier | yes | angr.solve | Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target. |
 | `artifact_stage` | analyst / verifier | yes | file.upload.begin + file.upload.write + file.upload.commit | Stage a hash-verified same-run evidence artifact into your assigned environment using bounded resumable transfer; returns the worker file and original evidence ID. |
 | `binary_inspect` | analyst / verifier | no | controller | Inspect the exact run target, architecture, sections, imports, symbols and mitigations. |
@@ -41,7 +41,7 @@ Rig provides native coordination tools `task`, `message`, `wait`; MCP tools depe
 | `findings_list` | all | no | controller | List this assessment's findings and recorded stages. |
 | `finish_scan` | root | yes | controller | Root only: finish the assessment after children and coverage are resolved. |
 | `follow_up_agent` | all | yes | controller | Explicitly assign a follow-up; reopens completed work in a new generation while preserving history. Use recipient_generation to guard against stale assignments. |
-| `function_decompile` | analyst / verifier | no | controller Ghidra or ghidra_query | Ghidra: decompile a function by MODULE-RELATIVE offset. |
+| `function_decompile` | analyst / verifier | no | controller Ghidra or ghidra_query | Ghidra: decompile using a target-bound module_relative AddressRef (preferred) or legacy byte offset. Copy binary_inspect addresses; a link-time VA must subtract image_base. File offsets, runtime addresses and page numbers are not module offsets. |
 | `function_instructions` | analyst / verifier | no | controller Ghidra or ghidra_query | Ghidra: paginated function instructions and control-flow edges, including calls. Addresses are module-relative and bound to target SHA256. Optional target_evidence_id selects an in-run baseline binary. |
 | `functions_search` | analyst / verifier | no | controller Ghidra or ghidra_query | Ghidra: search analyzed functions, paginated. |
 | `fuzz_start` | analyst / verifier | yes | fuzz.start | Start AFL++ QEMU fuzzing after staging target and nonempty seed files. |
@@ -79,4 +79,4 @@ Rig provides native coordination tools `task`, `message`, `wait`; MCP tools depe
 | `verification_record` | analyst / verifier | yes | job.status + job.artifacts | Verifier only: ingest a completed poc_verify job, its raw evidence and real trial counts. A crash verifies only crash behavior. |
 | `view_agent_graph` | all | no | controller | List this assessment's agent tree, scopes, states and results. |
 | `wait_for_agents` | all | yes | controller | Park on selected agents with policy all_terminal (default), all_success or any_success; return a satisfied/blocked outcome or timeout. Empty list means children. |
-| `xrefs_query` | analyst / verifier | no | controller Ghidra or ghidra_query | Ghidra: references to/from a MODULE-RELATIVE offset. |
+| `xrefs_query` | analyst / verifier | no | controller Ghidra or ghidra_query | Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers. |

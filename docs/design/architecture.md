@@ -4,6 +4,8 @@
 
 English · [简体中文](architecture.zh-CN.md)
 
+Compacted conversations include a bounded `working_state` rebuilt from the same agent's durable job, file, tool-call and shared-document records. It retains early and recent completed job observations, recent other jobs, file hashes/paths, tool errors and note previews across generations. Each preview retains original evidence/retrieval references and omission counts; a completed job is an observation, not a verified fact. Rig still owns transcript retention and summary replacement. Analysts save concise progress notes after decisive results, and consult original evidence when a preview is incomplete.
+
 This project implements Strix-inspired responsibilities and runtime semantics: root orchestration, dynamic children, messaging, independent conversations, sandboxed tools, Skills, evidence and independent verification. The [original plan](../history/strix-rig-binary-agent-plan.md) is a historical requirements baseline; [implementation contract](implementation-contract.md) records acceptance invariants. The controller is Rust; production execution uses Rig 0.46.0 ECS and native SubagentsPlugin.
 
 <a id="模块与职责"></a>

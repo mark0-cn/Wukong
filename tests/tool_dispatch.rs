@@ -1727,7 +1727,29 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
         "text/plain",
         json!({}),
     )?;
-    let args = json!({"producer_id":producer.id,"claim":"header has 8 bytes","scope":"header", "expected":"8","observed":"8","verdict":"supported","evidence_ids":[observation.id],"counterexamples":[]});
+    let args = json!({"producer_id":producer.id,"claim":"header has 8 bytes","scope":"header", "expected":"8","observed":"8","verdict":"supported","evidence_ids":[observation.id],"counterexamples":[],
+        "checks":[{"kind":"static","claim":"header width","expected":"8","observed":"8","verdict":"supported","evidence_ids":[observation.id]}],
+        "limitations":["Runtime parsing and reproduction commands were not tested."]});
+    for (id, mutation) in [
+        ("empty-checks", json!([])),
+        (
+            "contradiction",
+            json!([{"kind":"static","claim":"header width","expected":"8","observed":"4","verdict":"refuted","evidence_ids":[observation.id]}]),
+        ),
+        (
+            "unexecuted-command",
+            json!([{"kind":"reproduction","claim":"documented command","expected":"8","observed":"8","verdict":"supported","evidence_ids":[observation.id]}]),
+        ),
+    ] {
+        let mut invalid = args.clone();
+        invalid["checks"] = mutation;
+        assert!(
+            service
+                .execute(&verifier.id, id, "analysis_verify", invalid)
+                .await?
+                .is_error
+        );
+    }
     assert!(
         service
             .execute(
@@ -1739,6 +1761,87 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
             .await?
             .is_error
     );
+    let mut job = JobRecord {
+        id: "reproduction-fixture".into(),
+        worker_resource_id: "worker-fixture".into(),
+        run_id: run.id.clone(),
+        agent_id: verifier.id.clone(),
+        worker_id: "fixture".into(),
+        owner_generation: verifier.generation,
+        tool_name: "job_start".into(),
+        finding_id: None,
+        call_id: "fixture-call".into(),
+        worker_request_id: "fixture-request".into(),
+        parameters: json!({"argv":["python3","files/solver.py","--static-only"]}),
+        target_sha256: run.target_sha256.clone(),
+        status: serde_json::from_value(
+            json!({"job_id":"worker-fixture","state":"completed","result":{"exit_code":0}}),
+        )?,
+        status_evidence_id: Some(observation.id.clone()),
+        imported_artifacts: None,
+        notification_message_id: None,
+        created_at: now(),
+        updated_at: now(),
+    };
+    store.save_record(&job)?;
+    let mut reproduction = args.clone();
+    reproduction["checks"][0]["kind"] = json!("reproduction");
+    reproduction["checks"][0]["artifact_evidence_id"] = json!(observation.id);
+    reproduction["checks"][0]["reproduction_job_id"] = json!(job.id);
+    reproduction["checks"][0]["expected_exit_code"] = json!(0);
+    for (call_id, state, owner) in [
+        (
+            "running-reproduction",
+            JobState::Running,
+            verifier.id.clone(),
+        ),
+        ("failed-reproduction", JobState::Failed, verifier.id.clone()),
+        (
+            "borrowed-reproduction",
+            JobState::Completed,
+            producer.id.clone(),
+        ),
+    ] {
+        job.status.state = state;
+        job.agent_id = owner;
+        store.save_record(&job)?;
+        assert!(
+            service
+                .execute(
+                    &verifier.id,
+                    call_id,
+                    "analysis_verify",
+                    reproduction.clone()
+                )
+                .await?
+                .is_error
+        );
+    }
+    job.status.state = JobState::Completed;
+    job.agent_id = verifier.id.clone();
+    store.save_record(&job)?;
+    let mut wrong_exit = reproduction.clone();
+    wrong_exit["checks"][0]["expected_exit_code"] = json!(1);
+    assert!(
+        service
+            .execute(
+                &verifier.id,
+                "mismatched-exit",
+                "analysis_verify",
+                wrong_exit
+            )
+            .await?
+            .is_error
+    );
+    let accepted = service
+        .execute(
+            &verifier.id,
+            "executed-reproduction",
+            "analysis_verify",
+            reproduction,
+        )
+        .await?;
+    assert!(!accepted.is_error, "{accepted:?}");
     let first = service
         .execute(
             &verifier.id,
@@ -1753,8 +1856,10 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
         .await?;
     assert_eq!(result(&first), result(&replay));
     let records: Vec<Value> = store.list("analysis_verification", &run.id)?;
-    assert_eq!(records.len(), 1);
+    assert_eq!(records.len(), 2);
     assert_eq!(records[0]["target_sha256"], run.target_sha256);
+    assert_eq!(records[0]["coverage"]["whole_report_verified"], false);
+    assert_eq!(records[0]["coverage"]["applies_only_to"], "result.checks");
     service.close().await;
     Ok(())
 }

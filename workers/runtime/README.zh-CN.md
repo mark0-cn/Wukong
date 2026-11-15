@@ -4,6 +4,8 @@
 
 [English](README.md) · 简体中文
 
+Docker 容器使用 `--init`（虚拟机使用其 init）回收孤儿后代，包括 Ghidra 辅助进程和脱离客户端的 worker 守护进程。工作台自动添加该选项，并拒绝复用缺少 init 的旧容器；先结束活动任务，主工具容器通过 `env update --image <image-or-ID>` 重建，题目工具容器通过 `challenge down <id>` 后接 `challenge up <id>` 重建。题目重建保留文件和命名工具数据卷；仅运行 `env update` 不会重建已有的题目工具容器。`ProcessResources` 统一拥有执行与会话的进程组，在成功、超时、取消和异常时收尾。守护进程等待持久作业监督进程退出，客户端断开不会取消作业。关闭时拒绝并发请求或未终止的作业，关闭会话并等待监督进程退出。资源注册表不调用 `waitpid(-1)`，也不做全局进程清理。
+
 本指南的 Python 进程管理适用于 Linux Worker 和可信开发夹具。托管 Windows 由原生 Worker 统一管理身份、能力、租约、上传和执行；Python 仅按需运行受隔离的分析代码。当前职责和容量限制见[Windows 组件指南](../windows/README.zh-CN.md)。
 
 Rust 控制端默认不运行待分析目标。请选择持久化 Docker/VM/SSH worker。`trusted_local` 显式在宿主运行可信夹具，仅用于开发测试。Python bridge 管理进程，容器或 VM 提供隔离。
@@ -38,7 +40,7 @@ $docker = 'C:\Program Files\Docker\Docker\resources\bin\docker.exe'
 $env:PATH = (Split-Path $docker) + ';' + $env:PATH
 & $docker build -f workers/Dockerfile -t wukong-worker:0.1 .
 & $docker volume create wukong-worker-state
-& $docker run -d --name wukong-worker --network none --cap-drop ALL `
+& $docker run -d --init --name wukong-worker --network none --cap-drop ALL `
   --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add SYS_PTRACE --cap-add DAC_OVERRIDE `
   --security-opt no-new-privileges --security-opt seccomp=unconfined `
   --pids-limit 256 --memory 4g --cpus 2 --read-only --tmpfs /tmp:rw,size=1g,exec `

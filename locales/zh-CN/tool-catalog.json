@@ -4,8 +4,8 @@
     "text": "以结构化结果结束子任务，覆盖契约、证据和缺口。summary 仅用于无必需产物的任务；提供 result 时忽略 summary，以 result.answer 为准。活动后代必须先结束。"
   },
   "analysis_verify": {
-    "source": "Verifier only: record an independent general-analysis verdict with expected and observed results, scope, counterexamples and verifier-owned evidence. Does not promote security impact. Records are immutable and appear in shared notes.",
-    "text": "仅 verifier：记录独立通用分析判定，包含期望/观察、范围、反例及验证者自己的证据。不提升安全影响；记录不可变并出现在共享笔记中。"
+    "source": "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes.",
+    "text": "仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。"
   },
   "angr_solve": {
     "source": "Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target.",
@@ -132,12 +132,12 @@
     "text": "显式追加工作，以新 generation 重开已完成任务并保留历史；用 recipient_generation 拒绝过时代次的派单。"
   },
   "function_decompile": {
-    "source": "Ghidra: decompile a function by MODULE-RELATIVE offset.",
-    "text": "Ghidra：按模块相对偏移反编译函数。"
+    "source": "Ghidra: decompile using a target-bound module_relative AddressRef (preferred) or legacy byte offset. Copy binary_inspect addresses; a link-time VA must subtract image_base. File offsets, runtime addresses and page numbers are not module offsets.",
+    "text": "Ghidra：使用绑定目标的 module_relative AddressRef（推荐）或兼容的字节偏移反编译。复制 binary_inspect 返回的地址；链接时 VA 必须减去 image_base。文件偏移、运行时地址和页号不是模块偏移。"
   },
   "function_instructions": {
     "source": "Ghidra: paginated function instructions and control-flow edges, including calls. Addresses are module-relative and bound to target SHA256. Optional target_evidence_id selects an in-run baseline binary.",
-    "text": "Ghidra：分页函数指令及包含调用的控制流边；地址为模块相对且绑定目标 SHA256。可选 target_evidence_id 选择同 run 的基线二进制。"
+    "text": "Ghidra：使用绑定目标的 module_relative AddressRef 或兼容的模块相对字节偏移列出函数指令；不接受链接时 VA、文件偏移或页号。使用 offset/limit 分页。"
   },
   "functions_search": {
     "source": "Ghidra: search analyzed functions, paginated.",
@@ -284,7 +284,7 @@
     "text": "按 all_terminal（默认）、all_success 或 any_success 等待选定 Agent，返回 satisfied/blocked 或超时；空列表表示子任务。"
   },
   "xrefs_query": {
-    "source": "Ghidra: references to/from a MODULE-RELATIVE offset.",
-    "text": "Ghidra：查询模块相对偏移的入向/出向引用。"
+    "source": "Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
+    "text": "Ghidra：查询绑定目标的 module_relative AddressRef 或兼容字节偏移的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。"
   }
 }

@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from wukong_worker.artifacts.common import MAX_FILE, tail
+from wukong_worker.resources.processes import ProcessResources
 
 
 def detached_options():
@@ -192,83 +193,75 @@ def run_process(
 
         credential_options = isolation.credentials(experiment)
         env = {**env, "HOME": experiment["work"], "TMPDIR": experiment["work"]}
-    process = subprocess.Popen(
-        argv,
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        **detached_options(),
-        **credential_options,
-    )
-    attach_windows_job(process)
-    counts = {"stdout": 0, "stderr": 0}
+    with ProcessResources() as resources:
+        process = resources.spawn(
+            argv,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **credential_options,
+        )
+        counts = {"stdout": 0, "stderr": 0}
 
-    def feed_stdin():
-        # Bounded best-effort write: a target that never reads must not wedge
-        # the call; the timeout and cancel paths own termination.
+        def feed_stdin():
+            # Bounded best-effort write: a target that never reads must not wedge
+            # the call; the timeout and cancel paths own termination.
+            try:
+                process.stdin.write(stdin_bytes)
+                process.stdin.flush()
+            except (BrokenPipeError, OSError):
+                pass
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+
+        if stdin_bytes is not None:
+            threading.Thread(target=feed_stdin, daemon=True).start()
+
+        def drain(name, stream):
+            with open(str(log_prefix) + "." + name, "wb") as log:
+                while True:
+                    data = stream.read(8192)
+                    if not data:
+                        break
+                    remaining = max(0, output_limit - counts[name])
+                    if remaining:
+                        log.write(data[:remaining])
+                    counts[name] += len(data)
+            stream.close()
+
+        readers = [
+            threading.Thread(target=drain, args=(name, getattr(process, name)), daemon=True)
+            for name in counts
+        ]
+        for thread in readers:
+            thread.start()
+        state = "completed"
         try:
-            process.stdin.write(stdin_bytes)
-            process.stdin.flush()
-        except (BrokenPipeError, OSError):
-            pass
-        try:
-            process.stdin.close()
-        except OSError:
-            pass
-
-    if stdin_bytes is not None:
-        threading.Thread(target=feed_stdin, daemon=True).start()
-
-    def drain(name, stream):
-        with open(str(log_prefix) + "." + name, "wb") as log:
-            while True:
-                data = stream.read(8192)
-                if not data:
+            while process.poll() is None:
+                if cancel_file and Path(cancel_file).exists():
+                    state = "cancelled"
                     break
-                remaining = max(0, output_limit - counts[name])
-                if remaining:
-                    log.write(data[:remaining])
-                counts[name] += len(data)
-        stream.close()
-
-    readers = [
-        threading.Thread(target=drain, args=(name, getattr(process, name)), daemon=True)
-        for name in counts
-    ]
-    for thread in readers:
-        thread.start()
-    state = "completed"
-    while process.poll() is None:
-        if cancel_file and Path(cancel_file).exists():
-            state = "cancelled"
-            terminate_tree(process)
-            break
-        if time.monotonic() - start >= timeout_secs:
-            state = "timed_out"
-            terminate_tree(process)
-            break
-        time.sleep(0.03)
-    # A completed parent must not leave descendants holding output pipes open.
-    if os.name == "nt":
-        close_windows_job(process)
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    for thread in readers:
-        thread.join(timeout=5)
-    return {
-        "state": state,
-        "exit_code": process.returncode,
-        "signal": -process.returncode
-        if process.returncode is not None and process.returncode < 0 and os.name != "nt"
-        else None,
-        "duration_secs": round(time.monotonic() - start, 4),
-        "stdout": tail(str(log_prefix) + ".stdout"),
-        "stderr": tail(str(log_prefix) + ".stderr"),
-        "output_bytes": counts,
-        "output_truncated": any(v > output_limit for v in counts.values()),
-    }
+                if time.monotonic() - start >= timeout_secs:
+                    state = "timed_out"
+                    break
+                time.sleep(0.03)
+        finally:
+            resources.close()
+            for thread in readers:
+                thread.join(timeout=5)
+        return {
+            "state": state,
+            "exit_code": process.returncode,
+            "signal": -process.returncode
+            if process.returncode is not None and process.returncode < 0 and os.name != "nt"
+            else None,
+            "duration_secs": round(time.monotonic() - start, 4),
+            "stdout": tail(str(log_prefix) + ".stdout"),
+            "stderr": tail(str(log_prefix) + ".stderr"),
+            "output_bytes": counts,
+            "output_truncated": any(v > output_limit for v in counts.values()),
+        }
