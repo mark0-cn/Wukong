@@ -4,6 +4,25 @@
 
 English · [简体中文](github-maintenance.zh-CN.md)
 
+<a id="master-merge-policy"></a>
+
+## Main-branch merge rules
+
+`master` uses two rulesets with different audiences. Keep CI and review exemptions separate so administrator review privileges cannot bypass execution checks.
+
+| Ruleset | Applies to | Requirements |
+| --- | --- | --- |
+| `master - PR and required checks` | Everyone, with no bypass actors | PR required; GitHub Actions `summary` and `commit-policy` must pass; branch must be up to date; review conversations must be resolved; no force-push or deletion; merge/squash allowed |
+| `master - review for non-admins` | Everyone except the repository administrator role | At least one approving review; dismiss stale approvals after new commits; no additional Code Owner, last-pusher or unattributed-change approval requirements |
+
+The review-only ruleset exempts the repository administrator role using `bypass_mode: exempt`. GitHub documents this as skipping enforcement for the selected actor, unlike an explicit bypass operation. The common ruleset has no exemptions. Non-admins retain the required review; this configuration does not grant merge/write permissions to other users. See [GitHub's exemption description](https://github.blog/changelog/2025-09-10-github-ruleset-exemptions-and-repository-insights-updates/).
+
+Before an authorized merge, read the effective branch rules and each matching ruleset's `bypass_actors` and `current_user_can_bypass`. Confirm the PR's exact head SHA, latest base, mergeability, resolved conversations and successful mandatory checks from GitHub Actions. Do not interpret `REVIEW_REQUIRED` alone as proof that the current actor lacks a permitted merge path.
+
+GitHub auto-merge waits for merge requirements; queuing it is not a completed merge. If an administrator's ordinary, already-authorized PR remains review-blocked despite the applicable exemption, use `PUT /repos/{owner}/{repo}/pulls/{number}/merge` with the checked `sha` and `merge_method: merge`. GitHub still enforces the common ruleset. Reconcile an uncertain response by reading the PR before any retry. Do not weaken rules, fabricate approval or bypass CI to clear a blocker. A non-admin without the required approval must obtain a valid review. See the [merge API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request).
+
+After either path, verify `merged=true`, record the actual `master` commit and follow triggered CI to its final outcome. Changing rules requires explicit authorization and a saved before/after configuration. Version PRs still require explicit release authorization before enabling automatic merge or merging; review exemption does not authorize publication.
+
 ## Dependabot
 
 Default-branch `.github/dependabot.yml` manages Cargo, the npm workspace, `workers/runtime/requirements.txt` and commit-pinned GitHub Actions. Checks are staggered Mondays 09:10–09:40 Beijing time, with at most seven simultaneous version-update PRs. Rig dependencies update together; other compatible updates group by ecosystem, with separate security groups. Repository settings enable alerts/automatic security updates. PRs still require CI and maintainer merge.
@@ -76,4 +95,4 @@ Workbench inherits a stable toolchain stage; runtime/prompts/version labels come
 
 ## Commit policy and release previews
 
-The read-only `Commit policy` workflow validates PR titles/new non-merge commits with pinned commitlint and checks release fragments. PRs require English only. It reruns on PR title/body edits without restarting platform CI, and runs real git-cliff/commitlint regression tests before generating PR-only/cumulative previews. See [commit rules](commits.md) for optional local hooks and bilingual release fragments. Require the GitHub Actions `commit-policy` context alongside the existing `summary` context in the master Ruleset. Neither context substitutes for the other; retain existing approval, thread-resolution and strict-update requirements. A workflow file alone cannot enable a server-side merge requirement. No release authorization or tag is implied by this policy check.
+The read-only `Commit policy` workflow validates PR titles/new non-merge commits with pinned commitlint and checks release fragments. PRs require English only. It reruns on PR title/body edits without restarting platform CI, and runs real git-cliff/commitlint regression tests before generating PR-only/cumulative previews. See [commit rules](commits.md) for optional local hooks and bilingual release fragments. Require the GitHub Actions `commit-policy` context alongside `summary` in the common master ruleset. Neither context substitutes for the other; review exemptions follow the [main-branch merge policy](#master-merge-policy), while conversation resolution and strict updates remain required for everyone. A workflow file alone cannot enable a server-side merge requirement. No release authorization or tag is implied by this policy check.
