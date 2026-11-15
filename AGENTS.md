@@ -24,6 +24,8 @@ This file defines how to maintain the repository. Follow the linked documents fo
 - Use the [commit and release-description rules](docs/development/commits.md); PR titles and new non-merge commits must pass commitlint. Keep PRs English-only; maintain bilingual release fragments alongside user-facing changes.
 - After relevant validation, merge ordinary implementation changes into `master` and push. PRs also target `master`. Version PRs follow the release rules below.
 - Check whether the remote advanced before integration and retain existing commits. Never resolve integration through force-push or shared-history rewriting.
+- Follow the [main-branch merge policy](docs/development/github-maintenance.md#master-merge-policy). Inspect effective rules and the current account's exemptions before declaring a PR blocked. Non-admins need an approving review; the administrator's review exemption never exempts required CI, PRs or conversation resolution.
+- Enabling auto-merge is not completion. For an authorized ordinary merge, confirm `merged=true`, record the resulting `master` commit and follow its CI to completion. If auto-merge waits despite an applicable review exemption, use the documented direct-merge path after verifying the current head and all mandatory checks.
 
 <a id="文档入口与模块边界"></a>
 

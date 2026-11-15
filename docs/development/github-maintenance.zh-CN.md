@@ -4,6 +4,25 @@
 
 [English](github-maintenance.md) · 简体中文
 
+<a id="master-merge-policy"></a>
+
+## 主分支合入规则
+
+`master` 使用两套面向不同对象的规则。CI 与审阅豁免分开配置，保证管理员的审阅权限不能绕过执行检查。
+
+| 规则集 | 适用对象 | 要求 |
+| --- | --- | --- |
+| `master - PR and required checks` | 所有人，没有豁免对象 | 必须通过 PR；GitHub Actions 的 `summary` 与 `commit-policy` 必须通过；分支必须保持最新；审阅讨论必须解决；禁止强推或删除；允许 merge/squash |
+| `master - review for non-admins` | 仓库管理员角色以外的所有人 | 至少一份批准审阅；新提交使旧批准失效；不额外要求 Code Owner、最后推送者或无归属改动的批准 |
+
+仅含审阅要求的规则集使用 `bypass_mode: exempt` 排除仓库管理员角色。GitHub 将其定义为对指定对象跳过规则执行，区别于显式绕过操作。公共规则集没有豁免。非管理员仍需批准审阅；这项配置不会向其他用户授予合并或写入权限。参见 [GitHub 的豁免说明](https://github.blog/changelog/2025-09-10-github-ruleset-exemptions-and-repository-insights-updates/)。
+
+执行已授权合入前，读取分支实际生效规则及每个匹配规则集的 `bypass_actors`、`current_user_can_bypass`。核实 PR 的准确 head SHA、最新 base、可合并状态、讨论已解决，以及 GitHub Actions 的全部必需检查通过。不能只凭 `REVIEW_REQUIRED` 就判断当前账号没有允许的合入路径。
+
+GitHub 自动合并会等待合入条件满足；排队并不等于完成。如果管理员已获授权的普通 PR 具备适用的豁免，却仍因审阅要求而等待，应通过 `PUT /repos/{owner}/{repo}/pulls/{number}/merge`，携带已核实的 `sha` 和 `merge_method: merge` 完成合入。GitHub 仍会强制执行公共规则。响应不确定时先查询 PR 状态，再决定是否重试。不能为解除阻塞而放宽规则、伪造批准或绕过 CI。非管理员缺少必需批准时，必须取得有效审阅。参见[合入 API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)。
+
+无论使用哪种路径，合入后都须核实 `merged=true`、记录实际 `master` 提交，并跟踪触发的 CI 至最终结果。修改规则必须获得明确授权，且保存修改前后的配置。版本 PR 在启用自动合并或执行合入前仍须取得明确发布授权；审阅豁免不代表发布授权。
+
 ## Dependabot
 
 默认分支的 `.github/dependabot.yml` 管理 Cargo、npm workspace、
@@ -133,6 +152,6 @@ master、tag、仍打开的 PR 及未知普通分支均保留。定时任务可�
 
 ## 提交规范与发布预览
 
-只读 `Commit policy` 流程使用固定版本 commitlint 验证 PR 标题与新增非合并提交，并检查发布片段。PR 只需英文。PR 标题或正文编辑时重跑该流程，不重启平台 CI；生成仅本 PR 和累计预览前，会运行真实 git-cliff/commitlint 回归测试。可选本地 hook 和双语发布片段见[提交规范](commits.zh-CN.md)。master Ruleset 中应同时要求 GitHub Actions 的 `commit-policy` 和已有 `summary` 状态；二者不能互相替代，保留已有审批、讨论解决和严格更新要求。仅有 workflow 文件无法启用服务端合并限制。规范检查不代表发布授权，也不会创建 tag。
+只读 `Commit policy` 流程使用固定版本 commitlint 验证 PR 标题与新增非合并提交，并检查发布片段。PR 只需英文。PR 标题或正文编辑时重跑该流程，不重启平台 CI；生成仅本 PR 和累计预览前，会运行真实 git-cliff/commitlint 回归测试。可选本地 hook 和双语发布片段见[提交规范](commits.zh-CN.md)。公共 master 规则集中应同时要求 GitHub Actions 的 `commit-policy` 与 `summary` 状态；二者不能互相替代。审阅豁免遵循[主分支合入规则](#master-merge-policy)，所有人仍需满足讨论解决及严格更新要求。仅有 workflow 文件无法启用服务端合并限制。规范检查不代表发布授权，也不会创建 tag。
 
 发布片段保留 PR 原有的相关检查范围；`.changes/` 中的未知文件仍需完整检查。

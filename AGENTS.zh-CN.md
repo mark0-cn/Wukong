@@ -24,6 +24,8 @@
 - 遵循[提交与发布描述规范](docs/development/commits.zh-CN.md)；PR 标题与新增非合并提交需通过 commitlint。PR 只需英文，面向用户的修改随代码维护双语发布片段。
 - 普通实施改动完成相关验证后，合并到 `master` 并推送；PR 的目标分支也使用 `master`。版本 PR 按下方发布规则处理。
 - 集成前确认远端是否前进，保留已有提交；不通过强推或重写共享分支历史解决集成问题。
+- 遵循[主分支合入规则](docs/development/github-maintenance.zh-CN.md#master-merge-policy)。判断 PR 被阻塞前，检查实际生效规则及当前账号的豁免权限。非管理员需要批准审阅；管理员的审阅豁免不豁免必需 CI、PR 或讨论解决要求。
+- 启用自动合并不代表完成。已授权的普通合入须确认 `merged=true`、记录最终 `master` 提交并跟踪其 CI 至结束。如果存在适用的审阅豁免但自动合并仍在等待，应核实当前 head 和全部必需检查后，使用文档规定的直接合入路径。
 
 <a id="documentation-and-module-boundaries"></a>
 
