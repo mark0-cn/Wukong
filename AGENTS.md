@@ -106,6 +106,7 @@ Use these entry points according to impact; workflows define precise checks/depe
 ## CI, versions and releases
 
 - Prefer standard GitHub-hosted runners and online-only distributions; follow release documentation.
+- Treat PR CI as a merge gate and master CI as separate post-merge verification; follow both to completion. Keep `summary` and `commit-policy` stable, and include selected acceptance in `summary`. Use the documented [Actions entry points](docs/development/github-maintenance.md#actions-entry-points).
 - Synchronize versions through version preparation. Keep version PRs version-only. Tags are `vMAJOR.MINOR.PATCH`, match project versions and point to commits merged into `master`.
 - **Merging a version PR triggers official publication and requires explicit release authorization.** Ordinary merge authorization does not imply release authorization; existing explicit session authorization need not be requested again.
 - Pipeline configuration/validation does not request a release. Use manual rehearsals when publication is not requested.
