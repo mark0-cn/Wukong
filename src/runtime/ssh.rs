@@ -222,40 +222,40 @@ fn client_path(path: &Path) -> Result<String> {
 }
 
 #[cfg(test)]
-#[path = "ssh_debugger_acceptance.rs"]
+#[path = "ssh_tests/debugger_acceptance.rs"]
 mod debugger_acceptance;
 #[cfg(test)]
-#[path = "ssh_debugger_fault_acceptance.rs"]
+#[path = "ssh_tests/debugger_fault_acceptance.rs"]
 mod debugger_fault_acceptance;
 #[cfg(test)]
-#[path = "ssh_dump_acceptance.rs"]
+#[path = "ssh_tests/dump_acceptance.rs"]
 mod dump_acceptance;
 #[cfg(test)]
-#[path = "ssh_interactive_acceptance.rs"]
+#[path = "ssh_tests/interactive_acceptance.rs"]
 mod interactive_acceptance;
 #[cfg(test)]
-#[path = "ssh_inventory_acceptance.rs"]
+#[path = "ssh_tests/inventory_acceptance.rs"]
 mod inventory_acceptance;
 #[cfg(test)]
-#[path = "ssh_launch_acceptance.rs"]
+#[path = "ssh_tests/launch_acceptance.rs"]
 mod launch_acceptance;
 #[cfg(test)]
-#[path = "ssh_minimize_acceptance.rs"]
+#[path = "ssh_tests/minimize_acceptance.rs"]
 mod minimize_acceptance;
 #[cfg(test)]
-#[path = "ssh_process_acceptance.rs"]
+#[path = "ssh_tests/process_acceptance.rs"]
 mod process_acceptance;
 #[cfg(test)]
-#[path = "ssh_process_fault_acceptance.rs"]
+#[path = "ssh_tests/process_fault_acceptance.rs"]
 mod process_fault_acceptance;
 #[cfg(test)]
-#[path = "ssh_python_acceptance.rs"]
+#[path = "ssh_tests/python_acceptance.rs"]
 mod python_acceptance;
 #[cfg(test)]
-#[path = "ssh_replay_acceptance.rs"]
+#[path = "ssh_tests/replay_acceptance.rs"]
 mod replay_acceptance;
 #[cfg(test)]
-#[path = "ssh_shell_acceptance.rs"]
+#[path = "ssh_tests/shell_acceptance.rs"]
 mod shell_acceptance;
 #[cfg(test)]
 mod tests {
