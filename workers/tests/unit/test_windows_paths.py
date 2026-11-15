@@ -1,4 +1,5 @@
 """Real ordinary-token path checks without accounts or machine policy changes."""
+
 from contextlib import contextmanager
 import ctypes
 from ctypes import wintypes
@@ -7,34 +8,58 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import worker_windows_paths
+import wukong_worker.platform.windows_paths as worker_windows_paths
 
 
 @contextmanager
 def without_privileges():
     class Luid(ctypes.Structure):
         _fields_ = [("low", wintypes.DWORD), ("high", wintypes.LONG)]
+
     class Privilege(ctypes.Structure):
         _fields_ = [("luid", Luid), ("attributes", wintypes.DWORD)]
+
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     security = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel.GetCurrentProcess.restype = wintypes.HANDLE
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    security.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
-    security.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
-    security.CreateRestrictedToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
-        wintypes.DWORD, ctypes.POINTER(Privilege), wintypes.DWORD, ctypes.c_void_p, ctypes.POINTER(wintypes.HANDLE)]
+    security.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    security.GetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    security.CreateRestrictedToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(Privilege),
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
     security.ImpersonateLoggedOnUser.argtypes = [wintypes.HANDLE]
     security.RevertToSelf.argtypes = []
+
     def checked(result):
         if not result:
             raise ctypes.WinError(ctypes.get_last_error())
+
     def privileges(token):
         size = wintypes.DWORD()
         security.GetTokenInformation(token, 3, None, 0, ctypes.byref(size))
         buffer = ctypes.create_string_buffer(size.value)
         checked(security.GetTokenInformation(token, 3, buffer, size, ctypes.byref(size)))
         return buffer
+
     original, restricted = wintypes.HANDLE(), wintypes.HANDLE()
     active = False
     try:
@@ -42,7 +67,11 @@ def without_privileges():
         buffer = privileges(original)
         count = wintypes.DWORD.from_buffer(buffer).value
         deletion = ctypes.cast(ctypes.addressof(buffer) + 4, ctypes.POINTER(Privilege))
-        checked(security.CreateRestrictedToken(original, 0, 0, None, count, deletion, 0, None, ctypes.byref(restricted)))
+        checked(
+            security.CreateRestrictedToken(
+                original, 0, 0, None, count, deletion, 0, None, ctypes.byref(restricted)
+            )
+        )
         if wintypes.DWORD.from_buffer(privileges(restricted)).value != 0:
             raise AssertionError("fixture token retains privileges")
         checked(security.ImpersonateLoggedOnUser(restricted))
@@ -67,6 +96,11 @@ class WindowsPathsTests(unittest.TestCase):
             with without_privileges():
                 self.assertEqual(worker_windows_paths.local_path(path), path)
                 self.assertEqual(path.read_bytes(), b"inert-known-fixture")
-            for invalid in [r"\\server\share\file", r"C:\file:stream", r"relative\file", str(path) + "."]:
+            for invalid in [
+                r"\\server\share\file",
+                r"C:\file:stream",
+                r"relative\file",
+                str(path) + ".",
+            ]:
                 with self.assertRaises(ValueError):
                     worker_windows_paths.local_path(invalid)

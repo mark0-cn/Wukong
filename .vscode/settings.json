@@ -1,0 +1,13 @@
+{
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/target": true,
+    "**/__pycache__": true,
+    "**/.ruff_cache": true,
+    "**/*.egg-info": true,
+    "gen/schemas": true,
+    "ui/dist": true,
+    "test-results": true,
+    "playwright-report": true
+  }
+}

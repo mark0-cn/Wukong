@@ -1,4 +1,5 @@
 """Read upstream releases and propose reviewed pins; never modify the lock or run downloads."""
+
 import argparse
 import base64
 from datetime import datetime, timezone
@@ -14,11 +15,20 @@ import urllib.parse
 import urllib.request
 
 from scripts._lib.repository import ROOT
+
 SOURCES = {
     "pwndbg": ("pwndbg/pwndbg", r"v?(\d+\.\d+\.\d+)", r"pwndbg_[\d.]+_x86_64-portable\.tar\.xz"),
     "pwninit": ("io12/pwninit", r"v?(\d+\.\d+\.\d+)", r"pwninit"),
-    "ghidra": ("NationalSecurityAgency/ghidra", r"Ghidra_(\d+(?:\.\d+)+)_build", r"ghidra_[\d.]+_PUBLIC_\d+\.zip"),
-    "temurin": ("adoptium/temurin25-binaries", r"jdk-(25\.\d+\.\d+\+\d+)", r"OpenJDK25U-jdk_x64_linux_hotspot_[\d._]+\.tar\.gz"),
+    "ghidra": (
+        "NationalSecurityAgency/ghidra",
+        r"Ghidra_(\d+(?:\.\d+)+)_build",
+        r"ghidra_[\d.]+_PUBLIC_\d+\.zip",
+    ),
+    "temurin": (
+        "adoptium/temurin25-binaries",
+        r"jdk-(25\.\d+\.\d+\+\d+)",
+        r"OpenJDK25U-jdk_x64_linux_hotspot_[\d._]+\.tar\.gz",
+    ),
     "gef": ("hugsy/gef", r"(\d{4}\.\d{2})", None),
 }
 
@@ -28,6 +38,7 @@ def api(path):
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args, **kwargs):
             return None
+
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "wukong-toolchain-check"}
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
@@ -64,9 +75,15 @@ def inspect(name, current, get=api):
     if not match or release.get("draft") or release.get("prerelease"):
         raise ValueError("Unexpected stable release tag: " + tag)
     latest = match[1]
-    row = {"tool": name, "current": current["version"], "latest": latest,
-           "release_url": f"https://github.com/{repository}/releases/tag/{urllib.parse.quote(tag, safe='')}",
-           "status": "current", "checksum_source": "", "candidate": None}
+    row = {
+        "tool": name,
+        "current": current["version"],
+        "latest": latest,
+        "release_url": f"https://github.com/{repository}/releases/tag/{urllib.parse.quote(tag, safe='')}",
+        "status": "current",
+        "checksum_source": "",
+        "candidate": None,
+    }
     if version_key(latest) < version_key(current["version"]):
         row["status"] = "upstream_older"
         return row
@@ -93,11 +110,20 @@ def inspect(name, current, get=api):
         url = asset["browser_download_url"]
         parsed = urllib.parse.urlparse(url)
         expected = f"/{repository}/releases/download/{tag}/{asset['name']}"
-        if parsed.scheme != "https" or parsed.netloc != "github.com" or urllib.parse.unquote(parsed.path) != expected or parsed.query or parsed.fragment:
+        if (
+            parsed.scheme != "https"
+            or parsed.netloc != "github.com"
+            or urllib.parse.unquote(parsed.path) != expected
+            or parsed.query
+            or parsed.fragment
+        ):
             raise ValueError("Unexpected release asset URL")
         published_digest = asset.get("digest") or ""
         if not re.fullmatch(r"sha256:[a-f0-9]{64}", published_digest):
-            row.update(status="checksum_review_required", checksum_source="No GitHub asset SHA256; inspect upstream checksums manually")
+            row.update(
+                status="checksum_review_required",
+                checksum_source="No GitHub asset SHA256; inspect upstream checksums manually",
+            )
             return row
         digest = published_digest.split(":", 1)[1]
         row["checksum_source"] = "GitHub release asset SHA256; download verification pending"
@@ -122,10 +148,21 @@ def check(manifest, get=api):
         try:
             rows.append(inspect(name, manifest[name], get))
         except (KeyError, ValueError, RuntimeError, OSError) as error:
-            rows.append({"tool": name, "current": manifest.get(name, {}).get("version", "missing"),
-                         "latest": "unknown", "status": "error", "error": str(error), "candidate": None})
-    return {"checked_at": datetime.now(timezone.utc).isoformat(),
-            "passed": not any(r["status"] in {"error", "checksum_changed"} for r in rows), "tools": rows}
+            rows.append(
+                {
+                    "tool": name,
+                    "current": manifest.get(name, {}).get("version", "missing"),
+                    "latest": "unknown",
+                    "status": "error",
+                    "error": str(error),
+                    "candidate": None,
+                }
+            )
+    return {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "passed": not any(r["status"] in {"error", "checksum_changed"} for r in rows),
+        "tools": rows,
+    }
 
 
 def cell(value):
@@ -133,13 +170,26 @@ def cell(value):
 
 
 def markdown(report):
-    lines = ["## Toolchain update check", "", "| Tool | Locked | Upstream | Status |", "| --- | --- | --- | --- |"]
+    lines = [
+        "## Toolchain update check",
+        "",
+        "| Tool | Locked | Upstream | Status |",
+        "| --- | --- | --- | --- |",
+    ]
     for row in report["tools"]:
-        lines.append("| " + " | ".join(cell(row[k]) for k in ("tool", "current", "latest", "status")) + " |")
-    lines += ["", "Candidates are proposals only: review source/checksum evidence, synchronize Dockerfile pins, download and verify inputs, then build and run acceptance before merging.",
-              "Temurin stays on JDK 25. Missing checksums require manual review. This check does not audit apt/pip/gem packages or the AFL base image.", ""]
+        lines.append(
+            "| " + " | ".join(cell(row[k]) for k in ("tool", "current", "latest", "status")) + " |"
+        )
+    lines += [
+        "",
+        "Candidates are proposals only: review source/checksum evidence, synchronize Dockerfile pins, download and verify inputs, then build and run acceptance before merging.",
+        "Temurin stays on JDK 25. Missing checksums require manual review. This check does not audit apt/pip/gem packages or the AFL base image.",
+        "",
+    ]
     for row in report["tools"]:
-        lines.append(f"- **{cell(row['tool'])}**: {cell(row.get('error') or row.get('checksum_source', ''))}")
+        lines.append(
+            f"- **{cell(row['tool'])}**: {cell(row.get('error') or row.get('checksum_source', ''))}"
+        )
         if row.get("release_url"):
             lines.append("  Upstream: " + row["release_url"])
     return "\n".join(lines) + "\n"
@@ -155,7 +205,9 @@ def main():
     (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     (args.output / "report.md").write_text(markdown(report), encoding="utf-8")
     proposals = {r["tool"]: r["candidate"] for r in report["tools"] if r.get("candidate")}
-    (args.output / "candidates.json").write_text(json.dumps(proposals, indent=2) + "\n", encoding="utf-8")
+    (args.output / "candidates.json").write_text(
+        json.dumps(proposals, indent=2) + "\n", encoding="utf-8"
+    )
     for row in report["tools"]:
         print(f"{row['tool']}: {row['current']} -> {row['latest']} ({row['status']})")
     return 0 if report["passed"] else 1

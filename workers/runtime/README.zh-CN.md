@@ -20,6 +20,12 @@ Bridge 启动时会在导入 worker 模块前禁用 Python 字节码写入，新
 
 元数据发布使用 `atomicwrites`：完整 UTF-8 JSON 在替换前刷盘，写入失败时清理临时文件。Windows 写穿移动和 POSIX 父目录同步由库处理。仅对 Windows 临时访问/共享冲突重试，最多五次；保留记录失败不得授权执行。已有操作记录损坏仍报错，绝不静默重置。Linux bridge 依赖固定在 `requirements.txt`；原生 Windows 元数据不使用这套 Python 实现。故障注入检查不证明断电或当前源码的 VM 重启验收通过。
 
+作业准入在预留资源前形成有类型的内部计划。网络、LaunchSpec、重放和进程校验规范化参数的私有副本，并计算原有请求指纹；作业管理器仍用同一把锁覆盖重复请求查询、预留、UID 分配和监督器创建。启动失败保留预留记录供对账，绝不授权自动重启。传输 schema 和状态格式仍由共享协议及既有账本管理。
+
+子进程环境策略、RPC 错误分类和原子元数据 IO 各有独立归属，调用方直接导入；数值/地址校验来自 `wukong_analysis.validation`，协议定义来自生成的契约。制品帮助函数保留路径约束、哈希和有界读取。元数据重试、错误分类及子进程环境过滤保持原有行为。
+
+会话恢复在 stderr 报告无法读取的 JSON 或 IO 错误，每类会话最多输出 16 条具体警告，再汇总其余失败数量。诊断仅含类别、可识别的会话 ID 和异常类型，不含记录内容或任意路径。损坏记录保持原样，原运行中会话在元数据可写时标为 lost，缺少必需状态字段仍使启动失败。RPC stdout 继续仅用于协议响应。
+
 Docker 镜像自动安装依赖。GDB/MI 结果含解析后的 `payload`；异步事件是 type、message、payload、原始 `record` 的结构化记录。原始 MI transcript 保留为证据。
 
 ## Docker
@@ -179,8 +185,24 @@ Ghidra 套件编译自己的 C 夹具，通过只读适配器导入，定位 mai
 
 ## 模块边界
 
-`bridge.py` 只选择 stdio relay、daemon 或独立监督；部署整个 runtime 目录，Docker 已整体复制。`worker_transport` 管认证帧与启动；`worker_runtime` 装配/路由；`worker_operations` 管持久化保留与重放，`worker_sessions` 提供会话存活；`worker_jobs` 管记录/取消，`worker_job_supervisor` 管独立执行。调试、交互、文件、同步命令独立组件。`worker_processes` 管有界 I/O/进程树；`worker_common` 管协议值、路径约束、流式哈希和原子元数据。后端直接导入这些组件。
+`bridge.py` 保留 CLI 参数，在导入 `wukong_worker.cli` 前禁用字节码写入。部署整个 `workers/runtime` 目录及相邻的生成协议 schema，无需额外安装运行时包。内部显式导入 `wukong_worker` 包。`rpc/` 管帧、契约校验、错误和可调用注册；`host/` 管身份、能力观察、环境策略和服务装配。身份哈希覆盖 bridge 及所有嵌套包源码的路径/字节，以及共享 schema 和分析包。
 
-`worker_seccomp`、`worker_libc`、`worker_emu` 和 `worker_crash` 将受限输入及真实调试观察适配到独立[分析包](../analysis/README.zh-CN.md)。该包负责 BPF 解码/探测、有界 ELF 候选比较、Unicorn 模拟与崩溃数据解释，不拥有 Worker 状态或传输。`worker_network` 校验准备好的服务绑定并执行声明式 TCP 验证。监督器仍拥有生命周期/取消；不会在特权 supervisor 内运行模型提供的程序。见 [Pwn 工具契约](../../docs/reference/pwn-tools.zh-CN.md)。
+包内 `resources/` 管作业、会话和持久化副作用；`execution/` 管准入计划、监督执行、进程树 IO、重放和最小化。`debugger/` 管 GDB/MI 和交互进程；`artifacts/` 管受限路径、哈希、传输及原子元数据。`platform/` 保留 Linux 隔离及可信本地夹具使用的 Windows 身份/路径帮助函数。`workbench/` 管宿主调用的帮助脚本，control/prepare 通过明确的入口引导支持直接执行。注入隔离执行环境的分析和收集脚本保持自包含。
 
-`worker_launch_spec` 管公共解析、受限成员查找、流式产物哈希。原生启动和网络重放各自保留执行策略/预算。`worker_network` 协调试验；`worker_network_plan` 校验步骤/捕获；`worker_network_transport` 管有界 TCP 与新响应边界；`worker_network_evidence` 保存精确收发块及哈希 transcript。取消仍由 supervisor 管理。
+`analysis/adapters.py` 在同一文件内保留 `SeccompService`、`LibcService` 和 `EmuService` 各自的准入；`debugger/crash.py` 保留真实 GDB 观察。它们将输入适配到独立[分析包](../analysis/README.zh-CN.md)，该包负责 BPF 解码/探测、有界 ELF 候选比较、Unicorn 模拟与崩溃数据解释，不拥有 Worker 状态或传输。`network/service.py` 校验准备好的服务绑定并执行声明式 TCP 验证。监督器仍拥有生命周期/取消；不会在特权 supervisor 内运行模型提供的程序。见 [Pwn 工具契约](../../docs/reference/pwn-tools.zh-CN.md)。
+
+`execution/launch_spec.py` 管公共解析、受限成员查找、流式产物哈希。原生启动和网络重放各自保留执行策略/预算。`network/service.py` 协调试验；`network/plan.py` 校验步骤/捕获；`network/transport.py` 管有界 TCP 与新响应边界；`network/evidence.py` 保存精确收发块及哈希 transcript。取消仍由 supervisor 管理。
+
+## 资源所有权
+
+| 资源 | 所有者与生命周期 |
+| --- | --- |
+| 守护进程与端点 | `rpc/transport.py` 持有独立于 stdio 转发进程的守护锁；重连不会重新启动已有归属的作业。 |
+| 作业预留与回执 | `resources/jobs.py` 串行执行去重、UID/目录预留和监督器启动；`execution/planning.py` 在加锁前准备规范化输入。失败或未知的启动仍保留持久身份。 |
+| 作业进程树与输出 | 监督器负责取消和最终发布；`execution/processes.py` 负责进程组/Job 终止与有界输出收集。主进程死亡不能证明后代已退出。 |
+| GDB 与交互会话 | `resources/sessions.py` 保留活动所有者；会话类串行处理操作并保存观察。恢复将旧会话标为 lost，报告无法读取的元数据，但不修复原记录。 |
+| 网络试验 | `network/service.py` 持有 socket 上下文并最终发布 transcript；传输层检查取消/期限，保留旧响应与新响应的边界。 |
+| 输入缩减 | `execution/minimize.py` 管尝试次数和期限；注入的求值器负责每次执行及崩溃等价性。中断时保留的候选不代表已经最小化。 |
+| 实验文件 | `platform/isolation.py` 在独立 UID 下准备已校验的公开输入，通过同一受限身份收集制品。执行结束后仍保留存储证据。 |
+
+管理命令 `doctor` 在临时状态上绑定真实注册表，再观察能力。它不会在运行中的守护进程状态上构造 Runtime，避免错误恢复活动会话。关闭传输、取消执行和删除保留证据是由不同所有者负责的不同操作。

@@ -1,11 +1,14 @@
 """Pure bounded numeric input validation."""
-def bounded_int(value, default, minimum, maximum):
+
+
+def bounded_int(value: int | float | str | None, default: int, minimum: int, maximum: int) -> int:
     value = int(value if value is not None else default)
     if not minimum <= value <= maximum:
         raise ValueError("numeric parameter outside allowed range")
     return value
 
-def parse_address(value):
+
+def parse_address(value: object) -> int:
     """Accept the controller's interchangeable integer spellings for module-relative
     addresses: JSON integers, plain decimal strings and 0x-hex strings."""
     if isinstance(value, bool) or isinstance(value, float):

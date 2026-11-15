@@ -80,7 +80,7 @@ New resource records require state schema 5. Old workspaces are rejected without
 
 ## Controller execution boundaries
 
-`ToolService` performs role admission, tool dispatch and durable result handling. Each invocation borrows it through `ToolContext`, which carries execution and analysis services assembled from one `BoundWorker`; binding does not clone the controller. Environment connections, configuration snapshots, identity pins, leases and reconnection remain in `environments`/`runtime`.
+`ToolService` performs role admission, tool dispatch and durable result handling. Each invocation borrows it through `ToolContext`, which carries execution and analysis services assembled from one `BoundWorker`; binding does not clone the controller. Environment connections, configuration snapshots, identity pins, leases and reconnection remain in `adapters/environments`/`adapters/worker`.
 
 `WorkerGateway` accepts the shared typed `Request` contract. It preserves stable request identifiers and stores the original Worker reply before any presentation projection. Job and session services authorize controller IDs against their run/owner/Worker, send the recorded Worker resource ID, validate returned identities and construct controller-facing references explicitly. Original status artifacts retain Worker identifiers. Controller invocation receipts remain separate from the Worker execution ledger.
 

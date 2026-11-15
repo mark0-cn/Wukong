@@ -8,19 +8,37 @@ English · [简体中文](maintenance.zh-CN.md)
 
 ## Module boundaries
 
-- `kernel` assembles Rig and drives lifecycle. `admission` controls admission; `models` manages requests/metering; `coordination` projects messages/state; `business_tools` integrates effects. `kernel_host` exposes business operations; `supervisor` manages heartbeats/background observation independently; `model_catalog`, `usage`, `bootstrap` own model selection, accounting and assembly.
-- `tools` retains the execution pipeline/shared validation. `effects` owns durable receipts; `catalog` registers schemas, roles, recovery policy and handlers. `handlers` routes business operations; `coordination` handles shared documents/tasks; `analysis` static queries; `execution` worker dispatch; `verification` independent admission/certification; `files`, `jobs`, `sessions` their resources. Argument/handler subdirectories group by responsibility while one catalog registers them.
-- `queries` defines shared queries/DTOs; `store/workspace` and `store/report_queries` implement SQL. `desktop/workspace` reads snapshots through `store/desktop_queries`; `desktop/presentation` adapts public progress/tool results for React. `ui/src/commands.ts` constrains command arguments/responses; lifecycle effects belong in corresponding hooks.
-- `coordinator` separates runs/tasks/messages/waits/completion use cases, committing through the same Store transactions. `binary` retains public address/hash APIs; profiling, strings and Ghidra lifecycle have separate modules.
-- `store` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `store/conversations` owns conversation payloads/revisions. Current state schema is 4, without legacy migration.
+- `application/agent_runtime` assembles Rig and drives lifecycle. `admission` controls admission; `models` manages requests/metering; `coordination` projects messages/state; `business_tools` integrates effects. `application/agent_runtime/host` exposes business operations; `application/assessment/supervisor` manages heartbeats/background observation independently; `application/model_catalog`, `application/usage`, `bootstrap` own model selection, accounting and assembly.
+- `application/tools` retains the execution pipeline/shared validation. `application/effects` owns durable receipts; `catalog` registers schemas, roles, recovery policy and handlers. `handlers` routes business operations; `coordination` handles shared documents/tasks; `analysis` static queries; `execution` worker dispatch; `verification` independent admission/certification; `files`, `jobs`, `sessions` their resources. Argument/handler subdirectories group by responsibility while one catalog registers them.
+- `queries` defines neutral DTOs; `application/queries` owns Store-backed query facades. `storage/queries/workspace_delta` and `storage/queries/report` implement SQL. `storage/queries/workspace_snapshot` reads a complete snapshot in one transaction; `interfaces/desktop/workspace` and `interfaces/desktop/presentation` transform it after the transaction without further queries. `ui/src/shared/api/commands.ts` constrains command arguments/responses; lifecycle effects belong in corresponding hooks.
+- `application/coordinator` separates runs/tasks/messages/waits/completion use cases, committing through the same Store transactions. `adapters/binary` retains public address/hash APIs; profiling, strings and Ghidra lifecycle have separate modules.
+- `storage` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `storage/conversations` owns conversation payloads/revisions. Current state schema is 5, without legacy migration.
 
 See [worker components](../../workers/runtime/README.md). Deploy the Linux runtime directory and generated protocol schema, and install the independent `workers/analysis` package; entry files do not re-export modules. Windows packaging uses its explicit component inventory instead of copying the Linux runtime.
 
 Keep cross-module calls typed and ownership/completion gates centralized. General metadata queries do not read checkpoints. Inheritance, follow-ups and complete export explicitly request full reads. Metadata writes must not clear conversations; checkpoints/mailbox acknowledgments still commit atomically.
 
+`adapters/files` owns host paths, directory ownership markers, link/reparse checks and durable JSON publication. Storage uses these filesystem capabilities directly. Maintenance still owns configuration registration, inventory and cleanup policy; moving helpers does not change locks, adoption rules or deletion scope.
+
+`bootstrap` implements the public service constructors and assembles concrete dependencies. Assessment use cases receive a runner factory; start/resume select their configuration before invoking it. Runner and tool business implementations never call bootstrap. Public constructor signatures and saved-configuration behavior remain unchanged.
+
+Project Python uses the development-only Ruff version pinned in `scripts/dev/requirements.txt` and `ruff.toml`. Run `python -m pip install -r scripts/dev/requirements.txt`, then `python -m ruff format --check workers scripts tests evals fixtures` and `python -m ruff check workers scripts tests evals fixtures`. Format changes separately from logic changes. Static checks cover syntax, control flow, invalid comparisons and undefined names; optional dependency imports still require review. Runtime bundles do not install Ruff. Generated outputs, external benchmarks and cached third-party dependencies are excluded.
+
 Workbench operations hold `OperationLock` for their complete ownership scope. The guard explicitly unlocks before closing its file; do not replace it with a bare file whose drop only closes a descriptor. On Unix, an unrelated concurrent fork can temporarily inherit the open file description before exec, extending a close-only lock past its owner's scope. The clone-descriptor regression checks immediate successor admission while preserving mutual exclusion.
 
+Maintenance admission, update-cache access and cleanup's workbench locks use `adapters/files/locks::FileLock` with the same explicit-release rule. Acquire the guard before any policy check that may return early, and retain it for the full protected operation. Assessment clones share one guard through `Arc`; the last owner releases it. Shared and exclusive modes retain their existing admission rules. Do not apply scope-based release to analyzer locks whose ownership deliberately extends until child processes are reaped.
+
+## Local files and task artifacts
+
+The checked-in `.vscode/settings.json` hides dependency caches and generated outputs in the file explorer. It does not delete files or change build inputs. New task-specific logs, inventories and receipts belong under ignored `target/tasks/<task-id>/`; tool-owned build/cache locations keep their existing paths. Preserve older evidence at its recorded path and hash. Keep source, fixtures, licenses, release fragments and bilingual guides visible and versioned; cleanup still requires explicit ownership and retention checks.
+
+Python build/release CLIs reuse `scripts._lib` for repository discovery, checksums and GitHub access. Keep CLI parsing separate from reusable functions. Build commands inherit the CI job deadline; fixture execution and network downloads have operation-specific limits. Package verification repeats hashes at independent trust boundaries intentionally. The shared analysis package receives admitted paths/bytes and keeps numerical algorithms separate from worker ownership; its annotations document internal inputs and outputs without replacing the generated protocol schema.
+
+The test `support.client.Client` owns only its stdio relay. It bounds both request writes and response waits, verifies response IDs, and closes the relay after an uncertain transport result. Tests explicitly reconnect and reconcile persistent jobs or shut down the daemon; closing the relay never implies daemon/resource cleanup.
+
 <a id="桌面界面样式"></a>
+
+The frontend groups workspace, conversation, agents, evidence, settings and maintenance under `ui/src/features/`. Shared API contracts, UI primitives, localization and test support live under `ui/src/shared/`; `ui/src/app/` owns composition and desktop lifecycle. Keep feature tests beside their implementation and cross-feature browser flows under `ui/e2e/`. Global style import order remains centralized.
 
 ## Desktop styling
 
@@ -66,7 +84,7 @@ These are maintenance/query fields, not permissions or proof of backend availabi
 
 `domain/claims` parses flag-shaped claims centrally. Completion tools reject placeholders; coordinator applies independent verification to specific claims. Parsing classifies text, not exploitation success.
 
-Rust file hashes/actual byte counts live in `content`; `binary` keeps its public hash API. Workers use `worker_common.sha256_file`; build/release scripts use `scripts._lib.checksums.sha256`. Independently injected sandbox scripts remain self-contained without controller imports. Path limits, size budgets and independent controller/worker identity checks remain at call boundaries; shared hashing does not merge/remove them.
+Rust file hashes/actual byte counts live in `adapters/files/content`; `adapters/binary` keeps its public hash API. Workers use `wukong_worker.artifacts.common.sha256_file`; build/release scripts use `scripts._lib.checksums.sha256`. Independently injected sandbox scripts remain self-contained without controller imports. Path limits, size budgets and independent controller/worker identity checks remain at call boundaries; shared hashing does not merge/remove them.
 
 <a id="验证"></a>
 

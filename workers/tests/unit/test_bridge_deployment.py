@@ -1,4 +1,5 @@
 """Signed runtime sources must remain unchanged across bridge process startup."""
+
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,15 +15,43 @@ class ImmutableDeployment(unittest.TestCase):
             root = Path(temporary) / "runtime"
             root.mkdir()
             shutil.copytree(source.parent / "protocol/schema", root.parent / "protocol/schema")
-            for path in source.glob("*.py"):
-                shutil.copyfile(path, root / path.name)
-            before = {path.name: path.read_bytes() for path in root.iterdir()}
+            for path in source.rglob("*.py"):
+                destination = root / path.relative_to(source)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, destination)
+            before = {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob("*")
+                if path.is_file()
+            }
             # Do not inherit a caller's PYTHONDONTWRITEBYTECODE: the production
             # entry itself must protect daemon and job-supervisor interpreters.
-            result = subprocess.run([sys.executable, "-E", str(root / "bridge.py"), "--help"],
-                                    capture_output=True, text=True, timeout=20)
+            result = subprocess.run(
+                [sys.executable, "-E", str(root / "bridge.py"), "--help"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
-            after = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            # Host management helpers also run directly from a deployed tree.
+            probe = subprocess.run(
+                [
+                    sys.executable,
+                    "-E",
+                    str(root / "wukong_worker/workbench/control.py"),
+                    "idle",
+                    str(root.parent / "state"),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            self.assertEqual(probe.returncode, 0, probe.stderr)
+            after = {
+                path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob("*")
+                if path.is_file()
+            }
             self.assertEqual(before, after)
 
 

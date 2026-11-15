@@ -24,6 +24,12 @@ Bridge startup disables Python bytecode writes before importing worker modules, 
 
 Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before replacement, and failed writes clean up their temporary files. The library handles Windows write-through moves and POSIX parent-directory synchronization. Only transient Windows access/sharing violations retry, at most five times; a failed reservation never authorizes execution. Corrupted existing operation records remain errors and are never silently reset. Linux bridge dependencies are pinned in `requirements.txt`; native Windows metadata does not use this Python implementation. Failure-injection checks do not establish power-loss or current-source VM reboot acceptance.
 
+Job admission builds a typed internal plan before reserving resources. Network/LaunchSpec/replay/process validation normalizes a private parameter copy and computes the existing request fingerprint; the job manager retains one lock across duplicate lookup, reservation, UID allocation and supervisor creation. A failed spawn leaves its reservation for reconciliation and never authorizes an automatic respawn. Wire schemas and state formats remain owned by the shared protocol and existing ledgers.
+
+Child environment policy, RPC error categories and atomic metadata IO have separate owners. Consumers import them directly; numerical/address validation comes from `wukong_analysis.validation`, and protocol definitions come from the generated contract. Artifact helpers retain path confinement, hashes and bounded reads. Metadata retries, error categories and child environment filtering keep their existing behavior.
+
+Session recovery reports unreadable JSON or IO failures on stderr, with at most 16 detailed warnings per session kind and one count of additional failures. Diagnostics contain only the kind, a recognized session ID and exception class; record contents and arbitrary paths are excluded. Damaged records stay unchanged, former running owners become lost when their metadata can be written, and missing required state fields still fail startup. RPC stdout remains reserved for protocol responses.
+
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
 and the original `record`. Original MI transcripts remain available as evidence.
@@ -284,27 +290,34 @@ clearing that claim; absence of a lock owner alone does not prove its child exit
 
 ## Module boundaries
 
-`bridge.py` only selects stdio relay, daemon or detached job supervision. Deploy
-the complete `workers/runtime` directory; the Docker image already copies it as
-a unit. `worker_transport` owns authenticated framing and daemon startup;
-`worker_runtime` assembles and routes services. `worker_operations` owns durable
-reservation and replay, with session liveness supplied by `worker_sessions`.
-`worker_jobs` manages job records and cancellation; `worker_job_supervisor` owns
-detached execution. Debugger, interactive processes, files and synchronous
-commands have separate components. `worker_processes` contains bounded process
-IO and process-tree ownership; `worker_common` contains protocol values, confined
-paths, streamed file hashes and atomic metadata IO. Backend adapters import these components directly.
+`bridge.py` retains its CLI arguments and disables bytecode writes before importing `wukong_worker.cli`. Deploy the complete `workers/runtime` directory with the sibling generated protocol schema; no additional runtime-package installation is required. Internal imports use the `wukong_worker` package explicitly. `rpc/` owns framing, contract validation, errors and callable registration; `host/` owns identity, capability observation, environment policy and service assembly. Identity hashes the bridge and all nested package source paths/bytes, plus the shared schema and analysis package.
 
-`worker_seccomp`, `worker_libc`, `worker_emu` and `worker_crash` adapt confined inputs and live debugger observations to the independent [analysis package](../analysis/README.md). The package owns BPF decoding/probes, bounded ELF candidate comparison, Unicorn simulation and crash-data interpretation; it owns no worker state or transport.
-`worker_network` validates the prepared service binding and performs declarative
+Within the package, `resources/` owns jobs, sessions and durable effects; `execution/` owns admission plans, supervisor execution, process-tree IO, replay and minimization. `debugger/` owns GDB/MI and interactive processes; `artifacts/` owns confined paths, hashes, transfers and atomic metadata. `platform/` retains Linux isolation and the Windows identity/path helpers used by trusted local fixtures. `workbench/` contains host-invoked helpers; control/prepare support direct script execution with an explicit entry bootstrap. The analysis and collection scripts injected into isolated execution remain self-contained.
+
+`analysis/adapters.py` keeps separate `SeccompService`, `LibcService` and `EmuService` admission paths in one file. `debugger/crash.py` retains live GDB observations. They adapt inputs to the independent [analysis package](../analysis/README.md), which owns BPF decoding/probes, bounded ELF candidate comparison, Unicorn simulation and crash-data interpretation, with no worker state or transport.
+`network/service.py` validates the prepared service binding and performs declarative
 TCP verification. The job supervisor retains lifecycle/cancellation ownership;
 network replay never executes a model-provided program inside the privileged
 supervisor. See [Pwn tool contracts](../../docs/reference/pwn-tools.md).
 
-`worker_launch_spec` owns shared LaunchSpec parsing, confined member lookup and
+`execution/launch_spec.py` owns shared LaunchSpec parsing, confined member lookup and
 streamed artifact hashes. Local launch and network replay retain their own
-execution policy and explicit resource budgets. `worker_network` coordinates each
-trial; `worker_network_plan` validates steps and tracks captures,
-`worker_network_transport` owns bounded TCP IO and fresh-response boundaries,
-and `worker_network_evidence` persists exact transmitted/received chunks and their
+execution policy and explicit resource budgets. `network/service.py` coordinates each
+trial; `network/plan.py` validates steps and tracks captures,
+`network/transport.py` owns bounded TCP IO and fresh-response boundaries,
+and `network/evidence.py` persists exact transmitted/received chunks and their
 hash-bound transcript. Cancellation remains owned by the job supervisor.
+
+## Resource ownership
+
+| Resource | Owner and lifetime |
+| --- | --- |
+| Daemon and endpoint | `rpc/transport.py` holds the daemon guard independently of stdio relays; reconnecting does not restart an owned job. |
+| Job reservation and receipt | `resources/jobs.py` serializes deduplication, UID/directory reservation and supervisor launch; `execution/planning.py` prepares normalized inputs before that lock. Failed/unknown launches retain their durable identity. |
+| Job process tree and output | The supervisor owns cancellation and final publication; `execution/processes.py` owns process-group/Job termination and bounded output draining. A dead leader is not proof that descendants exited. |
+| GDB and interactive sessions | `resources/sessions.py` retains live owners; session classes serialize their operations and retain observations. Recovery marks former sessions lost and reports unreadable metadata without repairing it. |
+| Network trial | `network/service.py` owns the socket context and final transcript publication; transport checks cancellation/deadlines and preserves stale/fresh response boundaries. |
+| Reduction | `execution/minimize.py` owns the attempt/deadline budget; the injected evaluator owns each execution and crash equivalence. An interrupted candidate is not a minimality claim. |
+| Experiment files | `platform/isolation.py` stages validated public inputs under a distinct UID; artifacts are collected through the same confined identity. Stored evidence survives execution. |
+
+Management `doctor` binds the actual registry against disposable state before observing capabilities. It never constructs a runtime against the running daemon's state, which would incorrectly recover live sessions. Closing a transport, cancelling execution and deleting retained evidence are separate operations with separate owners.

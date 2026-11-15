@@ -5,7 +5,10 @@ import unittest
 from unittest.mock import patch
 
 import importlib.util
-_spec = importlib.util.spec_from_file_location("windows_selftest", Path(__file__).resolve().parents[2] / "windows/python/selftest.py")
+
+_spec = importlib.util.spec_from_file_location(
+    "windows_selftest", Path(__file__).resolve().parents[2] / "windows/python/selftest.py"
+)
 _selftest = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_selftest)
 checked_file, ssh_probe_environment = _selftest.checked_file, _selftest.ssh_probe_environment
@@ -14,18 +17,32 @@ checked_file, ssh_probe_environment = _selftest.checked_file, _selftest.ssh_prob
 class VerifiedSelftestMembers(unittest.TestCase):
     def test_fixed_ssh_probe_keeps_only_the_required_extra_windows_path(self):
         with tempfile.TemporaryDirectory() as temporary:
-            with patch.dict("os.environ", {"PROGRAMDATA": temporary, "MODEL_API_KEY": "private-sentinel"}, clear=True):
+            with patch.dict(
+                "os.environ",
+                {"PROGRAMDATA": temporary, "MODEL_API_KEY": "private-sentinel"},
+                clear=True,
+            ):
                 environment = ssh_probe_environment()
                 self.assertEqual(environment["ProgramData"], temporary)
                 self.assertNotIn("MODEL_API_KEY", environment)
-            with patch.dict("os.environ", {}, clear=True), self.assertRaisesRegex(ValueError, "ProgramData"):
+            with (
+                patch.dict("os.environ", {}, clear=True),
+                self.assertRaisesRegex(ValueError, "ProgramData"),
+            ):
                 ssh_probe_environment()
 
     def test_probe_hashes_and_paths_are_checked_before_execution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "probe.exe").write_bytes(b"known fixture")
-            manifest = {"files": {"probe.exe": {"sha256": hashlib.sha256(b"known fixture").hexdigest(), "size": 13}}}
+            manifest = {
+                "files": {
+                    "probe.exe": {
+                        "sha256": hashlib.sha256(b"known fixture").hexdigest(),
+                        "size": 13,
+                    }
+                }
+            }
             self.assertEqual(checked_file(root, manifest, "probe.exe"), root / "probe.exe")
             (root / "probe.exe").write_bytes(b"changed bytes")
             with self.assertRaises(ValueError):

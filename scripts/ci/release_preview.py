@@ -1,4 +1,5 @@
 """Preview current PR changes and cumulative release notes without publication."""
+
 import json
 import os
 from pathlib import Path
@@ -17,16 +18,28 @@ def preview(pr, directory, *, root=ROOT):
     cumulative = collect(tag, head, root=root)
     directory.mkdir(parents=True, exist_ok=True)
     for name, content in (("pr-changes", incremental), ("next-release", cumulative)):
-        (directory / (name + ".json")).write_text(json.dumps(content, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        (directory / (name + ".json")).write_text(
+            json.dumps(content, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         (directory / (name + ".md")).write_text(render(content), encoding="utf-8")
     is_version = pr["head"].get("ref", "").startswith("codex/release-")
-    summary = ("## Release description preview\n\n"
-               "Preview only; no tag, image or release is published. PR text requires English only.\n\n"
-               f"Source: `{head}`. " + (f"Proposed version: `{tag}`.\n\n" if is_version else f"Source version: `{tag}`; the next version is chosen during version preparation.\n\n")
-               + "<details>\n<summary>" + ("Cumulative version changes" if is_version else "Changes in this PR") + "</summary>\n\n"
-               + render(cumulative if is_version else incremental) + "\n</details>\n\n"
-               + "Both the PR-only and cumulative Markdown/JSON previews are in the release-description-preview artifact. "
-                 "Review the Chinese translation and internal-only declarations manually.\n")
+    summary = (
+        "## Release description preview\n\n"
+        "Preview only; no tag, image or release is published. PR text requires English only.\n\n"
+        f"Source: `{head}`. "
+        + (
+            f"Proposed version: `{tag}`.\n\n"
+            if is_version
+            else f"Source version: `{tag}`; the next version is chosen during version preparation.\n\n"
+        )
+        + "<details>\n<summary>"
+        + ("Cumulative version changes" if is_version else "Changes in this PR")
+        + "</summary>\n\n"
+        + render(cumulative if is_version else incremental)
+        + "\n</details>\n\n"
+        + "Both the PR-only and cumulative Markdown/JSON previews are in the release-description-preview artifact. "
+        "Review the Chinese translation and internal-only declarations manually.\n"
+    )
     # Preserve full output in artifacts without exceeding GitHub's summary limit.
     if len(summary.encode("utf-8")) > 200_000:
         summary = f"## Release description preview\n\nSource: `{head}`. Preview exceeds the inline limit; open the release-description-preview artifact. No publication occurred.\n"

@@ -12,9 +12,9 @@ Wukong supports `zh-CN` and `en-US`. Frontend/Rust share Fluent resources in `lo
 
 - `common`: app title, language settings, native dialogs.
 - `workspace`, `settings`, `updates`: desktop UI.
-- `tools`: display messages for catalog tools/legacy aliases.
+- `application/tools`: display messages for catalog tools/legacy aliases.
 - `errors`: controller status, notices, expected errors.
-- `cli`, `report`: command help and readable exports.
+- `cli`, `interfaces/report`: command help and readable exports.
 
 Tool names, JSON fields, status enums, paths, addresses, payloads, hashes and raw evidence remain unchanged. Original tool text, existing model prose and third-party errors remain original. App errors use `{code,args,detail}`, with raw diagnostics in `detail`. Business error types must not be inferred from translated text/Chinese substrings. Docker diagnostic text matching supplies advisory troubleshooting categories only; it does not replace typed errors or prove the root cause.
 

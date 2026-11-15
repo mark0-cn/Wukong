@@ -283,7 +283,7 @@ Prompts live in [`prompts/`](../../prompts), with shared rules in `base.md`:
 | `support/` | Tools and recovery guidance |
 | `examples/` | Analysis examples |
 
-[`src/prompts.rs`](../../src/prompts.rs) registers builtin names, purposes, bodies and example references. Models receive the catalog and selected bodies only. Directory categories do not change callable skill names.
+[`src/application/prompts.rs`](../../src/application/prompts.rs) registers builtin names, purposes, bodies and example references. Models receive the catalog and selected bodies only. Directory categories do not change callable skill names.
 
 Override builtin bodies or add methods in `skills_dir/<name>.md`; provide examples in `demos_dir/<name>.md`. The default examples directory is `prompts/examples`; missing directories skip examples. Builtin bodies are embedded and do not require runtime repository files.
 

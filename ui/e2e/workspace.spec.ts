@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { agents, budget, finding, host, tool, workspace } from '../src/test/fixtures';
+import { agents, budget, finding, host, tool, workspace } from '../src/shared/testing/fixtures';
 
 async function mockDesktop(page: Page) {
   await page.addInitScript(({ data, host, tool, finding }) => {

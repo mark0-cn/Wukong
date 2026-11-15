@@ -1,4 +1,5 @@
 """Build standalone Windows worker binaries with a verified static CRT."""
+
 import argparse
 import os
 from pathlib import Path
@@ -30,19 +31,43 @@ def build(output, check_only=False):
     environment = os.environ.copy()
     environment.pop("RUSTFLAGS", None)
     environment["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(["-C", "target-feature=+crt-static"])
-    subprocess.run([cargo, "build", "--locked", "--release", "--target", "x86_64-pc-windows-msvc",
-                    "--target-dir", str(output)], cwd=source, env=environment, check=True)
+    subprocess.run(
+        [
+            cargo,
+            "build",
+            "--locked",
+            "--release",
+            "--target",
+            "x86_64-pc-windows-msvc",
+            "--target-dir",
+            str(output),
+        ],
+        cwd=source,
+        env=environment,
+        check=True,
+    )
     files = {}
     inspector = output / "x86_64-pc-windows-msvc/release/wukong-package.exe"
     for name in ["wukong-worker.exe", "wukong-package.exe"]:
         binary = output / "x86_64-pc-windows-msvc/release" / name
-        files[name] = {"sha256": sha256(binary), "size": binary.stat().st_size,
-                       "imported_libraries": require_static_crt(binary, inspector=inspector)}
+        files[name] = {
+            "sha256": sha256(binary),
+            "size": binary.stat().st_size,
+            "imported_libraries": require_static_crt(binary, inspector=inspector),
+        }
     probes = build_probes(output, inspector=inspector)
     debugger = build_debugger(ROOT / "target/windows-offline-cache", output)
     if source_identity != identity():
         raise ValueError("Worker source changed during native build")
-    metadata = {"schema": 1, "platform": "windows-amd64", "static_crt_checked": True, "files": files, "selftests": probes, "debugger": debugger, **source_identity}
+    metadata = {
+        "schema": 1,
+        "platform": "windows-amd64",
+        "static_crt_checked": True,
+        "files": files,
+        "selftests": probes,
+        "debugger": debugger,
+        **source_identity,
+    }
     write_json(output / "native-build.json", metadata)
     return metadata
 
@@ -57,6 +82,7 @@ def main():
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Windows worker build failed: {error}\n")
     import json
+
     print(json.dumps(result))
 
 

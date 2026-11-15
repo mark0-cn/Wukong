@@ -1,4 +1,5 @@
 """Select an already accepted tag release artifact for publication-only recovery."""
+
 import argparse
 import json
 import os
@@ -8,14 +9,27 @@ from scripts.release.release_reuse import selected_artifact
 
 
 def select(run, jobs, artifacts, repository):
-    if not (run.get("status") == "completed" and run.get("event") == "push"
-            and run.get("path") == ".github/workflows/release.yml"
-            and run.get("repository", {}).get("full_name") == repository
-            and run.get("head_repository", {}).get("full_name") == repository
-            and re.fullmatch(r"[0-9a-f]{40}", run.get("head_sha", ""))
-            and re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", run.get("head_branch", ""))):
+    if not (
+        run.get("status") == "completed"
+        and run.get("event") == "push"
+        and run.get("path") == ".github/workflows/release.yml"
+        and run.get("repository", {}).get("full_name") == repository
+        and run.get("head_repository", {}).get("full_name") == repository
+        and re.fullmatch(r"[0-9a-f]{40}", run.get("head_sha", ""))
+        and re.fullmatch(
+            r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", run.get("head_branch", "")
+        )
+    ):
         raise ValueError("Expected a completed tag publication from this repository")
-    for name in ("metadata", "checks", "image", "acceptance", "windows-installer / build", "linux-installer / build", "package"):
+    for name in (
+        "metadata",
+        "checks",
+        "image",
+        "acceptance",
+        "windows-installer / build",
+        "linux-installer / build",
+        "package",
+    ):
         matches = [job for job in jobs if job.get("name") == name]
         if len(matches) != 1 or matches[0].get("conclusion") != "success":
             raise ValueError("Missing successful release gate: " + name)
@@ -34,7 +48,10 @@ def main():
     run = api(base)
     jobs = api(base + f"/attempts/{run['run_attempt']}/jobs?per_page=100")
     artifacts = api(base + "/artifacts?per_page=100")
-    if len(jobs["jobs"]) != jobs["total_count"] or len(artifacts["artifacts"]) != artifacts["total_count"]:
+    if (
+        len(jobs["jobs"]) != jobs["total_count"]
+        or len(artifacts["artifacts"]) != artifacts["total_count"]
+    ):
         raise ValueError("Incomplete release metadata")
     result = select(run, jobs["jobs"], artifacts["artifacts"], repository)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Fix the workbench doctor command failing while collecting worker capabilities. Management probes use disposable state and preserve sessions owned by the running worker."
+zh_CN = "修复工作台 doctor 命令收集 Worker 能力时失败的问题。管理探测使用临时状态，保留正在运行的 Worker 所拥有的会话。"

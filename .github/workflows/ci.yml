@@ -53,6 +53,11 @@ jobs:
         run: python -m scripts.ci.ci_scope
       - name: Documentation pairs, links and review records
         run: python -m scripts.ci.check_docs
+      - name: Python formatting and static checks
+        run: |
+          python -m pip install --disable-pip-version-check -r scripts/dev/requirements.txt
+          python -m ruff format --check workers scripts tests evals fixtures
+          python -m ruff check workers scripts tests evals fixtures
 
   windows:
     needs: changes

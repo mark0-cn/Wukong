@@ -1,4 +1,5 @@
 """Portable package member names and no-link controller staging paths."""
+
 import os
 from pathlib import Path
 import re
@@ -10,10 +11,14 @@ def member(value):
         raise ValueError("Invalid offline member path")
     parts = value.split("/")
     for part in parts:
-        if (not re.fullmatch(r"[A-Za-z0-9_. -]+", part) or part in {".", ".."}
-                or part.startswith(" ") or part.endswith((".", " "))
-                or part.split(".")[0].endswith(" ")
-                or re.fullmatch(r"(?i)(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?", part)):
+        if (
+            not re.fullmatch(r"[A-Za-z0-9_. -]+", part)
+            or part in {".", ".."}
+            or part.startswith(" ")
+            or part.endswith((".", " "))
+            or part.split(".")[0].endswith(" ")
+            or re.fullmatch(r"(?i)(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?", part)
+        ):
             raise ValueError("Unsafe offline member path: " + value)
     return value
 

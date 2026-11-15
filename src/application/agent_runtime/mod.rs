@@ -1,0 +1,340 @@
+//! Rig owns execution, conversations, async subagents and effect cancellation.
+//! This plugin supplies only application admission, evidence and completion gates.
+use crate::{
+    application::agent_runtime::host::KernelHost,
+    domain::{self, AgentMetadata, Role, RunRecord, Status},
+};
+use anyhow::{Result, ensure};
+use rig_basics::subagents::{
+    OpenRequests, Report, Request, SpawnSubagent, SpawnedAgent, SubagentPolicy, SubagentsPlugin,
+};
+use rig_core::{
+    completion::{AssistantContent, CompletionResponse, ToolDefinition, Usage},
+    effect::{self, Answered, EffectKind, FamilyDescriptor, HandlerDescriptor},
+    serve::{Dispatch, ErasedHandler, Reply, Serve},
+    tool::{ToolExecutionError, ToolOutput},
+};
+use rig_ecs::session_log::SessionStore;
+use rig_harness::prelude::*;
+use serde_json::{Value, json};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, mpsc},
+    time::Duration,
+};
+use tokio_util::sync::CancellationToken;
+
+mod admission;
+pub(crate) mod host;
+use admission::*;
+mod models;
+use models::*;
+mod preflight;
+use preflight::*;
+mod coordination;
+use coordination::*;
+mod business_tools;
+use business_tools::*;
+
+#[derive(Resource, Clone)]
+struct Application {
+    runner: KernelHost,
+    run_id: String,
+    runtime: tokio::runtime::Handle,
+}
+#[derive(Resource, Default)]
+struct Fatal(Option<anyhow::Error>);
+#[derive(Component)]
+struct BusinessTask;
+#[derive(Component)]
+struct SpawnAdmission {
+    id: String,
+    fresh: bool,
+}
+#[derive(Component)]
+struct AdmissionHold;
+#[derive(Component)]
+struct QuotaWrap;
+#[derive(Component)]
+struct MailDelivery {
+    id: i64,
+    generation: u64,
+}
+#[derive(Component)]
+struct HostFinal;
+#[derive(Component)]
+struct BusinessPrepared;
+#[derive(Component)]
+struct PredecessorHold;
+#[derive(Component, Default)]
+struct Nudged(bool);
+
+fn failed(app: &mut Fatal, result: Result<()>) {
+    if let Err(error) = result {
+        app.0.get_or_insert(error);
+    }
+}
+
+/// A windowless Rig app. Supervision and worker IO run outside this loop.
+pub(crate) fn drive(
+    runner: KernelHost,
+    run_id: &str,
+    owner: &str,
+    cancel: CancellationToken,
+    runtime: tokio::runtime::Handle,
+) -> Result<RunRecord> {
+    let run = runner.prepare_run(run_id)?;
+    let directory = runner.journal_dir(run_id);
+    let journal = rig::memory::DirStore::open(directory)?;
+    let (wake_tx, wakes) = mpsc::channel();
+    let store_wake = wake_tx.clone();
+    let mut changes = runner.subscribe_changes();
+    let watcher = runtime.spawn(async move {
+        while changes.changed().await.is_ok() {
+            if store_wake.send(()).is_err() {
+                break;
+            }
+        }
+    });
+    struct Watcher(tokio::task::AbortHandle);
+    impl Drop for Watcher {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+    let _watcher = Watcher(watcher.abort_handle());
+    let mut app = App::new();
+    app.add_plugins(TaskPoolPlugin::default())
+        .insert_resource(Wake::new(move || {
+            let _ = wake_tx.send(());
+        }))
+        .insert_resource(SessionStore::new(journal))
+        .insert_resource(Application {
+            runner: runner.clone(),
+            run_id: run_id.into(),
+            runtime,
+        })
+        .init_resource::<Fatal>()
+        .add_plugins((AgentPlugin, SessionLogPlugin))
+        .insert_resource(SubagentPolicy {
+            max_depth: run.budget.max_depth as usize,
+        })
+        .add_plugins((
+            SubagentsPlugin,
+            rig_basics::telemetry::effect_log::EffectLogPlugin,
+        ))
+        .add_systems(
+            AgentPass,
+            (
+                prepare_spawns.in_set(PrepareSystems::Edit),
+                inform_terminal.in_set(PrepareSystems::Edit),
+                bind_reports.in_set(PrepareSystems::Edit),
+                acknowledge_mail.in_set(Stage::Gate).before(admit_spawns),
+                configuwukongs.in_set(Stage::Admit),
+                carry_native_turns.in_set(Stage::Prepare),
+                ensure_owner_requests
+                    .in_set(Stage::Prepare)
+                    .before(prepare_models),
+                release_model_slots.in_set(Stage::Prepare),
+                release_predecessors.in_set(Stage::Prepare),
+                prepare_calls.in_set(PrepareSystems::Edit),
+                reconcile_calls.in_set(PrepareSystems::Edit),
+                begin_preflights
+                    .in_set(PrepareSystems::Edit)
+                    .after(prepare_spawns)
+                    .before(prepare_models),
+                prepare_models
+                    .in_set(PrepareSystems::Edit)
+                    .after(prepare_spawns),
+                (admit_spawns, gate_models, gate_tools)
+                    .chain()
+                    .in_set(Stage::Gate),
+                (account_replies, configure_spawned, enforce_completion)
+                    .chain()
+                    .in_set(ReviewSystems::Edit),
+                retry_policy.in_set(ReviewSystems::Edit),
+            ),
+        )
+        // A completed non-effect task must release its hold before AgentLoop
+        // decides whether an effect changed enough to run another pass.
+        .add_systems(Update, finish_preflights.after(PollTasks).before(AgentLoop))
+        // Stream arrivals do not necessarily advance Rig's effect graph, so
+        // Review may be skipped while a response remains in flight.
+        .add_systems(
+            AgentPass,
+            publish_partials.after(Stage::Arrive).before(Stage::Review),
+        )
+        .add_observer(record_turn_end)
+        .add_systems(PostUpdate, stream_progress)
+        .add_systems(Last, (project_conversations, acknowledge_mail));
+
+    // Native task spawning is extended with our typed business contract. Its
+    // generic spawn, reports and cancellation remain SubagentsPlugin's.
+    let task_schema = task_schema();
+    for mut def in app
+        .world_mut()
+        .query::<&mut ToolDef>()
+        .iter_mut(app.world_mut())
+    {
+        let definition = Arc::make_mut(&mut def.0);
+        match definition.name.as_str() {
+            "task" => {
+                definition.parameters = task_schema.clone();
+                definition.description = "Start an asynchronous subagent: role=analyst performs analysis, role=verifier independently checks another agent's claim. Supply a short description, full prompt and scope, with known evidence, constraints and outputs. Select capabilities through skills (recon, reverse, hunter, fuzz, crash, exploit, reporter or task methods), never through role. Changing capabilities alone does not justify another agent. Optional inherit_context, contract, wait_for_predecessors and dependency_policy refine the assignment. Creation returns before work finishes; predecessor gates hold the child's model requests. Model choice and tool permissions come from controller configuration and the role. Inspect existing work first. Use follow_up_agent for completed work, wait for one report or wait_for_agents for a group/success policy.".into();
+            }
+            "message" => {
+                definition.description = "Send a request, correction or reply to a reachable active agent using agent and text. Use send_message_to_agent with kind=information for progress-only updates, which must not release waits. New work on a completed agent requires follow_up_agent.".into();
+            }
+            "wait" => {
+                definition.description = "Wait for a requested reply or report from one reachable agent. Receiving a reply does not establish task success. Use wait_for_agents to collect multiple tasks or require all_success, all_terminal or any_success; inspect their structured outcomes.".into();
+            }
+            _ => {}
+        }
+    }
+    let mut definitions = HashMap::new();
+    for role in [Role::Root, Role::Analyst, Role::Verifier] {
+        for definition in runner.definitions(role) {
+            definitions.insert(definition.name.to_string(), definition);
+        }
+    }
+    let application = app.world().resource::<Application>().clone();
+    for definition in definitions.into_values() {
+        let options = if definition.name.as_str().starts_with("mcp_") {
+            ToolOptions::default()
+        } else {
+            ToolOptions {
+                footprint: Some(Touches::from_annotations(&definition.annotations)),
+            }
+        };
+        app.world_mut().spawn_tool(
+            definition.clone(),
+            ErasedHandler::new(BusinessTool {
+                application: application.clone(),
+                definition,
+                agent_id: None,
+                call_id: None,
+            }),
+            options,
+        );
+    }
+    app.finish();
+    // Rig restores its journal before creating the default root.
+    app.update();
+    let roots: Vec<Entity> = app
+        .world_mut()
+        .query_filtered::<Entity, (With<Agent>, Without<SpawnedBy>)>()
+        .iter(app.world())
+        .collect();
+    let root = *roots
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Rig did not create a root agent"))?;
+    if app
+        .world()
+        .get::<AgentId>(root)
+        .is_none_or(|id| id.0 != run.root_id)
+    {
+        let connection = runner
+            .engine_for(Role::Root)
+            .connection(runner.execution().stream);
+        app.world_mut().entity_mut(root).insert((
+            AgentId(run.root_id.clone()),
+            connection.clone(),
+            BusinessTask,
+            tool_access(&runner, &runner.agent(&run.root_id)?)?,
+        ));
+        app.world_mut()
+            .entity_mut(root)
+            .insert(ModelChoice(connection.spec.reference()));
+        app.world_mut()
+            .trigger(Deliver::new(root, run.task.clone(), DeliveryMode::Steer));
+    }
+    runner.emit(
+        run_id,
+        None,
+        "controller.started",
+        json!({"owner":owner,"runtime":"rig-ecs","subagents":"rig-basics"}),
+    )?;
+    let mut included = HashSet::new();
+    loop {
+        if cancel.is_cancelled() {
+            runner.pause_budget(run_id, "controller interrupted")?;
+        }
+        runner.release_dependencies(run_id)?;
+        runner.wake_waiters(run_id)?;
+        deliver_mail(&mut app, &runner, run_id, &mut included)?;
+        sync_statuses(&mut app, &runner, run_id)?;
+        app.update();
+        if let Some(error) = app.world_mut().resource_mut::<Fatal>().0.take() {
+            return Err(error);
+        }
+        if let Some(failure) = app
+            .world()
+            .resource::<rig_ecs::session_log::SessionLog>()
+            .failure()
+        {
+            anyhow::bail!("Rig journal write failed: {failure}");
+        }
+        let run: RunRecord = runner.run(run_id)?;
+        let active = app
+            .world_mut()
+            .query_filtered::<(), With<ActiveTurn>>()
+            .iter(app.world())
+            .count();
+        if run.status == Status::BudgetPaused || cancel.is_cancelled() {
+            // Cancellation can arrive during this frame, after the check at
+            // its start. Persist the pause before reporting that drive ended.
+            if cancel.is_cancelled() && !run.status.terminal() && run.status != Status::BudgetPaused
+            {
+                runner.pause_budget(run_id, "controller interrupted")?;
+            }
+            // A subagent's initial brief is sent on the next harness frame.
+            // Flush those messages before dropping the app. Gates hold model
+            // and business tool IO while this run is paused.
+            app.update();
+            app.update();
+            // Drop cancels in-flight futures. Leave Rig's saved turn open so
+            // CarryOn can restore the exact pending effect on a later drive.
+            runner.emit(
+                run_id,
+                None,
+                "controller.finished",
+                json!({"status":runner.run(run_id)?.status}),
+            )?;
+            return runner.run(run_id);
+        }
+        if run.status.terminal() && active == 0 {
+            app.world_mut().write_message(AppExit::Success);
+            app.update();
+            runner.emit(
+                run_id,
+                None,
+                "controller.finished",
+                json!({"status":run.status}),
+            )?;
+            return runner.run(run_id);
+        }
+        let agents = runner.agents(run_id)?;
+        if !run.status.terminal() && active == 0 && agents.iter().all(|a| a.status.terminal()) {
+            runner.fail_assessment(run,"All agents terminated without a successful finish_scan. Inspect errors and partial evidence.")?;
+            continue;
+        }
+        // Complete all locally queued stages before waiting for async IO.
+        if wakes.try_recv().is_err() {
+            let _ = wakes.recv_timeout(Duration::from_secs(1));
+        }
+    }
+}
+
+fn task_schema() -> Value {
+    let mut schema = crate::application::tools::child_schema();
+    let properties = schema["properties"].as_object_mut().expect("typed object");
+    let name = properties.remove("name").unwrap();
+    let task = properties.remove("task").unwrap();
+    properties.insert("description".into(), name);
+    properties.insert("prompt".into(), task);
+    schema["required"] = json!(["description", "prompt", "role", "scope"]);
+    schema
+}
+
+#[derive(Component)]
+struct ModelSlot;

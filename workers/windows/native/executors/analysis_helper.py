@@ -1,4 +1,5 @@
 """One bounded analysis invocation. No worker identity, leases, daemon or job ledger."""
+
 import json
 from pathlib import Path
 import sys
@@ -8,6 +9,7 @@ def main():
     configuration = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     method, params = configuration["method"], configuration["params"]
     from wukong_analysis.seccomp import analyze
+
     if method != "seccomp.analyze":
         raise ValueError("analysis method is not supported by this offline package")
     path = Path(sys.argv[2])

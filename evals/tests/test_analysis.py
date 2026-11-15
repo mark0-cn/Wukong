@@ -1,4 +1,5 @@
 """Validate scoring boundaries; fabricated reports here are test fixtures only."""
+
 import copy
 import hashlib
 from pathlib import Path
@@ -14,19 +15,42 @@ class ScoreTests(unittest.TestCase):
         target = Path(self.temp.name) / "sample"
         target.write_bytes(b"trusted scoring fixture")
         digest = hashlib.sha256(target.read_bytes()).hexdigest()
-        self.tasks = {"cases": [
-            {"id": "format", "binary": "sample", "questions": ["layout", "control"]},
-            {"id": "algorithm", "binary": "sample", "questions": ["arithmetic"]},
-        ]}
+        self.tasks = {
+            "cases": [
+                {"id": "format", "binary": "sample", "questions": ["layout", "control"]},
+                {"id": "algorithm", "binary": "sample", "questions": ["arithmetic"]},
+            ]
+        }
         self.build = {"targets": {"sample": {"path": str(target), "sha256": digest}}}
-        self.reports = {"format": {"snapshot": {"run": {"id": "run-one", "target_sha256": digest,
-                                                                   "total_tokens": 17, "cost_usd": 0.0},
-                                              "evidence": [{"id": "observation"}], "findings": []}}}
+        self.reports = {
+            "format": {
+                "snapshot": {
+                    "run": {
+                        "id": "run-one",
+                        "target_sha256": digest,
+                        "total_tokens": 17,
+                        "cost_usd": 0.0,
+                    },
+                    "evidence": [{"id": "observation"}],
+                    "findings": [],
+                }
+            }
+        }
         self.labels = [
-            {"case": "format", "question_id": "layout", "verdict": "correct",
-             "rationale": "Independently checked against the parser", "evidence_ids": ["observation"]},
-            {"case": "format", "question_id": "control", "verdict": "unresolved",
-             "rationale": "Control experiment was not run", "evidence_ids": []},
+            {
+                "case": "format",
+                "question_id": "layout",
+                "verdict": "correct",
+                "rationale": "Independently checked against the parser",
+                "evidence_ids": ["observation"],
+            },
+            {
+                "case": "format",
+                "question_id": "control",
+                "verdict": "unresolved",
+                "rationale": "Control experiment was not run",
+                "evidence_ids": [],
+            },
         ]
 
     def tearDown(self):

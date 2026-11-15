@@ -14,7 +14,13 @@ class ClientTests(unittest.TestCase):
             source.parent.mkdir(parents=True)
             source.write_bytes(b"client")
             folder = root / "artifact"
-            expected = dict(schema=1, target="windows", recipe="recipe", version="1.2.3", source_revision="a" * 40)
+            expected = dict(
+                schema=1,
+                target="windows",
+                recipe="recipe",
+                version="1.2.3",
+                source_revision="a" * 40,
+            )
             with patch.object(client, "identity", return_value=expected):
                 client.stage("windows", folder, root)
                 client.verify("windows", folder, root)
@@ -33,4 +39,6 @@ class ClientTests(unittest.TestCase):
     def test_desktop_and_acceptance_profiles_differ(self):
         self.assertNotEqual(client.TARGETS["linux"][0], client.TARGETS["linux-desktop"][0])
         self.assertIn("ubuntu-22.04", client.TARGETS["linux-desktop"][2])
-        self.assertNotEqual(client.identity("linux")["profile"], client.identity("linux-desktop")["profile"])
+        self.assertNotEqual(
+            client.identity("linux")["profile"], client.identity("linux-desktop")["profile"]
+        )

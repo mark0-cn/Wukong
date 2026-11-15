@@ -1,4 +1,5 @@
 """Build the pinned WinDbg MCP source with the reviewed AppContainer stdin patch."""
+
 import os
 import json
 from pathlib import Path
@@ -24,8 +25,10 @@ SUPPLEMENTAL_LICENSES = {
 
 
 def inputs():
-    asset, = [row for row in load_lock()["assets"] if row["component"] == "windbg_mcp"]
-    return asset, dict(upstream_revision=REVISION, source_sha256=asset["sha256"], patch_sha256=sha256(PATCH))
+    (asset,) = [row for row in load_lock()["assets"] if row["component"] == "windbg_mcp"]
+    return asset, dict(
+        upstream_revision=REVISION, source_sha256=asset["sha256"], patch_sha256=sha256(PATCH)
+    )
 
 
 def build(cache, output):
@@ -56,15 +59,34 @@ def build(cache, output):
         # controller checkout so patch paths remain relative to this source.
         environment["GIT_CEILING_DIRECTORIES"] = temporary
         for options in [["--check"], []]:
-            subprocess.run(["git", "apply", *options, str(PATCH)], cwd=source, env=environment, check=True)
+            subprocess.run(
+                ["git", "apply", *options, str(PATCH)], cwd=source, env=environment, check=True
+            )
         target = output / "debugger-build"
-        subprocess.run(["cargo", "build", "--locked", "--release", "--target", "x86_64-pc-windows-msvc",
-                        "--target-dir", str(target)], cwd=source, env=environment, check=True)
+        subprocess.run(
+            [
+                "cargo",
+                "build",
+                "--locked",
+                "--release",
+                "--target",
+                "x86_64-pc-windows-msvc",
+                "--target-dir",
+                str(target),
+            ],
+            cwd=source,
+            env=environment,
+            check=True,
+        )
         licenses = Path(temporary) / "licenses"
         notices = collect(licenses, source / "Cargo.toml", SUPPLEMENTAL_LICENSES)
-        artifacts = [(target / "x86_64-pc-windows-msvc/release/windbg-mcp.exe", BINARY),
-                     (PATCH, PATCH_MEMBER)]
-        artifacts += [(path, "debugger/licenses/" + path.relative_to(licenses).as_posix()) for path in notices]
+        artifacts = [
+            (target / "x86_64-pc-windows-msvc/release/windbg-mcp.exe", BINARY),
+            (PATCH, PATCH_MEMBER),
+        ]
+        artifacts += [
+            (path, "debugger/licenses/" + path.relative_to(licenses).as_posix()) for path in notices
+        ]
         files = {}
         for path, name in artifacts:
             destination = output / member(name)
@@ -77,10 +99,14 @@ def build(cache, output):
 
 
 def validate(directory, record):
-    if not isinstance(record, dict) or any(record.get(key) != value for key, value in inputs()[1].items()):
+    if not isinstance(record, dict) or any(
+        record.get(key) != value for key, value in inputs()[1].items()
+    ):
         raise ValueError("Debugger build does not match the pinned source and compatibility patch")
     files = record.get("files", {})
-    if not {BINARY, PATCH_MEMBER}.issubset(files) or not any(name.startswith("debugger/licenses/") for name in files):
+    if not {BINARY, PATCH_MEMBER}.issubset(files) or not any(
+        name.startswith("debugger/licenses/") for name in files
+    ):
         raise ValueError("Debugger build is missing its binary, patch or license documents")
     for name, expected in files.items():
         if not member(name).startswith("debugger/"):

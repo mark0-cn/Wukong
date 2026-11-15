@@ -288,7 +288,7 @@ Token 预算按 provider 返回的用量累计。缺少必要用量时，系统�
 | `support/` | 工具与恢复指导 |
 | `examples/` | 分析示例 |
 
-[`src/prompts.rs`](../../src/prompts.rs) 统一注册内置名称、用途、正文和示例引用；模型仅获取能力目录与已选择的正文。目录分类不改变 skill 调用名。
+[`src/application/prompts.rs`](../../src/application/prompts.rs) 统一注册内置名称、用途、正文和示例引用；模型仅获取能力目录与已选择的正文。目录分类不改变 skill 调用名。
 
 可通过 `skills_dir/<name>.md` 覆盖内置正文或提供自定义方法，通过 `demos_dir/<name>.md` 提供示例。默认示例目录为 `prompts/examples`，目录缺失时跳过示例。内置正文嵌入程序，不依赖运行时读取仓库文件。
 

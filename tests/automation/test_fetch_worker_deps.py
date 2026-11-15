@@ -9,7 +9,11 @@ import scripts.toolchain.fetch_worker_deps as deps
 
 class DependencyTests(unittest.TestCase):
     def test_cache_hit_is_verified_and_corrupt_download_does_not_replace_file(self):
-        entry = dict(file="tool.zip", url="https://example.invalid/tool", sha256=hashlib.sha256(b"valid").hexdigest())
+        entry = dict(
+            file="tool.zip",
+            url="https://example.invalid/tool",
+            sha256=hashlib.sha256(b"valid").hexdigest(),
+        )
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             path = folder / "tool.zip"
@@ -18,9 +22,14 @@ class DependencyTests(unittest.TestCase):
                 deps.fetch(("tool", entry), folder)
                 download.assert_not_called()
             path.write_bytes(b"old")
+
             def corrupt(*args, **kwargs):
                 (folder / "tool.zip.download").write_bytes(b"corrupt")
-            with patch.object(deps.subprocess, "run", side_effect=corrupt), self.assertRaises(ValueError):
+
+            with (
+                patch.object(deps.subprocess, "run", side_effect=corrupt),
+                self.assertRaises(ValueError),
+            ):
                 deps.fetch(("tool", entry), folder)
             self.assertEqual(path.read_bytes(), b"old")
             self.assertFalse((folder / "tool.zip.download").exists())

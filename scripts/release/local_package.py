@@ -1,4 +1,5 @@
 """Build a Windows online package locally, without publishing or changing versions."""
+
 import argparse
 import os
 from pathlib import Path
@@ -19,7 +20,9 @@ def checkout_identity():
         ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, text=True
     ).strip()
     if changes:
-        raise ValueError("Commit source changes first. Keep image metadata and build outputs under target/.")
+        raise ValueError(
+            "Commit source changes first. Keep image metadata and build outputs under target/."
+        )
     return revision
 
 
@@ -30,7 +33,9 @@ def run(command):
 
 def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
     if platform.system() != "Windows" or platform.machine().lower() not in ("amd64", "x86_64"):
-        raise ValueError("Local online packaging requires Windows x64 and the MSVC C++ build tools.")
+        raise ValueError(
+            "Local online packaging requires Windows x64 and the MSVC C++ build tools."
+        )
     number = version()
     revision = checkout_identity()
     if output.exists():
@@ -41,13 +46,18 @@ def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
         raise ValueError("Node.js/npm and Cargo must be installed and available on PATH.")
     if metadata is not None:
         if not metadata.is_file():
-            raise ValueError(f"Missing image metadata: {metadata}. Omit --image-metadata to download from Release.")
+            raise ValueError(
+                f"Missing image metadata: {metadata}. Omit --image-metadata to download from Release."
+            )
         image = read_json(metadata)
     else:
         image = release_image(number, revision, repository)
     validate_image(image, revision, released_version=number if metadata is None else None)
-    print(f"Version: v{number}\nClient commit: {revision}\nImage commit: {image['source_revision']}"
-          f"\nImage: {image['repository']}@{image['digest']}", flush=True)
+    print(
+        f"Version: v{number}\nClient commit: {revision}\nImage commit: {image['source_revision']}"
+        f"\nImage: {image['repository']}@{image['digest']}",
+        flush=True,
+    )
     if check_only:
         print("Preflight passed. No build or package was created.")
         return
@@ -55,8 +65,20 @@ def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
     run([npm, "ci"])
     run([npm, "run", "build"])
     target = "x86_64-pc-windows-msvc"
-    run([cargo, "build", "--locked", "--release", "--features", "custom-protocol",
-         "--target", target, "--target-dir", str(ROOT / "target")])
+    run(
+        [
+            cargo,
+            "build",
+            "--locked",
+            "--release",
+            "--features",
+            "custom-protocol",
+            "--target",
+            target,
+            "--target-dir",
+            str(ROOT / "target"),
+        ]
+    )
     binary = ROOT / "target" / target / "release" / "wukong.exe"
     if not binary.is_file():
         raise ValueError(f"Build did not produce the expected executable: {binary}")
@@ -79,13 +101,25 @@ def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image-metadata", type=Path,
-                        help="Use a local same-commit image.json instead of downloading Release metadata")
-    parser.add_argument("--repository", default=DEFAULT_REPOSITORY,
-                        help="Public GitHub repository for the exact version's Release (default: %(default)s)")
-    parser.add_argument("--output", type=Path, default=Path("target/local-package"),
-                        help="New output directory (default: %(default)s)")
-    parser.add_argument("--check", action="store_true", help="Fetch and validate metadata without building")
+    parser.add_argument(
+        "--image-metadata",
+        type=Path,
+        help="Use a local same-commit image.json instead of downloading Release metadata",
+    )
+    parser.add_argument(
+        "--repository",
+        default=DEFAULT_REPOSITORY,
+        help="Public GitHub repository for the exact version's Release (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("target/local-package"),
+        help="New output directory (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="Fetch and validate metadata without building"
+    )
     args = parser.parse_args()
     try:
         metadata = (ROOT / args.image_metadata).resolve() if args.image_metadata else None

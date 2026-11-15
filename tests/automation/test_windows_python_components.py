@@ -18,12 +18,20 @@ class WindowsPythonComponents(unittest.TestCase):
             install_python_components(runtime)
             inventory = json.loads((ROOT / "workers/windows/python-components.json").read_text())
             package = runtime / "python/Lib/site-packages/wukong_analysis"
-            self.assertEqual(sorted(path.name for path in package.iterdir()), sorted(inventory["analysis"]))
+            self.assertEqual(
+                sorted(path.name for path in package.iterdir()), sorted(inventory["analysis"])
+            )
             self.assertFalse((runtime / "worker").exists())
-            self.assertEqual((runtime / "python/python313._pth").read_bytes(), b"python313.zip\n.\nLib/site-packages\n")
+            self.assertEqual(
+                (runtime / "python/python313._pth").read_bytes(),
+                b"python313.zip\n.\nLib/site-packages\n",
+            )
             self.assertFalse(list(runtime.rglob("worker_*.py")))
             for name in inventory["analysis"]:
-                self.assertEqual((package / name).read_bytes(), (ROOT / "workers/analysis/wukong_analysis" / name).read_bytes())
+                self.assertEqual(
+                    (package / name).read_bytes(),
+                    (ROOT / "workers/analysis/wukong_analysis" / name).read_bytes(),
+                )
             source = (
                 "import json,sys;sys.path.insert(0,sys.argv[1]);"
                 "from wukong_analysis.seccomp import analyze;"
@@ -31,8 +39,13 @@ class WindowsPythonComponents(unittest.TestCase):
                 "assert not any(name.startswith('worker_') for name in sys.modules);"
                 "print(json.dumps(result))"
             )
-            result = subprocess.run([sys.executable, "-I", "-S", "-c", source, str(package.parent)],
-                                    check=True, capture_output=True, text=True, timeout=15)
+            result = subprocess.run(
+                [sys.executable, "-I", "-S", "-c", source, str(package.parent)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
             self.assertEqual(json.loads(result.stdout)["probes"][0]["decision"]["action"], "ALLOW")
 
 

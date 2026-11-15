@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Release maintenance, update-cache and cleanup operation locks when their owning operation ends, including rejected cleanup attempts, so an unrelated child process cannot temporarily keep new work blocked."
+zh_CN = "维护、更新缓存和清理操作结束时显式释放其持有的锁，包括被拒绝的清理尝试，避免无关子进程短暂继承句柄后继续阻止新操作。"

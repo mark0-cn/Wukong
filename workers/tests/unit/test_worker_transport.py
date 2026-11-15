@@ -1,4 +1,5 @@
 """Cold daemon startup must outlast the bounded Windows identity query."""
+
 from concurrent.futures import ThreadPoolExecutor
 from filelock import FileLock
 from pathlib import Path
@@ -10,8 +11,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from worker_processes import terminate_tree
-from worker_transport import ensure_daemon, relay_call
+from wukong_worker.execution.processes import terminate_tree
+from wukong_worker.rpc.transport import ensure_daemon, relay_call
 
 
 class DaemonStartupTests(unittest.TestCase):
@@ -32,7 +33,7 @@ class DaemonStartupTests(unittest.TestCase):
                 "import os,sys,time\n"
                 "from pathlib import Path\n"
                 f"sys.path.insert(0,{str(runtime)!r})\n"
-                "from worker_transport import serve\n"
+                "from wukong_worker.rpc.transport import serve\n"
                 "Path(sys.argv[sys.argv.index('--state')+1],'fixture.pid').write_text(str(os.getpid()))\n"
                 "time.sleep(6)\n"
                 "serve(Path(sys.argv[sys.argv.index('--state')+1]),True)\n",
@@ -42,13 +43,18 @@ class DaemonStartupTests(unittest.TestCase):
             state.mkdir()
             endpoint = None
             try:
-                with patch("worker_transport.BRIDGE_PATH", script), patch(
-                    "worker_transport.subprocess",
-                    SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL),
+                with (
+                    patch("wukong_worker.rpc.transport.BRIDGE_PATH", script),
+                    patch(
+                        "wukong_worker.rpc.transport.subprocess",
+                        SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL),
+                    ),
                 ):
                     started = time.monotonic()
                     with ThreadPoolExecutor(max_workers=4) as callers:
-                        endpoints = list(callers.map(lambda _: ensure_daemon(state, True), range(4)))
+                        endpoints = list(
+                            callers.map(lambda _: ensure_daemon(state, True), range(4))
+                        )
                     endpoint = endpoints[0]
                     self.assertTrue(all(item == endpoint for item in endpoints))
                     self.assertGreaterEqual(time.monotonic() - started, 6)
@@ -57,12 +63,16 @@ class DaemonStartupTests(unittest.TestCase):
                 self.assertEqual(endpoint["pid"], int((state / "fixture.pid").read_text()))
                 self.assertIsNone(children[0].poll())
                 duplicate = subprocess.run(
-                    [sys.executable, "-c",
-                     "import sys; from pathlib import Path; "
-                     f"sys.path.insert(0,{str(runtime)!r}); "
-                     "from worker_transport import serve; "
-                     f"serve(Path({str(state)!r}),True)"],
-                    capture_output=True, timeout=10,
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; from pathlib import Path; "
+                        f"sys.path.insert(0,{str(runtime)!r}); "
+                        "from wukong_worker.rpc.transport import serve; "
+                        f"serve(Path({str(state)!r}),True)",
+                    ],
+                    capture_output=True,
+                    timeout=10,
                 )
                 self.assertNotEqual(duplicate.returncode, 0)
                 self.assertIn(b"filelock", duplicate.stderr)
@@ -84,9 +94,14 @@ class DaemonStartupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             script = root / "failed-daemon.py"
-            script.write_text("print('fixture-startup-diagnostic',flush=True)\nraise SystemExit(19)\n", encoding="utf-8")
-            with patch("worker_transport.BRIDGE_PATH", script):
-                with self.assertRaisesRegex(ValueError, r"exited during startup \(19\).*fixture-startup-diagnostic"):
+            script.write_text(
+                "print('fixture-startup-diagnostic',flush=True)\nraise SystemExit(19)\n",
+                encoding="utf-8",
+            )
+            with patch("wukong_worker.rpc.transport.BRIDGE_PATH", script):
+                with self.assertRaisesRegex(
+                    ValueError, r"exited during startup \(19\).*fixture-startup-diagnostic"
+                ):
                     ensure_daemon(root, True)
             with FileLock(root / "startup.guard", timeout=0):
                 pass

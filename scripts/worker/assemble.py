@@ -1,4 +1,5 @@
 """Seal a complete offline Windows worker payload with a controller-owned key."""
+
 import argparse
 import json
 from pathlib import Path
@@ -35,10 +36,17 @@ def native_build(directory):
         raise ValueError("Native build metadata exceeds size limit")
     metadata = json.loads(raw)
     current = identity()
-    if (metadata.get("schema") != 1 or metadata.get("platform") != "windows-amd64"
-            or metadata.get("static_crt_checked") is not True or set(metadata.get("files", {})) != set(BINARIES)
-            or current["source_dirty"] or any(metadata.get(key) != value for key, value in current.items())):
-        raise ValueError("Native build requires matching clean committed worker sources; rebuild after committing")
+    if (
+        metadata.get("schema") != 1
+        or metadata.get("platform") != "windows-amd64"
+        or metadata.get("static_crt_checked") is not True
+        or set(metadata.get("files", {})) != set(BINARIES)
+        or current["source_dirty"]
+        or any(metadata.get(key) != value for key, value in current.items())
+    ):
+        raise ValueError(
+            "Native build requires matching clean committed worker sources; rebuild after committing"
+        )
     binaries = directory / "x86_64-pc-windows-msvc/release"
     for name in BINARIES:
         path = regular(binaries / name)
@@ -49,27 +57,39 @@ def native_build(directory):
     # just-built inspector, including that inspector's own static-CRT check.
     inspector = binaries / "wukong-package.exe"
     for name in BINARIES:
-        if require_static_crt(binaries / name, inspector=inspector) != metadata["files"][name]["imported_libraries"]:
+        if (
+            require_static_crt(binaries / name, inspector=inspector)
+            != metadata["files"][name]["imported_libraries"]
+        ):
             raise ValueError("Native build binary imports no longer match metadata: " + name)
     probes = metadata.get("selftests", {})
     if probes.get("schema") != 1 or set(probes.get("architectures", {})) != {"x64", "x86"}:
         raise ValueError("Native build is missing offline self-test fixtures")
     for architecture, probe in probes["architectures"].items():
-        if (probe.get("binary") != f"selftest/{architecture}/wukong-probe.exe"
-                or probe.get("pdb") != f"selftest/{architecture}/wukong-probe.pdb"
-                or probe.get("source_sha256") != sha256(ROOT / "workers/windows/fixtures/probe.c")):
+        if (
+            probe.get("binary") != f"selftest/{architecture}/wukong-probe.exe"
+            or probe.get("pdb") != f"selftest/{architecture}/wukong-probe.pdb"
+            or probe.get("source_sha256") != sha256(ROOT / "workers/windows/fixtures/probe.c")
+        ):
             raise ValueError("Self-test fixture does not match the pinned source")
-        if (sha256(regular(directory / probe["binary"])) != probe["binary_sha256"]
-                or sha256(regular(directory / probe["pdb"])) != probe["pdb_sha256"]
-                or require_static_crt(directory / probe["binary"], architecture, inspector) != probe["imported_libraries"]):
+        if (
+            sha256(regular(directory / probe["binary"])) != probe["binary_sha256"]
+            or sha256(regular(directory / probe["pdb"])) != probe["pdb_sha256"]
+            or require_static_crt(directory / probe["binary"], architecture, inspector)
+            != probe["imported_libraries"]
+        ):
             raise ValueError("Offline self-test fixture was changed")
-        dependency=probe.get('dependency')
+        dependency = probe.get("dependency")
         if dependency is not None:
-            if (dependency['binary']!=f'selftest/{architecture}/wukong-fixture.dll'
-                    or dependency['source_sha256']!=sha256(ROOT/'workers/windows/fixtures/dependency.c')
-                    or sha256(regular(directory/dependency['binary']))!=dependency['sha256']
-                    or require_static_crt(directory/dependency['binary'],architecture,inspector)!=dependency['imported_libraries']):
-                raise ValueError('Offline launch dependency fixture was changed')
+            if (
+                dependency["binary"] != f"selftest/{architecture}/wukong-fixture.dll"
+                or dependency["source_sha256"]
+                != sha256(ROOT / "workers/windows/fixtures/dependency.c")
+                or sha256(regular(directory / dependency["binary"])) != dependency["sha256"]
+                or require_static_crt(directory / dependency["binary"], architecture, inspector)
+                != dependency["imported_libraries"]
+            ):
+                raise ValueError("Offline launch dependency fixture was changed")
     return binaries, metadata
 
 
@@ -83,11 +103,21 @@ def file_index(root):
         name = member(path.relative_to(root).as_posix())
         if name.startswith("originals/"):
             kind = "original_installer"
-        elif name.startswith("licenses/") or any(part.endswith(".dist-info") for part in path.parts) and "LICENSE" in path.name.upper():
+        elif (
+            name.startswith("licenses/")
+            or any(part.endswith(".dist-info") for part in path.parts)
+            and "LICENSE" in path.name.upper()
+        ):
             kind = "license"
-        elif name in {"runtime/python/LICENSE.txt", "runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"}:
+        elif name in {
+            "runtime/python/LICENSE.txt",
+            "runtime/openssh/LICENSE.txt",
+            "runtime/openssh/NOTICE.txt",
+        }:
             kind = "license"
-        elif name.startswith(("runtime/helpers/", "runtime/python/Lib/site-packages/wukong_analysis/")):
+        elif name.startswith(
+            ("runtime/helpers/", "runtime/python/Lib/site-packages/wukong_analysis/")
+        ):
             kind = "python_source"
         elif name.startswith("runtime/"):
             kind = "runtime"
@@ -106,13 +136,21 @@ def assemble(cache, output, native, keys):
         raise ValueError("Controller key storage must stay outside the package")
     before = identity()
     prepare(cache, output)
-    shutil.copyfile(native / DEBUGGER_BINARY, output / "runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe")
+    shutil.copyfile(
+        native / DEBUGGER_BINARY,
+        output / "runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe",
+    )
     debugger_notices = []
     for name in native_metadata["debugger"]["files"]:
         if name != DEBUGGER_BINARY:
             is_patch = name.startswith("debugger/patches/")
-            destination = (output / "source-patches" / Path(name).name if is_patch else
-                           output / "licenses/windbg-mcp-build" / Path(name).relative_to("debugger/licenses"))
+            destination = (
+                output / "source-patches" / Path(name).name
+                if is_patch
+                else output
+                / "licenses/windbg-mcp-build"
+                / Path(name).relative_to("debugger/licenses")
+            )
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(native / name, destination)
             if not is_patch:
@@ -126,31 +164,71 @@ def assemble(cache, output, native, keys):
             target = output / "runtime" / probe[key]
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(native / probe[key], target)
-        if probe.get('dependency'):
-            target=output/'runtime'/probe['dependency']['binary']
-            shutil.copyfile(native/probe['dependency']['binary'],target)
+        if probe.get("dependency"):
+            target = output / "runtime" / probe["dependency"]["binary"]
+            shutil.copyfile(native / probe["dependency"]["binary"], target)
     shutil.copyfile(native / "native-build.json", output / "native-build.json")
-    notices = collect(output / "licenses/native", supplemental=SUPPLEMENTAL_LICENSES) + debugger_notices
+    notices = (
+        collect(output / "licenses/native", supplemental=SUPPLEMENTAL_LICENSES) + debugger_notices
+    )
     lock = load_lock()
-    license_paths = {"python": ["runtime/python/LICENSE.txt"], "openssh": ["runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"],
-                     "debugging_tools": ["licenses/debugging-tools.rtf"],
-                     "windbg_mcp": ["licenses/windbg-mcp-LICENSE"]}
-    components = {name: dict(component, original_payloads=["originals/" + item["path"] for item in lock["assets"] if item["component"] == name],
-                            licenses=license_paths[name]) for name, component in lock["components"].items()}
-    manifest = dict(schema=2, platform="windows-amd64", version=version(), source_revision=native_metadata["source_revision"],
-        toolchain_lock_sha256=sha256(output / "toolchain.lock.json"), toolchain_lock_path="toolchain.lock.json", runtime_protocol=3,
-        minimum_controller_version=version(), entrypoints=dict(worker="runtime/native/wukong-worker.exe", python="runtime/python/python.exe",
-            selftest="runtime/helpers/selftest.py", windbg_mcp="runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe",
-            dbgeng_library="runtime/sdk/Windows Kits/10/Debuggers/x64/dbgeng.dll", sshd="runtime/openssh/sshd.exe", ssh_keygen="runtime/openssh/ssh-keygen.exe"),
-        components=components, license_notices=[path.relative_to(output).as_posix() for path in notices], files=file_index(output))
+    license_paths = {
+        "python": ["runtime/python/LICENSE.txt"],
+        "openssh": ["runtime/openssh/LICENSE.txt", "runtime/openssh/NOTICE.txt"],
+        "debugging_tools": ["licenses/debugging-tools.rtf"],
+        "windbg_mcp": ["licenses/windbg-mcp-LICENSE"],
+    }
+    components = {
+        name: dict(
+            component,
+            original_payloads=[
+                "originals/" + item["path"] for item in lock["assets"] if item["component"] == name
+            ],
+            licenses=license_paths[name],
+        )
+        for name, component in lock["components"].items()
+    }
+    manifest = dict(
+        schema=2,
+        platform="windows-amd64",
+        version=version(),
+        source_revision=native_metadata["source_revision"],
+        toolchain_lock_sha256=sha256(output / "toolchain.lock.json"),
+        toolchain_lock_path="toolchain.lock.json",
+        runtime_protocol=3,
+        minimum_controller_version=version(),
+        entrypoints=dict(
+            worker="runtime/native/wukong-worker.exe",
+            python="runtime/python/python.exe",
+            selftest="runtime/helpers/selftest.py",
+            windbg_mcp="runtime/sdk/Windows Kits/10/Debuggers/x64/windbg-mcp.exe",
+            dbgeng_library="runtime/sdk/Windows Kits/10/Debuggers/x64/dbgeng.dll",
+            sshd="runtime/openssh/sshd.exe",
+            ssh_keygen="runtime/openssh/ssh-keygen.exe",
+        ),
+        components=components,
+        license_notices=[path.relative_to(output).as_posix() for path in notices],
+        files=file_index(output),
+    )
     if identity() != before:
         raise ValueError("Worker sources changed while assembling the offline payload")
     # The operator draft and protected key never enter the deliverable directory.
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".worker-seal-") as temporary:
         draft = Path(temporary) / "manifest-draft.json"
         draft.write_text(json.dumps(manifest), encoding="utf-8")
-        result = subprocess.run([str(binaries / "wukong-package.exe"), "seal", str(output), str(draft), str(keys), version()],
-                                check=True, capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                str(binaries / "wukong-package.exe"),
+                "seal",
+                str(output),
+                str(draft),
+                str(keys),
+                version(),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         return json.loads(result.stdout)
 
 
@@ -159,7 +237,9 @@ def main():
     parser.add_argument("--cache", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--native", type=Path, default=ROOT / "target/windows-worker-native")
-    parser.add_argument("--keys", type=Path, required=True, help="Controller-private directory outside output")
+    parser.add_argument(
+        "--keys", type=Path, required=True, help="Controller-private directory outside output"
+    )
     args = parser.parse_args()
     try:
         print(json.dumps(assemble(args.cache, args.output, args.native, args.keys)))

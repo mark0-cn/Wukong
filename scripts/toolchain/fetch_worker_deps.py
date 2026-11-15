@@ -1,4 +1,5 @@
 """Fetch all pinned Docker build inputs on Linux or Windows (Python 3.11+)."""
+
 import argparse
 from scripts._lib.checksums import sha256
 import json
@@ -17,7 +18,9 @@ def entries(manifest):
         filename = entry.get("file", "")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", filename) or filename.lower() in files:
             raise ValueError("Unsafe or duplicate dependency filename: " + filename)
-        if not re.fullmatch(r"[0-9a-f]{64}", entry.get("sha256", "")) or not entry["url"].startswith("https://"):
+        if not re.fullmatch(r"[0-9a-f]{64}", entry.get("sha256", "")) or not entry[
+            "url"
+        ].startswith("https://"):
             raise ValueError("Dependency requires HTTPS and SHA256: " + name)
         files.add(filename.lower())
         result.append((name, entry))
@@ -33,8 +36,26 @@ def fetch(item, destination, force=False):
             return
     temporary = path.with_suffix(path.suffix + ".download")
     try:
-        subprocess.run(["curl", "--fail", "--location", "--silent", "--show-error", "--retry", "5", "--retry-all-errors",
-                        "--connect-timeout", "20", "--max-time", "1800", "--output", str(temporary), entry["url"]], check=True)
+        subprocess.run(
+            [
+                "curl",
+                "--fail",
+                "--location",
+                "--silent",
+                "--show-error",
+                "--retry",
+                "5",
+                "--retry-all-errors",
+                "--connect-timeout",
+                "20",
+                "--max-time",
+                "1800",
+                "--output",
+                str(temporary),
+                entry["url"],
+            ],
+            check=True,
+        )
         if sha256(temporary) != entry["sha256"]:
             raise ValueError(name + " checksum mismatch")
         temporary.replace(path)
@@ -46,7 +67,9 @@ def fetch(item, destination, force=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--jobs", type=int, choices=range(1, 5), default=3, help="Concurrent downloads (1-4)")
+    parser.add_argument(
+        "--jobs", type=int, choices=range(1, 5), default=3, help="Concurrent downloads (1-4)"
+    )
     args = parser.parse_args()
     root = ROOT
     manifest = json.loads((root / "workers/toolchain.lock.json").read_text())

@@ -1,11 +1,12 @@
 """Both execution modes reject the same changed and escaping launch members."""
+
 import hashlib
 import json
 from pathlib import Path
 import tempfile
 import unittest
-from worker_launch import load
-from worker_network import network_profile
+from wukong_worker.execution.launch import load
+from wukong_worker.network.service import network_profile
 
 
 class SharedLaunchTests(unittest.TestCase):
@@ -16,11 +17,22 @@ class SharedLaunchTests(unittest.TestCase):
             base.mkdir(parents=True)
             target = base / "target"
             target.write_bytes(b"known fixture")
-            spec = {"schema_version": 1, "challenge_id": "fixture", "base": "files/challenge",
-                    "target": "target", "files": {"target": hashlib.sha256(target.read_bytes()).hexdigest()},
-                    "args": [], "cwd": ".", "input_mode": "stdin_pipe", "env": {},
-                    "service": {"mode": "local_service", "port": 1337}}
-            params = {"launch_spec": "files/challenge/launch.json", "target": "files/challenge/target"}
+            spec = {
+                "schema_version": 1,
+                "challenge_id": "fixture",
+                "base": "files/challenge",
+                "target": "target",
+                "files": {"target": hashlib.sha256(target.read_bytes()).hexdigest()},
+                "args": [],
+                "cwd": ".",
+                "input_mode": "stdin_pipe",
+                "env": {},
+                "service": {"mode": "local_service", "port": 1337},
+            }
+            params = {
+                "launch_spec": "files/challenge/launch.json",
+                "target": "files/challenge/target",
+            }
             launch = base / "launch.json"
             launch.write_text(json.dumps(spec))
             for read in (load, network_profile):
@@ -37,4 +49,5 @@ class SharedLaunchTests(unittest.TestCase):
                     read(root, params)
 
 
-if __name__ == "__main__": unittest.main()
+if __name__ == "__main__":
+    unittest.main()

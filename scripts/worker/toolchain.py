@@ -1,4 +1,5 @@
 """Acquire pinned official Windows assets on the controller, never in the VM."""
+
 import argparse
 import hashlib
 import json
@@ -34,18 +35,30 @@ def load_lock(path=LOCK):
     unique_paths(item["path"] for item in assets)
     for item in assets:
         url = urllib.parse.urlsplit(item["url"])
-        if (url.scheme != "https" or url.hostname not in HOSTS or url.username or url.password
-                or url.fragment or url.port not in (None, 443)):
+        if (
+            url.scheme != "https"
+            or url.hostname not in HOSTS
+            or url.username
+            or url.password
+            or url.fragment
+            or url.port not in (None, 443)
+        ):
             raise ValueError("Offline asset must use an official HTTPS origin")
-        if (item["component"] not in COMPONENTS or type(item["size"]) is not int
-                or not 0 < item["size"] <= 2 * 1024**3
-                or not re.fullmatch("[0-9a-f]{64}", item["sha256"])):
+        if (
+            item["component"] not in COMPONENTS
+            or type(item["size"]) is not int
+            or not 0 < item["size"] <= 2 * 1024**3
+            or not re.fullmatch("[0-9a-f]{64}", item["sha256"])
+        ):
             raise ValueError("Invalid offline asset identity")
     if sum(item["size"] for item in assets) > 8 * 1024**3:
         raise ValueError("Offline toolchain exceeds 8 GiB")
     for name, component in lock["components"].items():
-        if (not component.get("version") or component.get("channel") not in {"stable", "preview"}
-                or not any(item["component"] == name for item in assets)):
+        if (
+            not component.get("version")
+            or component.get("channel") not in {"stable", "preview"}
+            or not any(item["component"] == name for item in assets)
+        ):
             raise ValueError("Missing offline component payloads or version")
     return lock
 
@@ -74,14 +87,22 @@ def acquire(cache, lock, download=False):
             validate_asset(cache, item)
             continue
         if not download:
-            raise ValueError("Missing offline payload (controller download required): " + item["path"])
+            raise ValueError(
+                "Missing offline payload (controller download required): " + item["path"]
+            )
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".download-", delete=False) as output:
+            with tempfile.NamedTemporaryFile(
+                dir=path.parent, prefix=".download-", delete=False
+            ) as output:
                 temporary = Path(output.name)
-                request = urllib.request.Request(item["url"], headers={"User-Agent": "Wukong-offline-preparation"})
-                with urllib.request.build_opener(HttpsRedirect()).open(request, timeout=60) as response:
+                request = urllib.request.Request(
+                    item["url"], headers={"User-Agent": "Wukong-offline-preparation"}
+                )
+                with urllib.request.build_opener(HttpsRedirect()).open(
+                    request, timeout=60
+                ) as response:
                     digest, size = hashlib.sha256(), 0
                     while chunk := response.read(1024 * 1024):
                         size += len(chunk)
@@ -108,12 +129,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache", type=Path, required=True)
     parser.add_argument("--download", action="store_true", help="Allow downloads on the controller")
-    parser.add_argument("--component", choices=sorted(COMPONENTS), help="Prepare only one component for a controller build")
+    parser.add_argument(
+        "--component",
+        choices=sorted(COMPONENTS),
+        help="Prepare only one component for a controller build",
+    )
     args = parser.parse_args()
     try:
         lock = load_lock()
         if args.component:
-            lock["assets"] = [item for item in lock["assets"] if item["component"] == args.component]
+            lock["assets"] = [
+                item for item in lock["assets"] if item["component"] == args.component
+            ]
         result = acquire(args.cache, lock, args.download)
         print(json.dumps(dict(result, toolchain_lock_sha256=sha256(LOCK))))
     except (OSError, ValueError, KeyError) as error:

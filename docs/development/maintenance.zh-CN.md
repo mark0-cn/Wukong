@@ -8,19 +8,37 @@
 
 ## 模块边界
 
-- `kernel` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`kernel_host` 暴露业务操作，`supervisor` 独立管理心跳和后台任务观察；`model_catalog`、`usage`、`bootstrap` 分别负责模型选择、用量和装配。
-- `tools` 保留执行管线和共同校验入口，`effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
-- `queries` 定义共享查询与 DTO，`store/workspace`、`store/report_queries` 实现 SQL；`desktop/workspace` 通过 `store/desktop_queries` 读取桌面快照，`desktop/presentation` 适配公开进度和工具结果，React 界面消费 DTO。`ui/src/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
-- `coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
-- `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 4，不提供旧数据库迁移。
+- `application/agent_runtime` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`application/agent_runtime/host` 暴露业务操作，`application/assessment/supervisor` 独立管理心跳和后台任务观察；`application/model_catalog`、`application/usage`、`bootstrap` 分别负责模型选择、用量和装配。
+- `application/tools` 保留执行管线和共同校验入口，`application/effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
+- `queries` 定义中立 DTO，`application/queries` 管理持有 Store 的查询入口；`storage/queries/workspace_delta`、`storage/queries/report` 实现 SQL。`storage/queries/workspace_snapshot` 在同一事务读取完整快照，`interfaces/desktop/workspace` 和 `interfaces/desktop/presentation` 在事务结束后转换展示，不额外查询。`ui/src/shared/api/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
+- `application/coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`adapters/binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
+- `storage` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`storage/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 5，不提供旧数据库迁移。
 
 worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目录及生成的协议 schema，并安装独立 `workers/analysis` 包；入口文件不承担模块重导出。Windows 打包使用显式组件清单，不复制 Linux 运行时。
+
+`adapters/files` 管理主机路径、目录所有权标记、链接/重解析点检查和持久化 JSON 发布，存储层直接使用这些文件能力。配置登记、盘点和清理策略仍归维护模块；帮助函数迁移不改变锁、目录认领规则或删除范围。
+
+`bootstrap` 实现公开服务构造函数并装配具体依赖。分析用例接收 runner 工厂，start/resume 先选定配置再调用工厂；runner 和工具业务实现不回调 bootstrap。公开构造函数签名及保存配置的行为保持不变。
+
+项目 Python 使用 `scripts/dev/requirements.txt` 和 `ruff.toml` 固定的开发专用 Ruff 版本。先运行 `python -m pip install -r scripts/dev/requirements.txt`，再运行 `python -m ruff format --check workers scripts tests evals fixtures` 和 `python -m ruff check workers scripts tests evals fixtures`。格式变更与逻辑变更分开提交。静态检查覆盖语法、控制流、无效比较及未定义名称，可选依赖的导入仍需人工审查。运行时包不安装 Ruff；生成产物、外部基准和缓存的第三方依赖不在格式化范围内。
 
 跨模块调用保持类型化，资源归属和业务完成门槛保留在统一入口。通用元数据查询不读取 checkpoint；需要继承、follow-up 或完整导出时显式使用完整读取接口。元数据写入不得清空会话，checkpoint 与邮箱确认仍在同一持久化事务提交。
 
 工作台操作在完整的归属作用域内持有 `OperationLock`。守卫会先显式解锁，再关闭文件；不要替换成析构时只关闭描述符的普通文件。在 Unix 上，无关的并发 fork 可能在 exec 前临时继承打开文件描述，导致只依赖关闭的锁超出归属作用域。描述符克隆回归检查在保持互斥的同时，后继操作能够立即获得锁。
 
+维护准入、更新缓存访问以及清理过程中的工作台锁使用 `adapters/files/locks::FileLock`，遵循同样的显式释放规则。可能提前返回的策略检查之前就应取得守卫，并持有至整个受保护操作结束。分析任务的克隆通过 `Arc` 共享同一个守卫，由最后一个拥有者释放。共享与独占模式保留原有准入规则。分析器锁的所有权刻意延续至子进程回收完成，不能套用这种仅按作用域释放的方式。
+
+## 本地文件与任务产物
+
+仓库中的 `.vscode/settings.json` 在文件浏览器里隐藏依赖缓存和生成产物，不删除文件，也不改变构建输入。新的任务专用日志、清单和回执放在已忽略的 `target/tasks/<task-id>/` 下；工具管理的构建和缓存目录保持现有路径。旧证据保留其记录的路径及哈希。源码、夹具、许可证、发布片段和双语指南继续可见并纳入版本管理；清理仍须核对明确归属和保留策略。
+
+Python 构建和发布 CLI 复用 `scripts._lib` 定位仓库、计算哈希和访问 GitHub，参数解析与可复用函数分离。构建命令受 CI 作业期限约束，夹具执行和网络下载各自有操作期限。包验证在独立信任边界重复校验哈希是有意保留的设计。共享分析包接收已准入的路径或字节，数值算法与 Worker 所有权分离；类型注解说明内部输入和输出，不替代生成的协议 schema。
+
+测试辅助 `support.client.Client` 只拥有自己的 stdio 转发进程。它对请求写入和响应等待设置期限，核对响应 ID，并在传输结果不确定时关闭转发进程。测试显式重连并核对持久作业，或关闭守护进程；关闭转发进程不代表守护进程及其资源已清理。
+
 <a id="desktop-styling"></a>
+
+前端在 `ui/src/features/` 下按工作区、会话、Agent、证据、设置和维护分组。共用 API 契约、UI 基础组件、本地化及测试辅助放在 `ui/src/shared/`；`ui/src/app/` 负责装配和桌面生命周期。功能测试与实现同目录，跨功能浏览器流程放在 `ui/e2e/`。全局样式导入顺序继续集中维护。
 
 ## 桌面界面样式
 
@@ -39,7 +57,7 @@ worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目�
 
 ## 工具文档
 
-工具定义、参数 schema、角色权限、模型可见性和显示消息 ID 来自同一注册表；双语文案来自共享 Fluent 资源。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供消息 ID 并补齐双语标题。Markdown 工具清单也从注册表生成：
+工具定义、参数 schema、角色权限、模型可见性和显示消息 ID 来自同一注册表；双语文案来自共享 Fluent 资源。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `interfaces/desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供消息 ID 并补齐双语标题。Markdown 工具清单也从注册表生成：
 
 ```sh
 cargo run -- tool-catalog > docs/reference/tool-catalog.md
@@ -71,7 +89,7 @@ cargo test --test tool_catalog
 
 `domain/claims` 统一解析 flag 形状的声明；完成工具拒绝占位符，协调器按具体声明执行独立验证门槛。解析结果只表示文本分类，不证明利用成功。
 
-Rust 文件哈希和实际读取字节计数放在 `content`，`binary` 保留公开哈希接口；worker 使用 `worker_common.sha256_file`，构建与发布脚本使用 `scripts._lib.checksums.sha256`。独立注入沙箱的脚本保持自包含，不引入控制端模块。路径限制、大小预算和控制端/worker 的独立身份核对仍留在调用边界，不因共用哈希函数而合并或删除。
+Rust 文件哈希和实际读取字节计数放在 `adapters/files/content`，`adapters/binary` 保留公开哈希接口；worker 使用 `wukong_worker.artifacts.common.sha256_file`，构建与发布脚本使用 `scripts._lib.checksums.sha256`。独立注入沙箱的脚本保持自包含，不引入控制端模块。路径限制、大小预算和控制端/worker 的独立身份核对仍留在调用边界，不因共用哈希函数而合并或删除。
 
 <a id="validation"></a>
 

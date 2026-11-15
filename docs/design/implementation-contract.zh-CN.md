@@ -10,7 +10,7 @@
 
 ## 模块归属
 
-`domain` 定义持久化记录；`store` 负责 SQLite 事务与内容寻址产物；`coordinator` 实现业务任务、契约与邮箱语义；`prompts` 注册内置元数据/资源，`agents` 装配选定角色与 Skill；`llm` 适配服务连接和类型化摘要；`runner` 管理运行生命周期，通过监督器与业务服务处理租约、用量及事件；`kernel` 将原生 Rig ECS、日志和子任务协议接入业务准入/完成门槛；`tools` 使用 Rig schema 分派类型化操作；`binary`、`runtime` 实现外部后端；`mcp` 使用 rmcp；`report` 导出有证据的发现；`interface` 提供 CLI；`desktop`、`ui/src` 提供原生桌面工作区。
+`domain` 定义持久化记录；`storage` 负责 SQLite 事务与内容寻址产物；`application/coordinator` 实现业务任务、契约与邮箱语义；`prompts` 注册内置元数据/资源，`application/agents` 装配选定角色与 Skill；`adapters/models` 适配服务连接和类型化摘要；`application/assessment/runner` 管理运行生命周期，通过监督器与业务服务处理租约、用量及事件；`application/agent_runtime` 将原生 Rig ECS、日志和子任务协议接入业务准入/完成门槛；`application/tools` 使用 Rig schema 分派类型化操作；`adapters/binary`、`adapters/worker` 实现外部后端；`adapters/mcp` 使用 rmcp；`interfaces/report` 导出有证据的发现；`interfaces/cli` 提供 CLI；`interfaces/desktop`、`ui/src` 提供原生桌面工作区。
 
 <a id="required-invariants"></a>
 

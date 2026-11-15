@@ -1,4 +1,5 @@
 """Read image identity from the exact version's public GitHub Release assets."""
+
 import hashlib
 import json
 import re
@@ -27,10 +28,14 @@ def download(url):
             content = response.read(MAX_METADATA_BYTES + 1)
     except urllib.error.HTTPError as error:
         if error.code == 404:
-            raise ValueError(f"Release asset not found: {url}. Publish this version first, or supply --image-metadata.") from error
+            raise ValueError(
+                f"Release asset not found: {url}. Publish this version first, or supply --image-metadata."
+            ) from error
         raise ValueError(f"Cannot download {url}: HTTP {error.code}") from error
     except (urllib.error.URLError, TimeoutError) as error:
-        raise ValueError(f"Cannot download {url}: check network access to GitHub and retry") from error
+        raise ValueError(
+            f"Cannot download {url}: check network access to GitHub and retry"
+        ) from error
     if len(content) > MAX_METADATA_BYTES:
         raise ValueError("Release metadata exceeds 1 MiB")
     return content
@@ -46,8 +51,11 @@ def release_image(number, revision, repository=DEFAULT_REPOSITORY):
     # Direct versioned asset URLs avoid the API's anonymous rate limit. Never use latest.
     content = download(base + "release.json")
     sums = download(base + "SHA256SUMS").decode("utf-8-sig")
-    matches = [match[1].lower() for line in sums.splitlines()
-               if (match := re.fullmatch(r"([a-fA-F0-9]{64}) [ *]release\.json", line))]
+    matches = [
+        match[1].lower()
+        for line in sums.splitlines()
+        if (match := re.fullmatch(r"([a-fA-F0-9]{64}) [ *]release\.json", line))
+    ]
     if len(matches) != 1 or hashlib.sha256(content).hexdigest() != matches[0]:
         raise ValueError("Downloaded release.json does not match a unique SHA256SUMS entry")
     manifest = json.loads(content.decode("utf-8-sig"))
@@ -55,7 +63,10 @@ def release_image(number, revision, repository=DEFAULT_REPOSITORY):
         raise ValueError("Unsupported Release manifest")
     if manifest.get("version") != number:
         raise ValueError(f"Release manifest version does not match {tag}")
-    if manifest.get("platform") != "windows-amd64" or manifest.get("tool_platform") != "linux/amd64":
+    if (
+        manifest.get("platform") != "windows-amd64"
+        or manifest.get("tool_platform") != "linux/amd64"
+    ):
         raise ValueError("Release must provide a Windows x64 client and linux/amd64 image")
     if manifest.get("runtime_protocol") != 3 or manifest.get("data_schema") != 5:
         raise ValueError("Release runtime protocol or data schema is not supported")
@@ -66,9 +77,15 @@ def release_image(number, revision, repository=DEFAULT_REPOSITORY):
     if not isinstance(reference, str) or reference.count("@") != 1:
         raise ValueError("Release image must be pinned by registry digest")
     image_repository, digest = reference.split("@")
-    image = dict(repository=image_repository, digest=digest, image_id=manifest.get("image_id"),
-                 source_revision=source, release_version=number, platform=manifest["tool_platform"],
-                 size_bytes=manifest.get("image_size_bytes"))
+    image = dict(
+        repository=image_repository,
+        digest=digest,
+        image_id=manifest.get("image_id"),
+        source_revision=source,
+        release_version=number,
+        platform=manifest["tool_platform"],
+        size_bytes=manifest.get("image_size_bytes"),
+    )
     if not isinstance(image["image_id"], str) or type(image["size_bytes"]) is not int:
         raise ValueError("Release is missing image ID or size")
     validate_image(image, revision, released_version=number)

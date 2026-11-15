@@ -3,6 +3,7 @@
 Only artifacts from a successful trusted installer job may reach this verifier.
 The final publish gate additionally verifies actual updater signatures with Rust.
 """
+
 import argparse
 import hashlib
 import json
@@ -17,12 +18,26 @@ def identity(target, root=ROOT):
     if target not in ("windows", "linux"):
         raise ValueError("Unsupported installer platform")
     recipe = hashlib.sha256()
-    for name in (".github/workflows/build-installer.yml", "scripts/release/installer_artifact.py",
-                 "scripts/release/installer_identity.py", "tauri.conf.json", "tauri." + target + ".conf.json",
-                 "rust-toolchain.toml", "package-lock.json", "src/desktop/update-public.key"):
+    for name in (
+        ".github/workflows/build-installer.yml",
+        "scripts/release/installer_artifact.py",
+        "scripts/release/installer_identity.py",
+        "tauri.conf.json",
+        "tauri." + target + ".conf.json",
+        "rust-toolchain.toml",
+        "package-lock.json",
+        "src/interfaces/desktop/update-public.key",
+    ):
         recipe.update(name.encode() + b"\0" + (root / name).read_bytes())
-    return dict(schema=1, target=target, recipe=recipe.hexdigest(), version=version(root=root),
-                source_revision=subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip())
+    return dict(
+        schema=1,
+        target=target,
+        recipe=recipe.hexdigest(),
+        version=version(root=root),
+        source_revision=subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip(),
+    )
 
 
 def record(target, directory, root=ROOT):
@@ -38,7 +53,9 @@ def record(target, directory, root=ROOT):
             raise ValueError("Missing or invalid installer/signature")
         entries[path.name] = dict(size=path.stat().st_size, sha256=sha256(path))
     manifest = dict(identity(target, root), files=entries)
-    (directory / ("installer-" + target + ".json")).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (directory / ("installer-" + target + ".json")).write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def verify(target, directory, root=ROOT):
@@ -60,7 +77,12 @@ def verify(target, directory, root=ROOT):
         if Path(name).name != name or "/" in name or "\\" in name:
             raise ValueError("Unsafe installer filename")
         path = directory / name
-        if path.is_symlink() or not path.is_file() or path.stat().st_size != expected.get("size") or sha256(path) != expected.get("sha256"):
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.stat().st_size != expected.get("size")
+            or sha256(path) != expected.get("sha256")
+        ):
             raise ValueError("Installer checksum/size mismatch: " + name)
     print("Verified reusable", target, "installer at", manifest["source_revision"])
 

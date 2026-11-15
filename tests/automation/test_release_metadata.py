@@ -11,11 +11,18 @@ from scripts.release import release_metadata
 class ReleaseMetadataTests(unittest.TestCase):
     def setUp(self):
         self.revision = "a" * 40
-        self.manifest = dict(schema_version=2, version="1.2.3", source_revision=self.revision,
-                             platform="windows-amd64", tool_platform="linux/amd64",
-                             image="example/wukong@sha256:" + "b" * 64,
-                             image_id="sha256:" + "c" * 64, image_size_bytes=12345,
-                             runtime_protocol=3, data_schema=5)
+        self.manifest = dict(
+            schema_version=2,
+            version="1.2.3",
+            source_revision=self.revision,
+            platform="windows-amd64",
+            tool_platform="linux/amd64",
+            image="example/wukong@sha256:" + "b" * 64,
+            image_id="sha256:" + "c" * 64,
+            image_size_bytes=12345,
+            runtime_protocol=3,
+            data_schema=5,
+        )
 
     def assets(self, mutate_sums=lambda text: text):
         manifest = json.dumps(self.manifest).encode()
@@ -26,11 +33,22 @@ class ReleaseMetadataTests(unittest.TestCase):
         with patch.object(release_metadata, "download", side_effect=self.assets()) as download:
             image = release_metadata.release_image("1.2.3", self.revision)
         base = "https://github.com/mark0-cn/Wukong/releases/download/v1.2.3/"
-        self.assertEqual([call.args[0] for call in download.call_args_list],
-                         [base + "release.json", base + "SHA256SUMS"])
-        self.assertEqual(image, dict(repository="example/wukong", digest="sha256:" + "b" * 64,
-                                    image_id=self.manifest["image_id"], source_revision=self.revision,
-                                    size_bytes=12345, platform="linux/amd64", release_version="1.2.3"))
+        self.assertEqual(
+            [call.args[0] for call in download.call_args_list],
+            [base + "release.json", base + "SHA256SUMS"],
+        )
+        self.assertEqual(
+            image,
+            dict(
+                repository="example/wukong",
+                digest="sha256:" + "b" * 64,
+                image_id=self.manifest["image_id"],
+                source_revision=self.revision,
+                size_bytes=12345,
+                platform="linux/amd64",
+                release_version="1.2.3",
+            ),
+        )
 
     def test_earlier_image_commit_and_legacy_repository_are_preserved(self):
         old = "d" * 40
@@ -49,21 +67,37 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(image["source_revision"], "e" * 40)
 
     def test_bad_missing_and_duplicate_checksums_are_rejected(self):
-        for mutate in (lambda text: "0" * 64 + "  release.json\n",
-                       lambda text: text.replace("release.json", "other.json"),
-                       lambda text: text + text):
-            with self.subTest(mutate=mutate), patch.object(release_metadata, "download", side_effect=self.assets(mutate)):
+        for mutate in (
+            lambda text: "0" * 64 + "  release.json\n",
+            lambda text: text.replace("release.json", "other.json"),
+            lambda text: text + text,
+        ):
+            with (
+                self.subTest(mutate=mutate),
+                patch.object(release_metadata, "download", side_effect=self.assets(mutate)),
+            ):
                 with self.assertRaisesRegex(ValueError, "SHA256SUMS"):
                     release_metadata.release_image("1.2.3", self.revision)
 
     def test_incompatible_release_is_rejected_even_with_valid_checksums(self):
         original = dict(self.manifest)
-        for field, value in (("version", "1.2.4"), ("source_revision", "invalid"), ("schema_version", 1),
-                             ("platform", "linux-amd64"), ("tool_platform", "linux/arm64"),
-                             ("runtime_protocol", 1), ("data_schema", 1), ("image", "example/wukong:latest"),
-                             ("image_id", None), ("image_size_bytes", -1)):
+        for field, value in (
+            ("version", "1.2.4"),
+            ("source_revision", "invalid"),
+            ("schema_version", 1),
+            ("platform", "linux-amd64"),
+            ("tool_platform", "linux/arm64"),
+            ("runtime_protocol", 1),
+            ("data_schema", 1),
+            ("image", "example/wukong:latest"),
+            ("image_id", None),
+            ("image_size_bytes", -1),
+        ):
             self.manifest = {**original, field: value}
-            with self.subTest(field=field), patch.object(release_metadata, "download", side_effect=self.assets()):
+            with (
+                self.subTest(field=field),
+                patch.object(release_metadata, "download", side_effect=self.assets()),
+            ):
                 with self.assertRaises(ValueError):
                     release_metadata.release_image("1.2.3", self.revision)
 
@@ -86,13 +120,17 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_oversized_download_is_rejected(self):
         with patch.object(release_metadata.urllib.request, "build_opener") as opener:
-            opener.return_value.open.return_value = io.BytesIO(b"x" * (release_metadata.MAX_METADATA_BYTES + 1))
+            opener.return_value.open.return_value = io.BytesIO(
+                b"x" * (release_metadata.MAX_METADATA_BYTES + 1)
+            )
             with self.assertRaisesRegex(ValueError, "exceeds"):
                 release_metadata.download("https://github.com/asset")
 
     def test_insecure_redirect_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
-            release_metadata.HttpsRedirect().redirect_request(None, None, 302, "Found", {}, "http://example.com/asset")
+            release_metadata.HttpsRedirect().redirect_request(
+                None, None, 302, "Found", {}, "http://example.com/asset"
+            )
 
 
 if __name__ == "__main__":

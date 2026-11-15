@@ -29,7 +29,11 @@ class DocumentationChecks(unittest.TestCase):
         _, record = check(self.root, self.files)
         with (self.root / "README.md").open("a", encoding="utf-8") as stream:
             stream.write("New behavior.\n")
-        self.assertTrue(any("changed since review" in error for error in check(self.root, self.files, record)[0]))
+        self.assertTrue(
+            any(
+                "changed since review" in error for error in check(self.root, self.files, record)[0]
+            )
+        )
 
     def test_missing_anchor_and_relative_target(self):
         with (self.root / "README.md").open("a", encoding="utf-8") as stream:
@@ -40,7 +44,9 @@ class DocumentationChecks(unittest.TestCase):
 
     def test_explicit_unicode_anchor_and_fenced_examples(self):
         with (self.root / "README.md").open("a", encoding="utf-8") as stream:
-            stream.write('<a id="安装"></a>\n[setup](#%E5%AE%89%E8%A3%85)\n```md\n# example\n[not a link](missing.md)\n```\n')
+            stream.write(
+                '<a id="安装"></a>\n[setup](#%E5%AE%89%E8%A3%85)\n```md\n# example\n[not a link](missing.md)\n```\n'
+            )
         self.assertEqual([], check(self.root, self.files)[0])
 
     def test_new_guide_and_runtime_exclusion(self):

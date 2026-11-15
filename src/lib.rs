@@ -1,37 +1,26 @@
-pub mod agents;
+//! Controller entry points; implementation lives under responsibility modules.
+pub mod adapters;
 pub mod application;
-pub mod binary;
-pub mod cleanup;
-pub mod config;
-mod content;
-mod context;
-pub mod coordinator;
-mod credentials;
-pub mod desktop;
-pub mod domain;
-mod effects;
-pub mod environments;
-pub mod i18n;
-pub mod interface;
-mod kernel;
-pub mod llm;
-pub mod mcp;
-mod process_io;
-mod prompts;
-pub mod report;
-pub mod runner;
-pub mod runtime;
-pub mod store;
-mod supervisor;
-pub mod tools;
-
 mod bootstrap;
-mod kernel_host;
-mod model_catalog;
-mod progress;
-mod usage;
-
+pub mod config;
+pub mod domain;
+pub mod i18n;
+pub mod interfaces;
 pub mod queries;
+pub mod storage;
 
-pub mod updates;
-pub mod workbench;
+// Compatibility exports for existing library consumers, centralized here.
+pub use adapters::{binary, environments, mcp, models as llm, worker as runtime};
+pub use application::assessment::runner;
+pub use application::maintenance::updates;
+pub use application::{agents, coordinator, tools};
+pub use interfaces::{cli as interface, desktop, report};
+pub use storage as store;
+pub mod cleanup {
+    pub use crate::application::maintenance::cleanup::*;
+    pub use crate::interfaces::cli::cleanup as cli;
+}
+pub mod workbench {
+    pub use crate::application::maintenance::workbench::*;
+    pub use crate::interfaces::cli::workbench as cli;
+}

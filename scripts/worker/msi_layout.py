@@ -1,4 +1,5 @@
 """Read MSI databases and lay out verified CABs without running installer actions."""
+
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
@@ -33,7 +34,12 @@ def read_tables(path):
     msi.MsiDatabaseOpenViewW.argtypes = [handle, wintypes.LPCWSTR, ctypes.POINTER(handle)]
     msi.MsiViewExecute.argtypes = [handle, handle]
     msi.MsiViewFetch.argtypes = [handle, ctypes.POINTER(handle)]
-    msi.MsiRecordGetStringW.argtypes = [handle, wintypes.UINT, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+    msi.MsiRecordGetStringW.argtypes = [
+        handle,
+        wintypes.UINT,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
     msi.MsiCloseHandle.argtypes = [handle]
     database = handle()
 
@@ -61,7 +67,9 @@ def read_tables(path):
                         for column in range(1, columns + 1):
                             buffer = ctypes.create_unicode_buffer(1025)
                             size = wintypes.DWORD(len(buffer))
-                            checked(msi.MsiRecordGetStringW(record, column, buffer, ctypes.byref(size)))
+                            checked(
+                                msi.MsiRecordGetStringW(record, column, buffer, ctypes.byref(size))
+                            )
                             values.append(buffer.value)
                         rows.append(values)
                         if len(rows) > MAX_FILES:
@@ -126,8 +134,13 @@ def plan(tables):
     files, ids, sequences = [], set(), set()
     for identity, component, raw, size, sequence in tables["File"]:
         size, sequence = int(size), int(sequence)
-        if (not re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", identity) or identity in ids
-                or sequence in sequences or not 0 <= size <= MAX_BYTES or sequence <= 0):
+        if (
+            not re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", identity)
+            or identity in ids
+            or sequence in sequences
+            or not 0 <= size <= MAX_BYTES
+            or sequence <= 0
+        ):
             raise ValueError("Invalid MSI file identity, size or sequence")
         ids.add(identity)
         sequences.add(sequence)
@@ -159,17 +172,27 @@ def extract_cabinet(cabinet, output, expected):
     setup = _windows_dll("setupapi.dll")
 
     class FileInCabinet(ctypes.Structure):
-        _fields_ = [("name", wintypes.LPCWSTR), ("size", wintypes.DWORD),
-                    ("error", wintypes.DWORD), ("date", wintypes.WORD),
-                    ("time", wintypes.WORD), ("attributes", wintypes.WORD),
-                    ("target", wintypes.WCHAR * 260)]
+        _fields_ = [
+            ("name", wintypes.LPCWSTR),
+            ("size", wintypes.DWORD),
+            ("error", wintypes.DWORD),
+            ("date", wintypes.WORD),
+            ("time", wintypes.WORD),
+            ("attributes", wintypes.WORD),
+            ("target", wintypes.WCHAR * 260),
+        ]
 
     class FilePaths(ctypes.Structure):
-        _fields_ = [("target", wintypes.LPCWSTR), ("source", wintypes.LPCWSTR),
-                    ("error", wintypes.UINT), ("flags", wintypes.DWORD)]
+        _fields_ = [
+            ("target", wintypes.LPCWSTR),
+            ("source", wintypes.LPCWSTR),
+            ("error", wintypes.UINT),
+            ("flags", wintypes.DWORD),
+        ]
 
-    callback_type = ctypes.WINFUNCTYPE(wintypes.UINT, ctypes.c_void_p, wintypes.UINT,
-                                      ctypes.c_size_t, ctypes.c_size_t)
+    callback_type = ctypes.WINFUNCTYPE(
+        wintypes.UINT, ctypes.c_void_p, wintypes.UINT, ctypes.c_size_t, ctypes.c_size_t
+    )
     seen, errors = set(), []
 
     @callback_type
@@ -178,7 +201,12 @@ def extract_cabinet(cabinet, output, expected):
             if notification == 0x11:  # SPFILENOTIFY_FILEINCABINET
                 info = ctypes.cast(parameter1, ctypes.POINTER(FileInCabinet)).contents
                 name = info.name
-                if name not in expected or name in seen or info.size != expected[name] or info.error:
+                if (
+                    name not in expected
+                    or name in seen
+                    or info.size != expected[name]
+                    or info.error
+                ):
                     raise ValueError("Cabinet member differs from verified MSI inventory")
                 destination = no_links(output / name)
                 if len(str(destination)) >= 260 or destination.exists():
@@ -197,11 +225,18 @@ def extract_cabinet(cabinet, output, expected):
             errors.append(str(error))
             return 0
 
-    setup.SetupIterateCabinetW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, callback_type, ctypes.c_void_p]
+    setup.SetupIterateCabinetW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        callback_type,
+        ctypes.c_void_p,
+    ]
     setup.SetupIterateCabinetW.restype = wintypes.BOOL
     success = setup.SetupIterateCabinetW(str(cabinet), 0, callback, None)
     if not success or errors or seen != set(expected):
-        raise ValueError(errors[0] if errors else f"Incomplete cabinet extraction: {ctypes.get_last_error()}")
+        raise ValueError(
+            errors[0] if errors else f"Incomplete cabinet extraction: {ctypes.get_last_error()}"
+        )
     actual = {path.name for path in output.iterdir()}
     if actual != set(expected):
         raise ValueError("Cabinet produced unexpected files")
@@ -219,7 +254,9 @@ def layout(database, source, output, scratch):
     for cabinet in cabinets:
         selected = [item for item in files if item["cabinet"] == cabinet]
         directory = scratch / cabinet
-        extract_cabinet(source / cabinet, directory, {item["id"]: item["size"] for item in selected})
+        extract_cabinet(
+            source / cabinet, directory, {item["id"]: item["size"] for item in selected}
+        )
         for item in selected:
             target = no_links(output / item["path"])
             target.parent.mkdir(parents=True, exist_ok=True)
