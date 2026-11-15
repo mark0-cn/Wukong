@@ -97,6 +97,7 @@ pub struct WorkspaceQueries {
 
 #[derive(Serialize)]
 pub struct ReportSnapshot {
+    pub artifact_validations: Vec<ArtifactValidation>,
     #[serde(default)]
     pub analysis_verifications: Vec<serde_json::Value>,
     pub run: RunRecord,

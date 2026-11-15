@@ -67,6 +67,10 @@ def doctor(root, trusted, isolated, registrations):
         "socat",
         "gdbserver",
         "eu-unstrip",
+        "readelf",
+        "objdump",
+        "od",
+        "xxd",
     ]:
         executable = shutil.which(name)
         version = None
@@ -149,6 +153,9 @@ def doctor(root, trusted, isolated, registrations):
     advertised.update(
         {
             "debug_dbgeng": False,
+            "self_check_v1": linux
+            and execution_ready
+            and _python_module("wukong_analysis.validator"),
             "input_minimize": ready["minimize"] and ready["debugger"],
             "process_mapping_observations": linux,
             "formats": ["ELF"]

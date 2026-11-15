@@ -36,6 +36,33 @@ pub(in crate::application::tools) struct FilePutArgs {
     pub evidence_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executable: Option<bool>,
+    #[serde(default)]
+    pub path_policy: FilePathPolicy,
+}
+
+#[derive(Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(in crate::application::tools) enum FilePathPolicy {
+    #[default]
+    Exact,
+    Versioned,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct FileReviseArgs {
+    pub base_evidence_id: String,
+    /// Logical filename only; the returned path includes the new content hash.
+    pub name: String,
+    #[schemars(length(min = 1, max = 64))]
+    pub replacements: Vec<TextReplacement>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct TextReplacement {
+    pub old_text: String,
+    pub new_text: String,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

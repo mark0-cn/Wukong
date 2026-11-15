@@ -40,7 +40,9 @@ pub fn builtin_catalog_markdown_for_locale(locale: Locale) -> Result<String> {
     }
     for spec in specs {
         let name = spec.definition.name.as_str();
-        let roles = if spec.root_only {
+        let roles = if spec.verifier_only {
+            "verifier"
+        } else if spec.root_only {
             "root"
         } else if spec.child_only {
             "analyst / verifier"

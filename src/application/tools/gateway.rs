@@ -56,12 +56,28 @@ impl WorkerGateway {
         {
             return Ok(reply);
         }
-        let reply = self.runtime()?.call(method, params.clone()).await.context(
-            crate::application::effects::WorkerDispatch {
-                method: method.into(),
-                request_id: request_id.clone(),
-            },
-        )?;
+        let reply = self
+            .runtime()?
+            .call(method, params.clone())
+            .await
+            .map_err(|error| {
+                use crate::adapters::worker::protocol::{WorkerError, WorkerErrorKind};
+                if error.downcast_ref::<WorkerError>().is_some_and(|e| {
+                    matches!(
+                        e.kind,
+                        WorkerErrorKind::InvalidRequest
+                            | WorkerErrorKind::Conflict
+                            | WorkerErrorKind::SessionLost
+                    )
+                }) {
+                    error
+                } else {
+                    error.context(crate::application::effects::WorkerDispatch {
+                        method: method.into(),
+                        request_id: request_id.clone(),
+                    })
+                }
+            })?;
         self.effects()
             .record_worker_reply(agent, call_id, method, params, reply.clone())
             .context(crate::application::effects::WorkerDispatch {

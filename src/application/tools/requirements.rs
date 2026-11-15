@@ -7,6 +7,7 @@ pub(super) enum Requirement {
     Controller,
     Probe,
     Ghidra,
+    ScriptValidation,
     Worker(&'static [Method]),
 }
 
@@ -37,6 +38,17 @@ impl Requirement {
                     .iter()
                     .all(|method| value["methods"][method.name()]["ready"] == true)
             }),
+            Self::ScriptValidation => {
+                observation.is_some_and(|v| {
+                    v["os"] == "linux" && v["capabilities"]["self_check_v1"] == true
+                }) && Self::Worker(&[
+                    Method::PythonRun,
+                    Method::FilePut,
+                    Method::JobStatus,
+                    Method::JobArtifacts,
+                ])
+                .available(observation, false)
+            }
         }
     }
 
@@ -45,6 +57,9 @@ impl Requirement {
             Self::Controller => "controller".into(),
             Self::Probe => "explicit probe".into(),
             Self::Ghidra => "controller Ghidra or ghidra_query".into(),
+            Self::ScriptValidation => {
+                "Linux self_check_v1 + py_run + file.put + job.status + job.artifacts".into()
+            }
             Self::Worker(methods) => methods
                 .iter()
                 .map(|m| m.name())
@@ -66,7 +81,7 @@ impl ToolService {
         match spec.requirement {
             Requirement::Controller | Requirement::Probe => false,
             Requirement::Ghidra => self.local_ghidra().is_none(),
-            Requirement::Worker(_) => true,
+            Requirement::Worker(_) | Requirement::ScriptValidation => true,
         }
     }
 }
@@ -125,6 +140,15 @@ mod tests {
     use wukong_worker_protocol::Method;
     #[test]
     fn new_job_inputs_require_observed_support_without_hiding_basic_jobs() {
+        let methods = json!({"py_run":{"ready":true},"file.put":{"ready":true},"job.status":{"ready":true},"job.artifacts":{"ready":true}});
+        assert!(
+            !Requirement::ScriptValidation
+                .available(Some(&json!({"os":"linux","methods":methods})), false)
+        );
+        assert!(!Requirement::ScriptValidation.available(
+            Some(&json!({"os":"windows","methods":methods,"capabilities":{"self_check_v1":true}})),
+            false
+        ));
         let old = json!({"os":"linux","capabilities":{"process_jobs":true}});
         assert!(Requirement::job_inputs_available(
             &json!({"argv":["files/target"]}),

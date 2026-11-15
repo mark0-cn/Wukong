@@ -22,6 +22,7 @@ macro_rules! record {
 }
 record!(AgentSnapshot, "agent");
 record!(JobRecord, "job");
+record!(ArtifactValidation, "artifact_validation");
 record!(WorkerFileRecord, "worker_file");
 record!(EnvironmentBinding, "environment_binding");
 record!(ToolCallRecord, "call");
@@ -207,7 +208,7 @@ impl StateSession<'_> {
             "task_result",
             &format!("{}:{}", agent.id, agent.generation),
             &agent.run_id,
-            &json!({"task_id":agent.id,"generation":agent.generation,"result":result}),
+            &json!({"task_id":agent.id,"generation":agent.generation,"contract":agent.contract,"result":result}),
         )
     }
 }

@@ -165,9 +165,21 @@ struct HtmlReport<'a> {
 }
 
 impl HtmlReport<'_> {
+    fn predicate_status(&self, validation: &ArtifactValidation) -> String {
+        predicate_status(validation, self.locale)
+    }
     fn label(&self, key: &str) -> String {
         self.locale.text(key)
     }
+}
+fn predicate_status(validation: &ArtifactValidation, locale: Locale) -> String {
+    locale.text(if validation.status_evidence_id.is_none() {
+        "report-predicate-pending"
+    } else if validation.passed {
+        "report-predicate-pass"
+    } else {
+        "report-predicate-fail"
+    })
 }
 fn readable_report(
     snapshot: &crate::queries::ReportSnapshot,
@@ -283,6 +295,22 @@ fn readable_report(
             markdown_text(&coverage.outcome),
             markdown_text(&coverage.notes).replace('\n', " ")
         ));
+    }
+    if !snapshot.artifact_validations.is_empty() {
+        md.push_str(&format!(
+            "\n## {}\n\n{}\n\n",
+            tr("report-artifact-validation"),
+            tr("report-predicate-limit")
+        ));
+        for validation in &snapshot.artifact_validations {
+            md.push_str(&format!(
+                "- `{}`: {} — SHA256 `{}`, verifier `{}`\n",
+                markdown_text(&validation.id),
+                predicate_status(validation, locale),
+                validation.artifact_sha256,
+                markdown_text(&validation.verifier_id)
+            ));
+        }
     }
     let accounting = UiMessage::new("report-accounting-body")
         .arg("agents", snapshot.agents.len())
@@ -475,6 +503,7 @@ pub fn export_with_locale(
         redact(&mut config);
         write_json(staging, "config.redacted.json", &config, &mut files)?;
         let mut replay = json!({"schema_version":1,"target":{"original_path":snapshot.run.target_path,"bundle_path":target_relative,"sha256":target_hash},"config":"config.redacted.json","tool_calls":snapshot.calls,"verifications":snapshot.verifications,"jobs":snapshot.jobs,"evidence":evidence_index,"instructions":"Verify manifest before replay. Recreate the recorded runtime and dependencies, map the original target path to target/sample.bin, import required evidence by bundle_path, then replay the recorded tool arguments. Environment credentials must be supplied separately. Export itself executes no target code."});
+        replay["artifact_validations"] = serde_json::to_value(&snapshot.artifact_validations)?;
         redact(&mut replay);
         write_json(staging, "replay.json", &replay, &mut files)?;
         let (md, html) = readable_report(&snapshot, locale)?;

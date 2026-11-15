@@ -41,6 +41,7 @@ pub struct ToolService {
 mod analysis;
 mod analysis_verification;
 mod args;
+mod artifact_validation;
 mod catalog;
 mod coordination;
 mod discovery;
@@ -330,7 +331,10 @@ impl ToolService {
             }
             Ok(Err(error)) => {
                 let state = self.effects().failure_state(policy, &agent, call_id, &error)?;
-                self.finish_raw(record, json!({"error":format!("{error:#}")}), true, state)
+                let kind = error.downcast_ref::<crate::adapters::worker::protocol::WorkerError>().map(|e| json!(e.kind));
+                self.finish_raw(record, json!({"error":format!("{error:#}"),"kind":kind,
+                    "effect_state":if state == CallState::Uncertain {"unknown"} else {"rejected"},
+                    "next_action":if state == CallState::Uncertain {"reconcile the existing request; do not change arguments or issue a replacement write"} else {"correct the indicated input; preserve returned references and completed results"}}), true, state)
             }
             Err(_) => self.finish_raw(
                 record,
@@ -381,10 +385,12 @@ impl ToolService {
 fn substitute_target_argv(args: &Value, target_sha256: &str) -> Value {
     let staged = format!("files/targets/{target_sha256}/sample.bin");
     let mut params = args.clone();
-    if let Some(argv) = params.get_mut("argv").and_then(Value::as_array_mut) {
-        for entry in argv.iter_mut() {
-            if let Some(text) = entry.as_str() {
-                *entry = json!(text.replace("{target}", &staged));
+    for key in ["argv", "executable_inputs"] {
+        if let Some(argv) = params.get_mut(key).and_then(Value::as_array_mut) {
+            for entry in argv.iter_mut() {
+                if let Some(text) = entry.as_str() {
+                    *entry = json!(text.replace("{target}", &staged));
+                }
             }
         }
     }

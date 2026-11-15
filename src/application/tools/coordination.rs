@@ -105,6 +105,17 @@ impl ToolService {
             options.kind = MessageKind::FollowUp;
         }
         self.effect(agent, call_id, |tx| {
+            if follow_up && let Some(contract) = args.get("contract").filter(|v| !v.is_null()) {
+                return Ok(serde_json::to_value(Coordinator::tx_follow_up_contract(
+                    tx,
+                    agent,
+                    text(args, "agent_id")?,
+                    text(args, "message")?,
+                    options,
+                    call_id,
+                    serde_json::from_value(contract.clone())?,
+                )?)?);
+            }
             Ok(serde_json::to_value(Coordinator::tx_send(
                 tx,
                 &agent.id,

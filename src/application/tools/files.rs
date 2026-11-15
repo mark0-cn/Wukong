@@ -123,7 +123,13 @@ impl FilesService {
             bytes.len() <= 32 * 1024 * 1024,
             "file upload exceeds 32 MiB"
         );
-        let raw=self.gateway.worker_call(agent, call_id, Request::FilePut(serde_json::from_value(json!({"path":text(args,"path")?,"data_base64":BASE64.encode(&bytes),"executable":args["executable"].as_bool().unwrap_or(false)}))?)).await?;
+        let supplied_path = text(args, "path")?;
+        let path = if args["path_policy"] == "versioned" {
+            versioned_path(supplied_path, &bytes)?
+        } else {
+            supplied_path.to_owned()
+        };
+        let raw=self.gateway.worker_call(agent, call_id, Request::FilePut(serde_json::from_value(json!({"path":path,"data_base64":BASE64.encode(&bytes),"executable":args["executable"].as_bool().unwrap_or(false)}))?)).await?;
         ensure!(
             raw["sha256"] == binary::sha256_bytes(&bytes),
             "worker upload hash mismatch"
@@ -139,6 +145,45 @@ impl FilesService {
         )?;
         self.register_file(agent, &raw, Some(&evidence.id))?;
         Ok(json!({"file":raw,"content_evidence_id":evidence.id}))
+    }
+
+    pub(super) async fn revise(
+        &self,
+        agent: &AgentMetadata,
+        call_id: &str,
+        input: args::FileReviseArgs,
+    ) -> Result<Value> {
+        let original = self
+            .store
+            .read_evidence(&agent.run_id, &input.base_evidence_id)?;
+        ensure!(original.len() <= 1024 * 1024, "revision base exceeds 1 MiB");
+        let mut content =
+            String::from_utf8(original).context("file_revise requires UTF-8 content evidence")?;
+        ensure!(
+            (1..=64).contains(&input.replacements.len()),
+            "supply 1..64 replacements"
+        );
+        for (index, replacement) in input.replacements.iter().enumerate() {
+            ensure!(
+                unique_match(&content, &replacement.old_text),
+                "replacements[{index}].old_text must match exactly once; read the current content evidence before revising"
+            );
+            ensure!(
+                content
+                    .len()
+                    .saturating_sub(replacement.old_text.len())
+                    .saturating_add(replacement.new_text.len())
+                    <= 1024 * 1024,
+                "revised text exceeds 1 MiB"
+            );
+            content = content.replacen(&replacement.old_text, &replacement.new_text, 1);
+        }
+        self.file_put(
+            agent,
+            call_id,
+            &json!({"path":input.name,"path_policy":"versioned","text":content}),
+        )
+        .await
     }
 
     pub(super) async fn file_get(
@@ -200,5 +245,34 @@ impl FilesService {
         )?;
         self.register_file(agent, raw, Some(&evidence.id))?;
         Ok(evidence)
+    }
+}
+
+fn versioned_path(name: &str, bytes: &[u8]) -> Result<String> {
+    ensure!(
+        !name.is_empty()
+            && name.len() <= 128
+            && name != "."
+            && name != ".."
+            && name
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c)),
+        "versioned path requires a logical filename (e.g. solve.py), not a returned files/... worker path"
+    );
+    Ok(format!("generated/{}/{name}", binary::sha256_bytes(bytes)))
+}
+
+fn unique_match(content: &str, old: &str) -> bool {
+    !old.is_empty() && content.find(old).is_some() && content.find(old) == content.rfind(old)
+}
+
+#[cfg(test)]
+mod revision_tests {
+    #[test]
+    fn ambiguous_overlapping_replacements_are_rejected() {
+        assert!(!super::unique_match("aaa", "aa"));
+        assert!(!super::unique_match("xyxy", "xy"));
+        assert!(!super::unique_match("", ""));
+        assert!(super::unique_match("prefix α suffix", "α"));
     }
 }

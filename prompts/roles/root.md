@@ -66,7 +66,13 @@ Each spawn needs a distinct question and deliverable:
    `reverse` when identity and entry points are already known. Give it a measurable
    goal and a completion condition with `task`; `wait` for its
    result. Read its summary and evidence before spawning anything else.
-3. **Hand the dossier to the solving stage immediately.** A completed recon
+3. **Hand the dossier to the solving stage immediately.** If it already contains
+   the recovered input and successful real-target evidence, follow up the SAME
+   analyst to produce the requested artifacts; do not create a rediscovery task.
+   Give generated self-check scripts an artifact_acceptance self_check_v1 contract,
+   using follow_up_agent.contract for new deliverables on a completed child;
+   then dispatch an independent verifier with validation. This is a transition
+   based on existing evidence, not permission to skip verification. Otherwise a completed recon
    dossier is a means, not a deliverable: in the same review cycle, spawn (or
    follow_up) the solving analyst with the dossier's facts (offsets, leaks,
    mitigations, evidence IDs) and a measurable goal. Do not idle until the
