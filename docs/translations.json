@@ -30,12 +30,12 @@
       "zh-CN": "275d0311176621104dbab1b9913e1b888c3860101fe1744e1397817fc84c7f34"
     },
     "docs/development/commits.md": {
-      "en": "98fa85d02ba9705f01e4dec271bbdad3df6ed6a8aca74a124e195571a2f5346a",
-      "zh-CN": "97efcdc5bb9baea9ad3a412051141eb1546c3c3e70bc52b1f08bbfa6854b01dc"
+      "en": "328bb6704645a84d522c3b2a6a122d0c7c580287ec5321f7e70b5b3aadf52bf5",
+      "zh-CN": "be05ebe96a7f402f2d80df9f47292d1a216e6ae8ec39a4ffec52877a94323700"
     },
     "docs/development/desktop-updates.md": {
-      "en": "dd06f1d7e7ca56aef2753c30dd2ce2db57f69e0e2187e6ae2e9535f246914bd0",
-      "zh-CN": "222b6abe6706b72f01aa59f02cac79c4d85700e6c9752de90b6fc0f7269df76c"
+      "en": "439da589c889954afb9a36f9dc6c11ad9d16564e538ec80dc9a1871bdaa091a9",
+      "zh-CN": "8eb152cb42c9b38efd81cef1fa37abe378ce643f15ef77a4ce33817d2c313703"
     },
     "docs/development/documentation.md": {
       "en": "1c5a885e9fb60e19bc18e1b0d22367c2fc46d3d9a033e93670bb74873371c2a9",
@@ -46,8 +46,8 @@
       "zh-CN": "72fe258e53653c22a828ec69900ac35d934de2e2f876d8229ae871f2846cfc38"
     },
     "docs/development/github-maintenance.md": {
-      "en": "6ecf753b5c79c032a9d91050bce8fa342e322999dd22ee6b8324fe2f9fc192bd",
-      "zh-CN": "73dfd7beea7309803549711f80495daadf7e5e4930249223ed7dcb1b232a4aad"
+      "en": "fd814a35f7ac472504c223a0ff46b1d829ab557c39a8c0337aa5742e6c4217e4",
+      "zh-CN": "782bc43254b4d4fc9698bfc5db3acd6b726babcb1d86c7142b3fad7728a95405"
     },
     "docs/development/localization.md": {
       "en": "c4c4556a74b2c895f9378d202e139da062fa1a86507b81554eb1132d22b3e472",
@@ -58,8 +58,8 @@
       "zh-CN": "32657ca5e564664b74d9a9018e17229e5e30af794de7b3928e42bf67072fd036"
     },
     "docs/development/releases.md": {
-      "en": "4d3cf423fe4e09e1d03cbcb7c9f40bc35fdc42ffc00b3d2fd75eb607df26ab1e",
-      "zh-CN": "74449e346dca8af5ced982c20ff66a2fdece6909bf0758df7310aa7c2d4b2632"
+      "en": "dac0dd35da874f75c80bda7df2863abf61d3e378e86fc0e30e67b6aa4a4d8f44",
+      "zh-CN": "72d2f15a219acd20e33ebd816c8d4b373f22fb0365ecefb9d4717541c0b81c15"
     },
     "docs/history/README.md": {
       "en": "dc9906830ecbb0c106b647ef4513032bef03e89f8dc0daa3eddc1e4762299500",
@@ -78,8 +78,8 @@
       "zh-CN": "ec336fceccf444883a143ffdbd299f726b012b30981115a6d114e21dd04d5d72"
     },
     "docs/history/validation/2026-11-15-architecture-cleanup.md": {
-      "en": "3ce3a6d7060d427a0717542e6234f7e8051af62412ab84f67530955e5db0a866",
-      "zh-CN": "0077672e14b970b1d4e257300403f0c1854da8c53956258a04668762d09f77f6"
+      "en": "dce94f402e31528391975e900f31f9714859711b8a425bf0d2259716c3a8fca5",
+      "zh-CN": "bbc4359760115486d62c2c8c13f0605508261e00ab2598c40b05dad6a670986e"
     },
     "docs/history/validation/2026-11-15-execution-contract-v3.md": {
       "en": "7c7430711f62adac295c6403efb32b81fa8a357fababbde9880e1a20fe048709",

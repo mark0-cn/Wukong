@@ -4,7 +4,7 @@ English · [简体中文](2026-11-15-architecture-cleanup.zh-CN.md)
 
 ## Scope and identities
 
-The approved file organization and Python design work is implemented. The final production-code revision is `c7ed9bcf76c25adae08b6bbab3e63e70eff99a11`; `d9af37fa321fd02451508f9ce77634247404787a` subsequently corrects only a doctor test mock. The final workbench acceptance used that corrected test image. Native input hashing confirmed unchanged packaged source inputs. Documentation-only followups do not change these execution identities. Final integration and revision-bound hosted checks are tracked in [PR #29](https://github.com/mark0-cn/Wukong/pull/29).
+The approved file organization and Python design work is implemented. The final controller/worker implementation revision is `c7ed9bcf76c25adae08b6bbab3e63e70eff99a11`; `d9af37fa321fd02451508f9ce77634247404787a` subsequently corrects only a doctor test mock. The final workbench acceptance used that corrected test image. Native input hashing confirmed unchanged packaged source inputs. Documentation-only followups do not change these execution identities. Final integration and revision-bound hosted checks are tracked in [PR #29](https://github.com/mark0-cn/Wukong/pull/29).
 
 | Identity | Value |
 | --- | --- |
@@ -21,7 +21,7 @@ All 965 files in the approved baseline inventory have reconciled destinations; n
 
 Frontend implementation and tests are grouped by feature, with shared API/UI/testing infrastructure. Private runner and SSH installation tests are adjacent to their owners. Python runtime has one top-level Python entry, `bridge.py`, and explicit `wukong_worker` responsibility packages. Deployments hash nested runtime paths and bytes. Shared analysis stays independent of worker state. Editor settings hide generated artifacts; maintenance documentation defines `target/tasks/<task-id>` for new task artifacts without deleting old evidence.
 
-Python work includes pinned Ruff formatting/static checks, immutable job admission plans, typed callbacks and analysis inputs, explicit imports and startup dependency order, consolidated thin analysis adapters, bounded test transport and documented resource ownership. Formatting preserved all 197 baseline Python ASTs. A 768-case admission comparison preserved normalized specifications, fingerprints and errors. The final 214 Python files have an AST/import/risk inventory; this is not an exhaustive manual proof of every algorithm.
+Python work includes pinned Ruff formatting/static checks, immutable job admission plans, typed callbacks and analysis inputs, explicit imports and startup dependency order, consolidated thin analysis adapters, bounded test transport and documented resource ownership. Formatting preserved all 197 baseline Python ASTs. A 768-case admission comparison preserved normalized specifications, fingerprints and errors. The 214 Python files at this acceptance revision have an AST/import/risk inventory; this is not an exhaustive manual proof of every algorithm.
 
 Three separately committed behavior fixes have bilingual release fragments: unreadable recovery metadata produces bounded sanitized diagnostics; workbench doctor collects the live registry using disposable state; blocked interactive stdin respects a deadline and permits session termination. Partial or uncertain input delivery is not retried. Protocol v3, controller schema 5, native journal 2 and package schema 2 are unchanged.
 
@@ -60,6 +60,8 @@ Seven explicitly labelled Linux acceptance containers and their seven named stat
 Local raw records remain under the task's `target/architecture-plan` and `target/windows-vm-native73-*` paths. The fresh workflow is under `target/tasks/architecture-cleanup/workflow`. The migration reconciliation, Python decisions, validation summary and cleanup receipt reference the retained originals. These private local records are not release attachments or CI artifacts.
 
 ## Corrections and limits
+
+Before integration, master advanced to `08886cf` with the separate Actions redesign. Its Checks/Acceptance/Release/Maintenance behavior was retained, and the consolidated uninstall selector was updated to the reorganized paths. Incoming Python formatting preserved ASTs; regression cases cover the moved cleanup, ownership, recovery and UI entry points. The three upstream Python additions bring the combined inventory to 217 files. Final PR/master checks qualify that integrated tree; these infrastructure changes do not alter the recorded controller/worker inputs.
 
 Failed observations remain separate: the initial image build hit an Ubuntu HTTP 502 and passed on retry; the first network run selected a workbench image whose implicit volumes violated the network inventory check, so the dedicated network Dockerfile was built and passed without weakening checks. Cold Linux doctor testing exposed a mock that also intercepted `platform.platform()`; the test now intercepts only its intended probe, and the cold test plus full workbench suite passed. A stale acceptance-script package path and a task-local archive invocation were corrected before successful final observations.
 

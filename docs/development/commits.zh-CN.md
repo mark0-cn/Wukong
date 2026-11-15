@@ -19,7 +19,7 @@ git config --local core.hooksPath .githooks
 
 克隆 hook 文件不会自动启用，而且本地 hook 可以绕过，最终以 CI 为准。未启用 worktree 专属配置时，Git 配置在多个 worktree 之间共享。替换他人的 hook 前需检查已有设置。如果在此设置了上述选项，可通过 `git config --local --unset commit.template` / `git config --local --unset core.hooksPath` 撤销。
 
-`Commit policy / commit-policy` 在 PR 创建、重新打开、新提交、标题或正文编辑时检查 PR 标题、所有新增的非合并提交和发布片段。需将 GitHub Actions 的 `commit-policy` 状态检查加入 master Ruleset 的必需检查；仅提交 workflow 文件不会强制限制合并。该流程独立于较重的平台 CI，因此修改描述不会重跑构建。真实合并提交按拓扑排除，不信任标题中的声明。不重写旧历史，也不追溯检查旧提交。新的回滚提交同样使用 `revert: ...`。
+`Internal / Policy / commit-policy` 在 PR 创建、重新打开、新提交、标题或正文编辑时检查 PR 标题、所有新增的非合并提交和发布片段。需将 GitHub Actions 的 `commit-policy` 状态检查加入 master Ruleset 的必需检查；仅提交 workflow 文件不会强制限制合并。该流程独立于较重的平台 CI，因此修改描述不会重跑构建。真实合并提交按拓扑排除，不信任标题中的声明。不重写旧历史，也不追溯检查旧提交。新的回滚提交同样使用 `revert: ...`。
 
 兼容已有 `release: prepare vX.Y.Z` 自动化。版本 PR 使用匹配的 `codex/release-vX.Y.Z` 分支时，无需用户说明。Dependabot 的 `build(deps):` / `chore(deps):` PR（包括 `deps-dev`）无需片段，依赖详情会进入技术变更列表，但提交信息仍接受相同检查。其他机器人不整体豁免。
 

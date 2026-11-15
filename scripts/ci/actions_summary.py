@@ -117,10 +117,10 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
             "",
             cell(scope.get("reason", "范围计算失败")),
             "",
-            "Windows 版本及安装器检查始终执行；未选择的重型检查按规则跳过。",
+            "文档检查始终执行；平台、专项验收及客户端预构建按范围选择，意外跳过不能通过。",
             *[
                 f"- {name}: {cell(scope.get(name, 'unknown'))}"
-                for name in ("rust", "frontend", "linux")
+                for name in ("rust", "frontend", "linux", "apt", "uninstall", "release_clients")
             ],
             "",
         ]

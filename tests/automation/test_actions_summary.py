@@ -114,10 +114,21 @@ class SummaryTests(unittest.TestCase):
         needs = {
             "changes": {
                 "result": "success",
-                "outputs": dict(rust="false", frontend="false", linux="false"),
+                "outputs": dict(
+                    rust="false",
+                    frontend="true",
+                    linux="false",
+                    apt="false",
+                    uninstall="false",
+                    release_clients="false",
+                ),
             },
             "windows": {"result": "success", "outputs": {"rust_cache_hit": "true"}},
             "linux": {"result": "skipped"},
+            **{
+                name: {"result": "skipped"}
+                for name in ("acceptance", "windows-client", "linux-client", "linux-desktop-client")
+            },
         }
         jobs = [
             {

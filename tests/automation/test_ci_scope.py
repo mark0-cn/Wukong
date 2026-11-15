@@ -1,6 +1,8 @@
 import copy
 import unittest
-from scripts.ci.ci_scope import checks_passed, select_scope, prebuild_clients
+from scripts.ci.ci_scope import checks_passed, select_scope, prebuild_clients, changed_paths
+from unittest.mock import patch
+from scripts.ci.acceptance_gate import checks_passed as acceptance_passed
 
 
 class ScopeTests(unittest.TestCase):
@@ -37,7 +39,14 @@ class ScopeTests(unittest.TestCase):
         needs = {
             "changes": {
                 "result": "success",
-                "outputs": dict(rust="true", frontend="true", linux="true", release_clients="true"),
+                "outputs": dict(
+                    rust="true",
+                    frontend="true",
+                    linux="true",
+                    apt="false",
+                    uninstall="false",
+                    release_clients="true",
+                ),
             },
             **{
                 name: {"result": "success"}
@@ -50,6 +59,7 @@ class ScopeTests(unittest.TestCase):
                 )
             },
         }
+        needs["acceptance"] = {"result": "skipped"}
         self.assertTrue(checks_passed(needs))
         needs["linux-client"]["result"] = "skipped"
         self.assertFalse(checks_passed(needs))
@@ -58,8 +68,8 @@ class ScopeTests(unittest.TestCase):
         needs["linux-desktop-client"]["result"] = "skipped"
         self.assertTrue(checks_passed(needs))
 
-    def test_master_manual_and_release_always_run_full_checks(self):
-        for event in ("push", "workflow_dispatch", "workflow_call"):
+    def test_manual_and_release_always_run_full_checks(self):
+        for event in ("workflow_dispatch", "workflow_call"):
             scope = select_scope(["docs/development/releases.md"], event)
             self.assertTrue(all(scope[name] for name in ("rust", "frontend", "linux")))
         self.assertTrue(
@@ -111,9 +121,25 @@ class ScopeTests(unittest.TestCase):
             needs = {
                 "changes": {
                     "result": "success",
-                    "outputs": dict(rust="false", frontend="false", linux=linux),
+                    "outputs": dict(
+                        rust="false",
+                        frontend="false",
+                        linux=linux,
+                        apt="false",
+                        uninstall="false",
+                        release_clients="false",
+                    ),
                 },
-                "windows": {"result": "success"},
+                "windows": {"result": "success" if linux == "true" else "skipped"},
+                **{
+                    name: {"result": "skipped"}
+                    for name in (
+                        "acceptance",
+                        "windows-client",
+                        "linux-client",
+                        "linux-desktop-client",
+                    )
+                },
                 "linux": {"result": "success" if linux == "true" else "skipped"},
             }
             self.assertTrue(checks_passed(needs))
@@ -128,3 +154,75 @@ class ScopeTests(unittest.TestCase):
             del broken["changes"]["outputs"]["rust"]
             self.assertFalse(checks_passed(broken))
         self.assertFalse(checks_passed({}))
+
+    def test_docs_are_lightweight_on_pr_and_master_but_runtime_prompts_are_not(self):
+        for event in ("pull_request", "push"):
+            scope = select_scope(["AGENTS.md", "AGENTS.zh-CN.md", "docs/translations.json"], event)
+            self.assertFalse(
+                any(scope[k] for k in ("rust", "frontend", "linux", "apt", "uninstall"))
+            )
+            self.assertTrue(select_scope(["prompts/root.md"], event)["rust"])
+
+    def test_scope_does_not_lose_acceptance_paths_after_a_shared_path(self):
+        for paths, apt, uninstall in [
+            (["Cargo.lock", "scripts/ci/install_apt.py"], True, False),
+            (["Cargo.toml", "src/application/maintenance/cleanup/executor.rs"], False, True),
+            ([".github/workflows/ci.yml"], True, True),
+            (["ui/src/features/maintenance/CleanupReview.tsx"], False, True),
+            (["src/interfaces/cli/cleanup.rs"], False, True),
+            (["src/interfaces/desktop/cleanup.rs"], False, True),
+            (["src/interfaces/desktop/cleanup_review.rs"], False, True),
+            (["src/adapters/files/owned.rs"], False, True),
+            (["src/adapters/files/paths.rs"], False, True),
+            (["src/application/maintenance/updates/recovery.rs"], False, True),
+            (["ui/src/shared/api/commands.ts"], False, True),
+        ]:
+            for event in ("pull_request", "push"):
+                scope = select_scope(paths, event)
+                self.assertEqual((scope["apt"], scope["uninstall"]), (apt, uninstall))
+
+    def test_push_scope_uses_entire_before_after_range_and_pr_uses_merge_base(self):
+        with patch(
+            "scripts.ci.ci_scope.subprocess.check_output", return_value=b"src/old.rs\0docs/new.md\0"
+        ) as run:
+            self.assertEqual(changed_paths("a" * 40, "b" * 40), ["src/old.rs", "docs/new.md"])
+            self.assertEqual(run.call_args.args[0][-1], "a" * 40 + ".." + "b" * 40)
+            changed_paths("a" * 40, "b" * 40, pull_request=True)
+            self.assertEqual(run.call_args.args[0][-1], "a" * 40 + "..." + "b" * 40)
+            with self.assertRaises(ValueError):
+                changed_paths("0" * 40, "b" * 40)
+
+    def test_every_selected_acceptance_failure_blocks_both_gates(self):
+        needs = {
+            "changes": {
+                "result": "success",
+                "outputs": dict(
+                    rust="true",
+                    frontend="true",
+                    linux="true",
+                    apt="true",
+                    uninstall="true",
+                    release_clients="false",
+                ),
+            },
+            **{name: {"result": "success"} for name in ("windows", "linux", "acceptance")},
+            **{
+                name: {"result": "skipped"}
+                for name in ("windows-client", "linux-client", "linux-desktop-client")
+            },
+        }
+        self.assertTrue(checks_passed(needs))
+        for outcome in ("failure", "cancelled", "skipped", ""):
+            needs["acceptance"]["result"] = outcome
+            self.assertFalse(checks_passed(needs))
+        jobs = {name: {"result": "success"} for name in ("apt", "uninstall", "windows-worker")}
+        self.assertTrue(acceptance_passed(jobs, "all"))
+        for job in jobs:
+            for outcome in ("failure", "cancelled", "skipped", ""):
+                broken = copy.deepcopy(jobs)
+                broken[job]["result"] = outcome
+                self.assertFalse(acceptance_passed(broken, "all"))
+        self.assertFalse(acceptance_passed(jobs, "unknown"))
+        jobs["windows-worker"]["result"] = "skipped"
+        self.assertTrue(acceptance_passed(jobs, apt=True, uninstall=True))
+        self.assertFalse(acceptance_passed(jobs))

@@ -1,0 +1,100 @@
+name: Maintenance
+run-name: Maintenance · ${{ inputs.task || (github.event_name == 'push' && 'cache') || (github.event.schedule == '41 22 * * *' && 'cleanup') || 'toolchain' }}
+on:
+  schedule:
+    - cron: '41 22 * * *' # Daily 06:41 Asia/Shanghai: closed PR caches only.
+    - cron: '23 2 * * 1' # Monday 10:23 Asia/Shanghai: toolchain report only.
+  push:
+    branches: [master]
+    paths:
+      - workers/toolchain.lock.json
+      - scripts/toolchain/fetch_worker_deps.py
+      - .github/workflows/maintenance.yml
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Maintenance task'
+        type: choice
+        options: [cleanup, cache, toolchain]
+        default: cleanup
+      apply:
+        description: 'Apply closed-PR cache deletion (cleanup only; otherwise preview)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: maintenance-${{ inputs.task || (github.event_name == 'push' && 'cache') || (github.event.schedule == '41 22 * * *' && 'cleanup') || 'toolchain' }}
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/master' && (github.event.schedule == '41 22 * * *' || inputs.task == 'cleanup')
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Clean closed PR caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLY: ${{ github.event_name == 'schedule' || inputs.apply == true }}
+        run: |
+          if [[ "$APPLY" == true ]]; then
+            python -m scripts.ci.cleanup_ci_cache --apply
+          else
+            python -m scripts.ci.cleanup_ci_cache
+          fi
+
+  cache:
+    if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || inputs.task == 'cache')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: workers/deps
+          key: worker-deps-v1-${{ hashFiles('workers/toolchain.lock.json') }}
+      - name: Verify all cached files and download missing inputs
+        run: python -m scripts.toolchain.fetch_worker_deps
+      - name: Summarize shared cache
+        run: echo 'Locked tool downloads verified. Master cache is available to subsequent branch and tag builds.' >> "$GITHUB_STEP_SUMMARY"
+
+  toolchain:
+    if: github.ref == 'refs/heads/master' && (github.event.schedule == '23 2 * * 1' || inputs.task == 'toolchain')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Compare locked tools with upstream releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.toolchain.check_toolchain_updates
+      - name: Summarize findings
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f toolchain-report/report.md ]]; then
+            cat toolchain-report/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Toolchain check did not produce a report. Inspect the failed step.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: toolchain-update-report
+          path: toolchain-report/
+          retention-days: 30
+          if-no-files-found: warn
