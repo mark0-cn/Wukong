@@ -49,6 +49,7 @@ tool-artifact-stage = 传入共享制品
 tool-stage-target = 准备分析样本
 tool-file-put = 保存工作区文件
 tool-file-revise = 修订不可变文件
+tool-artifact-validate = 验收脚本判定逻辑
 tool-file-get = 读取工作区文件
 tool-exec-command = 执行分析命令
 tool-job-start = 启动后台分析任务

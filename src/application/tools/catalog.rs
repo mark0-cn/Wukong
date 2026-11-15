@@ -12,12 +12,15 @@ pub(super) struct Spec {
     pub(super) side_effecting: bool,
     pub(super) root_only: bool,
     pub(super) child_only: bool,
+    pub(super) verifier_only: bool,
     pub(super) model_visible: bool,
     pub(super) requirement: super::requirements::Requirement,
 }
 impl Spec {
     pub(super) fn allows(&self, role: Role) -> bool {
-        (!self.root_only || role == Role::Root) && (!self.child_only || role != Role::Root)
+        (!self.root_only || role == Role::Root)
+            && (!self.child_only || role != Role::Root)
+            && (!self.verifier_only || role == Role::Verifier)
     }
 }
 
@@ -34,6 +37,7 @@ enum Visibility {
     All,
     Root,
     Child,
+    Verifier,
     Internal,
 }
 
@@ -71,6 +75,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         model_visible: !matches!(visibility, Visibility::Internal),
         requirement,
         root_only: matches!(visibility, Visibility::Root),
+        verifier_only: matches!(visibility, Visibility::Verifier),
         child_only: matches!(visibility, Visibility::Child) || (target && name != "runtime_doctor"),
     }
 }
@@ -82,6 +87,16 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::ArtifactValidateArgs>(
+            "artifact_validate",
+            "tool-artifact-validate",
+            "Verifier only: independently test self_check_v1 Python or Shell script predicates with normal, abnormal-exit, signal, timeout, missing, truncated and contradictory observations. Bind the producer content evidence, verifier's successful same-target --verify baseline job, and its imported baseline.json. Starts a trusted bounded driver job; observe it before claiming acceptance. Tests simulated predicates, not target behavior or collector wiring.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            handlers::handle_artifact_validate,
+            Visibility::Verifier,
+            Requirement::ScriptValidation,
+        ),
         spec::<args::ArtifactStageArgs>(
             "artifact_stage",
             "tool-artifact-stage",
@@ -199,7 +214,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::AnalysisVerifyArgs>(
             "analysis_verify",
             "tool-analysis-verify",
-            "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes.",
+            "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes. Validator integration checks bind the real --verify job and an independent review of shared collector/evaluator wiring. Original owned job-status evidence is resolved automatically; errors identify invalid check indexes.",
             ReplayPolicy::Transactional,
             false,
             handlers::handle_analysis_verify,
@@ -841,6 +856,13 @@ mod role_tests {
     use super::*;
     #[test]
     fn target_operations_are_never_root_tools() {
+        let validator = builtins()
+            .iter()
+            .find(|s| s.definition.name == "artifact_validate")
+            .unwrap();
+        assert!(!validator.allows(Role::Root));
+        assert!(!validator.allows(Role::Analyst));
+        assert!(validator.allows(Role::Verifier));
         for name in [
             "binary_inspect",
             "function_decompile",

@@ -9,9 +9,10 @@
 | 工具 | 可见角色 | 有副作用 | 后端要求 | 用途 |
 |---|---|---|---|---|
 | `agent_finish` | analyst / verifier | 是 | controller | 以结构化结果结束子任务，覆盖契约、证据和缺口。summary 仅用于无必需产物的任务；提供 result 时忽略 summary，以 result.answer 为准。活动后代必须先结束。 |
-| `analysis_verify` | analyst / verifier | 是 | controller | 仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。 |
+| `analysis_verify` | analyst / verifier | 是 | controller | 仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。 validator_integration 检查绑定真实 --verify 任务与共用采集/判定路径的独立代码审查。自动解析自有任务原始状态证据；错误按索引标明无效检查。 |
 | `angr_solve` | analyst / verifier | 是 | angr.solve | 对 stdin 校验路径进行有界符号输入还原。提供模块相对成功/失败地址与输入长度，返回候选输入和探索统计的后台 job。简单可逆变换优先直接求逆，大状态空间使用切片或明确约束；必须在真实目标重放候选字节。 |
 | `artifact_stage` | analyst / verifier | 是 | file.upload.begin + file.upload.write + file.upload.commit | 通过有界可恢复传输，将同一 run 中通过哈希校验的证据制品传入分配的环境，返回 worker 文件和原始证据 ID。 |
+| `artifact_validate` | verifier | 是 | Linux self_check_v1 + py_run + file.put + job.status + job.artifacts | 仅 verifier 可用：对 self_check_v1 Python 或 Shell 脚本独立测试正常、异常退出、信号、超时、缺失、截断和矛盾观测。绑定生产者内容证据、verifier 成功执行同一目标 --verify 的基线任务及导入的 baseline.json。启动可信有界驱动任务；观察结果后才能声明验收通过。覆盖模拟判定，不证明目标行为或采集路径连接。 |
 | `binary_inspect` | analyst / verifier | 否 | controller | 检查本 run 的精确目标、架构、节、导入、符号和缓解机制。 |
 | `binary_strings` | analyst / verifier | 否 | controller | 分页搜索可打印字符串，附文件偏移地址引用。 |
 | `context_read` | 全部 | 否 | controller | 按字符范围读取同 run 的确切共享文档 JSON，含 amendments。kind/id 来自 context_search；沿 content.next_offset 读取所需完整内容。 |

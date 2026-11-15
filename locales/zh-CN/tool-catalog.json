@@ -4,8 +4,8 @@
     "text": "以结构化结果结束子任务，覆盖契约、证据和缺口。summary 仅用于无必需产物的任务；提供 result 时忽略 summary，以 result.answer 为准。活动后代必须先结束。"
   },
   "analysis_verify": {
-    "source": "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes.",
-    "text": "仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。"
+    "source": "Verifier only: record claim-level checks, limitations and verifier-owned evidence. Supported covers only listed checks; reproduction checks require the exact artifact and verifier job with status evidence. Does not certify the whole report or promote security impact. Records are immutable shared notes. Validator integration checks bind the real --verify job and an independent review of shared collector/evaluator wiring. Original owned job-status evidence is resolved automatically; errors identify invalid check indexes.",
+    "text": "仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。 validator_integration 检查绑定真实 --verify 任务与共用采集/判定路径的独立代码审查。自动解析自有任务原始状态证据；错误按索引标明无效检查。"
   },
   "angr_solve": {
     "source": "Bounded symbolic input reconstruction for stdin validation paths. Supply module-relative success/failure addresses and expected input length. Returns a background job with candidate input and exploration statistics. Prefer direct inversion for simple reversible transforms; slice or use explicit constraints for large state spaces. Always replay candidate bytes on the real target.",
@@ -286,6 +286,10 @@
   "xrefs_query": {
     "source": "Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
     "text": "Ghidra：查询绑定目标的 module_relative AddressRef 或兼容字节偏移的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。"
+  },
+  "artifact_validate": {
+    "source": "Verifier only: independently test self_check_v1 Python or Shell script predicates with normal, abnormal-exit, signal, timeout, missing, truncated and contradictory observations. Bind the producer content evidence, verifier's successful same-target --verify baseline job, and its imported baseline.json. Starts a trusted bounded driver job; observe it before claiming acceptance. Tests simulated predicates, not target behavior or collector wiring.",
+    "text": "仅 verifier 可用：对 self_check_v1 Python 或 Shell 脚本独立测试正常、异常退出、信号、超时、缺失、截断和矛盾观测。绑定生产者内容证据、verifier 成功执行同一目标 --verify 的基线任务及导入的 baseline.json。启动可信有界驱动任务；观察结果后才能声明验收通过。覆盖模拟判定，不证明目标行为或采集路径连接。"
   },
   "file_revise": {
     "source": "Create an immutable UTF-8 revision from original content evidence and 1..64 sequential, uniquely matching text replacements. name is a logical filename; reuse the returned hash-bound worker path and content_evidence_id. Originals are never overwritten. Prefer small revisions over retransmitting a complete script.",

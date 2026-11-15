@@ -88,6 +88,38 @@ impl Coordinator {
         tx.save_record(&agent)?;
         Self::notify_terminal(tx, &agent)?;
         if agent.role == Role::Root {
+            if result.outcome == TaskOutcome::Success {
+                let validations: Vec<ArtifactValidation> = tx.records(&agent.run_id)?;
+                let tasks: Vec<AgentMetadata> = tx.records(&agent.run_id)?;
+                let run: RunRecord = tx.get_record(&agent.run_id)?.context("run missing")?;
+                for task in &tasks {
+                    for name in task.contract.artifact_acceptance.keys() {
+                        let artifact = task
+                            .task_result
+                            .as_ref()
+                            .and_then(|r| r.artifacts.iter().find(|a| &a.name == name))
+                            .with_context(|| format!("acceptance artifact missing: {name}"))?;
+                        let evidence: Evidence = tx
+                            .get_record(&artifact.evidence_id)?
+                            .context("artifact evidence missing")?;
+                        ensure!(
+                            validations.iter().any(|v| v.passed
+                                && v.artifact_sha256 == evidence.sha256
+                                && v.target_sha256 == run.target_sha256
+                                && v.verifier_id != task.id
+                                && tasks
+                                    .iter()
+                                    .any(|a| a.id == v.verifier_id && a.role == Role::Verifier)
+                                && task.environment_id
+                                    == tasks
+                                        .iter()
+                                        .find(|a| a.id == v.verifier_id)
+                                        .and_then(|a| a.environment_id.clone())),
+                            "artifact {name} requires independent self_check_v1 acceptance for its final hash; use artifact_validate or finish inconclusive"
+                        );
+                    }
+                }
+            }
             // Independent verification gate: a flag value in any child's
             // accepted result must be reproduced by a verifier before the
             // assessment can close.

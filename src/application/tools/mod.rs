@@ -41,6 +41,7 @@ pub struct ToolService {
 mod analysis;
 mod analysis_verification;
 mod args;
+mod artifact_validation;
 mod catalog;
 mod coordination;
 mod discovery;

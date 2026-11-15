@@ -109,6 +109,10 @@ impl JobService {
                 tx.save_record(&current)
             })?;
             self.import_job_artifacts(agent, call, job_id).await?;
+            super::artifact_validation::observe(
+                &self.store,
+                &self.store.load::<JobRecord>(job_id)?,
+            )?;
             self.store.write(|tx| {
                 let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
                 if current.notification_message_id.is_some() {
@@ -168,6 +172,10 @@ impl JobService {
             .extra
             .insert("worker_job_id".into(), json!(status.job_id));
         status.job_id = job.id.clone();
+        if let Some(validation) = self.store.get_record::<ArtifactValidation>(&job.id)? {
+            status.extra.insert("artifact_validation".into(),json!({"validation_id":validation.id,
+                "settled":validation.status_evidence_id.is_some(),"passed":validation.passed,"details":validation.result}));
+        }
         Ok(serde_json::to_value(status)?)
     }
 

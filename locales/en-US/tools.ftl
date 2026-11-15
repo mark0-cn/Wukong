@@ -49,6 +49,7 @@ tool-artifact-stage = Stage shared artifact
 tool-stage-target = Prepare analysis target
 tool-file-put = Save workspace file
 tool-file-revise = Revise immutable file
+tool-artifact-validate = Test script validation predicates
 tool-file-get = Read workspace file
 tool-exec-command = Execute analysis command
 tool-job-start = Start background analysis

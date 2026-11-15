@@ -89,6 +89,20 @@ pub(in crate::application::tools) struct AnalysisVerifyArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct ArtifactValidateArgs {
+    pub artifact_evidence_id: String,
+    /// Verifier-owned baseline.json imported from the real --verify job's artifacts.
+    pub baseline_evidence_id: String,
+    pub baseline_job_id: String,
+    /// python3 or bash; other interpreters can implement the same stdin JSON protocol.
+    pub interpreter: String,
+    /// Original arguments after the script name; stage file arguments explicitly.
+    #[serde(default)]
+    pub arguments: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct AnalysisCheck {
     pub claim: String,
     pub expected: String,
@@ -111,6 +125,8 @@ pub(in crate::application::tools) enum AnalysisCheckKind {
     Algorithm,
     Boundary,
     Reproduction,
+    /// Independently inspect that real --verify and --validation-io share the same evaluator.
+    ValidatorIntegration,
     Static,
 }
 

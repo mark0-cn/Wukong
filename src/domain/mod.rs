@@ -285,6 +285,32 @@ pub struct TaskContract {
     pub deliverables: Vec<String>,
     /// Exact labels the result must explicitly account for on success.
     pub completion_conditions: Vec<String>,
+    /// Independent acceptance required before root can successfully deliver these artifacts.
+    pub artifact_acceptance: std::collections::BTreeMap<String, ArtifactAcceptanceProfile>,
+}
+
+#[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactAcceptanceProfile {
+    SelfCheckV1,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactValidation {
+    pub id: String,
+    pub run_id: String,
+    pub verifier_id: String,
+    pub worker_id: String,
+    pub target_sha256: String,
+    pub artifact_evidence_id: String,
+    pub artifact_sha256: String,
+    pub baseline_evidence_id: String,
+    pub baseline_sha256: String,
+    pub baseline_job_id: String,
+    pub job_id: String,
+    pub passed: bool,
+    pub status_evidence_id: Option<String>,
+    pub result: Option<serde_json::Value>,
 }
 
 #[derive(

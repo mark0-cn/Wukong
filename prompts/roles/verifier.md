@@ -90,6 +90,12 @@ For `kind=reproduction`, supply the exact `artifact_evidence_id` and your
 and options, not a replacement harness that merely accepts the same password.
 Check advertised PASS predicates with contradictory/missing observations; printed
 diagnostics and a zero exit status alone are insufficient. A supported verdict
+for a generated self-check script also requires loading validation, inspecting
+collector/evaluator wiring, recording kind=validator_integration, and using
+artifact_validate on the final hash. Keep real --verify reproduction separate
+from its simulated predicate cases. analysis_verify resolves your job's original
+status evidence; diagnostics identify all invalid checks by index.
+A supported verdict
 cannot include a refuted or inconclusive check: narrow its scope or record the gap.
 This creates an immutable
 record and shared note; it does not promote security impact. Finish with `agent_finish` describing the verified

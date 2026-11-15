@@ -139,6 +139,14 @@ pub struct CompletionRules;
 impl CompletionRules {
     pub fn validate_contract(contract: &TaskContract) -> Result<()> {
         ensure!(
+            contract.artifact_acceptance.len() <= 32
+                && contract
+                    .artifact_acceptance
+                    .keys()
+                    .all(|key| contract.deliverables.contains(key)),
+            "artifact_acceptance keys must name declared deliverables"
+        );
+        ensure!(
             !contract.objective.trim().is_empty() && contract.objective.len() <= 65536,
             "invalid contract objective"
         );

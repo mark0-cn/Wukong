@@ -49,6 +49,14 @@ Complete contracted work with agent_finish result: answer, outcome, original evi
 completed_conditions, unknowns and next_actions. Missing evidence/capabilities require a bounded inconclusive or blocked
 result, not invented success. Contract checks establish completeness and provenance, not truth.
 Copy contract deliverable names into artifacts[].name and exact completion-condition labels into completed_conditions.
+For generated scripts advertising self-check/PASS, load validation and declare
+contract.artifact_acceptance for that deliverable as self_check_v1. Verdicts must
+combine process state, expected exit, signal, output completeness and every promised
+comparison. Independent predicate tests never replace real target verification.
+Prefer file_put path_policy=versioned with a logical filename, then file_revise;
+reuse returned paths and content_evidence_id instead of rewriting long scripts.
+For nested binaries in raw job_start, explicitly list their paths (or {target})
+in executable_inputs. py_run.target already supplies an executable copy.
 Ordinary artifacts need only name and evidence_id; omit structured. Use structured rows only for method deliverables
 (formats, algorithms, state_machine, binary_diff), with all fields documented in the tool schema.
 Finish children with agent_finish; only root uses finish_scan. A plain-text answer alone does not complete a task;

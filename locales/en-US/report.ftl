@@ -1,4 +1,9 @@
 report-title = Binary analysis report
+report-artifact-validation = Script predicate acceptance
+report-predicate-limit = Simulated predicate checks only. Real target reproduction, collector wiring and complete claim coverage require separate independent evidence.
+report-predicate-pass = Passed
+report-predicate-fail = Not passed
+report-predicate-pending = Pending
 report-run = Run
 report-target = Target SHA256
 report-status = Status

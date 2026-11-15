@@ -49,6 +49,10 @@
 
 ## 结构化方法产物
 
+宣称支持自检的生成脚本须在任务合同中声明 `artifact_acceptance: {"deliverable_name":"self_check_v1"}`。生产者可先完成；root 成功收尾要求独立 verifier 针对最终内容哈希、目标和环境产生通过记录。`follow_up_agent.contract` 可为已完成且归属当前调用者的子任务安排新交付物，保留原约束、对话和累计用量。过期消息不能更改合同；各代结果归档保留当时合同。已有合同默认不增加要求，也不会追认通过新验收。
+
+`validation` 方法定义 Python 与 POSIX Shell 的独立 JSON 判定协议。`artifact_validate` 要求 verifier 从精确脚本的已记录成功任务中导入自有 `baseline.json`，并用 `validator_integration` 检查真实与模拟入口共用判定逻辑。可信 worker 驱动测试成功文本后的异常退出/信号、超时、不完整或缺失观测及矛盾。它证明有界判定行为，不证明整份脚本正确，也不表示真实目标发生过模拟故障。正常复现和独立目标对照仍单独进行。
+
 规范产物名 `formats`、`algorithms`、`state_machine`、`binary_diff` 要求匹配 `structured.kind`，包含 1–256 行；每行引用同 run 的 `evidence_id`。必需字段分别为 formats：offset/width/encoding/meaning/confidence；algorithms：input/expected/observed/arithmetic；state_machine：from/action/to/expected/observed；binary_diff：baseline_sha256/target_sha256/before/after。摘要为 64 位十六进制。另行关联原始产物；结构完整不等于正确，独立 verifier 必须挑战语义声明。旧的非规范产物名继续支持。
 
 普通交付物只需契约中的精确名称和原始 `evidence_id`；不要求方法行时省略 `structured`。完成条件使用契约中的精确标签。校验会指出缺失的交付物名称，并一次列出首个无效行的全部缺失字段，避免每轮猜测一个字段来修正结果。
