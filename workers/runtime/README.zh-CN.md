@@ -20,6 +20,8 @@ Bridge 启动时会在导入 worker 模块前禁用 Python 字节码写入，新
 
 元数据发布使用 `atomicwrites`：完整 UTF-8 JSON 在替换前刷盘，写入失败时清理临时文件。Windows 写穿移动和 POSIX 父目录同步由库处理。仅对 Windows 临时访问/共享冲突重试，最多五次；保留记录失败不得授权执行。已有操作记录损坏仍报错，绝不静默重置。Linux bridge 依赖固定在 `requirements.txt`；原生 Windows 元数据不使用这套 Python 实现。故障注入检查不证明断电或当前源码的 VM 重启验收通过。
 
+作业准入在预留资源前形成有类型的内部计划。网络、LaunchSpec、重放和进程校验规范化参数的私有副本，并计算原有请求指纹；作业管理器仍用同一把锁覆盖重复请求查询、预留、UID 分配和监督器创建。启动失败保留预留记录供对账，绝不授权自动重启。传输 schema 和状态格式仍由共享协议及既有账本管理。
+
 Docker 镜像自动安装依赖。GDB/MI 结果含解析后的 `payload`；异步事件是 type、message、payload、原始 `record` 的结构化记录。原始 MI transcript 保留为证据。
 
 ## Docker

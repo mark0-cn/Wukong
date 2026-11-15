@@ -10,6 +10,51 @@ from worker_jobs import JobManager
 
 
 class ProcessLaunchPlanningTests(unittest.TestCase):
+    def test_normalized_request_fingerprint_and_duplicate_do_not_depend_on_runner_token(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manager = JobManager(root, True, False)
+            params = {
+                "argv": ["fixture", "arg"],
+                "request_id": "job-admission-fixture",
+                "timeout_secs": None,
+                "output_limit": None,
+            }
+            original = json.loads(json.dumps(params))
+            with patch("worker_jobs.subprocess.Popen", return_value=Mock(pid=123)) as spawn:
+                first = manager.start_job(params)
+                duplicate = manager.start_job(params)
+                self.assertEqual(first["job_id"], duplicate["job_id"])
+                self.assertEqual(spawn.call_count, 1)
+                self.assertEqual(params, original)
+                meta = json.loads((root / "jobs" / first["job_id"] / "status.json").read_text())
+                self.assertEqual(
+                    meta["fingerprint"],
+                    "b9175accce21c0366f487d7a49f676ccdbde5e826e2907fe2556cbdae04e5b9c",
+                )
+                self.assertNotIn("runner_token", first)
+                with self.assertRaisesRegex(ValueError, "different request"):
+                    manager.start_job({**params, "argv": ["different"]})
+                self.assertEqual(spawn.call_count, 1)
+
+    def test_failed_spawn_keeps_reservation_and_retry_never_reexecutes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manager = JobManager(root, True, False)
+            params = {"argv": ["fixture"], "request_id": "spawn-failure"}
+            with patch(
+                "worker_jobs.subprocess.Popen", side_effect=OSError("fixture spawn failed")
+            ) as spawn:
+                with patch("worker_jobs.time.time", return_value=100):
+                    with self.assertRaisesRegex(OSError, "fixture spawn failed"):
+                        manager.start_job(params)
+                with patch("worker_jobs.time.time", return_value=111):
+                    retry = manager.start_job(params)
+                self.assertEqual(spawn.call_count, 1)
+                self.assertEqual(retry["state"], "lost")
+                self.assertIn("never created", retry["error"])
+                self.assertEqual(len(list((root / "jobs").iterdir())), 1)
+
     def test_launch_only_job_records_manifest_timeout_and_rejects_overrides_before_spawn(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

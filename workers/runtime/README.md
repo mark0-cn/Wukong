@@ -24,6 +24,8 @@ Bridge startup disables Python bytecode writes before importing worker modules, 
 
 Metadata publication uses `atomicwrites`: complete UTF-8 JSON is flushed before replacement, and failed writes clean up their temporary files. The library handles Windows write-through moves and POSIX parent-directory synchronization. Only transient Windows access/sharing violations retry, at most five times; a failed reservation never authorizes execution. Corrupted existing operation records remain errors and are never silently reset. Linux bridge dependencies are pinned in `requirements.txt`; native Windows metadata does not use this Python implementation. Failure-injection checks do not establish power-loss or current-source VM reboot acceptance.
 
+Job admission builds a typed internal plan before reserving resources. Network/LaunchSpec/replay/process validation normalizes a private parameter copy and computes the existing request fingerprint; the job manager retains one lock across duplicate lookup, reservation, UID allocation and supervisor creation. A failed spawn leaves its reservation for reconciliation and never authorizes an automatic respawn. Wire schemas and state formats remain owned by the shared protocol and existing ledgers.
+
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
 and the original `record`. Original MI transcripts remain available as evidence.

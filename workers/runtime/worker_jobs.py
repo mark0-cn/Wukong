@@ -1,9 +1,10 @@
 """Jobs."""
 
 from pathlib import Path
+from collections.abc import Callable
+from typing import Any
 import hashlib
 import json
-import secrets
 import subprocess
 import sys
 import threading
@@ -24,172 +25,89 @@ from worker_common import (
     safe_env,
     tail,
 )
+from worker_job_plan import JobPlan, prepare_job
 from worker_processes import detached_options, process_identity
 
 
 class JobManager:
-    def __init__(self, root, trusted, isolated, observe=None):
+    def __init__(
+        self,
+        root: Path,
+        trusted: bool,
+        isolated: bool,
+        observe: Callable[[], dict[str, Any]] | None = None,
+    ):
         self.root, self.trusted, self.isolated = root, trusted, isolated
         self.observe = observe
         self.lock = threading.RLock()
         (root / "jobs").mkdir(exist_ok=True)
 
-    def start_job(self, params, kind="process"):
-        if not self.trusted and not self.isolated:
-            raise ValueError(
-                "production execution requires a root Linux worker with UID/GID/CHOWN capabilities; use explicit trusted_local only for trusted fixtures"
-            )
-        spec = dict(params)
-        if kind == "minimize" and any(spec.get(key) is not None for key in ("trials", "expected")):
-            raise ValueError(
-                "input.minimize owns candidate trials and crash equivalence; trials/expected are not minimization options"
-            )
-        launch = None
-        if spec.get("network") is not None:
-            from worker_network import network_profile, validate_plan
-
-            if kind != "verify" or any(
-                spec.get(key) is not None for key in ["args", "env", "expected", "input_mode"]
-            ):
-                raise ValueError(
-                    "network plans are exclusive to poc.verify and cannot override local replay parameters"
-                )
-            spec["trusted_local"] = self.trusted
-            binding = network_profile(self.root, spec, self.trusted)
-            if binding != spec.get("network_binding"):
-                raise ValueError("network binding must match the admitted service profile")
-            input_path = public_file(self.root, spec["input"])
-            if input_path.stat().st_size > 1048576:
-                raise ValueError("network input exceeds 1 MiB")
-            validate_plan(spec["network"], input_path.read_bytes())
-        elif spec.get("launch_spec"):
-            if kind == "process" and (
-                spec.get("argv") or spec.get("env") or spec.get("cwd") not in (None, ".")
-            ):
-                raise ValueError("LaunchSpec owns process argv, environment and cwd")
-            from worker_launch import load
-
-            launch, _, _, _, _ = load(self.root, spec)
-            if (
-                kind == "process"
-                and params.get("timeout_secs") is not None
-                and params["timeout_secs"] != launch.get("timeout_secs", 30)
-            ):
-                raise ValueError("LaunchSpec owns its execution timeout")
-            spec["input_mode"] = "stdin" if launch["input_mode"] == "stdin_pipe" else "argv"
-            if launch["input_mode"] == "pty":
-                raise ValueError(
-                    "PTY replay is not supported; use interact.start and verify the delivery mode explicitly"
-                )
-            spec.setdefault("timeout_secs", launch.get("timeout_secs", 30))
-        spec["isolated"] = self.isolated
-        spec["call_id"] = spec.get("call_id") or spec.get("request_id")
-        spec["kind"] = kind
-        spec["timeout_secs"] = bounded_int(spec.get("timeout_secs"), 30, 1, 86400)
-        spec["output_limit"] = bounded_int(spec.get("output_limit"), 1048576, 1024, 8 * 1048576)
-        spec["runner_token"] = secrets.token_hex(32)
-        if kind in {"replay", "verify", "minimize"}:
-            target = public_file(self.root, spec["target"])
-            input_path = public_file(self.root, spec["input"])
-            if (
-                not target.is_file()
-                or not input_path.is_file()
-                or input_path.stat().st_size > MAX_FILE
-            ):
-                raise ValueError("target/input must be files and input must be <=32 MiB")
-            spec["timeout_secs"] = min(spec["timeout_secs"], 60)
-            spec["trials"] = bounded_int(spec.get("trials"), 3 if kind == "verify" else 1, 1, 16)
-            spec["max_attempts"] = bounded_int(spec.get("max_attempts"), 128, 1, 4096)
-            spec["minimize_timeout_secs"] = bounded_int(
-                spec.get("minimize_timeout_secs"), 300, 1, 3600
-            )
-            if kind == "verify":
-                if (
-                    not spec.get("verifier_agent_id")
-                    or not spec.get("producer_agent_id")
-                    or not spec.get("call_id")
-                ):
-                    raise ValueError(
-                        "poc.verify requires verifier_agent_id, producer_agent_id and call_id"
-                    )
-                if spec["verifier_agent_id"] == spec["producer_agent_id"]:
-                    raise ValueError("independent verifier must differ from PoC producer")
-        else:
-            if spec.get("launch_spec"):
-                if kind != "process":
-                    raise ValueError("LaunchSpec owns process argv, environment and cwd")
-            elif not isinstance(spec.get("argv"), list) or not spec["argv"]:
-                raise ValueError("argv is required")
-            cwd = confined(self.root, spec.get("cwd", "."), True)
-            if not cwd.is_dir():
-                raise ValueError("cwd must be a worker directory")
-            if spec.get("input") is not None:
-                source = public_file(self.root, spec["input"])
-                if not source.is_file() or source.stat().st_size > MAX_FILE:
-                    raise ValueError("process input must be a staged file <=32 MiB")
-        safe_env(spec.get("env"))
-        call_id = spec.get("call_id")
-        # Match the complete request, not just an id, to avoid silently reusing
-        # unrelated work. Reconnect callers can safely retry job creation.
-        fingerprint_spec = {k: v for k, v in spec.items() if k != "runner_token"}
-        fingerprint = hashlib.sha256(
-            json.dumps(fingerprint_spec, sort_keys=True).encode()
-        ).hexdigest()
+    def start_job(self, params: dict[str, Any], kind: str = "process") -> dict[str, Any]:
+        plan = prepare_job(self.root, params, kind, trusted=self.trusted, isolated=self.isolated)
         with self.lock:
-            if call_id:
-                for path in (self.root / "jobs").glob("*/status.json"):
-                    existing = load_json(path)
-                    if existing.get("call_id") == call_id:
-                        if existing["fingerprint"] != fingerprint:
-                            raise ValueError("call_id already used with a different request")
-                        return self.status(existing["job_id"])
-            identifier = (
-                hashlib.sha256((kind + ":" + str(spec["request_id"])).encode()).hexdigest()[:32]
-                if spec.get("request_id")
-                else uuid.uuid4().hex
-            )
-            directory = self.root / "jobs" / identifier
-            if directory.exists():
-                existing = load_json(directory / "status.json")
-                if existing.get("fingerprint") != fingerprint:
-                    raise ValueError("request_id already used with different job parameters")
-                return self.status(identifier)
-            directory.mkdir()
-            if self.isolated:
-                import isolation
+            return self._reserve_and_start(plan)
 
-                spec["execution_uid"] = isolation.allocate_uid(self.root)
-            meta = {
-                "job_id": identifier,
-                "kind": kind,
-                "state": "queued",
-                "created_at": time.time(),
-                "call_id": call_id,
-                "fingerprint": fingerprint,
-                "runner_token": spec["runner_token"],
-                "artifacts_dir": "jobs/" + identifier,
-            }
-            atomic_json(directory / "spec.json", spec)
-            atomic_json(directory / "status.json", meta)
-            with (directory / "supervisor.log").open("ab") as log:
-                process = subprocess.Popen(
-                    [
-                        sys.executable,
-                        str(BRIDGE_PATH),
-                        "--state",
-                        str(self.root),
-                        "--run-job",
-                        identifier,
-                    ],
-                    env=safe_env(),
-                    stdin=subprocess.DEVNULL,
-                    stdout=log,
-                    stderr=log,
-                    **detached_options(),
-                )
-            # Popen is intentionally not waited: it is owned by its supervisor.
-            meta["supervisor_pid"] = process.pid
-            return {k: v for k, v in meta.items() if k != "runner_token"}
+    def _reserve_and_start(self, plan: JobPlan) -> dict[str, Any]:
+        # Caller holds the admission lock through duplicate lookup, durable
+        # reservation and process creation. Failed/uncertain jobs are never respawned.
+        spec = plan.spec
+        fingerprint = plan.fingerprint
+        call_id = spec.get("call_id")
+        kind = spec["kind"]
+        if call_id:
+            for path in (self.root / "jobs").glob("*/status.json"):
+                existing = load_json(path)
+                if existing.get("call_id") == call_id:
+                    if existing["fingerprint"] != fingerprint:
+                        raise ValueError("call_id already used with a different request")
+                    return self.status(existing["job_id"])
+        identifier = (
+            hashlib.sha256((kind + ":" + str(spec["request_id"])).encode()).hexdigest()[:32]
+            if spec.get("request_id")
+            else uuid.uuid4().hex
+        )
+        directory = self.root / "jobs" / identifier
+        if directory.exists():
+            existing = load_json(directory / "status.json")
+            if existing.get("fingerprint") != fingerprint:
+                raise ValueError("request_id already used with different job parameters")
+            return self.status(identifier)
+        directory.mkdir()
+        if self.isolated:
+            import isolation
+
+            spec["execution_uid"] = isolation.allocate_uid(self.root)
+        meta = {
+            "job_id": identifier,
+            "kind": kind,
+            "state": "queued",
+            "created_at": time.time(),
+            "call_id": call_id,
+            "fingerprint": fingerprint,
+            "runner_token": spec["runner_token"],
+            "artifacts_dir": "jobs/" + identifier,
+        }
+        atomic_json(directory / "spec.json", spec)
+        atomic_json(directory / "status.json", meta)
+        with (directory / "supervisor.log").open("ab") as log:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(BRIDGE_PATH),
+                    "--state",
+                    str(self.root),
+                    "--run-job",
+                    identifier,
+                ],
+                env=safe_env(),
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=log,
+                **detached_options(),
+            )
+        # Popen is intentionally not waited: it is owned by its supervisor.
+        meta["supervisor_pid"] = process.pid
+        return {k: v for k, v in meta.items() if k != "runner_token"}
 
     def status(self, identifier):
         directory = job_dir(self.root, identifier)
