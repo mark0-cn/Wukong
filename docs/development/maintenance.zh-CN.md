@@ -8,11 +8,11 @@
 
 ## 模块边界
 
-- `kernel` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`kernel_host` 暴露业务操作，`supervisor` 独立管理心跳和后台任务观察；`model_catalog`、`usage`、`bootstrap` 分别负责模型选择、用量和装配。
-- `tools` 保留执行管线和共同校验入口，`effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
-- `queries` 定义中立 DTO，`application/queries` 管理持有 Store 的查询入口；`store/workspace`、`store/report_queries` 实现 SQL。`store/desktop_queries` 在同一事务读取完整快照，`desktop/workspace` 和 `desktop/presentation` 在事务结束后转换展示，不额外查询。`ui/src/shared/api/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
-- `coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
-- `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 5，不提供旧数据库迁移。
+- `application/agent_runtime` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`application/agent_runtime/host` 暴露业务操作，`application/assessment/supervisor` 独立管理心跳和后台任务观察；`application/model_catalog`、`application/usage`、`bootstrap` 分别负责模型选择、用量和装配。
+- `application/tools` 保留执行管线和共同校验入口，`application/effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
+- `queries` 定义中立 DTO，`application/queries` 管理持有 Store 的查询入口；`storage/queries/workspace_delta`、`storage/queries/report` 实现 SQL。`storage/queries/workspace_snapshot` 在同一事务读取完整快照，`interfaces/desktop/workspace` 和 `interfaces/desktop/presentation` 在事务结束后转换展示，不额外查询。`ui/src/shared/api/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
+- `application/coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`adapters/binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
+- `storage` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`storage/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 5，不提供旧数据库迁移。
 
 worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目录及生成的协议 schema，并安装独立 `workers/analysis` 包；入口文件不承担模块重导出。Windows 打包使用显式组件清单，不复制 Linux 运行时。
 
@@ -45,7 +45,7 @@ worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目�
 
 ## 工具文档
 
-工具定义、参数 schema、角色权限、模型可见性和显示消息 ID 来自同一注册表；双语文案来自共享 Fluent 资源。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供消息 ID 并补齐双语标题。Markdown 工具清单也从注册表生成：
+工具定义、参数 schema、角色权限、模型可见性和显示消息 ID 来自同一注册表；双语文案来自共享 Fluent 资源。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `interfaces/desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供消息 ID 并补齐双语标题。Markdown 工具清单也从注册表生成：
 
 ```sh
 cargo run -- tool-catalog > docs/reference/tool-catalog.md
@@ -77,7 +77,7 @@ cargo test --test tool_catalog
 
 `domain/claims` 统一解析 flag 形状的声明；完成工具拒绝占位符，协调器按具体声明执行独立验证门槛。解析结果只表示文本分类，不证明利用成功。
 
-Rust 文件哈希和实际读取字节计数放在 `content`，`binary` 保留公开哈希接口；worker 使用 `worker_common.sha256_file`，构建与发布脚本使用 `scripts._lib.checksums.sha256`。独立注入沙箱的脚本保持自包含，不引入控制端模块。路径限制、大小预算和控制端/worker 的独立身份核对仍留在调用边界，不因共用哈希函数而合并或删除。
+Rust 文件哈希和实际读取字节计数放在 `content`，`adapters/binary` 保留公开哈希接口；worker 使用 `worker_common.sha256_file`，构建与发布脚本使用 `scripts._lib.checksums.sha256`。独立注入沙箱的脚本保持自包含，不引入控制端模块。路径限制、大小预算和控制端/worker 的独立身份核对仍留在调用边界，不因共用哈希函数而合并或删除。
 
 <a id="validation"></a>
 

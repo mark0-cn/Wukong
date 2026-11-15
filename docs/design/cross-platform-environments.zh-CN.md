@@ -80,7 +80,7 @@ Windows 使用固定版本的外部 WinDbg MCP 和 `rmcp` 客户端；自写 Dbg
 
 ## 控制器执行边界
 
-`ToolService` 负责角色准入、工具分派及持久结果处理。每次调用通过 `ToolContext` 借用控制器，并携带由一个 `BoundWorker` 组装的执行及分析服务；绑定时不克隆整个控制器。环境连接、配置快照、身份固定、租约及重连仍由 `environments`/`runtime` 负责。
+`ToolService` 负责角色准入、工具分派及持久结果处理。每次调用通过 `ToolContext` 借用控制器，并携带由一个 `BoundWorker` 组装的执行及分析服务；绑定时不克隆整个控制器。环境连接、配置快照、身份固定、租约及重连仍由 `adapters/environments`/`adapters/worker` 负责。
 
 `WorkerGateway` 接收共享的类型化 `Request` 契约，保留稳定请求标识，在展示转换之前保存 Worker 原始回执。作业和会话服务根据运行、所有者及 Worker 校验控制器 ID，发送记录中的 Worker 资源 ID，核对返回身份，并明确构造面向控制器的引用。原始状态制品保留 Worker 标识。控制器调用收据与 Worker 执行账本保持分离。
 

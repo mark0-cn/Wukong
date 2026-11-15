@@ -55,8 +55,8 @@ These role constraints apply to the Wukong runtime; they do not instruct reposit
 
 - `root` orchestrates/summarizes; appropriate workers analyze/execute; an independent `verifier` verifies.
 - Roles determine permissions/completion protocol. Skills add methods, inputs and artifacts, never permissions or completion-gate bypasses.
-- For capability changes, check affected registrations, assembly, prompts and examples in `src/prompts.rs`, `src/agents.rs` and `prompts/`; validate selection/permission behavior.
-- Unified registries such as `src/tools/catalog.rs` own definitions, schemas, role visibility and catalogs. Regenerate and check documentation after tool changes.
+- For capability changes, check affected registrations, assembly, prompts and examples in `src/application/prompts.rs`, `src/application/agents.rs` and `prompts/`; validate selection/permission behavior.
+- Unified registries such as `src/application/tools/catalog.rs` own definitions, schemas, role visibility and catalogs. Regenerate and check documentation after tool changes.
 - Do not claim capabilities only in prompts: backend, permission checks and callable paths must exist.
 - Preserve typed protocols/module boundaries. Reuse Rig for generic scheduling, sessions and retries; keep business rules in the business layer.
 

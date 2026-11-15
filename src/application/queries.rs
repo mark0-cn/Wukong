@@ -1,5 +1,5 @@
 //! Application query facades delegate persistence to the store.
-use crate::{queries::models::*, store::Store};
+use crate::{queries::models::*, storage::Store};
 use anyhow::Result;
 pub struct ReportQueries<'a> {
     store: &'a Store,
@@ -9,7 +9,7 @@ impl<'a> ReportQueries<'a> {
         Self { store }
     }
     pub fn snapshot(&self, run: &str) -> Result<ReportSnapshot> {
-        crate::store::report_queries::snapshot(self.store, run)
+        crate::storage::queries::report::snapshot(self.store, run)
     }
 }
 pub struct AssessmentQueries<'a> {
@@ -20,10 +20,10 @@ impl<'a> AssessmentQueries<'a> {
         Self { store }
     }
     pub fn runs(&self) -> Result<Vec<RunSummary>> {
-        crate::store::workspace::runs(self.store)
+        crate::storage::queries::workspace_delta::runs(self.store)
     }
     pub fn status(&self, run: &str, limit: usize) -> Result<RunStatus> {
-        crate::store::workspace::status(self.store, run, limit)
+        crate::storage::queries::workspace_delta::status(self.store, run, limit)
     }
 }
 pub struct FindingQueries<'a> {
@@ -34,10 +34,10 @@ impl<'a> FindingQueries<'a> {
         Self { store }
     }
     pub fn details(&self, run: &str, id: &str) -> Result<FindingDetails> {
-        crate::store::finding_queries::details(self.store, run, id)
+        crate::storage::queries::findings::details(self.store, run, id)
     }
     pub fn preview(&self, run: &str, id: &str, offset: u64) -> Result<EvidencePreview> {
-        crate::store::finding_queries::preview(self.store, run, id, offset)
+        crate::storage::queries::findings::preview(self.store, run, id, offset)
     }
 }
 #[cfg(test)]

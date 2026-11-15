@@ -8,7 +8,7 @@ class ScopeTests(unittest.TestCase):
         scope = select_scope(["README.md"], "pull_request", force_full=True)
         self.assertTrue(all(scope[name] for name in ("rust", "frontend", "linux")))
     def test_release_fragments_preserve_frontend_scope_but_unknown_note_files_do_not(self):
-        selected = select_scope(["ui/src/components/Updates.tsx", ".changes/release-notes.toml"], "pull_request")
+        selected = select_scope(["ui/src/features/maintenance/Updates.tsx", ".changes/release-notes.toml"], "pull_request")
         self.assertTrue(selected["frontend"])
         self.assertFalse(selected["rust"])
         self.assertFalse(selected["linux"])
@@ -44,7 +44,7 @@ class ScopeTests(unittest.TestCase):
 
     def test_known_paths_select_only_relevant_expensive_checks(self):
         for paths, expected in [(["README.md", "README.en.md", "README.zh-CN.md", "docs/translations.json", "docs/development/releases.zh-CN.md"], (False, False, False)),
-                                (["ui/src/App.tsx"], (False, True, False)),
+                                (["ui/src/app/App.tsx"], (False, True, False)),
                                 (["workers/runtime/requirements.txt"], (False, False, True)),
                                 (["workers/tests/unit/test_profile.py"], (False, False, True)),
                                 (["evals/analysis/score.py", "fixtures/src/benign.c"], (False, False, True)),

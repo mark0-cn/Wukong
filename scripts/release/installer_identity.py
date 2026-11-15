@@ -19,7 +19,7 @@ def identity(target, root=ROOT):
     recipe = hashlib.sha256()
     for name in (".github/workflows/build-installer.yml", "scripts/release/installer_artifact.py",
                  "scripts/release/installer_identity.py", "tauri.conf.json", "tauri." + target + ".conf.json",
-                 "rust-toolchain.toml", "package-lock.json", "src/desktop/update-public.key"):
+                 "rust-toolchain.toml", "package-lock.json", "src/interfaces/desktop/update-public.key"):
         recipe.update(name.encode() + b"\0" + (root / name).read_bytes())
     return dict(schema=1, target=target, recipe=recipe.hexdigest(), version=version(root=root),
                 source_revision=subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip())

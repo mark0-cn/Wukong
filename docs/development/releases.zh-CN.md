@@ -160,7 +160,7 @@ Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改�
 
 客户端读取正式 Release 的 `latest.json` 和 `latest.json.sig`，先验证清单签名，再读取版本、平台、镜像 digest 与兼容性。
 下载 EXE/AppImage 后再次验证文件签名、SHA256 与大小；不使用 Docker `latest` 决定运行环境。
-公钥位于 `src/desktop/update-public.key` 和 Tauri 配置，必须保持一致。私钥存于 Actions Secret，并由管理员在仓库外备份；丢失密钥不能通过重新生成密钥为已有客户端无缝更新。
+公钥位于 `src/interfaces/desktop/update-public.key` 和 Tauri 配置，必须保持一致。私钥存于 Actions Secret，并由管理员在仓库外备份；丢失密钥不能通过重新生成密钥为已有客户端无缝更新。
 更新签名不替代 Windows Authenticode；当前安装文件没有系统代码签名。
 
 更新的检查、准备、切换和确认规则见[桌面更新设计](desktop-updates.zh-CN.md)。手动演练签署候选产物，但不修改正式 Release 或应用稳定更新入口。

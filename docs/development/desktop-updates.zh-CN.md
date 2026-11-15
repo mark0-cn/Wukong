@@ -20,7 +20,7 @@ Linux 支持范围以桌面安装验收矩阵为准，AppImage 不承诺兼容�
 发布目录中的 `latest.json` 同时供 Tauri 和环境管理使用；应用先验证其独立签名，再将同一份内容传给 Tauri `restore_update`，避免两次查询得到不同版本。
 清单仅允许当前项目对应版本的 HTTPS 附件和公开 `hlmark0/wukong` digest。签名密钥不是模型密钥，也不进入镜像。
 
-`desktop/updates.rs` 处理检查、下载、独立候选自检、安装和 GUI 进度。准备阶段不替换现用 worker。
+`interfaces/desktop/updates.rs` 处理检查、下载、独立候选自检、安装和 GUI 进度。准备阶段不替换现用 worker。
 安装前缓存并验证当前版本安装文件，原子保存恢复助手与 `updates/pending.json`。新进程只有在版本匹配且配套环境 doctor 通过后才将记录转为 `previous.json`。
 未确认更新阻止新任务启动；`maintenance.lock` 以共享/独占文件锁协调 GUI、CLI 和更新操作。
 模型设置及题目环境不参加版本替换；只接受数据 schema 5，不执行不兼容数据库迁移。
@@ -89,7 +89,7 @@ Docker 的 info、inspect、version、ps 控制查询最多等待 30 秒，其�
 
 具名环境清单仅登记 `trusted_local` worker 状态目录；Docker/SSH 的状态路径不作为本地 worker 清理根目录。关闭本地 worker 时检查协议 2。不可变只读 SQLite 归属检查识别状态 schema 3 和 4，不执行迁移，也不在旧工作区中启动分析任务。
 
-`desktop/cleanup.rs` 在独立的 webview profile 中只开放偏好、预览、确认和取消，不组装工作区服务。复用现有 React Modal、语言目录和类型化桥接展示同一份清单，界面最多展示 200 个路径/资源/保留项，后端保留完整预览。确认将清单保存到应用数据之外后退出，原生 hook 等 WebView 锁释放后调用无界面执行器。`packaging/windows/uninstall-hooks.nsh` 使用 Tauri 支持的 hook，不复制其 NSIS 模板。升级/被动路径不清理；共享清理关闭原生递归应用数据删除。匹配的 `cleanup finish` 在原生程序移除后解除延迟准入。Linux 只移除受管理的 AppImage/启动器/图标集成，便携副本保留。
+`interfaces/desktop/cleanup.rs` 在独立的 webview profile 中只开放偏好、预览、确认和取消，不组装工作区服务。复用现有 React Modal、语言目录和类型化桥接展示同一份清单，界面最多展示 200 个路径/资源/保留项，后端保留完整预览。确认将清单保存到应用数据之外后退出，原生 hook 等 WebView 锁释放后调用无界面执行器。`packaging/windows/uninstall-hooks.nsh` 使用 Tauri 支持的 hook，不复制其 NSIS 模板。升级/被动路径不清理；共享清理关闭原生递归应用数据删除。匹配的 `cleanup finish` 在原生程序移除后解除延迟准入。Linux 只移除受管理的 AppImage/启动器/图标集成，便携副本保留。
 
 Docker 清理复用有界 Workbench Docker 客户端，核对本地 socket、工作区标签和稳定身份，删除前重查保留容器的引用；不强制删除镜像，也不 prune。保留 Docker 范围/共用资源时，留下最小环境记录与导入副本。待完成更新、活动维护锁/工作区锁、本地 worker 拒绝关闭都会阻止删除。部分文件失败时保留其余元数据；原生卸载中止并报告。`tests/acceptance/check_cleanup.py` 拒绝在可丢弃的 GitHub 托管 runner 之外运行破坏性原生/Docker 验收。`cleanup-acceptance.yml` 构建未签名的测试 NSIS 包；普通 Linux CI 验证运行中的夹具容器/共用资源保留。这些不能证明 Windows Docker Desktop 跨版本验收通过。
 

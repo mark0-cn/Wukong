@@ -10,19 +10,24 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class ExecutionBoundaries(unittest.TestCase):
     def test_application_services_do_not_assemble_through_bootstrap(self):
-        for name in ["application.rs", "runner.rs", "tools.rs"]:
+        for name in ["application/assessment/mod.rs", "application/assessment/runner.rs", "application/tools/mod.rs"]:
             source = (ROOT / "src" / name).read_text(encoding="utf-8")
             self.assertNotRegex(source, r"\bbootstrap\s*::", name)
+
+    def test_domain_depends_on_protocol_without_host_adapters(self):
+        for path in (ROOT / "src/domain").rglob("*.rs"):
+            self.assertNotRegex(path.read_text(encoding="utf-8"),
+                                r"\b(?:runtime|adapters|desktop|interfaces|storage|store)\s*::", str(path))
 
     def test_filesystem_capabilities_do_not_depend_on_frontend_or_maintenance(self):
         for path in (ROOT / "src/adapters/files").glob("*.rs"):
             source = path.read_text(encoding="utf-8")
             self.assertNotRegex(source, r"\b(?:desktop|cleanup|updates|workbench|bootstrap)\s*::", str(path))
-        store = (ROOT / "src/store.rs").read_text(encoding="utf-8")
+        store = (ROOT / "src/storage/mod.rs").read_text(encoding="utf-8")
         self.assertNotRegex(store, r"\b(?:cleanup|desktop)\s*::")
 
     def test_storage_snapshots_do_not_depend_on_desktop_presentation(self):
-        for path in (ROOT / "src/store").rglob("*.rs"):
+        for path in (ROOT / "src/storage").rglob("*.rs"):
             production = path.read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
             self.assertNotRegex(production, r"\b(?:desktop|presentation)\s*::", str(path))
         for path in (ROOT / "src/queries").glob("*.rs"):
@@ -63,7 +68,7 @@ class ExecutionBoundaries(unittest.TestCase):
         self.assertNotIn(".dispatch", registry)
 
     def test_controller_gateway_preserves_resource_ids_in_raw_receipts(self):
-        source = (ROOT / "src/tools/gateway.rs").read_text(encoding="utf-8")
+        source = (ROOT / "src/application/tools/gateway.rs").read_text(encoding="utf-8")
         self.assertNotRegex(source, r'\["(?:job_id|session_id)"\]\s*=')
         self.assertNotIn("map_worker", source)
 

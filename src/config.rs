@@ -1,4 +1,4 @@
-use crate::{domain::Budget, llm::ModelConfig, mcp::McpServerConfig};
+use crate::{adapters::mcp::McpServerConfig, adapters::models::ModelConfig, domain::Budget};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -85,9 +85,10 @@ pub struct AppConfig {
     pub output_language: Option<crate::i18n::Locale>,
     pub model: ModelConfig,
     pub budget: Budget,
-    pub environments: std::collections::BTreeMap<String, crate::environments::EnvironmentConfig>,
+    pub environments:
+        std::collections::BTreeMap<String, crate::adapters::environments::EnvironmentConfig>,
     pub default_environment: Option<String>,
-    pub workbench: crate::workbench::WorkbenchConfig,
+    pub workbench: crate::application::maintenance::workbench::WorkbenchConfig,
     pub analysis: StaticConfig,
     pub pricing: Pricing,
     pub tools: ToolLimits,
@@ -105,14 +106,14 @@ impl Default for AppConfig {
             budget: Budget::default(),
             environments: Default::default(),
             default_environment: None,
-            workbench: crate::workbench::WorkbenchConfig::default(),
+            workbench: crate::application::maintenance::workbench::WorkbenchConfig::default(),
             analysis: StaticConfig::default(),
             pricing: Pricing::default(),
             tools: ToolLimits::default(),
             skills_dir: None,
             // The repository ships worked-example demos; a missing directory
             // simply skips them (see agents::load_demo).
-            demos_dir: Some(PathBuf::from(crate::prompts::EXAMPLES_DIR)),
+            demos_dir: Some(PathBuf::from(crate::application::prompts::EXAMPLES_DIR)),
             mcp: vec![],
             execution: ExecutionConfig::default(),
         }
@@ -147,7 +148,7 @@ impl AppConfig {
         resolve(base, &mut self.workbench.root);
         resolve(base, &mut self.state_dir);
         for environment in self.environments.values_mut() {
-            if let crate::runtime::TransportConfig::TrustedLocal(local) =
+            if let crate::adapters::worker::TransportConfig::TrustedLocal(local) =
                 &mut environment.runtime.transport
             {
                 resolve(base, &mut local.state_dir);
@@ -177,7 +178,7 @@ impl AppConfig {
     pub fn validate(&self) -> Result<()> {
         self.model.validate()?;
         for (id, environment) in &self.environments {
-            crate::environments::validate_id(id)?;
+            crate::adapters::environments::validate_id(id)?;
             environment.validate()?;
         }
         if let Some(default) = &self.default_environment {
@@ -338,14 +339,14 @@ mod tests {
         };
         config.environments.insert(
             "linux".into(),
-            crate::environments::EnvironmentConfig {
+            crate::adapters::environments::EnvironmentConfig {
                 name: "Linux".into(),
-                platform: crate::environments::Platform::Linux,
+                platform: crate::adapters::environments::Platform::Linux,
                 installation_id: None,
-                runtime: crate::runtime::RuntimeConfig {
-                    transport: crate::runtime::TransportConfig::Docker(
-                        crate::runtime::DockerConfig {
-                            ..crate::runtime::DockerConfig::new("fixture".into())
+                runtime: crate::adapters::worker::RuntimeConfig {
+                    transport: crate::adapters::worker::TransportConfig::Docker(
+                        crate::adapters::worker::DockerConfig {
+                            ..crate::adapters::worker::DockerConfig::new("fixture".into())
                         },
                     ),
                     request_timeout_secs: 120,

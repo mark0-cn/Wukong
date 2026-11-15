@@ -6,7 +6,7 @@ pub struct EnvironmentBinding {
     pub id: String,
     pub run_id: String,
     pub environment_id: String,
-    pub identity: crate::runtime::protocol::WorkerIdentity,
+    pub identity: wukong_worker_protocol::WorkerIdentity,
 }
 pub use wukong_worker_protocol::{JobResult, JobState, JobStatus, SessionHandle, SessionState};
 

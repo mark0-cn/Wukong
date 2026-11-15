@@ -12,9 +12,9 @@ Wukong 的界面支持 `zh-CN` 和 `en-US`。`locales/<locale>/*.ftl` 是前端�
 
 - `common`：应用标题、语言设置和原生对话框。
 - `workspace`、`settings`、`updates`：桌面界面。
-- `tools`：catalog 及历史工具别名对应的显示消息。
+- `application/tools`：catalog 及历史工具别名对应的显示消息。
 - `errors`：控制端产生的状态、通知和可预期错误。
-- `cli`、`report`：命令行帮助和可读导出。
+- `cli`、`interfaces/report`：命令行帮助和可读导出。
 
 工具名称、JSON 字段、状态枚举、路径、地址、payload、内容哈希和原始证据不翻译。工具返回的原始文本、已有模型正文和第三方错误也保持原样；应用生成的错误使用 `{code,args,detail}`，`detail` 保留原始诊断。业务错误类型不根据翻译正文或中文子串推测。Docker 诊断文本匹配仅用于排错建议，不替代类型化错误，也不证明精确根因。
 

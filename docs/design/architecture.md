@@ -10,9 +10,11 @@ This project implements Strix-inspired responsibilities and runtime semantics: r
 
 ## Modules and responsibilities
 
+The controller source is grouped by responsibility: `domain` holds durable records and pure rules; `queries` holds neutral read models; `application` owns use cases, agent integration and maintenance; `storage` owns transactions and artifacts; `adapters` owns worker/provider/filesystem integration; `interfaces` owns CLI, desktop and reports. `bootstrap` assembles dependencies. Existing public Rust paths are re-exported centrally in `src/lib.rs`; internal imports use the owning module. Private runner tests remain beside the runner, and installed-worker SSH fixtures live under `src/adapters/worker/ssh/tests`.
+
 Public execution uses JSON-RPC protocol v3 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
 
-Controller connections/configuration/identity/leases live under `src/runtime` and `src/environments`; `ToolContext` carries a bound worker into file/job/session/verification use cases. `WorkerGateway` retains stable request IDs and unmodified worker receipts. Those use cases translate resource IDs into controller ownership records. `src/effects` and `src/store` retain business receipts, evidence and notifications; the worker's execution ledger separately records external effects. A repeated session-start receipt cannot reopen a closed controller session or erase its transcript.
+Controller connections/configuration/identity/leases live under `src/adapters/worker` and `src/adapters/environments`; `ToolContext` carries a bound worker into file/job/session/verification use cases. `WorkerGateway` retains stable request IDs and unmodified worker receipts. Those use cases translate resource IDs into controller ownership records. `src/application/effects` and `src/storage` retain business receipts, evidence and notifications; the worker's execution ledger separately records external effects. A repeated session-start receipt cannot reopen a closed controller session or erase its transcript.
 
 Windows groups code into `host`, `resources`, `executors`, `artifacts`, `isolation` and `rpc`. `ResourceManager` alone serializes lifecycle admission, reservation and ticket-checked completion. Input preparation, execution waits and recovery run outside its state lock; active work remains owned when a caller disconnects. Explicit active-resource states distinguish startup, execution, finishing, closing and recovery. Executors return observations without writing the ledger. The host injects a verified runtime context; Windows API details stay in isolation. Internal sessions retain Prost/Protobuf.
 
@@ -26,19 +28,19 @@ Windows has one native worker authority. The controller owns business tasks/evid
 | Module | Responsibility |
 |---|---|
 | `domain` | Durable run/agent/message/event/tool/evidence/finding/verification/coverage records |
-| `store` | SQLite transactions, events/mailboxes and content-addressed original artifacts |
-| `coordinator` | Shared transaction entry; `runs`, `tasks`, `messages`, `waits`, `completion` manage runs, children, mail, dependencies and completion |
-| `agents`, `prompts/` | Role/capability prompt assembly; `src/prompts.rs` owns builtin registration |
-| `llm` | Provider configuration/native connections, typed tool summaries and summary usage hooks |
-| `runner`, `bootstrap` | Run lifecycle and concrete dependency assembly |
-| `kernel_host`, `model_catalog`, `usage` | Kernel-facing business APIs, role model selection, usage/budget accounting |
-| `kernel` | Business integration with Rig execution/logging, child/message protocol, model/tool admission and native conversation projection |
-| `tools` | One `catalog`; responsibility-grouped `args/`/`handlers/`; services own permissions/resources/evidence; `verification` centralizes independent admission/certification |
-| `binary` | Address identity/SHA256; `profile` parses ELF/PE/Mach-O, `strings` extracts bounded strings, `ghidra` owns headless/cache/process lifecycle |
-| `runtime`, `workers/runtime` | Isolation, durable worker, GDB/MI sessions, AFL++ jobs, crash replay/minimization |
-| `mcp` | rmcp protocol, Rig definitions, namespaces, timeouts, environment and message-size limits |
-| `report`, `interface` | Export, CLI, operator queries/intervention |
-| `desktop`, `ui/src` | Tauri commands/workspace services, presentation adapters and React lifecycle |
+| `storage` | SQLite transactions, events/mailboxes and content-addressed original artifacts |
+| `application/coordinator` | Shared transaction entry; `runs`, `tasks`, `messages`, `waits`, `completion` manage runs, children, mail, dependencies and completion |
+| `application/agents`, `prompts/` | Role/capability prompt assembly; `src/application/prompts.rs` owns builtin registration |
+| `adapters/models` | Provider configuration/native connections, typed tool summaries and summary usage hooks |
+| `application/assessment/runner`, `bootstrap` | Run lifecycle and concrete dependency assembly |
+| `application/agent_runtime/host`, `application/model_catalog`, `application/usage` | Kernel-facing business APIs, role model selection, usage/budget accounting |
+| `application/agent_runtime` | Business integration with Rig execution/logging, child/message protocol, model/tool admission and native conversation projection |
+| `application/tools` | One `catalog`; responsibility-grouped `args/`/`handlers/`; services own permissions/resources/evidence; `verification` centralizes independent admission/certification |
+| `adapters/binary` | Address identity/SHA256; `profile` parses ELF/PE/Mach-O, `strings` extracts bounded strings, `ghidra` owns headless/cache/process lifecycle |
+| `adapters/worker`, `workers/runtime` | Isolation, durable worker, GDB/MI sessions, AFL++ jobs, crash replay/minimization |
+| `adapters/mcp` | rmcp protocol, Rig definitions, namespaces, timeouts, environment and message-size limits |
+| `interfaces/report`, `interfaces/cli` | Export, CLI, operator queries/intervention |
+| `interfaces/desktop`, `ui/src` | Tauri commands/workspace services, presentation adapters and React lifecycle |
 
 <a id="一次任务如何运行"></a>
 
@@ -84,13 +86,13 @@ Runtime roles are only `root`, `analyst`, `verifier`. Root decomposes/dispatches
 
 Controller-installed role instructions cannot load as extra Skills. `load_skill` saves the local body/SHA256/original evidence as an active instruction snapshot, effective in the next fresh model request. Frozen requests remain unchanged; source edits do not mutate loaded snapshots. A same-name active snapshot replaces its initial body. Dynamic instructions bypass result summarization and survive compaction/recovery. Limit: 64 KiB per Skill, at most five distinct initial/dynamic names combined. Capabilities add methods/evidence/artifacts; the primary role owns completion. Successful recovery continues the original task.
 
-`prompts/base.md` contains shared rules; `roles/` identity/lifecycle; `capabilities/` specialist abilities; `methods/` techniques; `support/` tools/recovery; `examples/` substantive demonstrations. `src/prompts.rs` registers names/categories/purposes/bodies/optional examples, deriving discovery, loading, errors and role-Skill restrictions. Discovery includes only names/purposes; bodies/examples assemble by role/selection. Redundant short fuzz/crash examples were removed.
+`prompts/base.md` contains shared rules; `roles/` identity/lifecycle; `capabilities/` specialist abilities; `methods/` techniques; `support/` tools/recovery; `examples/` substantive demonstrations. `src/application/prompts.rs` registers names/categories/purposes/bodies/optional examples, deriving discovery, loading, errors and role-Skill restrictions. Discovery includes only names/purposes; bodies/examples assemble by role/selection. Redundant short fuzz/crash examples were removed.
 
 Callable names remain `reverse`, `hunter`, etc., without directories. Flat `skills_dir/<name>.md` files override/add bodies; `demos_dir` defaults to `prompts/examples` or a custom flat directory. Missing directories skip examples; embedded builtin bodies do not need runtime repository files.
 
 Each fresh model request selects at most six bounded shared-note/todo/optional-threat-model previews by author, parent, predecessor, scope and keywords. This heuristic does not guarantee full relevance coverage; prompts report omitted counts/search entry points. `context_search` supports text, kind, author scope, agent_id and pagination; `context_read` reads original document JSON including amendments by Unicode character offset. Both shrink pages to output-byte limits, retain continuation offsets and bypass model summaries. Reads stay within the run; `evidence_read` retrieves original evidence. Compaction retains the same previews, ledger counts and full-conversation references, never reinjecting every document/tree. Contracts still define plans/constraints; selection does not replace acceptance.
 
-`src/tools/catalog.rs` registers builtins and their backend requirements. Before each model request, asynchronous environment preflight selects the role-visible tools supported by observed capabilities; root orchestration stays lazy. Failed preflight preserves controller tools and reports unavailable requirements. Native coordination tools are `task`, `message`, `wait`. Root uses `finish_scan`, children `agent_finish`; actual operations recheck backend capabilities, target identity, evidence, session ownership and independent review. Definitions drive execution, validation and the [generated catalog](../reference/tool-catalog.md), without persisting tool-discovery selections. Connected MCP definitions merge in; their capabilities still need probing. `wukong tool-catalog` generates Markdown; `wukong --json tool-catalog` exports schemas.
+`src/application/tools/catalog.rs` registers builtins and their backend requirements. Before each model request, asynchronous environment preflight selects the role-visible tools supported by observed capabilities; root orchestration stays lazy. Failed preflight preserves controller tools and reports unavailable requirements. Native coordination tools are `task`, `message`, `wait`. Root uses `finish_scan`, children `agent_finish`; actual operations recheck backend capabilities, target identity, evidence, session ownership and independent review. Definitions drive execution, validation and the [generated catalog](../reference/tool-catalog.md), without persisting tool-discovery selections. Connected MCP definitions merge in; their capabilities still need probing. `wukong tool-catalog` generates Markdown; `wukong --json tool-catalog` exports schemas.
 
 `prompts/coverage.json` associates method sources/tools/mechanism fixtures with `SkillManifest`; `wukong skill-catalog` generates [coverage](../reference/skill-coverage.md). Metadata does not change permissions, availability or completion gates.
 
@@ -104,11 +106,11 @@ External processes recover separately from model state. Reconcile debugger/fuzz/
 
 ## Desktop reads and persistence boundaries
 
-`desktop/configuration` applies scalar or nested-table settings edits to a temporary document, then parses the complete result before replacing the draft. Invalid edits leave the draft unchanged. Saving preserves unrelated comments, checks external file changes and validates the resolved configuration; registering an environment does not connect to it or create its SSH credentials.
+`interfaces/desktop/configuration` applies scalar or nested-table settings edits to a temporary document, then parses the complete result before replacing the draft. Invalid edits leave the draft unchanged. Saving preserves unrelated comments, checks external file changes and validates the resolved configuration; registering an environment does not connect to it or create its SSH credentials.
 
-`queries` contains neutral read models, incremental cursor state and workspace snapshot inputs. `application/queries` owns the Store-backed `AssessmentQueries`, `FindingQueries` and `ReportQueries` facades. SQL lives in `store/workspace`/`store/report_queries`. CLI/GUI share query models; chat parsing/layout caches remain GUI adapters.
+`queries` contains neutral read models, incremental cursor state and workspace snapshot inputs. `application/queries` owns the Store-backed `AssessmentQueries`, `FindingQueries` and `ReportQueries` facades. SQL lives in `storage/queries/workspace_delta`/`storage/queries/report`. CLI/GUI share query models; chat parsing/layout caches remain GUI adapters.
 
-`store/desktop_queries` reads run/Agent summaries, calls, jobs, events and public replies in one SQL transaction. `desktop/workspace` projects that frozen snapshot into transcript and active-tool DTOs after the transaction ends, without additional queries or Worker RPC. Storage does not import desktop presentation. Response signatures combine epoch, `entity_revisions`, event sequence, query scope and operator mail; unchanged data is not resent, while independent CLI changes remain observable. Active history defaults to latest 500, expandable to 10,000; only calls referenced by that window load. `useWorkspace` rejects stale responses and reloads after task/storage changes.
+`storage/queries/workspace_snapshot` reads run/Agent summaries, calls, jobs, events and public replies in one SQL transaction. `interfaces/desktop/workspace` projects that frozen snapshot into transcript and active-tool DTOs after the transaction ends, without additional queries or Worker RPC. Storage does not import desktop presentation. Response signatures combine epoch, `entity_revisions`, event sequence, query scope and operator mail; unchanged data is not resent, while independent CLI changes remain observable. Active history defaults to latest 500, expandable to 10,000; only calls referenced by that window load. `useWorkspace` rejects stale responses and reloads after task/storage changes.
 
 Business writes use `StateSession`, not exposed SQLite connections. Storage `StoredRecord` binds entity type/location/identity/conversation policy. Business code uses `load`, `records`, `save_record`, typed document/conversation categories and specific result-archive operations. Message replacement, old-generation archives and unread counts remain encapsulated. Receipts/state share lease validation and one IMMEDIATE transaction.
 
@@ -116,7 +118,7 @@ SQLite uses WAL, independent read-only connections and one writer. Reads see con
 
 `AgentMetadata` excludes checkpoints/history and is the metadata read/write type. `AgentConversation` is the optional conversation payload. `AgentSnapshot` explicitly combines them for inheritance/recovery/reports/chat. Full snapshots use flat JSON; hot paths use metadata.
 
-`desktop/presentation` combines public progress/operator messages/tool results into DTOs. Frontend `Conversation` uses assistant-ui and virtualization. `ui/src/shared/api/commands.ts` maps command names/arguments/results; `bridge` invokes them. Type checking does not replace Rust permission/epoch validation. `useDesktopLifecycle` handles close confirmation/native drops/keyboard listeners; `useStartupUpdates` handles startup checks. Styles retain fixed import order with separate color/layout/component ownership. See [maintenance](../development/maintenance.md) for boundaries/benchmarks.
+`interfaces/desktop/presentation` combines public progress/operator messages/tool results into DTOs. Frontend `Conversation` uses assistant-ui and virtualization. `ui/src/shared/api/commands.ts` maps command names/arguments/results; `bridge` invokes them. Type checking does not replace Rust permission/epoch validation. `useDesktopLifecycle` handles close confirmation/native drops/keyboard listeners; `useStartupUpdates` handles startup checks. Styles retain fixed import order with separate color/layout/component ownership. See [maintenance](../development/maintenance.md) for boundaries/benchmarks.
 
 <a id="地址与静态分析"></a>
 
@@ -136,7 +138,7 @@ Cache identity includes target SHA256, Ghidra version/configuration and launcher
 
 ## Dynamic verification and evaluation limits
 
-`tools/verification` centralizes admission/evidence certification; `jobs` owns general query/artifact import. `verification_protocol` types worker identity, counts, network bindings and per-attempt observations. Full original JSON remains evidence; valid types do not establish impact. Network-binding extensions participate in identity comparison rather than discarding unparsed constraints.
+`application/tools/verification` centralizes admission/evidence certification; `jobs` owns general query/artifact import. `verification_protocol` types worker identity, counts, network bindings and per-attempt observations. Full original JSON remains evidence; valid types do not establish impact. Network-binding extensions participate in identity comparison rather than discarding unparsed constraints.
 
 Record static hypotheses, crash reproduction, root cause, exploitation primitives and final impact separately. Replay binds target hash, arguments, input and environment. Minimization reruns predicates, never substituting input length or a string for actual reproduction.
 
@@ -224,4 +226,4 @@ edges join the parent-completion dependency graph; cyclic waits are rejected
 transactionally. Wait parking and tool receipts commit together, so replay cannot
 park the same turn a second time after a lost response.
 
-The desktop transcript projects persisted calls, worker jobs and bounded public model replies. `progress` stores public snapshots using existing transaction/revision notifications; the kernel reads Rig `Partial.text` and delegates persistence through `KernelHost`. Rig retains streaming/retry ownership. Reply identity uses agent/generation/metered turn, not ECS entity IDs; late generations/turns cannot replace newer replies. Start/final events reference one reply while intermediate snapshots replace its record. Lease expiry participates in desktop revisions and marks unfinished text interrupted. Public text is presentation only and never releases completion or evidence gates.
+The desktop transcript projects persisted calls, worker jobs and bounded public model replies. `application/progress` stores public snapshots using existing transaction/revision notifications; the kernel reads Rig `Partial.text` and delegates persistence through `KernelHost`. Rig retains streaming/retry ownership. Reply identity uses agent/generation/metered turn, not ECS entity IDs; late generations/turns cannot replace newer replies. Start/final events reference one reply while intermediate snapshots replace its record. Lease expiry participates in desktop revisions and marks unfinished text interrupted. Public text is presentation only and never releases completion or evidence gates.

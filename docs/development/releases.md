@@ -135,7 +135,7 @@ See [online installation](../user/online-install.md). Packages exclude image tar
 
 ## In-app update trust and recovery
 
-Clients read official `latest.json`/`latest.json.sig`, verify the manifest first, then inspect version/platform/digest/compatibility. Downloaded EXE/AppImage also requires signature/SHA256/size verification. Docker `latest` never selects the runtime environment. Public keys in `src/desktop/update-public.key` and Tauri configuration must match. Private keys live in Actions Secrets with an external administrator backup; losing a key cannot be fixed by silently generating another for seamless existing-client updates. Updater signing does not replace Authenticode; current installers lack OS code signing.
+Clients read official `latest.json`/`latest.json.sig`, verify the manifest first, then inspect version/platform/digest/compatibility. Downloaded EXE/AppImage also requires signature/SHA256/size verification. Docker `latest` never selects the runtime environment. Public keys in `src/interfaces/desktop/update-public.key` and Tauri configuration must match. Private keys live in Actions Secrets with an external administrator backup; losing a key cannot be fixed by silently generating another for seamless existing-client updates. Updater signing does not replace Authenticode; current installers lack OS code signing.
 
 See [desktop updates](desktop-updates.md) for check/prepare/switch/confirm rules. Manual rehearsals sign candidates without changing official releases/stable update entry points.
 

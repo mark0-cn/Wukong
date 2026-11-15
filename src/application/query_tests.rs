@@ -6,7 +6,7 @@ fn cli_and_workspace_share_summary_contract_without_saved_configuration() -> Res
     let target = directory.path().join("sample");
     std::fs::write(&target, b"fixture")?;
     let store = Store::open(directory.path().join("state"))?;
-    let run = crate::coordinator::Coordinator::new(store.clone()).create_run(
+    let run = crate::application::coordinator::Coordinator::new(store.clone()).create_run(
         &target,
         "fixture",
         Budget::default(),

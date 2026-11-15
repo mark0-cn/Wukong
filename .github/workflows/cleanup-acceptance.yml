@@ -3,19 +3,21 @@ on:
   pull_request:
     branches: [master]
     paths:
-      - 'src/cleanup/**'
-      - 'src/desktop/cleanup.rs'
-      - 'src/desktop/paths.rs'
+      - 'src/application/maintenance/cleanup/**'
+      - 'src/interfaces/cli/cleanup.rs'
+      - 'src/interfaces/desktop/cleanup.rs'
+      - 'src/interfaces/desktop/cleanup_review.rs'
+      - 'src/adapters/files/**'
       - 'src/main.rs'
-      - 'src/updates/recovery.rs'
+      - 'src/application/maintenance/updates/recovery.rs'
       - 'packaging/windows/uninstall-hooks.nsh'
       - 'tauri*.json'
       - 'tests/acceptance/check_cleanup.py'
       - 'tests/acceptance/check_cleanup_ui.mjs'
       - 'tests/acceptance/review-window.ps1'
-      - 'ui/src/components/CleanupReview.tsx'
+      - 'ui/src/features/maintenance/CleanupReview.tsx'
       - 'ui/src/main.tsx'
-      - 'ui/src/commands.ts'
+      - 'ui/src/shared/api/commands.ts'
       - 'locales/*/cleanup.ftl'
       - '.github/workflows/cleanup-acceptance.yml'
   workflow_dispatch:
