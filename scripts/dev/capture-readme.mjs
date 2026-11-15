@@ -8,7 +8,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { resolve } from 'node:path';
 
 const root = new URL('../../', import.meta.url);
-const source = await readFile(new URL('ui/src/test/fixtures.ts', root), 'utf8');
+const source = await readFile(new URL('ui/src/shared/testing/fixtures.ts', root), 'utf8');
 const compiled = stripTypeScriptTypes(source);
 const fixtures = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const { version } = JSON.parse(await readFile(new URL('tauri.conf.json', root), 'utf8'));

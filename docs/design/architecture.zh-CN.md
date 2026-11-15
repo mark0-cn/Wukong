@@ -116,7 +116,7 @@ SQLite 使用 WAL、独立只读连接和单写入连接。普通查询以读事
 
 类型边界与此对应：`AgentMetadata` 不含 checkpoint 或继承历史，元数据读取和写入接口使用该具体类型；`AgentConversation` 表示可选会话载荷，`AgentSnapshot` 在继承、恢复、报告和聊天展示时显式组合两者。完整快照使用平铺 JSON 结构，业务热路径使用元数据类型。
 
-`desktop/presentation` 把公开进度、操作员消息和工具结果组合为展示 DTO，前端 `Conversation` 使用 assistant-ui 和虚拟列表呈现聊天。命令名、参数与返回值由 `ui/src/commands.ts` 的映射约束，`bridge` 统一调用；该类型检查不代替 Rust 权限和 epoch 校验。`useDesktopLifecycle` 管理关闭确认、原生文件拖入和键盘监听，`useStartupUpdates` 管理启动更新检查。样式入口保留固定导入顺序，颜色、分栏和组件样式分别维护。性能回归和模块边界见[维护约定](../development/maintenance.zh-CN.md)。
+`desktop/presentation` 把公开进度、操作员消息和工具结果组合为展示 DTO，前端 `Conversation` 使用 assistant-ui 和虚拟列表呈现聊天。命令名、参数与返回值由 `ui/src/shared/api/commands.ts` 的映射约束，`bridge` 统一调用；该类型检查不代替 Rust 权限和 epoch 校验。`useDesktopLifecycle` 管理关闭确认、原生文件拖入和键盘监听，`useStartupUpdates` 管理启动更新检查。样式入口保留固定导入顺序，颜色、分栏和组件样式分别维护。性能回归和模块边界见[维护约定](../development/maintenance.zh-CN.md)。
 
 <a id="addresses-and-static-analysis"></a>
 

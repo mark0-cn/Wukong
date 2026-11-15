@@ -116,7 +116,7 @@ SQLite uses WAL, independent read-only connections and one writer. Reads see con
 
 `AgentMetadata` excludes checkpoints/history and is the metadata read/write type. `AgentConversation` is the optional conversation payload. `AgentSnapshot` explicitly combines them for inheritance/recovery/reports/chat. Full snapshots use flat JSON; hot paths use metadata.
 
-`desktop/presentation` combines public progress/operator messages/tool results into DTOs. Frontend `Conversation` uses assistant-ui and virtualization. `ui/src/commands.ts` maps command names/arguments/results; `bridge` invokes them. Type checking does not replace Rust permission/epoch validation. `useDesktopLifecycle` handles close confirmation/native drops/keyboard listeners; `useStartupUpdates` handles startup checks. Styles retain fixed import order with separate color/layout/component ownership. See [maintenance](../development/maintenance.md) for boundaries/benchmarks.
+`desktop/presentation` combines public progress/operator messages/tool results into DTOs. Frontend `Conversation` uses assistant-ui and virtualization. `ui/src/shared/api/commands.ts` maps command names/arguments/results; `bridge` invokes them. Type checking does not replace Rust permission/epoch validation. `useDesktopLifecycle` handles close confirmation/native drops/keyboard listeners; `useStartupUpdates` handles startup checks. Styles retain fixed import order with separate color/layout/component ownership. See [maintenance](../development/maintenance.md) for boundaries/benchmarks.
 
 <a id="地址与静态分析"></a>
 

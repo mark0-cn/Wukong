@@ -1,9 +1,9 @@
-import { t } from './i18n';
-import { initializeLanguage, LanguageProvider } from './i18n';
+import { t } from './shared/i18n';
+import { initializeLanguage, LanguageProvider } from './shared/i18n';
 import { Component, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App';
-import { CleanupReview } from './components/CleanupReview';
+import App from './app/App';
+import { CleanupReview } from './features/maintenance/CleanupReview';
 import './theme.css';
 import './styles.css';
 import './workspace-layout.css';

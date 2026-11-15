@@ -6,5 +6,5 @@ export default defineConfig({
   server: { host: '127.0.0.1', port: 1420, strictPort: true },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: { target: ['es2022', 'chrome105', 'safari15'], sourcemap: true },
-  test: { environment: 'jsdom', globals: true, setupFiles: ['./src/test/setup.ts'], exclude: ['e2e/**', 'node_modules/**'] },
+  test: { environment: 'jsdom', globals: true, setupFiles: ['./src/shared/testing/setup.ts'], exclude: ['e2e/**', 'node_modules/**'] },
 });

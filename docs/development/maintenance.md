@@ -10,7 +10,7 @@ English · [简体中文](maintenance.zh-CN.md)
 
 - `kernel` assembles Rig and drives lifecycle. `admission` controls admission; `models` manages requests/metering; `coordination` projects messages/state; `business_tools` integrates effects. `kernel_host` exposes business operations; `supervisor` manages heartbeats/background observation independently; `model_catalog`, `usage`, `bootstrap` own model selection, accounting and assembly.
 - `tools` retains the execution pipeline/shared validation. `effects` owns durable receipts; `catalog` registers schemas, roles, recovery policy and handlers. `handlers` routes business operations; `coordination` handles shared documents/tasks; `analysis` static queries; `execution` worker dispatch; `verification` independent admission/certification; `files`, `jobs`, `sessions` their resources. Argument/handler subdirectories group by responsibility while one catalog registers them.
-- `queries` defines shared queries/DTOs; `store/workspace` and `store/report_queries` implement SQL. `desktop/workspace` reads snapshots through `store/desktop_queries`; `desktop/presentation` adapts public progress/tool results for React. `ui/src/commands.ts` constrains command arguments/responses; lifecycle effects belong in corresponding hooks.
+- `queries` defines shared queries/DTOs; `store/workspace` and `store/report_queries` implement SQL. `desktop/workspace` reads snapshots through `store/desktop_queries`; `desktop/presentation` adapts public progress/tool results for React. `ui/src/shared/api/commands.ts` constrains command arguments/responses; lifecycle effects belong in corresponding hooks.
 - `coordinator` separates runs/tasks/messages/waits/completion use cases, committing through the same Store transactions. `binary` retains public address/hash APIs; profiling, strings and Ghidra lifecycle have separate modules.
 - `store` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `store/conversations` owns conversation payloads/revisions. Current state schema is 4, without legacy migration.
 
@@ -21,6 +21,8 @@ Keep cross-module calls typed and ownership/completion gates centralized. Genera
 Workbench operations hold `OperationLock` for their complete ownership scope. The guard explicitly unlocks before closing its file; do not replace it with a bare file whose drop only closes a descriptor. On Unix, an unrelated concurrent fork can temporarily inherit the open file description before exec, extending a close-only lock past its owner's scope. The clone-descriptor regression checks immediate successor admission while preserving mutual exclusion.
 
 <a id="桌面界面样式"></a>
+
+The frontend groups workspace, conversation, agents, evidence, settings and maintenance under `ui/src/features/`. Shared API contracts, UI primitives, localization and test support live under `ui/src/shared/`; `ui/src/app/` owns composition and desktop lifecycle. Keep feature tests beside their implementation and cross-feature browser flows under `ui/e2e/`. Global style import order remains centralized.
 
 ## Desktop styling
 

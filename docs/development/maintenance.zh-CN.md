@@ -10,7 +10,7 @@
 
 - `kernel` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`kernel_host` 暴露业务操作，`supervisor` 独立管理心跳和后台任务观察；`model_catalog`、`usage`、`bootstrap` 分别负责模型选择、用量和装配。
 - `tools` 保留执行管线和共同校验入口，`effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
-- `queries` 定义共享查询与 DTO，`store/workspace`、`store/report_queries` 实现 SQL；`desktop/workspace` 通过 `store/desktop_queries` 读取桌面快照，`desktop/presentation` 适配公开进度和工具结果，React 界面消费 DTO。`ui/src/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
+- `queries` 定义共享查询与 DTO，`store/workspace`、`store/report_queries` 实现 SQL；`desktop/workspace` 通过 `store/desktop_queries` 读取桌面快照，`desktop/presentation` 适配公开进度和工具结果，React 界面消费 DTO。`ui/src/shared/api/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
 - `coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
 - `store` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`store/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 4，不提供旧数据库迁移。
 
@@ -21,6 +21,8 @@ worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目�
 工作台操作在完整的归属作用域内持有 `OperationLock`。守卫会先显式解锁，再关闭文件；不要替换成析构时只关闭描述符的普通文件。在 Unix 上，无关的并发 fork 可能在 exec 前临时继承打开文件描述，导致只依赖关闭的锁超出归属作用域。描述符克隆回归检查在保持互斥的同时，后继操作能够立即获得锁。
 
 <a id="desktop-styling"></a>
+
+前端在 `ui/src/features/` 下按工作区、会话、Agent、证据、设置和维护分组。共用 API 契约、UI 基础组件、本地化及测试辅助放在 `ui/src/shared/`；`ui/src/app/` 负责装配和桌面生命周期。功能测试与实现同目录，跨功能浏览器流程放在 `ui/e2e/`。全局样式导入顺序继续集中维护。
 
 ## 桌面界面样式
 
