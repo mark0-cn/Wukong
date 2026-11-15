@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 from scripts._lib.github import api
 from scripts._lib.versioning import ROOT, VERSION_FILES, bump_version, validate_tag, version
 
@@ -14,15 +15,20 @@ def git(*args, root=ROOT):
     return subprocess.check_output(["git", "-C", str(root), *args])
 
 
-def validate_ci(run, jobs, repository):
+def validate_ci_source(run, repository):
     if not (run.get("event") == "push" and run.get("head_branch") == "master"
             and run.get("path") == ".github/workflows/ci.yml"
             and run.get("repository", {}).get("full_name") == repository
-            and run.get("head_repository", {}).get("full_name") == repository
-            and run.get("status") == "completed" and run.get("conclusion") == "success"):
-        raise ValueError("Expected successful CI from a push to this repository's master")
+            and run.get("head_repository", {}).get("full_name") == repository):
+        raise ValueError("Expected CI from a push to this repository's master")
     if not re.fullmatch(r"[0-9a-f]{40}", run.get("head_sha", "")):
         raise ValueError("Invalid CI commit SHA")
+
+
+def validate_ci(run, jobs, repository):
+    validate_ci_source(run, repository)
+    if run.get("status") != "completed" or run.get("conclusion") != "success":
+        raise ValueError("Expected completed successful CI")
     for name in ("changes", "windows", "linux", "summary"):
         matches = [j for j in jobs if j.get("name") == name]
         if len(matches) != 1 or matches[0].get("conclusion") != "success":
@@ -73,18 +79,11 @@ def validate_change(sha, tag, root=ROOT):
                 raise ValueError("Release merge contains changes beyond the version bump: " + name)
 
 
-def discover(run_id, repository, root=ROOT):
-    run = api(f"repos/{repository}/actions/runs/{run_id}")
-    # Read only this attempt, so a previous successful attempt cannot mask a failure.
-    pages = api(f"repos/{repository}/actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100")
-    jobs = pages["jobs"]
-    if pages["total_count"] != len(jobs):
-        raise ValueError("Unexpected number of CI jobs; refusing a partial check")
-    validate_ci(run, jobs, repository)
+def discover_candidate(sha, repository, root=ROOT):
     candidates = []
-    for item in api(f"repos/{repository}/commits/{run['head_sha']}/pulls?per_page=100", paginate=True):
+    for item in api(f"repos/{repository}/commits/{sha}/pulls?per_page=100", paginate=True):
         pr = api(f"repos/{repository}/pulls/{item['number']}")
-        candidate = release_pr(pr, run["head_sha"], repository)
+        candidate = release_pr(pr, sha, repository)
         if candidate:
             candidates.append(candidate)
     if not candidates:
@@ -94,6 +93,41 @@ def discover(run_id, repository, root=ROOT):
     candidate = candidates[0]
     validate_change(candidate["sha"], candidate["tag"], root)
     return candidate
+
+
+def require_identity(run, sha, attempt):
+    if sha is not None and run.get("head_sha") != sha:
+        raise ValueError("CI request commit changed")
+    if attempt is not None and run.get("run_attempt") != attempt:
+        raise ValueError("CI request attempt changed; rerun the source Checks")
+
+
+def wait_for_ci(run_id, repository, sha, attempt, *, request=api, sleep=time.sleep, polls=60):
+    # The dispatch job must finish before its workflow can become successful.
+    # Only the receiver waits; the sender never waits for this release workflow.
+    for index in range(polls):
+        run = request(f"repos/{repository}/actions/runs/{run_id}")
+        validate_ci_source(run, repository)
+        require_identity(run, sha, attempt)
+        if run.get("status") == "completed":
+            if run.get("conclusion") != "success":
+                raise ValueError("Source Checks did not succeed")
+            return
+        if index + 1 < polls:
+            sleep(10)
+    raise TimeoutError("Source Checks did not complete; no tag was created")
+
+
+def discover(run_id, repository, root=ROOT, *, sha=None, attempt=None):
+    run = api(f"repos/{repository}/actions/runs/{run_id}")
+    require_identity(run, sha, attempt)
+    # Read only this attempt, so a previous successful attempt cannot mask a failure.
+    pages = api(f"repos/{repository}/actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100")
+    jobs = pages["jobs"]
+    if pages["total_count"] != len(jobs):
+        raise ValueError("Unexpected number of CI jobs; refusing a partial check")
+    validate_ci(run, jobs, repository)
+    return discover_candidate(run["head_sha"], repository, root)
 
 
 def push_tag(tag, sha, root=ROOT):
@@ -121,6 +155,9 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     discover_cmd = commands.add_parser("discover")
     discover_cmd.add_argument("--run-id", type=int, required=True)
+    discover_cmd.add_argument("--wait", action="store_true")
+    discover_cmd.add_argument("--sha")
+    discover_cmd.add_argument("--attempt", type=int)
     tag_cmd = commands.add_parser("push")
     tag_cmd.add_argument("--tag", required=True)
     tag_cmd.add_argument("--sha", required=True)
@@ -128,7 +165,12 @@ def main():
     if args.command == "push":
         print(push_tag(args.tag, args.sha))
         return
-    candidate = discover(args.run_id, os.environ["GITHUB_REPOSITORY"])
+    repository = os.environ["GITHUB_REPOSITORY"]
+    if args.wait:
+        if not args.sha or not args.attempt:
+            parser.error("--wait requires --sha and --attempt")
+        wait_for_ci(args.run_id, repository, args.sha, args.attempt)
+    candidate = discover(args.run_id, repository, sha=args.sha, attempt=args.attempt)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
         stream.write("eligible=" + ("true" if candidate else "false") + "\n")
         for key, value in (candidate or {}).items():

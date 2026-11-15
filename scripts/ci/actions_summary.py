@@ -73,8 +73,8 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
     if kind == "ci" and "changes" in needs:
         scope = needs["changes"].get("outputs", {})
         lines += ["### 检查范围", "", cell(scope.get("reason", "范围计算失败")), "",
-                  "Windows 版本及安装器检查始终执行；未选择的重型检查按规则跳过。",
-                  *[f"- {name}: {cell(scope.get(name, 'unknown'))}" for name in ("rust", "frontend", "linux")], ""]
+                  "文档检查始终执行；平台、专项验收及客户端预构建按范围选择，意外跳过不能通过。",
+                  *[f"- {name}: {cell(scope.get(name, 'unknown'))}" for name in ("rust", "frontend", "linux", "apt", "uninstall", "release_clients")], ""]
         cache_hit = needs.get("windows", {}).get("outputs", {}).get("rust_cache_hit", "")
         cache_state = {"true": "精确命中", "false": "未精确命中（回退恢复或无缓存，详见 Rust cache 日志）"}.get(cache_hit, "未执行或无结果")
         lines += ["### Rust 缓存与步骤耗时", "", f"- Rust cache: {cache_state}", "",

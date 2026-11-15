@@ -1,4 +1,4 @@
-name: Commit policy
+name: Internal / Policy
 on:
   pull_request:
     branches: [master]

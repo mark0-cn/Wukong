@@ -1,4 +1,4 @@
-name: Build Desktop Installer
+name: Internal / Installer
 on:
   workflow_call:
     inputs:

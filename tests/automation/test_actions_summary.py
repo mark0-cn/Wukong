@@ -66,9 +66,10 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(summary.duration("windows", jobs), "—")
 
     def test_ci_scope_cache_and_step_durations(self):
-        needs = {"changes": {"result": "success", "outputs": dict(rust="false", frontend="false", linux="false")},
+        needs = {"changes": {"result": "success", "outputs": dict(rust="false", frontend="true", linux="false", apt="false", uninstall="false", release_clients="false")},
                  "windows": {"result": "success", "outputs": {"rust_cache_hit": "true"}},
-                 "linux": {"result": "skipped"}}
+                 "linux": {"result": "skipped"},
+                 **{name: {"result": "skipped"} for name in ("acceptance", "windows-client", "linux-client", "linux-desktop-client")}}
         jobs = [{"name": "windows", "steps": [{"name": "Rust tests", "conclusion": "success",
                  "started_at": "2026-01-01T00:00:00Z", "completed_at": "2026-01-01T00:01:05Z"}]}]
         result = summary.render("ci", needs, self.context, self.directory, jobs=jobs)

@@ -56,7 +56,7 @@ Independent launcher formatting: `cargo fmt --manifest-path xtask/Cargo.toml -- 
 
 ## Everyday CI
 
-`ci.yml` runs on master pushes, PRs targeting master and manual dispatch. PRs select checks by scope; master/manual/version PR/release invocations run full checks. Windows runs Rust fmt/clippy/test, frontend tests/build and online-package validation. Linux runs Python runtime/analysis evaluation tests. External PRs receive no Docker Hub secret. See [GitHub maintenance](github-maintenance.md) for scope/caches.
+`Checks` (`ci.yml`) runs on master pushes, PRs targeting master and manual dispatch. Both PR/master select checks by scope; version PRs, master version increases, manual Checks and release calls run full checks plus APT/uninstall acceptance. Windows runs selected Rust fmt/clippy/test, frontend tests/build and online-package validation; Linux runs selected runtime/evaluation and real replay checks. External PRs receive no Docker Hub secret. See [GitHub maintenance](github-maintenance.md#actions-entry-points) for scope, gates and the five operator/three internal workflows.
 
 `rust-toolchain.toml` pins Rust; Cargo/npm use lockfiles. Debian/Python transitive dependencies are not fully locked. Released image digests are authoritative; rebuilding is not guaranteed byte-for-byte reproducible.
 
@@ -64,15 +64,15 @@ Independent launcher formatting: `cargo fmt --manifest-path xtask/Cargo.toml -- 
 
 ## Publish a version
 
-1. Open **Actions → Prepare Version PR → Run workflow**, choose master and enter a complete tag such as `v0.2.0`. Leave `dry_run` unchecked for normal preparation.
+1. Open **Actions → Version → Run workflow**, choose master and enter a complete tag such as `v0.2.0`. The default `dry_run=true` previews only; uncheck it to create the version PR.
 2. Synchronize Wukong versions in `Cargo.toml`/`Cargo.lock`, `tauri.conf.json`, and UI versions in `ui/package.json`/`package-lock.json`. Check syntax, monotonic increase and consistency, run release tests, then create `codex/release-v0.2.0` and a PR targeting master.
 3. The App-created PR starts native CI visible on the PR. After Windows/Linux/summary pass, the maintainer approves merging; **merging the version PR authorizes publication**.
-4. Master merge CI runs fully and prebuilds Windows Release client, Linux acceptance CLI and Ubuntu 22.04 Linux desktop Release client. After all succeed, **Tag Merged Release** validates/pushes a tag pointing to that checked merge commit, even if master subsequently advances.
-5. The tag triggers **Build and Publish**, building, validating and publishing Docker Hub/GitHub Release. No local action/manual tag push is required.
+4. Master merge CI runs fully and prebuilds Windows Release client, Linux acceptance CLI and Ubuntu 22.04 Linux desktop Release client. After summary succeeds, Checks requests **Release (`operation=tag`)** only for a merged App PR with the exact five-file version-only change. The receiver waits for the entire source CI attempt to complete successfully, verifies the configured App author, then tags. The request binds run ID, attempt and full SHA, even if master advances. The sender does not wait for Release, avoiding a dependency cycle; timeout, failure, cancellation or a changed attempt prevents tagging.
+5. The tag triggers **Release**, building, validating and publishing Docker Hub/GitHub Release. No local action/manual tag push is required.
 
 Preparation uses standard hosted runners and the App, not a personal PAT; built-in `GITHUB_TOKEN` is read-only. Ordinary PRs do not auto-tag. Automatic publication accepts only same-repository merged PRs created by the configured App from `codex/release-vX.Y.Z`, whose merge changes only the five version files by a pure version increase.
 
-Before tagging, requery the merge commit's CI/current attempt and require changes/windows/linux/summary success. Failed CI prevents tags. Prepare a new valid version PR after code fixes, or rerun that commit's CI/tag workflow for transient failure. A tag already pointing to the same commit is idempotent; another target is rejected. Retry **Build and Publish** for existing-tag release failures, never delete/recreate the tag. Old `github-actions[bot]`, manually created or pre-feature merged version PRs are not published retroactively.
+Before tagging, requery the merge commit's CI/current attempt and require changes/windows/linux/summary success. Failed CI prevents tags. Prepare a new valid version PR after code fixes, or rerun that commit's CI/tag workflow for transient failure. A tag already pointing to the same commit is idempotent; another target is rejected. Retry **Release** for existing-tag release failures, never delete/recreate the tag. Old `github-actions[bot]`, manually created or pre-feature merged version PRs are not published retroactively.
 
 Preparation creates no tag/image/Release. Version must increase; existing tags are rejected. Retry reuses a version branch only if its tree exactly matches this preparation, without force-push. If master/branch changes cause failure, resolve the existing PR/branch before preparing again.
 
@@ -105,11 +105,11 @@ Immutable Releases lock attachments/tags after publication. Upload all files whi
 
 ## Rehearsal and troubleshooting
 
-**Actions → Build and Publish → Run workflow** on the default branch pushes a public candidate and creates `online-release`, but **does not create a GitHub Release or update version/latest tags**. Official publication starts from tag push.
+**Actions → Release → Run workflow**, default `operation=rehearse` on master, pushes a public candidate and creates `online-release`, but **does not create a GitHub Release or update version/latest tags**. Official publication starts from tag push.
 
-For initial warmup/reuse checks, run **CI** on master with `build_release_clients`, then rehearse the same commit after success. Normal version merges prebuild automatically; ordinary master pushes do not add Release compilation. Linux desktop prebuild/AppImage packaging use Ubuntu 22.04. Master saves a separate linux-desktop cache; tags reuse same-SHA binaries or rebuild with the same recipe.
+For initial warmup/reuse checks, run **Checks** on master with `build_release_clients`, then rehearse the same commit after success. Normal version merges prebuild automatically; ordinary master pushes do not add Release compilation. Linux desktop prebuild/AppImage packaging use Ubuntu 22.04. Master saves a separate linux-desktop cache; tags reuse same-SHA binaries or rebuild with the same recipe.
 
-Manual **Tag Merged Release** on master takes a successful master push CI run ID for read-only eligibility checks. It never creates tags/issues App tokens; only successful CI `workflow_run` events can auto-tag.
+Run **Release** on master with `operation=inspect` and a successful master push `ci_run_id` for read-only eligibility checks: no App token or tag. Checks automatically requests `operation=tag`; an already authorized publication can retry with the exact `ci_run_id`, `ci_run_attempt` and `ci_sha`, subject to the same full source/version/author checks. Ordinary master commits do not request Release; there is no workflow_run listener for every CI completion. Only the master request job obtains Actions write permission for dispatch; PR checks have no release App private key.
 
 Inspect failed jobs:
 
@@ -143,7 +143,7 @@ See [desktop updates](desktop-updates.md) for check/prepare/switch/confirm rules
 
 ## Recover publication of accepted artifacts
 
-If a tag run completed builds, native installer checks, container acceptance and package, but publish was skipped/transiently failed, run **Recover Accepted Publication** manually on master with the original tag run ID. Invoking it authorizes publishing that existing version.
+If a tag run completed builds, native installer checks, container acceptance and package, but publish was skipped/transiently failed, run **Release (`operation=recover`)** manually on master with the original tag `release_run_id`. Invoking it authorizes publishing that existing version. The separate recovery job obtains Contents write permission without building or using a signing private key.
 
 It accepts only completed same-repository tag-push runs, requires each acceptance job success, pins that attempt's online-release artifact ID and checks unmoved tag/master ancestry. Download original installers/signatures/acceptance manifests; use the original commit's publisher to validate/publish identical bytes/digest. It neither compiles, resigns nor moves/creates tags, and needs no signing private key. Different existing attachments/fixed images remain protected. Missing/expired artifacts cannot use this path.
 

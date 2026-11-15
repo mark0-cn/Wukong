@@ -1,5 +1,5 @@
-name: CI
-run-name: CI · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name }} · ${{ github.sha }}
+name: Checks
+run-name: Checks · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name }} · ${{ github.sha }}
 on:
   push:
     branches: [master]
@@ -36,6 +36,8 @@ jobs:
       linux: ${{ steps.scope.outputs.linux }}
       reason: ${{ steps.scope.outputs.reason }}
       release_clients: ${{ steps.scope.outputs.release_clients }}
+      apt: ${{ steps.scope.outputs.apt }}
+      uninstall: ${{ steps.scope.outputs.uninstall }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,7 +45,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
-      - name: Select checks (full for master, releases and manual runs)
+      - name: Select checks from the complete PR or master change range
         id: scope
         env:
           BUILD_RELEASE_CLIENTS: ${{ inputs.build_release_clients || false }}
@@ -54,6 +56,7 @@ jobs:
 
   windows:
     needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.linux == 'true'
     env:
       # CI-only: retain line information while reducing debug data and cache size.
       # Keep assertions/overflow checks and the local/release profiles unchanged.
@@ -84,6 +87,7 @@ jobs:
           shared-key: windows-checks-v2
           save-if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
       - name: Version and release tooling tests
+        if: needs.changes.outputs.rust == 'true'
         run: |
           python -m scripts.release.cli check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -138,36 +142,7 @@ jobs:
       - name: Standalone Windows worker bootstrap
         id: worker_native
         if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
-        run: |
-          $locator = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $installation = & $locator -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -or -not $installation) { throw 'MSVC x64 build tools are unavailable' }
-          $setup = Join-Path $installation 'Common7/Tools/VsDevCmd.bat'
-          $command = '"{0}" -no_logo -arch=x64 -host_arch=x64 >nul && set' -f $setup
-          & cmd.exe /d /c $command | ForEach-Object {
-            if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') }
-          }
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo fmt --manifest-path workers/windows/Cargo.toml -- --check
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo clippy --locked --manifest-path workers/windows/Cargo.toml --all-targets --target-dir target/windows-worker-native -- -D warnings
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path workers/windows/Cargo.toml --lib --target-dir target/windows-worker-native
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python -m scripts.worker.toolchain --cache target/windows-offline-cache --component windbg_mcp --download
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python -m scripts.worker.build_native
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo fmt --manifest-path workers/package/Cargo.toml -- --check
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo clippy --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks -- -D warnings
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo test --locked --manifest-path workers/package/Cargo.toml --all-targets --target-dir target/worker-package-checks
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $env:WUKONG_WORKER_CLI = Join-Path $PWD 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-worker.exe'
-          $env:WUKONG_PACKAGE_CLI = Join-Path $PWD 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-package.exe'
-          cargo test --locked --manifest-path workers/package/Cargo.toml --test contract --target-dir target/worker-package-checks -- --ignored
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        run: ./scripts/ci/check_windows_worker.ps1
 
       - name: Dedicated hosted Windows worker installation acceptance
         id: worker_acceptance
@@ -274,6 +249,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  acceptance:
+    needs: changes
+    if: needs.changes.outputs.apt == 'true' || needs.changes.outputs.uninstall == 'true'
+    uses: ./.github/workflows/acceptance.yml
+    with:
+      apt: ${{ needs.changes.outputs.apt == 'true' }}
+      uninstall: ${{ needs.changes.outputs.uninstall == 'true' }}
+
   windows-client:
     needs: changes
     if: needs.changes.outputs.release_clients == 'true'
@@ -297,7 +280,7 @@ jobs:
 
   summary:
     if: always()
-    needs: [changes, windows, linux, windows-client, linux-client, linux-desktop-client]
+    needs: [changes, windows, linux, acceptance, windows-client, linux-client, linux-desktop-client]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -316,3 +299,25 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           python -c 'import json, os, sys; from scripts.ci.ci_scope import checks_passed; sys.exit(0 if checks_passed(json.loads(os.environ["NEEDS_JSON"])) else 1)'
+
+  release-request:
+    needs: [changes, summary]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.workflow == 'Checks' && needs.changes.outputs.release_clients == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Request publication eligibility for the exact version merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.release.request_release
