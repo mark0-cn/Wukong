@@ -36,6 +36,22 @@ def optional_bool(record, name):
     return value
 
 
+def result_fields(record):
+    result = record.get("result")
+    if result is None:
+        return {}
+    if not isinstance(result, dict):
+        raise ValueError("result must be an object")
+    return result
+
+
+def cleanup_proof(result):
+    flags = tuple(
+        optional_bool(result, key) for key in ("jobs_empty", "profiles_removed", "scratch_removed")
+    )
+    return all(flag is True for flag in flags)
+
+
 @dataclass(frozen=True)
 class ResourceObservation:
     terminal: bool
@@ -51,10 +67,12 @@ class ResourceObservation:
         state = JobState(record["state"])
         terminal = state in TERMINAL
         pending = optional_bool(record, "cleanup_pending")
-        result = record.get("result") or {}
-        outcome = OutcomeCertainty(
-            result.get("outcome") or ("unknown" if state == JobState.LOST else "known")
-        )
+        result = result_fields(record)
+        cleanup_proof(result)
+        outcome = result.get("outcome")
+        if outcome is None:
+            outcome = "unknown" if state == JobState.LOST else "known"
+        outcome = OutcomeCertainty(outcome)
         cleanup = (
             CleanupState.PENDING
             if pending
@@ -69,11 +87,7 @@ class ResourceObservation:
             raise ValueError("invalid session state")
         pending = optional_bool(record, "cleanup_pending")
         confirmed = optional_bool(record, "cleanup_confirmed")
-        proof = record.get("result") or {}
-        native = all(
-            optional_bool(proof, key) is True
-            for key in ("jobs_empty", "profiles_removed", "scratch_removed")
-        )
+        native = cleanup_proof(result_fields(record))
         closed = state == "closed" or (
             state == "lost" and (confirmed is True or (pending is False and native))
         )

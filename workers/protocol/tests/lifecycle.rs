@@ -2,6 +2,19 @@ use serde_json::Value;
 use wukong_worker_protocol::{JobStatus, OutcomeCertainty, SessionObservation};
 
 #[test]
+fn shared_invalid_lifecycle_fields_are_rejected() {
+    let corpus: Value = serde_json::from_str(include_str!("../fixtures/lifecycle.json")).unwrap();
+    for case in corpus["invalid_observations"].as_array().unwrap() {
+        let rejected = if case["kind"] == "job" {
+            serde_json::from_value::<JobStatus>(case["wire"].clone()).is_err()
+        } else {
+            serde_json::from_value::<SessionObservation>(case["wire"].clone()).is_err()
+        };
+        assert!(rejected, "{}", case["name"]);
+    }
+}
+
+#[test]
 fn shared_lifecycle_observations_preserve_completion_and_uncertainty() {
     let corpus: Value = serde_json::from_str(include_str!("../fixtures/lifecycle.json")).unwrap();
     for case in corpus["observations"].as_array().unwrap() {

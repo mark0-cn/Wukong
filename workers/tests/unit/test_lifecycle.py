@@ -66,6 +66,11 @@ class LifecycleTests(unittest.TestCase):
                         ledger.invoke("debug.start", params, execute, reconcile)
                 self.assertEqual(len(calls), 1)
 
+    def test_shared_invalid_lifecycle_fields(self):
+        for case in CORPUS["invalid_observations"]:
+            with self.subTest(case=case["name"]), self.assertRaises(ValueError):
+                getattr(ResourceObservation, case["kind"])(case["wire"])
+
     def test_shutdown_and_maintenance_share_unconfirmed_resource_gate(self):
         from wukong_worker.workbench.control import idle
 

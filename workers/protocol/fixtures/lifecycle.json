@@ -359,5 +359,67 @@
       "closed": true,
       "expect": "reuse"
     }
+  ],
+  "invalid_observations": [
+    {
+      "name": "numeric-pending",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "completed",
+        "cleanup_pending": 0
+      }
+    },
+    {
+      "name": "empty-outcome",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "lost",
+        "result": {
+          "outcome": ""
+        }
+      }
+    },
+    {
+      "name": "non-object-result",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "completed",
+        "result": []
+      }
+    },
+    {
+      "name": "invalid-job-proof",
+      "kind": "job",
+      "wire": {
+        "job_id": "fixture",
+        "state": "lost",
+        "result": {
+          "jobs_empty": false,
+          "scratch_removed": "true"
+        }
+      }
+    },
+    {
+      "name": "invalid-later-session-proof",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "result": {
+          "jobs_empty": false,
+          "scratch_removed": "true"
+        }
+      }
+    },
+    {
+      "name": "string-confirmed",
+      "kind": "session",
+      "wire": {
+        "state": "lost",
+        "cleanup_confirmed": "true"
+      }
+    }
   ]
 }
