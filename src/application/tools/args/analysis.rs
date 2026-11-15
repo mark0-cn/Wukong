@@ -2,6 +2,15 @@
 use super::*;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub(in crate::application::tools) enum StaticAddress {
+    /// Prefer copying the complete module-relative AddressRef from binary_inspect.
+    Reference(crate::adapters::binary::AddressRef),
+    /// Legacy byte offset relative to image_base, never a VA, file offset or page number.
+    Offset(u64),
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct BinaryInspectArgs {}
 
@@ -44,7 +53,7 @@ pub(in crate::application::tools) struct FunctionDecompileArgs {
     /// Optional same-run binary evidence for a baseline/secondary target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_evidence_id: Option<String>,
-    pub address: u64,
+    pub address: StaticAddress,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -53,7 +62,7 @@ pub(in crate::application::tools) struct XrefsQueryArgs {
     /// Optional same-run binary evidence for a baseline/secondary target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_evidence_id: Option<String>,
-    pub address: u64,
+    pub address: StaticAddress,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<Direction>,
     #[schemars(range(min = 1, max = 5000))]
@@ -77,7 +86,7 @@ pub(in crate::application::tools) struct AnalysisVerifyArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct FunctionInstructionsArgs {
-    pub address: u64,
+    pub address: StaticAddress,
     pub offset: Option<u64>,
     pub limit: Option<u64>,
     pub target_evidence_id: Option<String>,

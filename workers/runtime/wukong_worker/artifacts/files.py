@@ -1,6 +1,7 @@
 """Files."""
 
 import base64
+import hashlib
 import threading
 from wukong_worker.artifacts.common import MAX_FILE, artifact, confined, public_file
 from wukong_analysis.validation import bounded_int
@@ -21,7 +22,12 @@ class FileService:
         if path.exists():
             if path.is_file() and path.read_bytes() == data:
                 return artifact(self.root, path)
-            raise ValueError("file path already exists with different content; choose another path")
+            digest = hashlib.sha256(data).hexdigest()
+            raise ValueError(
+                f"file path {params['path']!r} already exists with different content; "
+                f"choose another path, for example {path.stem}-{digest[:12]}{path.suffix}; "
+                "reuse the returned worker path; executable scripts can be run through python3"
+            )
         with path.open("xb") as stream:
             stream.write(data)
         path.chmod(0o555 if params.get("executable") else 0o444)

@@ -55,7 +55,8 @@ impl FilesService {
                 self.gateway.worker_identity()?
             ),
         );
-        let record: WorkerFileRecord = self.store.load(&id)?;
+        let record: WorkerFileRecord = self.store.load(&id).with_context(||
+            format!("worker path {path:?} is not registered in this run; use stage_target for the sample, file_put/artifact_stage for a script or input, and reuse returned worker paths"))?;
         ensure!(
             record.run_id == agent.run_id && record.worker_id == self.gateway.worker_identity()?,
             "worker file belongs to another assessment or runtime"
@@ -64,7 +65,7 @@ impl FilesService {
             let run: RunRecord = self.store.load(&agent.run_id)?;
             ensure!(
                 record.sha256 == run.target_sha256,
-                "worker target does not match this run's sample SHA256"
+                "worker target does not match this run's sample SHA256; target must be stage_target's returned sample path, not the script path; pass the script through argv or source"
             );
         }
         Ok(record)
@@ -156,7 +157,10 @@ impl FilesService {
                     job.worker_id == self.gateway.worker_identity().unwrap_or_default()
                         && path.starts_with(&format!("jobs/{}/", job.worker_resource_id))
                 });
-            ensure!(allowed, "worker path has not been declared for this run");
+            ensure!(
+                allowed,
+                "worker path has not been declared for this run; retrieve controller evidence with evidence_read, or use a returned file_put/artifact_stage/job_artifacts worker path"
+            );
         }
         self.download_file(
             agent,

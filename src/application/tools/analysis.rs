@@ -37,15 +37,15 @@ impl AnalysisService {
                 limit: number(args, "limit", 25) as usize,
             },
             "function_instructions" => GhidraQuery::Instructions {
-                address: number(args, "address", 0),
+                address: static_address(args, &run)?,
                 offset: number(args, "offset", 0) as usize,
                 limit: number(args, "limit", 100) as usize,
             },
             "function_decompile" => GhidraQuery::Decompile {
-                address: number(args, "address", 0),
+                address: static_address(args, &run)?,
             },
             _ => GhidraQuery::Xrefs {
-                address: number(args, "address", 0),
+                address: static_address(args, &run)?,
                 direction: match args["direction"].as_str().unwrap_or("both") {
                     "to" => XrefDirection::To,
                     "from" => XrefDirection::From,
@@ -128,5 +128,93 @@ impl AnalysisService {
             logs.push(evidence.id);
         }
         Ok(json!({"analysis":result,"log_evidence_ids":logs}))
+    }
+}
+
+fn static_address(args: &Value, run: &RunRecord) -> Result<u64> {
+    let input: args::StaticAddress = serde_json::from_value(args["address"].clone())
+        .context("address requires a module-relative AddressRef or a byte offset")?;
+    let offset = match input {
+        args::StaticAddress::Offset(value) => value,
+        args::StaticAddress::Reference(address) => {
+            address.validate()?;
+            ensure!(
+                address.module_sha256 == run.target_sha256,
+                "address belongs to another module SHA256"
+            );
+            ensure!(
+                address.space == binary::AddressSpace::ModuleRelative,
+                "static analysis requires module_relative byte offsets; convert VA using the observed image/load base, never page numbers or file offsets"
+            );
+            address.value
+        }
+    };
+    if let Ok(profile) = binary::inspect(&run.target_path)
+        && !binary::contains_module_offset(&run.target_path, profile.image_base, offset)?
+    {
+        let hint = offset.checked_sub(profile.image_base).filter(|_| profile.image_base > 0)
+                .map(|relative| format!(" If {offset:#x} is a link-time VA, its module offset is {relative:#x} (image_base={:#x}); confirm with binary_inspect before retrying.",profile.image_base))
+                .unwrap_or_default();
+        anyhow::bail!(
+            "module-relative byte offset {offset:#x} is outside the target mapped segments.{hint}"
+        );
+    }
+    Ok(offset)
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    #[test]
+    fn static_addresses_preserve_space_hash_and_segment_bounds() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("address.elf");
+        let mut bytes = vec![0u8; 0x300];
+        bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+        for (offset, value) in [(16, 2u16), (18, 62), (52, 64), (54, 56), (56, 1), (58, 64)] {
+            bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        }
+        for (offset, value) in [(20, 1u32), (64, 1), (68, 5)] {
+            bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        for (offset, value) in [
+            (24, 0x401080u64),
+            (32, 64),
+            (80, 0x400000),
+            (88, 0x400000),
+            (96, 0x300),
+            (104, 0x2000),
+            (112, 0x1000),
+        ] {
+            bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+        }
+        fs::write(&path, bytes)?;
+        let store = Store::open(temp.path().join("state"))?;
+        let run = Coordinator::new(store).create_run(
+            &path,
+            "static fixture",
+            Budget::default(),
+            json!({}),
+        )?;
+        let profile = binary::inspect(&path)?;
+        assert_eq!(
+            static_address(&json!({"address":profile.entry}), &run)?,
+            0x1080
+        );
+        assert_eq!(static_address(&json!({"address":0x1080}), &run)?, 0x1080);
+        let error = static_address(&json!({"address":0x401080}), &run)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("0x1080") && error.contains("image_base=0x400000"));
+        for address in [
+            binary::AddressRef::file_offset(&run.target_sha256, 0x1080),
+            binary::AddressRef::runtime(&run.target_sha256, 0x401080, "instance", 0x400000)?,
+            binary::AddressRef::module_relative(&"a".repeat(64), 0x1080),
+        ] {
+            assert!(static_address(&json!({"address":address}), &run).is_err());
+        }
+        assert!(static_address(&json!({}), &run).is_err());
+        Ok(())
     }
 }

@@ -539,7 +539,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::FunctionDecompileArgs>(
             "function_decompile",
             "tool-function-decompile",
-            "Ghidra: decompile a function by MODULE-RELATIVE offset.",
+            "Ghidra: decompile using a target-bound module_relative AddressRef (preferred) or legacy byte offset. Copy binary_inspect addresses; a link-time VA must subtract image_base. File offsets, runtime addresses and page numbers are not module offsets.",
             ReplayPolicy::ReadOnly,
             true,
             handlers::handle_functions_search,
@@ -549,7 +549,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::XrefsQueryArgs>(
             "xrefs_query",
             "tool-xrefs-query",
-            "Ghidra: references to/from a MODULE-RELATIVE offset.",
+            "Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
             ReplayPolicy::ReadOnly,
             true,
             handlers::handle_functions_search,

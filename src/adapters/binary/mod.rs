@@ -20,10 +20,24 @@ pub use profile::{
 };
 pub use strings::{BinaryString, StringsQuery, StringsResult, strings};
 
+pub(crate) fn contains_module_offset(path: &Path, image_base: u64, offset: u64) -> Result<bool> {
+    use object::{Object, ObjectSegment};
+    let data = read_binary(path)?;
+    let file = object::File::parse(&*data)?;
+    let segments = file.segments().collect::<Vec<_>>();
+    // Relocatable/raw inputs without mapped segments remain backend-defined.
+    Ok(segments.is_empty()
+        || image_base.checked_add(offset).is_some_and(|address| {
+            segments.iter().any(|segment| {
+                address >= segment.address() && address - segment.address() < segment.size()
+            })
+        }))
+}
+
 const MAX_BINARY_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_ITEMS: usize = 20_000;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AddressSpace {
     FileOffset,
@@ -31,7 +45,8 @@ pub enum AddressSpace {
     Runtime,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct AddressRef {
     pub module_sha256: String,
     pub space: AddressSpace,
