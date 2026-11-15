@@ -6,8 +6,8 @@
       "zh-CN": "966058f71a165fe85983985ce485ec1df0469e01bc6b90e28af88dc17eaab1e9"
     },
     "AGENTS.md": {
-      "en": "5d1cddbaf451c7c22cda900b588e3aeb2426ca5a05ec658719a2f05a56ae091a",
-      "zh-CN": "af2a748d3dd647b4baa83e32c7aec77c8a284940f57cd60a91fb70f72e779d7f"
+      "en": "6add5d60e222aafea4f892174cc8e2a25da46223e7477f247933e53d73a2498c",
+      "zh-CN": "98559f4248fb4095ba346314eaff91b6fe3b669a575f3a18ac07daf82b749518"
     },
     "README.md": {
       "en": "d77b454b37bfab80fdbec80b9927ac81eefba878d25667e3d4773c0b82ba5baa",
@@ -76,6 +76,10 @@
     "docs/history/validation/2026-11-09/agent-skills.md": {
       "en": "f779acf4567947ae4d61b13e77c585cbbaf5d13e15337773661797e9a0ba6502",
       "zh-CN": "ec336fceccf444883a143ffdbd299f726b012b30981115a6d114e21dd04d5d72"
+    },
+    "docs/history/validation/2026-11-15-actions-redesign.md": {
+      "en": "91f56a0ec78a3d5a664cb7f8aa895c93b56c719dfa8fe18a8c41ff232fe72415",
+      "zh-CN": "41ca38a3b622f2ac8f93215bc1c34b44f536e094794c0079edcea4be842eb1d1"
     },
     "docs/history/validation/2026-11-15-execution-contract-v3.md": {
       "en": "7c7430711f62adac295c6403efb32b81fa8a357fababbde9880e1a20fe048709",
