@@ -28,6 +28,8 @@ Job admission builds a typed internal plan before reserving resources. Network/L
 
 Child environment policy, RPC error categories and atomic metadata IO have separate owners. Consumers import them directly; numerical/address validation comes from `wukong_analysis.validation`, and protocol definitions come from the generated contract. Artifact helpers retain path confinement, hashes and bounded reads. Metadata retries, error categories and child environment filtering keep their existing behavior.
 
+Session recovery reports unreadable JSON or IO failures on stderr, with at most 16 detailed warnings per session kind and one count of additional failures. Diagnostics contain only the kind, a recognized session ID and exception class; record contents and arbitrary paths are excluded. Damaged records stay unchanged, former running owners become lost when their metadata can be written, and missing required state fields still fail startup. RPC stdout remains reserved for protocol responses.
+
 The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
 and the original `record`. Original MI transcripts remain available as evidence.

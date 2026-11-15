@@ -22,6 +22,8 @@ class Server:
                 validate_result(name, result)
                 return Success(result)
             except Exception as error:
+                # This is the protocol boundary: unexpected implementation errors
+                # still become bounded RPC errors, never traceback text on stdout.
                 return Error(-32000, str(error)[:4096], {"kind": error_kind(error)})
 
         return invoke

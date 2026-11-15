@@ -69,6 +69,8 @@ class OperationLedger:
             try:
                 result = execute(method, params)
             except Exception as error:
+                # Record all execution failures at the durable boundary. Narrowing
+                # this catch would leave avoidable ambiguity after ordinary errors.
                 atomic_json(
                     ledger,
                     {

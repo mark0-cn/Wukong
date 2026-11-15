@@ -1,7 +1,10 @@
 """Sessions."""
 
 import base64
+import logging
 import os
+from pathlib import Path
+import re
 import shutil
 import sys
 import threading
@@ -12,32 +15,50 @@ import worker_debugger
 from worker_debugger import DebugSession
 from worker_interactive import InteractSession
 
+LOGGER = logging.getLogger(__name__)
+
+
+def _recover_sessions(directory: Path) -> None:
+    """Mark former live owners lost; never repair unreadable records or reopen them."""
+    skipped = 0
+    for path in directory.glob("*/session.json") if directory.exists() else []:
+        try:
+            state = load_json(path)
+            if state["state"] == "running":
+                state["state"] = "lost"
+                atomic_json(path, state)
+        except (ValueError, OSError) as error:
+            # Preserve the existing recovery policy, with bounded diagnostics.
+            # Do not log metadata contents, exception messages or arbitrary paths.
+            skipped += 1
+            if skipped <= 16:
+                identifier = path.parent.name
+                if not re.fullmatch(r"[0-9a-f]{32}", identifier):
+                    identifier = "nonstandard-session-id"
+                LOGGER.warning(
+                    "Session recovery skipped %s/%s metadata (%s)",
+                    directory.name,
+                    identifier,
+                    type(error).__name__,
+                )
+    if skipped > 16:
+        LOGGER.warning(
+            "Session recovery skipped %s additional %s records", skipped - 16, directory.name
+        )
+
 
 class SessionManager:
-    def __init__(self, root, trusted, isolated):
+    """Own live sessions; retain ownership when close fails so cleanup can retry."""
+
+    def __init__(self, root: Path, trusted: bool, isolated: bool) -> None:
         self.root, self.trusted, self.isolated = root, trusted, isolated
         self.lock = threading.RLock()
-        self.debug, self.interact = {}, {}
+        self.debug: dict[str, DebugSession] = {}
+        self.interact: dict[str, InteractSession] = {}
         # GDB cannot be resurrected after its owner dies. Jobs are independent
         # supervisors and are reconciled by heartbeat identity instead.
-        for path in (root / "debug").glob("*/session.json") if (root / "debug").exists() else []:
-            try:
-                state = load_json(path)
-                if state["state"] == "running":
-                    state["state"] = "lost"
-                    atomic_json(path, state)
-            except (ValueError, OSError):
-                pass
-        for path in (
-            (root / "interact").glob("*/session.json") if (root / "interact").exists() else []
-        ):
-            try:
-                state = load_json(path)
-                if state["state"] == "running":
-                    state["state"] = "lost"
-                    atomic_json(path, state)
-            except (ValueError, OSError):
-                pass
+        _recover_sessions(root / "debug")
+        _recover_sessions(root / "interact")
 
     def reconcile_reply(self, method, result):
         registry = (

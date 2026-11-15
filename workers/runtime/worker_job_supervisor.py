@@ -379,6 +379,8 @@ def supervise_job(root, directory):
             raise ValueError("unknown job kind")
         meta["result"] = result
     except Exception as error:
+        # The supervisor owns final job publication, including unexpected executor
+        # failures; a protocol client must not be required to keep this owner alive.
         meta.update({"state": "failed", "error": str(error)[:4096]})
     finally:
         stop.set()
