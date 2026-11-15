@@ -69,6 +69,11 @@ pub struct ModelConfig {
     pub temperature: Option<f64>,
     pub request_timeout_secs: u64,
     pub additional_params: Option<Value>,
+    /// Explicit per-request recovery ceiling; never changes run or role quotas.
+    pub recovery_max_tokens: Option<u64>,
+    /// Optional provider-supported overrides, used only on output-limit recovery.
+    /// No provider's reasoning is disabled by default.
+    pub recovery_additional_params: Option<Value>,
 }
 
 impl Default for ModelConfig {
@@ -85,6 +90,8 @@ impl Default for ModelConfig {
             temperature: None,
             request_timeout_secs: 180,
             additional_params: None,
+            recovery_max_tokens: None,
+            recovery_additional_params: None,
         }
     }
 }
@@ -154,6 +161,16 @@ impl ModelConfig {
             ensure!(max_tokens > 0, "role_max_tokens must be positive");
         }
         ensure!(self.max_tokens > 0, "max_tokens must be positive");
+        ensure!(
+            self.recovery_max_tokens.is_none_or(|limit| limit > 0),
+            "recovery_max_tokens must be positive"
+        );
+        ensure!(
+            self.recovery_additional_params
+                .as_ref()
+                .is_none_or(Value::is_object),
+            "recovery_additional_params must be an object"
+        );
         ensure!(
             self.request_timeout_secs > 0,
             "model timeout must be positive"

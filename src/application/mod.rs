@@ -7,6 +7,7 @@ pub mod coordinator;
 pub(crate) mod effects;
 pub mod maintenance;
 pub(crate) mod model_catalog;
+pub(crate) mod model_recovery;
 pub(crate) mod progress;
 pub(crate) mod prompts;
 pub mod queries;

@@ -74,6 +74,121 @@ fn reply(name: &str, args: Value) -> Value {
 fn reply_text(content: &str) -> Value {
     json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":content},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":2})
 }
+
+#[tokio::test]
+async fn reasoning_only_output_limit_recovers_without_replaying_tools() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (_dir, runner, run) = fixture_config(
+        format!("http://{}", listener.local_addr().unwrap()),
+        |config, _| {
+            config.model.max_tokens = 64;
+            config.model.recovery_max_tokens = Some(128);
+        },
+    )
+    .await;
+    let server = tokio::spawn(async move {
+        for index in 0..3 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let input = request(&mut socket).await;
+            assert_eq!(
+                input["options"]["num_predict"],
+                if index == 2 { 128 } else { 64 }
+            );
+            if index == 2 {
+                assert!(input.to_string().contains("output_limit_recovery"));
+                assert!(!input.to_string().contains("private unfinished reasoning"));
+            }
+            let output = match index {
+                0 => reply(
+                    "think",
+                    json!({"content":"durable observation before retry"}),
+                ),
+                1 => {
+                    let mut output = reply_text("");
+                    output["message"]["thinking"] = json!("private unfinished reasoning");
+                    output["done_reason"] = json!("length");
+                    output
+                }
+                _ => reply("finish_scan", json!({"summary":"recovery complete"})),
+            };
+            respond(&mut socket, output).await;
+        }
+    });
+    let result = drive_bounded(&runner, &run.id).await;
+    assert_eq!(result.status, Status::Completed, "{result:?}");
+    assert_eq!(result.total_tokens, 36);
+    assert_eq!(runner.store.records::<Thought>(&run.id).unwrap().len(), 1);
+    assert_eq!(
+        runner
+            .store
+            .list::<Value>("model_recovery", &run.id)
+            .unwrap()[0]["count"],
+        1
+    );
+    assert!(
+        runner
+            .store
+            .records::<Evidence>(&run.id)
+            .unwrap()
+            .iter()
+            .any(|e| e.source == "model.truncated_response")
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn reasoning_only_output_recovery_stops_at_durable_limit() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (_dir, runner, run) = fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            request(&mut socket).await;
+            let mut output = reply_text("");
+            output["message"]["thinking"] = json!("still reasoning");
+            output["done_reason"] = json!("length");
+            respond(&mut socket, output).await;
+        }
+    });
+    let result = drive_bounded(&runner, &run.id).await;
+    assert_eq!(result.status, Status::Failed);
+    assert_eq!(result.total_tokens, 24);
+    let root: AgentMetadata = runner.store.load(&run.root_id).unwrap();
+    assert!(
+        root.error
+            .as_deref()
+            .unwrap()
+            .contains("recovery exhausted")
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn visible_output_limit_preserves_text_for_one_bounded_continuation() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (_dir, runner, run) = fixture(format!("http://{}", listener.local_addr().unwrap())).await;
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        request(&mut socket).await;
+        let mut output = reply_text("Established observation: fixture has no executable bytes.");
+        output["done_reason"] = json!("length");
+        respond(&mut socket, output).await;
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let input = request(&mut socket).await.to_string();
+        assert!(input.contains("Established observation"));
+        assert!(input.contains("Continue only the missing part"));
+        respond(
+            &mut socket,
+            reply("finish_scan", json!({"summary":"observation retained"})),
+        )
+        .await;
+    });
+    assert_eq!(
+        drive_bounded(&runner, &run.id).await.status,
+        Status::Completed
+    );
+    server.await.unwrap();
+}
 async fn respond(socket: &mut TcpStream, value: Value) {
     let body = value.to_string();
     socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();

@@ -149,10 +149,17 @@ pub(crate) fn drive(
                 (admit_spawns, gate_models, gate_tools)
                     .chain()
                     .in_set(Stage::Gate),
-                (account_replies, configure_spawned, enforce_completion)
+                (
+                    account_replies,
+                    recover_output_limit,
+                    configure_spawned,
+                    enforce_completion,
+                )
                     .chain()
                     .in_set(ReviewSystems::Edit),
-                retry_policy.in_set(ReviewSystems::Edit),
+                retry_policy
+                    .in_set(ReviewSystems::Edit)
+                    .after(recover_output_limit),
             ),
         )
         // A completed non-effect task must release its hold before AgentLoop

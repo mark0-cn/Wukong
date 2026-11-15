@@ -168,6 +168,8 @@ role_max_tokens = 16384
 verifier = { model = "your-verifier-model", max_tokens = 16384 }
 ```
 
+Output-limit recovery is separate from network retries. `execution.output_recovery_attempts` defaults to 1, accepts 0–2, and is persisted per logical request so reopening state does not reset its allowance. Reasoning-only `Length` responses retain raw evidence and usage before Rig retries with a focused next-action instruction. `model.recovery_max_tokens` optionally sets an explicit recovery output ceiling; `model.recovery_additional_params` optionally supplies provider-supported overrides. Neither is enabled by default, and reasoning is never automatically disabled. Check your provider's supported settings before configuring overrides. Run budgets, turn limits and role quotas still apply. Visible truncated text is retained and gets one bounded continuation; incomplete tool arguments use Rig's corrective error and are never executed. Transport errors and context overflow keep Rig's separate retry/compaction behavior.
+
 Priority: role-specific configuration → `role_model` → root model. `role_max_tokens` is the default per-turn output limit for children with explicitly configured role models; role-specific `max_tokens` wins. For `finish_reason=Length` truncation, increase the relevant limit within provider support.
 
 <a id="执行后端"></a>

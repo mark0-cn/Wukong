@@ -173,6 +173,8 @@ role_max_tokens = 16384
 verifier = { model = "your-verifier-model", max_tokens = 16384 }
 ```
 
+输出截断恢复与网络重试分开。`execution.output_recovery_attempts` 默认为 1，允许 0–2；按逻辑请求持久化，重新打开状态不会重置次数。仅含推理的 `Length` 响应先保存原始证据和用量，再由 Rig 使用聚焦下一步动作的提示重试。`model.recovery_max_tokens` 可显式设置恢复请求的输出上限；`model.recovery_additional_params` 可提供服务支持的覆盖参数。两者默认均不启用，也不会自动关闭推理；配置前应确认服务支持相应参数。总预算、轮数上限和角色配额仍然有效。可见正文被截断时保留正文并进行一次有界续写；不完整工具参数使用 Rig 的纠错返回，绝不执行。传输错误和上下文溢出继续使用 Rig 各自的重试与压缩逻辑。
+
 角色模型选择优先级为：角色专属配置 → `role_model` → 根模型。`role_max_tokens` 为显式配置了角色模型的子 Agent 设置默认单轮输出上限；角色专属 `max_tokens` 优先。输出因 `finish_reason=Length` 截断时，可在服务支持的范围内提高相应上限。
 
 <a id="execution-backends"></a>
