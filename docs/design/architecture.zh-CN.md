@@ -10,6 +10,8 @@
 
 ## 模块与职责
 
+[2026-11-15 整理验收](../history/validation/2026-11-15-architecture-cleanup.zh-CN.md)记录了文件迁移、Python 设计变更、受测身份及验证限制。
+
 控制器源码按职责归组：`domain` 保存持久记录和纯规则，`queries` 保存中立读取模型，`application` 管理用例、Agent 集成和维护，`storage` 管理事务与制品，`adapters` 管理 Worker/模型提供方/文件系统接入，`interfaces` 管理 CLI、桌面和报告。`bootstrap` 装配依赖。现有公开 Rust 路径集中在 `src/lib.rs` 重导出，内部导入直接指向所属模块。runner 的私有测试与实现相邻，已安装 Worker 的 SSH 夹具位于 `src/adapters/worker/ssh/tests`。
 
 公开执行通过 SSH/stdio 使用 JSON-RPC 协议 v3。独立 `workers/protocol` crate 负责方法标识、请求/响应类型、副作用、资源需求及生成的 JSON Schema。Rust/jsonrpsee 和 Python/jsonrpcserver 注册实际处理器，双方校验同一组契约样本。模型工具目录负责角色可见性和所需方法，各 Worker 目录负责处理器及就绪状态。第三方观察保留为原始证据，文件/作业/会话身份与传输配置使用结构化类型。

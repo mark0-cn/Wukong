@@ -10,6 +10,8 @@ This project implements Strix-inspired responsibilities and runtime semantics: r
 
 ## Modules and responsibilities
 
+The [2026-11-15 cleanup acceptance](../history/validation/2026-11-15-architecture-cleanup.md) records the file migration, Python design changes, tested identities and validation limits.
+
 The controller source is grouped by responsibility: `domain` holds durable records and pure rules; `queries` holds neutral read models; `application` owns use cases, agent integration and maintenance; `storage` owns transactions and artifacts; `adapters` owns worker/provider/filesystem integration; `interfaces` owns CLI, desktop and reports. `bootstrap` assembles dependencies. Existing public Rust paths are re-exported centrally in `src/lib.rs`; internal imports use the owning module. Private runner tests remain beside the runner, and installed-worker SSH fixtures live under `src/adapters/worker/ssh/tests`.
 
 Public execution uses JSON-RPC protocol v3 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
