@@ -1,5 +1,5 @@
-name: Prepare Version PR
-run-name: Prepare ${{ inputs.tag }}${{ inputs.dry_run && ' (dry run)' || '' }}
+name: Version
+run-name: Version · ${{ inputs.tag }}${{ inputs.dry_run && ' (dry run)' || '' }}
 on:
   workflow_dispatch:
     inputs:
@@ -10,7 +10,7 @@ on:
       dry_run:
         description: 'Validate and show the version diff without creating a branch or PR'
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -112,7 +112,7 @@ jobs:
 
           Version consistency, release script tests and diff checks passed. This PR is created by the release GitHub App so normal pull_request CI starts automatically and appears on the PR. Wait for Windows, Linux and summary to pass before merging into master.
 
-          Merging this version PR approves publication. Once full CI passes on the merge commit in master, Tag Merged Release validates the version-only change and automatically pushes $RELEASE_TAG at that exact commit. Build and Publish then builds, validates and publishes Docker Hub and GitHub Release artifacts. No manual tag push is needed.
+          Merging this version PR approves publication. Once full CI passes on the merge commit in master, Release validates the version-only change and automatically pushes $RELEASE_TAG at that exact commit. The tag publication run then builds, validates and publishes Docker Hub and GitHub Release artifacts. No manual tag push is needed.
           EOF
             pr=$(gh pr create --base master --head "$branch" --title "release: prepare $RELEASE_TAG" --body-file "$RUNNER_TEMP/release-pr.md")
           fi

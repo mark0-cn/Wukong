@@ -65,7 +65,7 @@ Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检�
 
 ## 日常 CI
 
-`ci.yml` 在 `master` push、面向 `master` 的 PR 和手动触发时运行。PR 按改动范围选择检查；`master`、手动运行、版本 PR 和发布调用执行全量检查。Windows 执行 Rust fmt/clippy/test、前端测试与构建、在线包校验测试；Linux 执行 Python runtime 和分析评测工具测试。外部 PR 不获取 Docker Hub Secret。范围规则与缓存策略见 [GitHub 维护功能](github-maintenance.zh-CN.md)。
+`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、五个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
 
 Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。上游 Debian/Python 的全部传递依赖并未完全锁死；已发布镜像以 digest 为准，不能把重新构建视为逐位可复现。
 
@@ -73,16 +73,16 @@ Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。�
 
 ## 发布版本
 
-1. 打开 **Actions → Prepare Version PR → Run workflow**，分支选择 `master`，填写完整的新 tag，例如 `v0.2.0`。正常准备版本时不要勾选 `dry_run`。
+1. 打开 **Actions → Version → Run workflow**，分支选择 `master`，填写完整的新 tag，例如 `v0.2.0`。默认勾选 `dry_run` 只预览；实际创建版本 PR 时取消勾选。
 2. 工作流同步 `Cargo.toml`、`Cargo.lock` 中 wukong 的版本、`tauri.conf.json`、`ui/package.json`、`package-lock.json` 中 ui 的版本；检查格式、版本递增和一致性，运行发布脚本测试，然后创建 `codex/release-v0.2.0` 分支及目标为 `master` 的 PR。
 3. App 创建 PR 后，原生 CI 自动启动并显示在 PR 页面。Windows、Linux、summary 通过后，由维护者确认合并；**合并版本 PR 即批准发布**。
-4. 合并提交在 `master` 上执行全量 CI，并行预构建 Windows Release 客户端、Linux 验收 CLI 和 Ubuntu 22.04 Linux 桌面 Release 客户端。全部成功后 **Tag Merged Release** 自动校验并推送 tag，指向经过检查的合并提交；即使随后 `master` 前进，也不会误标到新提交。
-5. tag 自动触发 **Build and Publish**，完成构建、验收并发布 Docker Hub 镜像和 GitHub Release。无需本地操作或手动推送 tag。
+4. 合并提交在 `master` 上执行全量 CI，并行预构建 Windows Release 客户端、Linux 验收 CLI 和 Ubuntu 22.04 Linux 桌面 Release 客户端。summary 成功后，Checks 只为符合五文件纯版本变更的已合并 App PR 请求 **Release (`operation=tag`)**。接收端等待整个源 CI 尝试完成且成功，再核对配置的 App 作者并打 tag；绑定 run ID、attempt 和完整 SHA，即使 master 前进也不会误标。请求端不等待 Release，避免相互等待；超时、失败、取消或尝试变化均不打 tag。
+5. tag 自动触发 **Release**，完成构建、验收并发布 Docker Hub 镜像和 GitHub Release。无需本地操作或手动推送 tag。
 
-`Prepare Version PR` 使用标准 GitHub 托管 runner 和发布 App，不需要个人 PAT；内置 `GITHUB_TOKEN` 仅承担只读工作。
+`Version` 使用标准 GitHub 托管 runner 和发布 App，不需要个人 PAT；内置 `GITHUB_TOKEN` 仅承担只读工作。
 普通 PR 不会触发自动打 tag。自动发布只接受同仓库、由所配置 App 创建、分支为 `codex/release-vX.Y.Z` 的已合并版本 PR；合并结果必须是五个版本文件的纯版本递增，不能夹带其他改动。
 打 tag 前重新查询该合并提交的 CI 及当前尝试，要求 changes、windows、linux、summary 全部成功。CI 未通过就不会打 tag；修复后需准备新的有效版本 PR，或重跑该提交的 CI/打 tag 工作流处理临时故障。
-同名 tag 已指向相同提交时重试直接通过；指向其他提交时拒绝覆盖。已有 tag 的发布失败应重跑对应 **Build and Publish**，不删除重建 tag。
+同名 tag 已指向相同提交时重试直接通过；指向其他提交时拒绝覆盖。已有 tag 的发布失败应重跑对应 **Release**，不删除重建 tag。
 旧的 `github-actions[bot]` 版本 PR、手动创建的版本 PR以及本功能安装前已合并的 PR不作追溯发布。
 版本准备不创建 tag、不构建镜像、不发布 Release。输入的版本必须高于当前版本；已存在的 tag 会被拒绝。
 重试只复用文件树与本次准备完全一致的版本分支，不强推覆盖。若 `master` 或版本分支已有变化导致重试失败，先处理已有 PR/分支，再重新准备。
@@ -128,17 +128,17 @@ Docker Hub 如支持也可将精确版本标签设为不可变，但 `latest`、
 
 ## 演练与排错
 
-Actions → Build and Publish → Run workflow，选择默认分支。手动演练会推送公开候选镜像并生成 `online-release` artifact，**不创建 GitHub Release、不更新版本标签或 latest**。正式发布由 tag push 触发。
+Actions → **Release** → Run workflow，选择默认分支及默认 `operation=rehearse`。手动演练会推送公开候选镜像并生成 `online-release` artifact，**不创建 GitHub Release、不更新版本标签或 latest**。正式发布由 tag push 触发。
 
-首次预热或验证客户端复用时，先运行 **CI**，选择 `master` 并勾选 `build_release_clients`；成功后在同一提交上运行发布演练。正常版本合并自动预构建，不需每次手工预热。普通 master push 不额外编译 Release 客户端。Linux 桌面预构建和 AppImage 打包均使用 Ubuntu 22.04；预构建在 master 保存独立的 linux-desktop 编译缓存，tag 复用同 SHA 的二进制，缺失时按相同配方构建。
+首次预热或验证客户端复用时，先运行 **Checks**，选择 `master` 并勾选 `build_release_clients`；成功后在同一提交上运行发布演练。正常版本合并自动预构建，不需每次手工预热。普通 master push 不额外编译 Release 客户端。Linux 桌面预构建和 AppImage 打包均使用 Ubuntu 22.04；预构建在 master 保存独立的 linux-desktop 编译缓存，tag 复用同 SHA 的二进制，缺失时按相同配方构建。
 
-Actions → Tag Merged Release → Run workflow，选择 `master`，填写一个已成功的 master push CI run ID，只读检查该提交是否符合自动打 tag 条件。手动入口永远不创建 tag，也不签发 App token；只有成功 CI 的 `workflow_run` 事件可以进入自动打 tag 步骤。
+Actions → **Release** → Run workflow，选择 master 和 `operation=inspect`，填写成功的 master push `ci_run_id`，只读检查资格，不签发 App token、不创建 tag。`operation=tag` 由 Checks 自动请求，也可在已有发布授权下填写准确的 `ci_run_id`、`ci_run_attempt`、`ci_sha` 重试；它仍执行完整来源、版本与作者检查。普通 master 提交不请求 Release，不再为每次 CI 完成生成发布资格运行。仅 master 上的请求 job 取得 Actions 写权限以 dispatch；PR 检查没有发布 App 私钥。
 
 查看失败 job：
 
 - 登录失败：检查 Docker Hub PAT 对 `hlmark0/wukong` 的读写权限、有效期和 GitHub 配置。
 - App token 失败：检查 App ID/PEM、App 是否安装到该仓库、Contents/PR 权限及新增权限是否获安装批准。
-- PR 未显示 CI：核对 PR 作者是否为发布 App，查看 PR Checks 页面；不要将 Prepare Version PR 成功视为全部 CI 通过。
+- PR 未显示 CI：核对 PR 作者是否为发布 App，查看 PR Checks 页面；不要将 Version 成功视为全部 CI 通过。
 - 空间预检失败：查看 `df` 输出，改用更大托管 runner 或进一步缩减镜像；不自动降级/跳过验收。
 - 依赖下载失败：重试，缓存文件仍按 SHA256 核对。
 - 镜像已存在但不匹配：不删除或覆盖已有版本，改发新版本。
@@ -169,7 +169,7 @@ Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改�
 
 ## 已验收产物的发布恢复
 
-如果 tag 发布已完成构建、原生安装器检查、容器验收及 package，但 publish 被跳过或发布操作临时失败，可以在 master 手动执行 **Recover Accepted Publication**，填写原始 tag 发布 run ID。执行此入口表示批准发布该已有版本。
+如果 tag 发布已完成构建、原生安装器检查、容器验收及 package，但 publish 被跳过或发布操作临时失败，可以在 master 手动执行 **Release (`operation=recover`)**，填写原始 tag 发布 `release_run_id`。执行此入口表示批准发布该已有版本；恢复 job 独立取得 Contents 写权限，不运行构建、不需要签名私钥。
 入口只接受同仓库 tag push 的已结束运行，逐项要求验收 job 成功，固定该尝试上传的 online-release artifact ID，并核对 tag 未移动、提交仍属于 master。下载原始安装文件、签名和验收清单后，使用原提交的发布逻辑校验并发布原始字节和镜像 digest。
 此入口不编译、不重新签名、不移动或新建 tag，不需要更新签名私钥。已发布且内容不同的附件或固定镜像仍拒绝覆盖。产物过期或缺失时不能使用此入口。
 

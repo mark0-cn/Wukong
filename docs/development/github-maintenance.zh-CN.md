@@ -23,6 +23,27 @@ GitHub 自动合并会等待合入条件满足；排队并不等于完成。如�
 
 无论使用哪种路径，合入后都须核实 `merged=true`、记录实际 `master` 提交，并跟踪触发的 CI 至最终结果。修改规则必须获得明确授权，且保存修改前后的配置。版本 PR 在启用自动合并或执行合入前仍须取得明确发布授权；审阅豁免不代表发布授权。
 
+<a id="actions-entry-points"></a>
+
+## Actions 入口
+
+仓库维护八份工作流：五个操作入口和三个内部工作流。GitHub 自带的 Dependabot Updates、Dependency Graph 保持启用；旧运行历史保留。
+
+| 入口 | 文件 | 职责与触发 |
+| --- | --- | --- |
+| Checks | `ci.yml` | PR、master 改动检查；手动完整检查/客户端预热；必需 `summary` 门禁 |
+| Acceptance | `acceptance.yml` | 手动 `all`、`apt`、`uninstall`、`windows-worker` 专项验收；Checks 复用选中的 APT/卸载验收 |
+| Version | `prepare-release.yml` | 默认 `dry_run=true` 预览；取消勾选后创建五文件版本 PR |
+| Release | `release.yml` | `rehearse` 默认演练、`inspect` 只读检查、`tag` 已授权版本合并打标签、`recover` 恢复；tag push 正式发布 |
+| Maintenance | `maintenance.yml` | `cleanup`、`cache`、`toolchain` 分任务运行；仅缓存删除 job 有 Actions 写权限 |
+| Internal / Policy | `commit-policy.yml` | PR 标题/正文编辑只重新检查规范与发布说明；必需 `commit-policy` 门禁 |
+| Internal / Client | `build-client.yml` | 仅供调用的客户端构建 |
+| Internal / Installer | `build-installer.yml` | 仅供调用的安装器打包/验收 |
+
+`Acceptance/all` 运行三个专项验收，不替代 `Checks` 的全量组件检查或 `Release/rehearse` 的容器/发布包验收。原生安装卸载只在可丢弃的托管 runner 执行。内部工作流仍可能显示在 Actions 列表，通过名称区分。普通 PR 只有 Checks 与 Policy 两个顶层运行；专项验收作为 Checks 子任务汇总。普通 master 提交不启动 Release。
+
+需要自动合并的普通 PR 在创建后显式开启 GitHub 原生 auto-merge；仓库允许自动合并不等于每个 PR 已开启。检查当前等待的是 CI、review 还是讨论解决，保持管理员审阅豁免与非管理员至少一份批准的规则。
+
 ## Dependabot
 
 默认分支的 `.github/dependabot.yml` 管理 Cargo、npm workspace、
@@ -43,7 +64,7 @@ Dependabot 的 PR 使用普通 CI，不提供 Docker Hub 或模型密钥。
 
 ## 工具链更新检查
 
-Actions → **Toolchain updates** → Run workflow 可手动运行；每周一北京时间
+Actions → **Maintenance** (`task=toolchain`) → Run workflow 可手动运行；每周一北京时间
 10:23 自动检查默认分支，GitHub 的定时任务可能延迟。使用标准 Ubuntu runner，
 只读权限，不使用 Docker Hub 或模型密钥，不下载大型安装包。
 
@@ -84,19 +105,13 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 未开 PR 的分支可手动启动 CI；版本准备工作流使用发布 App 创建 PR，由原生 PR 事件启动完整 CI。
 PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
 
-Windows 原生 worker 安装验收需要显式选择：手动运行 CI 时启用 `windows_worker_acceptance`，或在推送待验收修订前给 PR 加上 `windows-worker-acceptance` 标签。仅修改标签不会启动 CI。此选项强制完整组件检查，并在原生编译后运行独立托管夹具；所选运行启动后移除标签，避免之后无关修订重复安装。夹具拒绝开发宿主和自托管机器，仅上传公开报告。按 worker 程序阻断外网会保留 CI agent 联网，不能替代最终的 Windows VM 整机断网验收。它不发布 Release，也不证明生产目标隔离或卸载已经完成；参见[原生组件指南](../../workers/windows/README.zh-CN.md)。
+Windows 原生 worker 安装验收需要显式选择：手动运行 Checks 时启用 `windows_worker_acceptance`，或在推送待验收修订前给 PR 加上 `windows-worker-acceptance` 标签。仅修改标签不会启动 CI。此选项强制完整组件检查，并在原生编译后运行独立托管夹具；所选运行启动后移除标签，避免之后无关修订重复安装。夹具拒绝开发宿主和自托管机器，仅上传公开报告。按 worker 程序阻断外网会保留 CI agent 联网，不能替代最终的 Windows VM 整机断网验收。它不发布 Release，也不证明生产目标隔离或卸载已经完成；参见[原生组件指南](../../workers/windows/README.zh-CN.md)。
 
 原生编译及选中的安装验收使用显式的未取消条件，因此此前无关测试失败不会阻止获取这项独立证据。安装仍要求原生构建和检查步骤通过；取消、原生构建失败或未选择夹具时均不安装。只有夹具实际运行并得到成功或失败结果后才上传报告。此前的失败仍使 Windows 作业及最终 CI 门禁失败；没有步骤使用错误后继续通过设置。参见 GitHub 的[状态检查表达式规则](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)。
 
-PR 使用 `scripts/ci/ci_scope.py` 选择检查：仅 README/docs Markdown 及配套翻译核对记录改动执行轻量检查；文档配对、链接与核对记录始终在 changes job 检查；
-`ui/` 增加前端检查；`workers/runtime/`、`workers/tests/`、`fixtures/`、`evals/` 增加 Linux 测试。
-Rust、公共脚本、锁文件、工作流、未知路径或版本准备 PR 都执行全量检查。
-重命名同时检查旧路径和新路径；计算范围失败直接阻止 CI 通过。
-Windows 版本一致性、发布脚本和安装器测试始终运行。`master`、手动运行和发布调用始终全量。
+PR 与 master 使用 `scripts/ci/ci_scope.py` 按完整改动范围选择检查：README、AGENTS、docs Markdown、有效的追加式 `.changes/<slug>.toml` 与翻译核对记录只做轻量检查，整项 Windows/Linux job 均跳过；changes 始终校验文档配对、链接和核对记录。`ui/` 增加前端检查；runtime/tests/fixtures/evals 增加 Linux 与 Windows Python 测试。Rust、公共脚本、锁文件、工作流和未知路径执行完整组件检查；运行时 prompts 不属于普通文档。版本 PR、版本递增的 master 提交、手动 Checks 和发布调用执行完整组件及 APT/卸载验收。PR 使用 merge-base 范围，master 使用 push 的 before/after 全范围；重命名包含新旧路径，计算失败阻止 CI。Windows 发布脚本与安装器事务测试仅随 Rust/共享改动运行。
 
-`summary` 是最终检查门禁：要求范围计算及 Windows 检查成功，Linux 的结果必须与选择范围一致；选中的版本客户端预构建也必须成功。
-以后配置 required checks 时应包含 `summary`，不要仅依赖可能按规则跳过的 `linux`。
-正常范围跳过会明确记录，失败/取消/异常跳过不能通过最终门禁。
+`summary` 是最终门禁：changes 必须成功，Windows、Linux、复用的 acceptance 和三个客户端预构建结果必须与选择范围一致。APT/卸载按受影响路径或工作流变更选中；子工作流的 acceptance-gate 独立检查每个选中 job。需要运行的任务失败、取消或意外跳过均不能通过；只有未选中的任务允许跳过。始终触发顶层 Checks，在 job 内选择范围，避免 required check 永久 Pending；Policy 的标题/正文编辑不取消平台 CI。
 
 Rust 使用固定工具链和参数派生缓存键，主分支负责写入，PR 只恢复。
 CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。首次或工具链/参数变化仍需重新编译。
@@ -114,7 +129,7 @@ Windows CI 通过 `CARGO_PROFILE_DEV_DEBUG=1`、`CARGO_PROFILE_TEST_DEBUG=1` 使
 
 CI、客户端构建及安装器构建的 Ubuntu 依赖步骤共用 `python -m scripts.ci.install_apt <packages>`。该入口拒绝在开发机或自托管机器上运行，仅支持一次性的 GitHub 标准托管 Ubuntu 22.04/24.04 x64 runner。任务专用 APT 配置选择经过签名的 Ubuntu archive/security 仓库，使用已安装的 Ubuntu archive keyring 和独立索引，保留签名校验。APT 内置的 `mirror+file` 传输依次尝试 kernel.org、MIT 的 HTTPS Ubuntu 镜像及 Canonical archive/security 地址，在索引和软件包下载时按文件回退。独立镜像域名覆盖此次 Ubuntu 域名的 DNS 故障。它绕过 runner 的 Azure 镜像选择器，不改写原有源文件、DNS 或凭据；Playwright 的依赖安装也使用这份配置。网络传输超时 15 秒、重试两次；索引更新与安装进程分别限时 120/480 秒，另留 15 秒强制结束剩余进程。依赖步骤外层限时 12 分钟，Linux 前端步骤限时 15 分钟。索引下载失败会严格报错，不接受陈旧索引。依赖安装与测试分开展示，网络故障不会显示为测试执行卡住。参数见 Ubuntu 的 [APT 配置](https://manpages.ubuntu.com/manpages/jammy/man5/apt.conf.5.html)、[apt-get](https://manpages.ubuntu.com/manpages/jammy/man8/apt-get.8.html) 及[镜像传输](https://manpages.ubuntu.com/manpages/jammy/man1/apt-transport-mirror.1.html)手册。这些设置限制失败等待时间，不能保证 Ubuntu 或 runner 网络始终可用。产品运行环境和 Docker 镜像的 APT 配置不受影响。
 
-`Ubuntu dependency acceptance` 在 PR 修改其安装入口或验收文件时运行，也可手动执行。轻量的 Ubuntu 22.04/24.04 矩阵实际安装经过签名校验的软件包，检查间接 APT 调用继承的配置，确认首选镜像不可连接时 APT 能自动回退，并检查仅有不可连接的回环仓库时返回 APT 错误 100；同时检查原有源文件没有变化。该验收不构建或发布安装器，也不替代平台 CI、Docker 验收和原生卸载测试。
+`Acceptance / apt` 在 PR/master 修改其安装入口或验收文件时由 Checks 调用，也可手动选择 `suite=apt`。轻量的 Ubuntu 22.04/24.04 矩阵实际安装经过签名校验的软件包，检查间接 APT 调用继承的配置，确认首选镜像不可连接时 APT 能自动回退，并检查仅有不可连接的回环仓库时返回 APT 错误 100；同时检查原有源文件没有变化。该验收不构建或发布安装器，也不替代平台 CI、Docker 验收和原生卸载测试。
 
 CI 与 Release 在各任务结束后运行 `summary` job，包括前面任务失败的情况。
 运行首页可查看 commit、ref、任务结果、耗时和产物链接；Release 额外显示版本、
@@ -130,7 +145,7 @@ API 暂不可用时展示缺失提示，不把未知耗时写成 0，也不把�
 
 ### Docker 与附件缓存
 
-`Cache Worker Dependencies` 在 master 的锁文件、下载器或该工作流变更时预热，也可手动运行。
+`Maintenance / cache` 在 master 的锁文件、下载器或该工作流变更时预热，也可手动运行。
 缓存键包含工具锁文件哈希；发布恢复 master 附件缓存，逐个 SHA256 校验后使用。
 默认最多并行下载 3 个附件，可用 `--jobs 1` 串行下载；临时文件校验成功才替换正式文件。
 网络错误或损坏内容不能作为有效缓存输入。缓存被淘汰时自动重新下载。
@@ -144,14 +159,14 @@ Docker Hub `buildcache` 保存完整中间层。pip cache mount 用于同一 bui
 
 ### 关闭 PR 后的缓存回收
 
-`Clean Closed PR Caches` 每天北京时间 06:41 运行，读取最新 PR 状态后按缓存 ID 删除：
+`Maintenance / cleanup` 每天北京时间 06:41 运行，读取最新 PR 状态后按缓存 ID 删除：
 已关闭 PR 的 `refs/pull/N/merge` 缓存，以及对应已关闭 Dependabot PR 的机器人分支缓存。
 master、tag、仍打开的 PR 及未知普通分支均保留。定时任务可能延迟。
-手动运行默认只列出候选；勾选 `apply` 才删除。摘要显示数量和回收字节数。
+手动选择 `task=cleanup` 默认只列出候选；勾选 `apply` 才删除。每日清理和每周工具报告分别按自己的 cron 路由，不互相触发。摘要显示数量和回收字节数。
 只在 master 上执行，不使用 `pull_request_target` 或运行 PR 代码，不需要个人管理员 Token。
 
 ## 提交规范与发布预览
 
-只读 `Commit policy` 流程使用固定版本 commitlint 验证 PR 标题与新增非合并提交，并检查发布片段。PR 只需英文。PR 标题或正文编辑时重跑该流程，不重启平台 CI；生成仅本 PR 和累计预览前，会运行真实 git-cliff/commitlint 回归测试。可选本地 hook 和双语发布片段见[提交规范](commits.zh-CN.md)。公共 master 规则集中应同时要求 GitHub Actions 的 `commit-policy` 与 `summary` 状态；二者不能互相替代。审阅豁免遵循[主分支合入规则](#master-merge-policy)，所有人仍需满足讨论解决及严格更新要求。仅有 workflow 文件无法启用服务端合并限制。规范检查不代表发布授权，也不会创建 tag。
+只读 `Internal / Policy` 流程使用固定版本 commitlint 验证 PR 标题与新增非合并提交，并检查发布片段。PR 只需英文。PR 标题或正文编辑时重跑该流程，不重启平台 CI；生成仅本 PR 和累计预览前，会运行真实 git-cliff/commitlint 回归测试。可选本地 hook 和双语发布片段见[提交规范](commits.zh-CN.md)。公共 master 规则集中应同时要求 GitHub Actions 的 `commit-policy` 与 `summary` 状态；二者不能互相替代。审阅豁免遵循[主分支合入规则](#master-merge-policy)，所有人仍需满足讨论解决及严格更新要求。仅有 workflow 文件无法启用服务端合并限制。规范检查不代表发布授权，也不会创建 tag。
 
 发布片段保留 PR 原有的相关检查范围；`.changes/` 中的未知文件仍需完整检查。
