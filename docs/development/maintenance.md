@@ -26,6 +26,14 @@ Project Python uses the development-only Ruff version pinned in `scripts/dev/req
 
 Workbench operations hold `OperationLock` for their complete ownership scope. The guard explicitly unlocks before closing its file; do not replace it with a bare file whose drop only closes a descriptor. On Unix, an unrelated concurrent fork can temporarily inherit the open file description before exec, extending a close-only lock past its owner's scope. The clone-descriptor regression checks immediate successor admission while preserving mutual exclusion.
 
+## Local files and task artifacts
+
+The checked-in `.vscode/settings.json` hides dependency caches and generated outputs in the file explorer. It does not delete files or change build inputs. New task-specific logs, inventories and receipts belong under ignored `target/tasks/<task-id>/`; tool-owned build/cache locations keep their existing paths. Preserve older evidence at its recorded path and hash. Keep source, fixtures, licenses, release fragments and bilingual guides visible and versioned; cleanup still requires explicit ownership and retention checks.
+
+Python build/release CLIs reuse `scripts._lib` for repository discovery, checksums and GitHub access. Keep CLI parsing separate from reusable functions. Build commands inherit the CI job deadline; fixture execution and network downloads have operation-specific limits. Package verification repeats hashes at independent trust boundaries intentionally. The shared analysis package receives admitted paths/bytes and keeps numerical algorithms separate from worker ownership; its annotations document internal inputs and outputs without replacing the generated protocol schema.
+
+The test `support.client.Client` owns only its stdio relay. It bounds both request writes and response waits, verifies response IDs, and closes the relay after an uncertain transport result. Tests explicitly reconnect and reconcile persistent jobs or shut down the daemon; closing the relay never implies daemon/resource cleanup.
+
 <a id="桌面界面样式"></a>
 
 The frontend groups workspace, conversation, agents, evidence, settings and maintenance under `ui/src/features/`. Shared API contracts, UI primitives, localization and test support live under `ui/src/shared/`; `ui/src/app/` owns composition and desktop lifecycle. Keep feature tests beside their implementation and cross-feature browser flows under `ui/e2e/`. Global style import order remains centralized.

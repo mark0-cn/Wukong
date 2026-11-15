@@ -307,3 +307,17 @@ trial; `network/plan.py` validates steps and tracks captures,
 `network/transport.py` owns bounded TCP IO and fresh-response boundaries,
 and `network/evidence.py` persists exact transmitted/received chunks and their
 hash-bound transcript. Cancellation remains owned by the job supervisor.
+
+## Resource ownership
+
+| Resource | Owner and lifetime |
+| --- | --- |
+| Daemon and endpoint | `rpc/transport.py` holds the daemon guard independently of stdio relays; reconnecting does not restart an owned job. |
+| Job reservation and receipt | `resources/jobs.py` serializes deduplication, UID/directory reservation and supervisor launch; `execution/planning.py` prepares normalized inputs before that lock. Failed/unknown launches retain their durable identity. |
+| Job process tree and output | The supervisor owns cancellation and final publication; `execution/processes.py` owns process-group/Job termination and bounded output draining. A dead leader is not proof that descendants exited. |
+| GDB and interactive sessions | `resources/sessions.py` retains live owners; session classes serialize their operations and retain observations. Recovery marks former sessions lost and reports unreadable metadata without repairing it. |
+| Network trial | `network/service.py` owns the socket context and final transcript publication; transport checks cancellation/deadlines and preserves stale/fresh response boundaries. |
+| Reduction | `execution/minimize.py` owns the attempt/deadline budget; the injected evaluator owns each execution and crash equivalence. An interrupted candidate is not a minimality claim. |
+| Experiment files | `platform/isolation.py` stages validated public inputs under a distinct UID; artifacts are collected through the same confined identity. Stored evidence survives execution. |
+
+Management `doctor` binds the actual registry against disposable state before observing capabilities. It never constructs a runtime against the running daemon's state, which would incorrectly recover live sessions. Closing a transport, cancelling execution and deleting retained evidence are separate operations with separate owners.

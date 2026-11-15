@@ -192,3 +192,17 @@ Ghidra 套件编译自己的 C 夹具，通过只读适配器导入，定位 mai
 `analysis/adapters.py` 在同一文件内保留 `SeccompService`、`LibcService` 和 `EmuService` 各自的准入；`debugger/crash.py` 保留真实 GDB 观察。它们将输入适配到独立[分析包](../analysis/README.zh-CN.md)，该包负责 BPF 解码/探测、有界 ELF 候选比较、Unicorn 模拟与崩溃数据解释，不拥有 Worker 状态或传输。`network/service.py` 校验准备好的服务绑定并执行声明式 TCP 验证。监督器仍拥有生命周期/取消；不会在特权 supervisor 内运行模型提供的程序。见 [Pwn 工具契约](../../docs/reference/pwn-tools.zh-CN.md)。
 
 `execution/launch_spec.py` 管公共解析、受限成员查找、流式产物哈希。原生启动和网络重放各自保留执行策略/预算。`network/service.py` 协调试验；`network/plan.py` 校验步骤/捕获；`network/transport.py` 管有界 TCP 与新响应边界；`network/evidence.py` 保存精确收发块及哈希 transcript。取消仍由 supervisor 管理。
+
+## 资源所有权
+
+| 资源 | 所有者与生命周期 |
+| --- | --- |
+| 守护进程与端点 | `rpc/transport.py` 持有独立于 stdio 转发进程的守护锁；重连不会重新启动已有归属的作业。 |
+| 作业预留与回执 | `resources/jobs.py` 串行执行去重、UID/目录预留和监督器启动；`execution/planning.py` 在加锁前准备规范化输入。失败或未知的启动仍保留持久身份。 |
+| 作业进程树与输出 | 监督器负责取消和最终发布；`execution/processes.py` 负责进程组/Job 终止与有界输出收集。主进程死亡不能证明后代已退出。 |
+| GDB 与交互会话 | `resources/sessions.py` 保留活动所有者；会话类串行处理操作并保存观察。恢复将旧会话标为 lost，报告无法读取的元数据，但不修复原记录。 |
+| 网络试验 | `network/service.py` 持有 socket 上下文并最终发布 transcript；传输层检查取消/期限，保留旧响应与新响应的边界。 |
+| 输入缩减 | `execution/minimize.py` 管尝试次数和期限；注入的求值器负责每次执行及崩溃等价性。中断时保留的候选不代表已经最小化。 |
+| 实验文件 | `platform/isolation.py` 在独立 UID 下准备已校验的公开输入，通过同一受限身份收集制品。执行结束后仍保留存储证据。 |
+
+管理命令 `doctor` 在临时状态上绑定真实注册表，再观察能力。它不会在运行中的守护进程状态上构造 Runtime，避免错误恢复活动会话。关闭传输、取消执行和删除保留证据是由不同所有者负责的不同操作。
