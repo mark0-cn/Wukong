@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Analyze and resume now return a nonzero exit code for incomplete assessments, including budget pauses, after exporting partial evidence and the structured status. Budget and resume behavior are unchanged."
+zh_CN = "Analyze 和 resume 在导出部分证据与结构化状态后，对预算暂停等未完成任务返回非零退出码；预算与恢复行为保持不变。"

@@ -254,7 +254,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         Some(&endpoint),
     )
     .await?;
-    if !output.status.success() {
+    if output.status.success() == pause_then_resume {
         let debug_store = Store::open(&config.state_dir)?;
         let runs = debug_store.runs()?;
         let errors = if let Some(run) = runs.first() {
@@ -291,6 +291,14 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         ensure!(
             run.status == Status::BudgetPaused,
             "token cap did not pause run"
+        );
+        ensure!(
+            output.status.code() == Some(1),
+            "incomplete assessment must exit 1"
+        );
+        ensure!(
+            String::from_utf8_lossy(&output.stderr).contains("status=budget_paused"),
+            "pause diagnostic must identify the resumable status"
         );
         let paused_calls = counts.lock().await.get("root").copied().unwrap_or_default();
         ensure!(paused_calls == 1, "paused checkpoint repeated model work");

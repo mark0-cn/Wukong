@@ -4,6 +4,8 @@
 
 English · [简体中文](report-format.zh-CN.md)
 
+CLI `analyze` and `resume` export requested bundles and print the stored result before checking completion. Only `completed` exits 0; paused, stopped, crashed, failed or otherwise incomplete assessments exit 1 and identify their status on stderr. Inspect the structured result's `status` to distinguish a resumable budget pause from failure. Export success and bundle integrity do not establish analysis completion or semantic correctness.
+
 `wukong::report::export(store, run_id, output)` exports one transactional run snapshot to a **new directory**. Export reads and hashes the original target and each evidence artifact; it never executes the sample. A verified staging directory is renamed to the destination only after all payloads pass verification. Existing destinations are refused.
 
 `export_with_locale(store, run_id, output, locale)` localizes Markdown/HTML headings, recorded status labels and the bundle README. The compatibility `export` function defaults to English. Desktop export uses the current interface language; CLI export uses `--locale`. Existing prose, snapshot fields, replay parameters, identifiers, hashes and evidence bytes remain unchanged. Only presentation files receive new content hashes; bundle integrity validation still covers all files.

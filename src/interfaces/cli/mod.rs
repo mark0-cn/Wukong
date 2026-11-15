@@ -308,9 +308,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 )?)?)?;
             }
             print_json(&serde_json::to_value(&result)?)?;
-            if result.status == Status::Failed {
-                anyhow::bail!("assessment failed; inspect stored errors and partial evidence");
-            }
+            require_completed(result.status)?;
         }
         Command::Resume {
             run_id,
@@ -334,9 +332,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 )?)?)?;
             }
             print_json(&serde_json::to_value(&result)?)?;
-            if result.status == Status::Failed {
-                anyhow::bail!("assessment failed; inspect stored errors and partial evidence");
-            }
+            require_completed(result.status)?;
         }
         Command::Runs => print_json(&serde_json::to_value(
             crate::queries::AssessmentQueries::new(&store).runs()?,
@@ -451,6 +447,14 @@ async fn drive_with_events(prepared: PreparedAssessment, json_events: bool) -> R
 /// Default objective shared by CLI and desktop assessments.
 pub(crate) const DEFAULT_TASK: &str = "Analyze the binary's purpose, structure, inputs, outputs and key behavior. Recover relevant formats or algorithms, validate observations where feasible, and report evidence, uncertainty and limitations. Investigate vulnerabilities only when explicitly requested.";
 
+fn require_completed(status: Status) -> Result<()> {
+    anyhow::ensure!(
+        status == Status::Completed,
+        "assessment did not complete (status={status}); inspect stored state and partial evidence"
+    );
+    Ok(())
+}
+
 fn config_path(
     explicit: Option<PathBuf>,
     desktop: bool,
@@ -475,6 +479,23 @@ fn config_path(
 #[cfg(test)]
 mod config_path_tests {
     use super::*;
+
+    #[test]
+    fn only_completed_assessments_succeed() {
+        assert!(require_completed(Status::Completed).is_ok());
+        for status in [
+            Status::Queued,
+            Status::Running,
+            Status::Waiting,
+            Status::BudgetPaused,
+            Status::Stopped,
+            Status::Crashed,
+            Status::Failed,
+        ] {
+            let error = require_completed(status).unwrap_err().to_string();
+            assert!(error.contains(status.as_str()));
+        }
+    }
 
     #[test]
     fn desktop_prefers_executable_config_and_cli_keeps_local_config() -> Result<()> {
