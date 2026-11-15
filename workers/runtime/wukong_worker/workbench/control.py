@@ -40,6 +40,7 @@ def idle(root):
 
 def doctor(root):
     from wukong_worker.host.capabilities import doctor as inventory
+    from wukong_worker.host.runtime import Runtime
 
     checks = {}
     env = safe_env()
@@ -124,10 +125,16 @@ def doctor(root):
             )
         else:
             checks["ghidra"] = {"passed": False, "error": "headless Ghidra unavailable"}
+        # Bind the real handler registry against disposable state. Constructing
+        # Runtime(root) here would recover live sessions owned by another daemon.
+        registry_root = directory / "registry"
+        registry_root.mkdir(mode=0o700)
+        probe = Runtime(registry_root, trusted=False)
+        observed = inventory(root, False, True, probe.registrations)
     return {
         "passed": all(c["passed"] for c in checks.values()),
         "checks": checks,
-        "inventory": inventory(root, False, True),
+        "inventory": observed,
     }
 
 
