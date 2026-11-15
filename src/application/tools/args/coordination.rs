@@ -20,6 +20,7 @@ pub(in crate::application::tools) struct CreateAgentArgs {
     /// These supplement the assigned role and never change its permissions or lifecycle.
     pub skills: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Defaults to false: use the child's brief and evidence references. Explicit opt-in only.
     pub inherit_context: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_for_predecessors: Option<Vec<String>>,
@@ -31,7 +32,17 @@ pub(in crate::application::tools) struct CreateAgentArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct ViewAgentGraphArgs {}
+pub(in crate::application::tools) struct ViewAgentGraphArgs {
+    /// Full agent ID (or unambiguous prefix) for that agent's detailed contract/result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    /// Summary page size, default 8 and maximum 16.
+    #[schemars(range(min = 1, max = 16))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

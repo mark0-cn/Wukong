@@ -5,6 +5,28 @@ use std::collections::HashSet;
 
 pub struct TaskGraph;
 impl TaskGraph {
+    /// Resolve model-facing references within one run. Persist only canonical IDs.
+    pub fn resolve<'a>(agents: &'a [AgentMetadata], reference: &str) -> Result<&'a AgentMetadata> {
+        if let Some(agent) = agents.iter().find(|agent| agent.id == reference) {
+            return Ok(agent);
+        }
+        ensure!(
+            reference.len() >= 8,
+            "use a full agent ID or a unique prefix of at least 8 characters"
+        );
+        let mut matches = agents
+            .iter()
+            .filter(|agent| agent.id.starts_with(reference));
+        let agent = matches
+            .next()
+            .context("agent reference not in this run; query view_agent_graph")?;
+        ensure!(
+            matches.next().is_none(),
+            "ambiguous agent reference; use the full ID from view_agent_graph"
+        );
+        Ok(agent)
+    }
+
     pub fn validate(agents: &[AgentMetadata]) -> Result<()> {
         fn visit<'a>(
             id: &'a str,

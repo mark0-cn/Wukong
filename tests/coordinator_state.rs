@@ -33,6 +33,68 @@ fn request(scope: &str) -> ChildRequest {
 }
 
 #[test]
+fn new_tasks_default_to_private_context_and_cannot_delegate_their_own_scope() {
+    let (_dir, _store, coordinator, run) = fixture();
+    let request: ChildRequest = serde_json::from_value(json!({
+        "name":"focused", "role":"analyst", "task":"inspect", "scope":"one function"
+    }))
+    .unwrap();
+    assert!(!request.inherit_context);
+    let child = coordinator
+        .create_child(&run.root_id, request.clone())
+        .unwrap()
+        .agent;
+    assert!(child.inherited_context.is_none());
+    let error = coordinator.create_child(&child.id, request).unwrap_err();
+    assert!(error.to_string().contains("owned by you or an ancestor"));
+}
+
+#[test]
+fn short_agent_references_are_canonical_scoped_and_unambiguous() {
+    let (_dir, store, coordinator, run) = fixture();
+    let child = coordinator
+        .create_child(&run.root_id, request("one function"))
+        .unwrap()
+        .agent;
+    let short = &child.id[..8];
+    coordinator
+        .message(&run.root_id, short, "inspect the caller")
+        .unwrap();
+    let messages = store
+        .transaction(|tx| Store::tx_messages(tx, &run.id))
+        .unwrap();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.recipient == child.id && m.content == "inspect the caller")
+    );
+    coordinator.wait(&run.root_id, &[short.into()], 30).unwrap();
+    let parent: AgentMetadata = store.load(&run.root_id).unwrap();
+    assert_eq!(parent.wait_for, vec![child.id.clone()]);
+    let mut duplicate = child.metadata.clone();
+    duplicate.id = format!("{short}another-agent");
+    store.save_record(&duplicate).unwrap();
+    let error = coordinator
+        .message(&run.root_id, short, "ambiguous")
+        .unwrap_err();
+    assert!(error.to_string().contains("ambiguous"));
+    coordinator
+        .message(&run.root_id, &child.id, "exact ID wins")
+        .unwrap();
+    let all = store.records::<AgentMetadata>(&run.id).unwrap();
+    assert!(TaskGraph::resolve(&all, "missing-agent").is_err());
+    assert!(TaskGraph::resolve(&all, &child.id[..7]).is_err());
+    let other = coordinator
+        .create_run(&run.target_path, "other run", Budget::default(), json!({}))
+        .unwrap();
+    assert!(
+        coordinator
+            .message(&other.root_id, &child.id, "cross run")
+            .is_err()
+    );
+}
+
+#[test]
 fn quota_exhausted_scope_requires_followup_instead_of_respawn() {
     let (_dir, _store, c, run) = fixture();
     let child = c
@@ -1205,4 +1267,49 @@ fn structured_deliverables_reject_missing_semantics() {
     );
     artifact.kind = "invented".into();
     assert!(artifact.validate().is_err());
+}
+
+#[test]
+fn lifecycle_replay_does_not_reset_agents_or_publish_duplicate_transitions() {
+    let (_dir, store, c, run) = fixture();
+    c.resume_once(&run.id, None, "controller-1").unwrap();
+    let mut root: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
+    root.metadata.status = Status::Running;
+    store.save_record(&root).unwrap();
+    c.resume_once(&run.id, None, "controller-1").unwrap();
+    assert_eq!(
+        store
+            .require::<AgentSnapshot>("agent", &run.root_id)
+            .unwrap()
+            .status,
+        Status::Running
+    );
+    c.pause_operator(&run.id, "clicked pause").unwrap();
+    c.pause_operator(&run.id, "duplicate pause").unwrap();
+    c.pause_budget(&run.id, "late accounting observation")
+        .unwrap();
+    // Retrying the old start cannot reopen this later pause.
+    c.resume_once(&run.id, None, "controller-1").unwrap();
+    assert_eq!(
+        store.require::<RunRecord>("run", &run.id).unwrap().status,
+        Status::BudgetPaused
+    );
+    c.resume_once(&run.id, None, "controller-2").unwrap();
+    let events = store.events(&run.id, 0, 100).unwrap();
+    for kind in ["run.started", "run.paused", "run.resumed"] {
+        assert_eq!(events.iter().filter(|event| event.kind == kind).count(), 1);
+    }
+    assert!(!events.iter().any(|event| event.kind == "run.budget_paused"));
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.kind == "run.paused")
+            .unwrap()
+            .data["cause"],
+        "operator"
+    );
+    assert!(
+        c.resume_once(&run.id, Some(Budget::default()), "controller-2")
+            .is_err()
+    );
 }

@@ -196,32 +196,9 @@ def supervise_job(root, directory):
                     )
                     argv[argv.index("-o") + 1] = str(cwd / "fuzz")
                 else:
-                    staged = []
-                    for argument in argv:
-                        path = Path(argument)
-                        absolute = path.resolve() if path.is_absolute() else (root / path).resolve()
-                        relative_input = not path.is_absolute() and argument.replace(
-                            "\\", "/"
-                        ).split("/", 1)[0] in {"files", "jobs", "fuzz"}
-                        if (path.is_absolute() and root in absolute.parents) or relative_input:
-                            if absolute.is_file():
-                                argument = str(
-                                    isolation.stage_file(
-                                        absolute, experiment, executable=(len(staged) == 0)
-                                    )
-                                )
-                            elif absolute.is_dir():
-                                argument = str(
-                                    isolation.stage_directory(
-                                        absolute, experiment, "directory-" + str(len(staged))
-                                    )
-                                )
-                            else:
-                                raise ValueError(
-                                    "isolated jobs must write output relative to their fresh working directory"
-                                )
-                        staged.append(argument)
-                    argv = staged
+                    from wukong_worker.execution.staging import stage_argv
+
+                    argv = stage_argv(root, argv, experiment, spec.get("executable_inputs", []))
                 isolation.seal(experiment)
                 atomic_json(directory / "experiment.json", experiment)
             job_env = launch["env"] if launch else safe_env(spec.get("env"))
@@ -259,6 +236,12 @@ def supervise_job(root, directory):
             )
             if launch:
                 result["launch_identity"] = launch["identity"]
+                result["source_target_sha256"] = launch["source_target_sha256"]
+                result["executed_target_sha256"] = launch["executed_target_sha256"]
+                result["input_mode"] = launch["input_mode"]
+            from wukong_worker.execution.staging import execution_metadata
+
+            result["execution"] = execution_metadata(cwd, experiment)
             result["experiment_uid"] = experiment["uid"] if experiment else None
             result["metadata_protected"] = bool(experiment)
             if experiment and kind == "process":

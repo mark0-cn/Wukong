@@ -77,11 +77,44 @@ def cancellation_proof(client, root):
     }
 
 
+def execution_copy_parity(client, root):
+    import hashlib
+
+    payload = b'#!/bin/sh\nprintf "execution-copy-ok\\n"\n'
+    target = client.put("execution-copy.sh", payload, executable=False)
+    original = root / target["path"]
+    original_mode = original.stat().st_mode
+    shell = client.call("exec.run", target=target["path"], command='"$TARGET"')
+    source = "import subprocess,sys; r=subprocess.run([sys.argv[-1]],capture_output=True); print(r.stdout.decode(),end='');sys.exit(r.returncode)"
+    python = client.finish(client.call("py.run", source=source, target=target["path"]))["result"]
+    job = client.finish(
+        client.call(
+            "job.start",
+            argv=["python3", "-c", source, target["path"]],
+            executable_inputs=[target["path"]],
+        )
+    )["result"]
+    for result in [shell, python, job]:
+        assert result["exit_code"] == 0 and result["stdout"] == "execution-copy-ok\n", result
+        copies = [
+            item
+            for item in result["execution"]["inputs"]
+            if item["source_sha256"] == hashlib.sha256(payload).hexdigest()
+        ]
+        assert (
+            len(copies) == 1 and copies[0]["access"] == "execute" and not copies[0]["writable"]
+        ), result
+        assert copies[0]["source_sha256"] == copies[0]["executed_sha256"], result
+    assert original.read_bytes() == payload and original.stat().st_mode == original_mode
+    return {"shell": shell, "python": python, "job": job, "original_preserved": True}
+
+
 def main():
     root = Path(sys.argv[1]).resolve()
     client = Client(root)
     doctor = client.call("doctor")
     assert doctor["metadata_protected_from_targets"] and doctor["unique_experiment_uids"], doctor
+    execution_copies = execution_copy_parity(client, root)
     canary = root / "private-staging-canary.txt"
     canary.write_text("CONTROLLED-STAGING-CANARY-NOT-A-TOKEN")
     canary.chmod(0o600)
@@ -188,6 +221,7 @@ print(json.dumps({'uid':os.getuid(),'denied':denied,'cap_eff':next(x for x in pa
                 "doctor": doctor,
                 "private_metadata_staging_denied": True,
                 "cancellation": cancellation,
+                "execution_copies": execution_copies,
                 "attacker": first,
                 "protected_job": second,
                 "verification": verified,

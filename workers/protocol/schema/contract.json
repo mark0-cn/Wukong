@@ -832,6 +832,8 @@
             "enum": [
               "running",
               "exited",
+              "closing",
+              "recovery_required",
               "closed",
               "lost"
             ],
@@ -1223,6 +1225,8 @@
             "enum": [
               "running",
               "exited",
+              "closing",
+              "recovery_required",
               "closed",
               "lost"
             ],
@@ -3233,7 +3237,7 @@
       }
     },
     "interact.close": {
-      "effect": "once",
+      "effect": "reconcile",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
@@ -3256,6 +3260,8 @@
             "enum": [
               "running",
               "exited",
+              "closing",
+              "recovery_required",
               "closed",
               "lost"
             ],
@@ -3353,6 +3359,8 @@
             "enum": [
               "running",
               "exited",
+              "closing",
+              "recovery_required",
               "closed",
               "lost"
             ],
@@ -3681,6 +3689,17 @@
             },
             "type": [
               "object",
+              "null"
+            ]
+          },
+          "executable_inputs": {
+            "description": "Public argv files that need executable copies (e.g. a binary launched by an interpreter).\nOther file arguments are staged read-only. LaunchSpec owns this when supplied.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "type": [
+              "array",
               "null"
             ]
           },
@@ -4533,6 +4552,7 @@
             "type": "string"
           },
           "target": {
+            "description": "Target appended to sys.argv as an immutable executable copy in isolation.",
             "type": [
               "string",
               "null"
@@ -4886,6 +4906,8 @@
         "enum": [
           "running",
           "exited",
+          "closing",
+          "recovery_required",
           "closed",
           "lost"
         ],

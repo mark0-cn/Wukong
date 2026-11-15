@@ -2,6 +2,7 @@
 use super::*;
 use crate::domain::{PublicReply, ReplyState};
 use rig_ecs::agent::Partial;
+use sha2::{Digest, Sha256};
 use std::time::Instant;
 
 #[derive(Component)]
@@ -9,7 +10,13 @@ pub(super) struct ReplyProgress {
     reply: PublicReply,
     last_flush: Option<Instant>,
     last_bytes: usize,
+    logical_step: String,
 }
+
+#[derive(Component)]
+pub(super) struct OutputReviewed;
+#[derive(Component)]
+pub(super) struct TruncatedText;
 type SettlingReplies<'w, 's> = Query<
     'w,
     's,
@@ -42,7 +49,12 @@ pub(super) fn prepare_models(
             Without<BusinessPrepared>,
         ),
     >,
-    mut owners: Query<(&AgentId, &mut Conversation, &mut ToolAccess)>,
+    mut owners: Query<(
+        &AgentId,
+        &mut Conversation,
+        &mut ToolAccess,
+        Has<TruncatedText>,
+    )>,
     definitions: Query<&ToolDef>,
     application: Res<Application>,
     mut fatal: ResMut<Fatal>,
@@ -52,7 +64,7 @@ pub(super) fn prepare_models(
         failed(
             &mut fatal,
             (|| -> Result<()> {
-                let (id, mut conversation, mut access) = owners.get_mut(from.0)?;
+                let (id, mut conversation, mut access, truncated_text) = owners.get_mut(from.0)?;
                 let agent: AgentMetadata = application.runner.agent(&id.0)?;
                 if !agent.predecessors_released {
                     return Ok(());
@@ -63,6 +75,10 @@ pub(super) fn prepare_models(
                 let preamble = application.runner.preamble(&agent, &run)?;
                 if let Some(prompt) = &mut call.prompt {
                     prompt.role = preamble;
+                    if truncated_text {
+                        prompt.sections.push(rig_core::completion::Section::new("visible_output_continuation", "Your visible answer was cut off and remains in your history. Continue only the missing part as one small tool action or an accepted agent_finish/finish_scan result. Do not repeat completed analysis. This continuation is bounded."));
+                        commands.entity(from.0).remove::<TruncatedText>();
+                    }
                     prompt.sections.push(rig_core::completion::Section::new(
                         "analysis_environment",
                         serde_json::to_string(&selected.0.environment)?,
@@ -143,14 +159,116 @@ pub(super) fn prepare_models(
                         application.runner.emit(&run.id,Some(&agent.id),"context.compacted",json!({"checkpoint_evidence_id":evidence.id,"removed_messages":start,"runtime":"rig-memory"}))?;
                     }
                 }
+                let logical_step = format!(
+                    "{}:{}:{:x}",
+                    agent.id,
+                    agent.generation,
+                    Sha256::digest(serde_json::to_vec(conversation.messages())?)
+                );
+                if application.runner.recovery_attempts(&logical_step)? > 0 {
+                    let config = application.runner.role_config(agent.role);
+                    let request = call.request_mut();
+                    if let Some(limit) = config.recovery_max_tokens {
+                        request.max_tokens = Some(limit.max(config.max_tokens));
+                    }
+                    if let Some(Value::Object(overrides)) = config.recovery_additional_params {
+                        let params = request.additional_params.get_or_insert_with(|| json!({}));
+                        if let Some(params) = params.as_object_mut() {
+                            params.extend(overrides);
+                        }
+                    }
+                    if let Some(prompt) = &mut call.prompt {
+                        prompt.sections.push(rig_core::completion::Section::new("output_limit_recovery", "The previous request exhausted its output limit before producing any usable answer. No tools from that response were executed. Reuse established evidence and produce one small concrete next action; avoid restarting the analysis or emitting a large report. This is a bounded retry of your own current task."));
+                    }
+                }
                 commands.entity(effect).insert((
                     BusinessPrepared,
                     ReplyProgress {
                         reply: PublicReply::for_request(&agent),
                         last_flush: None,
                         last_bytes: 0,
+                        logical_step,
                     },
                 ));
+                Ok(())
+            })(),
+        );
+    }
+}
+
+/// Preserve the physical response and its usage before asking Rig to retry a
+/// changed request. Truncated tool arguments remain Rig's non-executable errors.
+#[expect(
+    clippy::type_complexity,
+    reason = "Explicit effect filters protect retry admission"
+)]
+pub(super) fn recover_output_limit(
+    mut calls: Query<
+        (Entity, &Effect, &ForAgent, &mut Outcome, &ReplyProgress),
+        (
+            ReadyToSettle,
+            ModelCalls,
+            Without<HostFinal>,
+            Without<OutputReviewed>,
+        ),
+    >,
+    ids: Query<&AgentId>,
+    application: Res<Application>,
+    mut commands: Commands,
+    mut fatal: ResMut<Fatal>,
+) {
+    for (entity, effect, from, mut outcome, progress) in &mut calls {
+        commands.entity(entity).insert(OutputReviewed);
+        let Some(response) = outcome.completion() else {
+            continue;
+        };
+        if !response
+            .finish_reason()
+            .is_some_and(|finish| finish.truncated_output())
+        {
+            continue;
+        }
+        let response = response.clone();
+        failed(
+            &mut fatal,
+            (|| -> Result<()> {
+                let agent = application.runner.agent(&ids.get(from.0)?.0)?;
+                let classification = if response.unfinished_calls().next().is_some() {
+                    "incomplete_tool_arguments"
+                } else if !public_text(response.choice.iter()).trim().is_empty() {
+                    "visible_text_truncated"
+                } else if response.tool_calls().next().is_none() {
+                    "reasoning_only_output_limit"
+                } else {
+                    "complete_tools_at_output_limit"
+                };
+                if classification != "reasoning_only_output_limit" {
+                    if classification == "visible_text_truncated"
+                        && response.tool_calls().next().is_none()
+                    {
+                        commands.entity(from.0).insert(TruncatedText);
+                    }
+                    application.runner.emit(&agent.run_id, Some(&agent.id), "model.output_limit", json!({"classification":classification,"logical_step":progress.logical_step,"action":"native_rig_continuation"}))?;
+                    return Ok(());
+                }
+                let effect_id = effect.id().to_string();
+                application
+                    .runner
+                    .retain_model_response(&agent, &effect_id, &response)?;
+                let retry = application.runner.claim_recovery(
+                    &agent,
+                    &progress.logical_step,
+                    &effect_id,
+                )?;
+                outcome.0 = Err(rig_core::error::ErrorReport::new(rig_core::error::ErrorKind::Response,
+                if retry { "Output limit exhausted before usable content; retrying a bounded changed request" }
+                else { "Output-limit recovery exhausted; preserve this task's evidence and configure a supported recovery_max_tokens or recovery_additional_params before a focused replacement task" }
+            ).with_code("wukong_output_limit"));
+                commands.entity(entity).insert(RetryVerdict(if retry {
+                    rig_ecs::retry::Verdict::Retry(Duration::from_millis(1))
+                } else {
+                    rig_ecs::retry::Verdict::Final
+                }));
                 Ok(())
             })(),
         );
@@ -224,6 +342,9 @@ pub(super) fn retry_policy(
     };
     for (outcome, of, mut verdict) in &mut calls {
         if let Err(error) = &outcome.0 {
+            if error.code.as_deref() == Some("wukong_output_limit") {
+                continue;
+            }
             verdict.0 = policy.verdict(
                 error,
                 turns.get(of.0).map_or(0, |recovery| recovery.retries),
@@ -237,6 +358,7 @@ pub(super) fn enforce_completion(
     mut turns: Query<(Entity, &TurnOf, &mut TurnOutcome)>,
     ids: Query<&AgentId>,
     nudges: Query<&Nudged>,
+    truncated_text: Query<&TruncatedText>,
     application: Res<Application>,
     mut commands: Commands,
     mut fatal: ResMut<Fatal>,
@@ -261,7 +383,10 @@ pub(super) fn enforce_completion(
                     } else {
                         commands.entity(of.0).insert(Nudged(true));
                         commands.entity(turn).remove::<TurnOutcome>();
-                        commands.trigger(Deliver::new(of.0, "Call agent_finish (child) or finish_scan (root) with your accepted structured task result, or continue using tools. A plain-text answer does not complete this task.", DeliveryMode::Inform));
+                        let truncated = truncated_text.contains(of.0);
+                        if !truncated {
+                            commands.trigger(Deliver::new(of.0, "Call agent_finish (child) or finish_scan (root) with your accepted structured task result, or continue using tools. A plain-text answer does not complete this task.", DeliveryMode::Inform));
+                        }
                         commands.spawn((TurnCall, CallOf(turn), ForAgent(of.0)));
                     }
                 }

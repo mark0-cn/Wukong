@@ -19,13 +19,21 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _recover_sessions(directory: Path) -> None:
-    """Mark former live owners lost; never repair unreadable records or reopen them."""
+    """Reconcile durable process ownership before declaring a former owner gone."""
     skipped = 0
-    for path in directory.glob("*/session.json") if directory.exists() else []:
+    records = set(directory.glob("*/session.json"))
+    records.update(path.parent / "session.json" for path in directory.glob("*/processes.json"))
+    for path in sorted(records):
         try:
-            state = load_json(path)
-            if state["state"] == "running":
-                state["state"] = "lost"
+            # A crash between spawn and publishing the session still owns resources.
+            state = load_json(path) if path.exists() else {"state": "recovery_required"}
+            if state["state"] != "closed":
+                from wukong_worker.resources.process_journal import ProcessJournal
+
+                journal = path.parent / "processes.json"
+                confirmed = journal.exists() and ProcessJournal.reconcile(journal)
+                state["state"] = "lost" if confirmed else "recovery_required"
+                state["cleanup_confirmed"] = bool(confirmed)
                 atomic_json(path, state)
         except (ValueError, OSError) as error:
             # Preserve the existing recovery policy, with bounded diagnostics.
@@ -70,14 +78,57 @@ class SessionManager:
         )
         if registry is not None:
             with self.lock:
-                if result["session_id"] not in registry:
-                    return {**result, "state": "lost", "reason": "session owner daemon restarted"}
+                kind = "debug" if method == "debug.start" else "interact"
+                path = self.root / kind / result["session_id"] / "session.json"
+                state = load_json(path) if path.exists() else {}
+                if result["session_id"] not in registry or state.get("state") != "running":
+                    observed = state.get("state", "recovery_required")
+                    if observed == "lost" and not state.get("cleanup_confirmed"):
+                        observed = "recovery_required"
+                    return {
+                        **result,
+                        "state": observed,
+                        "cleanup_confirmed": state.get("cleanup_confirmed", observed == "closed"),
+                        "reason": "session ownership reconciled",
+                    }
         return result
 
     def close_all(self):
+        failures = []
         for registry in [self.debug, self.interact]:
             for session in registry.values():
-                session.close()
+                try:
+                    session.close()
+                except Exception as error:
+                    failures.append(error)
+        if failures:
+            raise failures[0]
+
+    def _close_absent(self, kind, params):
+        identifier = params.get("session_id", "")
+        if not re.fullmatch(r"[0-9a-f]{32}", identifier):
+            raise WorkerError("session_lost", "session has no verifiable ownership record")
+        directory = self.root / kind / identifier
+        metadata = directory / "session.json"
+        if not metadata.exists():
+            raise WorkerError("outcome_unknown", "session cleanup ownership record is missing")
+        state = load_json(metadata)
+        if state["state"] == "closed":
+            return {"session_id": identifier, "state": "closed", "cleanup_confirmed": True}
+        from wukong_worker.resources.process_journal import ProcessJournal
+
+        journal = directory / "processes.json"
+        confirmed = journal.exists() and ProcessJournal.reconcile(journal)
+        state.update(
+            state="lost" if confirmed else "recovery_required", cleanup_confirmed=bool(confirmed)
+        )
+        atomic_json(metadata, state)
+        if not confirmed:
+            raise WorkerError(
+                "outcome_unknown",
+                "session cleanup remains unconfirmed; reconcile its owning environment",
+            )
+        return {"session_id": identifier, "state": "lost", "cleanup_confirmed": True}
 
     def interact_start(self, params):
         if not self.trusted and not self.isolated:
@@ -111,7 +162,10 @@ class SessionManager:
             return {"session_id": session.id, "process": process_profile(session.process.pid)}
 
     def interact_close(self, params):
-        session = self._interact(params)
+        with self.lock:
+            session = self.interact.get(params.get("session_id"))
+        if session is None:
+            return self._close_absent("interact", params)
         result = session.close()
         with self.lock:
             self.interact.pop(session.id, None)
@@ -181,7 +235,10 @@ class SessionManager:
         return session.profile()
 
     def debug_close(self, params):
-        session = self._debug(params)
+        with self.lock:
+            session = self.debug.get(params.get("session_id"))
+        if session is None:
+            return self._close_absent("debug", params)
         return session.close()
 
     def debug_events(self, params):

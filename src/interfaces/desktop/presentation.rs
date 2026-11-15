@@ -220,7 +220,10 @@ pub fn transcript(
                         .into()
                 }),
                 "agents.stopped" => Some(UiMessage::new("transcript-stopped").into()),
-                "run.budget_paused" => Some(match event.data["reason"].as_str() {
+                "run.paused" if event.data["cause"] == "operator" => {
+                    Some(UiMessage::new("system-analysis-paused-progress-is-saved").into())
+                }
+                "run.paused" | "run.budget_paused" => Some(match event.data["reason"].as_str() {
                     Some("operator paused from desktop" | "operator paused assessment") => {
                         UiMessage::new("system-analysis-paused-progress-is-saved").into()
                     }

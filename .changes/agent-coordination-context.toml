@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Keep agent status queries compact and paginated, resolve unambiguous short references within a run, and isolate new task conversations by default while preserving explicit follow-up history. Reject delegation of an already-owned ancestor scope."
+zh_CN = "代理状态查询改为紧凑分页，在同一任务内解析无歧义短引用；新任务默认隔离会话，显式续任务保留自身历史，并拒绝重复委派自己或祖先已负责的范围。"

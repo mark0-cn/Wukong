@@ -458,21 +458,6 @@ impl Service {
                 serde_json::json!({"selected":id,"new_tasks_use_selected_environment":true,"existing_runs_keep_saved_configuration":true}),
             );
         }
-        // Starting an existing environment must not silently become an unobserved pull.
-        // Missing images go through the cancellable setup/repair controller.
-        if matches!(
-            request,
-            crate::application::maintenance::workbench::DesktopRequest::Up
-        ) {
-            let environment = workbench.environment()?;
-            ensure!(
-                workbench
-                    .docker
-                    .inspect("image", &environment.image_id)?
-                    .is_some(),
-                crate::i18n::Message::new("system-tool-image-needs-repair")
-            );
-        }
         let result = workbench.desktop(request)?;
         self.changed();
         Ok(result)

@@ -29,16 +29,14 @@ pub struct ChildRequest {
     pub contract: TaskContract,
     #[serde(default)]
     pub skills: Vec<String>,
-    #[serde(default = "yes")]
+    /// New tasks start with their own brief. Parent conversation is explicit opt-in.
+    #[serde(default)]
     pub inherit_context: bool,
     /// Predecessor agents evaluated using dependency_policy before admission.
     #[serde(default)]
     pub wait_for_predecessors: Vec<String>,
     #[serde(default)]
     pub dependency_policy: DependencyPolicy,
-}
-fn yes() -> bool {
-    true
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnResult {

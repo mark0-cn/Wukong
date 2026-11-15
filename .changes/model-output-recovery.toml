@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Recover reasoning-only output exhaustion with durable bounded attempts, retained response evidence and complete usage accounting. Keep visible-text continuation and incomplete-tool repair separate; provider output and reasoning overrides remain explicit configuration."
+zh_CN = "通过持久化的有界次数恢复仅含推理的输出耗尽，保留响应证据并完整计量用量；正文续写与不完整工具纠错分别处理，服务输出及推理参数调整仍需显式配置。"

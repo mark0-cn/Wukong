@@ -149,10 +149,17 @@ pub(crate) fn drive(
                 (admit_spawns, gate_models, gate_tools)
                     .chain()
                     .in_set(Stage::Gate),
-                (account_replies, configure_spawned, enforce_completion)
+                (
+                    account_replies,
+                    recover_output_limit,
+                    configure_spawned,
+                    enforce_completion,
+                )
                     .chain()
                     .in_set(ReviewSystems::Edit),
-                retry_policy.in_set(ReviewSystems::Edit),
+                retry_policy
+                    .in_set(ReviewSystems::Edit)
+                    .after(recover_output_limit),
             ),
         )
         // A completed non-effect task must release its hold before AgentLoop
@@ -180,7 +187,7 @@ pub(crate) fn drive(
         match definition.name.as_str() {
             "task" => {
                 definition.parameters = task_schema.clone();
-                definition.description = "Start an asynchronous subagent: role=analyst performs analysis, role=verifier independently checks another agent's claim. Supply a short description, full prompt and scope, with known evidence, constraints and outputs. Select capabilities through skills (recon, reverse, hunter, fuzz, crash, exploit, reporter or task methods), never through role. Changing capabilities alone does not justify another agent. Optional inherit_context, contract, wait_for_predecessors and dependency_policy refine the assignment. Creation returns before work finishes; predecessor gates hold the child's model requests. Model choice and tool permissions come from controller configuration and the role. Inspect existing work first. Use follow_up_agent for completed work, wait for one report or wait_for_agents for a group/success policy.".into();
+                definition.description = "Start an asynchronous subagent: role=analyst performs analysis, role=verifier independently checks another agent's claim. Supply a short description, full prompt and scope, with known evidence, constraints and outputs. Select capabilities through skills (recon, reverse, hunter, fuzz, crash, exploit, reporter or task methods), never through role. Changing capabilities alone does not justify another agent. New tasks default to isolated context; explicitly set inherit_context=true only for useful closed parent history. Optional contract, wait_for_predecessors and dependency_policy refine the assignment. Creation returns before work finishes; predecessor gates hold the child's model requests. Model choice and tool permissions come from controller configuration and the role. Inspect existing work first. Use follow_up_agent for completed work, wait for one report or wait_for_agents for a group/success policy.".into();
             }
             "message" => {
                 definition.description = "Send a request, correction or reply to a reachable active agent using agent and text. Use send_message_to_agent with kind=information for progress-only updates, which must not release waits. New work on a completed agent requires follow_up_agent.".into();

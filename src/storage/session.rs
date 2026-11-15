@@ -136,6 +136,8 @@ impl StateSession<'_> {
         #[derive(serde::Deserialize)]
         struct JobViewStatus {
             state: JobState,
+            #[serde(default)]
+            cleanup_pending: bool,
         }
         let mut open_sessions = Vec::new();
         for kind in ["debug_session", "interact_session"] {
@@ -158,7 +160,7 @@ impl StateSession<'_> {
             running_jobs: self
                 .list::<JobView>("job", run)?
                 .into_iter()
-                .filter(|job| !job.status.state.terminal())
+                .filter(|job| !job.status.state.terminal() || job.status.cleanup_pending)
                 .map(|job| job.id)
                 .collect(),
         })

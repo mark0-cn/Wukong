@@ -55,6 +55,8 @@ impl Default for ToolLimits {
 pub struct ExecutionConfig {
     pub stream: bool,
     pub model_retries: usize,
+    /// Changed-request retries for reasoning-only output exhaustion (0 disables, at most 2).
+    pub output_recovery_attempts: u32,
     pub compact_after_chars: usize,
     pub keep_recent_messages: usize,
     /// When enabled, large tool-result envelopes are replaced in the model
@@ -69,6 +71,7 @@ impl Default for ExecutionConfig {
         Self {
             stream: true,
             model_retries: 2,
+            output_recovery_attempts: 1,
             compact_after_chars: 200000,
             keep_recent_messages: 12,
             summarize_tool_outputs: true,
@@ -177,6 +180,10 @@ impl AppConfig {
     }
     pub fn validate(&self) -> Result<()> {
         self.model.validate()?;
+        ensure!(
+            self.execution.output_recovery_attempts <= 2,
+            "output_recovery_attempts must be at most 2"
+        );
         for (id, environment) in &self.environments {
             crate::adapters::environments::validate_id(id)?;
             environment.validate()?;

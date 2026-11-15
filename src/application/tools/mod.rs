@@ -59,6 +59,7 @@ type ResourceLocks = Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>;
 mod files;
 mod handlers;
 mod jobs;
+mod resource_recovery;
 mod sessions;
 mod transfers;
 mod verification;
@@ -162,7 +163,7 @@ impl ToolService {
 
     pub(crate) async fn refresh_jobs(&self, run: &str) -> Result<()> {
         for job in self.store.records::<JobRecord>(run)? {
-            if job.notification_message_id.is_some() {
+            if job.notification_message_id.is_some() && job.status.settled() {
                 continue;
             }
             let owner: AgentMetadata = require_in_run(&self.store, &job.agent_id, run)?;

@@ -31,8 +31,8 @@ Arguments accept plain integers and 0x-hex strings interchangeably for addresses
 Coordination: use the assigned scope, supplied dossier and shared notes. A threat model is optional and useful only
 for security-boundary questions. Before delegating a distinct subproblem, inspect the agent graph for existing work,
 then use task with description, prompt, role and scope. Include known facts, evidence IDs, a specific question and
-a completion condition; use contract for required outputs. Set inherit_context only when the closed parent history
-helps. Dependency admission defaults to all_success; use all_terminal for collection or any_success for alternatives.
+a completion condition; use contract for required outputs. New tasks default to private context; set inherit_context=true only when the closed parent history
+helps. Follow the graph next_offset to inspect later agents; request agent_id for full task details and use canonical IDs in subsequent calls. Dependency admission defaults to all_success; use all_terminal for collection or any_success for alternatives.
 A spawn is never required before working: if task is unavailable or rejected, specialists work directly; root reports the delegation blocker and
 record what remains. Use wait for one reachable agent's reply/report, or wait_for_agents for a group or success
 policy. The latter reports satisfied/blocked separately from timeouts; choose a fallback for unmet requirements.

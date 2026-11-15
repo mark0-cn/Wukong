@@ -36,9 +36,20 @@ impl Coordinator {
         mut options: MessageOptions,
         dedupe_key: Option<&str>,
     ) -> Result<MessageReceipt> {
-        let mut target: AgentMetadata = tx
-            .get_record::<AgentMetadata>(recipient)?
-            .context("recipient missing")?;
+        let from = if sender == "operator" {
+            None
+        } else {
+            Some(
+                tx.get_record::<AgentMetadata>(sender)?
+                    .context("sender missing")?,
+            )
+        };
+        let mut target: AgentMetadata = if let Some(from) = &from {
+            TaskGraph::resolve(&tx.records::<AgentMetadata>(&from.run_id)?, recipient)?.clone()
+        } else {
+            tx.get_record(recipient)?.context("recipient missing")?
+        };
+        let recipient = target.id.clone();
         let run: RunRecord = tx.get_record(&target.run_id)?.context("run missing")?;
         ensure!(!run.status.terminal(), "assessment is terminal");
         let quota_failed_target = target.status == Status::Failed
@@ -52,10 +63,7 @@ impl Coordinator {
                 || (quota_failed_target && options.kind == MessageKind::FollowUp),
             "recipient is stopped or failed; create a new focused task (quota-exhausted children resume with follow_up_agent)"
         );
-        let sender_generation = if sender != "operator" {
-            let from: AgentMetadata = tx
-                .get_record::<AgentMetadata>(sender)?
-                .context("sender missing")?;
+        let sender_generation = if let Some(from) = from {
             ensure!(from.run_id == target.run_id, "cross-run message denied");
             ensure!(
                 !from.status.terminal(),
@@ -106,7 +114,7 @@ impl Coordinator {
         let (mid, inserted) = tx.enqueue_message(
             &target.run_id,
             sender,
-            recipient,
+            &recipient,
             content,
             dedupe_key,
             &envelope,
@@ -221,7 +229,7 @@ impl Coordinator {
         }
         tx.event(
             &target.run_id,
-            Some(recipient),
+            Some(&recipient),
             "message.enqueued",
             json!({"message_id":mid,"sender":sender,"kind":options.kind,"generation":generation}),
         )?;

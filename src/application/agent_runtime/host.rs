@@ -57,6 +57,40 @@ impl KernelHost {
     pub(crate) fn execution(&self) -> &ExecutionConfig {
         &self.config.execution
     }
+    pub(crate) fn recovery_attempts(&self, step: &str) -> Result<u32> {
+        crate::application::model_recovery::attempts(&self.store, step)
+    }
+    pub(crate) fn claim_recovery(
+        &self,
+        agent: &AgentMetadata,
+        step: &str,
+        effect: &str,
+    ) -> Result<bool> {
+        crate::application::model_recovery::claim(
+            &self.store,
+            agent,
+            step,
+            effect,
+            self.config.execution.output_recovery_attempts,
+        )
+    }
+    pub(crate) fn retain_model_response(
+        &self,
+        agent: &AgentMetadata,
+        effect: &str,
+        response: &rig_core::completion::CompletionResponse,
+    ) -> Result<()> {
+        let evidence = self.store.artifact(
+            &agent.run_id,
+            &agent.id,
+            effect,
+            "model.truncated_response",
+            &serde_json::to_vec(response)?,
+            "application/json",
+            json!({"finish_reason":response.finish_reason()}),
+        )?;
+        self.emit(&agent.run_id, Some(&agent.id), "model.output_limit", json!({"evidence_id":evidence.id,"effect_id":effect,"classification":"reasoning_only_output_limit"}))
+    }
     pub(crate) fn engine_for(&self, role: Role) -> &ModelEngine {
         self.models.engine_for(role)
     }
@@ -81,7 +115,6 @@ impl KernelHost {
     pub(crate) fn prepare_run(&self, run_id: &str) -> Result<RunRecord> {
         let mut run = self.run(run_id)?;
         ensure!(!run.status.terminal(), "cannot drive a terminal assessment");
-        self.coordinator.resume(run_id, None)?;
         let root = self.store.agent_snapshot(&run.root_id)?;
         ensure!(
             root.checkpoint.is_none()
@@ -194,7 +227,7 @@ impl KernelHost {
             .checkpoint_and_ack_generation(id, checkpoint, messages, generation)
     }
     pub(crate) fn pause_budget(&self, run: &str, reason: &str) -> Result<()> {
-        self.coordinator.pause_budget(run, reason)
+        self.coordinator.pause_interrupted(run, reason)
     }
     pub(crate) fn release_dependencies(&self, run: &str) -> Result<usize> {
         self.coordinator.release_dependencies(run)

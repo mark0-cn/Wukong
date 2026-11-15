@@ -101,7 +101,9 @@ class DebugSession:
         launch_args = (
             ["--exec", str(target), "--core", str(dump)] if dump else ["--args", str(target)] + args
         )
-        self.process_resources = ProcessResources()
+        self.process_resources = ProcessResources(
+            self.directory / "processes.json", self.experiment
+        )
         self.process = self.process_resources.spawn(
             ["gdb", "--quiet", "--nx", "--nh", "-iex", "set auto-load off", "--interpreter=mi2"]
             + launch_args,
@@ -294,6 +296,10 @@ class DebugSession:
     def close(self):
         with self.lock:
             self.dead = True
-            self.process_resources.close()
+            try:
+                self.persist("closing")
+            finally:
+                # A metadata failure must not skip cleanup of live owned children.
+                self.process_resources.close()
             self.persist("closed")
         return {"session_id": self.id, "state": "closed"}

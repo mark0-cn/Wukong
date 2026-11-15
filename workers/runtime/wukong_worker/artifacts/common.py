@@ -71,6 +71,7 @@ def public_file(root, relative):
         "heartbeat.json",
         "cancel",
         "session.json",
+        "processes.json",
         "supervisor.log",
     }:
         raise ValueError("path is private worker metadata; use status APIs")

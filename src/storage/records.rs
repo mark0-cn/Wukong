@@ -122,7 +122,7 @@ impl StateSession<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SessionKind {
     Debugger,
     Interactive,
@@ -184,6 +184,9 @@ impl StateSession<'_> {
 impl Store {
     pub fn session(&self, kind: SessionKind, id: &str) -> Result<SessionRecord> {
         self.require(kind.key(), id)
+    }
+    pub(crate) fn sessions(&self, kind: SessionKind, run: &str) -> Result<Vec<SessionRecord>> {
+        self.list(kind.key(), run)
     }
     pub fn save_session(&self, kind: SessionKind, session: &SessionRecord) -> Result<()> {
         self.put(kind.key(), &session.id, &session.run_id, session)

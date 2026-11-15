@@ -200,3 +200,5 @@ wukong --config 新机器配置.toml challenge up demo
 尚不提供：内核/ARM 环境自动重建、任意 Compose 多服务拓扑导入、任意 jail 内层 namespace 自动附加、PTY 自动崩溃重放、历史运行的跨机器无缝续跑。APT/Python 全依赖没有完全锁死；迁移的可重复性依赖已验证的镜像 ID 和离线镜像，不能宣称任意日期从源码重建会得到同一镜像。
 
 验收脚本：`python tests/acceptance/check_workbench.py --docker <docker路径>`。这是开发验收工具，不是日常运行依赖，也不是 Pwn 题库评测套件。
+
+GUI 启动与 CLI `env up` 共用初始化、不可变镜像选择、资源归属检查和轻量 worker 身份探测。已有本地镜像时，GUI 可在尚无环境记录的新工作区直接初始化。启动中断会保留 `environment.pending.json`，重试时核对并复用自有资源；成功后写入生效环境和配置，并移除待完成记录。GUI 不隐式拉取镜像：镜像缺失走可见且可取消的初始化或修复流程；CLI `env up` 保留显式拉取行为。轻量探测检查 worker 加载及身份，不代替 `env doctor` 的完整工具自检。

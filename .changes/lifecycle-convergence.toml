@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Unify GUI and CLI environment startup, initialize from local images, and reconcile interrupted starts with a worker identity probe. Deduplicate controller resume operations, preserve structured pause causes, and catch up workspace snapshots after event reconnection."
+zh_CN = "统一 GUI 与 CLI 环境启动，支持从本地镜像初始化，并通过 worker 身份探测核对中断的启动。控制器续跑操作去重，保留结构化暂停原因，事件重连后补拉工作区快照。"

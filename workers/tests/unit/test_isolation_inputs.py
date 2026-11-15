@@ -9,6 +9,7 @@ import unittest
 from wukong_worker.platform.isolation import stage_file, stage_directory
 from wukong_worker.artifacts.common import public_file
 from wukong_worker.resources.jobs import JobManager
+from wukong_worker.execution.staging import executable_inputs, stage_argv
 
 
 class StagedInputPolicyTests(unittest.TestCase):
@@ -51,6 +52,38 @@ class StagedInputPolicyTests(unittest.TestCase):
         self.assertEqual(copied.read_bytes(), seed.read_bytes())
         directory = stage_directory(seed.parent, self.experiment, "seeds")
         self.assertEqual((directory / "status.json").read_bytes(), seed.read_bytes())
+
+    def test_interpreter_target_gets_an_executable_copy_but_data_does_not(self):
+        target = self.root / "files/target"
+        target.write_bytes(b"inert executable fixture")
+        target.chmod(0o444)
+        data = self.root / "files/data"
+        data.write_bytes(b"input data")
+        argv = ["python3", "files/data", "files/target"]
+        selected = executable_inputs(self.root, argv, ["files/target"])
+        staged = stage_argv(self.root, argv, self.experiment, selected)
+        manifest = self.experiment["inputs"]
+        self.assertEqual([item["access"] for item in manifest], ["read", "execute"])
+        self.assertEqual(
+            manifest[1]["source_sha256"], hashlib.sha256(target.read_bytes()).hexdigest()
+        )
+        self.assertEqual(manifest[1]["source_sha256"], manifest[1]["executed_sha256"])
+        self.assertNotEqual(Path(staged[-1]), target)
+        if os.name != "nt":
+            self.assertEqual(Path(staged[-1]).stat().st_mode & 0o777, 0o555)
+            self.assertEqual(Path(staged[1]).stat().st_mode & 0o777, 0o444)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o444)
+        # Windows read-only files need their own cleanup permissions restored.
+        for item in [target, *Path(self.experiment["readonly"]).iterdir()]:
+            item.chmod(0o600)
+
+    def test_executable_selection_cannot_publish_private_or_unlisted_files(self):
+        with self.assertRaisesRegex(ValueError, "private worker metadata"):
+            executable_inputs(self.root, [str(self.private)], ["endpoint.json"])
+        source = self.root / "files/target"
+        source.write_bytes(b"not an argument")
+        with self.assertRaisesRegex(ValueError, "present in argv"):
+            executable_inputs(self.root, ["python3"], ["files/target"])
 
     def test_private_verification_input_is_denied_before_a_job_can_be_created(self):
         target = self.root / "files/target"

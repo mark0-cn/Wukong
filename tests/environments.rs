@@ -64,7 +64,9 @@ fn binding_is_inherited_validated_and_participates_in_deduplication() -> Result<
     let second = coordinator.create_child(&root.id, child(Some("windows")))?;
     assert!(second.created);
     assert_ne!(first.agent.id, second.agent.id);
-    let nested = coordinator.create_child(&second.agent.id, child(None))?;
+    let mut nested_request = child(None);
+    nested_request.scope = "nested environment inheritance".into();
+    let nested = coordinator.create_child(&second.agent.id, nested_request)?;
     assert_eq!(nested.agent.environment_id.as_deref(), Some("windows"));
     assert!(
         coordinator

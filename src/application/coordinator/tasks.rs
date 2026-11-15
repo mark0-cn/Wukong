@@ -54,6 +54,15 @@ impl Coordinator {
         CompletionRules::validate_contract(&request.contract)?;
         Self::validate_evidence(tx, &run.id, &request.contract.input_evidence_ids)?;
         let agents = tx.records::<AgentMetadata>(&run.id)?;
+        request.wait_for_predecessors = request
+            .wait_for_predecessors
+            .iter()
+            .map(|reference| {
+                TaskGraph::resolve(&agents, reference)
+                    .map(|agent| agent.id.clone())
+                    .with_context(|| format!("wait_for_predecessors target missing: {reference}"))
+            })
+            .collect::<Result<_>>()?;
         if let Some(failed) = agents.iter().find(|a| {
             a.scope.trim() == request.scope.trim()
                 && a.role == request.role
@@ -75,6 +84,11 @@ impl Coordinator {
                 && a.environment_id == environment_id
                 && !a.status.terminal()
         }) {
+            ensure!(
+                existing.id != parent.id
+                    && !TaskGraph::is_descendant(&parent, &existing.id, &agents),
+                "this scope is owned by you or an ancestor; execute it here or delegate a distinct bounded subtask"
+            );
             let mut existing_contract = existing.contract.clone();
             if existing_contract.objective.trim().is_empty() {
                 existing_contract.objective = existing.task.clone();

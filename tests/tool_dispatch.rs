@@ -80,6 +80,73 @@ fn worker_config(path: &Path) -> AppConfig {
 }
 
 #[tokio::test]
+async fn agent_graph_pages_remain_compact_and_details_are_explicit() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, mut owner) = fixture(temp.path())?;
+    owner.metadata.task = "long task ".repeat(10_000);
+    owner.metadata.summary = Some("long report ".repeat(10_000));
+    store.save_record(&owner)?;
+    let sibling = child(&coordinator, &run.root_id, Role::Analyst, "sibling")?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let mut offset = 0;
+    let mut seen = BTreeSet::new();
+    loop {
+        let output = service
+            .execute(
+                &run.root_id,
+                &format!("graph:{offset}"),
+                "view_agent_graph",
+                json!({"offset":offset,"limit":1}),
+            )
+            .await?;
+        assert!(!output.is_error, "{output:?}");
+        let page = result(&output);
+        assert!(page.to_string().len() < 2500);
+        assert_eq!(page["caller_id"], run.root_id);
+        for item in page["agents"].as_array().unwrap() {
+            assert!(item.get("task").is_none());
+            assert!(item.get("summary").is_none());
+            seen.insert(item["id"].as_str().unwrap().to_owned());
+        }
+        match page["next_offset"].as_u64() {
+            Some(next) => offset = next,
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 3);
+    assert!(seen.contains(&sibling.id));
+    let details = service
+        .execute(
+            &run.root_id,
+            "graph:detail",
+            "view_agent_graph",
+            json!({"agent_id":sibling.id}),
+        )
+        .await?;
+    assert_eq!(result(&details)["agent"]["task"], sibling.task);
+    let denied = service
+        .execute(
+            &owner.id,
+            "stop:sibling",
+            "stop_agent",
+            json!({"agent_id":&sibling.id[..8],"reason":"not owned"}),
+        )
+        .await?;
+    assert!(denied.is_error);
+    let stopped = service
+        .execute(
+            &run.root_id,
+            "stop:child",
+            "stop_agent",
+            json!({"agent_id":&sibling.id[..8],"reason":"owned cleanup"}),
+        )
+        .await?;
+    assert!(!stopped.is_error, "{stopped:?}");
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, agent) = fixture(temp.path())?;
@@ -625,7 +692,7 @@ async fn model_coordination_checks_dependencies_and_reopens_completed_children()
 }
 
 #[tokio::test]
-async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Result<()> {
+async fn closed_sessions_are_idempotent_but_missing_ownership_requires_recovery() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let config = worker_config(temp.path());
     let (store, _coordinator, run, owner) = fixture_with_config(temp.path(), &config)?;
@@ -662,9 +729,7 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
     assert!(!again.is_error, "{again:?}");
     let record: Value = store.require("interact_session", &session_id)?;
     assert_eq!(record["state"], "closed");
-    // A session the worker lost (daemon restart): the local record says
-    // running but the bridge knows nothing; close must reconcile it to lost
-    // instead of stranding agent_finish.
+    // An absent worker session is not proof that its OS resources were cleaned.
     let real: Value = store.require("interact_session", &session_id)?;
     store.put(
         "interact_session",
@@ -680,9 +745,9 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
             json!({"session_id":"ghost-session"}),
         )
         .await?;
-    assert!(!ghost.is_error, "{ghost:?}");
+    assert!(ghost.is_error, "{ghost:?}");
     let record: Value = store.require("interact_session", "ghost-session")?;
-    assert_eq!(record["state"], "lost");
+    assert_eq!(record["state"], "recovery_required");
     store.put("debug_session", "ghost-debug", &run.id,
         &json!({"id":"ghost-debug","worker_resource_id":"ghost-debug","run_id":run.id,"agent_id":owner.id,"state":"running","worker_id":real["worker_id"],"created_at":now(),"updated_at":now()}))?;
     let debug = service
@@ -693,10 +758,20 @@ async fn closing_lost_or_closed_sessions_is_idempotent_and_reconciles() -> Resul
             json!({"session_id":"ghost-debug"}),
         )
         .await?;
-    assert!(!debug.is_error, "{debug:?}");
+    assert!(debug.is_error, "{debug:?}");
     assert_eq!(
         store.require::<Value>("debug_session", "ghost-debug")?["state"],
-        "lost"
+        "recovery_required"
+    );
+    let graph = service
+        .execute(&run.root_id, "pending:graph", "view_agent_graph", json!({}))
+        .await?;
+    assert!(
+        result(&graph)["open_sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "ghost-session")
     );
     service.close().await;
     Ok(())

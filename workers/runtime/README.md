@@ -34,6 +34,8 @@ The Docker image installs these automatically. GDB/MI results include a parsed
 `payload`; asynchronous events are structured records with type, message, payload
 and the original `record`. Original MI transcripts remain available as evidence.
 
+Isolated shell targets, Python targets and process inputs share the execution-copy preparation path. `py_run.target` is appended as a read-only executable copy, not as data requiring chmod. Raw `job_start` can name up to sixteen staged argv files in `executable_inputs`; other argv files stay read-only data. LaunchSpec retains authority over its executable files, cwd and input mode. Results expose execution cwd and each prepared file's source hash, executed hash and access mode. Copy hash mismatches fail preparation; original attachments are never chmodded. Each isolated invocation has a fresh writable working directory, so retrieve artifacts explicitly instead of assuming another call sees relative files.
+
 ## Docker
 
 From the repository root (PowerShell):
@@ -323,3 +325,5 @@ hash-bound transcript. Cancellation remains owned by the job supervisor.
 | Experiment files | `platform/isolation.py` stages validated public inputs under a distinct UID; artifacts are collected through the same confined identity. Stored evidence survives execution. |
 
 Management `doctor` binds the actual registry against disposable state before observing capabilities. It never constructs a runtime against the running daemon's state, which would incorrectly recover live sessions. Closing a transport, cancelling execution and deleting retained evidence are separate operations with separate owners.
+
+Session cleanup persists its intent before worker I/O. Linux process owners record boot/namespace, process creation identity, process groups and owned scratch paths; restart recovery scans these journals even if session publication was interrupted. A missing worker session is not cleanup confirmation: uncertain ownership stays `recovery_required`, and closing/recovery sessions or terminal jobs with `cleanup_pending` block completion and environment maintenance. Controller reconciliation retries closing sessions and resources of failed/stopped owners without replaying debugger commands. Windows retains its native ResourceManager. PID identity/namespace mismatches require environment recovery rather than signalling an unrelated process. Imported journals never grant destination process ownership.

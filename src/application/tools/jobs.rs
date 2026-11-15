@@ -49,7 +49,7 @@ impl JobService {
         let _guard = lock.lock().await;
         let job = self.known_job(agent, job_id, false)?;
         let cached = Some(job.status.clone());
-        let status = if let Some(status) = cached.filter(|status| status.state.terminal()) {
+        let status = if let Some(status) = cached.filter(JobStatus::settled) {
             status
         } else {
             serde_json::from_value(
@@ -87,7 +87,7 @@ impl JobService {
                 }
             }
         }
-        if status.state.terminal() {
+        if status.settled() {
             let evidence = if let Some(evidence) = &job.status_evidence_id {
                 evidence.clone()
             } else {
@@ -252,7 +252,7 @@ impl JobService {
             imported.push(json!({"artifact":artifact,"evidence_id":evidence.id}));
         }
         let result = json!({"job_id":job_id,"artifacts":imported});
-        if job.status.state.terminal() {
+        if job.status.settled() {
             self.store.write(|tx| {
                 job = tx.get_record(job_id)?.context("job missing")?;
                 job.imported_artifacts = Some(result.clone());

@@ -20,12 +20,13 @@ impl ExecutionService {
             store: store.clone(),
             gateway: gateway.clone(),
             files: files.clone(),
-            locks,
+            locks: locks.clone(),
         };
         let sessions = SessionsService {
             store: store.clone(),
             gateway: gateway.clone(),
             files: files.clone(),
+            locks,
         };
         Self {
             store,
@@ -111,6 +112,9 @@ impl ExecutionService {
                         self.files.known_file(agent, text(&args, "input")?, false)?;
                     }
                 } else {
+                    for input in string_list(&args, "executable_inputs")? {
+                        self.files.known_file(agent, &input, false)?;
+                    }
                     if let Some(launch) = args["launch_spec"].as_str() {
                         self.files.known_file(agent, launch, false)?;
                         ensure!(

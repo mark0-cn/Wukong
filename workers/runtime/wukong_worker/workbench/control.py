@@ -15,7 +15,6 @@ if __name__ == "__main__" and not __package__:
 from wukong_worker.artifacts.metadata import load_json
 from wukong_worker.host.environment import safe_env
 from wukong_worker.resources import TERMINAL
-from wukong_worker.execution.processes import process_identity
 
 
 def idle(root):
@@ -25,17 +24,33 @@ def idle(root):
     jobs = JobManager(root, False, True)
     for path in (root / "jobs").glob("*/status.json"):
         status = jobs.status(path.parent.name)
-        if status["state"] not in TERMINAL:
+        if status["state"] not in TERMINAL or status.get("cleanup_pending"):
             active.append({"kind": "job", "id": path.parent.name, "state": status["state"]})
-    for kind, pid_key in [("debug", "gdb_pid"), ("interact", "pid")]:
-        for path in (root / kind).glob("*/session.json"):
-            state = load_json(path)
-            if (
-                state.get("state") == "running"
-                and process_identity(state.get(pid_key)) != "missing"
-            ):
-                active.append({"kind": kind, "id": path.parent.name})
+    for kind in ["debug", "interact"]:
+        records = set((root / kind).glob("*/session.json"))
+        records.update(p.parent / "session.json" for p in (root / kind).glob("*/processes.json"))
+        for path in records:
+            state = load_json(path) if path.exists() else {}
+            journal = path.parent / "processes.json"
+            confirmed = state.get("state") == "closed" or (
+                state.get("state") == "lost" and state.get("cleanup_confirmed")
+            )
+            if not confirmed or (journal.exists() and load_json(journal)["observed"] != "closed"):
+                active.append(
+                    {
+                        "kind": kind,
+                        "id": path.parent.name,
+                        "state": state.get("state", "recovery_required"),
+                    }
+                )
     return {"idle": not active, "active": active}
+
+
+def health(root):
+    """Cheap startup probe; full tool self-tests remain an explicit doctor action."""
+    from wukong_worker.host.identity import WorkerIdentity
+
+    return {"healthy": True, "identity": WorkerIdentity(root).value}
 
 
 def doctor(root):
@@ -142,6 +157,6 @@ if __name__ == "__main__":
     action = sys.argv[1]
     root = Path(sys.argv[2]).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    if action not in {"idle", "doctor"}:
+    if action not in {"idle", "doctor", "health"}:
         raise ValueError("unknown management probe")
-    print(json.dumps(idle(root) if action == "idle" else doctor(root)))
+    print(json.dumps({"idle": idle, "doctor": doctor, "health": health}[action](root)))
