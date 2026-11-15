@@ -2,6 +2,7 @@
 
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 from wukong_worker.host.capabilities import doctor
@@ -27,6 +28,8 @@ class Runtime:
     def __init__(self, root: Path, trusted: bool) -> None:
         self.root, self.trusted = root.resolve(), trusted
         self.stopping = False
+        self._admission = threading.RLock()
+        self._active_requests = 0
         self.identity = WorkerIdentity(self.root)
         self.isolated = sys.platform.startswith("linux") and os.geteuid() == 0 and not trusted
         self.jobs = JobManager(self.root, trusted, self.isolated)
@@ -53,6 +56,17 @@ class Runtime:
         return doctor(self.root, self.trusted, self.isolated, self.registrations)
 
     def dispatch(self, method: str, params: dict[str, Any]) -> Any:
+        with self._admission:
+            if self.stopping:
+                raise ValueError("worker is shutting down")
+            self._active_requests += 1
+        try:
+            return self._dispatch(method, params)
+        finally:
+            with self._admission:
+                self._active_requests -= 1
+
+    def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
         if method not in {"ping", "doctor"} and "_binding" in params:
             self.identity.validate(params["_binding"])
             params = {key: value for key, value in params.items() if key != "_binding"}
@@ -86,6 +100,12 @@ class Runtime:
         return query(self.root, params)
 
     def shutdown(self, params):
+        with self._admission:
+            if self._active_requests > 1:
+                raise ValueError("cannot shut down worker while requests own active resources")
+            return self._shutdown()
+
+    def _shutdown(self):
         active = [
             self.jobs.status(path.parent.name)
             for path in (self.root / "jobs").glob("*/status.json")
@@ -95,5 +115,6 @@ class Runtime:
                 "cannot shut down worker while jobs are active; cancel and reconcile them first"
             )
         self.sessions.close_all()
+        self.jobs.process_resources.wait()
         self.stopping = True
         return {"state": "shutdown"}

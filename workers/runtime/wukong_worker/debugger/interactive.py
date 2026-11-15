@@ -9,7 +9,7 @@ import time
 import uuid
 from wukong_worker.artifacts.metadata import atomic_json
 from wukong_worker.host.environment import safe_env
-from wukong_worker.execution.processes import attach_windows_job, detached_options, terminate_tree
+from wukong_worker.resources.processes import ProcessResources
 
 
 class InteractSession:
@@ -91,24 +91,38 @@ class InteractSession:
             import pty
 
             self.pty_master, terminal_slave = pty.openpty()
-        self.process = subprocess.Popen(
-            argv,
-            cwd=cwd,
-            env=env,
-            stdin=terminal_slave if terminal_slave is not None else subprocess.PIPE,
-            stdout=terminal_slave if terminal_slave is not None else subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=0,
-            **detached_options(),
-            **credential_options,
-        )
-        if terminal_slave is not None:
-            os.close(terminal_slave)
-            self.process.stdin = os.fdopen(os.dup(self.pty_master), "wb", buffering=0)
-            self.process.stdout = os.fdopen(self.pty_master, "rb", buffering=0)
-        attach_windows_job(self.process)
-        threading.Thread(target=self.drain, daemon=True).start()
-        self.persist("running")
+        self.process_resources = ProcessResources()
+        owned_master = self.pty_master
+        try:
+            self.process = self.process_resources.spawn(
+                argv,
+                cwd=cwd,
+                env=env,
+                stdin=terminal_slave if terminal_slave is not None else subprocess.PIPE,
+                stdout=terminal_slave if terminal_slave is not None else subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=0,
+                **credential_options,
+            )
+            if terminal_slave is not None:
+                self.process.stdin = os.fdopen(os.dup(self.pty_master), "wb", buffering=0)
+                self.process.stdout = os.fdopen(self.pty_master, "rb", buffering=0)
+                owned_master = None  # stdout now owns the descriptor
+            self.persist("running")
+            threading.Thread(target=self.drain, daemon=True).start()
+        except BaseException:
+            self.dead = True
+            self.process_resources.close()
+            if owned_master is not None:
+                os.close(owned_master)
+            if hasattr(self, "process"):
+                for stream in (self.process.stdin, self.process.stdout):
+                    if stream is not None:
+                        stream.close()
+            raise
+        finally:
+            if terminal_slave is not None:
+                os.close(terminal_slave)
 
     def persist(self, state):
         atomic_json(
@@ -234,6 +248,6 @@ class InteractSession:
             with self.lock:
                 self.dead = True
                 self.closed = True
-            terminate_tree(self.process)
+            self.process_resources.close()
             self.persist("closed")
         return {"session_id": self.id, "state": "closed"}

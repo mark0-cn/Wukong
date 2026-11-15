@@ -7,7 +7,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -46,8 +45,8 @@ class DaemonStartupTests(unittest.TestCase):
                 with (
                     patch("wukong_worker.rpc.transport.BRIDGE_PATH", script),
                     patch(
-                        "wukong_worker.rpc.transport.subprocess",
-                        SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL),
+                        "wukong_worker.resources.processes.subprocess.Popen",
+                        side_effect=spawn,
                     ),
                 ):
                     started = time.monotonic()
@@ -82,7 +81,17 @@ class DaemonStartupTests(unittest.TestCase):
             finally:
                 try:
                     if endpoint:
-                        relay_call(endpoint, {"id": 1, "method": "worker.shutdown"}, timeout=5)
+                        reply = relay_call(
+                            endpoint,
+                            {
+                                "jsonrpc": "2.0",
+                                "id": 1,
+                                "method": "worker.shutdown",
+                                "params": {"request_id": "test-shutdown"},
+                            },
+                            timeout=5,
+                        )
+                        self.assertNotIn("error", reply)
                 finally:
                     for child in children:
                         try:

@@ -80,6 +80,10 @@ impl Workbench {
         if let Some(old) = self.docker.inspect("container", &env.container)? {
             self.owned(&old, &env.container)?;
             ensure!(
+                old["HostConfig"]["Init"] == true,
+                "worker container lacks a child-process reaper; close active work and run env update to recreate it"
+            );
+            ensure!(
                 old["Image"] == env.image_id,
                 "worker image changed; use env update after closing active work"
             );
@@ -102,6 +106,7 @@ impl Workbench {
             self.docker.run(&[
                 "run",
                 "--detach",
+                "--init",
                 "--name",
                 &env.container,
                 "--label",

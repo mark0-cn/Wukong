@@ -13,7 +13,7 @@ import uuid
 from wukong_worker.artifacts.metadata import atomic_json
 from wukong_worker.artifacts.common import public_file, sha256_file
 from wukong_worker.host.environment import safe_env
-from wukong_worker.execution.processes import detached_options, terminate_tree
+from wukong_worker.resources.processes import ProcessResources
 
 try:  # GDB/MI parsing is optional: the bridge must serve jobs without it.
     from pygdbmi.gdbmiparser import parse_response as parse_mi_response
@@ -101,7 +101,8 @@ class DebugSession:
         launch_args = (
             ["--exec", str(target), "--core", str(dump)] if dump else ["--args", str(target)] + args
         )
-        self.process = subprocess.Popen(
+        self.process_resources = ProcessResources()
+        self.process = self.process_resources.spawn(
             ["gdb", "--quiet", "--nx", "--nh", "-iex", "set auto-load off", "--interpreter=mi2"]
             + launch_args,
             cwd=self.directory,
@@ -113,46 +114,53 @@ class DebugSession:
             encoding="utf-8",
             errors="replace",
             bufsize=1,
-            **detached_options(),
         )
-        threading.Thread(target=self.read_records, daemon=True).start()
-        self.command("-gdb-set pagination off", 10, True)
-        self.command("-gdb-set mi-async on", 10, True)
-        self.command("-gdb-set disable-randomization off", 10, True)
-        if launch:
-            import shlex
+        try:
+            threading.Thread(target=self.read_records, daemon=True).start()
+            self.command("-gdb-set pagination off", 10, True)
+            self.command("-gdb-set mi-async on", 10, True)
+            self.command("-gdb-set disable-randomization off", 10, True)
+            if launch:
+                import shlex
 
-            wrapper = []
-            if self.experiment:
+                wrapper = []
+                if self.experiment:
+                    uid = str(self.experiment["uid"])
+                    wrapper = [
+                        "setpriv",
+                        "--reuid=" + uid,
+                        "--regid=" + uid,
+                        "--clear-groups",
+                        "--no-new-privs",
+                    ]
+                if launch["loader"]:
+                    wrapper += [
+                        str(launch["loader"]),
+                        "--library-path",
+                        str(launch["library_path"]),
+                    ]
+                if wrapper:
+                    self.command("-gdb-set exec-wrapper " + shlex.join(wrapper), 10, True)
+                self.command("-environment-cd " + json.dumps(str(launch["cwd"])), 10, True)
+                for key, value in load_launch_environment(root, params).items():
+                    self.command("-gdb-set environment " + json.dumps(key + "=" + value), 10, True)
+            elif self.experiment:
                 uid = str(self.experiment["uid"])
-                wrapper = [
-                    "setpriv",
-                    "--reuid=" + uid,
-                    "--regid=" + uid,
-                    "--clear-groups",
-                    "--no-new-privs",
-                ]
-            if launch["loader"]:
-                wrapper += [str(launch["loader"]), "--library-path", str(launch["library_path"])]
-            if wrapper:
-                self.command("-gdb-set exec-wrapper " + shlex.join(wrapper), 10, True)
-            self.command("-environment-cd " + json.dumps(str(launch["cwd"])), 10, True)
-            for key, value in load_launch_environment(root, params).items():
-                self.command("-gdb-set environment " + json.dumps(key + "=" + value), 10, True)
-        elif self.experiment:
-            uid = str(self.experiment["uid"])
-            self.command(
-                "-gdb-set exec-wrapper setpriv --reuid="
-                + uid
-                + " --regid="
-                + uid
-                + " --clear-groups --no-new-privs",
-                10,
-                True,
-            )
-            self.command("-environment-cd " + json.dumps(self.experiment["work"]), 10, True)
-        self.launch_identity = launch["identity"] if launch else None
-        self.persist("running")
+                self.command(
+                    "-gdb-set exec-wrapper setpriv --reuid="
+                    + uid
+                    + " --regid="
+                    + uid
+                    + " --clear-groups --no-new-privs",
+                    10,
+                    True,
+                )
+                self.command("-environment-cd " + json.dumps(self.experiment["work"]), 10, True)
+            self.launch_identity = launch["identity"] if launch else None
+            self.persist("running")
+        except BaseException:
+            self.process_resources.close()
+            raise
 
     def persist(self, state):
         atomic_json(
@@ -172,7 +180,7 @@ class DebugSession:
             for raw in iter(lambda: self.process.stdout.readline(65537), ""):
                 if len(raw) > 65536:
                     self.dead = True
-                    terminate_tree(self.process)
+                    self.process_resources.close()
                     break
                 line = raw.rstrip("\r\n")
                 if self.transcript_bytes < 4 * 1024 * 1024:
@@ -185,7 +193,7 @@ class DebugSession:
                     parsed = parse_mi_response(line)
                 except Exception:
                     self.dead = True
-                    terminate_tree(self.process)
+                    self.process_resources.close()
                     break
                 record = {**parsed, "record": line}
                 if parsed.get("message") == "running":
@@ -205,7 +213,7 @@ class DebugSession:
                         self.records.put_nowait(record)
                     except queue.Full:
                         self.dead = True
-                        terminate_tree(self.process)
+                        self.process_resources.close()
                         break
                 elif line and parsed["type"] != "done":
                     self.events.append(record)
@@ -252,7 +260,7 @@ class DebugSession:
             # The command may still have effects. Invalidate the session, never
             # issue another command against an unknown debugger state.
             self.dead = True
-            terminate_tree(self.process)
+            self.process_resources.close()
             self.persist("lost")
             raise ValueError("GDB command timeout; session invalidated")
 
@@ -286,6 +294,6 @@ class DebugSession:
     def close(self):
         with self.lock:
             self.dead = True
-            terminate_tree(self.process)
+            self.process_resources.close()
             self.persist("closed")
         return {"session_id": self.id, "state": "closed"}

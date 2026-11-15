@@ -16,7 +16,7 @@ from wukong_worker.artifacts.common import tail
 from wukong_worker.rpc.contract import PROTOCOL
 from wukong_worker.artifacts.metadata import atomic_json, load_json
 from wukong_worker.host.environment import safe_env
-from wukong_worker.execution.processes import detached_options
+from wukong_worker.resources.processes import ProcessResources
 from wukong_worker.host.runtime import Runtime
 from wukong_worker.rpc.server import Server as RpcServer
 
@@ -102,13 +102,13 @@ def ensure_daemon(root, trusted):
         if trusted:
             argv.append("--trusted-local")
         with (root / "daemon.log").open("ab") as log:
-            process = subprocess.Popen(
+            process = ProcessResources().spawn(
                 argv,
                 env=safe_env(),
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=log,
-                **detached_options(),
+                durable=True,
             )
         # Cold interpreter imports and state initialization can outlast a warm
         # reconnect. Keep the startup lock across the bounded readiness wait.

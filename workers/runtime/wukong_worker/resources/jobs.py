@@ -17,7 +17,8 @@ from wukong_worker.artifacts.metadata import atomic_json, load_json
 from wukong_analysis.validation import bounded_int, parse_address
 from wukong_worker.host.environment import safe_env
 from wukong_worker.execution.planning import JobPlan, prepare_job
-from wukong_worker.execution.processes import detached_options, process_identity
+from wukong_worker.execution.processes import process_identity
+from wukong_worker.resources.processes import ProcessResources
 
 
 class JobManager:
@@ -30,6 +31,7 @@ class JobManager:
     ):
         self.root, self.trusted, self.isolated = root, trusted, isolated
         self.observe = observe
+        self.process_resources = ProcessResources()
         self.lock = threading.RLock()
         (root / "jobs").mkdir(exist_ok=True)
 
@@ -81,7 +83,7 @@ class JobManager:
         atomic_json(directory / "spec.json", spec)
         atomic_json(directory / "status.json", meta)
         with (directory / "supervisor.log").open("ab") as log:
-            process = subprocess.Popen(
+            process = self.process_resources.spawn(
                 [
                     sys.executable,
                     str(BRIDGE_PATH),
@@ -94,9 +96,9 @@ class JobManager:
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=log,
-                **detached_options(),
+                durable=True,
             )
-        # Popen is intentionally not waited: it is owned by its supervisor.
+        # The registry waits the child without cancelling its durable work.
         meta["supervisor_pid"] = process.pid
         return {k: v for k, v in meta.items() if k != "runner_token"}
 
