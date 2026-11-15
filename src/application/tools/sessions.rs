@@ -7,6 +7,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cleanup_confirmation_accepts_native_proof_and_rejects_pending_cleanup() {
+        assert!(SessionsService::cleanup_confirmed(
+            &json!({"state":"closed"})
+        ));
+        assert!(!SessionsService::cleanup_confirmed(
+            &json!({"state":"closed","cleanup_pending":true})
+        ));
+        assert!(!SessionsService::cleanup_confirmed(
+            &json!({"state":"lost"})
+        ));
+        assert!(SessionsService::cleanup_confirmed(
+            &json!({"state":"lost","cleanup_confirmed":true})
+        ));
+        let mut native = json!({"state":"lost","cleanup_pending":false,"result":{"jobs_empty":true,"profiles_removed":true,"scratch_removed":true}});
+        assert!(SessionsService::cleanup_confirmed(&native));
+        native["result"]["scratch_removed"] = json!(false);
+        assert!(!SessionsService::cleanup_confirmed(&native));
+    }
+
+    #[test]
     fn repeated_start_preserves_terminal_state_evidence_and_ownership() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let store = Store::open(temp.path().join("state"))?;
@@ -50,6 +70,18 @@ pub(super) struct SessionsService {
     pub(super) locks: ResourceLocks,
 }
 impl SessionsService {
+    fn cleanup_confirmed(raw: &Value) -> bool {
+        if raw["cleanup_pending"] == true {
+            return false;
+        }
+        raw["state"] == "closed"
+            || (raw["state"] == "lost"
+                && (raw["cleanup_confirmed"] == true
+                    || (raw["cleanup_pending"] == false
+                        && raw["result"]["jobs_empty"] == true
+                        && raw["result"]["profiles_removed"] == true
+                        && raw["result"]["scratch_removed"] == true)))
+    }
     fn closing(&self, kind: SessionKind, session: &mut SessionRecord) -> Result<()> {
         session.state = SessionState::Closing;
         session.updated_at = now();
@@ -73,8 +105,11 @@ impl SessionsService {
         session: &mut SessionRecord,
         raw: &Value,
     ) -> Result<()> {
-        let confirmed = raw["state"] == "closed"
-            || (raw["state"] == "lost" && raw["cleanup_confirmed"] == true);
+        ensure!(
+            raw["session_id"] == session.worker_resource_id,
+            "worker returned another session identity"
+        );
+        let confirmed = Self::cleanup_confirmed(raw);
         if !confirmed {
             let error = anyhow::anyhow!("worker did not confirm session cleanup");
             self.close_failed(kind, session, &error)?;
@@ -118,7 +153,13 @@ impl SessionsService {
                 run_id: agent.run_id.clone(),
                 agent_id: agent.id.clone(),
                 worker_id,
-                state: handle.state,
+                state: if matches!(handle.state, SessionState::Closed | SessionState::Lost)
+                    && !Self::cleanup_confirmed(raw)
+                {
+                    SessionState::RecoveryRequired
+                } else {
+                    handle.state
+                },
                 worker: Some(raw.clone()),
                 transcript_evidence_id: None,
                 created_at: now(),
