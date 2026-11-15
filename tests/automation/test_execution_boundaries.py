@@ -9,6 +9,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExecutionBoundaries(unittest.TestCase):
+    def test_storage_snapshots_do_not_depend_on_desktop_presentation(self):
+        for path in (ROOT / "src/store").rglob("*.rs"):
+            production = path.read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
+            self.assertNotRegex(production, r"\b(?:desktop|presentation)\s*::", str(path))
+        for path in (ROOT / "src/queries").glob("*.rs"):
+            source = path.read_text(encoding="utf-8")
+            self.assertNotRegex(source, r"\bStore\b|\b(?:store|desktop|bootstrap)\s*::", str(path))
+
     def test_contract_has_no_controller_or_platform_dependencies(self):
         manifest = tomllib.loads((ROOT / "workers/protocol/Cargo.toml").read_text(encoding="utf-8"))
         for name, dependency in manifest["dependencies"].items():

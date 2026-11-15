@@ -1,5 +1,6 @@
 //! Shared assessment use cases. Frontends supply input and present results;
 //! preparation, saved configuration, ownership and resource cleanup live here.
+pub mod queries;
 use crate::{
     config::AppConfig, coordinator::Coordinator, domain::*, runner::AssessmentRunner, store::Store,
 };

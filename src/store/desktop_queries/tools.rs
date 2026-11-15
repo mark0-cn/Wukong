@@ -4,7 +4,6 @@ use super::*;
 pub(super) struct Tools {
     pub calls: Vec<ToolCallRecord>,
     pub jobs: Vec<JobRecord>,
-    pub active: Vec<presentation::ToolDisplay>,
 }
 
 pub(super) fn read(
@@ -12,7 +11,6 @@ pub(super) fn read(
     run: &RunSummary,
     selected_agent: Option<&str>,
     events: &[Event],
-    agents: &[AgentSummary],
 ) -> Result<Tools> {
     let ids: BTreeSet<_> = events
         .iter()
@@ -42,29 +40,5 @@ pub(super) fn read(
         )?
         .map(|raw| Ok(serde_json::from_str::<ToolCallRecord>(&raw?)?))
         .collect::<Result<Vec<_>>>()?;
-    let target_name = run
-        .target_path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let active = calls
-        .iter()
-        .filter_map(|call| {
-            let agent = agents.iter().find(|agent| agent.id == call.agent_id);
-            let display = presentation::with_job(
-                presentation::tool_display(call, agent, &target_name),
-                call,
-                agent,
-                &jobs,
-            );
-            (matches!(display.state.as_str(), "queued" | "running" | "uncertain")
-                && display.job.as_ref().is_none_or(|job| !job.stale))
-            .then_some(display)
-        })
-        .collect();
-    Ok(Tools {
-        calls,
-        jobs,
-        active,
-    })
+    Ok(Tools { calls, jobs })
 }

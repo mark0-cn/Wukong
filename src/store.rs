@@ -1,7 +1,7 @@
 pub(crate) mod desktop_queries;
-mod finding_queries;
+pub(crate) mod finding_queries;
 pub(crate) mod report_queries;
-mod workspace;
+pub(crate) mod workspace;
 use crate::domain::*;
 use anyhow::{Context, Result, anyhow, bail};
 use rusqlite::{Connection, OptionalExtension, params};

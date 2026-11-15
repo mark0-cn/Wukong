@@ -1,5 +1,5 @@
 use super::*;
-use crate::queries::ReportSnapshot;
+use crate::queries::models::ReportSnapshot;
 pub(crate) fn snapshot(store: &Store, run_id: &str) -> Result<ReportSnapshot> {
     store.read_transaction(|tx| {
         let run = Store::tx_get(tx, "run", run_id)?.context("run does not exist")?;

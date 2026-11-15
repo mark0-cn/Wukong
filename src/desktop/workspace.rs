@@ -1,13 +1,8 @@
-use super::presentation::ChatMessage;
+use super::presentation::{self, ChatMessage};
+pub use crate::queries::WorkspaceRequest;
+use crate::queries::workspace::WorkspaceSnapshot;
 use crate::{domain::*, queries::*, store::Store};
-use serde::{Deserialize, Serialize};
-#[derive(Clone, Default, Deserialize)]
-pub struct WorkspaceRequest {
-    pub run: Option<String>,
-    pub agent: Option<String>,
-    pub event_limit: Option<usize>,
-    pub known_revision: Option<String>,
-}
+use serde::Serialize;
 #[derive(Serialize)]
 pub struct WorkspaceData {
     pub selected: Option<String>,
@@ -29,5 +24,57 @@ pub fn read(
     epoch: u64,
     request: &WorkspaceRequest,
 ) -> anyhow::Result<WorkspaceResponse> {
-    crate::store::desktop_queries::read(store, epoch, request)
+    let snapshot = crate::store::desktop_queries::read(store, epoch, request)?;
+    Ok(WorkspaceResponse {
+        revision: snapshot.revision,
+        data: snapshot.data.map(present),
+    })
 }
+
+fn present(snapshot: WorkspaceSnapshot) -> WorkspaceData {
+    let active = snapshot
+        .calls
+        .iter()
+        .filter_map(|call| {
+            let agent = snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.id == call.agent_id);
+            let display = presentation::with_job(
+                presentation::tool_display(call, agent, &snapshot.target_name),
+                call,
+                agent,
+                &snapshot.jobs,
+            );
+            (matches!(display.state.as_str(), "queued" | "running" | "uncertain")
+                && display.job.as_ref().is_none_or(|job| !job.stale))
+            .then_some(display)
+        })
+        .collect();
+
+    let transcript = presentation::transcript(
+        &snapshot.events,
+        &snapshot.calls,
+        &snapshot.agents,
+        &snapshot.operator_messages,
+        &presentation::TranscriptState {
+            target_name: &snapshot.target_name,
+            jobs: &snapshot.jobs,
+            replies: &snapshot.replies,
+            controller_live: snapshot.controller_live,
+        },
+    );
+    WorkspaceData {
+        selected: snapshot.selected,
+        runs: snapshot.runs,
+        agents: snapshot.agents,
+        findings: snapshot.findings,
+        notes: snapshot.notes,
+        transcript,
+        active_tools: active,
+        has_earlier: snapshot.has_earlier,
+    }
+}
+#[cfg(test)]
+#[path = "workspace_tests.rs"]
+mod tests;

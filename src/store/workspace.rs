@@ -1,6 +1,6 @@
 //! SQLite implementation of incremental workspace projections.
 use super::*;
-use crate::queries::*;
+use crate::queries::models::*;
 use std::collections::{BTreeMap, BTreeSet};
 fn changes<T: DeserializeOwned>(
     tx: &Connection,
@@ -199,29 +199,27 @@ impl WorkspaceQueries {
     }
 }
 
-impl crate::queries::AssessmentQueries<'_> {
-    pub fn runs(&self) -> Result<Vec<RunSummary>> {
-        self.store.read_transaction(|tx| {
-            let mut query=tx.prepare("SELECT json_remove(data,'$.config') FROM entities WHERE kind='run' ORDER BY rowid DESC")?;
-            let rows=query.query_map([],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            rows.into_iter().map(|row|Ok(serde_json::from_str(&row)?)).collect()
+pub(crate) fn runs(store: &Store) -> Result<Vec<RunSummary>> {
+    store.read_transaction(|tx| {
+        let mut query=tx.prepare("SELECT json_remove(data,'$.config') FROM entities WHERE kind='run' ORDER BY rowid DESC")?;
+        let rows=query.query_map([],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter().map(|row|Ok(serde_json::from_str(&row)?)).collect()
+    })
+}
+pub(crate) fn status(store: &Store, run: &str, limit: usize) -> Result<RunStatus> {
+    store.read_transaction(|tx| {
+        let data: String = tx.query_row(
+            "SELECT json_remove(data,'$.config') FROM entities WHERE kind='run' AND id=?1",
+            [run],
+            |row| row.get(0),
+        )?;
+        Ok(RunStatus {
+            run: serde_json::from_str(&data)?,
+            agents: Store::tx_list_metadata(tx, "agent", run)?
+                .into_iter()
+                .map(AgentSummary::from)
+                .collect(),
+            events: Store::tx_recent_events(tx, run, limit.min(1000))?,
         })
-    }
-    pub fn status(&self, run: &str, limit: usize) -> Result<RunStatus> {
-        self.store.read_transaction(|tx| {
-            let data: String = tx.query_row(
-                "SELECT json_remove(data,'$.config') FROM entities WHERE kind='run' AND id=?1",
-                [run],
-                |row| row.get(0),
-            )?;
-            Ok(RunStatus {
-                run: serde_json::from_str(&data)?,
-                agents: Store::tx_list_metadata(tx, "agent", run)?
-                    .into_iter()
-                    .map(AgentSummary::from)
-                    .collect(),
-                events: Store::tx_recent_events(tx, run, limit.min(1000))?,
-            })
-        })
-    }
+    })
 }
