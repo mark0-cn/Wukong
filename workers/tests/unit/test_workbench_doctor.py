@@ -31,7 +31,7 @@ class WorkbenchDoctorTests(unittest.TestCase):
             with (
                 patch(
                     "wukong_worker.workbench.control.subprocess.run",
-                side_effect=probe_only,
+                    side_effect=probe_only,
                 ),
                 patch.dict("os.environ", {"WUKONG_GHIDRA_HEADLESS": ""}),
             ):
