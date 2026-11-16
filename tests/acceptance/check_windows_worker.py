@@ -524,8 +524,9 @@ def main():
                     "test",
                     "--locked",
                     "--lib",
-                    "installed_windows_worker_controller_acceptance",
+                    "adapters::worker::ssh::tests::installed_windows_worker_controller_acceptance",
                     "--",
+                    "--exact",  # Do not also select the separately configured remote-VM test.
                     "--ignored",
                     "--nocapture",
                 ],
