@@ -95,7 +95,8 @@ impl VmwareAdmin {
 impl LabAdmin for VmwareAdmin {
     async fn install(&self, request: AdminRequest) -> Result<AdminOutcome> {
         let guest_dir = format!(r"C:\Windows\Temp\wukong-lab-{}", request.install_id);
-        let mkdir_script = format!("if not exist \"{guest_dir}\" mkdir \"{guest_dir}\"");
+        let mkdir_script =
+            format!("New-Item -ItemType Directory -Force -Path '{guest_dir}' | Out-Null");
         let mkdir = vec![
             "-T".into(),
             "ws".into(),
@@ -105,8 +106,10 @@ impl LabAdmin for VmwareAdmin {
             self.password.clone(),
             "runProgramInGuest".into(),
             self.vmx()?.into(),
-            r"C:\Windows\System32\cmd.exe".into(),
-            "/c".into(),
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe".into(),
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
             mkdir_script,
         ];
         let mkdir_output = self.run(mkdir).await?;

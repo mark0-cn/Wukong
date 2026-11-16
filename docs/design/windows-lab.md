@@ -92,7 +92,8 @@ password_env = "WUKONG_LAB_ADMIN_PASSWORD"
 - The password is read only from the named process environment variable. It is never written to TOML, state or receipts. `vmrun` receives it on its command line, so process inspection on the controller can observe it; use a trusted controller.
 - The receipt records package/media identity, the install-script hash, exit code, stdout/stderr and guest paths. Transport failures are `unknown` and are reconciled by restoring the baseline, exactly like a harness run.
 - Cleanup is not executed. The disposable VM is discarded by the baseline restore after each analysis, so cleanup actions in an install plan are optional notes rather than preconditions. `lab restore` is rejected while an installation is in flight.
-- No real administrative login has been configured on the current VM (it has no password), so this slice is validated with a fake channel and command construction only; real service/driver acceptance needs a local administrator credential.
+- The administrative channel was provisioned once offline: a clone was edited while powered off to install a LocalSystem provisioning service, the guest then set a temporary local-administrator password, and a real `New-Service` installation returned exit code 0. Rotate the password and treat the provisioned VM as disposable.
+- The original VM and its snapshots were left untouched; only the clone is registered as the lab VM.
 
 ## Host operations
 
@@ -105,7 +106,7 @@ The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx>
 - `start_after_restore` must match how the host restores a running snapshot: on this host a running-VM snapshot restores powered off, so the lab starts it when configured.
 - Experiment snapshots are not deleted automatically; operators remove them explicitly after preserving evidence.
 - Cleanup actions are not executed. Restoring the disposable VM to the baseline is the cleanup boundary, so installation plans may omit cleanup entries.
-- The administrative channel is validated with a fake channel and command construction only; the current VM has no local administrator password, so real service/driver installation remains blocked on that credential.
+- A real service installation was validated: the packaged `install.ps1` created a manual service in generation 15 (exit code 0, immutable receipt), and the generation 16 baseline restore removed that service and pruned the experiment snapshot while the administrator login kept working. Driver installation, test-signing changes and Verifier configuration remain unexercised.
 - Phase 1 validation used the real VM: baseline and experiment snapshots were created, restores to the baseline ran in generations 2 and 4, and the worker `doctor` reported ready again after the VM start. A packaged prebuilt EXE was then uploaded and executed through the registered worker in generation 9 (job completed with exit code 0, immutable receipt written), and the baseline restore in generation 10 left the worker `doctor` ready again. Controller-restart, timeout and stale-generation behavior are covered by unit tests with a fake host.
 
 ## CLI
