@@ -995,6 +995,47 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::All,
             Requirement::Worker(&[Method::InputMinimize]),
         ),
+        spec::<args::BundleEmptyArgs>(
+            "bundle_manifest",
+            "tool-bundle-manifest",
+            "Return the directory bundle manifest: auto-hashed members, inferred executable/library/data kinds, PE imports and cross-member import edges. No user-assigned roles; entry is the inferred launch candidate.",
+            ReplayPolicy::ReadOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_bundle_manifest(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::BundleMemberArgs>(
+            "bundle_evidence",
+            "tool-bundle-evidence",
+            "Import one verified bundle member as immutable evidence so it can be inspected or decompiled with target_evidence_id. Path is relative to the analyzed directory.",
+            ReplayPolicy::ReadOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_bundle_evidence(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::BundleEmptyArgs>(
+            "bundle_stage",
+            "tool-bundle-stage",
+            "Stage every bundle member into one worker directory, create a LaunchSpec that sets that directory as cwd, and return the launch_spec path plus member identities. Then call job_start with launch_spec and no argv to run the inferred entry with its sidecar DLLs present. At most 64 members.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_bundle_stage(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Worker(&[
+                Method::UploadBegin,
+                Method::UploadWrite,
+                Method::UploadCommit,
+                Method::FilePut,
+            ]),
+        ),
         spec::<args::PocVerifyArgs>(
             "poc_verify",
             "tool-poc-verify",

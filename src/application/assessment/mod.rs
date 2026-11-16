@@ -63,8 +63,12 @@ impl AssessmentService {
     pub async fn start(&self, target: &Path, task: &str) -> Result<PreparedAssessment> {
         let maintenance =
             crate::application::maintenance::updates::maintenance::assessment_guard()?;
-        let target = std::fs::canonicalize(target).context("target must be an existing file")?;
-        ensure!(target.is_file(), "target must be a file");
+        let target = std::fs::canonicalize(target)
+            .context("target must be an existing file or directory")?;
+        ensure!(
+            target.is_file() || target.is_dir(),
+            "target must be a file or directory"
+        );
         ensure!(!task.trim().is_empty(), "task must not be empty");
         let mut config = self.config.clone();
         config.output_language.get_or_insert_with(|| {

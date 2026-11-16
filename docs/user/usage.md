@@ -148,7 +148,10 @@ Desktop defaults are Windows `%LOCALAPPDATA%/WukongData/wukong.toml` and Linux `
 ```sh
 wukong --config ./wukong.toml --state ./saved-state gui
 wukong --config ./wukong.toml analyze ./sample.elf --task "Recover the record format and verify field boundaries"
+wukong --config ./wukong.toml analyze ./install-dir --task "Find cross-file vulnerabilities in this program"
 ```
+
+A directory target is scanned as a bundle: every file is hashed, PE kinds/imports are inferred, and cross-member edges are exposed. Use `bundle_manifest`, `bundle_evidence` and `bundle_stage` to inspect a DLL separately or run the inferred entry with its sidecar files.
 
 <a id="模型服务"></a>
 

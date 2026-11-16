@@ -2,6 +2,7 @@
 pub(crate) mod agent_runtime;
 pub mod agents;
 pub mod assessment;
+pub mod bundle;
 pub(crate) mod context;
 pub mod coordinator;
 pub(crate) mod effects;

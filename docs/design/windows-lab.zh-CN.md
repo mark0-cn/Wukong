@@ -126,6 +126,17 @@ verifier.exe /querysettings
 
 测试签名足以加载测试驱动。本流程不会绕过或关闭 PatchGuard，第三方 PatchGuard 绕过工具不属于实验室；若某个实验确实需要，应作为独立的操作步骤并在结束后恢复基线。恢复基线会同时移除测试证书、testsigning 标志、服务和 Verifier 设置。
 
+## 目录 bundle
+
+`wukong analyze` 除了单个二进制，也接受目录。目录会递归扫描（最多 256 个文件、512 MiB、16 层），每个文件绑定 SHA-256，PE 成员会被检查格式、推断 executable/library/data 类型、入口 RVA 和导入。入口候选是自动推断的，不需要用户标注角色。
+
+- `bundle_manifest` 返回清单：成员、哈希、推断类型、导入和跨成员导入边，例如 `vulnserver.exe -> essfunc.dll`。
+- `bundle_evidence` 把某个已校验成员导入为证据，因此 Ghidra 可以通过 `target_evidence_id` 反编译该 DLL，而 run 的主目标仍是 EXE。
+- `bundle_stage` 最多把 64 个成员上传到同一个 worker 目录，并写入 schema-1 LaunchSpec，以该目录为 cwd、推断入口为 target。
+- 用该 `launch_spec` 且不带 argv 调用 `job_start`，入口会带着同目录 DLL 启动；验证中 `vulnserver.exe` 与 `essfunc.dll` 同目录启动成功并干净取消。
+
+限制：入口是启发式（优先第一个 `.exe` PE 可执行文件）；大树会在扫描边界截断，启动成员限制 64；尚未实现符号/PDB 配对和自动多入口执行。跨文件行为在真正执行入口及其导入之前仍是假设。
+
 ## 多环境分析
 
 Windows 执行 worker 不必携带全部逆向工具。注册一个 Linux worker（Docker 镜像已包含 Ghidra、capstone、pefile 和 angr），并把它指定为静态分析后端：
@@ -155,6 +166,7 @@ static_environment = "linux-static"
 - 已用真实服务安装验证：打包的 `install.ps1` 在第 15 代创建一个手动服务（退出码 0、不可变回执），第 16 代恢复基线后该服务被移除、实验快照被清理，管理员登录仍可用。
 - 一个用自签名证书签名的极简 WDM 驱动在 testsigning 下加载成功（服务 RUNNING），重启后又在标准 Driver Verifier 下再次加载；恢复基线移除了服务、测试证书和 Verifier 设置，worker `doctor` 仍 ready。
 - 绑定 Windows 的分析师通过运行在已登记 Docker Linux 环境中的 Ghidra 12.2 取得了 PE 目标的 `mainCRTStartup`，同时 `lab_status` 列出了配置的 lab VM（`vm=lab`）。这确认了 Windows 绑定的评估可以调用静态工具，而无需给 Windows worker 增加反编译器。
+- 包含 `vulnserver.exe` 与 `essfunc.dll` 的目录 bundle 推断出了入口、EXE 到 DLL 的导入边，把两个成员 staging 到同一目录，通过 LaunchSpec job 启动 EXE 并取消，清理得到确认。
 - 驱动覆盖仅限无设备 I/O 的旧式内核服务；生产/证明签名、PnP 设备栈和 PatchGuard 绕过场景未演练。
 - 第一阶段已用真实 VM 验证：创建基线与实验快照，在第 2、4 代恢复到基线，VM 启动后 worker `doctor` 再次就绪。随后在第 9 代通过已登记 worker 上传并执行一个预编译 EXE（job 完成、退出码 0、写入不可变回执），第 10 代恢复基线后 worker `doctor` 仍就绪。控制器重启、超时和过期代次行为由使用假宿主的单元测试覆盖。
 

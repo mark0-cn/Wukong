@@ -318,5 +318,17 @@
   "lab_prune": {
     "source": "Delete unused lab-prefixed snapshots while keeping the baseline and the active experiment snapshot. Reports per-snapshot failures and never touches unrelated snapshots.",
     "text": "删除未使用的 lab 前缀快照，保留基线和活动实验快照。逐个报告失败，绝不触碰无关快照。"
+  },
+  "bundle_manifest": {
+    "source": "Return the directory bundle manifest: auto-hashed members, inferred executable/library/data kinds, PE imports and cross-member import edges. No user-assigned roles; entry is the inferred launch candidate.",
+    "text": "返回目录 bundle 清单：自动哈希的成员、推断的 executable/library/data 类型、PE 导入和跨成员导入边。无需用户标注角色；entry 是推断出的启动候选。"
+  },
+  "bundle_evidence": {
+    "source": "Import one verified bundle member as immutable evidence so it can be inspected or decompiled with target_evidence_id. Path is relative to the analyzed directory.",
+    "text": "把一个已校验 bundle 成员导入为不可变证据，以便用 target_evidence_id 检查或反编译。路径相对于被分析目录。"
+  },
+  "bundle_stage": {
+    "source": "Stage every bundle member into one worker directory, create a LaunchSpec that sets that directory as cwd, and return the launch_spec path plus member identities. Then call job_start with launch_spec and no argv to run the inferred entry with its sidecar DLLs present. At most 64 members.",
+    "text": "把全部 bundle 成员 staging 到同一个 worker 目录，创建以该目录为 cwd 的 LaunchSpec，并返回 launch_spec 路径和成员身份。随后用 launch_spec 且不带 argv 调用 job_start，让推断入口带着同目录 DLL 运行。最多 64 个成员。"
   }
 }

@@ -26,3 +26,5 @@ mod execution;
 pub(super) use execution::*;
 mod lab;
 pub(super) use lab::*;
+mod bundle;
+pub(super) use bundle::*;

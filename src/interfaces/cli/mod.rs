@@ -82,7 +82,8 @@ pub enum Command {
         #[arg(long)]
         strings: bool,
     },
-    /// Start a real model-driven multi-agent assessment.
+    /// Start a real model-driven multi-agent assessment. TARGET may be a
+    /// binary or a directory bundle; directories are scanned automatically.
     Analyze {
         target: PathBuf,
         #[arg(long, default_value = DEFAULT_TASK)]

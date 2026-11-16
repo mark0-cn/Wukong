@@ -16,6 +16,7 @@ fn fixture(root: &Path) -> (Store, String, String) {
         id: run_id.clone(),
         target_path: target,
         target_sha256: hex::encode(Sha256::digest(b"trusted-report-fixture")),
+        bundle: None,
         task: "inspect <script>alert(1)</script>".into(),
         status: Status::Completed,
         root_id: "agent_root".into(),

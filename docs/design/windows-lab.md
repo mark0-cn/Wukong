@@ -126,6 +126,17 @@ verifier.exe /querysettings
 
 Test signing is sufficient for test drivers. PatchGuard is not bypassed or disabled by this workflow, and third-party PatchGuard-bypass tooling is not part of the lab; if an experiment needs one, treat it as an isolated operator step and restore the baseline afterwards. The baseline restore removes the test certificate, testsigning flag, service and Verifier settings together.
 
+## Directory bundles
+
+`wukong analyze` accepts a directory as well as a single binary. A directory is scanned recursively (at most 256 files, 512 MiB and 16 levels), every file is SHA-256-bound, and PE members are inspected for format, inferred executable/library/data kind, entry RVA and imports. The entry candidate is inferred; the user does not label roles.
+
+- `bundle_manifest` returns the manifest: members, hashes, inferred kinds, imports and cross-member import edges such as `vulnserver.exe -> essfunc.dll`.
+- `bundle_evidence` imports one verified member as evidence, so Ghidra can decompile that DLL through `target_evidence_id` while the EXE remains the run target.
+- `bundle_stage` uploads at most 64 members into one worker directory and writes a schema-1 LaunchSpec with that directory as cwd and the inferred entry as target.
+- `job_start` with that `launch_spec` and no argv runs the entry with its sidecar DLLs present; successful validation started `vulnserver.exe` with `essfunc.dll` in the same directory and cancelled it cleanly.
+
+Limits: the entry is a heuristic (first PE executable, preferring `.exe`); large trees are truncated at the scan bounds, launch members are limited to 64, and symbol/PDB pairing and automatic multi-entry execution are not implemented. Cross-file behavior is still a hypothesis until the entry and its imports are actually exercised.
+
 ## Multi-environment analysis
 
 A Windows execution worker does not need to carry every reverse-engineering tool. Register a Linux worker (the Docker image already contains Ghidra, capstone, pefile and angr) and name it as the static backend:
@@ -155,6 +166,7 @@ The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx>
 - A real service installation was validated: the packaged `install.ps1` created a manual service in generation 15 (exit code 0, immutable receipt), and the generation 16 baseline restore removed that service and pruned the experiment snapshot while the administrator login kept working.
 - A minimal WDM driver signed with a self-signed certificate loaded under testsigning (service RUNNING) and again under standard Driver Verifier after a reboot; reverting the baseline removed the service, test certificate and Verifier settings and left the worker `doctor` ready.
 - A Windows-bound analyst obtained `mainCRTStartup` for the PE target through Ghidra 12.2 running in the registered Docker Linux environment, while `lab_status` listed the configured lab VM (`vm=lab`). This confirms static tools can be called from a Windows-bound assessment without adding a decompiler to the Windows worker.
+- A directory bundle containing `vulnserver.exe` and `essfunc.dll` produced an inferred entry, an import edge from the EXE to the DLL, staged both members into one directory, started the EXE through a LaunchSpec job and cancelled it with confirmed cleanup.
 - Driver coverage is limited to a legacy kernel service with no device I/O. Production/attestation signing, PnP device stacks and PatchGuard-bypass scenarios are not exercised.
 - Phase 1 validation used the real VM: baseline and experiment snapshots were created, restores to the baseline ran in generations 2 and 4, and the worker `doctor` reported ready again after the VM start. A packaged prebuilt EXE was then uploaded and executed through the registered worker in generation 9 (job completed with exit code 0, immutable receipt written), and the baseline restore in generation 10 left the worker `doctor` ready again. Controller-restart, timeout and stale-generation behavior are covered by unit tests with a fake host.
 

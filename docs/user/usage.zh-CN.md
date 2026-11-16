@@ -153,7 +153,10 @@ wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
 ```sh
 wukong --config ./wukong.toml --state ./saved-state gui
 wukong --config ./wukong.toml analyze ./sample.elf --task "还原记录格式并验证字段边界"
+wukong --config ./wukong.toml analyze ./install-dir --task "查找该程序的跨文件漏洞"
 ```
+
+目录目标会作为 bundle 扫描：每个文件都计算哈希，推断 PE 类型与导入，并给出跨成员调用边。可用 `bundle_manifest`、`bundle_evidence` 和 `bundle_stage` 单独检查 DLL，或带着同目录依赖运行推断出的入口。
 
 <a id="model-services"></a>
 
