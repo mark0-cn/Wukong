@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use chrono::Utc;
 use fs2::FileExt;
+use runner::{LabWorker, LabWorkerRequest};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -25,6 +26,7 @@ use tokio::sync::Mutex;
 
 pub mod install;
 pub mod package;
+pub mod runner;
 
 pub const STATE_SCHEMA: u32 = 1;
 
@@ -182,6 +184,49 @@ pub struct PendingOperation {
     pub started_at: String,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatus {
+    Running,
+    Completed,
+    Failed,
+    TimedOut,
+    Lost,
+    Cancelled,
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct LabRun {
+    pub run_id: String,
+    pub lab_id: String,
+    pub generation: u64,
+    pub artifact: String,
+    pub artifact_sha256: String,
+    pub status: RunStatus,
+    #[serde(default)]
+    pub environment_id: Option<String>,
+    #[serde(default)]
+    pub installation_id: Option<String>,
+    #[serde(default)]
+    pub job_id: Option<String>,
+    #[serde(default)]
+    pub exit_code: Option<i64>,
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_bytes: u64,
+    pub stderr_bytes: u64,
+    #[serde(default)]
+    pub executable_path: Option<String>,
+    pub settled: bool,
+    pub started_at: String,
+    #[serde(default)]
+    pub ended_at: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct LabState {
@@ -192,6 +237,8 @@ pub struct LabState {
     pub baseline_snapshot: String,
     pub active: Option<ActiveExperiment>,
     pub pending: Option<PendingOperation>,
+    #[serde(default)]
+    pub last_run: Option<LabRun>,
     pub last_error: Option<String>,
     pub updated_at: String,
 }
@@ -206,6 +253,7 @@ impl LabState {
             baseline_snapshot: baseline.to_owned(),
             active: None,
             pending: None,
+            last_run: None,
             last_error: None,
             updated_at: now(),
         }
@@ -351,6 +399,7 @@ pub struct WindowsLab {
     start_after_restore: bool,
     store: LabStore,
     host: Arc<dyn VmHost>,
+    worker: Option<Arc<dyn LabWorker>>,
     gate: Mutex<()>,
 }
 
@@ -374,8 +423,21 @@ impl WindowsLab {
             start_after_restore: config.start_after_restore,
             store: LabStore::new(state_dir),
             host,
+            worker: None,
             gate: Mutex::new(()),
         })
+    }
+
+    /// Attach the registered worker that executes packaged harnesses.
+    pub fn with_worker(mut self, worker: Arc<dyn LabWorker>) -> Self {
+        self.worker = Some(worker);
+        self
+    }
+
+    pub async fn finish(&self) {
+        if let Some(worker) = &self.worker {
+            worker.finish().await;
+        }
     }
 
     pub async fn status(&self) -> Result<serde_json::Value> {
@@ -451,6 +513,7 @@ impl WindowsLab {
         state.phase = LabPhase::Preparing;
         state.pending = Some(pending.clone());
         state.active = None;
+        state.last_run = None;
         state.last_error = None;
         self.store.save(&state)?;
 
@@ -499,6 +562,18 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         self.mark_restart_recovery(&mut state)?;
+        if let Some(run) = state.last_run.as_mut() {
+            ensure!(
+                run.status != RunStatus::Running,
+                "harness run is still in flight; wait for it or inspect the worker"
+            );
+            if run.status == RunStatus::Unknown {
+                run.status = RunStatus::Lost;
+                run.ended_at = Some(now());
+                run.error = Some("baseline restore abandoned an unknown harness run".into());
+                self.store.save(&state)?;
+            }
+        }
         let active = state
             .active
             .as_ref()
@@ -573,6 +648,178 @@ impl WindowsLab {
             "phase": state.phase,
             "baseline_snapshot": self.baseline,
         }))
+    }
+
+    /// Execute one packaged, prebuilt user-mode EXE through the registered
+    /// worker. The store lock is held for the whole run so another operation
+    /// cannot restore the VM underneath the job.
+    pub async fn run(
+        &self,
+        lab_id: &str,
+        generation: u64,
+        artifact: &str,
+        stdin: Option<Vec<u8>>,
+        timeout_secs: u64,
+    ) -> Result<serde_json::Value> {
+        ensure!(
+            package::valid_artifact_name(artifact),
+            "invalid packaged artifact name"
+        );
+        ensure!(
+            (1..=600).contains(&timeout_secs),
+            "harness timeout must be 1–600 seconds"
+        );
+        if let Some(stdin) = &stdin {
+            ensure!(stdin.len() <= 1024 * 1024, "harness stdin exceeds 1 MiB");
+        }
+        let worker = self.worker.as_ref().cloned().context(
+            "registered lab VM has no worker environment; set windows_lab.vms.<id>.environment",
+        )?;
+        let _gate = self.gate.lock().await;
+        let _lock = self.store.lock(&self.vm_id)?;
+        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
+        self.mark_restart_recovery(&mut state)?;
+        ensure!(
+            state.phase == LabPhase::Ready,
+            "lab VM {} is {:?}, not ready",
+            self.vm_id,
+            state.phase
+        );
+        let active = state
+            .active
+            .as_ref()
+            .context("lab has no active experiment")?
+            .clone();
+        ensure!(
+            active.lab_id == lab_id && active.generation == generation,
+            "stale lab lease: request generation {generation} is not the active generation {}",
+            state.generation
+        );
+        ensure!(
+            active.spec.launch == LaunchKind::Exe,
+            "this phase runs only launch=exe harnesses"
+        );
+        ensure!(
+            !matches!(
+                state.last_run.as_ref().map(|run| run.status),
+                Some(RunStatus::Running | RunStatus::Unknown)
+            ),
+            "reconcile the previous harness run (restore the baseline) before starting another"
+        );
+        let package_id = active
+            .package_sha256
+            .clone()
+            .context("experiment has no verified offline package")?;
+        let (executable, artifact_sha256) = self.load_artifact(&package_id, artifact)?;
+        let run_id = uuid::Uuid::new_v4().simple().to_string();
+        let mut run = LabRun {
+            run_id: run_id.clone(),
+            lab_id: lab_id.to_owned(),
+            generation,
+            artifact: artifact.to_owned(),
+            artifact_sha256,
+            status: RunStatus::Running,
+            environment_id: None,
+            installation_id: None,
+            job_id: None,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            executable_path: None,
+            settled: false,
+            started_at: now(),
+            ended_at: None,
+            error: None,
+        };
+        state.last_run = Some(run.clone());
+        self.store.save(&state)?;
+        let outcome = worker
+            .execute(LabWorkerRequest {
+                run_id: run_id.clone(),
+                owner: active.owner.clone(),
+                artifact_name: artifact.to_owned(),
+                executable,
+                stdin,
+                timeout_secs,
+            })
+            .await;
+        match outcome {
+            Ok(outcome) => {
+                run.status = run_status(&outcome.state);
+                run.settled = outcome.settled;
+                run.environment_id = Some(outcome.environment_id);
+                run.installation_id = Some(outcome.installation_id);
+                run.job_id = Some(outcome.job_id);
+                run.exit_code = outcome.exit_code;
+                run.executable_path = outcome.executable_path;
+                run.stdout = outcome.stdout;
+                run.stderr = outcome.stderr;
+                run.stdout_bytes = outcome.stdout_bytes;
+                run.stderr_bytes = outcome.stderr_bytes;
+            }
+            Err(error) => {
+                run.status = RunStatus::Unknown;
+                run.error = Some(format!("{error:#}"));
+            }
+        }
+        run.ended_at = Some(now());
+        state.last_run = Some(run.clone());
+        self.store.save(&state)?;
+        let receipt = self.write_run_receipt(&run)?;
+        if run.status == RunStatus::Unknown {
+            bail!(
+                "harness run {run_id} outcome is unknown; inspect the VM and restore the baseline (receipt {})",
+                receipt.display()
+            );
+        }
+        Ok(serde_json::json!({
+            "vm_id": self.vm_id,
+            "receipt": receipt,
+            "run": run,
+        }))
+    }
+
+    fn load_artifact(&self, package_id: &str, artifact: &str) -> Result<(Vec<u8>, String)> {
+        let root = self.store.packages_root().join(package_id);
+        let manifest: package::PackageManifest = serde_json::from_slice(
+            &fs::read(root.join("manifest.json"))
+                .with_context(|| format!("read package manifest {}", root.display()))?,
+        )?;
+        let entry = manifest
+            .artifacts
+            .iter()
+            .find(|entry| entry.name == artifact)
+            .with_context(|| format!("artifact {artifact} is not in package {package_id}"))?;
+        let path = root.join(artifact);
+        let bytes = fs::read(&path)
+            .with_context(|| format!("read packaged artifact {}", path.display()))?;
+        let hash = hex::encode(Sha256::digest(&bytes));
+        ensure!(
+            bytes.len() as u64 == entry.size && hash == entry.sha256,
+            "packaged artifact {artifact} failed verification"
+        );
+        Ok((bytes, hash))
+    }
+
+    fn write_run_receipt(&self, run: &LabRun) -> Result<PathBuf> {
+        let directory = self.store.root().join("runs");
+        fs::create_dir_all(&directory)?;
+        let path = directory.join(format!("{}.json", run.run_id));
+        if path.exists() {
+            return Ok(path);
+        }
+        let mut bytes = serde_json::to_vec_pretty(run)?;
+        bytes.push(b'\n');
+        let mut staged = tempfile::NamedTempFile::new_in(&directory)?;
+        staged.write_all(&bytes)?;
+        staged.as_file().sync_all()?;
+        staged
+            .persist_noclobber(&path)
+            .map_err(|error| error.error)
+            .context("publish harness receipt")?;
+        Ok(path)
     }
 
     pub async fn reconcile(
@@ -665,6 +912,25 @@ impl WindowsLab {
             );
             self.store.save(state)?;
         }
+        if state
+            .last_run
+            .as_ref()
+            .is_some_and(|run| run.status == RunStatus::Running)
+        {
+            if let Some(run) = state.last_run.as_mut() {
+                run.status = RunStatus::Unknown;
+                run.ended_at = Some(now());
+                run.error = Some(
+                    "controller restarted during the harness run; restore the baseline to reconcile"
+                        .into(),
+                );
+            }
+            state.last_error = Some(
+                "controller restarted during a harness run; inspect the worker and restore the baseline"
+                    .into(),
+            );
+            self.store.save(state)?;
+        }
         Ok(())
     }
 
@@ -714,6 +980,17 @@ pub enum ReconcileOutcome {
     Completed,
     Failed,
     Unknown,
+}
+
+fn run_status(state: &str) -> RunStatus {
+    match state {
+        "completed" => RunStatus::Completed,
+        "failed" => RunStatus::Failed,
+        "timed_out" => RunStatus::TimedOut,
+        "lost" => RunStatus::Lost,
+        "cancelled" => RunStatus::Cancelled,
+        _ => RunStatus::Unknown,
+    }
 }
 
 fn host_error(running: &Result<bool>, snapshots: &Result<Vec<String>>) -> Option<String> {

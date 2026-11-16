@@ -4,7 +4,7 @@
 
 ## 范围
 
-Windows 能力计划的第一阶段为控制器提供一台已登记 VMware 实验 VM 的有界生命周期：创建基线与每次实验的快照、按代次围栏、恢复到基线，并对中断或超时的宿主操作进行核对。它还锁定并校验控制端依赖包，校验安装与清理计划。操作入口是 `wukong lab`。它尚未在 VM 内编译 harness、安装服务或驱动，也不暴露调试、网络和 fuzz 工具。
+Windows 能力计划的第一阶段为控制器提供一台已登记 VMware 实验 VM 的有界生命周期：创建基线与每次实验的快照、按代次围栏、恢复到基线，并对中断或超时的宿主操作进行核对。它还锁定并校验控制端依赖包、校验安装与清理计划，并通过已登记 worker 执行一个预编译用户态 EXE。操作入口是 `wukong lab`。它尚未在 VM 内编译 harness、安装服务或驱动，也不暴露调试、网络和 fuzz 工具。
 
 ## 登记身份与配置
 
@@ -63,6 +63,21 @@ ID 为 1–64 个 ASCII 字母、数字、下划线或连字符。快照名允�
 - `wukong lab package` 在不接触 VM 的情况下物化并校验依赖包。`lab prepare` 在改变任何状态之前物化依赖包，并把 `package_sha256` 与 `install_sha256` 绑定到待定意图、活动实验和租约。
 - 校验通过的依赖包和合法安装计划只是准入输入，不是资格认证。harness 编译、试运行准入与 guest 安装仍属于后续阶段。
 
+## Harness 执行
+
+VM 内已登记的 Windows 环境负责执行打包后的 harness：
+
+```toml
+[windows_lab.vms.lab]
+environment = "windows"
+```
+
+- `lab run` 要求 `launch=exe`，且产物来自实验已校验的依赖包。它会重新校验该产物，通过常规环境租约上传（单次 ≤32 MiB），可附带 stdin（≤1 MiB），启动一个有界 job（1–600 秒、输出 1 MiB），并轮询到终态。
+- 不可变回执记录 run/lab ID、代次、产物哈希、环境与安装身份、worker job ID、退出码、stdout/stderr 大小与预览，以及 settled 标志。回执位于 `<state_dir>/windows-lab/runs/<run_id>.json`。
+- 传输或轮询失败记录为 `unknown`，不会自动重试。恢复基线会将该 run 标记为 `lost`，这是唯一的核对路径；completed、failed、timed_out 或 cancelled 的 run 之后可以再运行或恢复。
+- run 进行中拒绝 `restore`，且整个 run 期间持有状态锁，避免其他操作在 job 运行期间回滚 VM。
+- 目前不做安装：EXE 从 worker 的上传文件区、在 worker 常规隔离身份下运行，清理归属仍在 worker 资源账本中。实验室不会声称删除了 worker 文件。
+
 ## 宿主操作
 
 适配器只使用 `vmrun -T ws list`、`listSnapshots <vmx>`、`snapshot <vmx> <name>`、`revertToSnapshot <vmx> <name>` 和 `start <vmx> nogui`。每次调用都有超时并捕获 stdout/stderr，从不经过 shell。基线仅在缺失时创建；已有快照从不删除。
@@ -73,7 +88,7 @@ ID 为 1–64 个 ASCII 字母、数字、下划线或连字符。快照名允�
 - guest 安装仍需要既定的离线介质和运维/管理员路径。本生命周期不猜密码，也不修改 VM 磁盘或账号。
 - `start_after_restore` 必须与宿主恢复运行中快照的行为一致：在本机上运行中 VM 的快照恢复后处于关机状态，因此实验室按配置启动它。
 - 实验快照不会自动删除；运维在保留证据后显式删除。
-- 第一阶段已用真实 VM 验证：创建基线与实验快照，在第 2、4 代恢复到基线，VM 启动后 worker `doctor` 再次就绪。控制器重启、超时和过期代次行为由使用假宿主的单元测试覆盖。
+- 第一阶段已用真实 VM 验证：创建基线与实验快照，在第 2、4 代恢复到基线，VM 启动后 worker `doctor` 再次就绪。随后在第 9 代通过已登记 worker 上传并执行一个预编译 EXE（job 完成、退出码 0、写入不可变回执），第 10 代恢复基线后 worker `doctor` 仍就绪。控制器重启、超时和过期代次行为由使用假宿主的单元测试覆盖。
 
 ## 命令行
 

@@ -1,4 +1,6 @@
 //! Operator entry point for the registered Windows experiment VM.
+use crate::adapters::environments::EnvironmentRegistry;
+use crate::adapters::windows_lab_worker::WindowsWorker;
 use crate::application::windows_lab::{ReconcileOutcome, WindowsLab};
 use crate::config::AppConfig;
 use anyhow::{Context, Result};
@@ -34,6 +36,23 @@ pub enum Command {
         /// Experiment description JSON bound to the resulting lease.
         #[arg(long)]
         spec: PathBuf,
+    },
+    /// Execute one packaged prebuilt user-mode EXE through the worker.
+    Run {
+        #[arg(long)]
+        vm: String,
+        #[arg(long)]
+        lab: String,
+        #[arg(long)]
+        generation: u64,
+        /// Packaged artifact name, e.g. harness.exe.
+        #[arg(long)]
+        artifact: String,
+        /// Optional stdin bytes delivered as a staged worker input.
+        #[arg(long)]
+        stdin: Option<PathBuf>,
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
     },
     /// Fence the active generation, then revert the VM to the baseline.
     Restore {
@@ -83,6 +102,28 @@ pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
             let lease = open(config, &vm)?.prepare(&owner, &purpose, spec).await?;
             Ok(serde_json::to_value(lease)?)
         }
+        Command::Run {
+            vm,
+            lab: lab_id,
+            generation,
+            artifact,
+            stdin,
+            timeout,
+        } => {
+            let stdin = match stdin {
+                Some(path) => Some(
+                    std::fs::read(&path)
+                        .with_context(|| format!("read harness stdin {}", path.display()))?,
+                ),
+                None => None,
+            };
+            let lab = open(config, &vm)?;
+            let result = lab
+                .run(&lab_id, generation, &artifact, stdin, timeout)
+                .await;
+            lab.finish().await;
+            result
+        }
         Command::Restore {
             vm,
             lab,
@@ -122,7 +163,13 @@ fn open(config: &AppConfig, vm_id: &str) -> Result<WindowsLab> {
         &vm.vmx,
         Duration::from_secs(vm.operation_timeout_seconds),
     )?;
-    WindowsLab::open(&config.state_dir, vm_id, vm, Arc::new(host))
+    let lab = WindowsLab::open(&config.state_dir, vm_id, vm, Arc::new(host))?;
+    if let Some(environment) = &vm.environment {
+        let registry = EnvironmentRegistry::new(config.environments.clone())?;
+        Ok(lab.with_worker(Arc::new(WindowsWorker::new(registry, environment.clone()))))
+    } else {
+        Ok(lab)
+    }
 }
 
 fn read_spec(path: &Path) -> Result<crate::application::windows_lab::ExperimentSpec> {

@@ -4,7 +4,7 @@
 
 ## Scope
 
-Phase 1 of the Windows capability plan gives the controller a bounded lifecycle for one registered VMware experiment VM: prepare a baseline and a per-experiment snapshot, fence every generation, restore to the baseline, and reconcile an interrupted or timed-out host operation. It also locks and verifies controller-side dependency packages and validates install/cleanup plans. The operator entry point is `wukong lab`. It does not yet compile harnesses in the VM, install services or drivers, or expose debugger, network and fuzz tools.
+Phase 1 of the Windows capability plan gives the controller a bounded lifecycle for one registered VMware experiment VM: prepare a baseline and a per-experiment snapshot, fence every generation, restore to the baseline, and reconcile an interrupted or timed-out host operation. It also locks and verifies controller-side dependency packages, validates install/cleanup plans, and executes one prebuilt user-mode EXE through the registered worker. The operator entry point is `wukong lab`. It does not yet compile harnesses in the VM, install services or drivers, or expose debugger, network and fuzz tools.
 
 ## Registered identity and configuration
 
@@ -63,6 +63,21 @@ Dependencies and installation are part of the experiment description:
 - `wukong lab package` materializes and verifies a package without touching the VM. `lab prepare` materializes it before any state change and binds `package_sha256` and `install_sha256` into the pending intent, active experiment and lease.
 - A verified package and a valid install plan are admission inputs, not qualification. Harness compilation, dry-run admission and guest installation remain later phase work.
 
+## Harness execution
+
+A registered Windows environment inside the VM executes the packaged harness:
+
+```toml
+[windows_lab.vms.lab]
+environment = "windows"
+```
+
+- `lab run` requires `launch=exe` and one artifact from the experiment's verified package. It re-verifies the artifact, uploads it through the normal environment lease (single upload ≤32 MiB) with optional stdin (≤1 MiB), starts one bounded job (1–600 seconds, 1 MiB output) and polls to a terminal state.
+- The immutable receipt records run/lab IDs, generation, artifact hash, environment and installation IDs, worker job ID, exit code, stdout/stderr sizes and previews, and the settled flag. Receipts live under `<state_dir>/windows-lab/runs/<run_id>.json`.
+- A transport or poll failure records `unknown` and is never retried automatically. A baseline restore marks that run `lost` and is the only reconciliation path; completed, failed, timed-out or cancelled runs may be followed by another run or a restore.
+- `restore` is rejected while a run is in flight, and the state lock is held for the whole run so another operation cannot revert the VM underneath the job.
+- No installation happens yet: the EXE runs from the worker's uploaded file area under the worker's normal isolated persona, and cleanup ownership remains in the worker resource journal. The lab never claims it deleted worker files.
+
 ## Host operations
 
 The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx> <name>`, `revertToSnapshot <vmx> <name>` and `start <vmx> nogui`. Each call has a timeout and captured stdout/stderr, never a shell. Baseline snapshots are created only when absent; existing snapshots are never deleted.
@@ -73,7 +88,7 @@ The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx>
 - Guest installation still needs the documented offline media and an operator/admin path. This lifecycle never guesses passwords and never edits VM disks or accounts.
 - `start_after_restore` must match how the host restores a running snapshot: on this host a running-VM snapshot restores powered off, so the lab starts it when configured.
 - Experiment snapshots are not deleted automatically; operators remove them explicitly after preserving evidence.
-- Phase 1 validation used the real VM: baseline and experiment snapshots were created, restores to the baseline ran in generations 2 and 4, and the worker `doctor` reported ready again after the VM start. Controller-restart, timeout and stale-generation behavior are covered by unit tests with a fake host.
+- Phase 1 validation used the real VM: baseline and experiment snapshots were created, restores to the baseline ran in generations 2 and 4, and the worker `doctor` reported ready again after the VM start. A packaged prebuilt EXE was then uploaded and executed through the registered worker in generation 9 (job completed with exit code 0, immutable receipt written), and the baseline restore in generation 10 left the worker `doctor` ready again. Controller-restart, timeout and stale-generation behavior are covered by unit tests with a fake host.
 
 ## CLI
 

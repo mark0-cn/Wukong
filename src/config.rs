@@ -92,6 +92,8 @@ pub struct WindowsLabConfig {
 pub struct WindowsLabVm {
     pub vmx: PathBuf,
     pub vmrun: PathBuf,
+    /// Registered Windows environment that executes packaged harnesses in this VM.
+    pub environment: Option<String>,
     pub baseline_snapshot: String,
     pub snapshot_prefix: String,
     /// Upper bound for one VMware host operation (snapshot, revert, start).
@@ -103,6 +105,7 @@ impl Default for WindowsLabVm {
         Self {
             vmx: PathBuf::new(),
             vmrun: PathBuf::from("vmrun"),
+            environment: None,
             baseline_snapshot: "wukong-lab-baseline".into(),
             snapshot_prefix: "wukong-lab".into(),
             operation_timeout_seconds: 300,
@@ -142,6 +145,15 @@ impl AppConfig {
                 (30..=3600).contains(&vm.operation_timeout_seconds),
                 "windows_lab VM {id} operation timeout must be 30–3600 seconds"
             );
+            if let Some(environment) = &vm.environment {
+                let configured = self.environments.get(environment).with_context(|| {
+                    format!("windows_lab VM {id} references an unknown environment")
+                })?;
+                ensure!(
+                    configured.platform == crate::adapters::environments::Platform::Windows,
+                    "windows_lab VM {id} environment must be a Windows environment"
+                );
+            }
         }
         Ok(())
     }

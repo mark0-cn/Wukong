@@ -1,6 +1,8 @@
 use super::*;
+use crate::application::windows_lab::runner::{LabWorker, LabWorkerOutcome, LabWorkerRequest};
 use anyhow::bail;
 use async_trait::async_trait;
+use std::path::Path;
 use std::sync::Mutex;
 
 #[derive(Default)]
@@ -94,6 +96,7 @@ fn config(dir: &Path) -> WindowsLabVm {
     WindowsLabVm {
         vmx: dir.join("vm.vmx"),
         vmrun: dir.join("vmrun.exe"),
+        environment: None,
         baseline_snapshot: "baseline".into(),
         snapshot_prefix: "lab".into(),
         operation_timeout_seconds: 30,
@@ -359,6 +362,122 @@ async fn invalid_dependency_fails_before_any_host_effect() {
     assert!(format!("{error:#}").contains("hash mismatch"));
     assert!(host.calls().is_empty());
     assert_eq!(state(dir.path()).phase, LabPhase::Idle);
+}
+
+#[tokio::test]
+async fn run_executes_a_packaged_exe_and_writes_a_receipt() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let worker = Arc::new(FakeWorker::completed());
+    let lab = lab(dir.path(), host).with_worker(worker.clone());
+    let mut spec = spec();
+    spec.dependencies = vec![dependency(dir.path(), "harness.exe", b"MZ-fake")];
+    let lease = lab.prepare("analyst", "run", spec).await.unwrap();
+    let result = lab
+        .run(
+            &lease.lab_id,
+            lease.generation,
+            "harness.exe",
+            Some(b"stdin".to_vec()),
+            30,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["run"]["status"], "completed");
+    assert_eq!(result["run"]["exit_code"], 0);
+    assert_eq!(result["run"]["stdout"], "ok\n");
+    let receipt = result["receipt"].as_str().unwrap();
+    assert!(Path::new(receipt).is_file());
+    let requests = worker.requests.lock().unwrap();
+    assert_eq!(requests[0].artifact_name, "harness.exe");
+    assert_eq!(requests[0].executable, b"MZ-fake");
+    assert_eq!(requests[0].stdin.as_deref(), Some(b"stdin".as_slice()));
+}
+
+#[tokio::test]
+async fn unknown_run_record_is_reconciled_by_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let worker = Arc::new(FakeWorker::failing("transport lost"));
+    let lab = lab(dir.path(), host).with_worker(worker);
+    let mut spec = spec();
+    spec.dependencies = vec![dependency(dir.path(), "harness.exe", b"MZ-fake")];
+    let lease = lab.prepare("analyst", "run", spec).await.unwrap();
+    let error = lab
+        .run(&lease.lab_id, lease.generation, "harness.exe", None, 30)
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("outcome is unknown"));
+    assert_eq!(
+        state(dir.path()).last_run.unwrap().status,
+        RunStatus::Unknown
+    );
+    assert!(
+        lab.run(&lease.lab_id, lease.generation, "harness.exe", None, 30)
+            .await
+            .is_err()
+    );
+    lab.restore(&lease.lab_id, lease.generation).await.unwrap();
+    assert_eq!(state(dir.path()).last_run.unwrap().status, RunStatus::Lost);
+}
+
+#[tokio::test]
+async fn run_rejects_non_exe_launch_kinds() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host).with_worker(Arc::new(FakeWorker::completed()));
+    let mut spec = spec();
+    spec.launch = LaunchKind::Service;
+    spec.dependencies = vec![dependency(dir.path(), "service.exe", b"MZ-fake")];
+    let lease = lab.prepare("analyst", "service", spec).await.unwrap();
+    let error = lab
+        .run(&lease.lab_id, lease.generation, "service.exe", None, 30)
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("only launch=exe"));
+}
+
+struct FakeWorker {
+    outcome: Mutex<Option<std::result::Result<LabWorkerOutcome, String>>>,
+    requests: Mutex<Vec<LabWorkerRequest>>,
+}
+
+impl FakeWorker {
+    fn completed() -> Self {
+        Self {
+            outcome: Mutex::new(Some(Ok(LabWorkerOutcome {
+                environment_id: "windows".into(),
+                installation_id: "installation".into(),
+                job_id: "job-1".into(),
+                state: "completed".into(),
+                settled: true,
+                exit_code: Some(0),
+                executable_path: Some("files/lab/harness.exe".into()),
+                stdout: "ok\n".into(),
+                stderr: String::new(),
+                stdout_bytes: 3,
+                stderr_bytes: 0,
+            }))),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+    fn failing(message: &str) -> Self {
+        Self {
+            outcome: Mutex::new(Some(Err(message.into()))),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl LabWorker for FakeWorker {
+    async fn execute(&self, request: LabWorkerRequest) -> Result<LabWorkerOutcome> {
+        self.requests.lock().unwrap().push(request);
+        match self.outcome.lock().unwrap().take().unwrap() {
+            Ok(outcome) => Ok(outcome),
+            Err(message) => bail!("{message}"),
+        }
+    }
 }
 
 #[tokio::test]

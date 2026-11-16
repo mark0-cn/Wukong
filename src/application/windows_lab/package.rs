@@ -76,6 +76,11 @@ fn valid_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
+/// Artifact names select one packaged file; they never contain a path.
+pub fn valid_artifact_name(name: &str) -> bool {
+    valid_name(name)
+}
+
 fn lowercase_digest(value: &str) -> bool {
     value.len() == 64
         && value
