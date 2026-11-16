@@ -22,9 +22,20 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
                 "output_limit": None,
             }
             original = json.loads(json.dumps(params))
-            with patch(
-                "wukong_worker.platform.process_owner.subprocess.Popen", return_value=Mock(pid=123)
-            ) as spawn:
+            with (
+                patch(
+                    "wukong_worker.platform.process_owner.subprocess.Popen",
+                    return_value=Mock(pid=123),
+                ) as spawn,
+                patch(
+                    "wukong_worker.resources.job_ledger.process_identity",
+                    return_value="fixture:123",
+                ),
+                patch(
+                    "wukong_worker.resources.job_ledger.JobLedger._registration",
+                    return_value=(123, "fixture:123"),
+                ),
+            ):
                 first = manager.start_job(params)
                 duplicate = manager.start_job(params)
                 self.assertEqual(first["job_id"], duplicate["job_id"])
@@ -45,10 +56,20 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
             root = Path(temporary)
             manager = JobService(root, True, False, jobs=JobManager(root, True, False))
             params = {"argv": ["fixture"], "request_id": "spawn-failure"}
-            with patch(
-                "wukong_worker.platform.process_owner.subprocess.Popen",
-                side_effect=OSError("fixture spawn failed"),
-            ) as spawn:
+            with (
+                patch(
+                    "wukong_worker.platform.process_owner.subprocess.Popen",
+                    side_effect=OSError("fixture spawn failed"),
+                ) as spawn,
+                patch(
+                    "wukong_worker.resources.job_ledger.process_identity",
+                    return_value="fixture:123",
+                ),
+                patch(
+                    "wukong_worker.resources.job_ledger.JobLedger._registration",
+                    return_value=(123, "fixture:123"),
+                ),
+            ):
                 with patch("wukong_worker.resources.jobs.time.time", return_value=100):
                     with self.assertRaisesRegex(OSError, "fixture spawn failed"):
                         manager.start_job(params)
@@ -56,8 +77,8 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
                     retry = manager.start_job(params)
                 self.assertEqual(spawn.call_count, 1)
                 self.assertEqual(retry["state"], "lost")
-                self.assertIn("never created", retry["error"])
-                self.assertEqual(len(list((root / "jobs").iterdir())), 1)
+                self.assertTrue(retry["cleanup_pending"])
+                self.assertEqual(len(list((root / "jobs").glob("*/status.json"))), 1)
 
     def test_launch_only_job_records_manifest_timeout_and_rejects_overrides_before_spawn(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -80,9 +101,20 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
             (base / "launch.json").write_text(json.dumps(spec))
             manager = JobService(root, True, False, jobs=JobManager(root, True, False))
             params = dict(launch_spec="files/case/launch.json", input="files/case/input.bin")
-            with patch(
-                "wukong_worker.platform.process_owner.subprocess.Popen", return_value=Mock(pid=123)
-            ) as spawn:
+            with (
+                patch(
+                    "wukong_worker.platform.process_owner.subprocess.Popen",
+                    return_value=Mock(pid=123),
+                ) as spawn,
+                patch(
+                    "wukong_worker.resources.job_ledger.process_identity",
+                    return_value="fixture:123",
+                ),
+                patch(
+                    "wukong_worker.resources.job_ledger.JobLedger._registration",
+                    return_value=(123, "fixture:123"),
+                ),
+            ):
                 result = manager.start_job(params)
                 saved = json.loads((root / "jobs" / result["job_id"] / "spec.json").read_text())
                 self.assertEqual(saved["timeout_secs"], 5)
