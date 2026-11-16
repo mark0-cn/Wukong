@@ -549,8 +549,12 @@ async fn native_skills_and_usage_survive_rig_memory_compaction() {
                 extra: Default::default(),
             },
             status_evidence_id: Some(observation.id.clone()),
-            imported_artifacts: None,
+            imported_artifacts: Some(json!({"artifacts":[]})),
             notification_message_id: Some(1),
+            execution_notification_message_id: None,
+            execution_status_evidence_id: None,
+            evidence_sync: Default::default(),
+            cleanup_intent: None,
             created_at: now(),
             updated_at: now(),
         };

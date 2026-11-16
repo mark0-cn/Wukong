@@ -11,7 +11,12 @@ pub(super) struct ExecutionService {
     pub(super) sessions: SessionsService,
 }
 impl ExecutionService {
-    pub(super) fn new(store: Store, gateway: WorkerGateway, locks: ResourceLocks) -> Self {
+    pub(super) fn new(
+        store: Store,
+        gateway: WorkerGateway,
+        locks: ResourceLocks,
+        sync_limits: evidence_sync::SyncLimits,
+    ) -> Self {
         let files = FilesService {
             store: store.clone(),
             gateway: gateway.clone(),
@@ -21,6 +26,7 @@ impl ExecutionService {
             gateway: gateway.clone(),
             files: files.clone(),
             locks: locks.clone(),
+            sync_limits,
         };
         let sessions = SessionsService {
             store: store.clone(),
@@ -51,18 +57,9 @@ impl ExecutionService {
                     .await
             }
             "job_cancel" => {
-                let job_id = text(&args, "job_id")?;
-                let job = self.jobs.known_job(agent, job_id, true)?;
-                args["job_id"] = json!(job.worker_resource_id);
-                let raw = self
-                    .gateway
-                    .worker_call(
-                        agent,
-                        call_id,
-                        Request::JobCancel(serde_json::from_value(args)?),
-                    )
-                    .await?;
-                self.jobs.present(&job, raw)
+                self.jobs
+                    .cancel(agent, call_id, text(&args, "job_id")?)
+                    .await
             }
             "job_artifacts" => {
                 self.jobs
@@ -189,6 +186,10 @@ impl ExecutionService {
                     status_evidence_id: None,
                     imported_artifacts: None,
                     notification_message_id: None,
+                    execution_notification_message_id: None,
+                    execution_status_evidence_id: None,
+                    evidence_sync: Default::default(),
+                    cleanup_intent: None,
                     created_at: now(),
                     updated_at: now(),
                 };

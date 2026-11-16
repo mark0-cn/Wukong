@@ -34,6 +34,7 @@ pub struct ToolService {
     locks: Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>,
     environments: crate::adapters::environments::EnvironmentRegistry,
     default_environment: Option<String>,
+    sync_limits: evidence_sync::SyncLimits,
 }
 
 mod analysis;
@@ -58,9 +59,11 @@ use files::FilesService;
 use gateway::WorkerGateway;
 use sessions::SessionsService;
 type ResourceLocks = Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>;
+mod evidence_sync;
 mod files;
 mod handlers;
 mod jobs;
+mod observation;
 mod resource_recovery;
 mod sessions;
 mod transfers;
@@ -118,6 +121,7 @@ impl ToolService {
             locks,
             environments,
             default_environment: config.default_environment,
+            sync_limits: Default::default(),
         })
     }
     pub(crate) async fn bound_to(&self, agent: &AgentMetadata) -> Result<ToolContext> {
@@ -148,21 +152,6 @@ impl ToolService {
         .await
     }
 
-    pub(crate) async fn refresh_jobs(&self, run: &str) -> Result<()> {
-        for job in self.store.records::<JobRecord>(run)? {
-            if job.notification_message_id.is_some() && job.status.settled() {
-                continue;
-            }
-            let owner: AgentMetadata = require_in_run(&self.store, &job.agent_id, run)?;
-            let tools = self.bound_to(&owner).await?;
-            tools
-                .execution
-                .jobs
-                .observe(&owner, &format!("job-observation:{}", job.id), &job.id)
-                .await?;
-        }
-        Ok(())
-    }
     pub(crate) async fn renew_environment_leases(&self, run: &str) -> Result<()> {
         if let Some(owner) = self.store.controller_owner() {
             self.environments.renew_leases(run, &owner).await?;

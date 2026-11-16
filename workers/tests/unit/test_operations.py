@@ -13,6 +13,28 @@ from wukong_worker.resources.operations import OperationLedger
 
 
 class OperationTests(unittest.TestCase):
+    def test_failed_cleanup_reconciles_original_request_without_restarting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = OperationLedger(Path(directory))
+            params = {"request_id": "stable-close", "session_id": "original"}
+            calls = []
+
+            def execute(method, supplied):
+                calls.append((method, supplied.copy()))
+                if len(calls) == 1:
+                    raise WorkerError("outcome_unknown", "cleanup pending")
+                return {"session_id": "original", "state": "lost", "cleanup_confirmed": True}
+
+            with self.assertRaises(WorkerError):
+                ledger.invoke("interact.close", params, execute, lambda _, result: result)
+            closed = ledger.invoke("interact.close", params, execute, lambda _, result: result)
+            self.assertTrue(closed["cleanup_confirmed"])
+            self.assertEqual(calls[0], calls[1])
+            self.assertEqual(
+                closed, ledger.invoke("interact.close", params, execute, lambda _, result: result)
+            )
+            self.assertEqual(len(calls), 2)
+
     def test_completed_python_request_is_not_executed_twice(self):
         with tempfile.TemporaryDirectory() as directory:
             ledger = OperationLedger(Path(directory))

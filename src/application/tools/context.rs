@@ -21,6 +21,7 @@ impl ToolContext {
             service.store.clone(),
             gateway.clone(),
             service.locks.clone(),
+            service.sync_limits.clone(),
         );
         let analysis = AnalysisService {
             store: service.store.clone(),

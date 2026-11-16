@@ -24,6 +24,7 @@ class JobLedger:
         "supervisor.log",
         "ledger.lock",
         "supervisor-start.json",
+        "processes.json",
     }
 
     def __init__(self, directory: Path):

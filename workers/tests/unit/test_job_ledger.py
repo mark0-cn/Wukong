@@ -13,6 +13,22 @@ from wukong_worker.resources.supervisor import supervise_job
 
 
 class JobLedgerTests(unittest.TestCase):
+    def test_artifact_manifest_excludes_all_private_job_files(self):
+        from wukong_worker.artifacts.common import public_file
+        from wukong_worker.resources.jobs import JobManager
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            job = root / "jobs" / ("a" * 32)
+            job.mkdir(parents=True)
+            for name in JobLedger.INTERNAL_FILES | {"output.stdout"}:
+                (job / name).write_bytes(b"fixture")
+            manager = JobManager.__new__(JobManager)
+            manager.root = root
+            manifest = manager.artifacts({"job_id": job.name})
+            self.assertEqual(len(manifest), 1)
+            self.assertEqual(public_file(root, manifest[0]["path"]), job / "output.stdout")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

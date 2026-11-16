@@ -84,7 +84,11 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 `ToolContext` 显式装配执行、分析、协调、文档、证据及环境服务，不再解引用为 `ToolService`。目录适配器向每个处理器传入具体服务，处理器不能访问完整入口对象。目录继续管理 schema、注册、权限和恢复策略，Rig 保留通用调度职责。`FilesService`、`JobService` 和 `SessionsService` 负责 worker 用例；`WorkerGateway` 集中管理传输与稳定回执。控制端使用 `JobRecord`、`SessionRecord`、`WorkerFileRecord` 和 `RunScoped` 检查归属，原始 worker 扩展载荷保留为 JSON。
 
-`JobService` 统一自动监控和手动状态查询：检查任务归属、解析类型化 `JobStatus`、导入终止状态原始证据及产物后，发布可供模型读取的通知。同一任务的观察串行化，更新时合并最新账本，避免覆盖已导入产物或通知状态。`lost` 是终止状态，退出码和验证标志来自 `result`。任务通知与完成标识在同一事务写入持久化邮箱，沿用会话检查点与消息确认的原子提交；重启后未确认消息继续投递，旧 generation 的迟到任务结果标记为 stale。worker 错误通过 RPC `error.data.kind` 携带类别，业务会话和恢复代码按错误类别对账。
+`JobService::observe` 统一自动和手动状态查询，检查归属并仅导入原始状态证据。同一资源串行处理，更新时合并最新记录。公平观察器对作业观察和会话清理使用统一资源身份去重：全局最多八个请求、每环境最多两个，观察超时十秒，单资源失败按一至三十秒退避，成功后复位。控制端心跳与环境租约续期保持独立；迟到写入必须通过 controller fence。清理在手动调用、超时和重启之间保留首次持久化的操作身份。
+
+`EvidenceSyncService` 在资源锁外传输，全局最多两个任务、每个 worker 环境最多一个。产物清单和逐文件进度持久化，以 worker 身份、路径、SHA256 和大小标识文件；重启后复用已验证文件，无需重新下载。网络失败按有界退避重试；完整性或大小失败明确保留为失败。提交时重新获取资源锁，校验当前身份及 controller fence。状态查询和工作上下文展示有界进度与错误。
+
+首次观察到执行终态时，事务性发送 `job_execution_finished`，包含原始证据、清理及同步状态，不能据此认定业务成功。只有清理确认、证据齐全且后处理完成后，才发送现有 `job_completed`。两阶段分别去重；未确认邮件在重启后继续投递，旧 generation 通知标记为 stale。verifier 认证和 root 成功完成必须要求证据就绪；证据无法取得时可以明确报告带缺口的不确定结果。`lost` 保持终态，退出码和验证标志来自 `result`。控制端新增字段带默认值：已有完整产物记录映射为就绪，已有最终通知不补发第一阶段通知。worker 协议 v3、工具名和权限保持不变，RPC `error.data.kind` 继续提供类型化恢复类别。
 
 运行时角色只有 `root`、`analyst`、`verifier`。root 负责拆解、派单、证据协调和最终交付；analyst 负责目标分析；verifier 独立检查其他实例的结论。子任务的 `role` 只接受 analyst 或 verifier。模型、预算和工具权限由角色决定，`skills` 不授予新权限。
 

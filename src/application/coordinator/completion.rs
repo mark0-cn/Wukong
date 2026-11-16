@@ -89,6 +89,12 @@ impl Coordinator {
         Self::notify_terminal(tx, &agent)?;
         if agent.role == Role::Root {
             if result.outcome == TaskOutcome::Success {
+                ensure!(
+                    tx.records::<JobRecord>(&agent.run_id)?
+                        .iter()
+                        .all(JobRecord::evidence_ready),
+                    "job evidence is not ready; wait for synchronization or finish inconclusive with explicit gaps"
+                );
                 let validations: Vec<ArtifactValidation> = tx.records(&agent.run_id)?;
                 let tasks: Vec<AgentMetadata> = tx.records(&agent.run_id)?;
                 let run: RunRecord = tx.get_record(&agent.run_id)?.context("run missing")?;

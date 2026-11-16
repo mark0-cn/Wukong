@@ -74,7 +74,17 @@ impl SessionsService {
         serde_json::from_value::<SessionObservation>(raw.clone())
             .is_ok_and(|observation| observation.observation().settled())
     }
-    fn closing(&self, kind: SessionKind, session: &mut SessionRecord) -> Result<()> {
+    fn closing(
+        &self,
+        kind: SessionKind,
+        session: &mut SessionRecord,
+        agent: &AgentMetadata,
+        call: &str,
+    ) -> Result<()> {
+        session.cleanup_intent.get_or_insert_with(|| CleanupIntent {
+            call_id: call.into(),
+            agent_id: agent.id.clone(),
+        });
         session.state = SessionState::Closing;
         session.updated_at = now();
         self.store.save_session(kind, session)
@@ -154,6 +164,7 @@ impl SessionsService {
                 },
                 worker: Some(raw.clone()),
                 transcript_evidence_id: None,
+                cleanup_intent: None,
                 created_at: now(),
                 updated_at: now(),
             };
@@ -252,13 +263,31 @@ impl SessionsService {
                 );
                 args["session_id"] = json!(session.worker_resource_id);
                 if name == "debug_close" {
-                    self.closing(SessionKind::Debugger, &mut session)?;
+                    self.closing(SessionKind::Debugger, &mut session, agent, call_id)?;
                 }
+                let cleanup_actor = if name == "debug_close" {
+                    Some(require_in_run::<AgentMetadata>(
+                        &self.store,
+                        &session
+                            .cleanup_intent
+                            .as_ref()
+                            .context("cleanup intent missing")?
+                            .agent_id,
+                        &agent.run_id,
+                    )?)
+                } else {
+                    None
+                };
+                let worker_call = if cleanup_actor.is_some() {
+                    session.cleanup_intent.as_ref().unwrap().call_id.as_str()
+                } else {
+                    call_id
+                };
                 let raw = match self
                     .gateway
                     .worker_call(
-                        agent,
-                        call_id,
+                        cleanup_actor.as_ref().unwrap_or(agent),
+                        worker_call,
                         (if name == "debug_close" {
                             Method::DebugClose
                         } else if name == "debug_profile" {
@@ -407,13 +436,31 @@ impl SessionsService {
                 );
                 args["session_id"] = json!(session.worker_resource_id);
                 if name == "interactive_close" {
-                    self.closing(SessionKind::Interactive, &mut session)?;
+                    self.closing(SessionKind::Interactive, &mut session, agent, call_id)?;
                 }
+                let cleanup_actor = if name == "interactive_close" {
+                    Some(require_in_run::<AgentMetadata>(
+                        &self.store,
+                        &session
+                            .cleanup_intent
+                            .as_ref()
+                            .context("cleanup intent missing")?
+                            .agent_id,
+                        &agent.run_id,
+                    )?)
+                } else {
+                    None
+                };
+                let worker_call = if cleanup_actor.is_some() {
+                    session.cleanup_intent.as_ref().unwrap().call_id.as_str()
+                } else {
+                    call_id
+                };
                 let raw = match self
                     .gateway
                     .worker_call(
-                        agent,
-                        call_id,
+                        cleanup_actor.as_ref().unwrap_or(agent),
+                        worker_call,
                         (if name == "interactive_close" {
                             Method::InteractClose
                         } else if name == "interactive_profile" {
