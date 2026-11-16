@@ -38,6 +38,8 @@ Isolated shell targets, Python targets and process inputs share the execution-co
 
 Job lifecycle writes go through `JobLedger` under a per-job process lock. The parent registers the supervisor creation identity before it can claim an execution token; queries and late supervisors cannot overwrite terminal records. Missing PID or legacy active records are uncertain and require recovery, never automatic replay. Upgrade Python workers only when idle. Snapshot imports revoke execution authority while retaining terminal results. Ledger tokens, registration handshakes and lock files are private metadata, excluded from RPC status and artifact lists.
 
+After registration commits successfully, the parent releases the supervisor through a one-byte acknowledgement on its inherited, unbuffered stdin pipe. A visible registration record alone cannot authorize execution: parent exit or a failed registration closes the pipe without acknowledgement, even when publishing the revocation also fails. The supervisor then still claims the token under the ledger lock.
+
 ## Docker
 
 From the repository root (PowerShell):

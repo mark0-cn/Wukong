@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -25,7 +26,7 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
             with (
                 patch(
                     "wukong_worker.platform.process_owner.subprocess.Popen",
-                    return_value=Mock(pid=123),
+                    return_value=Mock(pid=123, **{"stdin.write.return_value": 1}),
                 ) as spawn,
                 patch(
                     "wukong_worker.resources.job_ledger.process_identity",
@@ -40,6 +41,8 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
                 duplicate = manager.start_job(params)
                 self.assertEqual(first["job_id"], duplicate["job_id"])
                 self.assertEqual(spawn.call_count, 1)
+                self.assertEqual(spawn.call_args.kwargs["stdin"], subprocess.PIPE)
+                self.assertEqual(spawn.call_args.kwargs["bufsize"], 0)
                 self.assertEqual(params, original)
                 meta = json.loads((root / "jobs" / first["job_id"] / "status.json").read_text())
                 self.assertEqual(
@@ -104,7 +107,7 @@ class ProcessLaunchPlanningTests(unittest.TestCase):
             with (
                 patch(
                     "wukong_worker.platform.process_owner.subprocess.Popen",
-                    return_value=Mock(pid=123),
+                    return_value=Mock(pid=123, **{"stdin.write.return_value": 1}),
                 ) as spawn,
                 patch(
                     "wukong_worker.resources.job_ledger.process_identity",

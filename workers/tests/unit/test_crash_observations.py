@@ -1,6 +1,7 @@
 """Regression checks for crash evidence, not an exploit evaluation suite."""
 
 import base64
+import io
 import os
 import tempfile
 import unittest
@@ -79,7 +80,7 @@ class CrashTests(unittest.TestCase):
                 JobLedger(job).reserve_and_spawn(
                     load_json(job / "spec.json"),
                     {"state": "queued", "runner_token": "test"},
-                    lambda: Mock(pid=os.getpid()),
+                    lambda: Mock(pid=os.getpid(), **{"stdin.write.return_value": 1}),
                 )
 
             def replay(root, directory, spec, data, index):
@@ -94,7 +95,7 @@ class CrashTests(unittest.TestCase):
                     "wukong_worker.resources.job_ledger.process_identity", return_value="fixture"
                 ),
             ):
-                supervise_job(root, job, execute_job)
+                supervise_job(root, job, execute_job, io.BytesIO(b"\x01"))
             status = load_json(job / "status.json")
             return status, (job / "minimized.bin").read_bytes() if (
                 job / "minimized.bin"

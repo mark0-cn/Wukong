@@ -1,6 +1,7 @@
 """Durable execution authority under startup, observation and recovery races."""
 
 import os
+import io
 from pathlib import Path
 import tempfile
 import threading
@@ -45,22 +46,31 @@ class JobLedgerTests(unittest.TestCase):
     def reserve(self, spawn=None):
         self.ledger.announce("token")
         return self.ledger.reserve_and_spawn(
-            self.spec, self.meta, spawn or (lambda: Mock(pid=os.getpid()))
+            self.spec,
+            self.meta,
+            spawn or (lambda: Mock(pid=os.getpid(), **{"stdin.write.return_value": 1})),
         )
 
     def test_query_and_child_wait_for_parent_registration_then_claim_once(self):
         entered, release = threading.Event(), threading.Event()
+        reader, writer = os.pipe()
+        admission = os.fdopen(reader, "rb", buffering=0)
+        acknowledgement = os.fdopen(writer, "wb", buffering=0)
+        self.addCleanup(admission.close)
+        self.addCleanup(acknowledgement.close)
 
         def spawn():
             entered.set()
             self.assertTrue(release.wait(5))
-            return Mock(pid=os.getpid())
+            return Mock(pid=os.getpid(), stdin=acknowledgement)
 
         parent = threading.Thread(target=lambda: self.reserve(spawn))
         parent.start()
         self.assertTrue(entered.wait(5))
         execute = Mock(return_value=JobOutcome("completed", {}))
-        child = threading.Thread(target=lambda: supervise_job(self.root, self.root, execute))
+        child = threading.Thread(
+            target=lambda: supervise_job(self.root, self.root, execute, admission)
+        )
         observed = []
         query = threading.Thread(target=lambda: observed.append(JobLedger(self.root).observe()))
         child.start()
@@ -70,7 +80,7 @@ class JobLedgerTests(unittest.TestCase):
         for thread in [parent, child, query]:
             thread.join(5)
             self.assertFalse(thread.is_alive())
-        supervise_job(self.root, self.root, execute)
+        supervise_job(self.root, self.root, execute, io.BytesIO(b"\x01"))
         self.assertEqual(execute.call_count, 1)
         self.assertEqual(self.ledger.observe()["state"], "completed")
         self.assertNotEqual(observed[0]["state"], "lost")
@@ -87,9 +97,40 @@ class JobLedgerTests(unittest.TestCase):
             with self.assertRaisesRegex(OSError, "registration failed"):
                 self.reserve()
         execute = Mock()
-        supervise_job(self.root, self.root, execute)
+        supervise_job(self.root, self.root, execute, io.BytesIO(b"\x01"))
         execute.assert_not_called()
         self.assertTrue(self.ledger.observe()["cleanup_pending"])
+
+    def test_visible_failed_commit_and_failed_revocation_cannot_release_child(self):
+        real = atomic_json
+
+        def uncertain_commit(path, value):
+            phase = value.get("_ledger", {}).get("phase")
+            if phase == "revoked":
+                raise OSError("revocation unavailable")
+            real(path, value)
+            if phase == "registered":
+                raise OSError("directory sync failed after replacement")
+
+        reader, writer = os.pipe()
+        with os.fdopen(reader, "rb", buffering=0) as admission:
+            stream = os.fdopen(writer, "wb", buffering=0)
+            process = Mock(pid=os.getpid(), stdin=stream)
+            with patch("wukong_worker.resources.job_ledger.atomic_json", side_effect=uncertain_commit):
+                with self.assertRaisesRegex(OSError, "revocation unavailable"):
+                    self.reserve(lambda: process)
+            self.assertTrue(stream.closed)
+            self.assertEqual(load_json(self.ledger.path)["_ledger"]["phase"], "registered")
+            execute = Mock()
+            supervise_job(self.root, self.root, execute, admission)
+            execute.assert_not_called()
+
+    def test_parent_exit_before_admission_never_claims_registered_record(self):
+        self.reserve()
+        execute = Mock()
+        supervise_job(self.root, self.root, execute, io.BytesIO())
+        execute.assert_not_called()
+        self.assertEqual(load_json(self.ledger.path)["_ledger"]["phase"], "registered")
 
     def test_legacy_or_reserved_without_pid_is_uncertain_and_cannot_claim(self):
         for internal in [{}, {"_ledger": {"schema": 1, "phase": "reserved", "version": 1}}]:

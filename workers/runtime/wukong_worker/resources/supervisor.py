@@ -7,11 +7,15 @@ from wukong_worker.artifacts.metadata import atomic_json, load_json
 from wukong_worker.resources.job_ledger import JobLedger
 
 
-def supervise_job(root, directory, execute):
+def supervise_job(root, directory, execute, admission):
     spec = load_json(directory / "spec.json")
     token = spec["runner_token"]
     ledger = JobLedger(directory)
     ledger.announce(token)
+    # This inherited pipe is closed on parent death or failed registration.
+    # Never infer permission from a record whose commit may have been uncertain.
+    if admission.read(1) != b"\x01":
+        return
     version = ledger.claim(token, os.getpid())
     if version is None:
         return

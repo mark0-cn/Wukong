@@ -48,6 +48,7 @@ class JobLedger:
             atomic_json(self.directory / "spec.json", spec)
             meta["_ledger"] = {"schema": 1, "phase": "reserved", "version": 0}
             self._write(meta)
+            process = None
             try:
                 process = spawn()
                 pid, identity = self._registration(process.pid, spec["runner_token"])
@@ -59,11 +60,19 @@ class JobLedger:
                 fresh.update(supervisor_pid=pid, supervisor_identity=identity)
                 fresh["_ledger"]["phase"] = "registered"
                 self._write(fresh)
+                # Atomic replacement can become visible before its durability
+                # confirmation fails. Only a successful parent commit releases
+                # the child; a failed revocation must not make that record enough.
+                if process.stdin.write(b"\x01") != 1:
+                    raise OSError("supervisor admission acknowledgement failed")
                 return self.public(fresh)
             except Exception:
                 fresh = load_json(self.path)
                 self._lose(fresh, "supervisor_registration_unconfirmed")
                 raise
+            finally:
+                if process is not None and process.stdin is not None:
+                    process.stdin.close()
 
     def announce(self, token):
         # Windows venv Python can use a launcher parent; register the interpreter
