@@ -462,15 +462,27 @@ fn capability_changes_reuse_scope_owner_and_verification_stays_independent() {
 #[test]
 fn finish_scan_waits_for_running_worker_jobs() {
     let (_dir, store, coordinator, run) = fixture();
-    let job = json!({"id":"job-1","run_id":run.id,"status":{"state":"running"}});
+    let job = json!({"id":"job-1","run_id":run.id,"agent_id":run.root_id,
+        "worker_resource_id":"worker-job","worker_id":"fixture","owner_generation":0,
+        "tool_name":"job_start","call_id":"fixture","worker_request_id":"request",
+        "parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),
+        "status":{"job_id":"worker-job","state":"running"}});
     store.put("job", "job-1", &run.id, &job).unwrap();
     let error = coordinator.finish(&run.root_id, "done").unwrap_err();
     let message = format!("{error:#}");
     assert!(message.contains("jobs remain"), "{message}");
-    // Polling job_status persists terminal states; only then can the root
-    // account for the job and finish.
+    // Execution completion alone cannot authorize a successful assessment.
     let mut finished_job = job;
     finished_job["status"]["state"] = json!("completed");
+    store.put("job", "job-1", &run.id, &finished_job).unwrap();
+    assert!(
+        coordinator
+            .finish(&run.root_id, "done")
+            .unwrap_err()
+            .to_string()
+            .contains("evidence is not ready")
+    );
+    finished_job["imported_artifacts"] = json!({"artifacts":[]});
     store.put("job", "job-1", &run.id, &finished_job).unwrap();
     coordinator.finish(&run.root_id, "done").unwrap();
     assert_eq!(
