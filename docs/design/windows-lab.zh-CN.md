@@ -37,7 +37,7 @@ Schema-2 状态位于 `<state_dir>/windows-lab/<vm_id>.json`，绑定规范化 V
 - `status` 读取快照，不调和或重写状态；有时限的宿主探测只是观测。其他操作持有修改锁时仍可查询。
 - 中断的宿主影响不会重放。修改型恢复把中断意图归为 `recovery_required`；操作者须检查客体并调和准确的 operation ID。未解决的维护影响会阻止普通 worker 新任务，但观测与清理仍可使用。
 
-Schema-1 文件会被明确拒绝：先用原版本完成/调和旧实验、保留证据，再明确归档旧 lab 状态并创建 schema-2 状态。不要把旧租约复制给另一 VM 或静默修改身份。旧的 `os_build`、`toolchain_sha256` 声明需移入可选说明 `annotations.os_build`、`annotations.toolchain`。
+仅支持当前状态格式和工具契约，不提供早期分支内格式的迁移流程或兼容层。系统和工具链说明使用可选字段 `annotations.os_build`、`annotations.toolchain`。
 
 ## 实验与包契约
 

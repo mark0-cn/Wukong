@@ -85,7 +85,7 @@ impl LabStore {
                 return Err(error).with_context(|| format!("read lab state {}", path.display()));
             }
         };
-        let mut state: LabState = serde_json::from_str(&text)
+        let state: LabState = serde_json::from_str(&text)
             .with_context(|| format!("parse lab state {}", path.display()))?;
         ensure!(
             state.schema == STATE_SCHEMA,
@@ -106,9 +106,10 @@ impl LabStore {
                 "lab VM configuration changed; reconcile the old physical VM before re-registering"
             );
         }
-        if state.updated_at.is_empty() {
-            state.updated_at = now();
-        }
+        ensure!(
+            !state.updated_at.is_empty(),
+            "lab state timestamp is missing"
+        );
         Ok(state)
     }
 
