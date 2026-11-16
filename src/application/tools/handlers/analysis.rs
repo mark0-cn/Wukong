@@ -2,7 +2,7 @@
 use super::*;
 
 pub(in crate::application::tools) fn handle_artifact_validate<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a ExecutionService,
     agent: &'a AgentMetadata,
     call: &'a str,
     _name: &'a str,
@@ -15,7 +15,7 @@ pub(in crate::application::tools) fn handle_artifact_validate<'a>(
 }
 
 pub(in crate::application::tools) fn handle_binary_inspect<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a AnalysisService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     __name: &'a str,
@@ -66,7 +66,7 @@ pub(in crate::application::tools) fn handle_binary_inspect<'a>(
 }
 
 pub(in crate::application::tools) fn handle_binary_strings<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a AnalysisService,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -83,17 +83,17 @@ pub(in crate::application::tools) fn handle_binary_strings<'a>(
 }
 
 pub(in crate::application::tools) fn handle_functions_search<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a AnalysisService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.analysis.ghidra(agent, call_id, name, &args).await })
+    Box::pin(async move { tools.ghidra(agent, call_id, name, &args).await })
 }
 
 pub(in crate::application::tools) fn handle_analysis_verify<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a evidence::EvidenceService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -175,7 +175,7 @@ pub(in crate::application::tools) fn handle_analysis_verify<'a>(
 }
 
 pub(in crate::application::tools) fn handle_differential_test<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a ExecutionService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -194,19 +194,12 @@ pub(in crate::application::tools) fn handle_differential_test<'a>(
                 "input vector too large"
             );
         }
-        tools
-            .execution
-            .files
-            .known_file(agent, &input.target, true)?;
-        tools
-            .execution
-            .files
-            .known_file(agent, &input.reference, false)?;
+        tools.files.known_file(agent, &input.target, true)?;
+        tools.files.known_file(agent, &input.reference, false)?;
         let config = serde_json::to_string(
             &json!({"inputs":input.inputs_base64,"timeout":input.case_timeout_seconds,"python":input.reference_python}),
         )?;
         tools
-            .execution
             .runtime_tool(
                 agent,
                 call_id,

@@ -33,3 +33,43 @@ pub(crate) fn publish_json(path: &Path, value: &impl Serialize, policy: &AclPoli
     bytes.push(b'\n');
     policy.publish(path, &bytes)
 }
+
+/// Replace a diagnostic snapshot in an already protected directory. Existing
+/// create-new publication remains unchanged for execution authority records.
+pub(crate) fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+    let policy = AclPolicy::private_vm();
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("diagnostic parent missing"))?;
+    policy.verify(parent, true)?;
+    if path.exists() {
+        policy.verify(path, false)?;
+    }
+    let temporary = parent.join(format!(
+        "diagnostic-{}.tmp",
+        hex::encode(crate::host::accounts::random_bytes::<16>()?)
+    ));
+    let result = (|| -> Result<()> {
+        let mut output = policy.create_file(&temporary)?;
+        output.write_all(bytes)?;
+        output.sync_all()?;
+        drop(output);
+        let from = security::wide(temporary.as_os_str())?;
+        let to = security::wide(path.as_os_str())?;
+        security::check(unsafe {
+            MoveFileExW(
+                from.as_ptr(),
+                to.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        })?;
+        policy.verify(path, false)
+    })();
+    if temporary.exists() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
+}

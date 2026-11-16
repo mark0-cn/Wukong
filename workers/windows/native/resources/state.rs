@@ -678,11 +678,8 @@ impl ResourceState {
                 },
             "native resource session kind differs"
         );
-        if interactive && close && record.phase == Phase::Closed {
-            ensure!(
-                fields.is_empty(),
-                "interactive close accepts only session_id"
-            );
+        if close && record.phase == Phase::Closed {
+            ensure!(fields.is_empty(), "session close accepts only session_id");
             return self
                 .host()?
                 .artifacts

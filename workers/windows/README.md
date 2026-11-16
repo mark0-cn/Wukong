@@ -2,6 +2,20 @@
 
 English · [简体中文](README.zh-CN.md)
 
+Windows execution requires a dedicated, disposable target VM. The target may affect the entire guest, including its worker. Configure host access, shared folders/devices and external networking at the hypervisor boundary; keep controller/model credentials and signing keys outside the guest. Retain original evidence on the controller and reset or discard the VM after untrusted execution. The worker does not create VMs, configure hypervisor policy or automate snapshots.
+
+Signed enrollment requires `"execution_boundary": "disposable_vm"`. The signed record schema, signing CLI, offline media preparation, installer and service enforce this declaration. Missing, null or unsupported boundaries are rejected. Deployment targets a dedicated disposable VM; no migration or legacy-enrollment compatibility is provided.
+
+Startup records deployment identity, resource recovery, dependency self-test, guest controls self-test and communication readiness as separate stages. Each stage publishes start and success/failure events with elapsed time and a stable error code. Protected `metadata/startup-diagnostics.json` uses schema 2, is atomically replaced, capped at 16 KiB, and bound to the installation, verified package/boot identity when available, and a fresh startup attempt. `last-service-error.txt` is refreshed for the same attempt, including pending/ready states. Fixed summaries omit arbitrary exception text. Installer failures include current diagnostic identity and code; hosted acceptance validates the full report separately from installation success.
+
+The project no longer subscribes to or matches WFP events, and startup does not require loopback-block evidence. AppContainer/token, ACL, process ownership, cleanup and debugger checks remain guest controls. Fresh schema-5 qualification receipts use `scope: "disposable_vm_guest_controls"`. Reports and `doctor` declare `execution_boundary: "disposable_vm"` and `external_isolation_verified: false`; `doctor.guest_controls_verified` describes the current startup checks. These checks cannot certify hypervisor isolation or evidence integrity after guest compromise. Windows may still use its own WFP facilities internally; this change does not disable the OS firewall.
+
+Unexpected stops in the sealed startup debugger fixture retain a bounded diagnostic projection in the protected host log: architecture, expected/observed addresses, exception flags and the first frame identity. Each selected string is limited to 192 identifier characters; arbitrary MCP output and target contents are omitted. The structured startup report still uses its fixed stage code and summary.
+
+Hosted service-restart acceptance checks the bounded report and matching `startup_ready` text summary before and after restart, and requires a new startup attempt identity. The summary file's existence is not an error by itself; stale identity, pending startup and runtime-failure summaries still fail acceptance.
+
+The sealed fixture may continue one live, first-chance, continuable native breakpoint whose exception and first-frame addresses match the current stop in `ntdll`, plus one WOW64 loader notification for x86. Offline export symbols can attribute the native loader break to a nearby export, so qualification does not require a particular OS function name or zero symbol displacement. Repeated stops, mismatched addresses, other modules/faults and stored crash contexts are rejected. Qualification still requires the fixture's own PDB-resolved breakpoint, registers and stack to match. This allowance is not used for ordinary targets. See Microsoft's [initial breakpoint](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/initial-breakpoint) description.
+
 ## Ownership and request flow
 
 The native Rust worker is the sole Windows execution authority. Managed SSH invokes the fixed relay, which authenticates the enrolled SCM service through its named pipe. The service owns startup, qualification, recovery and shutdown; `native/rpc/worker.rs` routes the public API. There is no persistent Python metadata worker, inner Python lease, loopback worker endpoint or reverse broker-health channel.
@@ -16,14 +30,14 @@ The native Rust worker is the sole Windows execution authority. Managed SSH invo
 | `native/resources/` | One resource manager owns admission, operation tickets, journal and recovery |
 | `native/executors/` | Process/session plans, owned execution observations and result adapters; no journal mutation |
 | `native/artifacts/` | Lease-scoped immutable inputs, run/resource-scoped outputs and bounded protected IO |
-| `native/isolation/` | Windows tokens, AppContainers, Jobs, ACL/WFP and process launch |
+| `native/isolation/` | Windows tokens, AppContainers, Jobs, ACL and process launch |
 | External WinDbg MCP / Python | Debugging or bounded analysis inside owned resources; no independent worker authority |
 
 RPC resolves registered handlers into resource operations before calling the manager; resources and artifacts never query the RPC registry. `executors/results.rs` validates and publishes process/replay observations, while the manager alone commits cleanup and journal transitions. Shell and analysis adapters own their response projection. The shared protocol provides typed outcome/cleanup observations; the native journal retains its stricter OS cleanup proof.
 
 The public transport remains JSON-RPC 2.0. The controller uses `jsonrpsee`; shared Rust types use Serde. Private session messages use generated Prost protobuf and Tokio framing; the external debugger uses `rmcp`. Raw debugger replies remain hashed evidence instead of being reimplemented as a new debugger protocol. Linux retains its existing Python worker.
 
-`ping` and `doctor` are answered natively. The service enables registered execution capabilities only after signed-package checks, outstanding-resource recovery, offline dependency checks and a fresh isolation/debugger qualification for this service start. `doctor.readiness` explains this state. Historical qualification receipts cannot qualify a new startup. The registry advertises only callable native execution or isolated analysis methods; Linux GDB commands, AFL/QEMU and runtime preparation are not advertised on Windows.
+`ping` and `doctor` are answered natively. The service enables registered execution capabilities only after signed-package checks, outstanding-resource recovery, offline dependency checks and a fresh guest controls/debugger qualification for this service start. `doctor.readiness` explains this state. Historical qualification receipts cannot qualify a new startup. The registry advertises only callable native execution or isolated analysis methods; Linux GDB commands, AFL/QEMU and runtime preparation are not advertised on Windows.
 
 ## Fencing, capacity and durable state
 

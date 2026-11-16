@@ -199,12 +199,12 @@ async fn stalled_environment_preflight_does_not_block_root_or_cancellation() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let (dir, runner, run) = fixture_config(format!("http://{}", listener.local_addr().unwrap()), |config, root| {
             let bridge=root.join("slow_preflight.py");
-            std::fs::write(&bridge, r#"import json,pathlib,platform,sys,time
+            std::fs::write(&bridge, r#"import json,pathlib,sys,threading
 root=pathlib.Path(sys.argv[sys.argv.index('--state')+1]);root.mkdir(exist_ok=True)
 for line in sys.stdin:
  request=json.loads(line)
  if request['method']=='doctor':
-  (root/'probing').write_text('ready');time.sleep(60)
+  (root/'probing').write_text('ready');threading.Event().wait()
  result={'identity':{'protocol':3,'installation_id':'slow-fixture','boot_id':'boot','package_sha256':'0'*64}}
  print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
 "#).unwrap();
@@ -233,7 +233,9 @@ transport: crate::adapters::worker::TransportConfig::TrustedLocal(crate::adapter
         let cancel = cancel.clone();
         tokio::spawn(async move { runner.drive(&id, cancel).await })
     };
-    let input = tokio::time::timeout(Duration::from_secs(4), root_request)
+    // Allow cold process/database setup on a loaded runner. The preflight never
+    // completes, so progress still proves independence rather than a timing race.
+    let input = tokio::time::timeout(Duration::from_secs(20), root_request)
         .await
         .unwrap()
         .unwrap();
@@ -244,7 +246,7 @@ transport: crate::adapters::worker::TransportConfig::TrustedLocal(crate::adapter
             .iter()
             .any(|tool| tool["function"]["name"] == "debug_start")
     );
-    tokio::time::timeout(Duration::from_secs(4), async {
+    tokio::time::timeout(Duration::from_secs(20), async {
         while !dir.path().join("worker/probing").exists() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -549,8 +551,12 @@ async fn native_skills_and_usage_survive_rig_memory_compaction() {
                 extra: Default::default(),
             },
             status_evidence_id: Some(observation.id.clone()),
-            imported_artifacts: None,
+            imported_artifacts: Some(json!({"artifacts":[]})),
             notification_message_id: Some(1),
+            execution_notification_message_id: None,
+            execution_status_evidence_id: None,
+            evidence_sync: Default::default(),
+            cleanup_intent: None,
             created_at: now(),
             updated_at: now(),
         };

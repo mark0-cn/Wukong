@@ -1,4 +1,4 @@
-//! Jobs tool operations.
+//! State observation and transactional two-phase job notifications.
 use super::*;
 use crate::adapters::worker::protocol::JobStatus;
 
@@ -8,9 +8,52 @@ pub(crate) struct JobService {
     pub(super) gateway: WorkerGateway,
     pub(super) files: FilesService,
     pub(super) locks: ResourceLocks,
+    pub(super) sync_limits: evidence_sync::SyncLimits,
 }
 
 impl JobService {
+    pub(super) async fn cancel(
+        &self,
+        agent: &AgentMetadata,
+        call: &str,
+        id: &str,
+    ) -> Result<Value> {
+        let resource = self.resource_lock(id).await;
+        let _guard = resource.lock().await;
+        let mut job = self.known_job(agent, id, true)?;
+        let intent = job
+            .cleanup_intent
+            .get_or_insert_with(|| CleanupIntent {
+                agent_id: agent.id.clone(),
+                call_id: call.into(),
+            })
+            .clone();
+        self.store.save_record(&job)?;
+        let actor = require_in_run(&self.store, &intent.agent_id, &job.run_id)?;
+        let raw = self
+            .gateway
+            .worker_call(
+                &actor,
+                &intent.call_id,
+                Request::JobCancel(serde_json::from_value(
+                    json!({"job_id":job.worker_resource_id}),
+                )?),
+            )
+            .await?;
+        self.present(&job, raw)
+    }
+
+    pub(super) async fn resource_lock(&self, job_id: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.locks.lock().await;
+        if locks.len() >= 256 {
+            locks.retain(|_, held| Arc::strong_count(held) > 1);
+        }
+        locks
+            .entry(format!("resource:job:{job_id}"))
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
     #[cfg(test)]
     pub(crate) async fn refresh(&self, run: &str) -> Result<()> {
         if self.gateway.worker.is_none() {
@@ -21,9 +64,12 @@ impl JobService {
                 continue;
             }
             let owner: AgentMetadata = require_in_run(&self.store, &job.agent_id, run)?;
-            let job_id = &job.id;
-            self.observe(&owner, &format!("job-observation:{job_id}"), job_id)
+            self.observe(&owner, &format!("job-observation:{}", job.id), &job.id)
                 .await?;
+            if self.store.load::<JobRecord>(&job.id)?.status.settled() {
+                self.import_job_artifacts(&owner, &format!("job-sync:{}", job.id), &job.id)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -34,63 +80,58 @@ impl JobService {
         call: &str,
         job_id: &str,
     ) -> Result<Value> {
-        // Manual status calls and automatic observations share resource
-        // serialization, evidence import and the same transactional update.
-        let lock = {
-            let mut locks = self.locks.lock().await;
-            if locks.len() >= 256 {
-                locks.retain(|_, held| Arc::strong_count(held) > 1);
-            }
-            locks
-                .entry(format!("resource:job:{job_id}"))
-                .or_insert_with(|| Arc::new(Mutex::new(())))
-                .clone()
-        };
+        let lock = self.resource_lock(job_id).await;
         let _guard = lock.lock().await;
         let job = self.known_job(agent, job_id, false)?;
-        let cached = Some(job.status.clone());
-        let status = if let Some(status) = cached.filter(JobStatus::settled) {
-            status
+        let status: JobStatus = if job.status.settled() {
+            job.status.clone()
         } else {
             serde_json::from_value(
-                self.gateway
-                    .worker_query(Request::JobStatus(serde_json::from_value(
-                        json!({"job_id":job.worker_resource_id}),
-                    )?))
-                    .await?,
+                tokio::time::timeout(
+                    Duration::from_secs(10),
+                    self.gateway
+                        .worker_query(Request::JobStatus(serde_json::from_value(
+                            json!({"job_id":job.worker_resource_id}),
+                        )?)),
+                )
+                .await
+                .context("job status timed out")??,
             )?
         };
         ensure!(
             status.job_id == job.worker_resource_id,
             "worker returned another job identity"
         );
+        ensure!(
+            !job.status.state.terminal() || status.state == job.status.state,
+            "worker attempted to regress a terminal job"
+        );
         let raw = serde_json::to_value(&status)?;
-        self.store.write(|tx| {
-            let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
-            current.status = status.clone();
-            current.updated_at = now();
-            tx.save_record(&current)
-        })?;
-        if let Some(crashes) = raw["crashes"].as_array() {
-            for artifact in crashes {
-                self.files.register_file(agent, artifact, None)?;
-                if let Some(path) = artifact["path"].as_str() {
-                    let existing = self.files.known_file(agent, path, false)?;
-                    if existing.evidence_id.is_none() {
-                        let bytes = self
-                            .gateway
-                            .runtime()?
-                            .call("file.get", json!({"path":path,"max_bytes":32*1024*1024}))
-                            .await?;
-                        self.files.import_file(agent, call, &bytes)?;
-                    }
-                }
-            }
-        }
-        if status.settled() {
-            let evidence = if let Some(evidence) = &job.status_evidence_id {
-                evidence.clone()
-            } else {
+        // Original status receipts are small, local writes. File transfers have
+        // a separate owner and never run while this resource lock is held.
+        let terminal = status.state.terminal();
+        let execution_evidence = if terminal
+            && job.execution_status_evidence_id.is_none()
+            && job.notification_message_id.is_none()
+        {
+            Some(
+                self.store
+                    .artifact(
+                        &agent.run_id,
+                        &agent.id,
+                        call,
+                        "job.execution_status",
+                        &serde_json::to_vec(&raw)?,
+                        "application/json",
+                        json!({"job_id":job_id}),
+                    )?
+                    .id,
+            )
+        } else {
+            job.execution_status_evidence_id.clone()
+        };
+        let final_evidence = if status.settled() && job.status_evidence_id.is_none() {
+            Some(
                 self.store
                     .artifact(
                         &agent.run_id,
@@ -101,65 +142,123 @@ impl JobService {
                         "application/json",
                         json!({"job_id":job_id}),
                     )?
-                    .id
-            };
-            self.store.write(|tx| {
-                let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
-                current.status_evidence_id = Some(evidence);
-                tx.save_record(&current)
-            })?;
-            self.import_job_artifacts(agent, call, job_id).await?;
-            super::artifact_validation::observe(
-                &self.store,
-                &self.store.load::<JobRecord>(job_id)?,
-            )?;
-            self.store.write(|tx| {
-                let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
-                if current.notification_message_id.is_some() {
-                    return Ok(());
-                }
-                let owner_id = &current.agent_id;
-                let owner = tx
-                    .get_record::<AgentMetadata>(owner_id)?
-                    .context("job owner missing")?;
-                let generation = current.owner_generation;
-                let stale = generation != owner.generation;
-                let envelope = MessageEnvelope {
-                    options: MessageOptions {
-                        kind: MessageKind::Information,
-                        recipient_generation: Some(generation),
-                        evidence_ids: vec![
-                            current
-                                .status_evidence_id
-                                .clone()
-                                .context("job status evidence missing")?,
-                        ],
-                        ..Default::default()
-                    },
-                    task_id: owner_id.clone(),
-                    delivery: if stale {
-                        MessageDelivery::Stale
-                    } else {
-                        MessageDelivery::Queued
-                    },
-                    stale_reason: stale
-                        .then(|| "job completed after its owning generation ended".into()),
-                    ..Default::default()
-                };
-                let brief = Self::brief(&current, &status);
-                let (mid, _) = tx.enqueue_message(
-                    &agent.run_id,
-                    "worker",
-                    owner_id,
-                    &serde_json::to_string(&brief)?,
-                    Some(&format!("job-completed:{job_id}")),
-                    &envelope,
-                )?;
-                current.notification_message_id = Some(mid);
-                tx.save_record(&current)
-            })?;
+                    .id,
+            )
+        } else {
+            job.status_evidence_id.clone()
+        };
+        self.store.write(|tx| {
+            let mut current: JobRecord = tx.get_record(job_id)?.context("job missing")?;
+            Self::check_identity(&job, &current)?;
+            current.status = status.clone();
+            current.execution_status_evidence_id = execution_evidence;
+            current.status_evidence_id = final_evidence;
+            current.updated_at = now();
+            if terminal
+                && current.notification_message_id.is_none()
+                && current.execution_notification_message_id.is_none()
+            {
+                Self::notify(tx, &mut current, false)?;
+            }
+            tx.save_record(&current)
+        })?;
+        if let Some(crashes) = raw["crashes"].as_array() {
+            for artifact in crashes {
+                self.files.register_file(agent, artifact, None)?;
+            }
         }
-        self.present(&job, raw)
+        let current = self.store.load::<JobRecord>(job_id)?;
+        self.present(&current, raw)
+    }
+
+    pub(super) fn check_identity(expected: &JobRecord, current: &JobRecord) -> Result<()> {
+        ensure!(
+            expected.worker_id == current.worker_id
+                && expected.worker_resource_id == current.worker_resource_id
+                && expected.run_id == current.run_id
+                && expected.agent_id == current.agent_id
+                && expected.owner_generation == current.owner_generation,
+            "job identity changed during observation"
+        );
+        Ok(())
+    }
+
+    pub(super) fn notify(
+        tx: &crate::storage::StateSession<'_>,
+        job: &mut JobRecord,
+        completed: bool,
+    ) -> Result<()> {
+        if (completed && job.notification_message_id.is_some())
+            || (!completed
+                && (job.execution_notification_message_id.is_some()
+                    || job.notification_message_id.is_some()))
+        {
+            return Ok(());
+        }
+        let owner = tx
+            .get_record::<AgentMetadata>(&job.agent_id)?
+            .context("job owner missing")?;
+        let stale = job.owner_generation != owner.generation;
+        let evidence = if completed {
+            &job.status_evidence_id
+        } else {
+            &job.execution_status_evidence_id
+        };
+        let envelope = MessageEnvelope {
+            options: MessageOptions {
+                kind: MessageKind::Information,
+                recipient_generation: Some(job.owner_generation),
+                evidence_ids: vec![evidence.clone().context("job status evidence missing")?],
+                ..Default::default()
+            },
+            task_id: job.agent_id.clone(),
+            delivery: if stale {
+                MessageDelivery::Stale
+            } else {
+                MessageDelivery::Queued
+            },
+            stale_reason: stale.then(|| "job notification belongs to an ended generation".into()),
+            ..Default::default()
+        };
+        let kind = if completed {
+            "job_completed"
+        } else {
+            "job_execution_finished"
+        };
+        let result = job.status.result.as_ref();
+        let artifacts = job
+            .imported_artifacts
+            .as_ref()
+            .and_then(|value| value["artifacts"].as_array());
+        let brief = json!({"type":kind,"job_id":job.id,"tool":job.tool_name,"state":job.status.state,
+            "exit_code":result.and_then(|r|r.exit_code),"passed":result.and_then(|r|r.passed),
+            "stdout":job.status.stdout.chars().take(400).collect::<String>(),
+            "stderr":job.status.stderr.chars().take(200).collect::<String>(),
+            "evidence_id":evidence,"cleanup_confirmed":job.status.settled(),
+            "artifact_count":artifacts.map_or(0,Vec::len),
+            "artifact_evidence_ids":artifacts.into_iter().flatten().take(8).filter_map(|file|file["evidence_id"].as_str()).collect::<Vec<_>>(),
+            "evidence_sync":job.evidence_sync.progress(job.evidence_ready()),
+            "note":if completed {"Evidence and postprocessing are ready; inspect the result before claiming success."}
+                else {"Execution ended. Evidence or cleanup may be pending; this is not business success."}});
+        let key = if completed {
+            format!("job-completed:{}", job.id)
+        } else {
+            format!("job-execution-finished:{}", job.id)
+        };
+        let (mid, _) = tx.enqueue_message(
+            &job.run_id,
+            "worker",
+            &job.agent_id,
+            &serde_json::to_string(&brief)?,
+            Some(&key),
+            &envelope,
+        )?;
+        if completed {
+            job.notification_message_id = Some(mid);
+        } else {
+            job.execution_notification_message_id = Some(mid);
+        }
+        Ok(())
     }
 
     pub(super) fn present(&self, job: &JobRecord, raw: Value) -> Result<Value> {
@@ -171,6 +270,10 @@ impl JobService {
         status
             .extra
             .insert("worker_job_id".into(), json!(status.job_id));
+        status.extra.insert(
+            "evidence_sync".into(),
+            job.evidence_sync.progress(job.evidence_ready()),
+        );
         status.job_id = job.id.clone();
         if let Some(validation) = self.store.get_record::<ArtifactValidation>(&job.id)? {
             status.extra.insert("artifact_validation".into(),json!({"validation_id":validation.id,
@@ -179,22 +282,6 @@ impl JobService {
         Ok(serde_json::to_value(status)?)
     }
 
-    fn brief(job: &JobRecord, status: &JobStatus) -> Value {
-        let result = status.result.as_ref();
-        let artifacts = job
-            .imported_artifacts
-            .as_ref()
-            .and_then(|value| value["artifacts"].as_array());
-        json!({"type":"job_completed","job_id":job.id,"tool":job.tool_name,"state":status.state,
-            "exit_code":result.and_then(|result|result.exit_code),"passed":result.and_then(|result|result.passed),
-            "stdout":status.stdout.chars().take(400).collect::<String>(),"stderr":status.stderr.chars().take(200).collect::<String>(),
-            "evidence_id":job.status_evidence_id,"artifact_evidence_ids":artifacts.map(|items|items.iter().take(8).map(|item|item["evidence_id"].clone()).collect::<Vec<_>>()),
-            "artifacts_total":artifacts.map_or(0,Vec::len),
-            "note":"Completed job observation; use evidence_read for the full status."})
-    }
-}
-
-impl JobService {
     pub(super) fn known_job(
         &self,
         agent: &AgentMetadata,
@@ -206,68 +293,22 @@ impl JobService {
             job.worker_id == self.gateway.worker_identity()?,
             "job belongs to a different runtime configuration"
         );
-        if owned {
-            ensure!(
-                job.agent_id == agent.id,
-                "this operation requires the job's owning agent"
-            );
-        }
+        ensure!(
+            !owned || job.agent_id == agent.id,
+            "this operation requires the job's owning agent"
+        );
         Ok(job)
     }
 
     pub(super) async fn import_job_artifacts(
         &self,
         agent: &AgentMetadata,
-        call_id: &str,
+        call: &str,
         job_id: &str,
     ) -> Result<Value> {
-        let mut job = self.known_job(agent, job_id, false)?;
-        if let Some(imported) = &job.imported_artifacts {
-            return Ok(imported.clone());
-        }
-        let artifacts = self
-            .gateway
-            .worker_query(Request::JobArtifacts(
-                wukong_worker_protocol::params::JobArtifactsArgs {
-                    job_id: job.worker_resource_id.clone(),
-                },
-            ))
-            .await?;
-        let mut imported = Vec::new();
-        for artifact in artifacts
-            .as_array()
-            .context("worker artifact list is not an array")?
-        {
-            ensure!(
-                artifact["size"]
-                    .as_u64()
-                    .is_some_and(|size| size <= 32 * 1024 * 1024),
-                "worker artifact exceeds 32 MiB import limit"
-            );
-            let raw = self
-                .gateway
-                .runtime()?
-                .call(
-                    "file.get",
-                    json!({"path":artifact["path"],"max_bytes":32*1024*1024}),
-                )
-                .await?;
-            ensure!(
-                raw["sha256"] == artifact["sha256"],
-                "job artifact changed while being imported"
-            );
-            let evidence = self.files.import_file(agent, call_id, &raw)?;
-            imported.push(json!({"artifact":artifact,"evidence_id":evidence.id}));
-        }
-        let result = json!({"job_id":job_id,"artifacts":imported});
-        if job.status.settled() {
-            self.store.write(|tx| {
-                job = tx.get_record(job_id)?.context("job missing")?;
-                job.imported_artifacts = Some(result.clone());
-                tx.save_record(&job)
-            })?;
-        }
-        Ok(result)
+        evidence_sync::EvidenceSyncService::new(self.clone())
+            .sync(agent, call, job_id)
+            .await
     }
 }
 
@@ -320,7 +361,7 @@ mod tests {
             .metadata;
         let service = ToolService::new(config, store.clone()).await?;
         let tools = service.bound_to(&owner).await?;
-        let started = tools
+        let started = service
             .execute(
                 &owner.id,
                 "start",
@@ -340,7 +381,13 @@ mod tests {
             }
             Ok::<_, anyhow::Error>(())
         })
-        .await??;
+        .await
+        .with_context(|| {
+            format!(
+                "job completion timed out: {:?}",
+                store.load::<JobRecord>(job_id)
+            )
+        })??;
         let automatic: Value = store.require("job", job_id)?;
         assert_eq!(automatic["status"]["result"]["exit_code"], 7);
         assert!(
@@ -369,7 +416,7 @@ mod tests {
             call.result = None;
             tx.put("call", "start", &run.id, &call)
         })?;
-        let replay = tools
+        let replay = service
             .execute(
                 &owner.id,
                 "start",
@@ -386,10 +433,13 @@ mod tests {
         let inbox = store.inbox(&owner.id)?;
         assert_eq!(
             inbox.len(),
-            1,
-            "automatic and manual observations enqueue one notice"
+            2,
+            "automatic and manual observations enqueue each phase once"
         );
-        let brief: Value = serde_json::from_str(&inbox[0].content)?;
+        let early: Value = serde_json::from_str(&inbox[0].content)?;
+        assert_eq!(early["type"], "job_execution_finished");
+        let brief: Value = serde_json::from_str(&inbox[1].content)?;
+        assert_eq!(brief["type"], "job_completed");
         assert_eq!(brief["exit_code"], 7);
         assert_eq!(brief["evidence_id"], automatic["status_evidence_id"]);
         let reopened = Store::open(store.root())?;
@@ -401,7 +451,7 @@ mod tests {
         reopened.checkpoint_and_ack_generation(
             &owner.id,
             json!({"fixture":true}),
-            &[inbox[0].id],
+            &inbox.iter().map(|message| message.id).collect::<Vec<_>>(),
             Some(owner.generation),
         )?;
         assert!(store.inbox(&owner.id)?.is_empty());
@@ -433,7 +483,7 @@ mod tests {
         assert_eq!(stale.envelope.delivery, MessageDelivery::Stale);
         assert!(stale.acknowledged);
         tools.runtime()?.call("worker.shutdown", json!({})).await?;
-        tools.close().await;
+        service.close().await;
         Ok(())
     }
 }

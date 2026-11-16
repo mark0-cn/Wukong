@@ -1980,6 +1980,10 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
         status_evidence_id: Some(observation.id.clone()),
         imported_artifacts: None,
         notification_message_id: None,
+        execution_notification_message_id: None,
+        execution_status_evidence_id: None,
+        evidence_sync: Default::default(),
+        cleanup_intent: None,
         created_at: now(),
         updated_at: now(),
     };
@@ -2019,6 +2023,18 @@ async fn general_verification_requires_independent_owned_evidence() -> Result<()
     }
     job.status.state = JobState::Completed;
     job.agent_id = verifier.id.clone();
+    store.save_record(&job)?;
+    let pending = service
+        .execute(
+            &verifier.id,
+            "pending-reproduction-evidence",
+            "analysis_verify",
+            reproduction.clone(),
+        )
+        .await?;
+    assert!(pending.is_error);
+    assert!(pending.value.to_string().contains("ready evidence"));
+    job.imported_artifacts = Some(json!({"artifacts":[]}));
     store.save_record(&job)?;
     let mut wrong_exit = reproduction.clone();
     wrong_exit["checks"][0]["expected_exit_code"] = json!(1);

@@ -2,7 +2,7 @@
 use super::*;
 
 pub(in crate::application::tools) fn handle_finding_file<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a evidence::EvidenceService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -12,7 +12,7 @@ pub(in crate::application::tools) fn handle_finding_file<'a>(
 }
 
 pub(in crate::application::tools) fn handle_findings_list<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a evidence::EvidenceService,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -22,7 +22,7 @@ pub(in crate::application::tools) fn handle_findings_list<'a>(
 }
 
 pub(in crate::application::tools) fn handle_finding_get<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a evidence::EvidenceService,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -40,23 +40,17 @@ pub(in crate::application::tools) fn handle_finding_get<'a>(
 }
 
 pub(in crate::application::tools) fn handle_verification_record<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a ExecutionService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move {
-        tools
-            .execution
-            .verification
-            .record(agent, call_id, &args)
-            .await
-    })
+    Box::pin(async move { tools.verification.record(agent, call_id, &args).await })
 }
 
 pub(in crate::application::tools) fn handle_evidence_read<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a evidence::EvidenceService,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -68,8 +62,7 @@ pub(in crate::application::tools) fn handle_evidence_read<'a>(
         let total = usize::try_from(record.size)?;
         let offset = usize::try_from(number(&args, "offset", 0))?;
         ensure!(offset <= total, "evidence offset is past end of file");
-        let length = usize::try_from(number(&args, "length", 8192))?
-            .min(tools.limits.max_evidence_read_bytes);
+        let length = usize::try_from(number(&args, "length", 8192))?.min(tools.read_limit);
         let part = if offset == total || length == 0 {
             Vec::new()
         } else {

@@ -3,6 +3,8 @@
 import importlib.util
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,6 +18,150 @@ spec.loader.exec_module(fixture)
 
 
 class HostedWorkerGuardTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("pwsh"), "PowerShell diagnostic parser requires pwsh")
+    def test_restart_accepts_current_ready_summary_and_rejects_failures_and_stale_identity(self):
+        import copy
+        import json
+
+        helper = Path(__file__).parents[1] / "acceptance/windows-worker-startup.ps1"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            metadata = root / "metadata"
+            metadata.mkdir()
+            stages = [
+                "deployment_identity",
+                "resource_recovery",
+                "dependency_selftest",
+                "guest_controls_selftest",
+                "communication_ready",
+            ]
+            value = dict(
+                schema=2,
+                installation_id="installation",
+                package_sha256="a" * 64,
+                attempt_id="b" * 32,
+                ready=True,
+                execution_boundary="disposable_vm",
+                external_isolation_verified=False,
+                events=[
+                    dict(stage=stage, status=status)
+                    for stage in stages
+                    for status in ["started", "succeeded"]
+                ],
+            )
+            runner = root / "read-startup.ps1"
+            runner.write_text(
+                "param($Helper,$Root)\n$ErrorActionPreference='Stop'\n. $Helper\n"
+                "Read-ReadyWorkerStartup $Root 'installation' ('a'*64) | ConvertTo-Json -Compress\n",
+                encoding="utf-8",
+            )
+            summary = (
+                f"attempt={'b' * 32} installation=installation code=startup_ready elapsed_ms=1\n"
+            )
+
+            def inspect(report, text):
+                (metadata / "startup-diagnostics.json").write_text(
+                    json.dumps(report), encoding="utf-8"
+                )
+                (metadata / "last-service-error.txt").write_text(text, encoding="utf-8")
+                return subprocess.run(
+                    [
+                        shutil.which("pwsh"),
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-File",
+                        str(runner),
+                        str(helper.resolve()),
+                        str(root),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=20,
+                )
+
+            result = inspect(value, summary)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["attempt_id"], value["attempt_id"])
+            for text in [
+                summary.replace("b" * 32, "c" * 32),
+                summary.replace("installation=installation", "installation=other"),
+                summary.replace("startup_ready", "service_runtime_failed"),
+                summary.replace("startup_ready", "startup_pending"),
+                summary + "x" * 1025,
+            ]:
+                with self.subTest(summary=text[:120]):
+                    self.assertNotEqual(inspect(value, text).returncode, 0)
+            for change in [
+                {"package_sha256": "c" * 64},
+                {"ready": False},
+                {"execution_boundary": "other"},
+                {"external_isolation_verified": True},
+                {"events": value["events"][:-1]},
+                {"oversized": "x" * 16385},
+            ]:
+                with self.subTest(fields=list(change)):
+                    self.assertNotEqual(inspect({**value, **change}, summary).returncode, 0)
+            failed = copy.deepcopy(value)
+            failed["events"][-1]["status"] = "failed"
+            self.assertNotEqual(inspect(failed, summary).returncode, 0)
+
+    def test_startup_report_identity_bounds_stages_and_summary_are_validated(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            metadata = root / "metadata"
+            metadata.mkdir()
+            value = dict(
+                schema=2,
+                installation_id="installation",
+                package_sha256="a" * 64,
+                boot_id="boot",
+                attempt_id="b" * 32,
+                started_at_ms=1,
+                ready=False,
+                events=[
+                    dict(
+                        stage="deployment_identity",
+                        status="started",
+                        elapsed_ms=0,
+                        code="stage_started",
+                        summary="Startup stage started.",
+                    ),
+                    dict(
+                        stage="deployment_identity",
+                        status="failed",
+                        elapsed_ms=1,
+                        code="deployment_identity_failed",
+                        summary="Identity failed.",
+                    ),
+                ],
+                execution_boundary="disposable_vm",
+                external_isolation_verified=False,
+            )
+            report = metadata / "startup-diagnostics.json"
+            report.write_text(json.dumps(value), encoding="utf-8")
+            summary = metadata / "last-service-error.txt"
+            summary.write_text(
+                "attempt=" + "b" * 32 + " code=deployment_identity_failed", encoding="utf-8"
+            )
+            self.assertEqual(fixture.startup_diagnostic(root, "installation", "a" * 64), value)
+            with self.assertRaisesRegex(ValueError, "installation mismatch"):
+                fixture.startup_diagnostic(root, "other", "a" * 64)
+            with self.assertRaisesRegex(ValueError, "package mismatch"):
+                fixture.startup_diagnostic(root, "installation", "c" * 64)
+            summary.write_text("old attempt", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "another attempt"):
+                fixture.startup_diagnostic(root)
+            report.write_text("x" * 16385, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exceeds bound"):
+                fixture.startup_diagnostic(root)
+            value["external_isolation_verified"] = True
+            report.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "boundary mismatch"):
+                fixture.startup_diagnostic(root)
+
     def test_only_explicit_bounded_fault_sections_enter_the_report(self):
         private = b"UNREQUESTED-REGISTER-CANARY"
         sections = fixture.debugger_fault_sections(

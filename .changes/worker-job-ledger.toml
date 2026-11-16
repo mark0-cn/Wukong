@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Fence job execution until supervisor registration is durable, preserve terminal outcomes under races, and revoke execution authority on snapshot import. Upgrade Python workers only when idle."
+zh_CN = "在 supervisor 登记持久化后才允许执行作业，竞争时保留终态，快照导入撤销执行权限。Python worker 只能在空闲时升级。"

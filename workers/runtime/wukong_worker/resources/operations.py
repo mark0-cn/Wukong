@@ -48,7 +48,16 @@ class OperationLedger:
                     raise ValueError("request_id already used for a different operation")
                 if operation["state"] == "completed":
                     return reconcile(method, operation["result"])
-                if operation["state"] == "failed":
+                # Only owned cleanup may retry a failed reconciliation with the
+                # original request. Never extend this exception to starts or
+                # once-only target actions, even if their contract is reconcile.
+                cleanup_retry = method in {
+                    "debug.close",
+                    "interact.close",
+                    "job.cancel",
+                    "fuzz.stop",
+                }
+                if operation["state"] == "failed" and not cleanup_retry:
                     raise WorkerError(
                         operation.get("error_kind", "invalid_request"), operation["error"]
                     )

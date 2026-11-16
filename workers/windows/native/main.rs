@@ -48,17 +48,16 @@ fn main() -> Result<()> {
         return Ok(());
     }
     #[cfg(windows)]
-    if args.len() == 8 && args[1] == "isolation-probe" {
+    if args.len() == 7 && args[1] == "isolation-probe" {
         let report = wukong_windows_worker::host::resource_host::probe(
             Path::new(&args[2]),
             Path::new(&args[3]),
-            args[4].to_str().context("invalid probe port")?.parse()?,
-            args[5].to_str().context("invalid probe SID")?,
-            args[6]
+            args[4].to_str().context("invalid probe SID")?,
+            args[5]
                 .to_str()
                 .context("invalid fixed host PID")?
                 .parse()?,
-            args[7]
+            args[6]
                 .to_str()
                 .context("invalid fixed host TID")?
                 .parse()?,
@@ -113,7 +112,7 @@ fn main() -> Result<()> {
         enrollment.bind_payload(&package)?;
         println!(
             "{}",
-            json!({"verified":true,"scope":"public_enrollment_and_payload","installation_id":enrollment.enrollment().installation_id,"generation":enrollment.enrollment().generation,"manifest_sha256":package.sha256()})
+            json!({"verified":true,"scope":"public_enrollment_and_payload","execution_boundary":enrollment.enrollment().execution_boundary,"installation_id":enrollment.enrollment().installation_id,"generation":enrollment.enrollment().generation,"manifest_sha256":package.sha256()})
         );
         return Ok(());
     }

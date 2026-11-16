@@ -62,6 +62,13 @@ pub struct Enrollment {
     pub management_peer: IpAddr,
     pub ssh_port: u16,
     pub ssh_public_key: SshPublicKey,
+    /// An operator declaration, never guest-side proof of hypervisor policy.
+    pub execution_boundary: ExecutionBoundary,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionBoundary {
+    DisposableVm,
 }
 impl Enrollment {
     fn validate(&self) -> Result<()> {

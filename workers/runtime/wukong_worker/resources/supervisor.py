@@ -4,23 +4,21 @@ import os
 import threading
 import time
 from wukong_worker.artifacts.metadata import atomic_json, load_json
-from wukong_worker.platform.process_control import process_identity
+from wukong_worker.resources.job_ledger import JobLedger
 
 
-def supervise_job(root, directory, execute):
+def supervise_job(root, directory, execute, admission):
     spec = load_json(directory / "spec.json")
-    meta = load_json(directory / "status.json")
     token = spec["runner_token"]
-    meta.update(
-        {
-            "state": "running",
-            "supervisor_pid": os.getpid(),
-            "supervisor_identity": process_identity(os.getpid()),
-            "started_at": time.time(),
-            "runner_token": token,
-        }
-    )
-    atomic_json(directory / "status.json", meta)
+    ledger = JobLedger(directory)
+    ledger.announce(token)
+    # This inherited pipe is closed on parent death or failed registration.
+    # Never infer permission from a record whose commit may have been uncertain.
+    if admission.read(1) != b"\x01":
+        return
+    version = ledger.claim(token, os.getpid())
+    if version is None:
+        return
     stop = threading.Event()
 
     def heartbeat():
@@ -36,12 +34,11 @@ def supervise_job(root, directory, execute):
     threading.Thread(target=heartbeat, daemon=True).start()
     try:
         outcome = execute(root, directory, spec)
-        meta.update(state=outcome.state, result=outcome.result)
+        state, result = outcome.state, {"result": outcome.result}
     except Exception as error:
         # The supervisor owns final job publication, including unexpected executor
         # failures; a protocol client must not be required to keep this owner alive.
-        meta.update({"state": "failed", "error": str(error)[:4096]})
+        state, result = "failed", {"error": str(error)[:4096]}
     finally:
         stop.set()
-        meta["finished_at"] = time.time()
-        atomic_json(directory / "status.json", meta)
+    ledger.finish(token, version, state, **result)

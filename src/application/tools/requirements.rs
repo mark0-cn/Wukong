@@ -86,18 +86,24 @@ impl ToolService {
     }
 }
 
-impl ToolContext<'_> {
+impl ToolContext {
     pub(super) async fn require_backend(&self, spec: &catalog::Spec, args: &Value) -> Result<()> {
-        let observation =
-            if self.needs_worker(spec) && !matches!(spec.requirement, Requirement::Probe) {
-                Some(self.execution.gateway.runtime()?.doctor().await?)
-            } else {
-                None
-            };
+        let observation = if match spec.requirement {
+            Requirement::Controller | Requirement::Probe => false,
+            Requirement::Ghidra => self.local_ghidra.is_none(),
+            _ => true,
+        } && !matches!(spec.requirement, Requirement::Probe)
+        {
+            Some(self.execution.gateway.runtime()?.doctor().await?)
+        } else {
+            None
+        };
         ensure!(
             spec.requirement.available(
                 observation.as_ref(),
-                self.local_ghidra().is_some_and(|path| path.is_file())
+                self.local_ghidra
+                    .as_ref()
+                    .is_some_and(|path| path.is_file())
             ),
             "tool {} requires an observed backend capability: {}",
             spec.definition.name,

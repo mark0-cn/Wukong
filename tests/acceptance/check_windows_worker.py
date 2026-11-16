@@ -12,6 +12,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 from pathlib import Path
 import platform
 import socket
@@ -104,6 +105,73 @@ def external_addresses(management):
     return result
 
 
+def startup_diagnostic(installed, installation=None, package=None):
+    """Validate only the bounded, allowlisted startup projection, not isolation."""
+    path = installed / "metadata/startup-diagnostics.json"
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("current startup diagnostic unavailable")
+    with path.open("rb") as incoming:
+        raw = incoming.read(16 * 1024 + 1)
+    if len(raw) > 16 * 1024:
+        raise ValueError("startup diagnostic exceeds bound")
+    value = json.loads(raw)
+    expected = {
+        "schema",
+        "installation_id",
+        "package_sha256",
+        "boot_id",
+        "attempt_id",
+        "started_at_ms",
+        "ready",
+        "events",
+        "execution_boundary",
+        "external_isolation_verified",
+    }
+    if set(value) != expected or value["schema"] != 2:
+        raise ValueError("startup diagnostic schema mismatch")
+    if not re.fullmatch(r"[0-9a-f]{32}", value["attempt_id"]):
+        raise ValueError("startup diagnostic attempt identity missing")
+    if installation is not None and value["installation_id"] != installation:
+        raise ValueError("startup diagnostic installation mismatch")
+    if package is not None and value["package_sha256"] not in {None, package}:
+        raise ValueError("startup diagnostic package mismatch")
+    stages = [
+        "deployment_identity",
+        "resource_recovery",
+        "dependency_selftest",
+        "guest_controls_selftest",
+        "communication_ready",
+    ]
+    events = value["events"]
+    if not isinstance(events, list) or not 1 <= len(events) <= 10:
+        raise ValueError("startup diagnostic event bound mismatch")
+    for index, event in enumerate(events):
+        if (
+            set(event) != {"stage", "status", "elapsed_ms", "code", "summary"}
+            or event["stage"] != stages[index // 2]
+            or event["status"] not in (["started"] if index % 2 == 0 else ["succeeded", "failed"])
+            or not isinstance(event["elapsed_ms"], int)
+            or event["elapsed_ms"] < 0
+            or len(event["summary"]) > 128
+            or not re.fullmatch(r"[a-z_]{1,64}", event["code"])
+        ):
+            raise ValueError("startup diagnostic stage mismatch")
+        if event["status"] == "failed" and index != len(events) - 1:
+            raise ValueError("startup continued after a failed stage")
+    if value["ready"] != (len(events) == 10 and events[-1]["status"] == "succeeded"):
+        raise ValueError("startup diagnostic readiness mismatch")
+    if (
+        value["execution_boundary"] != "disposable_vm"
+        or value["external_isolation_verified"] is not False
+    ):
+        raise ValueError("startup diagnostic boundary mismatch")
+    with (installed / "metadata/last-service-error.txt").open(encoding="utf-8") as incoming:
+        summary = incoming.read(1025)
+    if len(summary) > 1024 or f"attempt={value['attempt_id']} " not in summary:
+        raise ValueError("startup diagnostic text belongs to another attempt")
+    return value
+
+
 def diagnostics(installed):
     """Only fixed native diagnostics; never endpoint/lease/LSA/key records."""
     metadata = installed / "metadata"
@@ -114,6 +182,12 @@ def diagnostics(installed):
     selected += sorted(metadata.glob("resource-probe-*.log"))[-2:]
     selected += sorted(metadata.glob("resource-debugger-*.log"))[-2:]
     result = {}
+    try:
+        result["startup-diagnostics.json"] = startup_diagnostic(installed)
+    except (OSError, ValueError, KeyError, TypeError):
+        result["startup-diagnostics.json"] = {
+            "unavailable": "current bounded startup diagnostic could not be validated"
+        }
     for path in selected:
         if path.is_file() and not path.is_symlink():
             try:
@@ -320,6 +394,7 @@ def main():
             port = candidate.getsockname()[1]
         management = local_management_ip()
         draft = dict(
+            execution_boundary="disposable_vm",
             schema=1,
             generation=1,
             installation_id=installation,
@@ -382,9 +457,16 @@ def main():
             or installed_result["manifest_sha256"] != sealed["manifest_sha256"]
         ):
             raise RuntimeError("Installer receipt differs from prepared fixture")
+        report["execution_boundary"] = "disposable_vm"
+        report["external_isolation_verified"] = False
         report["native_isolation"] = control("Isolation")
+        report["startup_diagnostic"] = startup_diagnostic(
+            installed, installation, sealed["manifest_sha256"]
+        )
         if (
             report["native_isolation"].get("passed") is not True
+            or report["native_isolation"].get("execution_boundary") != "disposable_vm"
+            or report["native_isolation"].get("external_isolation_verified") is not False
             or report["native_isolation"].get("production_execution") is not False
             or len(report["native_isolation"].get("personas", [])) != 2
             or [item.get("architecture") for item in report["native_isolation"].get("dbgeng", [])]
@@ -442,8 +524,9 @@ def main():
                     "test",
                     "--locked",
                     "--lib",
-                    "installed_windows_worker_controller_acceptance",
+                    "adapters::worker::ssh::tests::installed_windows_worker_controller_acceptance",
                     "--",
+                    "--exact",  # Do not also select the separately configured remote-VM test.
                     "--ignored",
                     "--nocapture",
                 ],
@@ -482,6 +565,22 @@ def main():
         if plan_path.exists() and (work / "hosted-preflight.json").exists():
             if not report["passed"]:
                 report["diagnostics"] = diagnostics(installed)
+                try:
+                    current = startup_diagnostic(
+                        installed, installation=installation, package=sealed["manifest_sha256"]
+                    )
+                    report["startup_diagnostic_validation"] = {
+                        "passed": True,
+                        "attempt_id": current["attempt_id"],
+                        "ready": current["ready"],
+                        "execution_boundary": current["execution_boundary"],
+                        "external_isolation_verified": current["external_isolation_verified"],
+                    }
+                except (OSError, ValueError, KeyError, TypeError) as diagnostic_error:
+                    report["startup_diagnostic_validation"] = {
+                        "passed": False,
+                        "error": type(diagnostic_error).__name__,
+                    }
             try:
                 report["cleanup"] = control("Cleanup")
                 if report["cleanup"]["remaining_task_root"]:

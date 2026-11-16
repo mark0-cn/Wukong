@@ -61,24 +61,10 @@ impl RunSupervisor {
         let monitor_run = run_id.to_owned();
         let monitor_cancel = supervisor.cancel.clone();
         let monitor = tokio::spawn(async move {
-            let mut timer = tokio::time::interval(Duration::from_secs(1));
-            loop {
-                tokio::select! {
-                    biased;
-                    _ = monitor_cancel.cancelled() => break,
-                    _ = timer.tick() => {
-                        tokio::select! {
-                            _ = monitor_cancel.cancelled() => break,
-                            result = async {
-                                monitor_runner.tools.reconcile_resources(&monitor_run).await?;
-                                monitor_runner.tools.refresh_jobs(&monitor_run).await
-                            } => {
-                                if let Err(error) = result { tracing::warn!(%error, "job monitor failed"); }
-                            }
-                        }
-                    }
-                }
-            }
+            monitor_runner
+                .tools
+                .monitor_resources(&monitor_run, monitor_cancel)
+                .await
         });
         supervisor.tasks.push(monitor.abort_handle());
         let runtime = tokio::runtime::Handle::current();

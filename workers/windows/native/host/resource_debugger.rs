@@ -187,7 +187,8 @@ async fn probe(
                 .await?;
             ensure!(
                 initial_breaks.observe(architecture, &stop, &event),
-                "single-pass fixture stopped at an unexpected or repeated exception"
+                "single-pass fixture stopped at an unexpected or repeated exception: {}",
+                stop_diagnostic(architecture, address, &stop, &event)
             );
             // At most one native break-in and one WOW64 loader notification,
             // in either order. This policy belongs only to the sealed fixture.
@@ -239,6 +240,35 @@ struct InitialBreaks {
     wow64: bool,
 }
 
+// Only the sealed startup fixture uses this projection. Keep the protected
+// failure log useful without copying arbitrary MCP output or target contents.
+fn stop_diagnostic(architecture: &str, expected: &str, stop: &Value, event: &Value) -> Value {
+    fn scalar(value: &Value) -> Value {
+        match value {
+            Value::Bool(_) | Value::Number(_) => value.clone(),
+            Value::String(text)
+                if text.len() <= 192
+                    && text
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"_!.:+-".contains(&c)) =>
+            {
+                value.clone()
+            }
+            _ => Value::Null,
+        }
+    }
+    let exception = &event["exception"];
+    let frame = &event["frames"][0];
+    json!({"architecture":architecture,"expected":scalar(&json!(expected)),
+        "stopped_at":scalar(&stop["stopped_at"]),"status":scalar(&event["status"]),
+        "kind":scalar(&event["kind"]),"stored_crash_context":scalar(&event["stored_crash_context"]),
+        "frames_from_stored_context":scalar(&event["frames_from_stored_context"]),
+        "exception":{"code":scalar(&exception["code"]),"address":scalar(&exception["address"]),
+            "first_chance":scalar(&exception["first_chance"]),"noncontinuable":scalar(&exception["noncontinuable"])},
+        "frame":{"module":scalar(&frame["module"]),"symbol":scalar(&frame["symbol"]),
+            "address":scalar(&frame["address"]),"displacement":scalar(&frame["displacement"])}})
+}
+
 impl InitialBreaks {
     fn observe(&mut self, architecture: &str, stop: &Value, event: &Value) -> bool {
         let exception = &event["exception"];
@@ -258,10 +288,13 @@ impl InitialBreaks {
             && event["kind"] == "breakpoint"
             && event["frames_from_stored_context"] == false
             && frame["module"] == "ntdll"
-            && frame["symbol"] == "ntdll!DbgBreakPoint"
-            && frame["displacement"] == "0x0"
             && frame["address"] == exception["address"]
         {
+            // With only offline export symbols, the loader's initial break
+            // can be attributed to an unrelated nearest ntdll export. Match
+            // the live module/address, not that approximate function name.
+            // This one-shot allowance applies only to the sealed fixture,
+            // which must subsequently hit its own PDB-resolved breakpoint.
             &mut self.native
         } else {
             return false;
@@ -337,6 +370,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fixture_stop_diagnostics_are_bounded_and_omit_arbitrary_output() {
+        let event = json!({"status":"ok","stdout":"PRIVATE-CANARY",
+            "exception":{"code":"0x80000003","first_chance":true},
+            "frames":[{"symbol":"ntdll!DbgBreakPoint","module":"x".repeat(193),"address":"C:\\secret","displacement":0}]});
+        let report = stop_diagnostic("x64", "0x1234", &json!({"stopped_at":"0x5678"}), &event);
+        assert_eq!(report["frame"]["symbol"], "ntdll!DbgBreakPoint");
+        assert_eq!(report["frame"]["module"], Value::Null);
+        assert_eq!(report["frame"]["address"], Value::Null);
+        assert_eq!(report["frame"]["displacement"], 0);
+        assert_eq!(report["exception"]["first_chance"], true);
+        let raw = report.to_string();
+        assert!(!raw.contains("PRIVATE-CANARY"));
+        assert!(!raw.contains("secret"));
+        assert!(raw.len() < 4096);
+    }
+
+    #[test]
     fn fixture_continuation_refuses_other_faults_or_a_different_stop() {
         let stop = json!({"stopped_at":"0x00000000771e7d89"});
         let event = json!({"status":"ok","stored_crash_context":false,
@@ -377,9 +427,7 @@ mod tests {
             ("/kind", json!("unknown")),
             ("/exception/first_chance", json!(false)),
             ("/exception/noncontinuable", json!(true)),
-            ("/frames/0/symbol", json!("wukong_probe!fixture_step")),
             ("/frames/0/module", json!("wukong_probe")),
-            ("/frames/0/displacement", json!("0x1")),
             ("/frames/0/address", json!("0x0000000000000000")),
             ("/frames", Value::Null),
         ] {
@@ -398,5 +446,27 @@ mod tests {
             assert!(!observed.observe("x86", &stop, &event));
             assert!(!observed.observe("x86", &stop, &wow64));
         }
+    }
+
+    #[test]
+    fn sealed_fixture_initial_break_does_not_require_online_os_symbols() {
+        // Observed on the hosted Windows runner with the offline symbol path.
+        // The exported name is only the nearest export, not the break routine.
+        let stop = json!({"stopped_at":"0x00007ffe1065ee1d"});
+        let mut event = json!({"status":"ok","stored_crash_context":false,
+            "frames_from_stored_context":false,"kind":"breakpoint",
+            "exception":{"code":"0x80000003","address":stop["stopped_at"],"first_chance":true,"noncontinuable":false},
+            "frames":[{"address":stop["stopped_at"],"module":"ntdll",
+                "symbol":"ntdll!RtlGetReturnAddressHijackTarget","displacement":"0x6ed"}]});
+        for architecture in ["x64", "x86"] {
+            let mut observed = InitialBreaks::default();
+            assert!(observed.observe(architecture, &stop, &event));
+            assert!(!observed.observe(architecture, &stop, &event));
+        }
+        event["frames"][0]["symbol"] = Value::Null;
+        event["frames"][0]["displacement"] = Value::Null;
+        assert!(InitialBreaks::default().observe("x64", &stop, &event));
+        event["exception"]["code"] = json!("0xc0000005");
+        assert!(!InitialBreaks::default().observe("x64", &stop, &event));
     }
 }

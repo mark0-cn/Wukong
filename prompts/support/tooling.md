@@ -100,8 +100,11 @@ Prefer `python3 files/<script>` over executing the script directly:
 file_put stages files without the executable bit unless executable=true, and
 a direct exec of a non-executable file fails with Permission denied.
 
-Terminal job results arrive automatically in the next request's
-`job_results` section — do not poll `job_status` unless a result is missing.
+Job status and synchronization progress arrive in working context and durable mail.
+`job_execution_finished` reports execution only; cleanup or evidence may still be
+pending. Wait for `job_completed` and evidence readiness before relying on complete
+results. Use `job_status` for missing status and `job_artifacts` for synchronization
+progress/errors; unavailable evidence is a proof gap, never success.
 
 ## Path discipline (worker layouts are not guessable)
 
@@ -138,8 +141,8 @@ explicit z3 constraints or an appropriate harness for those cases:
 - It returns a job_id; poll job_status. On completion stdout carries
   {"solved": true, "input_base64": ..., "input_hex": ..., "stats": {...}}.
   The solved input is also persisted as job artifacts (solved-input.bin,
-  solved.json) and imported as evidence when the terminal job_status is
-  polled — prefer those artifacts over scraping the stdout tail.
+  solved.json) and synchronized independently after cleanup. Check evidence
+  readiness or call job_artifacts; prefer those artifacts over the stdout tail.
   Decode input_base64 and feed it to the target with job_start to CONFIRM
   the solution really reaches the find address — angr's answer is a
   hypothesis until the real run agrees.

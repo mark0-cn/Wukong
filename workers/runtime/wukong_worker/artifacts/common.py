@@ -69,6 +69,8 @@ def public_file(root, relative):
         "spec.json",
         "status.json",
         "heartbeat.json",
+        "ledger.lock",
+        "supervisor-start.json",
         "cancel",
         "session.json",
         "processes.json",

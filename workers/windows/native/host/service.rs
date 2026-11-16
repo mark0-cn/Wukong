@@ -92,18 +92,6 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
             .build()?;
         runtime.block_on(run(context))
     })();
-    if let Err(error) = &result {
-        // Operator diagnostics only; never include RPC frames or endpoint auth.
-        let message = format!("native worker service failed: {error:#}\n");
-        if let Some(parent) = context.configuration.parent() {
-            let path = parent.join("last-service-error.txt");
-            if !path.exists()
-                && let Ok(mut output) = AclPolicy::private_vm().create_file(&path)
-            {
-                let _ = std::io::Write::write_all(&mut output, message.as_bytes());
-            }
-        }
-    }
     let _ = report(SERVICE_STOPPED, if result.is_ok() { 0 } else { 1066 });
 }
 pub fn dispatch(installation: &str, configuration: &Path) -> Result<()> {
@@ -281,6 +269,17 @@ async fn serve_client(
     }
 }
 async fn run(context: &ContextState) -> Result<()> {
+    let mut diagnostic =
+        super::startup::Report::new(&context.configuration, &context.installation)?;
+    let result = run_stages(context, &mut diagnostic).await;
+    if let Err(error) = &result {
+        diagnostic.fail(error)?;
+    }
+    result
+}
+async fn run_stages(context: &ContextState, diagnostic: &mut super::startup::Report) -> Result<()> {
+    use super::startup::Stage;
+    diagnostic.begin(Stage::DeploymentIdentity)?;
     let (deployment, root) = deployment::load(&context.configuration)?;
     ensure!(
         deployment.installation_id == context.installation,
@@ -304,6 +303,9 @@ async fn run(context: &ContextState) -> Result<()> {
     );
     let identity =
         crate::rpc::worker_identity::identity(&deployment.installation_id, manifest.sha256())?;
+    diagnostic.bind(manifest.sha256(), &identity.boot_id)?;
+    diagnostic.succeed()?;
+    diagnostic.begin(Stage::ResourceRecovery)?;
     let worker = Arc::new(Worker::open(identity.clone(), &root.join("metadata"))?);
     worker.open_resources(&root, &deployment, &manifest)?;
     let recovery_deadline = tokio::time::Instant::now() + Duration::from_secs(120);
@@ -315,7 +317,11 @@ async fn run(context: &ContextState) -> Result<()> {
         report(SERVICE_START_PENDING, 0)?;
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    diagnostic.succeed()?;
+    diagnostic.begin(Stage::DependencySelftest)?;
     offline_selftest(&root, &package, &deployment, &manifest).await?;
+    diagnostic.succeed()?;
+    diagnostic.begin(Stage::GuestControlsSelftest)?;
     let mut checkpoint = tokio::time::Instant::now();
     crate::host::resource_host::qualify(&root, &package, &deployment, &manifest, || {
         ensure!(
@@ -329,7 +335,9 @@ async fn run(context: &ContextState) -> Result<()> {
         Ok(())
     })
     .await?;
+    diagnostic.succeed()?;
     worker.qualify();
+    diagnostic.begin(Stage::CommunicationReady)?;
     let sid = deployment.account(Role::Management)?.sid.clone();
     let mut listener = pipe_transport::server(&context.installation, &sid, true)?;
     let ssh = spawn_ssh(&root, &package, &manifest)?;
@@ -338,6 +346,7 @@ async fn run(context: &ContextState) -> Result<()> {
         !ssh.exited(),
         "packaged SSH daemon failed to start; inspect native SSH log"
     );
+    diagnostic.succeed()?;
     report(SERVICE_RUNNING, 0)?;
     let semaphore = Arc::new(Semaphore::new(15));
     let mut tasks = tokio::task::JoinSet::new();
