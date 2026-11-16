@@ -95,6 +95,37 @@ password_env = "WUKONG_LAB_ADMIN_PASSWORD"
 - 管理通道通过一次离线置备建立：在关机状态下编辑克隆盘，安装一个以 LocalSystem 运行的置备服务，guest 随后设置临时本地管理员密码，真实的 `New-Service` 安装返回退出码 0。请轮换密码，并把置备后的 VM 视为一次性环境。
 - 原 VM 及其快照保持不变；只有克隆被登记为实验 VM。
 
+## 驱动安装、测试签名与 Verifier
+
+管理通道可以用同一个哈希固定的 `install.ps1` 安装内核服务：
+
+```powershell
+New-Item -ItemType Directory -Force C:\lab | Out-Null
+Copy-Item (Join-Path $PSScriptRoot 'driver.sys') C:\lab\driver.sys
+sc.exe create WukongLabDrv type= kernel start= demand binPath= C:\lab\driver.sys
+sc.exe start WukongLabDrv
+```
+
+测试签名驱动还需要 guest 内的测试签名和受信任的测试证书：
+
+```powershell
+Import-Certificate C:\lab\test.cer -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate C:\lab\test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+bcdedit.exe /set testsigning on
+shutdown.exe /r /t 3 /f
+```
+
+重启后创建并启动服务，然后为该驱动启用标准 Driver Verifier 并再次重启：
+
+```powershell
+sc.exe config WukongLabDrv start= system
+verifier.exe /standard /driver WukongLabDrv.sys
+shutdown.exe /r /t 3 /f
+verifier.exe /querysettings
+```
+
+测试签名足以加载测试驱动。本流程不会绕过或关闭 PatchGuard，第三方 PatchGuard 绕过工具不属于实验室；若某个实验确实需要，应作为独立的操作步骤并在结束后恢复基线。恢复基线会同时移除测试证书、testsigning 标志、服务和 Verifier 设置。
+
 ## 宿主操作
 
 适配器只使用 `vmrun -T ws list`、`listSnapshots <vmx>`、`snapshot <vmx> <name>`、`revertToSnapshot <vmx> <name>` 和 `start <vmx> nogui`。每次调用都有超时并捕获 stdout/stderr，从不经过 shell。基线仅在缺失时创建；已有快照从不删除。
@@ -106,7 +137,9 @@ password_env = "WUKONG_LAB_ADMIN_PASSWORD"
 - `start_after_restore` 必须与宿主恢复运行中快照的行为一致：在本机上运行中 VM 的快照恢复后处于关机状态，因此实验室按配置启动它。
 - 实验快照不会自动删除；运维在保留证据后显式删除。
 - 不执行清理动作。把一次性 VM 恢复到基线就是清理边界，因此安装计划可以省略清理条目。
-- 已用真实服务安装验证：打包的 `install.ps1` 在第 15 代创建一个手动服务（退出码 0、不可变回执），第 16 代恢复基线后该服务被移除、实验快照被清理，管理员登录仍可用。驱动安装、测试签名调整与 Verifier 配置尚未演练。
+- 已用真实服务安装验证：打包的 `install.ps1` 在第 15 代创建一个手动服务（退出码 0、不可变回执），第 16 代恢复基线后该服务被移除、实验快照被清理，管理员登录仍可用。
+- 一个用自签名证书签名的极简 WDM 驱动在 testsigning 下加载成功（服务 RUNNING），重启后又在标准 Driver Verifier 下再次加载；恢复基线移除了服务、测试证书和 Verifier 设置，worker `doctor` 仍 ready。
+- 驱动覆盖仅限无设备 I/O 的旧式内核服务；生产/证明签名、PnP 设备栈和 PatchGuard 绕过场景未演练。
 - 第一阶段已用真实 VM 验证：创建基线与实验快照，在第 2、4 代恢复到基线，VM 启动后 worker `doctor` 再次就绪。随后在第 9 代通过已登记 worker 上传并执行一个预编译 EXE（job 完成、退出码 0、写入不可变回执），第 10 代恢复基线后 worker `doctor` 仍就绪。控制器重启、超时和过期代次行为由使用假宿主的单元测试覆盖。
 
 ## 命令行

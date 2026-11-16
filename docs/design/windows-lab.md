@@ -95,6 +95,37 @@ password_env = "WUKONG_LAB_ADMIN_PASSWORD"
 - The administrative channel was provisioned once offline: a clone was edited while powered off to install a LocalSystem provisioning service, the guest then set a temporary local-administrator password, and a real `New-Service` installation returned exit code 0. Rotate the password and treat the provisioned VM as disposable.
 - The original VM and its snapshots were left untouched; only the clone is registered as the lab VM.
 
+## Driver installation, test signing and Verifier
+
+The administrative channel can install a kernel service from the same hash-pinned `install.ps1`:
+
+```powershell
+New-Item -ItemType Directory -Force C:\lab | Out-Null
+Copy-Item (Join-Path $PSScriptRoot 'driver.sys') C:\lab\driver.sys
+sc.exe create WukongLabDrv type= kernel start= demand binPath= C:\lab\driver.sys
+sc.exe start WukongLabDrv
+```
+
+A test-signed driver additionally needs guest-local test signing and a trusted test certificate:
+
+```powershell
+Import-Certificate C:\lab\test.cer -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate C:\lab\test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher
+bcdedit.exe /set testsigning on
+shutdown.exe /r /t 3 /f
+```
+
+After the reboot, create and start the service, then enable standard Driver Verifier for it and reboot again:
+
+```powershell
+sc.exe config WukongLabDrv start= system
+verifier.exe /standard /driver WukongLabDrv.sys
+shutdown.exe /r /t 3 /f
+verifier.exe /querysettings
+```
+
+Test signing is sufficient for test drivers. PatchGuard is not bypassed or disabled by this workflow, and third-party PatchGuard-bypass tooling is not part of the lab; if an experiment needs one, treat it as an isolated operator step and restore the baseline afterwards. The baseline restore removes the test certificate, testsigning flag, service and Verifier settings together.
+
 ## Host operations
 
 The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx> <name>`, `revertToSnapshot <vmx> <name>` and `start <vmx> nogui`. Each call has a timeout and captured stdout/stderr, never a shell. Baseline snapshots are created only when absent; existing snapshots are never deleted.
@@ -106,7 +137,9 @@ The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx>
 - `start_after_restore` must match how the host restores a running snapshot: on this host a running-VM snapshot restores powered off, so the lab starts it when configured.
 - Experiment snapshots are not deleted automatically; operators remove them explicitly after preserving evidence.
 - Cleanup actions are not executed. Restoring the disposable VM to the baseline is the cleanup boundary, so installation plans may omit cleanup entries.
-- A real service installation was validated: the packaged `install.ps1` created a manual service in generation 15 (exit code 0, immutable receipt), and the generation 16 baseline restore removed that service and pruned the experiment snapshot while the administrator login kept working. Driver installation, test-signing changes and Verifier configuration remain unexercised.
+- A real service installation was validated: the packaged `install.ps1` created a manual service in generation 15 (exit code 0, immutable receipt), and the generation 16 baseline restore removed that service and pruned the experiment snapshot while the administrator login kept working.
+- A minimal WDM driver signed with a self-signed certificate loaded under testsigning (service RUNNING) and again under standard Driver Verifier after a reboot; reverting the baseline removed the service, test certificate and Verifier settings and left the worker `doctor` ready.
+- Driver coverage is limited to a legacy kernel service with no device I/O. Production/attestation signing, PnP device stacks and PatchGuard-bypass scenarios are not exercised.
 - Phase 1 validation used the real VM: baseline and experiment snapshots were created, restores to the baseline ran in generations 2 and 4, and the worker `doctor` reported ready again after the VM start. A packaged prebuilt EXE was then uploaded and executed through the registered worker in generation 9 (job completed with exit code 0, immutable receipt written), and the baseline restore in generation 10 left the worker `doctor` ready again. Controller-restart, timeout and stale-generation behavior are covered by unit tests with a fake host.
 
 ## CLI
