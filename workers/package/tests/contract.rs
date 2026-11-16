@@ -96,7 +96,7 @@ fn enrollment_fixture(
     let mut blob = b"\0\0\0\x0bssh-ed25519\0\0\0\x20".to_vec();
     blob.extend(hex::decode(signer.public_key().to_hex()).unwrap());
     wukong_worker_package::Enrollment {
-        execution_boundary: Some(wukong_worker_package::ExecutionBoundary::DisposableVm),
+        execution_boundary: wukong_worker_package::ExecutionBoundary::DisposableVm,
         schema: 1,
         generation: 1,
         installation_id: "e".repeat(32),
@@ -714,35 +714,36 @@ fn native_cli_checks_independent_trust_and_actual_file_bytes() -> anyhow::Result
 }
 
 #[test]
-fn disposable_vm_boundary_is_explicit_signed_and_legacy_receipts_remain_readable()
--> anyhow::Result<()> {
-    use wukong_worker_package::VerifiedEnrollment;
+fn enrollment_requires_an_explicit_signed_disposable_vm_boundary() -> anyhow::Result<()> {
+    use wukong_worker_package::{Enrollment, ExecutionBoundary, VerifiedEnrollment};
     let (signer, _) = Signer::generate()?;
     let (bytes, signature) = signer.sign(&fixture())?;
     let payload = VerifiedManifest::verify(&bytes, &signature, &signer.public_key())?;
-    let mut enrollment = enrollment_fixture(&signer, &payload);
-    enrollment.require_disposable_vm()?;
+    let enrollment = enrollment_fixture(&signer, &payload);
     let (bytes, signature) = enrollment.sign(&signer)?;
-    VerifiedEnrollment::verify(&bytes, &signature, &signer.public_key())?
-        .enrollment()
-        .require_disposable_vm()?;
-    let mut changed: serde_json::Value = serde_json::from_slice(&bytes)?;
-    changed
+    assert_eq!(
+        VerifiedEnrollment::verify(&bytes, &signature, &signer.public_key())?
+            .enrollment()
+            .execution_boundary,
+        ExecutionBoundary::DisposableVm
+    );
+    let mut missing: serde_json::Value = serde_json::from_slice(&bytes)?;
+    missing
         .as_object_mut()
         .unwrap()
         .remove("execution_boundary");
+    assert!(serde_json::from_value::<Enrollment>(missing.clone()).is_err());
     assert!(
         VerifiedEnrollment::verify(
-            &serde_json::to_vec(&changed)?,
+            &serde_json::to_vec(&missing)?,
             &signature,
             &signer.public_key()
         )
         .is_err()
     );
-    enrollment.execution_boundary = None;
-    let (bytes, signature) = enrollment.sign(&signer)?;
-    let old = VerifiedEnrollment::verify(&bytes, &signature, &signer.public_key())?;
-    assert!(old.enrollment().require_disposable_vm().is_err());
-    assert!(!String::from_utf8(bytes)?.contains("execution_boundary"));
+    for boundary in [serde_json::Value::Null, serde_json::json!("host_process")] {
+        missing["execution_boundary"] = boundary;
+        assert!(serde_json::from_value::<Enrollment>(missing.clone()).is_err());
+    }
     Ok(())
 }

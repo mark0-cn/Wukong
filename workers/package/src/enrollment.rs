@@ -63,8 +63,7 @@ pub struct Enrollment {
     pub ssh_port: u16,
     pub ssh_public_key: SshPublicKey,
     /// An operator declaration, never guest-side proof of hypervisor policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_boundary: Option<ExecutionBoundary>,
+    pub execution_boundary: ExecutionBoundary,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -72,13 +71,6 @@ pub enum ExecutionBoundary {
     DisposableVm,
 }
 impl Enrollment {
-    pub fn require_disposable_vm(&self) -> Result<()> {
-        ensure!(
-            self.execution_boundary == Some(ExecutionBoundary::DisposableVm),
-            "enrollment must explicitly declare execution_boundary=disposable_vm; use a dedicated disposable VM with host access and external networking restricted by the hypervisor"
-        );
-        Ok(())
-    }
     fn validate(&self) -> Result<()> {
         ensure!(self.schema == 1, "unsupported worker enrollment format");
         ensure!(self.generation > 0, "missing enrollment generation");

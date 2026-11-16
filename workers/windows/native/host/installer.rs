@@ -75,7 +75,6 @@ impl Plan {
         )?;
 
         let enrollment = deployment::read_enrollment(&base.join("enrollment"), pinned)?;
-        enrollment.enrollment().require_disposable_vm()?;
         enrollment.bind_payload(&manifest)?;
         let bytes = crate::artifacts::io::read_bytes(&std::env::current_exe()?, 64 * 1024 * 1024)?;
         ensure!(

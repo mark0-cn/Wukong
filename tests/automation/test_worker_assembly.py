@@ -15,7 +15,7 @@ from tests.automation.test_worker_pe import fixture
 
 
 class AssemblyChecks(unittest.TestCase):
-    def test_legacy_signed_enrollment_cannot_publish_new_vm_setup_media(self):
+    def test_missing_boundary_cannot_publish_vm_setup_media(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             package, enrollment, output = [
