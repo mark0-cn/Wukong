@@ -2,6 +2,11 @@
 
 English · [简体中文](README.zh-CN.md)
 
+Startup records deployment identity, resource recovery, dependency self-test, isolation qualification and communication readiness as separate stages. Each stage publishes start and success/failure events with elapsed time and a stable error code. Protected `metadata/startup-diagnostics.json` is atomically replaced, capped at 16 KiB, and bound to the installation, verified package/boot identity when available, and a fresh startup attempt. `last-service-error.txt` is refreshed for the same attempt, including pending/ready states; it no longer retains a previous startup error. Summaries use fixed classifications rather than arbitrary exception text. Installer failures include the current diagnostic identity/code and bounded WFP counts; hosted acceptance retains and validates the full report separately from installation success.
+
+WFP diagnostics count received callbacks, parse failures, missing fields, identity/address/port/direction/time-window mismatches, exact matches and overflow. Counts are saturating; retained events remain capped at 16. The existing application/listener subscription filters, 30-second correlation window and live AppContainerLoopback filter verification remain mandatory. Zero callbacks describes this filtered subscription only. Diagnostics neither prove isolation nor permit readiness after failed qualification. This change does not fix the previously observed WFP qualification failure; only a dedicated hosted installation run can establish the current outcome.
+
+
 ## Ownership and request flow
 
 The native Rust worker is the sole Windows execution authority. Managed SSH invokes the fixed relay, which authenticates the enrolled SCM service through its named pipe. The service owns startup, qualification, recovery and shutdown; `native/rpc/worker.rs` routes the public API. There is no persistent Python metadata worker, inner Python lease, loopback worker endpoint or reverse broker-health channel.

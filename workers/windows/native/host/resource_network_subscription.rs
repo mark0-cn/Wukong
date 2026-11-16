@@ -18,11 +18,14 @@ use std::{
     sync::{Condvar, Mutex},
 };
 
+use super::NetworkCounters;
+
 const MAX_RECORDS: usize = 16;
 #[derive(Default)]
 struct Observed {
     records: Vec<Record>,
     failed: Option<String>,
+    counters: NetworkCounters,
 }
 struct State {
     binding: Binding,
@@ -33,18 +36,17 @@ impl State {
     fn retain(&self, record: Record) {
         // Source port is reported by the child after its connect attempt. Keep
         // only this listener/application's otherwise fully correlated drops.
-        if record.source_port == 0
-            || record.source_port == self.binding.listener_port
-            || !self.binding.matches(
-                &record,
-                record.source_port,
-                ticks(self.binding.start).saturating_add(30 * 10_000_000),
-            )
-        {
+        let mut observed = self.observed.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(reason) = self.binding.rejection(
+            &record,
+            record.source_port,
+            ticks(self.binding.start).saturating_add(30 * 10_000_000),
+        ) {
+            observed.counters.reject(reason);
             return;
         }
-        let mut observed = self.observed.lock().unwrap_or_else(|p| p.into_inner());
         if observed.records.len() == MAX_RECORDS {
+            observed.counters.overflow = observed.counters.overflow.saturating_add(1);
             observed.failed = Some("WFP live observation exceeded its record bound".into());
         } else {
             observed.records.push(record);
@@ -53,6 +55,7 @@ impl State {
     }
     fn fail(&self, message: &str) {
         let mut observed = self.observed.lock().unwrap_or_else(|p| p.into_inner());
+        observed.counters.parse_failed = observed.counters.parse_failed.saturating_add(1);
         if observed.failed.is_none() {
             observed.failed = Some(message.chars().take(256).collect());
         }
@@ -66,10 +69,22 @@ unsafe extern "system" fn notification(context: *mut c_void, event: *const FWPM_
     }
     // The Box remains stable until unsubscribe has waited for all callbacks.
     let state = unsafe { &*context.cast::<State>() };
+    {
+        let mut observed = state.observed.lock().unwrap_or_else(|p| p.into_inner());
+        observed.counters.received = observed.counters.received.saturating_add(1);
+    }
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<()> {
         ensure!(!event.is_null(), "WFP live event pointer is missing");
         if let Some(record) = Record::read(unsafe { &*event })? {
             state.retain(record);
+        } else {
+            let mut observed = state.observed.lock().unwrap_or_else(|p| p.into_inner());
+            if Record::missing_fields(unsafe { &*event }) {
+                observed.counters.fields_missing =
+                    observed.counters.fields_missing.saturating_add(1);
+            } else {
+                observed.counters.parse_failed = observed.counters.parse_failed.saturating_add(1);
+            }
         }
         Ok(())
     }));
@@ -179,6 +194,14 @@ impl Subscription {
     pub(super) fn engine(&self) -> &Engine {
         &self.engine
     }
+    pub(super) fn counters(&self) -> NetworkCounters {
+        self.state()
+            .observed
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .counters
+            .clone()
+    }
     pub(super) fn wait(&self, source_port: u16, end: FILETIME) -> Result<Record> {
         let state = self.state();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -186,18 +209,22 @@ impl Subscription {
             .observed
             .lock()
             .map_err(|_| anyhow::anyhow!("WFP live observer lock is poisoned"))?;
+        let mut evaluated = 0;
         loop {
             ensure!(
                 observed.failed.is_none(),
                 "WFP live observation failed: {}",
                 observed.failed.as_deref().unwrap_or_default()
             );
-            if let Some(record) = observed
-                .records
-                .iter()
-                .find(|record| state.binding.matches(record, source_port, ticks(end)))
-            {
-                return Ok(record.clone());
+            while evaluated < observed.records.len() {
+                let record = observed.records[evaluated].clone();
+                evaluated += 1;
+                if let Some(reason) = state.binding.rejection(&record, source_port, ticks(end)) {
+                    observed.counters.reject(reason);
+                } else {
+                    observed.counters.matched = observed.counters.matched.saturating_add(1);
+                    return Ok(record);
+                }
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             ensure!(
@@ -282,6 +309,7 @@ mod tests {
         }
         let observed = state.observed.lock().unwrap();
         assert_eq!(observed.records.len(), MAX_RECORDS);
+        assert_eq!(observed.counters.overflow, 1);
         assert!(observed.failed.as_deref().unwrap().contains("record bound"));
         drop(observed);
         let state = self::state();
@@ -298,6 +326,68 @@ mod tests {
                 .unwrap()
                 .contains("pointer is missing")
         );
+    }
+
+    #[test]
+    fn diagnostics_classify_bounded_rejections_without_changing_subscription_filters() -> Result<()>
+    {
+        let state = state();
+        let mut value = record();
+        value.application_id.clear();
+        state.retain(value);
+        let mut value = record();
+        value.local_address = 0;
+        state.retain(value);
+        let mut value = record();
+        value.source_port = 0;
+        state.retain(value);
+        let mut value = record();
+        value.direction = 0;
+        state.retain(value);
+        let mut value = record();
+        value.time = 0;
+        state.retain(value);
+        state.retain(record());
+        let subscription = Subscription {
+            engine: Engine(null_mut()),
+            handle: null_mut(),
+            state: Some(Box::new(state)),
+        };
+        subscription.wait(
+            45124,
+            FILETIME {
+                dwLowDateTime: 200,
+                dwHighDateTime: 0,
+            },
+        )?;
+        let counters = subscription.counters();
+        assert_eq!(
+            (
+                counters.identity_mismatch,
+                counters.address_mismatch,
+                counters.port_mismatch,
+                counters.direction_mismatch,
+                counters.time_window_mismatch,
+                counters.matched
+            ),
+            (1, 1, 1, 1, 1, 1)
+        );
+        let state = self::state();
+        unsafe {
+            notification(
+                (&state as *const State).cast_mut().cast(),
+                &FWPM_NET_EVENT2::default(),
+            );
+        }
+        unsafe {
+            notification((&state as *const State).cast_mut().cast(), null());
+        }
+        let observed = state.observed.lock().unwrap();
+        assert_eq!(observed.counters.received, 2);
+        assert_eq!(observed.counters.fields_missing, 1);
+        assert_eq!(observed.counters.parse_failed, 1);
+        assert!(observed.records.is_empty());
+        Ok(())
     }
 
     #[test]

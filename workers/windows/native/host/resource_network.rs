@@ -18,6 +18,69 @@ use windows_sys::Win32::{
     System::{Rpc::RPC_C_AUTHN_WINNT, SystemInformation::GetSystemTimeAsFileTime},
 };
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct NetworkCounters {
+    received: u64,
+    parse_failed: u64,
+    fields_missing: u64,
+    identity_mismatch: u64,
+    address_mismatch: u64,
+    port_mismatch: u64,
+    direction_mismatch: u64,
+    time_window_mismatch: u64,
+    matched: u64,
+    overflow: u64,
+}
+#[derive(Clone, Copy)]
+enum Rejection {
+    Identity,
+    Address,
+    Port,
+    Direction,
+    TimeWindow,
+}
+impl NetworkCounters {
+    pub(crate) fn add(&mut self, other: &Self) {
+        self.received = self.received.saturating_add(other.received);
+        self.parse_failed = self.parse_failed.saturating_add(other.parse_failed);
+        self.fields_missing = self.fields_missing.saturating_add(other.fields_missing);
+        self.identity_mismatch = self
+            .identity_mismatch
+            .saturating_add(other.identity_mismatch);
+        self.address_mismatch = self.address_mismatch.saturating_add(other.address_mismatch);
+        self.port_mismatch = self.port_mismatch.saturating_add(other.port_mismatch);
+        self.direction_mismatch = self
+            .direction_mismatch
+            .saturating_add(other.direction_mismatch);
+        self.time_window_mismatch = self
+            .time_window_mismatch
+            .saturating_add(other.time_window_mismatch);
+        self.matched = self.matched.saturating_add(other.matched);
+        self.overflow = self.overflow.saturating_add(other.overflow);
+    }
+    fn reject(&mut self, reason: Rejection) {
+        let count = match reason {
+            Rejection::Identity => &mut self.identity_mismatch,
+            Rejection::Address => &mut self.address_mismatch,
+            Rejection::Port => &mut self.port_mismatch,
+            Rejection::Direction => &mut self.direction_mismatch,
+            Rejection::TimeWindow => &mut self.time_window_mismatch,
+        };
+        *count = count.saturating_add(1);
+    }
+}
+impl std::fmt::Display for NetworkCounters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "bounded WFP observation counters: received={}, matched={}",
+            self.received, self.matched
+        )
+    }
+}
+impl std::error::Error for NetworkCounters {}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Observation {
@@ -176,6 +239,16 @@ impl Capture {
         })
     }
     pub(super) fn verify(mut self, observation: &Observation) -> Result<Value> {
+        let result = self.verify_inner(observation);
+        let counters = self.subscription.counters();
+        result
+            .map(|mut value| {
+                value["diagnostic_counters"] = json!(counters);
+                value
+            })
+            .context(counters)
+    }
+    fn verify_inner(&mut self, observation: &Observation) -> Result<Value> {
         ensure!(
             observation.source_port > 0
                 && observation.source_port != self.subscription.binding().listener_port,
@@ -250,20 +323,31 @@ impl Binding {
             listener_port,
         })
     }
+    #[cfg(test)]
     fn matches(&self, record: &Record, source_port: u16, end: u64) -> bool {
-        record.time >= ticks(self.start)
-            && record.time <= end
-            && record.application_id == self.application_id
-            && record.listener_port == self.listener_port
-            && record.source_port == source_port
-            && record.local_address == 0x7f000001
-            && record.remote_address == 0x7f000001
-            && record.user_sid == "S-1-5-18"
-            && record.loopback
-            // The observed outgoing loopback attempt reports FWP_DIRECTION_OUT
-            // (0x3901), independently of the enforcing receive/accept layer.
-            // msFwpDirection does not use FWP_DIRECTION_OUTBOUND (0).
-            && record.direction == 0x3901
+        self.rejection(record, source_port, end).is_none()
+    }
+    fn rejection(&self, record: &Record, source_port: u16, end: u64) -> Option<Rejection> {
+        if record.time < ticks(self.start) || record.time > end {
+            Some(Rejection::TimeWindow)
+        } else if record.application_id != self.application_id || record.user_sid != "S-1-5-18" {
+            Some(Rejection::Identity)
+        } else if record.listener_port != self.listener_port
+            || record.source_port != source_port
+            || record.source_port == 0
+            || record.source_port == self.listener_port
+        {
+            Some(Rejection::Port)
+        } else if record.local_address != 0x7f000001
+            || record.remote_address != 0x7f000001
+            || !record.loopback
+        {
+            Some(Rejection::Address)
+        } else if record.direction != 0x3901 {
+            Some(Rejection::Direction)
+        } else {
+            None
+        }
     }
 }
 
@@ -282,8 +366,7 @@ struct Record {
     layer_id: u16,
 }
 impl Record {
-    fn read(event: &FWPM_NET_EVENT2) -> Result<Option<Self>> {
-        let header = &event.header;
+    fn missing_fields(event: &FWPM_NET_EVENT2) -> bool {
         let required = FWPM_NET_EVENT_FLAG_APP_ID_SET
             | FWPM_NET_EVENT_FLAG_USER_ID_SET
             | FWPM_NET_EVENT_FLAG_IP_VERSION_SET
@@ -292,8 +375,12 @@ impl Record {
             | FWPM_NET_EVENT_FLAG_REMOTE_ADDR_SET
             | FWPM_NET_EVENT_FLAG_LOCAL_PORT_SET
             | FWPM_NET_EVENT_FLAG_REMOTE_PORT_SET;
+        event.header.flags & required != required
+    }
+    fn read(event: &FWPM_NET_EVENT2) -> Result<Option<Self>> {
+        let header = &event.header;
         if event.r#type != FWPM_NET_EVENT_TYPE_CLASSIFY_DROP
-            || header.flags & required != required
+            || Self::missing_fields(event)
             || header.ipVersion != FWP_IP_VERSION_V4
             || header.ipProtocol != 6
         {

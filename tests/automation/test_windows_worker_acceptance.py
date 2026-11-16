@@ -16,6 +16,61 @@ spec.loader.exec_module(fixture)
 
 
 class HostedWorkerGuardTests(unittest.TestCase):
+    def test_startup_report_identity_bounds_stages_and_summary_are_validated(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            metadata = root / "metadata"
+            metadata.mkdir()
+            value = dict(
+                schema=1,
+                installation_id="installation",
+                package_sha256="a" * 64,
+                boot_id="boot",
+                attempt_id="b" * 32,
+                started_at_ms=1,
+                ready=False,
+                events=[
+                    dict(
+                        stage="deployment_identity",
+                        status="started",
+                        elapsed_ms=0,
+                        code="stage_started",
+                        summary="Startup stage started.",
+                    ),
+                    dict(
+                        stage="deployment_identity",
+                        status="failed",
+                        elapsed_ms=1,
+                        code="deployment_identity_failed",
+                        summary="Identity failed.",
+                    ),
+                ],
+                wfp=None,
+            )
+            report = metadata / "startup-diagnostics.json"
+            report.write_text(json.dumps(value), encoding="utf-8")
+            summary = metadata / "last-service-error.txt"
+            summary.write_text(
+                "attempt=" + "b" * 32 + " code=deployment_identity_failed", encoding="utf-8"
+            )
+            self.assertEqual(fixture.startup_diagnostic(root, "installation", "a" * 64), value)
+            with self.assertRaisesRegex(ValueError, "installation mismatch"):
+                fixture.startup_diagnostic(root, "other", "a" * 64)
+            with self.assertRaisesRegex(ValueError, "package mismatch"):
+                fixture.startup_diagnostic(root, "installation", "c" * 64)
+            summary.write_text("old attempt", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "another attempt"):
+                fixture.startup_diagnostic(root)
+            report.write_text("x" * 16385, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exceeds bound"):
+                fixture.startup_diagnostic(root)
+            value["wfp"] = {"raw_events": ["PRIVATE-CANARY"]}
+            report.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "counters mismatch"):
+                fixture.startup_diagnostic(root)
+
     def test_only_explicit_bounded_fault_sections_enter_the_report(self):
         private = b"UNREQUESTED-REGISTER-CANARY"
         sections = fixture.debugger_fault_sections(

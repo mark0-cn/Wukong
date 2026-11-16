@@ -33,6 +33,7 @@ mod adversary;
 mod debugger;
 #[path = "resource_network.rs"]
 mod network;
+pub(crate) use network::NetworkCounters;
 
 fn token_data(
     token: &Handle,
@@ -180,7 +181,7 @@ pub fn selftest(installation: &str, configuration: &Path, qualification: &str) -
     listener.set_nonblocking(true)?;
     let mut reports = Vec::new();
     for role in [Role::Target, Role::Debugger] {
-        reports.push(check_persona(
+        let observed = check_persona(
             &deployment,
             &root,
             &resources,
@@ -188,7 +189,18 @@ pub fn selftest(installation: &str, configuration: &Path, qualification: &str) -
             &listener,
             role,
             &system_environment,
-        )?);
+        );
+        if let Err(error) = &observed
+            && let Some(counters) = error.downcast_ref::<NetworkCounters>()
+        {
+            crate::artifacts::io::replace_private(
+                &root.join("metadata/qualification-diagnostics.json"),
+                &serde_json::to_vec(
+                    &json!({"schema":1,"installation_id":installation,"package_sha256":manifest.sha256(),"qualification_id":qualification,"wfp":counters}),
+                )?,
+            )?;
+        }
+        reports.push(observed?);
     }
     ensure!(
         reports[0]["appcontainer_sid"] != reports[1]["appcontainer_sid"],
@@ -377,7 +389,7 @@ pub(crate) async fn qualify(
     deployment: &Deployment,
     manifest: &wukong_worker_package::VerifiedManifest,
     mut tick: impl FnMut() -> Result<()>,
-) -> Result<()> {
+) -> Result<NetworkCounters> {
     let private = AclPolicy::private_vm();
     // Each service epoch must observe current OS policy. A prior manifest-bound
     // success is history, never evidence of this process's startup qualification.
@@ -420,14 +432,41 @@ pub(crate) async fn qualify(
     drop(process);
     drop(log);
     let bytes = crate::artifacts::io::read_bytes(&log_path, 8192)?;
-    ensure!(
-        code == Some(0),
-        "native resource qualification failed: {}",
-        String::from_utf8_lossy(&bytes)
-    );
+    if code != Some(0) {
+        let error = anyhow::anyhow!(
+            "native resource qualification failed: {}",
+            String::from_utf8_lossy(&bytes)
+        );
+        let diagnostic = root.join("metadata/qualification-diagnostics.json");
+        if diagnostic.exists() {
+            private.verify(&diagnostic, false)?;
+            let value: Value =
+                serde_json::from_slice(&crate::artifacts::io::read_bytes(&diagnostic, 4096)?)?;
+            if value["schema"] == 1
+                && value["installation_id"] == deployment.installation_id
+                && value["package_sha256"] == manifest.sha256()
+                && value["qualification_id"] == qualification
+            {
+                return Err(error.context(serde_json::from_value::<NetworkCounters>(
+                    value["wfp"].clone(),
+                )?));
+            }
+        }
+        return Err(error);
+    }
     let value: Value = serde_json::from_slice(&bytes)?;
     validate_resource_report(&value, manifest.sha256(), &qualification)?;
-    crate::artifacts::io::write_new_json(&receipt, &value, &private)
+    crate::artifacts::io::write_new_json(&receipt, &value, &private)?;
+    let mut counters = NetworkCounters::default();
+    for persona in value["personas"]
+        .as_array()
+        .context("qualification personas missing")?
+    {
+        counters.add(&serde_json::from_value(
+            persona["network_evidence"]["diagnostic_counters"].clone(),
+        )?);
+    }
+    Ok(counters)
 }
 fn validate_resource_report(value: &Value, manifest: &str, qualification: &str) -> Result<()> {
     ensure!(
