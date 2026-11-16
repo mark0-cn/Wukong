@@ -115,6 +115,22 @@ API key 内容不写入 TOML；填写环境变量名，而非密钥值。Windows
 
 此后使用发布目录中的 `Wukong.lnk` 启动。配置仍保存到指定的原始文件；脚本不修改工作区或 Docker 权限。重新构建后，关闭旧窗口并再次运行脚本即可更新。
 
+### Windows 实验 VM 生命周期
+
+`wukong lab` 准备、恢复并围栏已登记的 VMware 实验 VM。每台 VM 同时只允许一个实验。`lab prepare` 在缺失时创建基线并创建一份实验快照，返回租约；`lab restore` 先提升代次再恢复，因此旧租约无法再次执行；`lab reconcile` 在检查 VM 后解决中断的操作。
+
+```powershell
+wukong --config wukong.toml lab status --vm lab
+wukong --config wukong.toml lab package --vm lab --spec spec.json
+wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parser --spec spec.json
+wukong --config wukong.toml lab run --vm lab --lab <lab_id> --generation <n> --artifact harness.exe
+wukong --config wukong.toml lab install --vm lab --lab <lab_id> --generation <n>
+wukong --config wukong.toml lab prune --vm lab
+wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
+```
+
+`lab package` 下载或复制规格中的依赖，逐个校验 SHA-256，并在不接触 VM 的情况下发布可复用的离线包；`lab prepare` 把该包和已校验的安装/清理计划绑定到租约。`lab run` 通过已登记的 Windows worker 上传并执行一个打包的预编译 EXE，写入不可变回执；传输失败标记为 unknown，需恢复基线来核对。`lab install` 把依赖包复制到 guest，并通过管理通道运行哈希固定的 `install.ps1`；密码只从配置的环境变量读取，绝不存储。不执行清理：每次分析后恢复基线即可。`lab restore` 会删除本次实验使用的快照；`lab prune` 删除更早的实验快照，但保留基线和活动实验。CLI 必须从正常完整性目录运行，不能位于带 Low 标签的构建目录。参见 [Windows 实验实验室](../design/windows-lab.zh-CN.md)。
+
 <a id="configuration-and-models"></a>
 
 ## 配置与模型
@@ -137,7 +153,10 @@ API key 内容不写入 TOML；填写环境变量名，而非密钥值。Windows
 ```sh
 wukong --config ./wukong.toml --state ./saved-state gui
 wukong --config ./wukong.toml analyze ./sample.elf --task "还原记录格式并验证字段边界"
+wukong --config ./wukong.toml analyze ./install-dir --task "查找该程序的跨文件漏洞"
 ```
+
+目录目标会作为 bundle 扫描：每个文件都计算哈希，推断 PE 类型与导入，并给出跨成员调用边。可用 `bundle_manifest`、`bundle_evidence` 和 `bundle_stage` 单独检查 DLL，或带着同目录依赖运行推断出的入口。
 
 <a id="model-services"></a>
 

@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add the controller-side preparation pipeline for Windows experiments: hash-verified dependency packages from local paths or URLs, reusable offline packages, and validated install/cleanup plans bound into the lab lease."
+zh_CN = "新增 Windows 实验的控制端准备流水线：从本地路径或 URL 构建经哈希校验的依赖包、可复用的离线包，并把校验通过的安装/清理计划绑定到实验租约。"

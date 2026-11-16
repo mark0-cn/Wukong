@@ -1,4 +1,5 @@
 pub mod cleanup;
+pub mod lab;
 pub mod workbench;
 use crate::{
     adapters::binary,
@@ -59,6 +60,11 @@ pub enum Command {
         #[command(subcommand)]
         command: crate::interfaces::cli::workbench::ChallengeCommand,
     },
+    /// Manage the registered Windows experiment VM lifecycle without a model.
+    Lab {
+        #[command(subcommand)]
+        command: crate::interfaces::cli::lab::Command,
+    },
     /// Write a configuration without overwriting an existing file.
     Init {
         #[arg(default_value = "wukong.toml")]
@@ -76,7 +82,8 @@ pub enum Command {
         #[arg(long)]
         strings: bool,
     },
-    /// Start a real model-driven multi-agent assessment.
+    /// Start a real model-driven multi-agent assessment. TARGET may be a
+    /// binary or a directory bundle; directories are scanned automatically.
     Analyze {
         target: PathBuf,
         #[arg(long, default_value = DEFAULT_TASK)]
@@ -249,6 +256,10 @@ pub async fn run(cli: Cli) -> Result<()> {
         )?)?;
         return Ok(());
     }
+    if let Command::Lab { command } = command {
+        print_json(&crate::interfaces::cli::lab::run(&config, command).await?)?;
+        return Ok(());
+    }
     let store = Store::open(&config.state_dir)?;
     let service = AssessmentService::new(config.clone(), store.clone());
     match command {
@@ -260,7 +271,8 @@ pub async fn run(cli: Cli) -> Result<()> {
         | Command::ToolCatalog
         | Command::SkillCatalog
         | Command::Env { .. }
-        | Command::Challenge { .. } => unreachable!(),
+        | Command::Challenge { .. }
+        | Command::Lab { .. } => unreachable!(),
         Command::Doctor => {
             let registry = crate::adapters::environments::EnvironmentRegistry::new(
                 config.environments.clone(),
@@ -287,7 +299,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                         _ => "OPENAI_API_KEY",
                     });
             print_json(
-                &json!({"version":env!("CARGO_PKG_VERSION"),"rig_version":crate::adapters::models::RIG_VERSION,"state_dir":store.root(),"model":{"provider":config.model.provider,"model":config.model.model,"role_model":config.model.role_model,"role_models":config.model.role_models,"base_url":config.model.base_url,"credential_env":key_env,"credential_present":crate::adapters::credentials::lookup(key_env).is_some()},"static":{"binary_parser":true,"ghidra_executable":config.analysis.ghidra_executable,"configured":config.analysis.ghidra_executable.is_some()},"environments":environments,"mcp_servers":config.mcp.iter().map(|s|&s.name).collect::<Vec<_>>()}),
+                &json!({"version":env!("CARGO_PKG_VERSION"),"rig_version":crate::adapters::models::RIG_VERSION,"state_dir":store.root(),"model":{"provider":config.model.provider,"model":config.model.model,"role_model":config.model.role_model,"role_models":config.model.role_models,"base_url":config.model.base_url,"credential_env":key_env,"credential_present":crate::adapters::credentials::lookup(key_env).is_some()},"static":{"binary_parser":true,"ghidra_executable":config.analysis.ghidra_executable,"static_environment":config.analysis.static_environment,"configured":config.analysis.ghidra_executable.is_some()},"environments":environments,"mcp_servers":config.mcp.iter().map(|s|&s.name).collect::<Vec<_>>()}),
             )?;
         }
         Command::Analyze {

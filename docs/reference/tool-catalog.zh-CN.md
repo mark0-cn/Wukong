@@ -15,6 +15,9 @@
 | `artifact_validate` | verifier | 是 | Linux self_check_v1 + py_run + file.put + job.status + job.artifacts | 仅 verifier 可用：对 self_check_v1 Python 或 Shell 脚本独立测试正常、异常退出、信号、超时、缺失、截断和矛盾观测。绑定生产者内容证据、verifier 成功执行同一目标 --verify 的基线任务及导入的 baseline.json。启动可信有界驱动任务；观察结果后才能声明验收通过。覆盖模拟判定，不证明目标行为或采集路径连接。 |
 | `binary_inspect` | analyst / verifier | 否 | controller | 检查本 run 的精确目标、架构、节、导入、符号和缓解机制。 |
 | `binary_strings` | analyst / verifier | 否 | controller | 分页搜索可打印字符串，附文件偏移地址引用。 |
+| `bundle_evidence` | analyst / verifier | 否 | controller | 把一个已校验 bundle 成员导入为不可变证据，以便用 target_evidence_id 检查或反编译。路径相对于被分析目录。 |
+| `bundle_manifest` | analyst / verifier | 否 | controller | 返回目录 bundle 清单：自动哈希的成员、推断的 executable/library/data 类型、PE 导入和跨成员导入边。无需用户标注角色；entry 是推断出的启动候选。 |
+| `bundle_stage` | analyst / verifier | 是 | file.upload.begin + file.upload.write + file.upload.commit + file.put | 上传选定的 bundle 入口及最多 64 个成员；上传前校验路径和启动选项。可用 entry、members、args、cwd、input_mode 覆盖推断的默认值。不可变 LaunchSpec 路径包含内容哈希；调用 job_start 时传 launch_spec，省略 argv/timeout_secs/cwd/env。 |
 | `context_read` | 全部 | 否 | controller | 按字符范围读取同 run 的确切共享文档 JSON，含 amendments。kind/id 来自 context_search；沿 content.next_offset 读取所需完整内容。 |
 | `context_search` | 全部 | 否 | controller | 按文本、kind、作者 scope 或 agent_id 搜索同 run 的笔记、待办和可选威胁模型。返回有界预览和 next_offset；用 context_read 读取完整正文及 amendments。 |
 | `coverage_list` | 全部 | 否 | controller | 列出本次分析的全部覆盖记录。 |
@@ -56,6 +59,15 @@
 | `job_cancel` | analyst / verifier | 是 | job.cancel | 请求取消所属的同 run job。 |
 | `job_start` | analyst / verifier | 是 | job.start | 在配置的 worker 启动持久进程任务，立即返回 job_id。使用 argv，或已暂存的 launch_spec（记录目标、文件、参数、cwd、环境和输入模式）；input 选择已暂存数据文件。有 launch_spec 时省略 argv/env/cwd 覆盖并保留其超时。原始 argv 与 executable_inputs 可使用 {target}；files/... 引用只解析直接参数，不解析 shell 字符串。隔离 Linux 中 argv[0] 和显式 executable_inputs 获得可执行副本，其余文件参数只读。结果包含 cwd、输入哈希与权限。可通过环境变量 WUKONG_STATE_DIR 和 WUKONG_JOB_DIR 读取路径。 |
 | `job_status` | analyst / verifier | 否 | job.status | 观察同 run job，刷新持久状态并导入原始观察。 |
+| `lab_install` | analyst / verifier | 是 | controller | 通过已配置的管理通道启动安装并返回 operation_id。整个安装受 1–600 秒总时限约束，使用固定哈希介质及检查声明文件、服务、账户的客体回执。通过 lab_operation_status 查询；缺少回执时保留未知结果。要求工作节点资源空闲且证据同步完毕。 |
+| `lab_list` | analyst / verifier | 否 | controller | 列出已配置的 Windows 实验 VM 别名及分配的环境，不连接或修改状态。 |
+| `lab_operation_cancel` | analyst / verifier | 是 | controller | 请求中断自己拥有的实验宿主操作。取消后客体影响可能仍未知；再次修改前须检查并调和原操作。 |
+| `lab_operation_status` | analyst / verifier | 否 | controller | 按 operation_id 读取持久化实验宿主操作的结果和证据。控制器归属丢失时保留结果未知，不重放操作。 |
+| `lab_prepare` | analyst / verifier | 是 | controller | 启动当前分配的 Windows 实验环境准备并返回 operation_id。控制器依据调用者和评估证据引用确定归属、目标与包哈希；spec 使用明确类型。通过 lab_operation_status 获取 lab_id/generation 租约；运行准入会拒绝未支持的执行要求。 |
+| `lab_prune` | analyst / verifier | 是 | controller | 启动闲置实验前缀快照清理并返回 operation_id。保留基线及活动快照，拒绝待恢复状态并检查归属。用 lab_operation_status 查询逐快照结果。 |
+| `lab_restore` | analyst / verifier | 是 | controller | 启动受归属和代际约束的基线恢复并返回 operation_id。要求调用者持有有效的 lab_id/generation，工作节点资源空闲且证据同步完毕。只有确认恢复后才将未知影响标记为 lost；快照清理单独报告。用 lab_operation_status 查询。 |
+| `lab_run` | analyst / verifier | 是 | job.start + file.put + job.status + job.cancel | 将校验后的 exe/user 测试程序作为普通持久化评估任务启动，返回 run.job_id。用该句柄调用 job_status、job_cancel 和 job_artifacts。支持 stdin 证据或空 argv；声明的目标哈希必须匹配。继续使用评估共享租约及任务完成检查。 |
+| `lab_status` | analyst / verifier | 否 | controller | 读取指定 Windows 实验 VM 的持久状态及有时限的宿主观测。必须提供 vm；发现配置请使用 lab_list。不执行调和或状态修改，长操作期间仍可查询。 |
 | `libc_identify` | analyst / verifier | 否 | libc.identify | 使用同进程符号泄漏比较最多 16 份同 run ELF libc 候选；省略时只检查 worker libc。保留哈希、Build ID、架构、不一致泄漏和歧义。候选不确认映射身份，无匹配仅描述搜索集合。 |
 | `load_skill` | 全部 | 是 | controller | 激活内置或自定义能力/方法。root/analyst/verifier 角色指令自动安装，不能在此加载。初始与动态能力合计最多五个名称。精确正文/哈希持久化，下一新模型边界生效，替代同名初始正文并跨压缩/恢复保留。加载不改变角色、权限或完成条件。 |
 | `message_status` | 全部 | 否 | controller | 查看收发消息、投递状态和关联回复。 |
@@ -63,7 +75,7 @@
 | `note_save` | 全部 | 是 | controller | 保存关联本任务的共享笔记。 |
 | `notes_list` | 全部 | 否 | controller | 列出本分析共享笔记。 |
 | `poc_verify` | analyst / verifier | 是 | poc.verify | 在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。原生 Windows worker 仅支持 argv/stdin 重放；成功以 worker 观察为准。 |
-| `py_run` | analyst / verifier | 是 | py.run | 一步在 worker 运行 Python 源文，无需 base64/file_put。先语法检查并直接返回编译错误，再创建后台 job（job_status 读输出）。可选 argv 对应 sys.argv[1..]；可选 target 暂存路径附加为最后参数，在隔离 job 自动暂存，用 sys.argv[-1] 读取。多行脚本优先于 file_put+job_start。 隔离环境中的 target 是只读、可执行的副本；原始附件保持不变。 |
+| `py_run` | analyst / verifier | 是 | py.run | 一步在 worker 运行 Python。小脚本直接用 source 文本；大脚本先用 file_put 的 text 上传，再把返回路径作为 source_file（source/source_file 只能二选一）。worker 先做语法检查并直接返回编译错误，再创建后台 job（用 job_status 读输出）。可选 argv 对应 sys.argv[1..]；可选 target 暂存路径追加为最后参数，在隔离 job 中作为只读可执行副本，用 sys.argv[-1] 读取。 |
 | `runtime_doctor` | 全部 | 否 | explicit probe | 检查已配置 worker 的真实平台、版本及能力。 |
 | `runtime_prepare` | analyst / verifier | 是 | runtime.prepare | 为提供的 target/libc/loader 创建不可变执行副本并返回直接 argv。三份 ELF 架构须一致。不执行或修改原件；真实映射另行确认。 |
 | `runtime_profile` | analyst / verifier | 否 | runtime.profile | 检查同 run target/libc/loader 的 SHA256、ELF Build ID 和架构；可选观察所属存活调试会话真实映射。文件候选不代表确认运行时。 |

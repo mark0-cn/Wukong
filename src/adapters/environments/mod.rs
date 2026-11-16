@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{Mutex, OnceCell};
+pub mod lab_guard;
 pub mod registration;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -112,6 +113,8 @@ type LeaseCache =
 pub struct EnvironmentRegistry {
     entries: Arc<BTreeMap<String, Entry>>,
     leases: LeaseCache,
+    lab_paths: Arc<BTreeMap<String, std::path::PathBuf>>,
+    lab_guards: Arc<Mutex<BTreeMap<String, crate::adapters::files::locks::FileLock>>>,
 }
 
 impl EnvironmentRegistry {
@@ -134,7 +137,24 @@ impl EnvironmentRegistry {
         Ok(Self {
             entries: Arc::new(entries),
             leases: Default::default(),
+            lab_paths: Default::default(),
+            lab_guards: Default::default(),
         })
+    }
+
+    pub fn with_lab_guards(mut self, labs: &crate::config::WindowsLabConfig) -> Result<Self> {
+        let mut paths = BTreeMap::new();
+        for vm in labs.vms.values() {
+            if let Some(environment) = &vm.environment {
+                let path = lab_guard::path(&vm.vmx)?;
+                ensure!(
+                    paths.insert(environment.clone(), path).is_none(),
+                    "duplicate lab environment mapping"
+                );
+            }
+        }
+        self.lab_paths = Arc::new(paths);
+        Ok(self)
     }
 
     pub fn config(&self, id: &str) -> Result<&EnvironmentConfig> {
@@ -211,6 +231,13 @@ impl EnvironmentRegistry {
         run: &str,
         owner: Option<&str>,
     ) -> Result<RuntimeClient> {
+        let mut leases = self.leases.lock().await;
+        if let Some(path) = self.lab_paths.get(id) {
+            let mut guards = self.lab_guards.lock().await;
+            if !guards.contains_key(id) {
+                guards.insert(id.into(), lab_guard::acquire(path, false)?);
+            }
+        }
         let client = self.client(id).await?;
         let config = self.config(id)?;
         if config.platform != Platform::Windows
@@ -230,7 +257,7 @@ impl EnvironmentRegistry {
             .await??,
         )?;
         lease.validate(run, owner, client.identity())?;
-        self.leases.lock().await.insert(
+        leases.insert(
             LeaseKey {
                 environment: id.into(),
                 run: run.into(),
@@ -251,7 +278,106 @@ impl EnvironmentRegistry {
             .map(|key| key.environment.clone())
             .collect();
         for id in ids {
-            self.bind(&id, run, Some(owner)).await?;
+            // Recheck under the same lock as release. A supervisor snapshot
+            // must never reacquire a scope that maintenance just released.
+            let mut leases = self.leases.lock().await;
+            let key = LeaseKey {
+                environment: id.clone(),
+                run: run.into(),
+                owner: owner.into(),
+            };
+            let Some(previous) = leases.get(&key) else {
+                continue;
+            };
+            let next: crate::adapters::worker::protocol::EnvironmentLease = serde_json::from_value(
+                self.lease_client(&id)
+                    .await?
+                    .call(
+                        "environment.lease.acquire",
+                        json!({"run_id":run,"owner_id":owner}),
+                    )
+                    .await?,
+            )?;
+            next.validate(run, owner, self.client(&id).await?.identity())?;
+            ensure!(
+                next.same_fence(previous),
+                "environment lease changed during renewal"
+            );
+            leases.insert(key, next);
+        }
+        Ok(())
+    }
+
+    /// A fresh exclusive worker lease also fences orphan resources left by a
+    /// controller crash. The worker refuses takeover until its journal is idle.
+    pub(crate) async fn maintenance(&self, environment: &str) -> Result<MaintenanceLease> {
+        let config = self.config(environment)?;
+        ensure!(
+            config.platform == Platform::Windows
+                && config.runtime.backend() != RuntimeBackend::TrustedLocal,
+            "VM maintenance requires a registered native Windows worker"
+        );
+        let client = self.lease_client(environment).await?.clone();
+        let identity = uuid::Uuid::new_v4().simple().to_string();
+        let run = format!("maintenance-{identity}");
+        let owner = run.clone();
+        let lease: crate::adapters::worker::protocol::EnvironmentLease = serde_json::from_value(
+            client
+                .call(
+                    "environment.lease.acquire",
+                    json!({"run_id":run,"owner_id":owner}),
+                )
+                .await?,
+        )?;
+        lease.validate(&run, &owner, client.identity())?;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let stop = cancellation.clone();
+        let renewed = client.clone();
+        let fence = lease.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = stop.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                        let next = renewed.call("environment.lease.acquire", json!({"run_id":run,"owner_id":owner})).await;
+                        let valid = next.and_then(|v| Ok(serde_json::from_value::<crate::adapters::worker::protocol::EnvironmentLease>(v)?))
+                            .is_ok_and(|next| next.same_fence(&fence));
+                        if !valid { tracing::error!("maintenance lease heartbeat lost; VM operation requires reconciliation"); break; }
+                    }
+                }
+            }
+            let _ = renewed
+                .call("environment.lease.release", json!({"lease":fence}))
+                .await;
+        });
+        Ok(MaintenanceLease {
+            cancellation,
+            task: Some(task),
+        })
+    }
+
+    /// Release only the exact caller scope, retaining other assessments and transports.
+    pub(crate) async fn release_scope(
+        &self,
+        environment: &str,
+        run: &str,
+        owner: &str,
+    ) -> Result<()> {
+        let key = LeaseKey {
+            environment: environment.into(),
+            run: run.into(),
+            owner: owner.into(),
+        };
+        let mut leases = self.leases.lock().await;
+        if let Some(lease) = leases.get(&key) {
+            self.lease_client(environment)
+                .await?
+                .call("environment.lease.release", json!({"lease":lease}))
+                .await?;
+            leases.remove(&key);
+        }
+        if !leases.keys().any(|key| key.environment == environment) {
+            self.lab_guards.lock().await.remove(environment);
         }
         Ok(())
     }
@@ -267,6 +393,7 @@ impl EnvironmentRegistry {
                 tracing::warn!(%error,"environment lease retained until owned resources are reconciled");
             }
         }
+        self.lab_guards.lock().await.clear();
         for entry in self.entries.values() {
             if let Some(client) = entry.client.get() {
                 let _ = client.close().await;
@@ -275,5 +402,25 @@ impl EnvironmentRegistry {
                 let _ = client.close().await;
             }
         }
+    }
+}
+
+pub(crate) struct MaintenanceLease {
+    cancellation: tokio_util::sync::CancellationToken,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+impl Drop for MaintenanceLease {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
+}
+
+impl MaintenanceLease {
+    pub(crate) async fn finish(mut self) -> Result<()> {
+        self.cancellation.cancel();
+        if let Some(task) = self.task.take() {
+            task.await?;
+        }
+        Ok(())
     }
 }

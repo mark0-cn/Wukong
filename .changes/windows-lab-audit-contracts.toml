@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Fence Windows lab operations by physical VM, configuration and caller; use durable host-operation handles and supervised jobs; verify offline packages and guest installation receipts. Agent preparation takes evidence references and injected ownership, with OS/toolchain notes under annotations. Only the current contract is supported; no migration or legacy compatibility is provided."
+zh_CN = "按物理虚拟机、配置和调用者约束 Windows 实验操作；使用持久化宿主操作句柄和受监督任务，验证离线包与来宾安装回执。Agent 准备操作使用证据引用并自动绑定所有者，系统和工具链说明放在 annotations 下。仅支持当前契约，不提供迁移或旧版兼容。"

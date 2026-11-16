@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Analyze Windows targets with Linux static tools: a registered Docker Linux environment can supply Ghidra while execution stays on the Windows worker, and child agents can drive the lab lifecycle through lab_status/lab_prepare/lab_run/lab_install/lab_restore/lab_prune. Large Python scripts can be uploaded first and run with py_run source_file."
+zh_CN = "使用 Linux 静态工具分析 Windows 目标：已登记的 Docker Linux 环境可提供 Ghidra，执行仍留在 Windows worker；子代理可通过 lab_status/lab_prepare/lab_run/lab_install/lab_restore/lab_prune 驱动实验室生命周期。较大的 Python 脚本可先上传，再用 py_run 的 source_file 执行。"

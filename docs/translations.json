@@ -14,8 +14,8 @@
       "zh-CN": "c7347269092896acf0a14bf5ec23ed7a4082e233587c83df2d8689af14ee129b"
     },
     "docs/README.md": {
-      "en": "5b258ea0bf3bcbc247c65020829271334302fe0dc2e01d9847fa154f354f091f",
-      "zh-CN": "04ef38f29d72fd0ea63c0106c81e86210272b0617def67218e6079dbbcf6d01d"
+      "en": "4a3e81ec55758eca24625918a8e33351ad2dac8f0b117d867c2a10dc11bf07ab",
+      "zh-CN": "f3d70c02fab4d30f2b1ea9141eaf5ce0a02f053413629cf70d84e0af3ab7c9e4"
     },
     "docs/design/architecture.md": {
       "en": "b9125bf15f017ca01fdff24c0ae32e946afe1b1cc56c36a9e0b3317f79350031",
@@ -28,6 +28,10 @@
     "docs/design/implementation-contract.md": {
       "en": "579c18b2a2fe5944c829359f89e0a7c3b143555666f2c15ed5c1d710f1f8b94c",
       "zh-CN": "99de4fb39618f470be7eb5adc193c69ae9761d359dce89bce9dae569d24f4343"
+    },
+    "docs/design/windows-lab.md": {
+      "en": "a2971d7988fc548605b5d1aa01e10f9b9d368896e8d238419fb09bc2781a50d1",
+      "zh-CN": "f196425035123625e138ee1b5488d5c4e6b27dc321a2397e99be0086b2cbd49e"
     },
     "docs/development/commits.md": {
       "en": "328bb6704645a84d522c3b2a6a122d0c7c580287ec5321f7e70b5b3aadf52bf5",
@@ -106,8 +110,8 @@
       "zh-CN": "1edce24e862bbc1c082016383088c2703f2548180d9886c731594b0f71ab6e18"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "9c36557898791310995f2bf53c14e2f46b16389e449e0b74b3b36b8dd17ec381",
-      "zh-CN": "514afac4eef2377e690765ac558d03ebbd456d52749c86f95fc0ff91558beb41"
+      "en": "e2057bce2fd51441ebc6bd8041a01d69ad0b1319aa6f26b484e3d065e8b80c24",
+      "zh-CN": "2378de8fabe0845ac0d2c8ea7d580c2de1a6cf7a475e15a2ba05b962a63494f0"
     },
     "docs/user/languages.md": {
       "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
@@ -122,8 +126,8 @@
       "zh-CN": "11b6e828ccc1953a223f868a234c45ea53abed0a94d3b3602866035e5b1fd483"
     },
     "docs/user/usage.md": {
-      "en": "47b9c79ed859c7aedfd0cc55a6287770735daccee7fe9e7d2f26dc0ae87029e1",
-      "zh-CN": "d7b690ba78bbe5f92ceb2423a2e8014394a132e130954c8176a11580ccd4c6cb"
+      "en": "cffa095d8b4f6d27cd6c475371491ec616ebd6ae107e7cf1f2912f8fbb0e4cdd",
+      "zh-CN": "4d666b8363b68534f53019b5cce341578b21c212ee5774eed8cdf73e0ca61b18"
     },
     "evals/README.md": {
       "en": "8fb115c1b503627b087374bb0a3b254a140e6094baa6df91452a763a761b78ed",

@@ -18,6 +18,9 @@ pub struct StaticConfig {
     pub ghidra_executable: Option<PathBuf>,
     pub ghidra_cache_dir: PathBuf,
     pub ghidra_script_dir: Option<PathBuf>,
+    /// Registered Linux environment used for Ghidra static analysis when the
+    /// bound worker has no Ghidra (for example a Windows execution worker).
+    pub static_environment: Option<String>,
     pub timeout_seconds: u64,
     pub analysis_timeout_seconds: u64,
     pub max_cpu: usize,
@@ -28,6 +31,7 @@ impl Default for StaticConfig {
             ghidra_executable: None,
             ghidra_cache_dir: PathBuf::from(".wukong/ghidra"),
             ghidra_script_dir: None,
+            static_environment: None,
             timeout_seconds: 300,
             analysis_timeout_seconds: 240,
             max_cpu: 2,
@@ -80,6 +84,132 @@ impl Default for ExecutionConfig {
         }
     }
 }
+/// Controller-owned Windows experiment VM registry. Host paths and the VMware
+/// executable come from operator configuration; model input never supplies them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsLabConfig {
+    pub vms: std::collections::BTreeMap<String, WindowsLabVm>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsLabVm {
+    pub vmx: PathBuf,
+    pub vmrun: PathBuf,
+    /// Registered Windows environment that executes packaged harnesses in this VM.
+    pub environment: Option<String>,
+    /// Administrative channel used only for service/driver installation media.
+    pub admin: Option<WindowsLabAdmin>,
+    pub baseline_snapshot: String,
+    pub snapshot_prefix: String,
+    /// Upper bound for one VMware host operation (snapshot, revert, start).
+    pub operation_timeout_seconds: u64,
+    pub start_after_restore: bool,
+}
+impl Default for WindowsLabVm {
+    fn default() -> Self {
+        Self {
+            vmx: PathBuf::new(),
+            vmrun: PathBuf::from("vmrun"),
+            environment: None,
+            admin: None,
+            baseline_snapshot: "wukong-lab-baseline".into(),
+            snapshot_prefix: "wukong-lab".into(),
+            operation_timeout_seconds: 300,
+            start_after_restore: false,
+        }
+    }
+}
+fn valid_snapshot_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsLabAdmin {
+    pub user: String,
+    /// Environment variable holding the password; never persisted in TOML.
+    pub password_env: String,
+}
+impl Default for WindowsLabAdmin {
+    fn default() -> Self {
+        Self {
+            user: "Administrator".into(),
+            password_env: "WUKONG_LAB_ADMIN_PASSWORD".into(),
+        }
+    }
+}
+impl AppConfig {
+    fn validate_windows_lab(&self) -> Result<()> {
+        let mut physical_vms = std::collections::BTreeSet::new();
+        let mut lab_environments = std::collections::BTreeSet::new();
+        for (id, vm) in &self.windows_lab.vms {
+            ensure!(
+                physical_vms.insert(crate::adapters::environments::lab_guard::physical_identity(
+                    &vm.vmx
+                )?),
+                "multiple lab aliases name the same physical VM"
+            );
+            if let Some(environment) = &vm.environment {
+                ensure!(
+                    lab_environments.insert(environment),
+                    "multiple lab VMs name the same environment"
+                );
+            }
+            crate::adapters::environments::validate_id(id)?;
+            ensure!(
+                vm.vmx.is_absolute() && vm.vmrun.is_absolute(),
+                "windows_lab VM {id} requires absolute vmx and vmrun paths"
+            );
+            ensure!(
+                vm.vmx.extension().is_some_and(|ext| ext == "vmx"),
+                "windows_lab VM {id} vmx must name a .vmx file"
+            );
+            ensure!(
+                valid_snapshot_name(&vm.baseline_snapshot)
+                    && valid_snapshot_name(&vm.snapshot_prefix),
+                "windows_lab VM {id} snapshot names contain unsupported characters"
+            );
+            ensure!(
+                vm.snapshot_prefix != vm.baseline_snapshot && vm.snapshot_prefix.len() <= 48,
+                "windows_lab VM {id} needs a distinct, short snapshot prefix"
+            );
+            ensure!(
+                (30..=3600).contains(&vm.operation_timeout_seconds),
+                "windows_lab VM {id} operation timeout must be 30–3600 seconds"
+            );
+            if let Some(environment) = &vm.environment {
+                let configured = self.environments.get(environment).with_context(|| {
+                    format!("windows_lab VM {id} references an unknown environment")
+                })?;
+                ensure!(
+                    configured.platform == crate::adapters::environments::Platform::Windows,
+                    "windows_lab VM {id} environment must be a Windows environment"
+                );
+            }
+            if let Some(admin) = &vm.admin {
+                ensure!(
+                    !admin.user.trim().is_empty()
+                        && admin.user.len() <= 128
+                        && !admin.user.contains(['\n', '\r', '\0']),
+                    "windows_lab VM {id} admin user is invalid"
+                );
+                ensure!(
+                    !admin.password_env.is_empty()
+                        && admin
+                            .password_env
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+                    "windows_lab VM {id} admin password_env must name an environment variable"
+                );
+            }
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
@@ -99,6 +229,7 @@ pub struct AppConfig {
     pub demos_dir: Option<PathBuf>,
     pub mcp: Vec<McpServerConfig>,
     pub execution: ExecutionConfig,
+    pub windows_lab: WindowsLabConfig,
 }
 impl Default for AppConfig {
     fn default() -> Self {
@@ -119,6 +250,7 @@ impl Default for AppConfig {
             demos_dir: Some(PathBuf::from(crate::application::prompts::EXAMPLES_DIR)),
             mcp: vec![],
             execution: ExecutionConfig::default(),
+            windows_lab: WindowsLabConfig::default(),
         }
     }
 }
@@ -162,6 +294,10 @@ impl AppConfig {
                 resolve(base, &mut ssh.known_hosts_file);
             }
         }
+        for vm in self.windows_lab.vms.values_mut() {
+            resolve(base, &mut vm.vmx);
+            resolve(base, &mut vm.vmrun);
+        }
         resolve(base, &mut self.analysis.ghidra_cache_dir);
         if let Some(p) = &mut self.skills_dir {
             resolve(base, p);
@@ -180,6 +316,7 @@ impl AppConfig {
     }
     pub fn validate(&self) -> Result<()> {
         self.model.validate()?;
+        self.validate_windows_lab()?;
         ensure!(
             self.execution.output_recovery_attempts <= 2,
             "output_recovery_attempts must be at most 2"
@@ -192,6 +329,16 @@ impl AppConfig {
             ensure!(
                 self.environments.contains_key(default),
                 "default environment is not registered: {default}"
+            );
+        }
+        if let Some(static_environment) = &self.analysis.static_environment {
+            let environment = self
+                .environments
+                .get(static_environment)
+                .with_context(|| "analysis.static_environment references an unknown environment")?;
+            ensure!(
+                environment.platform == crate::adapters::environments::Platform::Linux,
+                "analysis.static_environment must be a Linux environment"
             );
         }
         ensure!(

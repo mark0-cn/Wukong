@@ -938,7 +938,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::PyRunArgs>(
             "py_run",
             "tool-py-run",
-            "Run a Python script in the worker in ONE step: pass the source text directly (no base64, no file_put). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv as a read-only executable copy in isolated jobs — read it from sys.argv[-1]. Prefer this over file_put+job_start for any script longer than one line.",
+            "Run a Python script in the worker in ONE step. Pass small scripts as source text; for larger scripts use file_put with text and pass the returned path as source_file (exactly one of source/source_file). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv as a read-only executable copy in isolated jobs — read it from sys.argv[-1].",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {
@@ -995,6 +995,47 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::All,
             Requirement::Worker(&[Method::InputMinimize]),
         ),
+        spec::<args::BundleEmptyArgs>(
+            "bundle_manifest",
+            "tool-bundle-manifest",
+            "Return the directory bundle manifest: auto-hashed members, inferred executable/library/data kinds, PE imports and cross-member import edges. No user-assigned roles; entry is the inferred launch candidate.",
+            ReplayPolicy::ReadOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_bundle_manifest(&services.bundle, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::BundleMemberArgs>(
+            "bundle_evidence",
+            "tool-bundle-evidence",
+            "Import one verified bundle member as immutable evidence so it can be inspected or decompiled with target_evidence_id. Path is relative to the analyzed directory.",
+            ReplayPolicy::ReadOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_bundle_evidence(&services.bundle, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::BundleStageArgs>(
+            "bundle_stage",
+            "tool-bundle-stage",
+            "Stage a selected bundle entry and up to 64 members, validating paths and launch options before upload. Optional entry, members, args, cwd and input_mode override the inferred defaults. The immutable LaunchSpec path is content-addressed; call job_start with launch_spec and omit argv/timeout_secs/cwd/env.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_bundle_stage(&services.bundle, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Worker(&[
+                Method::UploadBegin,
+                Method::UploadWrite,
+                Method::UploadCommit,
+                Method::FilePut,
+            ]),
+        ),
         spec::<args::PocVerifyArgs>(
             "poc_verify",
             "tool-poc-verify",
@@ -1006,6 +1047,119 @@ fn build_catalog() -> Vec<Spec> {
             },
             Visibility::All,
             Requirement::Worker(&[Method::PocVerify]),
+        ),
+        spec::<args::BundleEmptyArgs>(
+            "lab_list",
+            "tool-lab-list",
+            "List configured Windows lab VM aliases and assigned environments without connecting or changing state.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_list(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabOperationArgs>(
+            "lab_operation_status",
+            "tool-lab-operation-status",
+            "Read a durable lab host operation by operation_id, including its result and evidence. A lost controller leaves the operation uncertain and never replays it.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_operation(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabOperationArgs>(
+            "lab_operation_cancel",
+            "tool-lab-operation-cancel",
+            "Request interruption of your lab host operation. Cancellation can leave guest effects unknown; inspect and reconcile the existing operation before another mutation.",
+            ReplayPolicy::Transactional,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_operation(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabStatusArgs>(
+            "lab_status",
+            "tool-lab-status",
+            "Read the persisted state and bounded host observations for one registered Windows lab VM. Requires vm; use lab_list for discovery. Does not reconcile or modify state and remains available during long operations.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_status(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabPrepareArgs>(
+            "lab_prepare",
+            "tool-lab-prepare",
+            "Start preparation of the assigned Windows lab and return operation_id. The controller derives caller ownership and target/package hashes from assessment evidence references; spec is typed. Query lab_operation_status for the lab_id/generation lease. Unsupported execution requirements are rejected at run admission.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_prepare(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabRunArgs>(
+            "lab_run",
+            "tool-lab-run",
+            "Start a verified exe/user harness as an ordinary durable assessment job and return run.job_id. Use job_status, job_cancel and job_artifacts with that handle. Supports stdin evidence or empty argv; declared target hash must match. Shared assessment leases and completion gates remain in force.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_run(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Worker(&[
+                Method::JobStart,
+                Method::FilePut,
+                Method::JobStatus,
+                Method::JobCancel,
+            ]),
+        ),
+        spec::<args::LabInstallArgs>(
+            "lab_install",
+            "tool-lab-install",
+            "Start installation through the configured administrative channel and return operation_id. Uses one overall timeout (1-600 seconds), hash-pinned media and a guest receipt checking declared files, service and account. Query lab_operation_status; missing receipts remain uncertain. Requires idle worker resources and synchronized evidence.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_install(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabRestoreArgs>(
+            "lab_restore",
+            "tool-lab-restore",
+            "Start a fenced baseline restore and return operation_id. Requires the caller-owned active lab_id/generation and idle worker resources with synchronized evidence. Unknown effects become lost only after confirmed restoration; snapshot pruning is reported separately. Query lab_operation_status.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_restore(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabPruneArgs>(
+            "lab_prune",
+            "tool-lab-prune",
+            "Start pruning unused lab-prefixed snapshots and return operation_id. Keeps the baseline and active snapshot, rejects pending recovery and checks ownership. Query lab_operation_status for per-snapshot results.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_prune(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
         ),
     ]
 }
@@ -1025,6 +1179,15 @@ mod role_tests {
         assert!(!validator.allows(Role::Root));
         assert!(!validator.allows(Role::Analyst));
         assert!(validator.allows(Role::Verifier));
+        for name in ["lab_status", "lab_prepare", "lab_run", "lab_install"] {
+            let spec = builtins()
+                .iter()
+                .find(|s| s.definition.name.as_str() == name)
+                .unwrap();
+            assert!(!spec.allows(Role::Root), "{name}");
+            assert!(spec.allows(Role::Analyst), "{name}");
+            assert!(spec.allows(Role::Verifier), "{name}");
+        }
         for name in [
             "binary_inspect",
             "function_decompile",

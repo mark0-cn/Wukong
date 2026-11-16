@@ -70,6 +70,9 @@ output_usd_per_million = 0.0
 [analysis]
 # Optional local Ghidra launcher; use the version required by your installed JDK.
 # ghidra_executable = "C:/tools/ghidra/support/analyzeHeadless.bat"
+# Or reuse a registered Linux worker's Ghidra when the bound Windows worker
+# lacks it. Static queries run there while execution stays on Windows.
+# static_environment = "linux"
 ghidra_cache_dir = ".wukong/ghidra"
 # timeout_seconds must cover analysis_timeout_seconds (validated at startup).
 timeout_seconds = 300
@@ -112,3 +115,18 @@ root = ".wukong/workbench"
 image = "wukong:0.1"
 memory = "4g"
 cpus = 2
+
+# Controller-owned Windows experiment VM lifecycle (`wukong lab`). Paths must be
+# absolute; only these registered identities can be addressed and the adapter
+# builds every VMware argument.
+# [windows_lab.vms.lab]
+# vmx = "D:/vm/win10/Windows 10 x64.vmx"
+# vmrun = "D:/VMware/VMware Workstation/vmrun.exe"
+# environment = "windows"
+# baseline_snapshot = "wukong-lab-baseline"
+# snapshot_prefix = "wukong-lab"
+# operation_timeout_seconds = 300
+# start_after_restore = true
+# [windows_lab.vms.lab.admin]
+# user = "Administrator"
+# password_env = "WUKONG_LAB_ADMIN_PASSWORD"

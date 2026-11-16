@@ -102,7 +102,15 @@ impl ExecutionService {
                         .await?;
                 }
                 if name == "py_run" {
-                    let _ = text(&args, "source")?;
+                    let source = args["source"].as_str().filter(|value| !value.is_empty());
+                    let source_file = args["source_file"].as_str();
+                    ensure!(
+                        source.is_some() != source_file.is_some(),
+                        "py_run requires exactly one of source or source_file"
+                    );
+                    if let Some(file) = source_file {
+                        self.files.known_file(agent, file, false)?;
+                    }
                     if let Some(target) = args.get("target").and_then(Value::as_str) {
                         self.files.known_file(agent, target, true)?;
                     }
@@ -120,6 +128,14 @@ impl ExecutionService {
                         ensure!(
                             string_list(&args, "argv")?.is_empty(),
                             "LaunchSpec owns job argv"
+                        );
+                        ensure!(
+                            args.get("timeout_secs").is_none(),
+                            "LaunchSpec owns its execution timeout; omit timeout_secs"
+                        );
+                        ensure!(
+                            args.get("cwd").is_none() && args.get("env").is_none(),
+                            "LaunchSpec owns cwd and environment; omit those overrides"
                         );
                     } else {
                         ensure!(

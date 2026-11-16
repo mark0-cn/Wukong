@@ -111,6 +111,22 @@ Run at the repository root, using the quick-start release binary and root config
 
 Launch `Wukong.lnk` in the destination thereafter. Configuration still saves to the original selected file; the script does not change workspace or Docker permissions. Close the old window and rerun the script after rebuilding.
 
+### Windows experiment VM lifecycle
+
+`wukong lab` prepares, restores and fences the registered VMware experiment VM. One experiment runs per VM at a time. `lab prepare` creates the baseline when missing plus one experiment snapshot and returns a lease; `lab restore` advances the generation before reverting, so an old lease cannot run again; `lab reconcile` resolves an interrupted operation after you inspect the VM.
+
+```powershell
+wukong --config wukong.toml lab status --vm lab
+wukong --config wukong.toml lab package --vm lab --spec spec.json
+wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parser --spec spec.json
+wukong --config wukong.toml lab run --vm lab --lab <lab_id> --generation <n> --artifact harness.exe
+wukong --config wukong.toml lab install --vm lab --lab <lab_id> --generation <n>
+wukong --config wukong.toml lab prune --vm lab
+wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
+```
+
+`lab package` fetches or copies the spec's dependencies, verifies every SHA-256 and publishes a reusable offline package without touching the VM; `lab prepare` binds that package and the validated install/cleanup plan into the lease. `lab run` uploads one packaged prebuilt EXE through the registered Windows worker, records an immutable receipt, and marks transport failures unknown; restore the baseline to reconcile an unknown run. `lab install` copies the package to the guest and runs its hash-pinned `install.ps1` through the administrative channel; the password is read from the configured environment variable and never stored. No cleanup is executed: restore the baseline after each analysis. `lab restore` prunes the experiment snapshot it used; `lab prune` removes older lab snapshots while keeping the baseline and any active experiment. Run the CLI from a normal-integrity directory outside a Low-labeled build tree. See [Windows experiment lab](../design/windows-lab.md).
+
 <a id="配置与模型"></a>
 
 ## Configuration and models
@@ -132,7 +148,10 @@ Desktop defaults are Windows `%LOCALAPPDATA%/WukongData/wukong.toml` and Linux `
 ```sh
 wukong --config ./wukong.toml --state ./saved-state gui
 wukong --config ./wukong.toml analyze ./sample.elf --task "Recover the record format and verify field boundaries"
+wukong --config ./wukong.toml analyze ./install-dir --task "Find cross-file vulnerabilities in this program"
 ```
+
+A directory target is scanned as a bundle: every file is hashed, PE kinds/imports are inferred, and cross-member edges are exposed. Use `bundle_manifest`, `bundle_evidence` and `bundle_stage` to inspect a DLL separately or run the inferred entry with its sidecar files.
 
 <a id="模型服务"></a>
 

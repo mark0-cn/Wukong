@@ -1,3 +1,4 @@
+pub mod bundle;
 mod claims;
 pub(crate) use claims::flag_claims;
 mod rules;
@@ -149,6 +150,9 @@ pub struct RunRecord {
     pub id: String,
     pub target_path: PathBuf,
     pub target_sha256: String,
+    /// Present when the target was analyzed as a directory bundle.
+    #[serde(default)]
+    pub bundle: Option<bundle::BundleManifest>,
     pub task: String,
     pub status: Status,
     pub root_id: String,

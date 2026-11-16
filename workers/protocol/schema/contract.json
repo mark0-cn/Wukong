@@ -4978,6 +4978,39 @@
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
+        "oneOf": [
+          {
+            "not": {
+              "required": [
+                "source_file"
+              ]
+            },
+            "properties": {
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          {
+            "not": {
+              "required": [
+                "source"
+              ]
+            },
+            "properties": {
+              "source_file": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "source_file"
+            ]
+          }
+        ],
         "properties": {
           "argv": {
             "items": {
@@ -5000,7 +5033,18 @@
           "source": {
             "maxLength": 262144,
             "minLength": 1,
-            "type": "string"
+            "pattern": "[^\\s]",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_file": {
+            "description": "Worker file containing the script; mutually exclusive with source.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "target": {
             "description": "Target appended to sys.argv as an immutable executable copy in isolation.",
@@ -5019,9 +5063,6 @@
             ]
           }
         },
-        "required": [
-          "source"
-        ],
         "title": "PyRunArgs",
         "type": "object"
       },

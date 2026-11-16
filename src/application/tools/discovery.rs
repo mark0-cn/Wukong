@@ -11,18 +11,35 @@ pub(crate) struct ToolSelection {
 impl ToolService {
     /// Initial access is conservative and performs no worker IO.
     pub(crate) fn model_tool_names(&self, agent: &AgentMetadata) -> Result<BTreeSet<String>> {
-        Ok(self.selection(agent, None).names)
+        Ok(self.selection(agent, None, None).names)
     }
 
-    fn selection(&self, agent: &AgentMetadata, observation: Option<&Value>) -> ToolSelection {
+    fn selection(
+        &self,
+        agent: &AgentMetadata,
+        observation: Option<&Value>,
+        static_observation: Option<&Value>,
+    ) -> ToolSelection {
         let local = self.local_ghidra().is_some_and(|path| path.is_file());
+        let static_ghidra = static_observation
+            .is_some_and(|value| value["methods"][Method::GhidraQuery.name()]["ready"] == true);
         let mut names = BTreeSet::new();
         let mut unavailable = Vec::new();
         for spec in builtins()
             .iter()
             .filter(|spec| spec.model_visible && spec.allows(agent.role))
         {
-            if spec.requirement.available(observation, local) {
+            if spec.requirement.available(
+                if matches!(spec.requirement, requirements::Requirement::Ghidra)
+                    && self.static_environment.is_some()
+                {
+                    static_observation
+                } else {
+                    observation
+                },
+                local,
+                static_ghidra,
+            ) {
                 names.insert(spec.definition.name.to_string());
             } else {
                 unavailable
@@ -46,7 +63,7 @@ impl ToolService {
     pub(crate) async fn prepare_tool_selection(&self, agent: &AgentMetadata) -> ToolSelection {
         // Root orchestration never connects implicitly. Explicit doctor tools can probe.
         if agent.role == Role::Root || agent.environment_id.is_none() {
-            return self.selection(agent, None);
+            return self.selection(agent, None, None);
         }
         let result = tokio::time::timeout(Duration::from_secs(20), async {
             self.checked_environment(agent).await?.doctor().await
@@ -57,7 +74,29 @@ impl ToolService {
             Ok(Err(error)) => Err(format!("{error:#}")),
             Err(_) => Err("environment preflight timed out after 20 seconds".into()),
         };
-        let mut selection = self.selection(agent, observation.as_ref().ok());
+        let static_observation = if let Some(id) = &self.static_environment {
+            tokio::time::timeout(Duration::from_secs(20), async {
+                environment_service::EnvironmentService {
+                    store: self.store.clone(),
+                    registry: self.environments.clone(),
+                }
+                .checked_id(agent, id)
+                .await?
+                .doctor()
+                .await
+            })
+            .await
+            .ok()
+            .and_then(Result::ok)
+        } else {
+            None
+        };
+        let mut selection = self.selection(
+            agent,
+            observation.as_ref().ok(),
+            static_observation.as_ref(),
+        );
+        selection.environment["static_preflight"] = static_observation.unwrap_or(Value::Null);
         selection.environment["preflight"] = match observation {
             Ok(value) => {
                 json!({"status":"observed","identity":value["identity"],"os":value["os"],"capabilities":value["capabilities"],"methods":value["methods"]})
@@ -113,6 +152,16 @@ for line in sys.stdin:
                 },
             },
         );
+        let mut unavailable = config.environments["fixture"].clone();
+        unavailable.platform = crate::adapters::environments::Platform::Linux;
+        let mut static_ssh = crate::adapters::worker::SshConfig::new("unused-fixture".into());
+        static_ssh.ssh_executable = root
+            .join("missing-static-ssh.exe")
+            .to_string_lossy()
+            .into_owned();
+        unavailable.runtime.transport = crate::adapters::worker::TransportConfig::Ssh(static_ssh);
+        config.environments.insert("static".into(), unavailable);
+        config.analysis.static_environment = Some("static".into());
         let store = Store::open(root.join("state"))?;
         let coordinator = Coordinator::new(store.clone());
         let target = root.join("target.bin");
@@ -154,6 +203,15 @@ for line in sys.stdin:
         assert!(selection.names.contains("binary_inspect"));
         assert!(!selection.names.contains("exec_command"));
         assert!(!selection.names.contains("debug_start"));
+        assert!(!selection.names.contains("ghidra_decompile"));
+        // Ordinary bindings remain usable when the configured static backend is down.
+        assert!(tools.bound_to(&child).await.is_ok());
+        assert!(
+            tools
+                .bound_for(&child, requirements::Requirement::Ghidra)
+                .await
+                .is_err()
+        );
         let denied = tools
             .execute(
                 &child.id,

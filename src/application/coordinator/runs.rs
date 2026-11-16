@@ -8,11 +8,19 @@ impl Coordinator {
         budget: Budget,
         config: Value,
     ) -> Result<RunRecord> {
-        let target_path = fs::canonicalize(target).context("target must be an existing file")?;
-        if !target_path.is_file() {
-            bail!("target is not a file");
-        }
-        let target_sha256 = crate::adapters::files::content::sha256_file(&target_path)?;
+        let target_path =
+            fs::canonicalize(target).context("target must be an existing file or directory")?;
+        let (target_path, target_sha256, bundle) = if target_path.is_file() {
+            let sha256 = crate::adapters::files::content::sha256_file(&target_path)?;
+            (target_path, sha256, None)
+        } else if target_path.is_dir() {
+            let bundle = crate::application::bundle::load(&target_path)?;
+            let entry = target_path.join(&bundle.entry);
+            let sha256 = bundle.entry_sha256.clone();
+            (entry, sha256, Some(bundle))
+        } else {
+            bail!("target is neither a file nor a directory");
+        };
         let run_id = id("run");
         let root_id = id("agent");
         let timestamp = now();
@@ -20,6 +28,7 @@ impl Coordinator {
             id: run_id.clone(),
             target_path,
             target_sha256,
+            bundle,
             task: task.to_owned(),
             status: Status::Running,
             root_id: root_id.clone(),
@@ -83,7 +92,7 @@ impl Coordinator {
                 &run.id,
                 Some(&root.id),
                 "run.created",
-                json!({"target_sha256":run.target_sha256,"task":task}),
+                json!({"target_sha256":run.target_sha256,"bundle_sha256":run.bundle.as_ref().map(|bundle| &bundle.bundle_sha256),"task":task}),
             )?;
             Ok(())
         })?;

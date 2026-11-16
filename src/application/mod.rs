@@ -2,6 +2,7 @@
 pub(crate) mod agent_runtime;
 pub mod agents;
 pub mod assessment;
+pub mod bundle;
 pub(crate) mod context;
 pub mod coordinator;
 pub(crate) mod effects;
@@ -13,5 +14,6 @@ pub(crate) mod prompts;
 pub mod queries;
 pub mod tools;
 pub(crate) mod usage;
+pub mod windows_lab;
 // Preserve the original assessment service entry points.
 pub use assessment::{AssessmentService, PreparedAssessment};

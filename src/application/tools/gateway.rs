@@ -4,11 +4,16 @@ use super::*;
 pub(super) struct BoundWorker {
     client: RuntimeClient,
     identity: String,
+    environment_id: String,
 }
 impl BoundWorker {
-    pub(super) fn new(client: RuntimeClient) -> Result<Self> {
+    pub(super) fn new(client: RuntimeClient, environment_id: &str) -> Result<Self> {
         let identity = stable("worker", &serde_json::to_string(client.identity())?);
-        Ok(Self { client, identity })
+        Ok(Self {
+            client,
+            identity,
+            environment_id: environment_id.into(),
+        })
     }
 }
 #[derive(Clone)]
@@ -55,6 +60,19 @@ impl WorkerGateway {
             .worker_reply(agent, call_id, method, &params)?
         {
             return Ok(reply);
+        }
+        if request.method().resources() == wukong_worker_protocol::ResourceDemand::Execution {
+            let run: RunRecord = self.store.load(&agent.run_id)?;
+            if let Some(labs) = run.config.get("windows_lab") {
+                let labs: crate::config::WindowsLabConfig = serde_json::from_value(labs.clone())?;
+                crate::application::windows_lab::check_execution_admission(
+                    self.store.root(),
+                    &labs,
+                    self.worker
+                        .as_ref()
+                        .map(|worker| worker.environment_id.as_str()),
+                )?;
+            }
         }
         let reply = self
             .runtime()?

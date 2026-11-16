@@ -18,6 +18,7 @@ English · [简体中文](README.zh-CN.md)
 ## Design and development
 
 - [Architecture](design/architecture.md) and [implementation contract](design/implementation-contract.md): module responsibilities, runtime semantics and acceptance invariants.
+- [Windows experiment lab](design/windows-lab.md): registered VMware VM lifecycle, generation fencing and restart/timeout reconciliation.
 - [Source setup](development/getting-started.md): client builds, model configuration and Docker tools.
 - [Maintenance](development/maintenance.md): boundaries, generated catalogs and checks.
 - [Documentation maintenance](development/documentation.md) and [localization](development/localization.md): paired guides and product translations.

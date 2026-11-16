@@ -212,8 +212,8 @@
     "text": "在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。原生 Windows worker 仅支持 argv/stdin 重放；成功以 worker 观察为准。"
   },
   "py_run": {
-    "source": "Run a Python script in the worker in ONE step: pass the source text directly (no base64, no file_put). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv as a read-only executable copy in isolated jobs — read it from sys.argv[-1]. Prefer this over file_put+job_start for any script longer than one line.",
-    "text": "一步在 worker 运行 Python 源文，无需 base64/file_put。先语法检查并直接返回编译错误，再创建后台 job（job_status 读输出）。可选 argv 对应 sys.argv[1..]；可选 target 暂存路径附加为最后参数，在隔离 job 自动暂存，用 sys.argv[-1] 读取。多行脚本优先于 file_put+job_start。 隔离环境中的 target 是只读、可执行的副本；原始附件保持不变。"
+    "source": "Run a Python script in the worker in ONE step. Pass small scripts as source text; for larger scripts use file_put with text and pass the returned path as source_file (exactly one of source/source_file). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv as a read-only executable copy in isolated jobs — read it from sys.argv[-1].",
+    "text": "一步在 worker 运行 Python。小脚本直接用 source 文本；大脚本先用 file_put 的 text 上传，再把返回路径作为 source_file（source/source_file 只能二选一）。worker 先做语法检查并直接返回编译错误，再创建后台 job（用 job_status 读输出）。可选 argv 对应 sys.argv[1..]；可选 target 暂存路径追加为最后参数，在隔离 job 中作为只读可执行副本，用 sys.argv[-1] 读取。"
   },
   "runtime_doctor": {
     "source": "Inspect the configured worker's real platform, versions and available capabilities.",
@@ -294,5 +294,53 @@
   "file_revise": {
     "source": "Create an immutable UTF-8 revision from original content evidence and 1..64 sequential, uniquely matching text replacements. name is a logical filename; reuse the returned hash-bound worker path and content_evidence_id. Originals are never overwritten. Prefer small revisions over retransmitting a complete script.",
     "text": "从原始 UTF-8 内容证据和 1–64 个按顺序唯一匹配的文本替换创建不可变修订。name 是逻辑文件名；后续复用返回的哈希绑定工作区路径和 content_evidence_id。绝不覆盖原件。小改动优先使用局部修订，避免重传整份脚本。"
+  },
+  "lab_status": {
+    "source": "Read the persisted state and bounded host observations for one registered Windows lab VM. Requires vm; use lab_list for discovery. Does not reconcile or modify state and remains available during long operations.",
+    "text": "读取指定 Windows 实验 VM 的持久状态及有时限的宿主观测。必须提供 vm；发现配置请使用 lab_list。不执行调和或状态修改，长操作期间仍可查询。"
+  },
+  "lab_prepare": {
+    "source": "Start preparation of the assigned Windows lab and return operation_id. The controller derives caller ownership and target/package hashes from assessment evidence references; spec is typed. Query lab_operation_status for the lab_id/generation lease. Unsupported execution requirements are rejected at run admission.",
+    "text": "启动当前分配的 Windows 实验环境准备并返回 operation_id。控制器依据调用者和评估证据引用确定归属、目标与包哈希；spec 使用明确类型。通过 lab_operation_status 获取 lab_id/generation 租约；运行准入会拒绝未支持的执行要求。"
+  },
+  "lab_run": {
+    "source": "Start a verified exe/user harness as an ordinary durable assessment job and return run.job_id. Use job_status, job_cancel and job_artifacts with that handle. Supports stdin evidence or empty argv; declared target hash must match. Shared assessment leases and completion gates remain in force.",
+    "text": "将校验后的 exe/user 测试程序作为普通持久化评估任务启动，返回 run.job_id。用该句柄调用 job_status、job_cancel 和 job_artifacts。支持 stdin 证据或空 argv；声明的目标哈希必须匹配。继续使用评估共享租约及任务完成检查。"
+  },
+  "lab_install": {
+    "source": "Start installation through the configured administrative channel and return operation_id. Uses one overall timeout (1-600 seconds), hash-pinned media and a guest receipt checking declared files, service and account. Query lab_operation_status; missing receipts remain uncertain. Requires idle worker resources and synchronized evidence.",
+    "text": "通过已配置的管理通道启动安装并返回 operation_id。整个安装受 1–600 秒总时限约束，使用固定哈希介质及检查声明文件、服务、账户的客体回执。通过 lab_operation_status 查询；缺少回执时保留未知结果。要求工作节点资源空闲且证据同步完毕。"
+  },
+  "lab_restore": {
+    "source": "Start a fenced baseline restore and return operation_id. Requires the caller-owned active lab_id/generation and idle worker resources with synchronized evidence. Unknown effects become lost only after confirmed restoration; snapshot pruning is reported separately. Query lab_operation_status.",
+    "text": "启动受归属和代际约束的基线恢复并返回 operation_id。要求调用者持有有效的 lab_id/generation，工作节点资源空闲且证据同步完毕。只有确认恢复后才将未知影响标记为 lost；快照清理单独报告。用 lab_operation_status 查询。"
+  },
+  "lab_prune": {
+    "source": "Start pruning unused lab-prefixed snapshots and return operation_id. Keeps the baseline and active snapshot, rejects pending recovery and checks ownership. Query lab_operation_status for per-snapshot results.",
+    "text": "启动闲置实验前缀快照清理并返回 operation_id。保留基线及活动快照，拒绝待恢复状态并检查归属。用 lab_operation_status 查询逐快照结果。"
+  },
+  "bundle_manifest": {
+    "source": "Return the directory bundle manifest: auto-hashed members, inferred executable/library/data kinds, PE imports and cross-member import edges. No user-assigned roles; entry is the inferred launch candidate.",
+    "text": "返回目录 bundle 清单：自动哈希的成员、推断的 executable/library/data 类型、PE 导入和跨成员导入边。无需用户标注角色；entry 是推断出的启动候选。"
+  },
+  "bundle_evidence": {
+    "source": "Import one verified bundle member as immutable evidence so it can be inspected or decompiled with target_evidence_id. Path is relative to the analyzed directory.",
+    "text": "把一个已校验 bundle 成员导入为不可变证据，以便用 target_evidence_id 检查或反编译。路径相对于被分析目录。"
+  },
+  "bundle_stage": {
+    "source": "Stage a selected bundle entry and up to 64 members, validating paths and launch options before upload. Optional entry, members, args, cwd and input_mode override the inferred defaults. The immutable LaunchSpec path is content-addressed; call job_start with launch_spec and omit argv/timeout_secs/cwd/env.",
+    "text": "上传选定的 bundle 入口及最多 64 个成员；上传前校验路径和启动选项。可用 entry、members、args、cwd、input_mode 覆盖推断的默认值。不可变 LaunchSpec 路径包含内容哈希；调用 job_start 时传 launch_spec，省略 argv/timeout_secs/cwd/env。"
+  },
+  "lab_list": {
+    "source": "List configured Windows lab VM aliases and assigned environments without connecting or changing state.",
+    "text": "列出已配置的 Windows 实验 VM 别名及分配的环境，不连接或修改状态。"
+  },
+  "lab_operation_status": {
+    "source": "Read a durable lab host operation by operation_id, including its result and evidence. A lost controller leaves the operation uncertain and never replays it.",
+    "text": "按 operation_id 读取持久化实验宿主操作的结果和证据。控制器归属丢失时保留结果未知，不重放操作。"
+  },
+  "lab_operation_cancel": {
+    "source": "Request interruption of your lab host operation. Cancellation can leave guest effects unknown; inspect and reconcile the existing operation before another mutation.",
+    "text": "请求中断自己拥有的实验宿主操作。取消后客体影响可能仍未知；再次修改前须检查并调和原操作。"
   }
 }
