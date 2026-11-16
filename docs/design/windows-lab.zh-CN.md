@@ -133,7 +133,7 @@ verifier.exe /querysettings
 - `bundle_manifest` 返回清单：成员、哈希、推断类型、导入和跨成员导入边，例如 `vulnserver.exe -> essfunc.dll`。
 - `bundle_evidence` 把某个已校验成员导入为证据，因此 Ghidra 可以通过 `target_evidence_id` 反编译该 DLL，而 run 的主目标仍是 EXE。
 - `bundle_stage` 最多把 64 个成员上传到同一个 worker 目录，并写入 schema-1 LaunchSpec，以该目录为 cwd、推断入口为 target。
-- 用该 `launch_spec` 且不带 argv 调用 `job_start`，入口会带着同目录 DLL 启动；验证中 `vulnserver.exe` 与 `essfunc.dll` 同目录启动成功并干净取消。
+- 用该 `launch_spec` 且不带 argv/timeout_secs/cwd/env 调用 `job_start`，入口会带着同目录 DLL 启动；timeout 由 LaunchSpec 持有（默认 300 秒）。验证中 `vulnserver.exe` 与 `essfunc.dll` 同目录启动成功并干净取消。
 
 限制：入口是启发式（优先第一个 `.exe` PE 可执行文件）；大树会在扫描边界截断，启动成员限制 64；尚未实现符号/PDB 配对和自动多入口执行。跨文件行为在真正执行入口及其导入之前仍是假设。
 

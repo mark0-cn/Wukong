@@ -328,7 +328,7 @@
     "text": "把一个已校验 bundle 成员导入为不可变证据，以便用 target_evidence_id 检查或反编译。路径相对于被分析目录。"
   },
   "bundle_stage": {
-    "source": "Stage every bundle member into one worker directory, create a LaunchSpec that sets that directory as cwd, and return the launch_spec path plus member identities. Then call job_start with launch_spec and no argv to run the inferred entry with its sidecar DLLs present. At most 64 members.",
-    "text": "把全部 bundle 成员 staging 到同一个 worker 目录，创建以该目录为 cwd 的 LaunchSpec，并返回 launch_spec 路径和成员身份。随后用 launch_spec 且不带 argv 调用 job_start，让推断入口带着同目录 DLL 运行。最多 64 个成员。"
+    "source": "Stage every bundle member into one worker directory, create a LaunchSpec that sets that directory as cwd, and return the launch_spec path plus member identities. Then call job_start with launch_spec and no argv/timeout_secs/cwd/env to run the inferred entry with its sidecar DLLs present. timeout_secs (default 300) is stored in the LaunchSpec. At most 64 members.",
+    "text": "把全部 bundle 成员 staging 到同一个 worker 目录，创建以该目录为 cwd 的 LaunchSpec，并返回 launch_spec 路径和成员身份。随后用 launch_spec 且不带 argv/timeout_secs/cwd/env 调用 job_start，让推断入口带着同目录 DLL 运行。timeout_secs（默认 300）写入 LaunchSpec；最多 64 个成员。"
   }
 }

@@ -68,9 +68,10 @@ pub(in crate::application::tools) fn handle_bundle_stage<'a>(
     agent: &'a AgentMetadata,
     call: &'a str,
     _name: &'a str,
-    _args: Value,
+    args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
+        let input: args::BundleStageArgs = serde_json::from_value(args)?;
         let bundle = run_bundle(tools, agent)?;
         ensure!(
             bundle.members.len() <= 64,
@@ -122,6 +123,7 @@ pub(in crate::application::tools) fn handle_bundle_stage<'a>(
             "args": [],
             "cwd": ".",
             "input_mode": "stdin_pipe",
+            "timeout_secs": input.timeout_secs.unwrap_or(300).clamp(1, 3600),
         });
         let uploaded = tools
             .execution

@@ -1019,10 +1019,10 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::Child,
             Requirement::Controller,
         ),
-        spec::<args::BundleEmptyArgs>(
+        spec::<args::BundleStageArgs>(
             "bundle_stage",
             "tool-bundle-stage",
-            "Stage every bundle member into one worker directory, create a LaunchSpec that sets that directory as cwd, and return the launch_spec path plus member identities. Then call job_start with launch_spec and no argv to run the inferred entry with its sidecar DLLs present. At most 64 members.",
+            "Stage every bundle member into one worker directory, create a LaunchSpec that sets that directory as cwd, and return the launch_spec path plus member identities. Then call job_start with launch_spec and no argv/timeout_secs/cwd/env to run the inferred entry with its sidecar DLLs present. timeout_secs (default 300) is stored in the LaunchSpec. At most 64 members.",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {

@@ -129,6 +129,14 @@ impl ExecutionService {
                             string_list(&args, "argv")?.is_empty(),
                             "LaunchSpec owns job argv"
                         );
+                        ensure!(
+                            args.get("timeout_secs").is_none(),
+                            "LaunchSpec owns its execution timeout; omit timeout_secs"
+                        );
+                        ensure!(
+                            args.get("cwd").is_none() && args.get("env").is_none(),
+                            "LaunchSpec owns cwd and environment; omit those overrides"
+                        );
                     } else {
                         ensure!(
                             !string_list(&args, "argv")?.is_empty(),

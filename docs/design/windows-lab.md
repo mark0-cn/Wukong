@@ -133,7 +133,7 @@ Test signing is sufficient for test drivers. PatchGuard is not bypassed or disab
 - `bundle_manifest` returns the manifest: members, hashes, inferred kinds, imports and cross-member import edges such as `vulnserver.exe -> essfunc.dll`.
 - `bundle_evidence` imports one verified member as evidence, so Ghidra can decompile that DLL through `target_evidence_id` while the EXE remains the run target.
 - `bundle_stage` uploads at most 64 members into one worker directory and writes a schema-1 LaunchSpec with that directory as cwd and the inferred entry as target.
-- `job_start` with that `launch_spec` and no argv runs the entry with its sidecar DLLs present; successful validation started `vulnserver.exe` with `essfunc.dll` in the same directory and cancelled it cleanly.
+- `job_start` with that `launch_spec` and no argv/timeout_secs/cwd/env runs the entry with its sidecar DLLs present; the LaunchSpec owns the timeout (default 300 seconds). Successful validation started `vulnserver.exe` with `essfunc.dll` in the same directory and cancelled it cleanly.
 
 Limits: the entry is a heuristic (first PE executable, preferring `.exe`); large trees are truncated at the scan bounds, launch members are limited to 64, and symbol/PDB pairing and automatic multi-entry execution are not implemented. Cross-file behavior is still a hypothesis until the entry and its imports are actually exercised.
 
