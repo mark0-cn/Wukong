@@ -187,9 +187,16 @@ jobs:
         with:
           shared-key: linux-desktop-checks-v1
           save-if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
-      - name: Install Linux runtime dependencies
+      - name: Prepare required Linux test dependencies
         timeout-minutes: 12
-        run: python -m scripts.ci.install_apt gdb patchelf gcc-multilib musl-tools libwayland-dev libxkbcommon-dev
+        env:
+          DESKTOP_TESTS: ${{ needs.changes.outputs.rust }}
+        run: |
+          packages=(gdb patchelf gcc-multilib musl-tools)
+          if [[ "$DESKTOP_TESTS" == 'true' ]]; then
+            packages+=(libwayland-dev libxkbcommon-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb)
+          fi
+          python -m scripts.ci.install_apt "${packages[@]}"
       - name: Python runtime and release tests
         run: |
           python -m pip install -e workers/analysis -r workers/runtime/requirements.txt pyelftools
@@ -203,10 +210,6 @@ jobs:
           python -m evals.analysis.evaluate --build-dir "$RUNNER_TEMP/analysis-fixtures"
           sh fixtures/build.sh "$RUNNER_TEMP/vulnerability-fixtures"
           python -m evals.vulnerability.evaluate --build-dir "$RUNNER_TEMP/vulnerability-fixtures" --repetitions 1
-      - name: Install Linux desktop test dependencies
-        if: needs.changes.outputs.rust == 'true'
-        timeout-minutes: 12
-        run: python -m scripts.ci.install_apt libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev xvfb
       - name: Linux desktop feature tests
         if: needs.changes.outputs.rust == 'true'
         run: |
