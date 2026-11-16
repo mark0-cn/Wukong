@@ -110,7 +110,7 @@ pub(super) fn prepare_models(
                 request.temperature = model_config.temperature;
                 request.additional_params = model_config.additional_params;
                 let mut names = selected.0.names.clone();
-                names.extend(["task", "message", "wait"].map(str::to_owned));
+                names.extend(["task"].map(str::to_owned));
                 // Rebuild from Rig's registry: its initial request was built
                 // with the previous selection, which can hide newly loaded tools.
                 request.tools = definitions

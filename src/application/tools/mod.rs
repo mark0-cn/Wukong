@@ -7,7 +7,7 @@ use crate::{
     application::coordinator::Coordinator,
     config::AppConfig,
     domain::*,
-    storage::{DocumentKind, SessionKind, Store, StoredRecord},
+    storage::{SessionKind, Store, StoredRecord},
 };
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -43,12 +43,18 @@ mod analysis;
 mod analysis_verification;
 mod args;
 mod artifact_validation;
+mod capabilities;
 mod catalog;
 mod coordination;
+mod differential;
 mod discovery;
 mod documents;
 mod environment_service;
 mod evidence;
+mod input_contracts;
+mod inventory;
+mod launch;
+mod resource_output;
 pub(crate) use discovery::ToolSelection;
 mod context;
 mod execution;
@@ -297,6 +303,10 @@ impl ToolService {
                 "tool {name} is unavailable for role {}",
                 agent.role
             );
+            ensure!(
+                capabilities::authorized(&agent, name),
+                "tool requires an explicit task grant"
+            );
             let args = if let Some(spec) = builtin {
                 (spec.parse)(validated_arguments(args, &spec.definition.parameters)?)?
             } else {
@@ -466,6 +476,14 @@ pub(crate) fn normalize_integer_arguments(value: &mut Value, schema: &Value) {
             *value = json!(parsed);
         }
     } else if let Some(object) = value.as_object_mut() {
+        // Keep serde/Rig's optional-null semantics, then validate all cross-field rules.
+        object.retain(|name, value| {
+            !value.is_null()
+                || schema["properties"].get(name).is_none()
+                || schema["required"]
+                    .as_array()
+                    .is_some_and(|fields| fields.iter().any(|field| field == name))
+        });
         for (name, value) in object {
             if let Some(property) = schema["properties"].get(name) {
                 normalize_integer_arguments(value, property);
@@ -492,6 +510,10 @@ fn validated_arguments(mut value: Value, schema: &Value) -> Result<Value> {
                 .join("; ")
         )
     })?;
+    jsonschema::validator_for(schema)
+        .context("invalid built-in tool schema")?
+        .validate(&value)
+        .map_err(|error| anyhow::anyhow!("invalid tool arguments: {error}"))?;
     Ok(value)
 }
 
@@ -503,16 +525,6 @@ fn require_in_run<T: StoredRecord + RunScoped>(store: &Store, id: &str, run_id: 
         T::KIND
     );
     Ok(record)
-}
-fn require_document(
-    store: &Store,
-    kind: DocumentKind,
-    id: &str,
-    run: &str,
-) -> Result<SharedDocument> {
-    let document = store.document(kind, id)?;
-    ensure!(document.run_id == run, "document belongs to another run");
-    Ok(document)
 }
 fn require_session(store: &Store, kind: SessionKind, id: &str, run: &str) -> Result<SessionRecord> {
     let session = store.session(kind, id)?;

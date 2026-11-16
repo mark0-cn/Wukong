@@ -63,7 +63,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         definition: ToolDefinition::new(
             ToolName::new(name).expect("built-in tool name"),
             description,
-            rig_core::tool::args_schema::<A>(),
+            input_contracts::schema(name, rig_core::tool::args_schema::<A>()),
         )
         .with_annotations(
             ToolAnnotations::default()
@@ -76,7 +76,7 @@ fn spec<A: serde::de::DeserializeOwned + serde::Serialize + schemars::JsonSchema
         requirement,
         root_only: matches!(visibility, Visibility::Root),
         verifier_only: matches!(visibility, Visibility::Verifier),
-        child_only: matches!(visibility, Visibility::Child) || (target && name != "runtime_doctor"),
+        child_only: matches!(visibility, Visibility::Child) || target,
     }
 }
 
@@ -87,6 +87,85 @@ pub(super) fn builtins() -> &'static [Spec] {
 
 fn build_catalog() -> Vec<Spec> {
     vec![
+        spec::<args::ResourceReadArgs>(
+            "resource_read",
+            "tool-resource-read",
+            "Read an owned job stdout/stderr or session transcript in bounded byte pages. Reuse next_offset; at_snapshot_end may become readable later, while eof requires a terminal resource. Each chunk is preserved as hashed evidence. A worker may publish outputs only after completion; missing streams are explicit errors.",
+            ReplayPolicy::ReadOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_resource_read(&services.execution, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Worker(&[Method::FileRead]),
+        ),
+        spec::<args::LaunchPrepareArgs>(
+            "launch_prepare",
+            "tool-launch-prepare",
+            "Prepare an immutable hash-bound LaunchSpec from the primary target, directory bundle, staged target/dependencies or Linux target/libc/loader. Own args, cwd, environment, input mode and timeout here; reuse the returned launch_spec in jobs and sessions without overrides. Preparation does not execute the target.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_launch_prepare(&services.execution, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Worker(&[
+                Method::FilePut,
+                Method::FileStat,
+                Method::FileRead,
+                Method::UploadBegin,
+                Method::UploadWrite,
+                Method::UploadCommit,
+            ]),
+        ),
+        spec::<args::ToolCatalogArgs>(
+            "tool_catalog",
+            "tool-tool-catalog",
+            "Query bounded tool groups, current selection, task permissions and last-observed backend availability. Follow next_cursor with after. Selection never changes role or task grants.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_tool_selection(&services.coordination, agent, call, name, args)
+            },
+            Visibility::All,
+            Requirement::Controller,
+        ),
+        spec::<args::ToolSelectArgs>(
+            "tool_select",
+            "tool-tool-select",
+            "Replace optional tool groups for subsequent model requests. Core and resource lifecycle tools stay available. Raw debugger and Windows lab require explicit task grants; external selects configured MCP tools.",
+            ReplayPolicy::Transactional,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_tool_selection(&services.coordination, agent, call, name, args)
+            },
+            Visibility::All,
+            Requirement::Controller,
+        ),
+        spec::<args::EvidenceSearchArgs>(
+            "evidence_search",
+            "tool-evidence-search",
+            "Find same-run evidence metadata by producer, target hash, content hash, job, media type or source. Bounded stable ID pages; follow next_cursor using after. Read content with evidence_read.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_inventory(&services.evidence, agent, call, name, args)
+            },
+            Visibility::All,
+            Requirement::Controller,
+        ),
+        spec::<args::ResourceListArgs>(
+            "resource_list",
+            "tool-resource-list",
+            "List your owned jobs, debugger and interactive sessions with last-observed state. Bounded ID pages; follow next_cursor using after. This query does not grant cleanup authority or discover foreign worker resources.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_inventory(&services.evidence, agent, call, name, args)
+            },
+            Visibility::All,
+            Requirement::Controller,
+        ),
         spec::<args::ArtifactValidateArgs>(
             "artifact_validate",
             "tool-artifact-validate",
@@ -115,7 +194,7 @@ fn build_catalog() -> Vec<Spec> {
                 Method::UploadCommit,
             ]),
         ),
-        spec::<args::RuntimeDoctorArgs>(
+        spec::<args::EnvironmentListArgs>(
             "environment_list",
             "tool-environment-list",
             "List registered analysis environments without connecting; configuration is not proof of readiness.",
@@ -199,22 +278,10 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::Child,
             Requirement::Worker(&[Method::RuntimeProfile]),
         ),
-        spec::<args::RuntimeProfileArgs>(
-            "runtime_prepare",
-            "tool-runtime-prepare",
-            "Create an immutable execution copy of supplied target, libc and loader and return direct launch argv. Requires all three ELF files with matching architecture. Does not execute or modify originals; verify actual mappings separately.",
-            ReplayPolicy::WorkerIdempotent,
-            true,
-            |services, agent, call, name, args| {
-                handlers::handle_runtime_profile(&services.execution, agent, call, name, args)
-            },
-            Visibility::Child,
-            Requirement::Worker(&[Method::RuntimePrepare]),
-        ),
         spec::<args::FunctionInstructionsArgs>(
             "function_instructions",
             "tool-function-instructions",
-            "Ghidra: paginated function instructions and control-flow edges, including calls. Addresses are module-relative and bound to target SHA256. Optional target_evidence_id selects an in-run baseline binary.",
+            "Ghidra: paginated function instructions and control-flow edges, including calls. Addresses are module-relative and bound to target SHA256. Optional target_ref={kind:evidence,evidence_id:...} selects an in-run baseline binary.",
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
@@ -226,14 +293,21 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::DifferentialTestArgs>(
             "differential_test",
             "tool-differential-test",
-            "Compare the staged target and reference on bounded stdin vectors in an isolated background job. Preserve raw outputs, hashes and mismatches as artifacts. Timeout or truncated output is inconclusive, never a match.",
+            "Compare two prepared LaunchSpecs on 1..8 same-run input evidence files. Each launch must record a 1..10 second timeout. Runs ordinary owned jobs and preserves original status/output evidence. Choose exact_output, exit_status or stdout_json and expected exit codes explicitly. Missing, timed-out, truncated or invalid JSON observations are inconclusive. May take up to 300 seconds; resources remain discoverable with resource_list.",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {
                 handlers::handle_differential_test(&services.execution, agent, call, name, args)
             },
             Visibility::Child,
-            Requirement::Worker(&[Method::JobStart]),
+            Requirement::Worker(&[
+                Method::JobStart,
+                Method::FilePut,
+                Method::FileStat,
+                Method::FileRead,
+                Method::JobStatus,
+                Method::JobArtifacts,
+            ]),
         ),
         spec::<args::AnalysisVerifyArgs>(
             "analysis_verify",
@@ -346,7 +420,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::AgentFinishArgs>(
             "agent_finish",
             "tool-agent-finish",
-            "Finish a child task with a structured result accounting for its contract, evidence and gaps. summary is shorthand for tasks without required outputs and is ignored when result is provided (result.answer is the canonical summary). Active descendants must finish first.",
+            "Finish a child task with a structured result accounting for its contract, evidence and gaps. result.answer is the canonical summary. Active descendants must finish first.",
             ReplayPolicy::Transactional,
             false,
             |services, agent, call, name, args| {
@@ -365,18 +439,6 @@ fn build_catalog() -> Vec<Spec> {
                 handlers::handle_agent_finish(&services.coordination, agent, call, name, args)
             },
             Visibility::Root,
-            Requirement::Controller,
-        ),
-        spec::<args::ThreatModelGetArgs>(
-            "threat_model_get",
-            "tool-threat-model-get",
-            "Read the shared threat model documents.",
-            ReplayPolicy::ReadOnly,
-            false,
-            |services, agent, call, name, args| {
-                handlers::handle_threat_model_get(&services.documents, agent, call, name, args)
-            },
-            Visibility::All,
             Requirement::Controller,
         ),
         spec::<args::ThreatModelSaveArgs>(
@@ -411,18 +473,6 @@ fn build_catalog() -> Vec<Spec> {
             false,
             |services, agent, call, name, args| {
                 handlers::handle_threat_model_save(&services.documents, agent, call, name, args)
-            },
-            Visibility::All,
-            Requirement::Controller,
-        ),
-        spec::<args::NotesListArgs>(
-            "notes_list",
-            "tool-notes-list",
-            "List shared notes for this assessment.",
-            ReplayPolicy::ReadOnly,
-            false,
-            |services, agent, call, name, args| {
-                handlers::handle_notes_list(&services.documents, agent, call, name, args)
             },
             Visibility::All,
             Requirement::Controller,
@@ -475,18 +525,6 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::All,
             Requirement::Controller,
         ),
-        spec::<args::TodosListArgs>(
-            "todos_list",
-            "tool-todos-list",
-            "List shared to-do items.",
-            ReplayPolicy::ReadOnly,
-            false,
-            |services, agent, call, name, args| {
-                handlers::handle_todos_list(&services.documents, agent, call, name, args)
-            },
-            Visibility::All,
-            Requirement::Controller,
-        ),
         spec::<args::CoverageRecordArgs>(
             "coverage_record",
             "tool-coverage-record",
@@ -514,7 +552,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::CoverageListArgs>(
             "coverage_list",
             "tool-coverage-list",
-            "List all recorded assessment coverage.",
+            "List bounded coverage summaries filtered by agent, scope or outcome. Follow next_cursor with after; notes are previews and full_evidence_id retains the full page.",
             ReplayPolicy::ReadOnly,
             false,
             |services, agent, call, name, args| {
@@ -550,7 +588,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::FindingsListArgs>(
             "findings_list",
             "tool-findings-list",
-            "List this assessment's findings and recorded stages.",
+            "List bounded finding summaries filtered by agent, stage or severity. Follow next_cursor with after; use finding_get for full details.",
             ReplayPolicy::ReadOnly,
             false,
             |services, agent, call, name, args| {
@@ -607,22 +645,10 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::All,
             Requirement::Controller,
         ),
-        spec::<args::ThinkArgs>(
-            "think",
-            "tool-think",
-            "Record a concise audited scratch note for this agent. The original content remains in tool-call history and may be inherited by children; this is neither a private channel nor a context-saving mechanism. Use note_save for shared conclusions.",
-            ReplayPolicy::Transactional,
-            false,
-            |services, agent, call, name, args| {
-                handlers::handle_think(&services.coordination, agent, call, name, args)
-            },
-            Visibility::All,
-            Requirement::Controller,
-        ),
         spec::<args::BinaryInspectArgs>(
             "binary_inspect",
             "tool-binary-inspect",
-            "Inspect the exact run target, architecture, sections, imports, symbols and mitigations.",
+            "Inspect binary architecture, sections, imports, symbols and mitigations. Optional target_ref selects primary or same-run evidence; omitted selects the primary target.",
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
@@ -634,7 +660,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::BinaryStringsArgs>(
             "binary_strings",
             "tool-binary-strings",
-            "Search printable strings with file-offset address references and pagination.",
+            "Search printable strings with file-offset address references and pagination. Optional target_ref selects primary or same-run binary evidence.",
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
@@ -678,18 +704,6 @@ fn build_catalog() -> Vec<Spec> {
             },
             Visibility::All,
             Requirement::Ghidra,
-        ),
-        spec::<args::RuntimeDoctorArgs>(
-            "runtime_doctor",
-            "tool-runtime-doctor",
-            "Inspect the configured worker's real platform, versions and available capabilities.",
-            ReplayPolicy::ReadOnly,
-            true,
-            |services, agent, call, name, args| {
-                handlers::handle_runtime_doctor(&services.environments, agent, call, name, args)
-            },
-            Visibility::All,
-            Requirement::Probe,
         ),
         spec::<args::StageTargetArgs>(
             "stage_target",
@@ -815,18 +829,6 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::All,
             Requirement::Worker(&[Method::FuzzStart]),
         ),
-        spec::<args::FuzzStatusArgs>(
-            "fuzz_status",
-            "tool-fuzz-status",
-            "Observe a bound AFL++ job and its real statistics/crash files.",
-            ReplayPolicy::ReadOnly,
-            true,
-            |services, agent, call, name, args| {
-                handlers::handle_job_start(&services.execution, agent, call, name, args)
-            },
-            Visibility::All,
-            Requirement::Worker(&[Method::JobStatus]),
-        ),
         spec::<args::DebugStartArgs>(
             "debug_start",
             "tool-debug-start",
@@ -854,7 +856,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::DebugInspectArgs>(
             "debug_inspect",
             "tool-debug-inspect",
-            "Inspect bounded registers, stack, memory, modules, threads, instructions, exception or execution state in your owned debugger session; full engine transcripts remain evidence.",
+            "Inspect bounded registers, stack, memory, modules, threads, instructions, exception or execution state in your owned debugger session. Addresses are runtime virtual addresses in that session. kind=events requires debug.events support and accepts offset/limit; full engine transcripts remain evidence.",
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
@@ -902,7 +904,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::InteractiveSendArgs>(
             "interactive_send",
             "tool-interactive-send",
-            "Write bytes to an owned interactive session's stdin and return its newly produced output. The session stays alive between calls.",
+            "Write at most 64 KiB to an owned session using source={kind:text,text:...}, {kind:base64,data_base64:...} or {kind:evidence,evidence_id:...}. Returns newly produced output; the session stays alive between calls.",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {
@@ -1010,7 +1012,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::BundleMemberArgs>(
             "bundle_evidence",
             "tool-bundle-evidence",
-            "Import one verified bundle member as immutable evidence so it can be inspected or decompiled with target_evidence_id. Path is relative to the analyzed directory.",
+            "Import one verified bundle member as immutable evidence so it can be inspected or decompiled with target_ref={kind:evidence,evidence_id:...}. Path is relative to the analyzed directory.",
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
@@ -1018,23 +1020,6 @@ fn build_catalog() -> Vec<Spec> {
             },
             Visibility::Child,
             Requirement::Controller,
-        ),
-        spec::<args::BundleStageArgs>(
-            "bundle_stage",
-            "tool-bundle-stage",
-            "Stage every bundle member into one worker directory, create a LaunchSpec that sets that directory as cwd, and return the launch_spec path plus member identities. Then call job_start with launch_spec and no argv/timeout_secs/cwd/env to run the inferred entry with its sidecar DLLs present. timeout_secs (default 300) is stored in the LaunchSpec. At most 64 members.",
-            ReplayPolicy::WorkerIdempotent,
-            true,
-            |services, agent, call, name, args| {
-                handlers::handle_bundle_stage(services, agent, call, name, args)
-            },
-            Visibility::Child,
-            Requirement::Worker(&[
-                Method::UploadBegin,
-                Method::UploadWrite,
-                Method::UploadCommit,
-                Method::FilePut,
-            ]),
         ),
         spec::<args::PocVerifyArgs>(
             "poc_verify",
@@ -1063,7 +1048,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::LabPrepareArgs>(
             "lab_prepare",
             "tool-lab-prepare",
-            "Prepare a registered Windows lab: materialize the spec's hash-verified package, validate its install plan, create the baseline if needed and take the experiment snapshot. Returns the lease with lab_id and generation; target tools use that lease.",
+            "Prepare a registered Windows lab: materialize the spec's hash-verified package, validate its install plan, create the baseline if needed and take the experiment snapshot. Returns an opaque lab_ref bound to this agent, run, assigned VM and lease generation. Requires the windows_lab task grant.",
             ReplayPolicy::OperatorOnly,
             true,
             |services, agent, call, name, args| {
@@ -1099,23 +1084,11 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::LabRestoreArgs>(
             "lab_restore",
             "tool-lab-restore",
-            "Revert the registered lab to its baseline, optionally start it and prune the experiment snapshot. Reconciles unknown run/install outcomes; requires the active lab_id and generation.",
+            "Revert the registered lab to its baseline, optionally start it and prune the experiment snapshot. Reconciles unknown run/install outcomes; requires the owned lab_ref returned by lab_prepare.",
             ReplayPolicy::OperatorOnly,
             true,
             |services, agent, call, name, args| {
                 handlers::handle_lab_restore(services, agent, call, name, args)
-            },
-            Visibility::Child,
-            Requirement::Controller,
-        ),
-        spec::<args::LabPruneArgs>(
-            "lab_prune",
-            "tool-lab-prune",
-            "Delete unused lab-prefixed snapshots while keeping the baseline and the active experiment snapshot. Reports per-snapshot failures and never touches unrelated snapshots.",
-            ReplayPolicy::OperatorOnly,
-            true,
-            |services, agent, call, name, args| {
-                handlers::handle_lab_prune(services, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,

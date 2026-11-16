@@ -2,12 +2,12 @@
 use super::*;
 
 pub(super) fn allowed(runner: &KernelHost, role: Role, name: &str) -> bool {
-    matches!(name, "task" | "message" | "wait") || runner.allows(role, name)
+    name == "task" || runner.allows(role, name)
 }
 
 pub(super) fn tool_access(runner: &KernelHost, agent: &AgentMetadata) -> Result<ToolAccess> {
     let mut names = runner.tool_names(agent)?;
-    names.extend(["task", "message", "wait"].map(str::to_owned));
+    names.extend(["task"].map(str::to_owned));
     Ok(ToolAccess::Only(names.into_iter().collect()))
 }
 

@@ -174,7 +174,7 @@ async fn same_paths_in_two_workers_are_registered_independently_and_configuratio
             &second.id,
             "cross-environment-artifact",
             "artifact_stage",
-            json!({"artifact_id":original}),
+            json!({"evidence_id":original}),
         )
         .await?;
     assert!(!staged.is_error, "{}", staged.value);
@@ -197,7 +197,12 @@ async fn same_paths_in_two_workers_are_registered_independently_and_configuratio
     changed.environments.get_mut("second").unwrap().name = "changed".into();
     let tools = ToolService::new(changed, store).await?;
     let rejected = tools
-        .execute(&second.id, "changed-config", "runtime_doctor", json!({}))
+        .execute(
+            &second.id,
+            "changed-config",
+            "environment_doctor",
+            json!({}),
+        )
         .await?;
     assert!(rejected.is_error);
     assert!(rejected.value.to_string().contains("configuration changed"));
@@ -248,7 +253,7 @@ async fn large_artifacts_round_trip_through_bounded_worker_frames() -> Result<()
             &owner.id,
             "large-stage",
             "artifact_stage",
-            json!({"artifact_id":original.id}),
+            json!({"evidence_id":original.id}),
         )
         .await?;
     assert!(!staged.is_error, "{}", staged.value);

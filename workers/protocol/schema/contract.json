@@ -3563,6 +3563,7 @@
         "additionalProperties": false,
         "properties": {
           "argv": {
+            "default": [],
             "items": {
               "type": "string"
             },
@@ -3592,9 +3593,6 @@
             ]
           }
         },
-        "required": [
-          "argv"
-        ],
         "title": "InteractiveStartArgs",
         "type": "object"
       },

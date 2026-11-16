@@ -1,6 +1,6 @@
 # Worker toolchain quick reference
 
-Use `runtime_doctor` to check the selected worker's actual capabilities.
+Use `environment_doctor` to check the selected worker's actual capabilities.
 The bundled worker includes Python 3, pwntools, z3-solver, angr and ropper;
 other configured workers may not. Reach available tools through execution.
 

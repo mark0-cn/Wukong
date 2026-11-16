@@ -17,7 +17,7 @@ Save a dossier note: identity, file-path input via argv[1], parser location,
 string anchors, relevant evidence IDs, and untested runtime behavior. Record
 coverage for the identity/input-entrypoint scope. Because this assignment only
 requests a dossier, the analyst can complete it through its role workflow. No
-runtime_doctor, staging, job or exploit work is necessary for this scope.
+environment_doctor, staging, job or exploit work is necessary for this scope.
 
 For a behavior question that does require execution, first check the worker,
 then stage the target and pass it and all files as direct argv values to a

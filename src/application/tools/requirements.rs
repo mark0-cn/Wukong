@@ -125,6 +125,14 @@ impl ToolContext {
             spec.definition.name,
             spec.requirement.label()
         );
+        if spec.definition.name.as_str() == "debug_inspect" && args["kind"] == "events" {
+            ensure!(
+                observation
+                    .as_ref()
+                    .is_some_and(|v| v["methods"]["debug.events"]["ready"] == true),
+                "debug event snapshots are unavailable on this backend"
+            );
+        }
         if spec.definition.name.as_str() == "debug_start" {
             let observation = observation.as_ref().context("debugger preflight missing")?;
             let capability = match args["engine"].as_str().unwrap_or("auto") {
@@ -214,7 +222,7 @@ mod tests {
         for name in [
             "debug_command",
             "fuzz_start",
-            "runtime_prepare",
+            "launch_prepare",
             "poc_verify",
             "job_start",
             "interactive_start",

@@ -109,7 +109,10 @@ async fn reasoning_only_output_limit_recovers_without_replaying_tools() {
                     output["done_reason"] = json!("length");
                     output
                 }
-                _ => reply("finish_scan", json!({"summary":"recovery complete"})),
+                _ => reply(
+                    "finish_scan",
+                    json!({"result":{"outcome":"success","answer":"recovery complete"}}),
+                ),
             };
             respond(&mut socket, output).await;
         }
@@ -179,7 +182,10 @@ async fn visible_output_limit_preserves_text_for_one_bounded_continuation() {
         assert!(input.contains("Continue only the missing part"));
         respond(
             &mut socket,
-            reply("finish_scan", json!({"summary":"observation retained"})),
+            reply(
+                "finish_scan",
+                json!({"result":{"outcome":"success","answer":"observation retained"}}),
+            ),
         )
         .await;
     });
@@ -273,7 +279,10 @@ async fn native_kernel_accepts_gated_completion_without_an_extra_provider_call()
         let input = request(&mut socket).await;
         respond(
             &mut socket,
-            reply("finish_scan", json!({"summary":"native completion"})),
+            reply(
+                "finish_scan",
+                json!({"result":{"outcome":"success","answer":"native completion"}}),
+            ),
         )
         .await;
         input
@@ -370,7 +379,10 @@ async fn native_full_catalog_is_visible_from_the_first_request() {
         let mut inputs = Vec::new();
         for (name, args) in [
             ("coverage_list", json!({})),
-            ("finish_scan", json!({"summary":"full catalog verified"})),
+            (
+                "finish_scan",
+                json!({"result":{"outcome":"success","answer":"full catalog verified"}}),
+            ),
         ] {
             let (mut socket, _) = listener.accept().await.unwrap();
             inputs.push(request(&mut socket).await);
@@ -445,7 +457,10 @@ async fn native_unknown_usage_preserves_the_response_without_tool_io() {
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         request(&mut socket).await;
-        let mut output = reply("finish_scan", json!({"summary":"pending completion"}));
+        let mut output = reply(
+            "finish_scan",
+            json!({"result":{"outcome":"success","answer":"pending completion"}}),
+        );
         output.as_object_mut().unwrap().remove("prompt_eval_count");
         output.as_object_mut().unwrap().remove("eval_count");
         respond(&mut socket, output).await;
@@ -570,7 +585,10 @@ async fn native_skills_and_usage_survive_rig_memory_compaction() {
                 "think",
                 json!({"content":"Format facts are linked through shared evidence; preserve unknowns."}),
             ),
-            ("finish_scan", json!({"summary":"format analysis complete"})),
+            (
+                "finish_scan",
+                json!({"result":{"outcome":"success","answer":"format analysis complete"}}),
+            ),
         ] {
             let (mut socket, _) = listener.accept().await.unwrap();
             inputs.push(request(&mut socket).await);
@@ -648,7 +666,10 @@ async fn native_retry_uses_rig_error_classification_and_retry_after() {
                 request(&mut socket).await;
                 respond(
                     &mut socket,
-                    reply("finish_scan", json!({"summary":"retry succeeded"})),
+                    reply(
+                        "finish_scan",
+                        json!({"result":{"outcome":"success","answer":"retry succeeded"}}),
+                    ),
                 )
                 .await;
             }
@@ -729,7 +750,7 @@ async fn native_messages_do_not_reopen_work_and_followups_keep_history() {
                         "task",
                         json!({"description":"format analyst","prompt":"Explain the format","role":"analyst","scope":"input format","inherit_context":false}),
                     ),
-                    1 => reply("wait", json!({"agent":child().id})),
+                    1 => reply("wait_for_agents", json!({"agent_ids":[child().id]})),
                     2 => reply(
                         "send_message_to_agent",
                         json!({"agent_id":child().id,"message":"For reference only","kind":"information"}),
@@ -742,8 +763,11 @@ async fn native_messages_do_not_reopen_work_and_followups_keep_history() {
                             json!({"agent_id":child().id,"message":"Clarify the length field","recipient_generation":0}),
                         )
                     }
-                    4 => reply("wait", json!({"agent":child().id})),
-                    5 => reply("finish_scan", json!({"summary":"two accepted results"})),
+                    4 => reply("wait_for_agents", json!({"agent_ids":[child().id]})),
+                    5 => reply(
+                        "finish_scan",
+                        json!({"result":{"outcome":"success","answer":"two accepted results"}}),
+                    ),
                     _ => panic!("unexpected root call {roots}"),
                 };
                 roots += 1;
@@ -761,7 +785,7 @@ async fn native_messages_do_not_reopen_work_and_followups_keep_history() {
                 }
                 let output = reply(
                     "agent_finish",
-                    json!({"summary":if children==0 {"first format result"} else {"clarified result"}}),
+                    json!({"result":{"outcome":"success","answer":if children==0 {"first format result"} else {"clarified result"}}}),
                 );
                 children += 1;
                 output
@@ -928,7 +952,10 @@ async fn public_partial_survives_native_pause_and_inflight_request_recovery() {
         drop(socket);
         let (mut socket, _) = listener.accept().await.unwrap();
         assert_eq!(request(&mut socket).await["stream"], true);
-        let mut final_reply = reply("finish_scan", json!({"summary":"resumed completion"}));
+        let mut final_reply = reply(
+            "finish_scan",
+            json!({"result":{"outcome":"success","answer":"resumed completion"}}),
+        );
         final_reply["message"]["content"] = json!("Inspecting the fixture is complete.");
         let body = final_reply.to_string() + "\n";
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
@@ -1007,7 +1034,7 @@ async fn native_provider_reasoning_replays_through_the_real_kernel() {
     ];
     let responses = [
         json!({"id":"resp_1","object":"response","created_at":1,"status":"completed","model":"gpt-5.2","output":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"inspect parser"}],"encrypted_content":"opaque-native-reasoning"},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"view_agent_graph","arguments":"{}","status":"completed"}],"usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14},"tools":[]}),
-        json!({"id":"resp_2","object":"response","created_at":1,"status":"completed","model":"gpt-5.2","output":[{"type":"function_call","id":"fc_2","call_id":"call_2","name":"finish_scan","arguments":"{\"summary\":\"native provider result\"}","status":"completed"}],"usage":{"input_tokens":14,"output_tokens":2,"total_tokens":16},"tools":[]}),
+        json!({"id":"resp_2","object":"response","created_at":1,"status":"completed","model":"gpt-5.2","output":[{"type":"function_call","id":"fc_2","call_id":"call_2","name":"finish_scan","arguments":"{\"result\":{\"outcome\":\"success\",\"answer\":\"native provider result\"}}","status":"completed"}],"usage":{"input_tokens":14,"output_tokens":2,"total_tokens":16},"tools":[]}),
     ];
     for (provider, model, outputs, marker) in [
         (
@@ -1101,11 +1128,14 @@ async fn native_tasks_return_before_predecessors_finish_but_models_wait() {
                         );
                         ready.notify_one();
                         reply(
-                            "wait",
-                            json!({"agent":tasks.iter().find(|agent|agent.scope=="second").unwrap().id}),
+                            "wait_for_agents",
+                            json!({"agent_ids":[tasks.iter().find(|agent|agent.scope=="second").unwrap().id]}),
                         )
                     }
-                    _ => reply("finish_scan", json!({"summary":"ordered tasks completed"})),
+                    _ => reply(
+                        "finish_scan",
+                        json!({"result":{"outcome":"success","answer":"ordered tasks completed"}}),
+                    ),
                 };
                 roots += 1;
                 Some(output)
@@ -1115,7 +1145,10 @@ async fn native_tasks_return_before_predecessors_finish_but_models_wait() {
                     ready.notified().await;
                     respond(
                         &mut socket,
-                        reply("agent_finish", json!({"summary":"predecessor facts"})),
+                        reply(
+                            "agent_finish",
+                            json!({"result":{"outcome":"success","answer":"predecessor facts"}}),
+                        ),
                     )
                     .await;
                 }));
@@ -1136,7 +1169,10 @@ async fn native_tasks_return_before_predecessors_finish_but_models_wait() {
                     text.contains("predecessor facts"),
                     "successor did not get the dependency result"
                 );
-                Some(reply("agent_finish", json!({"summary":"successor result"})))
+                Some(reply(
+                    "agent_finish",
+                    json!({"result":{"outcome":"success","answer":"successor result"}}),
+                ))
             };
             if let Some(output) = output {
                 respond(&mut socket, output).await;
@@ -1225,7 +1261,7 @@ async fn informational_mail_from_the_awaited_agent_does_not_release_native_wait(
                         .into_iter()
                         .find(|agent| agent.role == Role::Analyst)
                         .unwrap();
-                    reply("wait", json!({"agent":child.id}))
+                    reply("wait_for_agents", json!({"agent_ids":[child.id]}))
                 };
                 roots += 1;
                 respond(&mut socket, output).await;
@@ -1248,7 +1284,7 @@ async fn informational_mail_from_the_awaited_agent_does_not_release_native_wait(
             pending_child.as_mut().unwrap(),
             reply(
                 "agent_finish",
-                json!({"summary":"finished after information"}),
+                json!({"result":{"outcome":"success","answer":"finished after information"}}),
             ),
         )
         .await;
@@ -1264,7 +1300,7 @@ async fn informational_mail_from_the_awaited_agent_does_not_release_native_wait(
             &mut socket,
             reply(
                 "finish_scan",
-                json!({"summary":"wait observed actual completion"}),
+                json!({"result":{"outcome":"success","answer":"wait observed actual completion"}}),
             ),
         )
         .await;
@@ -1303,14 +1339,20 @@ async fn following_up_a_grandchild_reactivates_and_reports_its_parent() {
                         "task",
                         json!({"description":"parent","prompt":"Parent objective","scope":"parent","role":"analyst","inherit_context":false}),
                     ),
-                    1 | 3 => reply("wait", json!({"agent":lookup("parent").id})),
+                    1 | 3 => reply(
+                        "wait_for_agents",
+                        json!({"agent_ids":[lookup("parent").id]}),
+                    ),
                     2 => reply(
                         "follow_up_agent",
                         json!({"agent_id":lookup("leaf").id,"message":"Update the leaf result","recipient_generation":0}),
                     ),
                     4 => {
                         assert!(text.contains("parent updated"));
-                        reply("finish_scan", json!({"summary":"updated tree"}))
+                        reply(
+                            "finish_scan",
+                            json!({"result":{"outcome":"success","answer":"updated tree"}}),
+                        )
                     }
                     _ => panic!("unexpected root turn {roots}"),
                 };
@@ -1322,11 +1364,17 @@ async fn following_up_a_grandchild_reactivates_and_reports_its_parent() {
                         "task",
                         json!({"description":"leaf","prompt":"Leaf objective","scope":"leaf","role":"analyst","inherit_context":true}),
                     ),
-                    1 | 3 => reply("wait", json!({"agent":lookup("leaf").id})),
-                    2 => reply("agent_finish", json!({"summary":"parent original"})),
+                    1 | 3 => reply("wait_for_agents", json!({"agent_ids":[lookup("leaf").id]})),
+                    2 => reply(
+                        "agent_finish",
+                        json!({"result":{"outcome":"success","answer":"parent original"}}),
+                    ),
                     4 => {
                         assert!(text.contains("leaf updated"));
-                        reply("agent_finish", json!({"summary":"parent updated"}))
+                        reply(
+                            "agent_finish",
+                            json!({"result":{"outcome":"success","answer":"parent updated"}}),
+                        )
                     }
                     _ => panic!("unexpected parent turn {parents}"),
                 };
@@ -1350,7 +1398,7 @@ async fn following_up_a_grandchild_reactivates_and_reports_its_parent() {
                 }
                 let output = reply(
                     "agent_finish",
-                    json!({"summary":if leaves==0 {"leaf original"} else {"leaf updated"}}),
+                    json!({"result":{"outcome":"success","answer":if leaves==0 {"leaf original"} else {"leaf updated"}}}),
                 );
                 leaves += 1;
                 output

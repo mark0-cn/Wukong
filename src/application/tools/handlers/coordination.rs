@@ -126,18 +126,7 @@ pub(in crate::application::tools) fn handle_agent_finish<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let result: TaskResult = if let Some(result) = args.get("result") {
-            // result.answer is the canonical summary; a free-text
-            // summary argument is accepted but never cross-checked
-            // (models reliably produce both, and equality checks
-            // just burn retry turns).
-            serde_json::from_value(result.clone())?
-        } else {
-            TaskResult {
-                answer: text(&args, "summary")?.into(),
-                ..Default::default()
-            }
-        };
+        let result: TaskResult = serde_json::from_value(args["result"].clone())?;
         ensure!(
             !flag_claims(&result.answer).placeholder,
             "the answer contains a placeholder flag (flag{{...}}, Flag{{.}} and similar). Submit only a value observed in the target's own output, with its evidence id in evidence_ids; a bounded negative result is 'not found in scope X'."
@@ -162,33 +151,18 @@ pub(in crate::application::tools) fn handle_load_skill<'a>(
     Box::pin(async move { tools.activate_skill(agent, call_id, text(&args, "name")?) })
 }
 
-pub(in crate::application::tools) fn handle_think<'a>(
+pub(in crate::application::tools) fn handle_tool_selection<'a>(
     tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
-    call_id: &'a str,
-    __name: &'a str,
+    call: &'a str,
+    name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let content = text(&args, "content")?;
-        ensure!(
-            content.chars().count() <= 8000,
-            "think content exceeds 8000 characters"
-        );
-        let thought = crate::domain::Thought {
-            id: stable("thought", call_id),
-            run_id: agent.run_id.clone(),
-            agent_id: agent.id.clone(),
-            content: content.to_owned(),
-            created_at: now(),
-        };
-        let thoughts = tools
-            .store
-            .records::<crate::domain::Thought>(&agent.run_id)?
-            .into_iter()
-            .filter(|t| t.agent_id == agent.id)
-            .count();
-        tools.store.save_record(&thought)?;
-        Ok(json!({"recorded":true,"chars":content.chars().count(),"thoughts":thoughts + 1}))
+        if name == "tool_select" {
+            tools.select_tools(agent, call, args)
+        } else {
+            tools.tool_catalog(agent, &args)
+        }
     })
 }

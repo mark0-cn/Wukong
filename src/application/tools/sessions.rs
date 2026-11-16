@@ -382,10 +382,21 @@ impl SessionsService {
                 Self::present(&record, raw)
             }
             "interactive_start" => {
-                ensure!(
-                    !string_list(&args, "argv")?.is_empty(),
-                    "interactive argv cannot be empty"
-                );
+                if let Some(launch) = args["launch_spec"].as_str() {
+                    self.files.known_file(agent, launch, false)?;
+                    ensure!(
+                        string_list(&args, "argv")?.is_empty() && args.get("env").is_none(),
+                        "LaunchSpec owns interactive argv and environment"
+                    );
+                } else {
+                    ensure!(
+                        !string_list(&args, "argv")?.is_empty(),
+                        "interactive argv cannot be empty"
+                    );
+                }
+                if let Some(input) = args["input"].as_str() {
+                    self.files.known_file(agent, input, false)?;
+                }
                 let raw = self
                     .gateway
                     .worker_call(
@@ -485,6 +496,7 @@ impl SessionsService {
                 } else if raw["state"].as_str() == Some("exited") {
                     session.state = SessionState::Exited;
                 }
+                session.worker = Some(raw.clone());
                 session.updated_at = now();
                 self.store
                     .save_session(SessionKind::Interactive, &session)?;
@@ -492,5 +504,50 @@ impl SessionsService {
             }
             _ => bail!("unknown session tool: {name}"),
         }
+    }
+}
+
+impl SessionsService {
+    pub(super) async fn events(
+        &self,
+        agent: &AgentMetadata,
+        call: &str,
+        args: &Value,
+    ) -> Result<Value> {
+        let session = require_session(
+            &self.store,
+            SessionKind::Debugger,
+            text(args, "session_id")?,
+            &agent.run_id,
+        )?;
+        self.authorize_session(agent, &session, false)?;
+        let raw = self
+            .gateway
+            .worker_query(
+                Method::DebugEvents.decode(json!({"session_id":session.worker_resource_id}))?,
+            )
+            .await?;
+        let events = raw["events"]
+            .as_array()
+            .context("worker returned no event snapshot")?;
+        let offset = number(args, "offset", 0) as usize;
+        ensure!(
+            offset <= events.len(),
+            "offset is beyond the current event snapshot; start a fresh snapshot at zero"
+        );
+        let limit = number(args, "limit", 32).min(256) as usize;
+        let page = events.iter().skip(offset).take(limit).collect::<Vec<_>>();
+        let evidence = self.store.artifact(
+            &agent.run_id,
+            &agent.id,
+            call,
+            "debug.events.snapshot",
+            &serde_json::to_vec(&raw)?,
+            "application/json",
+            json!({"session_id":session.id}),
+        )?;
+        Ok(
+            json!({"session_id":session.id,"events":page,"next_offset":offset+page.len(),"snapshot_evidence_id":evidence.id,"total":events.len(),"at_snapshot_end":offset+page.len()>=events.len()}),
+        )
     }
 }

@@ -23,6 +23,16 @@ impl ToolService {
             .iter()
             .filter(|spec| spec.model_visible && spec.allows(agent.role))
         {
+            let name = spec.definition.name.as_str();
+            if !capabilities::authorized(agent, name)
+                || !capabilities::selected(&self.store, agent, name)
+            {
+                unavailable.push(json!({"tool":name,"requires":"task grant or group selection"}));
+                continue;
+            }
+            if name.starts_with("lab_") && self.windows_lab.vms.is_empty() {
+                continue;
+            }
             if spec
                 .requirement
                 .available(observation, local, static_ghidra)
@@ -33,7 +43,18 @@ impl ToolService {
                     .push(json!({"tool":spec.definition.name,"requires":spec.requirement.label()}));
             }
         }
-        if agent.role != Role::Root {
+        if agent.role != Role::Root
+            && self
+                .store
+                .get::<Value>("tool_selection", &agent.id)
+                .ok()
+                .flatten()
+                .is_some_and(|s| {
+                    s["groups"]
+                        .as_array()
+                        .is_some_and(|g| g.iter().any(|x| x == "external"))
+                })
+        {
             names.extend(
                 self.mcp
                     .definitions()
@@ -41,6 +62,12 @@ impl ToolService {
                     .map(|definition| definition.name.to_string()),
             );
         }
+        let _ = self.store.put(
+            "tool_availability",
+            &agent.id,
+            &agent.run_id,
+            &json!({"available":names,"observed_at":now()}),
+        );
         ToolSelection {
             names,
             environment: json!({"environment_id":agent.environment_id,"unavailable_tools":unavailable}),

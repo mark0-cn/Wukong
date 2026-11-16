@@ -87,7 +87,7 @@ async fn model_server() -> Result<(
                 .collect::<Vec<_>>();
             if role == "root" {
                 ensure!(
-                    !names.contains(&"binary_inspect") && names.contains(&"runtime_doctor"),
+                    !names.contains(&"binary_inspect") && names.contains(&"environment_doctor"),
                     "root must receive coordination and preflight tools only"
                 );
             }
@@ -111,7 +111,7 @@ async fn model_server() -> Result<(
                         json!({"description":"Fixture recon","role":"analyst","prompt":"Inspect exact target, record static coverage with the output evidence ID, and finish.","scope":"fixture static inspection","skills":["recon"],"inherit_context":false}),
                     ),
                 ],
-                ("root", 1) => vec![call("root-wait", "wait", {
+                ("root", 1) => vec![call("root-wait", "wait_for_agents", {
                     let spawned = request["messages"]
                         .as_array()
                         .unwrap()
@@ -121,12 +121,12 @@ async fn model_server() -> Result<(
                         .as_str()
                         .unwrap();
                     let agent = spawned.split('`').nth(1).unwrap();
-                    json!({"agent":agent})
+                    json!({"agent_ids":[agent]})
                 })],
                 ("root", 2) => vec![call(
                     "root-finish",
                     "finish_scan",
-                    json!({"summary":"Static inspection complete; no dynamic execution or verified vulnerability claimed."}),
+                    json!({"result":{"outcome":"success","answer":"Static inspection complete; no dynamic execution or verified vulnerability claimed."}}),
                 )],
                 ("analyst", 0) => {
                     ensure!(
@@ -154,7 +154,7 @@ async fn model_server() -> Result<(
                         call(
                             "child-finish",
                             "agent_finish",
-                            json!({"summary":"Exact target metadata inspected and evidence linked."}),
+                            json!({"result":{"outcome":"success","answer":"Exact target metadata inspected and evidence linked."}}),
                         ),
                     ]
                 }

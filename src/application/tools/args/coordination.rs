@@ -113,19 +113,13 @@ pub(in crate::application::tools) struct StopAgentArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct AgentFinishArgs {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<TaskResult>,
+    pub result: TaskResult,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct FinishScanArgs {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<TaskResult>,
+    pub result: TaskResult,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -135,9 +129,27 @@ pub(in crate::application::tools) struct LoadSkillArgs {
     pub name: String,
 }
 
+choices!(ToolGroup {
+    Core,
+    StaticAnalysis,
+    Debugger,
+    RawDebugger,
+    WindowsLab,
+    Fuzzing,
+    Symbolic,
+    External
+});
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct ThinkArgs {
-    #[schemars(length(min = 1))]
-    pub content: String,
+pub(in crate::application::tools) struct ToolSelectArgs {
+    #[schemars(length(max = 8))]
+    pub groups: Vec<ToolGroup>,
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct ToolCatalogArgs {
+    pub group: Option<ToolGroup>,
+    pub after: Option<String>,
+    #[schemars(range(min = 1, max = 20))]
+    pub limit: Option<u64>,
 }

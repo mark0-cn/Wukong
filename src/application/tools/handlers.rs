@@ -1,13 +1,12 @@
 //! Registered builtin handlers. The catalog owns routing and recovery metadata.
 use super::{
     AnalysisService, ExecutionService, analysis_verification, args, documents, environment_service,
-    evidence, number, require_document, require_in_run, stable, string_list, target, text,
+    evidence, number, require_in_run, stable, string_list, target, text,
 };
 use crate::{
     adapters::binary::{self, StringsQuery},
     application::coordinator::Coordinator,
     domain::*,
-    storage::DocumentKind,
 };
 use anyhow::{Context, Result, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};

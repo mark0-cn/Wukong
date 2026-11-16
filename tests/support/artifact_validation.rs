@@ -67,7 +67,7 @@ async fn docker_script_predicates_accept_python_shell_and_reject_banner_only() -
                 &verifier.id,
                 &format!("stage:{name}"),
                 "artifact_stage",
-                json!({"artifact_id":artifact_id}),
+                json!({"evidence_id":artifact_id}),
             )
             .await?;
         assert!(!staged.is_error, "{staged:?}");

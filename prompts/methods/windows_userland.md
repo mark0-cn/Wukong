@@ -21,8 +21,8 @@ On a qualified worker the available surface is `binary_inspect`,
 and `runtime_profile`. Only a verifier may use `verification_record`.
 
 Not available on Windows: `fuzz_start` (AFL++ QEMU is a Linux worker method;
-`fuzz_status` can only observe an already bound job), `debug_command` (GDB/MI
-only), `crash_snapshot` (no `core.snapshot`), `runtime_prepare`,
+`job_status` can only observe an already bound job), `debug_command` (GDB/MI
+only), `crash_snapshot` (no `core.snapshot`), `launch_prepare` with source.kind=linux_runtime,
 `cyclic_offset`, `libc_identify`, `emulate_run`, `angr_solve` and
 `artifact_validate`. There is no coverage-guided campaign; discovery is bounded
 and hypothesis-driven. Capacity is one active resource, so close a debugger or

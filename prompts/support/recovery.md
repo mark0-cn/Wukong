@@ -9,7 +9,7 @@ explain.
 - A schema/argument rejection before dispatch has no execution effect: fix
   the rejected arguments and try once. Do not apply this rule to worker or
   transport errors, which may arrive after execution started.
-- `runtime_doctor` reports actual worker capabilities and paths. A capability
+- `environment_doctor` reports actual worker capabilities and paths. A capability
   error means the backend is fine but the operation is unsupported: adapt
   (the worker executes ELF only — PE/Mach-O targets are static-only), do not
   retry.
@@ -21,7 +21,7 @@ explain.
 
 - Jobs, fuzz campaigns, debug sessions and the daemon keep running after the
   stdio client dies; a reconnect reuses the same state directory. A dropped
-  transport is NOT lost work: reconnect and read `job_status`/`fuzz_status`
+  transport is NOT lost work: reconnect and read `job_status`/`job_status`
   instead of restarting jobs.
 - A job is `lost` only when its supervisor process is provably gone.
   Uncertain observations stay active with a reconciliation note. Do not

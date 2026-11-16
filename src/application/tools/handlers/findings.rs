@@ -16,9 +16,9 @@ pub(in crate::application::tools) fn handle_findings_list<'a>(
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
-    _args: Value,
+    args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { Ok(json!({"findings":tools.store.records::<Finding>(&agent.run_id)?})) })
+    Box::pin(async move { super::super::inventory::findings(&tools.store, agent, &args) })
 }
 
 pub(in crate::application::tools) fn handle_finding_get<'a>(
@@ -78,5 +78,20 @@ pub(in crate::application::tools) fn handle_evidence_read<'a>(
         Ok(
             json!({"evidence_id":evidence_id,"offset":offset,"length":part.len(),"total_bytes":total,"next_offset":if end<total{Some(end)}else{None},"content":content}),
         )
+    })
+}
+
+pub(in crate::application::tools) fn handle_inventory<'a>(
+    tools: &'a evidence::EvidenceService,
+    agent: &'a AgentMetadata,
+    _call: &'a str,
+    name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        match name {
+            "evidence_search" => super::super::inventory::evidence(&tools.store, agent, &args),
+            _ => super::super::inventory::resources(&tools.store, agent, &args),
+        }
     })
 }

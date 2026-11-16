@@ -74,7 +74,7 @@ impl FilesService {
         call: &str,
         args: &Value,
     ) -> Result<Value> {
-        let evidence_id = text(args, "artifact_id")?;
+        let evidence_id = text(args, "evidence_id")?;
         let evidence: Evidence = require_in_run(&self.store, evidence_id, &agent.run_id)?;
         let path = self
             .store

@@ -228,6 +228,7 @@ pub struct InteractiveStartArgs {
     /// Prepared worker-relative LaunchSpec; shares loader, libraries, cwd and input mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_spec: Option<String>,
+    #[serde(default)]
     pub argv: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<std::collections::BTreeMap<String, String>>,

@@ -69,6 +69,7 @@ impl ToolContext {
             execution,
             analysis,
             lab: LabService {
+                store: service.store.clone(),
                 config: service.windows_lab.clone(),
                 state_dir: service.store.root().to_path_buf(),
                 environments: service.environments.clone(),

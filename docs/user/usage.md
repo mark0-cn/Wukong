@@ -151,7 +151,7 @@ wukong --config ./wukong.toml analyze ./sample.elf --task "Recover the record fo
 wukong --config ./wukong.toml analyze ./install-dir --task "Find cross-file vulnerabilities in this program"
 ```
 
-A directory target is scanned as a bundle: every file is hashed, PE kinds/imports are inferred, and cross-member edges are exposed. Use `bundle_manifest`, `bundle_evidence` and `bundle_stage` to inspect a DLL separately or run the inferred entry with its sidecar files.
+A directory target is scanned as a bundle: every file is hashed, PE kinds/imports are inferred, and cross-member edges are exposed. Use `bundle_manifest`, `bundle_evidence` and `launch_prepare` (`source.kind=bundle`) to inspect a DLL separately or run the inferred entry with its sidecar files.
 
 <a id="模型服务"></a>
 
@@ -333,9 +333,9 @@ Custom `skills_dir` Markdown files appear in the capability catalog. Optional ma
 
 ### Shared analysis tools
 
-`function_instructions` returns paginated instructions, block starts, branch/call flow and fallthrough, with module SHA256 on all addresses. Ghidra queries may set `target_evidence_id` to another binary evidence item in this run as baseline, without changing the task target. Missing baselines must be reported, never replaced with the current target.
+`function_instructions` returns paginated instructions, block starts, branch/call flow and fallthrough, with module SHA256 on all addresses. Ghidra queries may set `target_ref={kind:"evidence",evidence_id:"..."}` to another binary evidence item in this run as baseline, without changing the task target. Missing baselines must be reported, never replaced with the current target.
 
-`differential_test` takes registered worker `target`/`reference`, `reference_python`, `inputs_base64` and a 1–10 second per-case timeout, with at most 64 stdin inputs of 64 KiB each. It uses existing isolated job lifecycle. `job_artifacts` imports `differential-results.json`, preserving inputs, original outputs, exit codes, both hashes and differences. Timeout, truncation and nonzero exit are inconclusive. The protocol compares stdin only; argv/stateful sessions require a separate harness.
+`differential_test` accepts `target_launch_spec`, `reference_launch_spec`, 1–8 `input_evidence_ids` (each at most 64 KiB), an explicit `comparison` (`exact_output`, `exit_status` or `stdout_json`) and `expected_exit_codes`. Each LaunchSpec must record a 1–10 second timeout and stdin_pipe or argv_file input delivery. Ordinary owned jobs run sequentially, including on single-resource Windows workers. Original manifest, input, output and status evidence remain available. Timeout, missing/truncated output, unexpected exit and invalid JSON are inconclusive. The call is bounded to 300 seconds; unfinished resources remain visible through `resource_list`.
 
 <a id="pwn-方法堆分析"></a>
 
@@ -349,7 +349,7 @@ Builtin `heap_ptmalloc` interprets allocation/free timelines using actual alloca
 
 Register supplied libc/loader with `file_put`; `runtime_profile` reads target/library SHA256, ELF Build ID and architecture. By default it confirms file identity only. An owned debugger `session_id` or `interactive_session_id` permits reading actual mappings and marking each `mapped_hash_confirmed`; arbitrary PIDs are rejected. Exited processes/unreadable modules do not imply a match.
 
-`runtime_prepare` requires three registered ELF files: target/libc/loader. It creates independent content-addressed copies and returns direct loader/library-path/target argv for `interactive_start` or `job_start`; never concatenate a shell string. Originals remain unchanged. glibc versions, extra dependencies or loader ABI can still prevent startup; record actual results. `libc_identify` compares supplied ELF candidates against multiple leaks from the same process; without candidates it checks only the worker's own libc. A match is `candidate_only`, not mapped identity; no match does not prove a different target libc. See [Pwn evidence tools](../reference/pwn-tools.md#libc_identify) for ambiguity and limits.
+`launch_prepare` (`source.kind=linux_runtime`) requires three registered ELF files: target/libc/loader. It creates independent content-addressed copies and returns a hash-bound LaunchSpec for `interactive_start`, `debug_start` or `job_start`; reuse launch_spec without per-call overrides. Originals remain unchanged. glibc versions, extra dependencies or loader ABI can still prevent startup; record actual results. `libc_identify` compares supplied ELF candidates against multiple leaks from the same process; without candidates it checks only the worker's own libc. A match is `candidate_only`, not mapped identity; no match does not prove a different target libc. See [Pwn evidence tools](../reference/pwn-tools.md#libc_identify) for ambiguity and limits.
 
 <a id="结构化崩溃证据"></a>
 
@@ -376,3 +376,5 @@ Background jobs update their originating tool row and the active-operation bar f
 Public narration streams into one stable message per agent generation/model request, with at most one persisted snapshot per 250 ms and a 64 Ki character display bound. Final text replaces that message. Paused, failed or disconnected controllers leave clearly marked partial text; legacy completed events remain readable. Only public text is projected, never reasoning. This does not guarantee a particular sentence, number of agents or successful analysis result.
 
 The first controller start is labeled as a new analysis; a later start after a pause or controller recovery is labeled as resumed. These labels follow persisted lifecycle events.
+
+For tool selection, task grants and breaking interface migrations, see [Agent tool interfaces](../reference/agent-tools.md).
