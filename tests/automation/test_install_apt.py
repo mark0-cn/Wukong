@@ -1,4 +1,4 @@
-"""Regress the hosted-runner DNS failure without changing the developer's APT."""
+"""Dependency admission, whole-mirror retries and offline installation invariants."""
 
 import os
 from pathlib import Path
@@ -37,67 +37,149 @@ class InstallAptTests(unittest.TestCase):
                     apt.install(["gdb"])
                 run.assert_not_called()
 
-    def test_official_sources_keep_signatures_and_reject_untrusted_suite(self):
+    def test_signed_direct_sources_and_minimal_indexes(self):
         for suite in ("jammy", "noble"):
-            source = apt.sources(suite)
-            self.assertIn("mirror+file:" + apt.MIRRORS, source)
-            self.assertEqual(source.count("Signed-By: " + apt.KEYRING), 1)
-            self.assertIn(f"{suite}-security", source)
-            self.assertNotIn("trusted", source)
-        with self.assertRaises(ValueError):
-            apt.sources("noble\nTrusted: yes")
-        config = apt.configuration()
+            for mirror in apt.MIRRORS:
+                source = apt.sources(suite, mirror)
+                self.assertNotIn("mirror+file", source)
+                self.assertEqual(source.count("Signed-By: " + apt.KEYRING), 2)
+                self.assertIn(f"{suite}-security", source)
+                self.assertNotIn("trusted", source)
+            canonical = apt.sources(suite, apt.MIRRORS[-1])
+            self.assertIn("https://security.ubuntu.com/ubuntu/", canonical)
+        for suite, mirror in [
+            ("future", apt.MIRRORS[0]),
+            ("noble", "http://untrusted/ubuntu/"),
+            ("noble", apt.MIRRORS[0] + "\nTrusted: yes"),
+        ]:
+            with self.assertRaises(ValueError):
+                apt.sources(suite, mirror)
+        config = apt.configuration("/isolated/lists")
         self.assertIn('APT::Update::Error-Mode "any";', config)
-        self.assertIn('Acquire::https::Timeout "15";', config)
-        self.assertIn('Acquire::Retries "2";', config)
+        self.assertIn('Acquire::Retries "0";', config)
+        self.assertIn('Acquire::Languages "none";', config)
+        self.assertIn('Dir::State::lists "/isolated/lists";', config)
         self.assertNotIn("AllowUnauthenticated", config)
-        mirrorlist = apt.mirrors().splitlines()
-        self.assertTrue(all(line.startswith("https://") for line in mirrorlist))
-        self.assertIn("mirrors.edge.kernel.org/ubuntu/\tpriority:1", mirrorlist[0])
-        self.assertIn("mirrors.mit.edu/ubuntu/\tpriority:2", mirrorlist[1])
 
-    def test_bad_index_update_or_timeout_prevents_install_and_fails(self):
-        for code, expected in ((100, "exited 100"), (124, "timed out"), (137, "timed out")):
-            commands = []
+    def test_preinstalled_packages_skip_network_but_are_probed(self):
+        with (
+            patch.object(apt, "require_runner", return_value="noble"),
+            patch.object(apt, "installed", return_value=True),
+            patch.object(apt, "download") as download,
+            patch.object(apt, "configure") as configure,
+            patch.object(apt.subprocess, "run") as run,
+        ):
+            apt.install(["gdb", "gdb", "libwayland-dev"])
+        download.assert_not_called()
+        configure.assert_not_called()
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [["gdb", "--version"], ["pkg-config", "--modversion", "wayland-client"]],
+        )
 
-            def run(command, **kwargs):
-                commands.append(command)
-                return subprocess.CompletedProcess(command, code if "apt-get" in command else 0)
+    def test_only_missing_packages_download_and_install_without_network(self):
+        with (
+            patch.object(apt, "require_runner", return_value="noble"),
+            patch.object(apt, "installed", side_effect=lambda p: p == "gdb"),
+            patch.object(apt, "download") as download,
+            patch.object(apt, "apt") as command,
+            patch.object(apt, "verify") as verify,
+        ):
+            apt.install(["gdb", "musl-tools", "musl-tools"])
+        self.assertEqual(download.call_args.args[0], ["musl-tools"])
+        command.assert_called_once_with(
+            ["install", "--no-download", "-y", "musl-tools"], apt.INSTALL_SECONDS
+        )
+        verify.assert_called_once_with(["gdb", "musl-tools"])
+
+    def test_failed_index_or_package_download_abandons_entire_mirror(self):
+        for failing in ["update", "download"]:
+            configured, calls = [], []
+
+            def command(arguments, seconds):
+                calls.append((configured[-1], arguments, seconds))
+                if configured[-1] == "bad" and (
+                    arguments[0] == "update"
+                    if failing == "update"
+                    else "--download-only" in arguments
+                ):
+                    raise RuntimeError("fixture read timed out")
 
             with (
-                self.subTest(code=code),
-                patch.object(apt, "require_runner", return_value="noble"),
-                patch.object(apt.subprocess, "run", side_effect=run),
+                self.subTest(phase=failing),
+                patch.object(
+                    apt, "configure", side_effect=lambda source, lists: configured.append(source)
+                ) as configure,
+                patch.object(apt, "apt", side_effect=command),
             ):
-                with self.assertRaisesRegex(RuntimeError, expected):
-                    apt.install(["gdb"])
-            apt_commands = [command for command in commands if "apt-get" in command]
-            self.assertEqual(len(apt_commands), 1)
-            self.assertIn("120s", apt_commands[0])
-            self.assertIn("--kill-after=15s", apt_commands[0])
-            self.assertEqual(apt_commands[0][-1], "update")
+                apt.download(["gdb"], [("first", "bad"), ("second", "good")])
+            self.assertEqual(configured, ["bad", "good"])
+            paths = [call.args[1] for call in configure.call_args_list]
+            self.assertNotEqual(
+                paths[0], paths[1], "partial indexes must not carry across attempts"
+            )
+            self.assertEqual(calls[-1][0], "good")
+            self.assertIn("--download-only", calls[-1][1])
+            self.assertFalse(any("--no-download" in call[1] for call in calls))
 
-    def test_success_installs_only_explicit_packages_after_strict_update(self):
-        commands, config_files = [], {}
+    def test_network_budget_and_all_mirror_failure_prevent_install(self):
+        with (
+            patch.object(apt, "require_runner", return_value="noble"),
+            patch.object(apt, "installed", return_value=False),
+            patch.object(apt, "configure"),
+            patch.object(apt, "apt", side_effect=RuntimeError("fixture failure")) as command,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "All APT mirror attempts failed"):
+                apt.install(["gdb"])
+            self.assertEqual(command.call_count, len(apt.MIRRORS))
+            self.assertTrue(all(call.args[0] == ["update"] for call in command.call_args_list))
+        with (
+            patch.object(apt.time, "monotonic", side_effect=[0, 1, apt.NETWORK_SECONDS]),
+            patch.object(apt, "configure"),
+            patch.object(apt, "apt") as command,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "network budget exhausted"):
+                apt.download(["gdb"], [("only", "source")])
+            command.assert_not_called()
+
+    def test_success_exit_does_not_hide_missing_packages_or_broken_tools(self):
+        with patch.object(apt, "installed", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "not installed"):
+                apt.verify(["gdb"])
+        with (
+            patch.object(apt, "installed", return_value=True),
+            patch.object(
+                apt.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "gdb")
+            ),
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                apt.verify(["gdb"])
+
+    def test_attempt_configuration_changes_only_job_owned_paths(self):
+        commands, files = [], {}
 
         def run(command, **kwargs):
             commands.append(command)
             if "644" in command:
-                config_files[command[-1]] = Path(command[-2]).read_text(encoding="utf-8")
+                files[command[-1]] = Path(command[-2]).read_text(encoding="utf-8")
             return subprocess.CompletedProcess(command, 0)
 
-        with (
-            patch.object(apt, "require_runner", return_value="jammy"),
-            patch.object(apt.subprocess, "run", side_effect=run),
-        ):
-            apt.install(["gdb", "libwebkit2gtk-4.1-dev"])
-        self.assertEqual(config_files[apt.SOURCES], apt.sources("jammy"))
-        self.assertEqual(config_files[apt.MIRRORS], apt.mirrors())
-        self.assertEqual(config_files[apt.CONFIG], apt.configuration())
-        install = commands[-1]
-        self.assertIn("480s", install)
-        self.assertEqual(install[-4:], ["install", "-y", "gdb", "libwebkit2gtk-4.1-dev"])
-        for package in ("--allow-unauthenticated", "gdb-", "../gdb.deb", "gdb;echo", "gdb=1"):
+        with patch.object(apt.subprocess, "run", side_effect=run):
+            apt.configure("signed source", "/isolated/lists")
+        self.assertEqual(files[apt.SOURCES], "signed source")
+        self.assertEqual(files[apt.CONFIG], apt.configuration("/isolated/lists"))
+        self.assertEqual(len(commands), 3)
+
+    def test_command_deadlines_and_invalid_packages(self):
+        for code, expected in [(100, "exited 100"), (124, "timed out"), (137, "timed out")]:
+            with patch.object(
+                apt.subprocess, "run", return_value=subprocess.CompletedProcess([], code)
+            ) as run:
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    apt.apt(["update"], 4)
+                self.assertIn("4s", run.call_args.args[0])
+                self.assertIn("--kill-after=5s", run.call_args.args[0])
+        for package in ["--allow-unauthenticated", "gdb-", "../gdb.deb", "gdb;echo", "gdb=1"]:
             with patch.object(apt.subprocess, "run") as run:
                 with self.assertRaises(ValueError):
                     apt.install([package])

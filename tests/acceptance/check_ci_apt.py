@@ -1,13 +1,15 @@
-"""Exercise actual APT on disposable hosted Ubuntu runners, including failure.
+"""Exercise actual signed APT and slow-server failover on disposable hosted runners."""
 
-This does not install or uninstall Wukong or touch a developer's package manager.
-"""
-
+from contextlib import contextmanager
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+import threading
+import time
+from unittest.mock import patch
+import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.ci import install_apt as apt
@@ -20,112 +22,148 @@ def original_sources():
     }
 
 
+def healthy_index(suite):
+    for mirror in apt.MIRRORS:
+        try:
+            with urllib.request.urlopen(f"{mirror}dists/{suite}/InRelease", timeout=10) as response:
+                data = response.read(2 * 1024 * 1024)
+            if not data.startswith(b"-----BEGIN PGP SIGNED MESSAGE-----"):
+                raise ValueError("Fixture did not receive a signed InRelease")
+            return mirror, data
+        except (OSError, ValueError) as error:
+            print(f"Fixture mirror unavailable: {mirror}: {error}", flush=True)
+    raise RuntimeError("No official signed index is reachable for the acceptance fixture")
+
+
+def source(suite, uri):
+    return f"Types: deb\nURIs: {uri}\nSuites: {suite}\nComponents: main\nArchitectures: amd64\nSigned-By: {apt.KEYRING}\n"
+
+
+@contextmanager
+def slow_server(index=None):
+    release, reached, index_requested = threading.Event(), threading.Event(), threading.Event()
+    sizes = {}
+    if index is not None:
+        for line in index.decode("utf-8").splitlines():
+            fields = line.split()
+            if len(fields) == 3 and len(fields[0]) == 64 and fields[1].isdigit():
+                sizes[fields[0]] = int(fields[1])
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            reached.set()
+            try:
+                if index is not None and self.path.endswith("/InRelease"):
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(index)))
+                    self.end_headers()
+                    self.wfile.write(index)
+                    self.wfile.flush()
+                    return
+                if index is not None:
+                    size = sizes.get(self.path.rsplit("/", 1)[-1])
+                    if size is None:
+                        self.send_error(404)
+                        return
+                    index_requested.set()
+                    # Signed metadata was already served. Stall after a partial
+                    # index body to exercise read timeout, not connection refusal.
+                    self.send_response(200)
+                    # Match the original signed size so APT really waits for
+                    # bytes instead of rejecting the headers immediately.
+                    self.send_header("Content-Length", str(size))
+                    self.end_headers()
+                    self.wfile.write(b"partial-index")
+                    self.wfile.flush()
+                release.wait(30)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/ubuntu/", reached, index_requested
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+
 def main():
-    suite = apt.require_runner()  # Refuse local and self-hosted machines before any mutation.
+    suite = apt.require_runner()
     before = original_sources()
-    apt.install(["patchelf", "libwayland-dev"])
-    if original_sources() != before:
-        raise AssertionError("CI setup changed the runner's original sources")
-    for package in ("patchelf", "libwayland-dev"):
-        status = subprocess.check_output(
-            ["dpkg-query", "-W", "-f=${Status}", package], text=True, timeout=10
-        )
-        if status != "install ok installed":
-            raise AssertionError(f"Package was not installed: {package}")
-    # An indirect apt caller (such as Playwright) must use the same configuration.
+    mirror, signed = healthy_index(suite)
+    # Force real downloads for an absent small package, without relying on the
+    # hosted image's incidental package inventory.
+    package = next((p for p in ("hello", "sl", "toilet") if not apt.installed(p)), None)
+    if package is None:
+        raise AssertionError("All acceptance fixture packages are unexpectedly preinstalled")
+    good = [(mirror, source(suite, mirror)) for mirror in apt.MIRRORS]
+    for mode, index in [("silent-server", None), ("partial-index", signed)]:
+        with slow_server(index) as (uri, reached, index_requested):
+            started = time.monotonic()
+            real_apt = apt.apt
+            failures = []
+
+            def bounded_fixture(arguments, seconds):
+                current = Path(apt.SOURCES).read_text(encoding="utf-8")
+                try:
+                    real_apt(arguments, min(seconds, 4) if uri in current else seconds)
+                except RuntimeError as error:
+                    failures.append(str(error))
+                    raise
+
+            with patch.object(apt, "apt", side_effect=bounded_fixture):
+                apt.download([package], [(mode, source(suite, uri)), *good])
+            if not reached.is_set() or (index is not None and not index_requested.is_set()):
+                raise AssertionError(f"Slow-server fixture was not exercised: {mode}")
+            if not failures or "timed out" not in failures[0]:
+                raise AssertionError(f"Expected a real read timeout, got {failures}")
+            # The failed mirror must have been abandoned for all subsequent reads.
+            active = Path(apt.SOURCES).read_text(encoding="utf-8")
+            if uri in active or not any(mirror in active for mirror in apt.MIRRORS):
+                raise AssertionError("Failed mirror remained in the selected APT source")
+            print(
+                f"{mode}: entire mirror abandoned; signed fallback passed in {time.monotonic() - started:.1f}s",
+                flush=True,
+            )
+    apt.apt(["install", "--no-download", "-y", package], apt.INSTALL_SECONDS)
+    apt.verify([package])
+    with patch.object(
+        apt, "download", side_effect=AssertionError("Preinstalled package used network")
+    ):
+        apt.install([package])
     config = subprocess.check_output(["apt-config", "dump"], text=True, timeout=10)
     for expected in (f'Dir::Etc::sourcelist "{apt.SOURCES}";', 'APT::Update::Error-Mode "any";'):
         if expected not in config:
-            raise AssertionError(f"Job-wide APT configuration missing: {expected}")
-    with tempfile.TemporaryDirectory(prefix="wukong-apt-failure-") as directory:
-        root = Path(directory)
-        root.chmod(0o755)
-        mirrorlist = root / "fallback.mirrors"
-        mirrorlist.write_text(
-            "http://127.0.0.1:1/ubuntu/\tpriority:0\n" + apt.mirrors(), encoding="utf-8"
-        )
-        fallback_source = root / "fallback.sources"
-        fallback_source.write_text(
-            f"Types: deb\nURIs: mirror+file:{mirrorlist}\nSuites: {suite}\n"
-            f"Components: main\nArchitectures: amd64\nSigned-By: {apt.KEYRING}\n",
-            encoding="utf-8",
-        )
-        for file in (mirrorlist, fallback_source):
-            file.chmod(0o644)
-        source = root / "failure.sources"
-        source.write_text(
-            f"Types: deb\nURIs: http://127.0.0.1:1/ubuntu\nSuites: {suite}\n"
-            f"Components: main\nSigned-By: {apt.KEYRING}\n",
-            encoding="utf-8",
-        )
-        source.chmod(0o644)
-        lists = root / "lists"
-        lists.mkdir(mode=0o755)
-        fallback_lists = root / "fallback-lists"
-        fallback_lists.mkdir(mode=0o755)
-        command = [
-            "sudo",
-            "-n",
-            "timeout",
-            "--kill-after=5s",
-            "15s",
-            "apt-get",
-            "-o",
-            f"Dir::Etc::sourcelist={source}",
-            "-o",
-            f"Dir::State::lists={lists}",
-            "-o",
-            "Acquire::Retries=0",
-            "-o",
-            "Acquire::http::Timeout=2",
-            "update",
-        ]
+            raise AssertionError(f"Indirect APT caller configuration missing: {expected}")
+    # No reachable mirror must remain a hard failure, even with earlier valid indexes.
+    selected_source = Path(apt.SOURCES).read_text(encoding="utf-8")
+    selected_config = Path(apt.CONFIG).read_text(encoding="utf-8")
+    with slow_server() as (uri, reached, _):
+        started = time.monotonic()
         try:
-            fallback_command = [
-                "sudo",
-                "-n",
-                "timeout",
-                "--kill-after=15s",
-                "120s",
-                "apt-get",
-                "-o",
-                f"Dir::Etc::sourcelist={fallback_source}",
-                "-o",
-                f"Dir::State::lists={fallback_lists}",
-                "-o",
-                "Acquire::Retries=0",
-                "-o",
-                "Acquire::http::Timeout=2",
-                "update",
-            ]
-            fallback = subprocess.run(fallback_command, capture_output=True, text=True, timeout=140)
-            print(fallback.stdout, flush=True)
-            print(fallback.stderr, file=sys.stderr, flush=True)
-            if fallback.returncode != 0 or "127.0.0.1" not in fallback.stdout + fallback.stderr:
-                raise AssertionError(
-                    f"APT did not recover from the unreachable first mirror: exit {fallback.returncode}"
-                )
-            result = subprocess.run(command, capture_output=True, text=True, timeout=25)
-            print(result.stdout, flush=True)
-            print(result.stderr, file=sys.stderr, flush=True)
-            if result.returncode != 100 or "Failed to fetch" not in result.stderr:
-                raise AssertionError(
-                    f"Index download failure was not rejected by APT: exit {result.returncode}"
-                )
-        finally:
-            # Root-owned files can exist only under this exact temporary fixture.
-            for owned in (lists, fallback_lists):
-                assert owned.resolve().parent == root.resolve() and owned.name in (
-                    "lists",
-                    "fallback-lists",
-                )
-                subprocess.run(
-                    ["sudo", "-n", "rm", "-rf", "--", str(owned)], check=True, timeout=10
-                )
+            with patch.object(apt, "UPDATE_SECONDS", 3):
+                apt.download([package], [("only-slow-mirror", source(suite, uri))])
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("All-mirror failure was accepted using stale indexes")
+        if not reached.is_set() or time.monotonic() - started > 15:
+            raise AssertionError("Silent mirror did not respect the bounded attempt")
+    # Restore only this fixture's own job configuration for subsequent callers.
+    lists = selected_config.split('Dir::State::lists "', 1)[1].split('"', 1)[0]
+    apt.configure(selected_source, lists)
     if original_sources() != before:
-        raise AssertionError("APT failure fixture changed the runner's original sources")
+        raise AssertionError("APT acceptance changed the runner's original sources")
     print(
-        f"Ubuntu {suite}: signed package install, indirect caller configuration, mirror failover and strict index failure passed."
+        f"Ubuntu {suite}: signed fallback, slow headers/body, offline install, preinstalled reuse and strict failure passed."
     )
 
 

@@ -127,9 +127,11 @@ Windows CI 通过 `CARGO_PROFILE_DEV_DEBUG=1`、`CARGO_PROFILE_TEST_DEBUG=1` 使
 优化验收分别记录首次运行、同配置缓存命中运行及仅 Python 改动 PR 的耗时，
 同时比较总等待时间和 runner 用量；不把无缓存构建和缓存命中构建直接当作同条件性能对比。
 
-CI、客户端构建及安装器构建的 Ubuntu 依赖步骤共用 `python -m scripts.ci.install_apt <packages>`。该入口拒绝在开发机或自托管机器上运行，仅支持一次性的 GitHub 标准托管 Ubuntu 22.04/24.04 x64 runner。任务专用 APT 配置选择经过签名的 Ubuntu archive/security 仓库，使用已安装的 Ubuntu archive keyring 和独立索引，保留签名校验。APT 内置的 `mirror+file` 传输依次尝试 kernel.org、MIT 的 HTTPS Ubuntu 镜像及 Canonical archive/security 地址，在索引和软件包下载时按文件回退。独立镜像域名覆盖此次 Ubuntu 域名的 DNS 故障。它绕过 runner 的 Azure 镜像选择器，不改写原有源文件、DNS 或凭据；Playwright 的依赖安装也使用这份配置。网络传输超时 15 秒、重试两次；索引更新与安装进程分别限时 120/480 秒，另留 15 秒强制结束剩余进程。依赖步骤外层限时 12 分钟，Linux 前端步骤限时 15 分钟。索引下载失败会严格报错，不接受陈旧索引。依赖安装与测试分开展示，网络故障不会显示为测试执行卡住。参数见 Ubuntu 的 [APT 配置](https://manpages.ubuntu.com/manpages/jammy/man5/apt.conf.5.html)、[apt-get](https://manpages.ubuntu.com/manpages/jammy/man8/apt-get.8.html) 及[镜像传输](https://manpages.ubuntu.com/manpages/jammy/man1/apt-transport-mirror.1.html)手册。这些设置限制失败等待时间，不能保证 Ubuntu 或 runner 网络始终可用。产品运行环境和 Docker 镜像的 APT 配置不受影响。
+CI、客户端构建及安装器构建的 Ubuntu 依赖步骤共用 `python -m scripts.ci.install_apt <packages>`。该入口拒绝在开发机或自托管机器上运行，仅支持一次性的 GitHub 标准托管 Ubuntu 22.04/24.04 x64 runner。先检查软件包安装状态，只下载缺失的软件包，随后探测所需工具和库。若全部已安装，跳过联网并保持 APT 配置不变。Linux worker 检查需要调试工具和测试程序编译器；仅在 Rust 桌面检查时加入桌面开发库，在同一步骤完成安装。
 
-`Acceptance / apt` 在 PR/master 修改其安装入口或验收文件时由 Checks 调用，也可手动选择 `suite=apt`。轻量的 Ubuntu 22.04/24.04 矩阵实际安装经过签名校验的软件包，检查间接 APT 调用继承的配置，确认首选镜像不可连接时 APT 能自动回退，并检查仅有不可连接的回环仓库时返回 APT 错误 100；同时检查原有源文件没有变化。该验收不构建或发布安装器，也不替代平台 CI、Docker 验收和原生卸载测试。
+需要下载时，脚本将 kernel.org、MIT 和最后的 Canonical archive/security HTTPS Ubuntu 源作为完整尝试依次处理。每次尝试使用直接签名源及全新的独立索引。索引或软件包下载失败后，本次调用不再使用该镜像，后续文件不会返回失败镜像。选中的配置继续供 Playwright 等间接 APT 调用使用。原始源文件、DNS、凭据和 Ubuntu archive-keyring 签名校验保持不变。每个镜像的索引更新限时 40 秒、软件包下载限时 120 秒，全部网络尝试共用 480 秒预算。APT 传输超时十秒，不进行逐文件重试；结束进程另留五秒宽限。只有下载完整后，才允许进入独立的 `--no-download` 本地安装阶段，限时 180 秒。省略翻译和 command-not-found 索引。依赖步骤外层仍限时十二分钟，前端步骤仍限时十五分钟。全部镜像失败或软件包、工具检查失败时，CI 必须失败，不接受陈旧索引，也不跳过必需测试。此机制限制等待时间，不保证镜像或网络始终可用；产品运行环境和 Docker 镜像的 APT 配置不受影响。
+
+`Acceptance / apt` 在依赖脚本、验收或工作流变化时选中，也可以通过 `suite=apt` 手动运行。Ubuntu 22.04/24.04 矩阵测试真实签名索引和软件下载、独立离线安装及预装软件包复用。回环服务器接受连接后不返回响应头，或返回原始签名 InRelease 后在索引内容传输中途挂起；两者都必须放弃整个失败镜像，并通过官方源恢复。仅有挂起镜像时，即使之前存在有效索引，也必须在期限内失败。验收检查间接 APT 调用继承的配置及原有源文件保持不变。该验收不构建或发布安装器，也不替代平台 CI、Docker 验收和原生卸载测试。
 
 CI 与 Release 在各任务结束后运行 `summary` job，包括前面任务失败的情况。
 运行首页可查看 commit、ref、任务结果、耗时和产物链接；Release 额外显示版本、
