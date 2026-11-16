@@ -150,7 +150,7 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 
 `fixtures/` 包含符号/stripped 的本地漏洞、修复与正常样本。构建脚本生成 ELF，行为 harness 实际重放并保存哈希与退出结果；检测准确率由独立报告和显式复核标签计算，不从 crash 推断 agent 检测成功。详见 `fixtures/README.md`。
 
-生产动态工具面向 Linux x86_64 ELF，PE/Mach-O 静态画像可用。Windows 使用外部 WinDbg MCP 工具，已通过真实可信 x64/x86 dump/live 客户端验收；自写 DbgEng 后端已删除，托管 Windows 调试准入及完整生产安装仍未完成。macOS LLDB 尚未实现。参见[分析环境](cross-platform-environments.zh-CN.md)。当前平台验收以 CI 和[桌面更新验证](../development/desktop-updates.zh-CN.md)为准；早期原生内核检查不证明当前 Windows Docker Desktop 覆盖。缺少依赖会返回明确错误；本地协议测试不等同于线上 provider 或外部引擎验收。
+生产动态工具默认面向 Linux x86_64 ELF；PE/Mach-O 静态画像在所有环境可用。登记 Windows 环境后，原生 worker 通过外部 WinDbg MCP 提供 x64/x86 launch/minidump 调试、进程与交互执行、崩溃重放及输入最小化。安装后验收覆盖这些受信夹具路径及服务重启恢复，但报告记录为 `production_execution=false`：受信夹具验收不等于生产准入或分发（[v3 记录](../history/validation/2026-11-15-execution-contract-v3.zh-CN.md)）。离线介质仍需手工构建并签名，桌面介质准备尚未完成；虚拟化层隔离由 worker 外部配置，worker 声明 `external_isolation_verified=false`。Windows 不声明 AFL/QEMU、原始调试命令、core 快照、ELF 运行时准备及符号执行；其 `poc_verify` 仅重放 argv/stdin，映射模块内容无法由路径确认。`artifact_validate` 仍仅支持 Linux。macOS LLDB 尚未实现。参见[分析环境](cross-platform-environments.zh-CN.md)。当前平台验收以 CI 和[桌面更新验证](../development/desktop-updates.zh-CN.md)为准；早期原生内核检查不证明当前 Windows Docker Desktop 覆盖。缺少依赖会返回明确错误；本地协议测试不等同于线上 provider 或外部引擎验收。
 
 <a id="typed-coordination-messages"></a>
 

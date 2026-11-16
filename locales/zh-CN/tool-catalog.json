@@ -152,8 +152,8 @@
     "text": "观察已绑定 AFL++ job 的真实统计和崩溃文件。"
   },
   "input_minimize": {
-    "source": "Minimize a crashing input with fresh module-hash, PC-offset and frame signatures; requires GDB. allow_signal_only explicitly permits weaker signal-only equivalence. Poll job_status and collect job_artifacts.",
-    "text": "用新观察的模块哈希、PC 偏移及栈帧签名缩减崩溃输入，要求 GDB。allow_signal_only 显式允许较弱信号等价；轮询 job_status 并收集 job_artifacts。"
+    "source": "Minimize a crashing input with fresh module-hash, PC-offset and frame signatures using the worker's debugger (GDB on Linux, DbgEng through WinDbg MCP on Windows). allow_signal_only explicitly permits weaker signal-only equivalence. Poll job_status and collect job_artifacts.",
+    "text": "用新观察的模块哈希、PC 偏移及栈帧签名，经 worker 调试器缩减崩溃输入（Linux 为 GDB，Windows 为经 WinDbg MCP 的 DbgEng）。allow_signal_only 显式允许较弱信号等价；轮询 job_status 并收集 job_artifacts。"
   },
   "interactive_close": {
     "source": "Close your interactive session and terminate its process tree; also permits cleanup when its in-run owner is terminal.",
@@ -208,8 +208,8 @@
     "text": "列出本分析共享笔记。"
   },
   "poc_verify": {
-    "source": "Independently replay a finding in fresh trial directories. Use argv/stdin delivery, or a bounded declarative network plan with the host-prepared launch_spec. Network trials use fresh TCP connections, capture/patch ASLR-dependent values and hash raw transcripts; server state is not reset and deployed runtime identity remains unconfirmed. Worker observations determine success.",
-    "text": "在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。成功以 worker 观察为准。"
+    "source": "Independently replay a finding in fresh trial directories. Use argv/stdin delivery, or a bounded declarative network plan with the host-prepared launch_spec. Network trials use fresh TCP connections, capture/patch ASLR-dependent values and hash raw transcripts; server state is not reset and deployed runtime identity remains unconfirmed. Native Windows workers support argv/stdin replay only. Worker observations determine success.",
+    "text": "在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。原生 Windows worker 仅支持 argv/stdin 重放；成功以 worker 观察为准。"
   },
   "py_run": {
     "source": "Run a Python script in the worker in ONE step: pass the source text directly (no base64, no file_put). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv as a read-only executable copy in isolated jobs — read it from sys.argv[-1]. Prefer this over file_put+job_start for any script longer than one line.",

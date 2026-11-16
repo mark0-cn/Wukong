@@ -106,6 +106,26 @@
       "pwn/musl-format"
     ]
   },
+  "windows_userland": {
+    "related_tools": [
+      "binary_inspect",
+      "function_decompile",
+      "xrefs_query",
+      "debug_start",
+      "debug_inspect",
+      "debug_control",
+      "crash_replay",
+      "input_minimize",
+      "poc_verify",
+      "interactive_start",
+      "py_run",
+      "differential_test"
+    ],
+    "sources": [
+      "docs/design/cross-platform-environments.md"
+    ],
+    "fixtures": []
+  },
   "validation": {
     "related_tools": [
       "artifact_validate",

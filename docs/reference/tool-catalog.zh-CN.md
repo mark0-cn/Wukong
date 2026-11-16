@@ -48,7 +48,7 @@
 | `functions_search` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：分页搜索已分析函数。 |
 | `fuzz_start` | analyst / verifier | 是 | fuzz.start | 暂存目标和非空种子后启动 AFL++ QEMU fuzz。 |
 | `fuzz_status` | analyst / verifier | 否 | job.status | 观察已绑定 AFL++ job 的真实统计和崩溃文件。 |
-| `input_minimize` | analyst / verifier | 是 | input.minimize | 用新观察的模块哈希、PC 偏移及栈帧签名缩减崩溃输入，要求 GDB。allow_signal_only 显式允许较弱信号等价；轮询 job_status 并收集 job_artifacts。 |
+| `input_minimize` | analyst / verifier | 是 | input.minimize | 用新观察的模块哈希、PC 偏移及栈帧签名，经 worker 调试器缩减崩溃输入（Linux 为 GDB，Windows 为经 WinDbg MCP 的 DbgEng）。allow_signal_only 显式允许较弱信号等价；轮询 job_status 并收集 job_artifacts。 |
 | `interactive_close` | analyst / verifier | 是 | interact.close | 关闭所属交互会话及进程树，也可清理同 run 中 owner 已终止的会话。 |
 | `interactive_send` | analyst / verifier | 是 | interact.write | 向所属交互会话 stdin 写字节并返回新增输出；两次调用间会话保持存活。 |
 | `interactive_start` | analyst / verifier | 是 | interact.start | 启动本 Agent 所属的持久化交互进程（REPL），返回 session_id；worker 路径只在直接 argv 项解析。 |
@@ -62,7 +62,7 @@
 | `mitigation_profile` | analyst / verifier | 否 | runtime.profile | 区分二进制声明、worker 支持和所属进程/线程的保护观察；可选 address 检查其真实映射。 |
 | `note_save` | 全部 | 是 | controller | 保存关联本任务的共享笔记。 |
 | `notes_list` | 全部 | 否 | controller | 列出本分析共享笔记。 |
-| `poc_verify` | analyst / verifier | 是 | poc.verify | 在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。成功以 worker 观察为准。 |
+| `poc_verify` | analyst / verifier | 是 | poc.verify | 在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。原生 Windows worker 仅支持 argv/stdin 重放；成功以 worker 观察为准。 |
 | `py_run` | analyst / verifier | 是 | py.run | 一步在 worker 运行 Python 源文，无需 base64/file_put。先语法检查并直接返回编译错误，再创建后台 job（job_status 读输出）。可选 argv 对应 sys.argv[1..]；可选 target 暂存路径附加为最后参数，在隔离 job 自动暂存，用 sys.argv[-1] 读取。多行脚本优先于 file_put+job_start。 隔离环境中的 target 是只读、可执行的副本；原始附件保持不变。 |
 | `runtime_doctor` | 全部 | 否 | explicit probe | 检查已配置 worker 的真实平台、版本及能力。 |
 | `runtime_prepare` | analyst / verifier | 是 | runtime.prepare | 为提供的 target/libc/loader 创建不可变执行副本并返回直接 argv。三份 ELF 架构须一致。不执行或修改原件；真实映射另行确认。 |

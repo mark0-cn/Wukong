@@ -18,8 +18,8 @@
       "zh-CN": "04ef38f29d72fd0ea63c0106c81e86210272b0617def67218e6079dbbcf6d01d"
     },
     "docs/design/architecture.md": {
-      "en": "9ad19e49e1293840d292334d88beee4ee41ef8e82b47fbf45f5dffbc6e2dbae9",
-      "zh-CN": "3d339adf94d37a1f9a9af9e3cd746e535f911cd03d78480251f1711b58e05fe3"
+      "en": "e3fe69b03a8e5358ad65c83e0f2d1489cc4d27a0a06dc055c9beda9e0d8dff0d",
+      "zh-CN": "e568bc7c274c669643cd3cc6c6a4382db4b6f536c9c5d92a0adc1a63c914e764"
     },
     "docs/design/cross-platform-environments.md": {
       "en": "cdc4c6710cb67af662b2ff3654219368d9aa492cb41fa99b7d85cf6d897c7e90",
@@ -102,12 +102,12 @@
       "zh-CN": "23406501c7614bdcd665a1a5d95b420d5b0054c574820a174bd197bcfca2ad88"
     },
     "docs/reference/skill-coverage.md": {
-      "en": "0b9272912e2d2afc463663723c2532d1d6b56ff83572fff507eac663d4cf4826",
-      "zh-CN": "81b10521dedf204f2e8a8627014f53fc239969ee50034f81e477386ad51773c1"
+      "en": "ffdcd9ef7c681550cdc36e100b25274b73aa761be50ac02b2b1bdfa01a083f73",
+      "zh-CN": "1edce24e862bbc1c082016383088c2703f2548180d9886c731594b0f71ab6e18"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "04c0bf047d202717a4a74be81ab7980e2243113e981055888ca6ac90d8d4f0d9",
-      "zh-CN": "763fada93d60711f7beab0bc397725bc6ae4435ed72499723929c5e9a1d19b85"
+      "en": "9c36557898791310995f2bf53c14e2f46b16389e449e0b74b3b36b8dd17ec381",
+      "zh-CN": "514afac4eef2377e690765ac558d03ebbd456d52749c86f95fc0ff91558beb41"
     },
     "docs/user/languages.md": {
       "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
@@ -122,8 +122,8 @@
       "zh-CN": "11b6e828ccc1953a223f868a234c45ea53abed0a94d3b3602866035e5b1fd483"
     },
     "docs/user/usage.md": {
-      "en": "51946b3df34d8f38fdc90243c2029a1b43cc0c4f9d51ae6c6b18cf567abe229c",
-      "zh-CN": "d41cc8ea3dae8e94d41d377cc59e1f405539b562e8afd14e7f18e03cf1898606"
+      "en": "47b9c79ed859c7aedfd0cc55a6287770735daccee7fe9e7d2f26dc0ae87029e1",
+      "zh-CN": "d7b690ba78bbe5f92ceb2423a2e8014394a132e130954c8176a11580ccd4c6cb"
     },
     "evals/README.md": {
       "en": "8fb115c1b503627b087374bb0a3b254a140e6094baa6df91452a763a761b78ed",
@@ -174,8 +174,8 @@
       "zh-CN": "a498a5c3b2b373362ef6dd34ef6731eb96dcee295461131dc75c981b130ad708"
     },
     "workers/windows/README.md": {
-      "en": "b8d7971d795af89ef2ad3c7d440747c825d3d87e654863a0d579b4123bb3588c",
-      "zh-CN": "4f6c61af9baf46090f11356fc28483e9a949ee6d97884d4051d4bc21ca87b78d"
+      "en": "f880271fca13c1da191556f5477b390dd3a9465d20334859cc4a0aa226bb526c",
+      "zh-CN": "58ad239113f2a8576efeac5e0915cbdf46ab77648426034987185da81b68e29b"
     },
     "workers/windows/VALIDATION-HISTORY.md": {
       "en": "0d0397e04441b89da389edcc895fb469ebce0fdea4521dea4315f2fd7d863772",

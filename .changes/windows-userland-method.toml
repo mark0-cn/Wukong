@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Correct Windows platform guidance: route PE targets to a registered Windows VM instead of claiming ELF-only execution, describe input minimization and PoC replay on the Windows DbgEng path (argv/stdin only), and separate trusted-fixture acceptance from production admission. Add a `windows_userland` method covering PE loader mitigations, IPC and token boundaries, NT heap/SEH, and the Windows worker's evidence limits."
+zh_CN = "修正 Windows 平台说明：PE 目标改为路由到已登记的 Windows VM，而非声称仅支持 ELF 执行；输入最小化与 PoC 重放描述补充 Windows DbgEng 路径（仅 argv/stdin）；架构文档区分受信夹具验收与生产准入。新增 `windows_userland` 方法，覆盖 PE 加载器缓解、IPC/令牌边界、NT 堆/SEH 及 Windows worker 的证据限制。"

@@ -244,6 +244,12 @@ pub(crate) static REGISTRY: &[Entry] = &[
         "Recover malformed or hand-crafted ELF files: raw header audit, patched working copies and per-entry analysis."
     ),
     entry!(
+        windows_userland,
+        Kind::Method,
+        "methods",
+        "Windows PE userland hypotheses: loader mitigations, IPC and token trust boundaries, NT heap/SEH and the Windows worker's evidence limits."
+    ),
+    entry!(
         tooling,
         Kind::Support,
         "support",

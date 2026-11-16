@@ -13,7 +13,8 @@ what to run": delegate the running too.
 | Format/arch unknown | analyst with `skills=["recon"]` runs `binary_inspect`; wait for its dossier |
 | ELF with symbols | analyst with `reverse` searches functions and analyzes candidates |
 | ELF stripped | analyst combines `recon` anchors with `reverse` references as needed |
-| PE / Mach-O | analyst uses static inspection and Ghidra; worker execution supports ELF |
+| PE / Mach-O | analyst uses static inspection and Ghidra; Mach-O stays static-only, while PE execution/debugging needs a registered Windows VM environment |
+| Windows target | bind the Windows environment, then check `environment_doctor` before staging; expect no AFL/QEMU, raw debugger commands or core snapshots — plan owned DbgEng sessions plus `crash_replay`/`input_minimize`/`poc_verify` with argv/stdin and bounded `py_run` analysis |
 | Execution required | assigned analyst stages the target with `stage_target` and checks `runtime_doctor` |
 | Vulnerability discovery requested | analyst with `hunter` investigates the bounded scope and forms testable hypotheses; no prior hypothesis required |
 | A crash exists | analyst with `crash` replays, minimizes and investigates the root cause; exploit work only when requested |

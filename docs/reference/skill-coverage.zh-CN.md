@@ -36,3 +36,4 @@
 | `tooling` | 未登记 | 未登记 | 未登记 |
 | `types` | 未登记 | 未登记 | 未登记 |
 | `validation` | `artifact_validate`, `analysis_verify`, `file_revise` | [docs/reference/report-format.md](../../docs/reference/report-format.zh-CN.md) | 未登记 |
+| `windows_userland` | `binary_inspect`, `function_decompile`, `xrefs_query`, `debug_start`, `debug_inspect`, `debug_control`, `crash_replay`, `input_minimize`, `poc_verify`, `interactive_start`, `py_run`, `differential_test` | [docs/design/cross-platform-environments.md](../../docs/design/cross-platform-environments.zh-CN.md) | 未登记 |
