@@ -126,6 +126,13 @@ impl VmHost for VmwareVm {
             .await?;
         Ok(())
     }
+
+    async fn delete_snapshot(&self, name: &str) -> Result<()> {
+        validate_snapshot_name(name)?;
+        self.run(&["-T", "ws", "deleteSnapshot", self.vmx()?, name])
+            .await?;
+        Ok(())
+    }
 }
 
 fn comparable(path: &Path) -> String {

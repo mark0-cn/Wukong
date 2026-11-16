@@ -55,6 +55,11 @@ pub enum Command {
         #[arg(long, default_value_t = 120)]
         timeout: u64,
     },
+    /// Delete unused experiment snapshots, keeping the baseline and active one.
+    Prune {
+        #[arg(long)]
+        vm: String,
+    },
     /// Run the packaged install.ps1 through the administrative channel.
     Install {
         #[arg(long)]
@@ -136,6 +141,7 @@ pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
             lab.finish().await;
             result
         }
+        Command::Prune { vm } => open(config, &vm)?.prune().await,
         Command::Install {
             vm,
             lab: lab_id,

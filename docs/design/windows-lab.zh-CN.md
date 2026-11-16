@@ -29,7 +29,8 @@ ID 为 1–64 个 ASCII 字母、数字、下划线或连字符。快照名允�
 阶段为 `idle`、`preparing`、`ready`、`restoring`、`recovery_required` 和 `failed`。
 
 - `prepare` 仅在 `idle` 或 `failed` 时接受。它提升代次、持久化待定意图、仅在缺失时创建基线、创建一份 `<prefix>-<lab_id>` 快照，并进入带活动租约的 `ready`。
-- `restore` 要求活动实验 ID 与代次。它先提升代次再请求 VMware 恢复，清空活动实验，恢复到基线，按配置启动 VM，并进入 `idle`。
+- `restore` 要求活动实验 ID 与代次。它先提升代次再请求 VMware 恢复，清空活动实验，恢复到基线，按配置启动 VM，并进入 `idle`。恢复成功后尽力删除该实验的快照，并报告 `pruned_snapshot` 或 `prune_error`。
+- `prune` 删除所有带实验前缀的快照，但保留基线和活动实验快照；无关快照和失败都会被报告，绝不静默删除。
 - 过期代次在任何宿主调用之前被拒绝，因此旧租约即使在 VM 恢复后也无法重新获得执行权。
 - 明确的 prepare 失败进入 `failed` 并允许重试；restore 失败和所有超时进入 `recovery_required`。
 - 进程启动时发现待定的 `preparing` 或 `restoring`，说明控制器重启中断了宿主副作用，状态转为 `recovery_required`，不会重放。

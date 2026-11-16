@@ -41,6 +41,7 @@ pub trait VmHost: Send + Sync {
     async fn snapshot(&self, name: &str) -> Result<()>;
     async fn revert(&self, name: &str) -> Result<()>;
     async fn start(&self) -> Result<()>;
+    async fn delete_snapshot(&self, name: &str) -> Result<()>;
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,6 +162,8 @@ pub struct ActiveExperiment {
     pub generation: u64,
     pub spec_sha256: String,
     pub spec: ExperimentSpec,
+    #[serde(default)]
+    pub snapshot: Option<String>,
     #[serde(default)]
     pub package_sha256: Option<String>,
     #[serde(default)]
@@ -581,6 +584,7 @@ impl WindowsLab {
             generation,
             spec_sha256: spec_sha256.clone(),
             spec,
+            snapshot: Some(snapshot.clone()),
             package_sha256: package_sha256.clone(),
             install_sha256: install_sha256.clone(),
             started_at: now(),
@@ -645,6 +649,7 @@ impl WindowsLab {
             "stale lab lease: request generation {generation} is not the active generation {}",
             state.generation
         );
+        let experiment_snapshot = active.snapshot.clone();
         let next_generation = state.generation + 1;
         let pending = PendingOperation {
             operation_id: uuid::Uuid::new_v4().simple().to_string(),
@@ -698,11 +703,22 @@ impl WindowsLab {
         state.pending = None;
         state.last_error = None;
         self.store.save(&state)?;
+        let mut pruned_snapshot: Option<String> = None;
+        let mut prune_error: Option<String> = None;
+        if let Some(snapshot) = experiment_snapshot {
+            match tokio::time::timeout(self.timeout, self.host.delete_snapshot(&snapshot)).await {
+                Ok(Ok(())) => pruned_snapshot = Some(snapshot),
+                Ok(Err(error)) => prune_error = Some(format!("{error:#}")),
+                Err(_) => prune_error = Some("snapshot deletion timed out".into()),
+            }
+        }
         Ok(serde_json::json!({
             "vm_id": self.vm_id,
             "generation": next_generation,
             "phase": state.phase,
             "baseline_snapshot": self.baseline,
+            "pruned_snapshot": pruned_snapshot,
+            "prune_error": prune_error,
         }))
     }
 
@@ -1031,6 +1047,47 @@ impl WindowsLab {
         Ok(path)
     }
 
+    /// Delete unused experiment snapshots. The baseline and the active
+    /// experiment snapshot are always kept.
+    pub async fn prune(&self) -> Result<serde_json::Value> {
+        let _gate = self.gate.lock().await;
+        let _lock = self.store.lock(&self.vm_id)?;
+        let state = self.store.load(&self.vm_id, &self.baseline)?;
+        let active = state
+            .active
+            .as_ref()
+            .and_then(|active| active.snapshot.clone());
+        let names = tokio::time::timeout(self.timeout, self.host.snapshots())
+            .await
+            .map_err(|_| anyhow::anyhow!("snapshot listing timed out"))??;
+        let prefix = format!("{}-", self.snapshot_prefix);
+        let mut deleted = Vec::new();
+        let mut failed = Vec::new();
+        let mut kept = vec![self.baseline.clone()];
+        if let Some(active) = &active {
+            kept.push(active.clone());
+        }
+        for name in names {
+            if !name.starts_with(&prefix) || name == self.baseline || Some(&name) == active.as_ref()
+            {
+                continue;
+            }
+            match tokio::time::timeout(self.timeout, self.host.delete_snapshot(&name)).await {
+                Ok(Ok(())) => deleted.push(name),
+                Ok(Err(error)) => {
+                    failed.push(serde_json::json!({"snapshot":name,"error":format!("{error:#}")}))
+                }
+                Err(_) => failed.push(serde_json::json!({"snapshot":name,"error":"timed out"})),
+            }
+        }
+        Ok(serde_json::json!({
+            "vm_id": self.vm_id,
+            "deleted": deleted,
+            "failed": failed,
+            "kept": kept,
+        }))
+    }
+
     pub async fn reconcile(
         &self,
         operation_id: &str,
@@ -1061,6 +1118,8 @@ impl WindowsLab {
                     generation: pending.generation,
                     spec_sha256: pending.spec_sha256.clone(),
                     spec: pending.spec.clone(),
+                    snapshot: (pending.kind == OperationKind::Prepare)
+                        .then(|| pending.snapshot.clone()),
                     package_sha256: pending.package_sha256.clone(),
                     install_sha256: pending.install_sha256.clone(),
                     started_at: pending.started_at.clone(),

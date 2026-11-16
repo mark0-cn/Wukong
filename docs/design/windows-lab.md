@@ -29,7 +29,8 @@ State lives in `<state_dir>/windows-lab/<vm_id>.json` and records the schema, VM
 Phases are `idle`, `preparing`, `ready`, `restoring`, `recovery_required` and `failed`.
 
 - `prepare` is accepted only while `idle` or `failed`. It advances the generation, persists a pending intent, creates the baseline only when absent, creates one `<prefix>-<lab_id>` snapshot, and reaches `ready` with an active lease.
-- `restore` requires the active lab ID and generation. It advances the generation before asking VMware to revert, clears the active experiment, reverts to the baseline, optionally starts the VM, and reaches `idle`.
+- `restore` requires the active lab ID and generation. It advances the generation before asking VMware to revert, clears the active experiment, reverts to the baseline, optionally starts the VM, and reaches `idle`. After a successful restore it deletes that experiment's snapshot best-effort and reports `pruned_snapshot` or `prune_error`.
+- `prune` deletes every snapshot with the lab prefix except the baseline and the active experiment snapshot; unrelated snapshots and failures are reported, never silently removed.
 - A stale generation is rejected before any host call, so an old lease cannot regain execution rights even when the VM is restored.
 - A definitive prepare failure becomes `failed` and may be retried. Restore failures and every timeout become `recovery_required`.
 - Finding a pending `preparing` or `restoring` state on process start means a controller restart interrupted a host effect. The state becomes `recovery_required`; nothing is replayed.

@@ -43,6 +43,9 @@ impl FakeHost {
     fn set_running(&self, running: bool) {
         self.state.lock().unwrap().running = running;
     }
+    fn add_snapshot(&self, name: &str) {
+        self.state.lock().unwrap().snapshots.push(name.into());
+    }
     async fn wait(&self) {
         let delay = self.state.lock().unwrap().delay;
         if let Some(delay) = delay {
@@ -90,6 +93,19 @@ impl VmHost for FakeHost {
         self.state.lock().unwrap().calls.push("start".into());
         self.wait().await;
         self.state.lock().unwrap().running = true;
+        Ok(())
+    }
+    async fn delete_snapshot(&self, name: &str) -> Result<()> {
+        self.state
+            .lock()
+            .unwrap()
+            .calls
+            .push(format!("delete {name}"));
+        self.state
+            .lock()
+            .unwrap()
+            .snapshots
+            .retain(|snapshot| snapshot != name);
         Ok(())
     }
 }
@@ -604,6 +620,56 @@ impl LabAdmin for FakeAdmin {
             settled: true,
         })
     }
+}
+
+#[tokio::test]
+async fn prune_removes_only_unused_lab_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host.clone());
+    let lease = lab.prepare("analyst", "prune", spec()).await.unwrap();
+    host.add_snapshot("lab-orphan");
+    host.add_snapshot("user-snapshot");
+    let result = lab.prune().await.unwrap();
+    assert_eq!(result["deleted"], serde_json::json!(["lab-orphan"]));
+    assert_eq!(
+        result["kept"],
+        serde_json::json!(["baseline", lease.snapshot.clone()])
+    );
+    assert!(
+        !host
+            .state
+            .lock()
+            .unwrap()
+            .snapshots
+            .contains(&"lab-orphan".to_string())
+    );
+    assert!(
+        host.state
+            .lock()
+            .unwrap()
+            .snapshots
+            .contains(&"user-snapshot".to_string())
+    );
+}
+
+#[tokio::test]
+async fn restore_prunes_its_experiment_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host.clone());
+    let lease = lab.prepare("analyst", "restore", spec()).await.unwrap();
+    let result = lab.restore(&lease.lab_id, lease.generation).await.unwrap();
+    assert_eq!(result["pruned_snapshot"], lease.snapshot);
+    assert!(host.calls().contains(&format!("delete {}", lease.snapshot)));
+    assert!(
+        !host
+            .state
+            .lock()
+            .unwrap()
+            .snapshots
+            .contains(&lease.snapshot)
+    );
 }
 
 #[tokio::test]
