@@ -116,7 +116,9 @@ class JobLedgerTests(unittest.TestCase):
         with os.fdopen(reader, "rb", buffering=0) as admission:
             stream = os.fdopen(writer, "wb", buffering=0)
             process = Mock(pid=os.getpid(), stdin=stream)
-            with patch("wukong_worker.resources.job_ledger.atomic_json", side_effect=uncertain_commit):
+            with patch(
+                "wukong_worker.resources.job_ledger.atomic_json", side_effect=uncertain_commit
+            ):
                 with self.assertRaisesRegex(OSError, "revocation unavailable"):
                     self.reserve(lambda: process)
             self.assertTrue(stream.closed)
