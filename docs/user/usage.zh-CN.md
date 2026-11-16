@@ -121,11 +121,12 @@ API key 内容不写入 TOML；填写环境变量名，而非密钥值。Windows
 
 ```powershell
 wukong --config wukong.toml lab status --vm lab
+wukong --config wukong.toml lab package --vm lab --spec spec.json
 wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parser --spec spec.json
 wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
 ```
 
-CLI 必须从正常完整性目录运行，不能位于带 Low 标签的构建目录。参见 [Windows 实验实验室](../design/windows-lab.zh-CN.md)。第一阶段仅覆盖生命周期；依赖打包、harness 准入与 guest 安装另行处理。
+`lab package` 下载或复制规格中的依赖，逐个校验 SHA-256，并在不接触 VM 的情况下发布可复用的离线包；`lab prepare` 把该包和已校验的安装/清理计划绑定到租约。CLI 必须从正常完整性目录运行，不能位于带 Low 标签的构建目录。参见 [Windows 实验实验室](../design/windows-lab.zh-CN.md)。第一阶段仅覆盖生命周期与准备；harness 准入与 guest 安装另行处理。
 
 <a id="configuration-and-models"></a>
 

@@ -117,11 +117,12 @@ Launch `Wukong.lnk` in the destination thereafter. Configuration still saves to 
 
 ```powershell
 wukong --config wukong.toml lab status --vm lab
+wukong --config wukong.toml lab package --vm lab --spec spec.json
 wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parser --spec spec.json
 wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
 ```
 
-Run the CLI from a normal-integrity directory outside a Low-labeled build tree. See [Windows experiment lab](../design/windows-lab.md). Phase 1 covers lifecycle only; dependency packaging, harness admission and guest installation remain separate.
+`lab package` fetches or copies the spec's dependencies, verifies every SHA-256 and publishes a reusable offline package without touching the VM; `lab prepare` binds that package and the validated install/cleanup plan into the lease. Run the CLI from a normal-integrity directory outside a Low-labeled build tree. See [Windows experiment lab](../design/windows-lab.md). Phase 1 covers lifecycle and preparation only; harness admission and guest installation remain separate.
 
 <a id="配置与模型"></a>
 

@@ -23,6 +23,9 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+pub mod install;
+pub mod package;
+
 pub const STATE_SCHEMA: u32 = 1;
 
 /// Fixed host operations the lab may request. There is no generic run method.
@@ -98,6 +101,12 @@ pub struct ExperimentSpec {
     pub toolchain_sha256: String,
     #[serde(default)]
     pub recovery: String,
+    /// Controller-fetched, hash-verified artifacts assembled into an offline package.
+    #[serde(default)]
+    pub dependencies: Vec<package::Dependency>,
+    /// Guest-side installation and cleanup ownership. Validation only in Phase 1.
+    #[serde(default)]
+    pub install: Option<install::InstallPlan>,
 }
 
 impl ExperimentSpec {
@@ -118,6 +127,10 @@ impl ExperimentSpec {
             self.recovery.len() <= 512,
             "experiment recovery note exceeds 512 characters"
         );
+        package::validate_dependencies(&self.dependencies)?;
+        if let Some(install) = &self.install {
+            install.validate(self.launch)?;
+        }
         Ok(())
     }
 
@@ -143,6 +156,10 @@ pub struct ActiveExperiment {
     pub generation: u64,
     pub spec_sha256: String,
     pub spec: ExperimentSpec,
+    #[serde(default)]
+    pub package_sha256: Option<String>,
+    #[serde(default)]
+    pub install_sha256: Option<String>,
     pub started_at: String,
 }
 
@@ -157,6 +174,10 @@ pub struct PendingOperation {
     pub purpose: String,
     pub spec_sha256: String,
     pub spec: ExperimentSpec,
+    #[serde(default)]
+    pub package_sha256: Option<String>,
+    #[serde(default)]
+    pub install_sha256: Option<String>,
     pub snapshot: String,
     pub started_at: String,
 }
@@ -198,6 +219,8 @@ pub struct LabLease {
     pub generation: u64,
     pub snapshot: String,
     pub spec_sha256: String,
+    pub package_sha256: Option<String>,
+    pub install_sha256: Option<String>,
     pub owner: String,
 }
 
@@ -214,6 +237,10 @@ impl LabStore {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn packages_root(&self) -> PathBuf {
+        self.root.join("packages")
     }
 
     fn state_path(&self, vm_id: &str) -> PathBuf {
@@ -297,6 +324,21 @@ fn now() -> String {
     Utc::now().to_rfc3339()
 }
 
+/// Materialize the spec's dependencies without touching lab state or the VM.
+pub async fn materialize_dependencies(
+    state_dir: &Path,
+    spec: &ExperimentSpec,
+) -> Result<Option<package::Package>> {
+    spec.validate()?;
+    if spec.dependencies.is_empty() {
+        return Ok(None);
+    }
+    let store = LabStore::new(state_dir);
+    package::materialize(&store.packages_root(), &spec.dependencies)
+        .await
+        .map(Some)
+}
+
 fn valid_label(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.len() <= max && !value.contains(['\n', '\r', '\0'])
 }
@@ -367,6 +409,17 @@ impl WindowsLab {
         );
         spec.validate()?;
         let spec_sha256 = spec.sha256()?;
+        let package = if spec.dependencies.is_empty() {
+            None
+        } else {
+            Some(package::materialize(&self.store.packages_root(), &spec.dependencies).await?)
+        };
+        let package_sha256 = package.map(|package| package.id);
+        let install_sha256 = spec
+            .install
+            .as_ref()
+            .map(|install| install.sha256(spec.launch))
+            .transpose()?;
         let _gate = self.gate.lock().await;
         let _lock = self.store.lock(&self.vm_id)?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
@@ -389,6 +442,8 @@ impl WindowsLab {
             purpose: purpose.to_owned(),
             spec_sha256: spec_sha256.clone(),
             spec: spec.clone(),
+            package_sha256: package_sha256.clone(),
+            install_sha256: install_sha256.clone(),
             snapshot: snapshot.clone(),
             started_at: now(),
         };
@@ -419,6 +474,8 @@ impl WindowsLab {
             generation,
             spec_sha256: spec_sha256.clone(),
             spec,
+            package_sha256: package_sha256.clone(),
+            install_sha256: install_sha256.clone(),
             started_at: now(),
         });
         state.pending = None;
@@ -429,6 +486,8 @@ impl WindowsLab {
             generation,
             snapshot,
             spec_sha256,
+            package_sha256,
+            install_sha256,
             owner: owner.to_owned(),
         })
     }
@@ -465,6 +524,8 @@ impl WindowsLab {
             purpose: active.purpose.clone(),
             spec_sha256: active.spec_sha256.clone(),
             spec: active.spec.clone(),
+            package_sha256: active.package_sha256.clone(),
+            install_sha256: active.install_sha256.clone(),
             snapshot: state.baseline_snapshot.clone(),
             started_at: now(),
         };
@@ -544,6 +605,8 @@ impl WindowsLab {
                     generation: pending.generation,
                     spec_sha256: pending.spec_sha256.clone(),
                     spec: pending.spec.clone(),
+                    package_sha256: pending.package_sha256.clone(),
+                    install_sha256: pending.install_sha256.clone(),
                     started_at: pending.started_at.clone(),
                 });
                 state.pending = None;

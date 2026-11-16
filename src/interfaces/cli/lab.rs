@@ -3,7 +3,7 @@ use crate::application::windows_lab::{ReconcileOutcome, WindowsLab};
 use crate::config::AppConfig;
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,6 +14,14 @@ pub enum Command {
     Status {
         #[arg(long)]
         vm: String,
+    },
+    /// Fetch, verify and publish the spec's dependency offline package.
+    Package {
+        #[arg(long)]
+        vm: String,
+        /// Experiment description JSON with the dependency list.
+        #[arg(long)]
+        spec: PathBuf,
     },
     /// Create the baseline (if needed) and one immutable experiment snapshot.
     Prepare {
@@ -52,6 +60,19 @@ pub enum Command {
 pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
     match command {
         Command::Status { vm } => open(config, &vm)?.status().await,
+        Command::Package { vm, spec } => {
+            ensure_registered(config, &vm)?;
+            let spec = read_spec(&spec)?;
+            match crate::application::windows_lab::materialize_dependencies(
+                &config.state_dir,
+                &spec,
+            )
+            .await?
+            {
+                Some(package) => Ok(serde_json::to_value(package)?),
+                None => Ok(json!({"vm_id": vm, "package": null})),
+            }
+        }
         Command::Prepare {
             vm,
             owner,
@@ -83,12 +104,19 @@ pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
     }
 }
 
-fn open(config: &AppConfig, vm_id: &str) -> Result<WindowsLab> {
-    let vm = config
+fn ensure_registered<'a>(
+    config: &'a AppConfig,
+    vm_id: &str,
+) -> Result<&'a crate::config::WindowsLabVm> {
+    config
         .windows_lab
         .vms
         .get(vm_id)
-        .with_context(|| format!("VM {vm_id} is not registered under [windows_lab.vms]"))?;
+        .with_context(|| format!("VM {vm_id} is not registered under [windows_lab.vms]"))
+}
+
+fn open(config: &AppConfig, vm_id: &str) -> Result<WindowsLab> {
+    let vm = ensure_registered(config, vm_id)?;
     let host = crate::adapters::windows_lab::VmwareVm::new(
         &vm.vmrun,
         &vm.vmx,

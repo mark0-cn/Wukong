@@ -4,7 +4,7 @@
 
 ## Scope
 
-Phase 1 of the Windows capability plan gives the controller a bounded lifecycle for one registered VMware experiment VM: prepare a baseline and a per-experiment snapshot, fence every generation, restore to the baseline, and reconcile an interrupted or timed-out host operation. The operator entry point is `wukong lab`. It does not yet prepare dependency packages, compile harnesses, install services or drivers, or expose debugger, network and fuzz tools.
+Phase 1 of the Windows capability plan gives the controller a bounded lifecycle for one registered VMware experiment VM: prepare a baseline and a per-experiment snapshot, fence every generation, restore to the baseline, and reconcile an interrupted or timed-out host operation. It also locks and verifies controller-side dependency packages and validates install/cleanup plans. The operator entry point is `wukong lab`. It does not yet compile harnesses in the VM, install services or drivers, or expose debugger, network and fuzz tools.
 
 ## Registered identity and configuration
 
@@ -38,6 +38,30 @@ Phases are `idle`, `preparing`, `ready`, `restoring`, `recovery_required` and `f
 ## Experiment description
 
 `ExperimentSpec` binds `target_sha256`, `launch` (`exe`, `dll_harness`, `service`, `gui`, `driver`), `input_channel` (`argv`, `stdin`, `file`, `network`, `named_pipe`, `com`, `gui`, `ioctl`), `account` (`user`, `elevated_user`, `system`, `driver`), `os_build`, `toolchain_sha256` and a bounded recovery note. Hashes must be 64 lowercase hexadecimal characters. The specification hash is bound into the lease and active state. A valid description is an admission precondition, not execution evidence.
+
+## Preparation pipeline
+
+Dependencies and installation are part of the experiment description:
+
+```json
+{
+  "dependencies": [
+    {"name": "harness.c", "sha256": "<64 lowercase hex>",
+     "source": {"kind": "path", "path": "D:/lab/harness.c"}}
+  ],
+  "install": {
+    "targets": ["C:\\lab\\harness.exe"],
+    "cleanup": [{"kind": "file", "target": "C:\\lab\\harness.exe"}]
+  }
+}
+```
+
+- A dependency source is an absolute existing `path` or an `http`/`https` `url`. Each artifact is bounded to 64 MiB, a package to 512 MiB, and a download to 60 seconds.
+- Every byte is verified against the declared SHA-256. The package ID is the hash of the canonical manifest, and the package is published under `<state_dir>/windows-lab/packages/<id>/` with `manifest.json` and `SHA256SUMS`.
+- Reuse re-verifies every existing byte. A mismatch fails instead of overwriting; operators remove a broken package explicitly.
+- `install.targets` are absolute Windows paths without dot segments. A service binary must be one of them, `kernel_driver` requires `launch=driver`, and every target, service and account needs a covering cleanup action (`file`, `directory`, `service` or `account`).
+- `wukong lab package` materializes and verifies a package without touching the VM. `lab prepare` materializes it before any state change and binds `package_sha256` and `install_sha256` into the pending intent, active experiment and lease.
+- A verified package and a valid install plan are admission inputs, not qualification. Harness compilation, dry-run admission and guest installation remain later phase work.
 
 ## Host operations
 

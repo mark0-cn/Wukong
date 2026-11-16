@@ -4,7 +4,7 @@
 
 ## 范围
 
-Windows 能力计划的第一阶段为控制器提供一台已登记 VMware 实验 VM 的有界生命周期：创建基线与每次实验的快照、按代次围栏、恢复到基线，并对中断或超时的宿主操作进行核对。操作入口是 `wukong lab`。它尚未准备依赖包、编译 harness、安装服务或驱动，也不暴露调试、网络和 fuzz 工具。
+Windows 能力计划的第一阶段为控制器提供一台已登记 VMware 实验 VM 的有界生命周期：创建基线与每次实验的快照、按代次围栏、恢复到基线，并对中断或超时的宿主操作进行核对。它还锁定并校验控制端依赖包，校验安装与清理计划。操作入口是 `wukong lab`。它尚未在 VM 内编译 harness、安装服务或驱动，也不暴露调试、网络和 fuzz 工具。
 
 ## 登记身份与配置
 
@@ -38,6 +38,30 @@ ID 为 1–64 个 ASCII 字母、数字、下划线或连字符。快照名允�
 ## 实验描述
 
 `ExperimentSpec` 绑定 `target_sha256`、`launch`（`exe`、`dll_harness`、`service`、`gui`、`driver`）、`input_channel`（`argv`、`stdin`、`file`、`network`、`named_pipe`、`com`、`gui`、`ioctl`）、`account`（`user`、`elevated_user`、`system`、`driver`）、`os_build`、`toolchain_sha256` 和有界恢复说明。哈希必须是 64 个小写十六进制字符。规格哈希绑定到租约和活动状态。有效描述只是准入前提，不是执行证据。
+
+## 准备流水线
+
+依赖与安装属于实验描述的一部分：
+
+```json
+{
+  "dependencies": [
+    {"name": "harness.c", "sha256": "<64 个小写十六进制>",
+     "source": {"kind": "path", "path": "D:/lab/harness.c"}}
+  ],
+  "install": {
+    "targets": ["C:\\lab\\harness.exe"],
+    "cleanup": [{"kind": "file", "target": "C:\\lab\\harness.exe"}]
+  }
+}
+```
+
+- 依赖来源可以是绝对且存在的 `path`，也可以是 `http`/`https` 的 `url`。单件产物上限 64 MiB，整包上限 512 MiB，下载超时 60 秒。
+- 每个字节都按声明的 SHA-256 校验。包 ID 是规范清单的哈希，包发布到 `<state_dir>/windows-lab/packages/<id>/`，并包含 `manifest.json` 与 `SHA256SUMS`。
+- 复用时会重新校验每个已有字节。不匹配直接失败，不会覆盖；损坏的包由运维显式删除。
+- `install.targets` 是不含点段的绝对 Windows 路径。服务二进制必须是其中一个目标；`kernel_driver` 要求 `launch=driver`；每个目标、服务和账号都必须有覆盖它的清理动作（`file`、`directory`、`service` 或 `account`）。
+- `wukong lab package` 在不接触 VM 的情况下物化并校验依赖包。`lab prepare` 在改变任何状态之前物化依赖包，并把 `package_sha256` 与 `install_sha256` 绑定到待定意图、活动实验和租约。
+- 校验通过的依赖包和合法安装计划只是准入输入，不是资格认证。harness 编译、试运行准入与 guest 安装仍属于后续阶段。
 
 ## 宿主操作
 

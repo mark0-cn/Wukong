@@ -110,6 +110,30 @@ fn spec() -> ExperimentSpec {
         os_build: "10.0.17134".into(),
         toolchain_sha256: "b".repeat(64),
         recovery: "revert to baseline".into(),
+        dependencies: vec![],
+        install: None,
+    }
+}
+
+fn dependency(dir: &Path, name: &str, bytes: &[u8]) -> package::Dependency {
+    let path = dir.join(name);
+    std::fs::write(&path, bytes).unwrap();
+    package::Dependency {
+        name: name.into(),
+        sha256: hex::encode(sha2::Sha256::digest(bytes)),
+        source: package::DependencySource::Path { path },
+    }
+}
+
+fn install_plan() -> install::InstallPlan {
+    install::InstallPlan {
+        targets: vec![r"C:\lab\harness.exe".into()],
+        service: None,
+        account: None,
+        cleanup: vec![install::CleanupAction {
+            kind: install::CleanupKind::File,
+            target: r"C:\lab\harness.exe".into(),
+        }],
     }
 }
 
@@ -267,6 +291,8 @@ async fn controller_restart_requires_reconciliation_for_a_pending_effect() {
         purpose: "first".into(),
         spec_sha256: lease.spec_sha256.clone(),
         spec: spec(),
+        package_sha256: None,
+        install_sha256: None,
         snapshot: lease.snapshot.clone(),
         started_at: now(),
     });
@@ -290,6 +316,49 @@ async fn reconcile_rejects_a_different_operation() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn prepare_binds_offline_package_and_install_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host);
+    let mut spec = spec();
+    spec.dependencies = vec![dependency(
+        dir.path(),
+        "harness.c",
+        b"int main(void){return 0;}",
+    )];
+    spec.install = Some(install_plan());
+    let lease = lab.prepare("analyst", "package", spec).await.unwrap();
+    let package_id = lease.package_sha256.clone().unwrap();
+    assert!(
+        dir.path()
+            .join("windows-lab/packages")
+            .join(&package_id)
+            .join("harness.c")
+            .is_file()
+    );
+    let state = state(dir.path());
+    let active = state.active.unwrap();
+    assert_eq!(active.package_sha256, Some(package_id));
+    assert!(active.install_sha256.is_some());
+    assert!(lease.install_sha256.is_some());
+}
+
+#[tokio::test]
+async fn invalid_dependency_fails_before_any_host_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host.clone());
+    let mut spec = spec();
+    let mut dependency = dependency(dir.path(), "harness.c", b"source");
+    dependency.sha256 = "c".repeat(64);
+    spec.dependencies = vec![dependency];
+    let error = lab.prepare("analyst", "package", spec).await.unwrap_err();
+    assert!(format!("{error:#}").contains("hash mismatch"));
+    assert!(host.calls().is_empty());
+    assert_eq!(state(dir.path()).phase, LabPhase::Idle);
 }
 
 #[tokio::test]
