@@ -266,3 +266,67 @@ pub(super) fn ensure_owner_requests(
         );
     }
 }
+
+/// A domain wait can resolve before Rig has accepted the terminal report. Keep
+/// the tool effect open until queued ledger mail has entered Rig's inbox, so
+/// Rig builds the next model request with those messages in one boundary.
+#[derive(Component)]
+pub(super) struct WaitDeliveryHold;
+
+pub(super) fn hold_wait_delivery(
+    calls: Query<(Entity, &ForAgent, &ToolRequest), ReadyToSettle>,
+    ids: Query<&AgentId>,
+    accepted: Query<&MailDelivery, With<Started>>,
+    application: Res<Application>,
+    mut commands: Commands,
+    mut fatal: ResMut<Fatal>,
+) {
+    for (entity, from, request) in &calls {
+        if request.call.function.name.as_str() != "wait_for_agents" {
+            continue;
+        }
+        failed(
+            &mut fatal,
+            (|| -> Result<()> {
+                let id = &ids.get(from.0)?.0;
+                if application
+                    .runner
+                    .inbox(id)?
+                    .iter()
+                    .any(|mail| !accepted.iter().any(|delivery| delivery.id == mail.id))
+                {
+                    commands.spawn((HoldOf(entity), WaitDeliveryHold));
+                }
+                Ok(())
+            })(),
+        );
+    }
+}
+
+pub(super) fn release_wait_delivery(
+    holds: Query<(Entity, &HoldOf), With<WaitDeliveryHold>>,
+    owners: Query<&ForAgent>,
+    ids: Query<&AgentId>,
+    accepted: Query<&MailDelivery, With<Started>>,
+    application: Res<Application>,
+    mut commands: Commands,
+    mut fatal: ResMut<Fatal>,
+) {
+    for (hold, of) in &holds {
+        failed(
+            &mut fatal,
+            (|| -> Result<()> {
+                let id = &ids.get(owners.get(of.0)?.0)?.0;
+                if application
+                    .runner
+                    .inbox(id)?
+                    .iter()
+                    .all(|mail| accepted.iter().any(|delivery| delivery.id == mail.id))
+                {
+                    commands.entity(hold).despawn();
+                }
+                Ok(())
+            })(),
+        );
+    }
+}

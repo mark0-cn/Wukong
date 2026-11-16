@@ -136,6 +136,8 @@ pub(crate) fn drive(
                     .in_set(Stage::Prepare)
                     .before(prepare_models),
                 release_model_slots.in_set(Stage::Prepare),
+                release_wait_delivery.in_set(Stage::Prepare),
+                hold_wait_delivery.in_set(ReviewSystems::Edit),
                 release_predecessors.in_set(Stage::Prepare),
                 prepare_calls.in_set(PrepareSystems::Edit),
                 reconcile_calls.in_set(PrepareSystems::Edit),
@@ -187,7 +189,7 @@ pub(crate) fn drive(
         match definition.name.as_str() {
             "task" => {
                 definition.parameters = task_schema.clone();
-                definition.description = "Start an asynchronous subagent: role=analyst performs analysis, role=verifier independently checks another agent's claim. Supply a short description, full prompt and scope, with known evidence, constraints and outputs. Select capabilities through skills (recon, reverse, hunter, fuzz, crash, exploit, reporter or task methods), never through role. Changing capabilities alone does not justify another agent. New tasks default to isolated context; explicitly set inherit_context=true only for useful closed parent history. Optional contract, wait_for_predecessors and dependency_policy refine the assignment. Creation returns before work finishes; predecessor gates hold the child's model requests. Model choice and tool permissions come from controller configuration and the role. Inspect existing work first. Use follow_up_agent for completed work, wait for one report or wait_for_agents for a group/success policy.".into();
+                definition.description = "Start an asynchronous subagent: role=analyst performs analysis, role=verifier independently checks another agent's claim. Supply a short description, full prompt and scope, with known evidence, constraints and outputs. Select capabilities through skills (recon, reverse, hunter, fuzz, crash, exploit, reporter or task methods), never through role. Changing capabilities alone does not justify another agent. New tasks default to isolated context; explicitly set inherit_context=true only for useful closed parent history. Optional contract, wait_for_predecessors and dependency_policy refine the assignment. Creation returns before work finishes; predecessor gates hold the child's model requests. Model choice and tool permissions come from controller configuration and the role. Inspect existing work first. Use follow_up_agent for completed work, use wait_for_agents for one or more results and an explicit completion policy.".into();
             }
             "message" => {
                 definition.description = "Send a request, correction or reply to a reachable active agent using agent and text. Use send_message_to_agent with kind=information for progress-only updates, which must not release waits. New work on a completed agent requires follow_up_agent.".into();

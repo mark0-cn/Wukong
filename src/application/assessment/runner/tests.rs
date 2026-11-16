@@ -1,5 +1,6 @@
 use super::*;
 use crate::adapters::models::{ModelEngine, Provider};
+use crate::storage::DocumentKind;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::{
@@ -100,8 +101,8 @@ async fn reasoning_only_output_limit_recovers_without_replaying_tools() {
             }
             let output = match index {
                 0 => reply(
-                    "think",
-                    json!({"content":"durable observation before retry"}),
+                    "note_save",
+                    json!({"title":"recovery observation","body":"durable observation before retry"}),
                 ),
                 1 => {
                     let mut output = reply_text("");
@@ -120,7 +121,14 @@ async fn reasoning_only_output_limit_recovers_without_replaying_tools() {
     let result = drive_bounded(&runner, &run.id).await;
     assert_eq!(result.status, Status::Completed, "{result:?}");
     assert_eq!(result.total_tokens, 36);
-    assert_eq!(runner.store.records::<Thought>(&run.id).unwrap().len(), 1);
+    assert_eq!(
+        runner
+            .store
+            .documents(DocumentKind::Note, &run.id)
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(
         runner
             .store
@@ -823,7 +831,7 @@ async fn native_streams_keep_reasoning_usage_and_ui_progress() {
             json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","thinking":"check the evidence"},"done":false}),
             json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":"I am inspecting "},"done":false}),
             json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":"the fixture."},"done":false}),
-            json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","tool_calls":[{"function":{"name":"finish_scan","arguments":{"summary":"streamed completion"}}}]},"done":false}),
+            json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","tool_calls":[{"function":{"name":"finish_scan","arguments":{"result":{"outcome":"success","answer":"streamed completion"}}}}]},"done":false}),
             json!({"model":"fixture","created_at":"2026-11-06T00:00:00Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":2}),
         ];
         let lines = parts
@@ -1030,7 +1038,7 @@ async fn public_partial_survives_native_pause_and_inflight_request_recovery() {
 async fn native_provider_reasoning_replays_through_the_real_kernel() {
     let anthropic = [
         json!({"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"thinking","thinking":"inspect the input parser","signature":"provider-signed-thinking"},{"type":"tool_use","id":"toolu_1","name":"view_agent_graph","input":{}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":3}}),
-        json!({"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"tool_use","id":"toolu_2","name":"finish_scan","input":{"summary":"native provider result"}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":12,"output_tokens":2}}),
+        json!({"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"tool_use","id":"toolu_2","name":"finish_scan","input":{"result":{"outcome":"success","answer":"native provider result"}}}],"stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":12,"output_tokens":2}}),
     ];
     let responses = [
         json!({"id":"resp_1","object":"response","created_at":1,"status":"completed","model":"gpt-5.2","output":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"inspect parser"}],"encrypted_content":"opaque-native-reasoning"},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"view_agent_graph","arguments":"{}","status":"completed"}],"usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14},"tools":[]}),
@@ -1104,8 +1112,10 @@ async fn native_tasks_return_before_predecessors_finish_but_models_wait() {
     let server = tokio::spawn(async move {
         let mut handlers = vec![];
         let mut roots = 0;
-        // Four root calls and one model call per child.
-        for _ in 0..6 {
+        // The predecessor's report may interrupt a conditional wait. Preserve
+        // its predicate and wait again until the successor has actually finished.
+        let mut finished = false;
+        for _ in 0..10 {
             let (mut socket, _) = listener.accept().await.unwrap();
             let input = request(&mut socket).await;
             let text = input.to_string();
@@ -1132,10 +1142,18 @@ async fn native_tasks_return_before_predecessors_finish_but_models_wait() {
                             json!({"agent_ids":[tasks.iter().find(|agent|agent.scope=="second").unwrap().id]}),
                         )
                     }
-                    _ => reply(
-                        "finish_scan",
-                        json!({"result":{"outcome":"success","answer":"ordered tasks completed"}}),
-                    ),
+                    _ => {
+                        let second = tasks.iter().find(|agent| agent.scope == "second").unwrap();
+                        if second.status.terminal() && text.contains("successor result") {
+                            finished = true;
+                            reply(
+                                "finish_scan",
+                                json!({"result":{"outcome":"success","answer":"ordered tasks completed"}}),
+                            )
+                        } else {
+                            reply("wait_for_agents", json!({"agent_ids":[second.id]}))
+                        }
+                    }
                 };
                 roots += 1;
                 Some(output)
@@ -1177,13 +1195,28 @@ async fn native_tasks_return_before_predecessors_finish_but_models_wait() {
             if let Some(output) = output {
                 respond(&mut socket, output).await;
             }
+            if finished {
+                break;
+            }
         }
+        assert!(finished, "conditional waits did not finish");
         for handler in handlers {
             handler.await.unwrap();
         }
     });
     let result = drive_bounded(&runner, &run.id).await;
-    assert_eq!(result.status, Status::Completed);
+    assert_eq!(
+        result.status,
+        Status::Completed,
+        "agents: {:?}",
+        runner
+            .store
+            .list::<AgentSnapshot>("agent", &run.id)
+            .unwrap()
+            .iter()
+            .map(|agent| (&agent.scope, &agent.status, &agent.error))
+            .collect::<Vec<_>>()
+    );
     server.await.unwrap();
 }
 #[tokio::test]
