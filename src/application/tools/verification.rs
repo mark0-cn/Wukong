@@ -16,6 +16,10 @@ impl VerificationService {
         finding_id: Option<&str>,
         args: &mut Value,
     ) -> Result<()> {
+        ensure!(
+            agent.role == Role::Verifier,
+            "independent verifier role required"
+        );
         let finding: Finding = require_in_run(
             &self.jobs.store,
             finding_id.context("finding_id missing")?,
@@ -84,6 +88,10 @@ impl VerificationService {
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
+        ensure!(
+            agent.role == Role::Verifier,
+            "independent verifier role required"
+        );
         let finding: Finding =
             require_in_run(&self.jobs.store, text(args, "finding_id")?, &agent.run_id)?;
         ensure!(

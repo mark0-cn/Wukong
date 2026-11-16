@@ -244,7 +244,7 @@ fn build_catalog() -> Vec<Spec> {
             |services, agent, call, name, args| {
                 handlers::handle_analysis_verify(&services.evidence, agent, call, name, args)
             },
-            Visibility::Child,
+            Visibility::Verifier,
             Requirement::Controller,
         ),
         spec::<args::CreateAgentArgs>(
@@ -580,7 +580,7 @@ fn build_catalog() -> Vec<Spec> {
             |services, agent, call, name, args| {
                 handlers::handle_verification_record(&services.execution, agent, call, name, args)
             },
-            Visibility::All,
+            Visibility::Verifier,
             Requirement::Worker(&[Method::JobStatus, Method::JobArtifacts]),
         ),
         spec::<args::EvidenceReadArgs>(
@@ -1045,7 +1045,7 @@ fn build_catalog() -> Vec<Spec> {
             |services, agent, call, name, args| {
                 handlers::handle_job_start(&services.execution, agent, call, name, args)
             },
-            Visibility::All,
+            Visibility::Verifier,
             Requirement::Worker(&[Method::PocVerify]),
         ),
         spec::<args::LabStatusArgs>(

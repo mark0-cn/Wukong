@@ -1,0 +1,3 @@
+kind = "security"
+en = "Restrict analysis certification, PoC verification and verification records to the verifier role, and reject finding promotion backed by a non-verifier record. Analysts must delegate independent certification to a verifier."
+zh_CN = "将分析认证、PoC 验证和验证记录限制为 verifier 角色，并拒绝用非 verifier 记录提升发现阶段。分析任务必须委派独立 verifier 完成认证。"

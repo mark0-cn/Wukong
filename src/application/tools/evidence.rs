@@ -175,9 +175,13 @@ impl EvidenceService {
                         && !verification.evidence_ids.is_empty(),
                     "independent successful verification is required"
                 );
-                let _: AgentMetadata = tx
+                let verifier: AgentMetadata = tx
                     .get_record::<AgentMetadata>(&verification.verifier_agent_id)?
                     .context("verifier agent missing")?;
+                ensure!(
+                    verifier.role == Role::Verifier && verifier.run_id == agent.run_id,
+                    "verification requires a same-run verifier role"
+                );
                 finding.impact = Some(verification.impact);
             }
             finding.updated_at = now();

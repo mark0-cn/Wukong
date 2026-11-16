@@ -418,8 +418,6 @@ async fn role_catalog_enforces_coordinator_boundary() -> Result<()> {
         "interactive_start",
         "fuzz_start",
         "crash_replay",
-        "poc_verify",
-        "verification_record",
         "coverage_record",
         "finding_file",
         "threat_model_save",
@@ -508,11 +506,11 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
         .await?;
     assert!(denied.is_error);
     assert!(
-        !result(&denied)["error"]
+        result(&denied)["error"]
             .as_str()
             .unwrap()
-            .contains("verifier role"),
-        "poc_verify is no longer role-gated"
+            .contains("unavailable for role"),
+        "poc_verify must reject analysts before dispatch"
     );
 
     let report = service
@@ -1459,11 +1457,11 @@ async fn model_boolean_or_fake_verification_cannot_promote_a_finding() -> Result
         .await?;
     assert!(producer_verify.is_error);
     assert!(
-        !result(&producer_verify)["error"]
+        result(&producer_verify)["error"]
             .as_str()
             .unwrap()
-            .contains("verifier role"),
-        "poc_verify is no longer role-gated"
+            .contains("unavailable for role"),
+        "poc_verify must reject analysts before dispatch"
     );
     let finding: Finding = store.require("finding", id)?;
     assert_eq!(finding.stage, FindingStage::Suspected);

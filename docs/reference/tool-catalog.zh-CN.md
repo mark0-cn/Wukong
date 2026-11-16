@@ -9,7 +9,7 @@
 | 工具 | 可见角色 | 有副作用 | 后端要求 | 用途 |
 |---|---|---|---|---|
 | `agent_finish` | analyst / verifier | 是 | controller | 以结构化结果结束子任务，覆盖契约、证据和缺口。summary 仅用于无必需产物的任务；提供 result 时忽略 summary，以 result.answer 为准。活动后代必须先结束。 |
-| `analysis_verify` | analyst / verifier | 是 | controller | 仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。 validator_integration 检查绑定真实 --verify 任务与共用采集/判定路径的独立代码审查。自动解析自有任务原始状态证据；错误按索引标明无效检查。 |
+| `analysis_verify` | verifier | 是 | controller | 仅 verifier：记录逐项声明检查、限制及验证者自己的证据。supported 只覆盖所列检查；复现检查必须关联精确产物和带状态证据的验证者作业。不认证整份报告，不提升安全影响。记录为不可变共享笔记。 validator_integration 检查绑定真实 --verify 任务与共用采集/判定路径的独立代码审查。自动解析自有任务原始状态证据；错误按索引标明无效检查。 |
 | `angr_solve` | analyst / verifier | 是 | angr.solve | 对 stdin 校验路径进行有界符号输入还原。提供模块相对成功/失败地址与输入长度，返回候选输入和探索统计的后台 job。简单可逆变换优先直接求逆，大状态空间使用切片或明确约束；必须在真实目标重放候选字节。 |
 | `artifact_stage` | analyst / verifier | 是 | file.upload.begin + file.upload.write + file.upload.commit | 通过有界可恢复传输，将同一 run 中通过哈希校验的证据制品传入分配的环境，返回 worker 文件和原始证据 ID。 |
 | `artifact_validate` | verifier | 是 | Linux self_check_v1 + py_run + file.put + job.status + job.artifacts | 仅 verifier 可用：对 self_check_v1 Python 或 Shell 脚本独立测试正常、异常退出、信号、超时、缺失、截断和矛盾观测。绑定生产者内容证据、verifier 成功执行同一目标 --verify 的基线任务及导入的 baseline.json。启动可信有界驱动任务；观察结果后才能声明验收通过。覆盖模拟判定，不证明目标行为或采集路径连接。 |
@@ -71,7 +71,7 @@
 | `mitigation_profile` | analyst / verifier | 否 | runtime.profile | 区分二进制声明、worker 支持和所属进程/线程的保护观察；可选 address 检查其真实映射。 |
 | `note_save` | 全部 | 是 | controller | 保存关联本任务的共享笔记。 |
 | `notes_list` | 全部 | 否 | controller | 列出本分析共享笔记。 |
-| `poc_verify` | analyst / verifier | 是 | poc.verify | 在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。原生 Windows worker 仅支持 argv/stdin 重放；成功以 worker 观察为准。 |
+| `poc_verify` | verifier | 是 | poc.verify | 在新试验目录独立重放发现，使用 argv/stdin 或宿主准备 launch_spec 的有界网络计划。网络每次新 TCP 连接，捕获/修补 ASLR 值并哈希原始 transcript；不重置服务，部署身份仍未确认。原生 Windows worker 仅支持 argv/stdin 重放；成功以 worker 观察为准。 |
 | `py_run` | analyst / verifier | 是 | py.run | 一步在 worker 运行 Python。小脚本直接用 source 文本；大脚本先用 file_put 的 text 上传，再把返回路径作为 source_file（source/source_file 只能二选一）。worker 先做语法检查并直接返回编译错误，再创建后台 job（用 job_status 读输出）。可选 argv 对应 sys.argv[1..]；可选 target 暂存路径追加为最后参数，在隔离 job 中作为只读可执行副本，用 sys.argv[-1] 读取。 |
 | `runtime_doctor` | 全部 | 否 | explicit probe | 检查已配置 worker 的真实平台、版本及能力。 |
 | `runtime_prepare` | analyst / verifier | 是 | runtime.prepare | 为提供的 target/libc/loader 创建不可变执行副本并返回直接 argv。三份 ELF 架构须一致。不执行或修改原件；真实映射另行确认。 |
@@ -87,7 +87,7 @@
 | `todo_save` | 全部 | 是 | controller | 创建共享待办，默认 pending。 |
 | `todo_update` | 全部 | 是 | controller | 更新共享待办正文或状态。 |
 | `todos_list` | 全部 | 否 | controller | 列出共享待办。 |
-| `verification_record` | analyst / verifier | 是 | job.status + job.artifacts | 仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。 |
+| `verification_record` | verifier | 是 | job.status + job.artifacts | 仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。 |
 | `view_agent_graph` | 全部 | 否 | controller | 查询紧凑分页的代理状态及完整 ID（默认每页 8 条，使用 next_offset 翻页）。指定 agent_id 获取单个代理完整任务、契约和结果。同一 run 内接受至少 8 字符的唯一前缀；后续协调使用返回的完整 ID。 |
 | `wait_for_agents` | 全部 | 是 | controller | 按 all_terminal（默认）、all_success 或 any_success 等待选定 Agent，返回 satisfied/blocked 或超时；空列表表示子任务。 |
 | `xrefs_query` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：查询绑定目标的 module_relative AddressRef 或兼容字节偏移的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。 |
