@@ -288,10 +288,13 @@ impl InitialBreaks {
             && event["kind"] == "breakpoint"
             && event["frames_from_stored_context"] == false
             && frame["module"] == "ntdll"
-            && frame["symbol"] == "ntdll!DbgBreakPoint"
-            && frame["displacement"] == "0x0"
             && frame["address"] == exception["address"]
         {
+            // With only offline export symbols, the loader's initial break
+            // can be attributed to an unrelated nearest ntdll export. Match
+            // the live module/address, not that approximate function name.
+            // This one-shot allowance applies only to the sealed fixture,
+            // which must subsequently hit its own PDB-resolved breakpoint.
             &mut self.native
         } else {
             return false;
@@ -424,9 +427,7 @@ mod tests {
             ("/kind", json!("unknown")),
             ("/exception/first_chance", json!(false)),
             ("/exception/noncontinuable", json!(true)),
-            ("/frames/0/symbol", json!("wukong_probe!fixture_step")),
             ("/frames/0/module", json!("wukong_probe")),
-            ("/frames/0/displacement", json!("0x1")),
             ("/frames/0/address", json!("0x0000000000000000")),
             ("/frames", Value::Null),
         ] {
@@ -445,5 +446,27 @@ mod tests {
             assert!(!observed.observe("x86", &stop, &event));
             assert!(!observed.observe("x86", &stop, &wow64));
         }
+    }
+
+    #[test]
+    fn sealed_fixture_initial_break_does_not_require_online_os_symbols() {
+        // Observed on the hosted Windows runner with the offline symbol path.
+        // The exported name is only the nearest export, not the break routine.
+        let stop = json!({"stopped_at":"0x00007ffe1065ee1d"});
+        let mut event = json!({"status":"ok","stored_crash_context":false,
+            "frames_from_stored_context":false,"kind":"breakpoint",
+            "exception":{"code":"0x80000003","address":stop["stopped_at"],"first_chance":true,"noncontinuable":false},
+            "frames":[{"address":stop["stopped_at"],"module":"ntdll",
+                "symbol":"ntdll!RtlGetReturnAddressHijackTarget","displacement":"0x6ed"}]});
+        for architecture in ["x64", "x86"] {
+            let mut observed = InitialBreaks::default();
+            assert!(observed.observe(architecture, &stop, &event));
+            assert!(!observed.observe(architecture, &stop, &event));
+        }
+        event["frames"][0]["symbol"] = Value::Null;
+        event["frames"][0]["displacement"] = Value::Null;
+        assert!(InitialBreaks::default().observe("x64", &stop, &event));
+        event["exception"]["code"] = json!("0xc0000005");
+        assert!(!InitialBreaks::default().observe("x64", &stop, &event));
     }
 }

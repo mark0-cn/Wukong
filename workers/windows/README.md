@@ -12,6 +12,7 @@ The project no longer subscribes to or matches WFP events, and startup does not 
 
 Unexpected stops in the sealed startup debugger fixture retain a bounded diagnostic projection in the protected host log: architecture, expected/observed addresses, exception flags and the first frame identity. Each selected string is limited to 192 identifier characters; arbitrary MCP output and target contents are omitted. The structured startup report still uses its fixed stage code and summary.
 
+The sealed fixture may continue one live, first-chance, continuable native breakpoint whose exception and first-frame addresses match the current stop in `ntdll`, plus one WOW64 loader notification for x86. Offline export symbols can attribute the native loader break to a nearby export, so qualification does not require a particular OS function name or zero symbol displacement. Repeated stops, mismatched addresses, other modules/faults and stored crash contexts are rejected. Qualification still requires the fixture's own PDB-resolved breakpoint, registers and stack to match. This allowance is not used for ordinary targets. See Microsoft's [initial breakpoint](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/initial-breakpoint) description.
 
 ## Ownership and request flow
 

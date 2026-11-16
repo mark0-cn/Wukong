@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow the sealed Windows startup debugger fixture to recognize its one-time ntdll loader breakpoint with offline export symbols. Continue rejecting repeated stops, mismatched live addresses and other faults, and require the fixture's own PDB breakpoint, registers and stack before startup can pass."
+zh_CN = "Windows 启动调试器密封夹具可在仅有离线导出符号时识别一次性 ntdll 加载器断点。继续拒绝重复停止、实时地址不符及其他故障；必须命中夹具自身的 PDB 断点并验证寄存器和栈，启动检查才可通过。"
