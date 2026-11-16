@@ -111,14 +111,17 @@ if($service){
 }
 if($Mode -eq 'Restart'){
     if(-not $service){throw 'Installed fixture service disappeared'}
-    if(Test-Path -LiteralPath (Join-Path $ownedRoot 'metadata/last-service-error.txt')){throw 'Native service recorded a lifecycle failure'}
+    . (Join-Path $PSScriptRoot 'windows-worker-startup.ps1')
+    $previousStartup=Read-ReadyWorkerStartup $ownedRoot $fixture.installation_id $fixture.manifest_sha256
     $before=@(Get-ChildItem -LiteralPath (Join-Path $ownedRoot 'metadata') -Filter $receiptPattern -File | Select-Object -ExpandProperty Name)
     $service.Start()
     $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running,[TimeSpan]::FromSeconds(210))
     $fresh=@(Get-ChildItem -LiteralPath (Join-Path $ownedRoot 'metadata') -Filter $receiptPattern -File | Where-Object {$_.Name -cnotin $before})
     if($fresh.Count -ne 1){throw 'Service restart did not perform one fresh resource qualification'}
     $qualification=Read-ResourceReceipt $fresh[0].FullName
-    @{restarted=$true;scope='owned_native_service';qualification_id=$qualification.qualification_id;fresh_isolation_qualification=$true} | ConvertTo-Json -Compress
+    $startup=Read-ReadyWorkerStartup $ownedRoot $fixture.installation_id $fixture.manifest_sha256
+    if($startup.attempt_id -ceq $previousStartup.attempt_id){throw 'Service restart reused the startup diagnostic identity'}
+    @{restarted=$true;scope='owned_native_service';qualification_id=$qualification.qualification_id;fresh_isolation_qualification=$true;startup_attempt_id=$startup.attempt_id;fresh_startup_diagnostic=$true} | ConvertTo-Json -Compress
     exit 0
 }
 if($service){
