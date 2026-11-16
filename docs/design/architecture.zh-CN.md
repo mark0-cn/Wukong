@@ -82,7 +82,7 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止及操作员消息。`PreparedAssessment` 保留已解析的运行配置与事件订阅，在执行完成或错误后关闭控制端工具连接；前端不自行编排租约或构造恢复配置。恢复准备不修改任务，预算修改在监督器取得正式租约后提交。
 
-`FilesService`、`JobService`、`SessionsService` 和 `AnalysisService` 各自持有局部配置与所需依赖，worker 传输和稳定请求回执集中在 `WorkerGateway`。控制端使用 `JobRecord`、`SessionRecord`、`WorkerFileRecord` 和 `RunScoped` 检查归属，原始 worker 扩展载荷保留为 JSON。
+`ToolContext` 显式装配执行、分析、协调、文档、证据及环境服务，不再解引用为 `ToolService`。目录适配器向每个处理器传入具体服务，处理器不能访问完整入口对象。目录继续管理 schema、注册、权限和恢复策略，Rig 保留通用调度职责。`FilesService`、`JobService` 和 `SessionsService` 负责 worker 用例；`WorkerGateway` 集中管理传输与稳定回执。控制端使用 `JobRecord`、`SessionRecord`、`WorkerFileRecord` 和 `RunScoped` 检查归属，原始 worker 扩展载荷保留为 JSON。
 
 `JobService` 统一自动监控和手动状态查询：检查任务归属、解析类型化 `JobStatus`、导入终止状态原始证据及产物后，发布可供模型读取的通知。同一任务的观察串行化，更新时合并最新账本，避免覆盖已导入产物或通知状态。`lost` 是终止状态，退出码和验证标志来自 `result`。任务通知与完成标识在同一事务写入持久化邮箱，沿用会话检查点与消息确认的原子提交；重启后未确认消息继续投递，旧 generation 的迟到任务结果标记为 stale。worker 错误通过 RPC `error.data.kind` 携带类别，业务会话和恢复代码按错误类别对账。
 

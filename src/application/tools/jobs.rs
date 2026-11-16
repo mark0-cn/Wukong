@@ -320,7 +320,7 @@ mod tests {
             .metadata;
         let service = ToolService::new(config, store.clone()).await?;
         let tools = service.bound_to(&owner).await?;
-        let started = tools
+        let started = service
             .execute(
                 &owner.id,
                 "start",
@@ -369,7 +369,7 @@ mod tests {
             call.result = None;
             tx.put("call", "start", &run.id, &call)
         })?;
-        let replay = tools
+        let replay = service
             .execute(
                 &owner.id,
                 "start",
@@ -433,7 +433,7 @@ mod tests {
         assert_eq!(stale.envelope.delivery, MessageDelivery::Stale);
         assert!(stale.acknowledged);
         tools.runtime()?.call("worker.shutdown", json!({})).await?;
-        tools.close().await;
+        service.close().await;
         Ok(())
     }
 }

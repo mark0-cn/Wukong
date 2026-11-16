@@ -1,8 +1,6 @@
 //! Role-aware tool dispatch with durable effect receipts and original evidence.
 use crate::{
-    adapters::binary::{
-        self, GhidraBackend, GhidraConfig, GhidraQuery, StringsQuery, XrefDirection,
-    },
+    adapters::binary::{self, GhidraBackend, GhidraConfig, GhidraQuery, XrefDirection},
     adapters::mcp::McpRegistry,
     adapters::worker::RuntimeClient,
     application::agents,
@@ -45,6 +43,9 @@ mod artifact_validation;
 mod catalog;
 mod coordination;
 mod discovery;
+mod documents;
+mod environment_service;
+mod evidence;
 pub(crate) use discovery::ToolSelection;
 mod context;
 mod execution;
@@ -119,7 +120,7 @@ impl ToolService {
             default_environment: config.default_environment,
         })
     }
-    pub(crate) async fn bound_to(&self, agent: &AgentMetadata) -> Result<ToolContext<'_>> {
+    pub(crate) async fn bound_to(&self, agent: &AgentMetadata) -> Result<ToolContext> {
         let Some(environment_id) = &agent.environment_id else {
             return Ok(ToolContext::new(self, None));
         };
@@ -139,27 +140,12 @@ impl ToolService {
     }
 
     async fn checked_environment(&self, agent: &AgentMetadata) -> Result<RuntimeClient> {
-        let environment_id = agent
-            .environment_id
-            .as_ref()
-            .context("task has no assigned environment")?;
-        let config = self.environments.config(environment_id)?;
-        let run: RunRecord = self.store.load(&agent.run_id)?;
-        ensure!(
-            run.config["environments"][environment_id] == serde_json::to_value(config)?,
-            "environment configuration changed since this assessment was created"
-        );
-        let client = self.environments.client(environment_id).await?;
-        self.store.bind_environment(&EnvironmentBinding {
-            id: stable(
-                "environment-binding",
-                &format!("{}:{environment_id}", agent.run_id),
-            ),
-            run_id: agent.run_id.clone(),
-            environment_id: environment_id.clone(),
-            identity: client.identity().clone(),
-        })?;
-        Ok(client)
+        environment_service::EnvironmentService {
+            store: self.store.clone(),
+            registry: self.environments.clone(),
+        }
+        .checked(agent)
+        .await
     }
 
     pub(crate) async fn refresh_jobs(&self, run: &str) -> Result<()> {
@@ -368,13 +354,20 @@ impl ToolService {
         reconcile_record(&self.store, call_id, resolution, evidence_ids, is_error)
     }
 
-    fn effect(
+    fn coordination_service(&self) -> coordination::CoordinationService {
+        coordination::CoordinationService {
+            store: self.store.clone(),
+            skills_dir: self.skills_dir.clone(),
+            output_limit: self.limits.max_output_bytes,
+        }
+    }
+    pub(crate) fn create_agent(
         &self,
         agent: &AgentMetadata,
-        call_id: &str,
-        action: impl FnOnce(&crate::storage::StateSession<'_>) -> Result<Value>,
+        call: &str,
+        args: &Value,
     ) -> Result<Value> {
-        self.effects().commit(agent, call_id, action)
+        self.coordination_service().create_agent(agent, call, args)
     }
 }
 

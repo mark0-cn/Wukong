@@ -2,7 +2,7 @@
 use super::*;
 
 pub(in crate::application::tools) fn handle_create_agent<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -12,7 +12,7 @@ pub(in crate::application::tools) fn handle_create_agent<'a>(
 }
 
 pub(in crate::application::tools) fn handle_view_agent_graph<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -41,7 +41,7 @@ pub(in crate::application::tools) fn handle_view_agent_graph<'a>(
 }
 
 pub(in crate::application::tools) fn handle_send_message_to_agent<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     name: &'a str,
@@ -51,7 +51,7 @@ pub(in crate::application::tools) fn handle_send_message_to_agent<'a>(
 }
 
 pub(in crate::application::tools) fn handle_message_status<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     _call_id: &'a str,
     _name: &'a str,
@@ -77,7 +77,7 @@ pub(in crate::application::tools) fn handle_message_status<'a>(
 }
 
 pub(in crate::application::tools) fn handle_wait_for_agents<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -99,7 +99,7 @@ pub(in crate::application::tools) fn handle_wait_for_agents<'a>(
 }
 
 pub(in crate::application::tools) fn handle_stop_agent<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -119,7 +119,7 @@ pub(in crate::application::tools) fn handle_stop_agent<'a>(
 }
 
 pub(in crate::application::tools) fn handle_agent_finish<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -153,7 +153,7 @@ pub(in crate::application::tools) fn handle_agent_finish<'a>(
 }
 
 pub(in crate::application::tools) fn handle_load_skill<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     _name: &'a str,
@@ -163,7 +163,7 @@ pub(in crate::application::tools) fn handle_load_skill<'a>(
 }
 
 pub(in crate::application::tools) fn handle_think<'a>(
-    tools: &'a ToolContext<'_>,
+    tools: &'a super::super::coordination::CoordinationService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
     __name: &'a str,
