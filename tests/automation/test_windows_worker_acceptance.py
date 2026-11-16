@@ -24,7 +24,7 @@ class HostedWorkerGuardTests(unittest.TestCase):
             metadata = root / "metadata"
             metadata.mkdir()
             value = dict(
-                schema=1,
+                schema=2,
                 installation_id="installation",
                 package_sha256="a" * 64,
                 boot_id="boot",
@@ -47,7 +47,8 @@ class HostedWorkerGuardTests(unittest.TestCase):
                         summary="Identity failed.",
                     ),
                 ],
-                wfp=None,
+                execution_boundary="disposable_vm",
+                external_isolation_verified=False,
             )
             report = metadata / "startup-diagnostics.json"
             report.write_text(json.dumps(value), encoding="utf-8")
@@ -66,9 +67,9 @@ class HostedWorkerGuardTests(unittest.TestCase):
             report.write_text("x" * 16385, encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "exceeds bound"):
                 fixture.startup_diagnostic(root)
-            value["wfp"] = {"raw_events": ["PRIVATE-CANARY"]}
+            value["external_isolation_verified"] = True
             report.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "counters mismatch"):
+            with self.assertRaisesRegex(ValueError, "boundary mismatch"):
                 fixture.startup_diagnostic(root)
 
     def test_only_explicit_bounded_fault_sections_enter_the_report(self):

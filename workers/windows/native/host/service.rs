@@ -321,22 +321,20 @@ async fn run_stages(context: &ContextState, diagnostic: &mut super::startup::Rep
     diagnostic.begin(Stage::DependencySelftest)?;
     offline_selftest(&root, &package, &deployment, &manifest).await?;
     diagnostic.succeed()?;
-    diagnostic.begin(Stage::IsolationQualification)?;
+    diagnostic.begin(Stage::GuestControlsSelftest)?;
     let mut checkpoint = tokio::time::Instant::now();
-    let counters =
-        crate::host::resource_host::qualify(&root, &package, &deployment, &manifest, || {
-            ensure!(
-                !STOP.load(Ordering::Acquire),
-                "service stopped during resource qualification"
-            );
-            if checkpoint.elapsed() > Duration::from_secs(5) {
-                report(SERVICE_START_PENDING, 0)?;
-                checkpoint = tokio::time::Instant::now();
-            }
-            Ok(())
-        })
-        .await?;
-    diagnostic.wfp(counters);
+    crate::host::resource_host::qualify(&root, &package, &deployment, &manifest, || {
+        ensure!(
+            !STOP.load(Ordering::Acquire),
+            "service stopped during resource qualification"
+        );
+        if checkpoint.elapsed() > Duration::from_secs(5) {
+            report(SERVICE_START_PENDING, 0)?;
+            checkpoint = tokio::time::Instant::now();
+        }
+        Ok(())
+    })
+    .await?;
     diagnostic.succeed()?;
     worker.qualify();
     diagnostic.begin(Stage::CommunicationReady)?;

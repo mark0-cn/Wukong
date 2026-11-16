@@ -22,6 +22,8 @@
 
 Windows 按 `host`、`resources`、`executors`、`artifacts`、`isolation` 和 `rpc` 分组。`ResourceManager` 统一串行处理生命周期准入、预留和核对票据后的提交。输入准备、执行等待与恢复在状态锁外运行，调用方断开后活动操作仍保有归属。显式活动资源状态区分启动、执行、收尾、关闭与恢复。执行器返回观察结果，不写账本；宿主注入已验证运行上下文，Windows API 细节保留在隔离层。内部会话继续使用 Prost/Protobuf。
 
+Windows 目标运行在签名部署记录声明的专用、可丢弃 VM 中。宿主／对外网络隔离由虚拟化层策略负责；guest 内部保留 AppContainer／令牌／ACL 检查，不再收集 WFP 事件。就绪报告明确说明外部隔离未验证。操作者接受 guest 被影响并重置／丢弃 VM；控制器凭据留在外部。参见 [Windows 边界契约](../../workers/windows/README.zh-CN.md)。
+
 `workers/analysis` 是只接收明确输入、不拥有 Worker 状态或传输的 Python 包。Linux 适配器保留文件约束和真实调试，Windows 一次性辅助程序使用同一分析包。Windows 组件清单排除 Linux Worker 服务及依赖。架构检查位于 `tests/automation/test_execution_boundaries.py`。
 
 控制器存储要求 schema 5，Windows 资源账本要求版本 2，包清单要求 schema 2。旧格式或协议直接拒绝；v3 使用新工作区和新 Worker 实例，不提供迁移、自动删除或旧配置适配层。现有目录及证据保持原样。当前验收与历史结果分别记录。

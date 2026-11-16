@@ -97,6 +97,7 @@ fn main() -> Result<()> {
                 outside_package(&root, path)?;
             }
             let enrollment: Enrollment = serde_json::from_slice(&read_draft(&draft, 16 * 1024)?)?;
+            enrollment.require_disposable_vm()?;
             let signer = load_controller_signer(keys)?;
             let payload = verify_package(
                 root_path,

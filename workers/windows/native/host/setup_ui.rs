@@ -35,7 +35,7 @@ pub fn review() -> Result<()> {
     let plan = Plan::read(&configuration, &key)?;
     let enrollment = plan.enrollment.enrollment();
     let summary = format!(
-        "Install this offline worker in the dedicated Windows test VM.\n\nEnvironment: {}\nInstallation: {}\nVersion: {}\nSSH port: {}\nAllowed controller address: {}\nController signing fingerprint:\n{}\n\nCompare this fingerprint with the controller's prepared bundle before continuing. All tools and dependencies are included; this installer downloads nothing.\n\nAdministrator elevation is required. Installation and production isolation still require VM acceptance.",
+        "Install this offline worker in a dedicated, disposable Windows VM. Targets may affect the entire guest. Restrict host access and external networking at the hypervisor; keep controller credentials outside the VM.\n\nEnvironment: {}\nInstallation: {}\nVersion: {}\nSSH port: {}\nAllowed controller address: {}\nController signing fingerprint:\n{}\n\nCompare this fingerprint with the controller's prepared bundle before continuing. All tools and dependencies are included; this installer downloads nothing.\n\nAdministrator elevation is required. Guest startup checks do not verify hypervisor isolation. Discard or reset the VM after untrusted work.",
         enrollment.environment_id,
         enrollment.installation_id,
         plan.manifest.manifest().version,
@@ -103,7 +103,7 @@ pub fn elevated(configuration: &Path, key: &PublicKey, enrollment_hash: &str) ->
         Ok(value) => {
             message(
                 &format!(
-                    "Worker service started and offline dependency checks passed.\n\nSSH user: {}\nSSH port: {}\nHost fingerprint:\n{}\n\nImport connection.json from the installation into the controller and independently compare this host fingerprint. Production isolation acceptance remains pending.",
+                    "Worker service started and offline dependency checks passed.\n\nSSH user: {}\nSSH port: {}\nHost fingerprint:\n{}\n\nImport connection.json from the installation into the controller and independently compare this host fingerprint. The execution boundary is the disposable VM. Hypervisor isolation is externally configured and has not been verified by this worker.",
                     value["ssh_user"].as_str().unwrap_or(""),
                     value["ssh_port"],
                     value["host_fingerprint"].as_str().unwrap_or("")

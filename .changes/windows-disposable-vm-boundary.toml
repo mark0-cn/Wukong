@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Windows workers now require a dedicated disposable target VM declared by signed execution_boundary=disposable_vm enrollment. Deploy a fresh VM and newly signed enrollment; retain previous evidence separately. Direct WFP event checks are removed. Guest controls and staged diagnostics remain; readiness does not certify hypervisor host/network isolation. Keep controller credentials outside and reset or discard the guest after untrusted execution."
+zh_CN = "Windows worker 现要求专用、可丢弃的目标 VM，并在签名部署记录中声明 execution_boundary=disposable_vm。请部署新 VM、重新签署部署记录并单独保留旧证据。移除直接 WFP 事件检查，保留 guest 控制及分阶段诊断；就绪不代表已验证虚拟化层宿主／网络隔离。控制器凭据留在外部，不可信执行后重置或丢弃 guest。"

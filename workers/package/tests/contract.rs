@@ -96,6 +96,7 @@ fn enrollment_fixture(
     let mut blob = b"\0\0\0\x0bssh-ed25519\0\0\0\x20".to_vec();
     blob.extend(hex::decode(signer.public_key().to_hex()).unwrap());
     wukong_worker_package::Enrollment {
+        execution_boundary: Some(wukong_worker_package::ExecutionBoundary::DisposableVm),
         schema: 1,
         generation: 1,
         installation_id: "e".repeat(32),
@@ -709,5 +710,39 @@ fn native_cli_checks_independent_trust_and_actual_file_bytes() -> anyhow::Result
     let changed = invoke(&signer.public_key().to_hex())?;
     assert!(!changed.status.success());
     assert!(String::from_utf8_lossy(&changed.stderr).contains("hash mismatch"));
+    Ok(())
+}
+
+#[test]
+fn disposable_vm_boundary_is_explicit_signed_and_legacy_receipts_remain_readable()
+-> anyhow::Result<()> {
+    use wukong_worker_package::VerifiedEnrollment;
+    let (signer, _) = Signer::generate()?;
+    let (bytes, signature) = signer.sign(&fixture())?;
+    let payload = VerifiedManifest::verify(&bytes, &signature, &signer.public_key())?;
+    let mut enrollment = enrollment_fixture(&signer, &payload);
+    enrollment.require_disposable_vm()?;
+    let (bytes, signature) = enrollment.sign(&signer)?;
+    VerifiedEnrollment::verify(&bytes, &signature, &signer.public_key())?
+        .enrollment()
+        .require_disposable_vm()?;
+    let mut changed: serde_json::Value = serde_json::from_slice(&bytes)?;
+    changed
+        .as_object_mut()
+        .unwrap()
+        .remove("execution_boundary");
+    assert!(
+        VerifiedEnrollment::verify(
+            &serde_json::to_vec(&changed)?,
+            &signature,
+            &signer.public_key()
+        )
+        .is_err()
+    );
+    enrollment.execution_boundary = None;
+    let (bytes, signature) = enrollment.sign(&signer)?;
+    let old = VerifiedEnrollment::verify(&bytes, &signature, &signer.public_key())?;
+    assert!(old.enrollment().require_disposable_vm().is_err());
+    assert!(!String::from_utf8(bytes)?.contains("execution_boundary"));
     Ok(())
 }

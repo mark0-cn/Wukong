@@ -42,8 +42,8 @@ pub(crate) fn verify_privileges(token: windows_sys::Win32::Foundation::HANDLE) -
     Ok(())
 }
 
-/// Verify the OS network boundary independently of local path validation.
-pub(crate) fn verify_network_isolation(
+/// Read back guest token restrictions; this does not verify hypervisor isolation.
+pub(crate) fn verify_appcontainer_policy(
     token: windows_sys::Win32::Foundation::HANDLE,
 ) -> Result<()> {
     use windows_sys::Win32::Security::{TOKEN_GROUPS, TokenCapabilities, TokenIsAppContainer};
@@ -61,7 +61,7 @@ pub(crate) fn verify_network_isolation(
     .ok()?;
     ensure!(
         returned as usize == size_of::<u32>() && app == 1,
-        "network isolation requires an AppContainer token"
+        "guest controls require an AppContainer token"
     );
     // A zero-capability token fits the SDK's fixed structure. Larger responses
     // fail at the SDK call rather than allocating an attacker-sized token list.
@@ -78,7 +78,7 @@ pub(crate) fn verify_network_isolation(
     .ok()?;
     ensure!(
         returned >= 4 && groups.GroupCount == 0,
-        "network-isolated AppContainer cannot have capabilities"
+        "guest AppContainer cannot have capabilities"
     );
     Ok(())
 }
@@ -87,7 +87,7 @@ pub(crate) fn verify_network_isolation(
 mod tests {
     use super::*;
     #[test]
-    fn an_ordinary_token_cannot_satisfy_the_resource_network_policy() -> Result<()> {
+    fn an_ordinary_token_cannot_satisfy_the_appcontainer_policy() -> Result<()> {
         use windows_sys::Win32::{
             Foundation::CloseHandle,
             Security::TOKEN_QUERY,
@@ -98,7 +98,7 @@ mod tests {
             OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
         })
         .ok()?;
-        let result = verify_network_isolation(token);
+        let result = verify_appcontainer_policy(token);
         unsafe { CloseHandle(token) };
         assert!(result.unwrap_err().to_string().contains("AppContainer"));
         Ok(())

@@ -59,6 +59,19 @@ class ExecutionBoundaries(unittest.TestCase):
                     dependency = name.split(".")[1]
                     self.assertIn(dependency, allowed[owner] | {owner}, f"{path}: {name}")
 
+    def test_windows_guest_does_not_use_wfp_as_a_host_isolation_gate(self):
+        native = ROOT / "workers/windows/native"
+        for path in native.rglob("*.rs"):
+            self.assertNotRegex(
+                path.read_text(encoding="utf-8"),
+                r"WindowsFilteringPlatform|FwpmNetEvent|FwpmEngine",
+                str(path),
+            )
+        self.assertNotIn(
+            "WindowsFilteringPlatform",
+            (ROOT / "workers/windows/Cargo.toml").read_text(encoding="utf-8"),
+        )
+
     def test_job_status_writes_belong_to_job_ledger(self):
         root = ROOT / "workers/runtime/wukong_worker"
         for path in root.rglob("*.py"):

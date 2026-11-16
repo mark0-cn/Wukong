@@ -64,7 +64,7 @@ Linux 复用已有 LaunchSpec 解析器和 UID 隔离，将包括 cwd 外文件�
 
 ## 结构化调试适配器
 
-Linux 使用 GDB/MI；托管 Windows 使用原生 `dbgeng` 路由和现成 WinDbg MCP。`mode = "dump"` 要求独立暂存的转储，不允许启动参数，目标仍绑定原始映像。检查和控制保留有界类型接口、停止/期限规则和会话所有权，转储会话拒绝执行控制。原始 `debug_command` 仅适用于 GDB/MI。Windows 的同一方法注册表同时驱动路由和能力声明；每次服务启动必须完成签名检查、资源恢复、依赖检查和新的隔离/调试器资格检查后才开放执行能力。
+Linux 使用 GDB/MI；托管 Windows 使用原生 `dbgeng` 路由和现成 WinDbg MCP。`mode = "dump"` 要求独立暂存的转储，不允许启动参数，目标仍绑定原始映像。检查和控制保留有界类型接口、停止/期限规则和会话所有权，转储会话拒绝执行控制。原始 `debug_command` 仅适用于 GDB/MI。Windows 的同一方法注册表同时驱动路由和能力声明；每次服务启动必须完成签名检查、资源恢复、依赖检查和新的 guest 控制／调试器资格检查后才开放执行能力。
 
 Windows 使用固定版本的外部 WinDbg MCP 和 `rmcp` 客户端；自写 DbgEng 桥已删除。私有会话协议使用 Prost 生成的 protobuf，公共身份、租约、错误和容量类型由 `workers/protocol` 共享。保留原始 MCP 结果作为证据；启动与转储输入、会话所有权和清理由原生 worker 管理。当前边界见 [Windows 组件指南](../../workers/windows/README.zh-CN.md)，此前验收范围见 [历史记录](../../workers/windows/VALIDATION-HISTORY.zh-CN.md)。
 
@@ -72,7 +72,7 @@ Windows 使用固定版本的外部 WinDbg MCP 和 `rmcp` 客户端；自写 Dbg
 
 完整离线包由联网控制器使用固定版本、经过校验的官方依赖组装，VM 安装不能在线补依赖。原生构建身份覆盖共用协议 crate；组装校验实际源码身份并保留许可证。安装、维护和实际执行各自需要对应验收，登记成功不能替代执行资格。私钥和模型凭据保留在控制器。详见 [Windows 组件指南](../../workers/windows/README.zh-CN.md)及其中明确标注的历史记录；旧包的验收不证明当前修改通过。
 
-目标后端为 DbgEng，提供结构化检查与控制、有归属的会话和独立重放。VM 提供外层隔离，目标权限和元数据保护仍是独立控制。内核调试、创建 VM、自动快照管理和 GUI 交互不在首版范围内。声明 Windows 执行或离线安装支持前，必须通过真实 Windows VM 验收。
+Windows 以专用、可丢弃的目标 VM 为执行边界。操作者接受目标影响整个 guest，并在虚拟化层配置宿主访问、共享设备／目录及对外网络限制。签名部署记录必须包含 `"execution_boundary": "disposable_vm"`；从旧包切换时使用新 VM 和重新签署的部署记录。凭据与原始证据保留在控制器，不可信执行后重置或丢弃 guest。AppContainer、令牌、ACL 及调试器自检保留为 guest 内部控制。项目不再收集 WFP 事件，也不以回环阻断作为启动门槛。`doctor` 和启动／资格报告明确设置 `external_isolation_verified: false`：guest 就绪不能认证虚拟化层，也不能证明 guest 被攻陷后的证据真实性。内核调试、创建 VM、自动快照与 GUI 交互仍不在契约范围。安装与功能验收必须标明对应包，不能替代外层边界验证。
 
 ## 状态与验证边界
 

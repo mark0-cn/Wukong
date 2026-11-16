@@ -300,7 +300,7 @@ fn seal_sandbox_token(
         )
     })?;
     let token = Handle(token);
-    crate::isolation::token_policy::verify_network_isolation(token.0)?;
+    crate::isolation::token_policy::verify_appcontainer_policy(token.0)?;
     let mut bytes = 0;
     unsafe {
         GetTokenInformation(token.0, TokenAppContainerSid, null_mut(), 0, &mut bytes);

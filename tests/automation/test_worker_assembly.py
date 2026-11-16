@@ -8,12 +8,32 @@ from unittest.mock import patch
 
 from scripts.worker.assemble import BINARIES, SUPPLEMENTAL_LICENSES, file_index, native_build
 from scripts.worker.notices import collect
+from scripts.worker import bundle
 from scripts._lib.checksums import sha256
 from scripts._lib.repository import ROOT
 from tests.automation.test_worker_pe import fixture
 
 
 class AssemblyChecks(unittest.TestCase):
+    def test_legacy_signed_enrollment_cannot_publish_new_vm_setup_media(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            package, enrollment, output = [
+                root / name for name in ["payload", "enrollment", "media"]
+            ]
+            package.mkdir()
+            enrollment.mkdir()
+            for name in ["enrollment.json", "enrollment.sig"]:
+                (enrollment / name).write_text("{}", encoding="utf-8")
+            verifier = root / "verifier.exe"
+            verifier.write_bytes(b"fixture")
+            with patch.object(bundle.subprocess, "run") as verify:
+                verify.return_value.stdout = json.dumps({"verified": True})
+                with self.assertRaisesRegex(ValueError, "signed disposable_vm"):
+                    bundle.prepare(package, enrollment, output, "key", "1.0.0", verifier)
+                verify.assert_called_once()
+                self.assertFalse(output.exists())
+
     def test_native_supplement_preserves_exact_upstream_license_and_version(self):
         original = SUPPLEMENTAL_LICENSES[("fixture3-ddmin", "0.1.1")]
         provenance = json.loads(original.with_name("source.json").read_text(encoding="utf-8"))

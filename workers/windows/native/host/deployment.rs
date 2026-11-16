@@ -119,6 +119,7 @@ impl Deployment {
             "active package differs from protected state"
         );
         let enrollment = read_enrollment(&root.join("metadata"), &key)?;
+        enrollment.enrollment().require_disposable_vm()?;
         authority.verify_active(&metadata, &enrollment, &private)?;
         ensure!(
             enrollment.enrollment().installation_id == self.installation_id,
