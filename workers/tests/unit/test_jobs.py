@@ -38,3 +38,29 @@ class FuzzPlanningTests(unittest.TestCase):
             for spec in [first, second, stable]:
                 self.assertTrue((root / spec["afl_output"]).is_dir())
                 self.assertEqual(spec["argv"][:2], ["afl-fuzz", "-Q"])
+
+
+class PythonSourceTests(unittest.TestCase):
+    def test_file_source_is_bounded_and_sealed_by_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "files").mkdir()
+            source = root / "files/source.py"
+            source.write_bytes("print('你好')\n".encode("utf-8"))
+            manager = JobService(
+                root,
+                trusted=True,
+                isolated=False,
+                jobs=JobManager(root, trusted=True, isolated=False),
+            )
+            with patch.object(manager, "start_job", side_effect=lambda spec: spec):
+                first = manager.python({"source_file": "files/source.py"})
+                self.assertEqual(first, manager.python({"source_file": "files/source.py"}))
+                self.assertEqual((root / first["argv"][1]).read_bytes(), source.read_bytes())
+                source.write_bytes(b"x" * 262145)
+                with self.assertRaisesRegex(ValueError, "256 KiB"):
+                    manager.python({"source_file": "files/source.py"})
+                with self.assertRaises(ValueError):
+                    manager.python({"source": "你" * 100000})
+                with self.assertRaises(ValueError):
+                    manager.python({"source": "pass", "source_file": "files/source.py"})

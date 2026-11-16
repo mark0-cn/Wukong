@@ -6,6 +6,7 @@ from typing import Any
 import hashlib
 import json
 import uuid
+from atomicwrites import atomic_write
 from wukong_worker import PACKAGE_ROOT
 from wukong_worker.artifacts.common import confined, public_file
 from wukong_analysis.validation import bounded_int, parse_address
@@ -75,7 +76,11 @@ class JobService:
         if source is None and source_file:
             path = confined(self.root, source_file)
             try:
-                source = path.read_text(encoding="utf-8")
+                with path.open("rb") as stream:
+                    data = stream.read(262145)
+                if len(data) > 262144:
+                    raise ValueError("source_file exceeds 256 KiB")
+                source = data.decode("utf-8")
             except (OSError, UnicodeError) as error:
                 raise ValueError("cannot read source_file: %s" % error) from error
         elif source is not None and source_file:
@@ -83,16 +88,24 @@ class JobService:
         if (
             not isinstance(source, str)
             or not source.strip()
-            or len(source) > 262144
+            or len(source.encode("utf-8")) > 262144
             or "\0" in source
         ):
             raise ValueError("source must be a nonempty string <=256KiB without NUL bytes")
         import py_compile
 
-        script_rel = "files/py_run_" + uuid.uuid4().hex + ".py"
+        script_rel = "files/py_run_" + hashlib.sha256(source.encode("utf-8")).hexdigest() + ".py"
         script = confined(self.root, script_rel)
         script.parent.mkdir(parents=True, exist_ok=True)
-        script.write_text(source, encoding="utf-8")
+        if not script.exists():
+            try:
+                with atomic_write(script, mode="wb", overwrite=False) as stream:
+                    stream.write(source.encode("utf-8"))
+            except FileExistsError:
+                pass
+        with script.open("rb") as stream:
+            if stream.read(262145) != source.encode("utf-8"):
+                raise ValueError("admitted Python source identity changed")
         script.chmod(0o444)
         # Syntax errors fail HERE, inline, instead of costing a job round-trip.
         try:

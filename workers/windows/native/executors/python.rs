@@ -6,17 +6,19 @@ use crate::{
     executors::plan::{Plan, Response},
 };
 use anyhow::{Result, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 // Python source becomes a sealed input of the existing process resource.
 // CPython executes only inside its target persona, never in the service.
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Python {
+    #[serde(default)]
     pub(crate) source: String,
+    pub(crate) source_file: Option<String>,
     #[serde(default)]
     pub(crate) argv: Vec<String>,
     pub(crate) target: Option<String>,
@@ -68,6 +70,52 @@ impl Python {
 
 pub(crate) fn plan(params: &Map<String, Value>) -> Result<Plan> {
     let (request_id, python): (_, Python) = start_parameters(params)?;
+    ensure!(
+        python.source_file.is_some() != !python.source.is_empty(),
+        "provide exactly one of source or source_file"
+    );
+    if let Some(path) = &python.source_file {
+        let logical = path
+            .strip_prefix("files/")
+            .ok_or_else(|| anyhow::anyhow!("Python source_file must be an admitted file"))?;
+        wukong_worker_package::validate_path(logical)?;
+        let specification = json!({"native_python_file_schema":1,"python":python});
+        return Ok(Plan {
+            kind: crate::core::resource::ResourceKind::Process,
+            request_id: request_id.into(),
+            specification,
+            response: Response::Job,
+            prepare: Box::new(move |inputs, owner| {
+                use crate::artifacts::resource_input::Purpose;
+                use std::io::Read;
+                let reference = inputs.reference(
+                    owner,
+                    python.source_file.as_deref().unwrap(),
+                    Purpose::Inspect,
+                )?;
+                ensure!(
+                    reference.size <= 256 * 1024,
+                    "Python source_file exceeds 256 KiB"
+                );
+                let mut bytes = Vec::new();
+                inputs
+                    .acquire(owner, &reference, Purpose::Inspect)?
+                    .take(256 * 1024 + 1)
+                    .read_to_end(&mut bytes)?;
+                let mut resolved = python;
+                resolved.source = String::from_utf8(bytes)?;
+                resolved.source_file = None;
+                let spec = resolved.process()?;
+                let admitted = inputs.python_source(owner, &resolved.source)?;
+                ensure!(
+                    admitted.path == spec.argv[0],
+                    "Python source identity differs"
+                );
+                spec.prepare_interpreted(inputs, owner, Some(Interpreter::Python))
+                    .map(crate::executors::plan::Target::Process)
+            }),
+        });
+    }
     let spec = python.process()?;
     let specification = json!({"native_process_schema":crate::executors::resource_process::SCHEMA,
             "process":spec,"interpreter":Interpreter::Python});
@@ -97,6 +145,60 @@ mod tests {
     use crate::resources::state::tests::{fixture, owner};
     use std::fs;
     use std::io::Read;
+
+    #[test]
+    fn file_source_is_admitted_with_owner_hash_and_byte_limit() -> Result<()> {
+        let (_root, inputs, _runtime) = fixture()?;
+        let source = inputs.generated(
+            &owner(),
+            "files/source.py".into(),
+            b"print('owned')".to_vec(),
+        )?;
+        let plan = plan(
+            json!({"source_file":source.path,"request_id":"file-script"})
+                .as_object()
+                .unwrap(),
+        )?;
+        let prepared = plan.prepare(&inputs, &owner())?;
+        let crate::executors::plan::Target::Process(request) = prepared.target else {
+            panic!("not a process")
+        };
+        assert_eq!(request.program.sha256, source.sha256);
+        assert_eq!(request.interpreter, Some(Interpreter::Python));
+        let mut foreign = owner();
+        foreign.run_id = "foreign".into();
+        assert!(
+            plan_for_file(&source.path)?
+                .prepare(&inputs, &foreign)
+                .is_err()
+        );
+        let large = inputs.generated(
+            &owner(),
+            "files/large.py".into(),
+            vec![b'x'; 256 * 1024 + 1],
+        )?;
+        assert!(
+            plan_for_file(&large.path)?
+                .prepare(&inputs, &owner())
+                .is_err()
+        );
+        assert!(
+            super::plan(
+                json!({"source":"pass","source_file":source.path,"request_id":"both"})
+                    .as_object()
+                    .unwrap()
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+    fn plan_for_file(path: &str) -> Result<Plan> {
+        super::plan(
+            json!({"source_file":path,"request_id":"file-check"})
+                .as_object()
+                .unwrap(),
+        )
+    }
 
     #[test]
     fn interrupted_python_reuses_intent_without_admitting_successor_source() -> Result<()> {
