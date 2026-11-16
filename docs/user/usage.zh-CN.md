@@ -124,10 +124,11 @@ wukong --config wukong.toml lab status --vm lab
 wukong --config wukong.toml lab package --vm lab --spec spec.json
 wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parser --spec spec.json
 wukong --config wukong.toml lab run --vm lab --lab <lab_id> --generation <n> --artifact harness.exe
+wukong --config wukong.toml lab install --vm lab --lab <lab_id> --generation <n>
 wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
 ```
 
-`lab package` 下载或复制规格中的依赖，逐个校验 SHA-256，并在不接触 VM 的情况下发布可复用的离线包；`lab prepare` 把该包和已校验的安装/清理计划绑定到租约。`lab run` 通过已登记的 Windows worker 上传并执行一个打包的预编译 EXE，写入不可变回执；传输失败标记为 unknown，需恢复基线来核对。CLI 必须从正常完整性目录运行，不能位于带 Low 标签的构建目录。参见 [Windows 实验实验室](../design/windows-lab.zh-CN.md)。第一阶段仅覆盖生命周期、准备与用户态 EXE 执行；harness 编译与 guest 安装另行处理。
+`lab package` 下载或复制规格中的依赖，逐个校验 SHA-256，并在不接触 VM 的情况下发布可复用的离线包；`lab prepare` 把该包和已校验的安装/清理计划绑定到租约。`lab run` 通过已登记的 Windows worker 上传并执行一个打包的预编译 EXE，写入不可变回执；传输失败标记为 unknown，需恢复基线来核对。`lab install` 把依赖包复制到 guest，并通过管理通道运行哈希固定的 `install.ps1`；密码只从配置的环境变量读取，绝不存储。不执行清理：每次分析后恢复基线即可。CLI 必须从正常完整性目录运行，不能位于带 Low 标签的构建目录。参见 [Windows 实验实验室](../design/windows-lab.zh-CN.md)。
 
 <a id="configuration-and-models"></a>
 

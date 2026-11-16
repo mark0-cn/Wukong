@@ -1,7 +1,9 @@
 use super::*;
+use crate::application::windows_lab::admin::{AdminOutcome, AdminRequest, LabAdmin};
 use crate::application::windows_lab::runner::{LabWorker, LabWorkerOutcome, LabWorkerRequest};
 use anyhow::bail;
 use async_trait::async_trait;
+use sha2::Digest;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -97,6 +99,7 @@ fn config(dir: &Path) -> WindowsLabVm {
         vmx: dir.join("vm.vmx"),
         vmrun: dir.join("vmrun.exe"),
         environment: None,
+        admin: None,
         baseline_snapshot: "baseline".into(),
         snapshot_prefix: "lab".into(),
         operation_timeout_seconds: 30,
@@ -477,6 +480,129 @@ impl LabWorker for FakeWorker {
             Ok(outcome) => Ok(outcome),
             Err(message) => bail!("{message}"),
         }
+    }
+}
+
+#[tokio::test]
+async fn install_runs_verified_media_through_the_administrative_channel() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let admin = Arc::new(FakeAdmin::default());
+    let lab = lab(dir.path(), host).with_admin(admin.clone());
+    let mut spec = spec();
+    spec.launch = LaunchKind::Service;
+    spec.dependencies = vec![
+        dependency(dir.path(), "install.ps1", b"Write-Output install"),
+        dependency(dir.path(), "app.exe", b"MZ-fake"),
+    ];
+    spec.install = Some(install::InstallPlan {
+        targets: vec![r"C:\lab\app.exe".into()],
+        service: Some(install::ServiceInstall {
+            name: "wukong-lab".into(),
+            binary: r"C:\lab\app.exe".into(),
+            kernel_driver: false,
+            start: true,
+        }),
+        account: None,
+        cleanup: vec![],
+    });
+    let lease = lab.prepare("analyst", "install", spec).await.unwrap();
+    let result = lab
+        .install(&lease.lab_id, lease.generation, 60)
+        .await
+        .unwrap();
+    assert_eq!(result["install"]["status"], "completed");
+    assert_eq!(result["install"]["exit_code"], 0);
+    assert!(Path::new(result["receipt"].as_str().unwrap()).is_file());
+    let requests = admin.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].media_sha256,
+        lease.package_sha256.clone().unwrap()
+    );
+    assert!(
+        requests[0]
+            .files
+            .iter()
+            .any(|file| file.name == "install.ps1")
+    );
+    assert!(requests[0].files.iter().all(|file| file.path.is_file()));
+}
+
+#[tokio::test]
+async fn install_requires_an_administrative_channel() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host);
+    let mut spec = spec();
+    spec.launch = LaunchKind::Service;
+    spec.dependencies = vec![dependency(dir.path(), "app.exe", b"MZ-fake")];
+    spec.install = Some(install::InstallPlan {
+        targets: vec![r"C:\lab\app.exe".into()],
+        service: None,
+        account: None,
+        cleanup: vec![],
+    });
+    let lease = lab.prepare("analyst", "install", spec).await.unwrap();
+    let error = lab
+        .install(&lease.lab_id, lease.generation, 60)
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("administrative channel is unavailable"));
+}
+
+#[tokio::test]
+async fn install_requires_a_packaged_install_script() {
+    let dir = tempfile::tempdir().unwrap();
+    let admin = Arc::new(FakeAdmin::default());
+    let lab = lab_with_admin(dir.path(), admin);
+    let mut spec = spec();
+    spec.launch = LaunchKind::Service;
+    spec.dependencies = vec![dependency(dir.path(), "app.exe", b"MZ-fake")];
+    spec.install = Some(install::InstallPlan {
+        targets: vec![r"C:\lab\app.exe".into()],
+        service: None,
+        account: None,
+        cleanup: vec![],
+    });
+    let lease = lab.prepare("analyst", "install", spec).await.unwrap();
+    let error = lab
+        .install(&lease.lab_id, lease.generation, 60)
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("install.ps1"));
+}
+
+fn lab_with_admin(dir: &Path, admin: Arc<FakeAdmin>) -> WindowsLab {
+    WindowsLab::open(dir, "labvm", &config(dir), Arc::new(FakeHost::new()))
+        .unwrap()
+        .with_admin(admin)
+}
+
+struct FakeAdmin {
+    requests: Mutex<Vec<AdminRequest>>,
+}
+
+impl Default for FakeAdmin {
+    fn default() -> Self {
+        Self {
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl LabAdmin for FakeAdmin {
+    async fn install(&self, request: AdminRequest) -> Result<AdminOutcome> {
+        self.requests.lock().unwrap().push(request);
+        Ok(AdminOutcome {
+            exit_code: Some(0),
+            stdout: "installed\n".into(),
+            stderr: String::new(),
+            guest_media: r"C:\Windows\Temp\wukong-lab.zip".into(),
+            guest_script: r"C:\Windows\Temp\wukong-lab\install.ps1".into(),
+            settled: true,
+        })
     }
 }
 

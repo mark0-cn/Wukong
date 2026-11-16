@@ -24,9 +24,12 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+pub mod admin;
 pub mod install;
+pub mod media;
 pub mod package;
 pub mod runner;
+use admin::{AdminFile, AdminRequest, LabAdmin};
 
 pub const STATE_SCHEMA: u32 = 1;
 
@@ -229,6 +232,32 @@ pub struct LabRun {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
+pub struct LabInstall {
+    pub install_id: String,
+    pub lab_id: String,
+    pub generation: u64,
+    pub package_sha256: String,
+    pub media_sha256: String,
+    pub install_sha256: String,
+    pub status: RunStatus,
+    #[serde(default)]
+    pub exit_code: Option<i64>,
+    pub stdout: String,
+    pub stderr: String,
+    #[serde(default)]
+    pub guest_media: Option<String>,
+    #[serde(default)]
+    pub guest_script: Option<String>,
+    pub settled: bool,
+    pub started_at: String,
+    #[serde(default)]
+    pub ended_at: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct LabState {
     pub schema: u32,
     pub vm_id: String,
@@ -239,6 +268,8 @@ pub struct LabState {
     pub pending: Option<PendingOperation>,
     #[serde(default)]
     pub last_run: Option<LabRun>,
+    #[serde(default)]
+    pub last_install: Option<LabInstall>,
     pub last_error: Option<String>,
     pub updated_at: String,
 }
@@ -254,6 +285,7 @@ impl LabState {
             active: None,
             pending: None,
             last_run: None,
+            last_install: None,
             last_error: None,
             updated_at: now(),
         }
@@ -400,6 +432,7 @@ pub struct WindowsLab {
     store: LabStore,
     host: Arc<dyn VmHost>,
     worker: Option<Arc<dyn LabWorker>>,
+    admin: Option<Arc<dyn LabAdmin>>,
     gate: Mutex<()>,
 }
 
@@ -424,6 +457,7 @@ impl WindowsLab {
             store: LabStore::new(state_dir),
             host,
             worker: None,
+            admin: None,
             gate: Mutex::new(()),
         })
     }
@@ -434,9 +468,18 @@ impl WindowsLab {
         self
     }
 
+    /// Attach the administrative channel used only for installation media.
+    pub fn with_admin(mut self, admin: Arc<dyn LabAdmin>) -> Self {
+        self.admin = Some(admin);
+        self
+    }
+
     pub async fn finish(&self) {
         if let Some(worker) = &self.worker {
             worker.finish().await;
+        }
+        if let Some(admin) = &self.admin {
+            admin.finish().await;
         }
     }
 
@@ -514,6 +557,7 @@ impl WindowsLab {
         state.pending = Some(pending.clone());
         state.active = None;
         state.last_run = None;
+        state.last_install = None;
         state.last_error = None;
         self.store.save(&state)?;
 
@@ -571,6 +615,18 @@ impl WindowsLab {
                 run.status = RunStatus::Lost;
                 run.ended_at = Some(now());
                 run.error = Some("baseline restore abandoned an unknown harness run".into());
+                self.store.save(&state)?;
+            }
+        }
+        if let Some(install) = state.last_install.as_mut() {
+            ensure!(
+                install.status != RunStatus::Running,
+                "installation is still in flight; wait for it or inspect the VM"
+            );
+            if install.status == RunStatus::Unknown {
+                install.status = RunStatus::Lost;
+                install.ended_at = Some(now());
+                install.error = Some("baseline restore abandoned an unknown installation".into());
                 self.store.save(&state)?;
             }
         }
@@ -703,8 +759,11 @@ impl WindowsLab {
             !matches!(
                 state.last_run.as_ref().map(|run| run.status),
                 Some(RunStatus::Running | RunStatus::Unknown)
+            ) && !matches!(
+                state.last_install.as_ref().map(|install| install.status),
+                Some(RunStatus::Running | RunStatus::Unknown)
             ),
-            "reconcile the previous harness run (restore the baseline) before starting another"
+            "reconcile the previous harness run or installation (restore the baseline) before starting another"
         );
         let package_id = active
             .package_sha256
@@ -822,6 +881,156 @@ impl WindowsLab {
         Ok(path)
     }
 
+    /// Build and run the experiment's offline installation media through the
+    /// administrative channel. The service/driver logic lives in the
+    /// hash-pinned `install.ps1`; the controller only transports and records it.
+    pub async fn install(
+        &self,
+        lab_id: &str,
+        generation: u64,
+        timeout_secs: u64,
+    ) -> Result<serde_json::Value> {
+        ensure!(
+            (1..=600).contains(&timeout_secs),
+            "installation timeout must be 1–600 seconds"
+        );
+        let admin = self.admin.as_ref().cloned().context(
+            "administrative channel is unavailable; configure windows_lab.vms.<id>.admin and set its password environment variable",
+        )?;
+        let _gate = self.gate.lock().await;
+        let _lock = self.store.lock(&self.vm_id)?;
+        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
+        self.mark_restart_recovery(&mut state)?;
+        ensure!(
+            state.phase == LabPhase::Ready,
+            "lab VM {} is {:?}, not ready",
+            self.vm_id,
+            state.phase
+        );
+        let active = state
+            .active
+            .as_ref()
+            .context("lab has no active experiment")?
+            .clone();
+        ensure!(
+            active.lab_id == lab_id && active.generation == generation,
+            "stale lab lease: request generation {generation} is not the active generation {}",
+            state.generation
+        );
+        ensure!(
+            active.spec.install.is_some(),
+            "experiment has no install plan"
+        );
+        ensure!(
+            !matches!(
+                state.last_run.as_ref().map(|run| run.status),
+                Some(RunStatus::Running | RunStatus::Unknown)
+            ) && !matches!(
+                state.last_install.as_ref().map(|install| install.status),
+                Some(RunStatus::Running | RunStatus::Unknown)
+            ),
+            "reconcile the previous harness run or installation (restore the baseline) first"
+        );
+        let package_id = active
+            .package_sha256
+            .clone()
+            .context("experiment has no verified offline package")?;
+        let install_sha256 = active
+            .install_sha256
+            .clone()
+            .context("experiment has no install plan identity")?;
+        let media = media::prepare(self.store.root(), &package_id)?;
+        let install_id = uuid::Uuid::new_v4().simple().to_string();
+        let mut record = LabInstall {
+            install_id: install_id.clone(),
+            lab_id: lab_id.to_owned(),
+            generation,
+            package_sha256: package_id,
+            media_sha256: media.sha256.clone(),
+            install_sha256,
+            status: RunStatus::Running,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            guest_media: None,
+            guest_script: None,
+            settled: false,
+            started_at: now(),
+            ended_at: None,
+            error: None,
+        };
+        state.last_install = Some(record.clone());
+        self.store.save(&state)?;
+        let outcome = admin
+            .install(AdminRequest {
+                install_id: install_id.clone(),
+                media_sha256: media.sha256,
+                files: media
+                    .files
+                    .iter()
+                    .map(|file| AdminFile {
+                        name: file.name.clone(),
+                        path: file.path.clone(),
+                    })
+                    .collect(),
+                timeout_secs,
+            })
+            .await;
+        match outcome {
+            Ok(outcome) => {
+                record.status = if outcome.exit_code == Some(0) {
+                    RunStatus::Completed
+                } else {
+                    RunStatus::Failed
+                };
+                record.exit_code = outcome.exit_code;
+                record.stdout = outcome.stdout;
+                record.stderr = outcome.stderr;
+                record.guest_media = Some(outcome.guest_media);
+                record.guest_script = Some(outcome.guest_script);
+                record.settled = outcome.settled;
+            }
+            Err(error) => {
+                record.status = RunStatus::Unknown;
+                record.error = Some(format!("{error:#}"));
+            }
+        }
+        record.ended_at = Some(now());
+        state.last_install = Some(record.clone());
+        self.store.save(&state)?;
+        let receipt = self.write_install_receipt(&record)?;
+        if record.status == RunStatus::Unknown {
+            bail!(
+                "installation {install_id} outcome is unknown; inspect the VM and restore the baseline (receipt {})",
+                receipt.display()
+            );
+        }
+        Ok(serde_json::json!({
+            "vm_id": self.vm_id,
+            "receipt": receipt,
+            "install": record,
+        }))
+    }
+
+    fn write_install_receipt(&self, record: &LabInstall) -> Result<PathBuf> {
+        let directory = self.store.root().join("installs");
+        fs::create_dir_all(&directory)?;
+        let path = directory.join(format!("{}.json", record.install_id));
+        if path.exists() {
+            return Ok(path);
+        }
+        let mut bytes = serde_json::to_vec_pretty(record)?;
+        bytes.push(b'\n');
+        let mut staged = tempfile::NamedTempFile::new_in(&directory)?;
+        staged.write_all(&bytes)?;
+        staged.as_file().sync_all()?;
+        staged
+            .persist_noclobber(&path)
+            .map_err(|error| error.error)
+            .context("publish installation receipt")?;
+        Ok(path)
+    }
+
     pub async fn reconcile(
         &self,
         operation_id: &str,
@@ -927,6 +1136,25 @@ impl WindowsLab {
             }
             state.last_error = Some(
                 "controller restarted during a harness run; inspect the worker and restore the baseline"
+                    .into(),
+            );
+            self.store.save(state)?;
+        }
+        if state
+            .last_install
+            .as_ref()
+            .is_some_and(|install| install.status == RunStatus::Running)
+        {
+            if let Some(install) = state.last_install.as_mut() {
+                install.status = RunStatus::Unknown;
+                install.ended_at = Some(now());
+                install.error = Some(
+                    "controller restarted during installation; restore the baseline to reconcile"
+                        .into(),
+                );
+            }
+            state.last_error = Some(
+                "controller restarted during installation; inspect the VM and restore the baseline"
                     .into(),
             );
             self.store.save(state)?;

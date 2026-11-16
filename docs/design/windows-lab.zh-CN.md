@@ -4,7 +4,7 @@
 
 ## 范围
 
-Windows 能力计划的第一阶段为控制器提供一台已登记 VMware 实验 VM 的有界生命周期：创建基线与每次实验的快照、按代次围栏、恢复到基线，并对中断或超时的宿主操作进行核对。它还锁定并校验控制端依赖包、校验安装与清理计划，并通过已登记 worker 执行一个预编译用户态 EXE。操作入口是 `wukong lab`。它尚未在 VM 内编译 harness、安装服务或驱动，也不暴露调试、网络和 fuzz 工具。
+Windows 能力计划的第一阶段为控制器提供一台已登记 VMware 实验 VM 的有界生命周期：创建基线与每次实验的快照、按代次围栏、恢复到基线，并对中断或超时的宿主操作进行核对。它还锁定并校验控制端依赖包、校验安装与清理计划，通过已登记 worker 执行一个预编译用户态 EXE，并可通过管理通道运行哈希固定的 `install.ps1`。操作入口是 `wukong lab`。它尚未在 VM 内编译 harness、生成服务/驱动逻辑，也不暴露调试、网络和 fuzz 工具。
 
 ## 登记身份与配置
 
@@ -78,6 +78,21 @@ environment = "windows"
 - run 进行中拒绝 `restore`，且整个 run 期间持有状态锁，避免其他操作在 job 运行期间回滚 VM。
 - 目前不做安装：EXE 从 worker 的上传文件区、在 worker 常规隔离身份下运行，清理归属仍在 worker 资源账本中。实验室不会声称删除了 worker 文件。
 
+## 离线介质与管理通道
+
+```toml
+[windows_lab.vms.lab.admin]
+user = "Administrator"
+password_env = "WUKONG_LAB_ADMIN_PASSWORD"
+```
+
+- 介质就是已校验的依赖包目录。它必须包含哈希固定的 `install.ps1`；控制器不生成服务或驱动逻辑。
+- `lab install` 通过 `vmrun copyFileFromHostToGuest` 把清单、校验和、产物与脚本复制到 `C:\Windows\Temp\wukong-lab-<install_id>`，再以配置的本地管理员身份通过 `runProgramInGuest` PowerShell 运行 `install.ps1`。
+- 密码只从指定的进程环境变量读取，绝不写入 TOML、状态或回执。`vmrun` 会把它放在命令行上，控制端进程检查可以看到；应在可信控制端运行。
+- 回执记录包/介质身份、安装脚本哈希、退出码、stdout/stderr 与 guest 路径。传输失败为 `unknown`，与 harness run 一样通过恢复基线核对。
+- 不执行清理。每次分析后恢复基线即可丢弃这台一次性 VM，因此安装计划中的清理动作只是可选备注，不是前置条件。安装进行中拒绝 `lab restore`。
+- 当前 VM 没有配置真实管理员登录（无密码），本切片只用假通道和命令构造验证；真实服务/驱动验收需要本地管理员凭据。
+
 ## 宿主操作
 
 适配器只使用 `vmrun -T ws list`、`listSnapshots <vmx>`、`snapshot <vmx> <name>`、`revertToSnapshot <vmx> <name>` 和 `start <vmx> nogui`。每次调用都有超时并捕获 stdout/stderr，从不经过 shell。基线仅在缺失时创建；已有快照从不删除。
@@ -88,6 +103,8 @@ environment = "windows"
 - guest 安装仍需要既定的离线介质和运维/管理员路径。本生命周期不猜密码，也不修改 VM 磁盘或账号。
 - `start_after_restore` 必须与宿主恢复运行中快照的行为一致：在本机上运行中 VM 的快照恢复后处于关机状态，因此实验室按配置启动它。
 - 实验快照不会自动删除；运维在保留证据后显式删除。
+- 不执行清理动作。把一次性 VM 恢复到基线就是清理边界，因此安装计划可以省略清理条目。
+- 管理通道只用假通道和命令构造验证；当前 VM 没有本地管理员密码，真实服务/驱动安装仍被该凭据阻塞。
 - 第一阶段已用真实 VM 验证：创建基线与实验快照，在第 2、4 代恢复到基线，VM 启动后 worker `doctor` 再次就绪。随后在第 9 代通过已登记 worker 上传并执行一个预编译 EXE（job 完成、退出码 0、写入不可变回执），第 10 代恢复基线后 worker `doctor` 仍就绪。控制器重启、超时和过期代次行为由使用假宿主的单元测试覆盖。
 
 ## 命令行

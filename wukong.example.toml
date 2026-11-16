@@ -124,3 +124,6 @@ cpus = 2
 # snapshot_prefix = "wukong-lab"
 # operation_timeout_seconds = 300
 # start_after_restore = true
+# [windows_lab.vms.lab.admin]
+# user = "Administrator"
+# password_env = "WUKONG_LAB_ADMIN_PASSWORD"

@@ -94,6 +94,8 @@ pub struct WindowsLabVm {
     pub vmrun: PathBuf,
     /// Registered Windows environment that executes packaged harnesses in this VM.
     pub environment: Option<String>,
+    /// Administrative channel used only for service/driver installation media.
+    pub admin: Option<WindowsLabAdmin>,
     pub baseline_snapshot: String,
     pub snapshot_prefix: String,
     /// Upper bound for one VMware host operation (snapshot, revert, start).
@@ -106,6 +108,7 @@ impl Default for WindowsLabVm {
             vmx: PathBuf::new(),
             vmrun: PathBuf::from("vmrun"),
             environment: None,
+            admin: None,
             baseline_snapshot: "wukong-lab-baseline".into(),
             snapshot_prefix: "wukong-lab".into(),
             operation_timeout_seconds: 300,
@@ -119,6 +122,21 @@ fn valid_snapshot_name(name: &str) -> bool {
         && name
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsLabAdmin {
+    pub user: String,
+    /// Environment variable holding the password; never persisted in TOML.
+    pub password_env: String,
+}
+impl Default for WindowsLabAdmin {
+    fn default() -> Self {
+        Self {
+            user: "Administrator".into(),
+            password_env: "WUKONG_LAB_ADMIN_PASSWORD".into(),
+        }
+    }
 }
 impl AppConfig {
     fn validate_windows_lab(&self) -> Result<()> {
@@ -152,6 +170,22 @@ impl AppConfig {
                 ensure!(
                     configured.platform == crate::adapters::environments::Platform::Windows,
                     "windows_lab VM {id} environment must be a Windows environment"
+                );
+            }
+            if let Some(admin) = &vm.admin {
+                ensure!(
+                    !admin.user.trim().is_empty()
+                        && admin.user.len() <= 128
+                        && !admin.user.contains(['\n', '\r', '\0']),
+                    "windows_lab VM {id} admin user is invalid"
+                );
+                ensure!(
+                    !admin.password_env.is_empty()
+                        && admin
+                            .password_env
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+                    "windows_lab VM {id} admin password_env must name an environment variable"
                 );
             }
         }

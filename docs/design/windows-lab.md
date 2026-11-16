@@ -4,7 +4,7 @@
 
 ## Scope
 
-Phase 1 of the Windows capability plan gives the controller a bounded lifecycle for one registered VMware experiment VM: prepare a baseline and a per-experiment snapshot, fence every generation, restore to the baseline, and reconcile an interrupted or timed-out host operation. It also locks and verifies controller-side dependency packages, validates install/cleanup plans, and executes one prebuilt user-mode EXE through the registered worker. The operator entry point is `wukong lab`. It does not yet compile harnesses in the VM, install services or drivers, or expose debugger, network and fuzz tools.
+Phase 1 of the Windows capability plan gives the controller a bounded lifecycle for one registered VMware experiment VM: prepare a baseline and a per-experiment snapshot, fence every generation, restore to the baseline, and reconcile an interrupted or timed-out host operation. It also locks and verifies controller-side dependency packages, validates install/cleanup plans, executes one prebuilt user-mode EXE through the registered worker, and can run a hash-pinned `install.ps1` through an administrative channel. The operator entry point is `wukong lab`. It does not yet compile harnesses in the VM, generate service/driver logic, or expose debugger, network and fuzz tools.
 
 ## Registered identity and configuration
 
@@ -78,6 +78,21 @@ environment = "windows"
 - `restore` is rejected while a run is in flight, and the state lock is held for the whole run so another operation cannot revert the VM underneath the job.
 - No installation happens yet: the EXE runs from the worker's uploaded file area under the worker's normal isolated persona, and cleanup ownership remains in the worker resource journal. The lab never claims it deleted worker files.
 
+## Offline media and the administrative channel
+
+```toml
+[windows_lab.vms.lab.admin]
+user = "Administrator"
+password_env = "WUKONG_LAB_ADMIN_PASSWORD"
+```
+
+- The media is the verified package directory. It must contain a hash-pinned `install.ps1`; the controller generates no service or driver logic.
+- `lab install` copies the manifest, sums, artifacts and script into `C:\Windows\Temp\wukong-lab-<install_id>` with `vmrun copyFileFromHostToGuest`, then runs `install.ps1` through `runProgramInGuest` PowerShell as the configured local administrator.
+- The password is read only from the named process environment variable. It is never written to TOML, state or receipts. `vmrun` receives it on its command line, so process inspection on the controller can observe it; use a trusted controller.
+- The receipt records package/media identity, the install-script hash, exit code, stdout/stderr and guest paths. Transport failures are `unknown` and are reconciled by restoring the baseline, exactly like a harness run.
+- Cleanup is not executed. The disposable VM is discarded by the baseline restore after each analysis, so cleanup actions in an install plan are optional notes rather than preconditions. `lab restore` is rejected while an installation is in flight.
+- No real administrative login has been configured on the current VM (it has no password), so this slice is validated with a fake channel and command construction only; real service/driver acceptance needs a local administrator credential.
+
 ## Host operations
 
 The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx> <name>`, `revertToSnapshot <vmx> <name>` and `start <vmx> nogui`. Each call has a timeout and captured stdout/stderr, never a shell. Baseline snapshots are created only when absent; existing snapshots are never deleted.
@@ -88,6 +103,8 @@ The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx>
 - Guest installation still needs the documented offline media and an operator/admin path. This lifecycle never guesses passwords and never edits VM disks or accounts.
 - `start_after_restore` must match how the host restores a running snapshot: on this host a running-VM snapshot restores powered off, so the lab starts it when configured.
 - Experiment snapshots are not deleted automatically; operators remove them explicitly after preserving evidence.
+- Cleanup actions are not executed. Restoring the disposable VM to the baseline is the cleanup boundary, so installation plans may omit cleanup entries.
+- The administrative channel is validated with a fake channel and command construction only; the current VM has no local administrator password, so real service/driver installation remains blocked on that credential.
 - Phase 1 validation used the real VM: baseline and experiment snapshots were created, restores to the baseline ran in generations 2 and 4, and the worker `doctor` reported ready again after the VM start. A packaged prebuilt EXE was then uploaded and executed through the registered worker in generation 9 (job completed with exit code 0, immutable receipt written), and the baseline restore in generation 10 left the worker `doctor` ready again. Controller-restart, timeout and stale-generation behavior are covered by unit tests with a fake host.
 
 ## CLI

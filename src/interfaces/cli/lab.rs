@@ -1,5 +1,6 @@
 //! Operator entry point for the registered Windows experiment VM.
 use crate::adapters::environments::EnvironmentRegistry;
+use crate::adapters::windows_lab_admin::VmwareAdmin;
 use crate::adapters::windows_lab_worker::WindowsWorker;
 use crate::application::windows_lab::{ReconcileOutcome, WindowsLab};
 use crate::config::AppConfig;
@@ -52,6 +53,17 @@ pub enum Command {
         #[arg(long)]
         stdin: Option<PathBuf>,
         #[arg(long, default_value_t = 120)]
+        timeout: u64,
+    },
+    /// Run the packaged install.ps1 through the administrative channel.
+    Install {
+        #[arg(long)]
+        vm: String,
+        #[arg(long)]
+        lab: String,
+        #[arg(long)]
+        generation: u64,
+        #[arg(long, default_value_t = 300)]
         timeout: u64,
     },
     /// Fence the active generation, then revert the VM to the baseline.
@@ -124,6 +136,17 @@ pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
             lab.finish().await;
             result
         }
+        Command::Install {
+            vm,
+            lab: lab_id,
+            generation,
+            timeout,
+        } => {
+            let lab = open(config, &vm)?;
+            let result = lab.install(&lab_id, generation, timeout).await;
+            lab.finish().await;
+            result
+        }
         Command::Restore {
             vm,
             lab,
@@ -164,12 +187,22 @@ fn open(config: &AppConfig, vm_id: &str) -> Result<WindowsLab> {
         Duration::from_secs(vm.operation_timeout_seconds),
     )?;
     let lab = WindowsLab::open(&config.state_dir, vm_id, vm, Arc::new(host))?;
+    let mut lab = lab;
     if let Some(environment) = &vm.environment {
         let registry = EnvironmentRegistry::new(config.environments.clone())?;
-        Ok(lab.with_worker(Arc::new(WindowsWorker::new(registry, environment.clone()))))
-    } else {
-        Ok(lab)
+        lab = lab.with_worker(Arc::new(WindowsWorker::new(registry, environment.clone())));
     }
+    if let Some(admin) = &vm.admin
+        && let Some(channel) = VmwareAdmin::from_env(
+            &vm.vmrun,
+            &vm.vmx,
+            admin,
+            Duration::from_secs(vm.operation_timeout_seconds),
+        )?
+    {
+        lab = lab.with_admin(Arc::new(channel));
+    }
+    Ok(lab)
 }
 
 fn read_spec(path: &Path) -> Result<crate::application::windows_lab::ExperimentSpec> {

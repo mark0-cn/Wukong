@@ -16,6 +16,9 @@ pub struct InstallPlan {
     pub service: Option<ServiceInstall>,
     #[serde(default)]
     pub account: Option<AccountInstall>,
+    /// Optional ownership notes. The disposable VM is discarded by a baseline
+    /// restore, so cleanup is not a precondition in this phase.
+    #[serde(default)]
     pub cleanup: Vec<CleanupAction>,
 }
 
@@ -115,38 +118,6 @@ impl InstallPlan {
                 action.target
             );
         }
-        for target in &self.targets {
-            ensure!(
-                self.cleanup.iter().any(|action| match action.kind {
-                    CleanupKind::File => action.target.eq_ignore_ascii_case(target),
-                    CleanupKind::Directory => {
-                        directory_covers(&action.target, target)
-                    }
-                    _ => false,
-                }),
-                "install target {target} has no file or directory cleanup action"
-            );
-        }
-        if let Some(service) = &self.service {
-            ensure!(
-                self.cleanup
-                    .iter()
-                    .any(|action| action.kind == CleanupKind::Service
-                        && action.target.eq_ignore_ascii_case(&service.name)),
-                "service {} has no service cleanup action",
-                service.name
-            );
-        }
-        if let Some(account) = &self.account {
-            ensure!(
-                self.cleanup
-                    .iter()
-                    .any(|action| action.kind == CleanupKind::Account
-                        && action.target.eq_ignore_ascii_case(&account.name)),
-                "account {} has no account cleanup action",
-                account.name
-            );
-        }
         Ok(())
     }
 
@@ -187,15 +158,6 @@ fn valid_cleanup_target(action: &CleanupAction) -> bool {
     }
 }
 
-fn directory_covers(directory: &str, target: &str) -> bool {
-    let directory = directory.replace('/', "\\").to_ascii_lowercase();
-    let target = target.replace('/', "\\").to_ascii_lowercase();
-    directory == target
-        || target
-            .strip_prefix(&directory)
-            .is_some_and(|rest| rest.starts_with('\\'))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,24 +192,14 @@ mod tests {
     }
 
     #[test]
-    fn targets_need_a_covering_cleanup_action() {
+    fn cleanup_actions_are_optional_notes() {
         let mut plan = sample();
-        plan.cleanup
-            .retain(|action| action.kind != CleanupKind::Directory);
-        assert!(plan.validate(LaunchKind::Service).is_err());
-    }
-
-    #[test]
-    fn services_and_accounts_need_their_own_cleanup() {
-        let mut plan = sample();
-        plan.cleanup
-            .retain(|action| action.kind != CleanupKind::Service);
-        assert!(plan.validate(LaunchKind::Service).is_err());
-        let mut plan = sample();
+        plan.cleanup.clear();
+        assert!(plan.validate(LaunchKind::Service).is_ok());
         plan.account = Some(AccountInstall {
             name: "wukong-lab".into(),
         });
-        assert!(plan.validate(LaunchKind::Service).is_err());
+        assert!(plan.validate(LaunchKind::Service).is_ok());
     }
 
     #[test]
