@@ -80,6 +80,72 @@ impl Default for ExecutionConfig {
         }
     }
 }
+/// Controller-owned Windows experiment VM registry. Host paths and the VMware
+/// executable come from operator configuration; model input never supplies them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsLabConfig {
+    pub vms: std::collections::BTreeMap<String, WindowsLabVm>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WindowsLabVm {
+    pub vmx: PathBuf,
+    pub vmrun: PathBuf,
+    pub baseline_snapshot: String,
+    pub snapshot_prefix: String,
+    /// Upper bound for one VMware host operation (snapshot, revert, start).
+    pub operation_timeout_seconds: u64,
+    pub start_after_restore: bool,
+}
+impl Default for WindowsLabVm {
+    fn default() -> Self {
+        Self {
+            vmx: PathBuf::new(),
+            vmrun: PathBuf::from("vmrun"),
+            baseline_snapshot: "wukong-lab-baseline".into(),
+            snapshot_prefix: "wukong-lab".into(),
+            operation_timeout_seconds: 300,
+            start_after_restore: false,
+        }
+    }
+}
+fn valid_snapshot_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+}
+impl AppConfig {
+    fn validate_windows_lab(&self) -> Result<()> {
+        for (id, vm) in &self.windows_lab.vms {
+            crate::adapters::environments::validate_id(id)?;
+            ensure!(
+                vm.vmx.is_absolute() && vm.vmrun.is_absolute(),
+                "windows_lab VM {id} requires absolute vmx and vmrun paths"
+            );
+            ensure!(
+                vm.vmx.extension().is_some_and(|ext| ext == "vmx"),
+                "windows_lab VM {id} vmx must name a .vmx file"
+            );
+            ensure!(
+                valid_snapshot_name(&vm.baseline_snapshot)
+                    && valid_snapshot_name(&vm.snapshot_prefix),
+                "windows_lab VM {id} snapshot names contain unsupported characters"
+            );
+            ensure!(
+                vm.snapshot_prefix != vm.baseline_snapshot && vm.snapshot_prefix.len() <= 48,
+                "windows_lab VM {id} needs a distinct, short snapshot prefix"
+            );
+            ensure!(
+                (30..=3600).contains(&vm.operation_timeout_seconds),
+                "windows_lab VM {id} operation timeout must be 30–3600 seconds"
+            );
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
@@ -99,6 +165,7 @@ pub struct AppConfig {
     pub demos_dir: Option<PathBuf>,
     pub mcp: Vec<McpServerConfig>,
     pub execution: ExecutionConfig,
+    pub windows_lab: WindowsLabConfig,
 }
 impl Default for AppConfig {
     fn default() -> Self {
@@ -119,6 +186,7 @@ impl Default for AppConfig {
             demos_dir: Some(PathBuf::from(crate::application::prompts::EXAMPLES_DIR)),
             mcp: vec![],
             execution: ExecutionConfig::default(),
+            windows_lab: WindowsLabConfig::default(),
         }
     }
 }
@@ -162,6 +230,10 @@ impl AppConfig {
                 resolve(base, &mut ssh.known_hosts_file);
             }
         }
+        for vm in self.windows_lab.vms.values_mut() {
+            resolve(base, &mut vm.vmx);
+            resolve(base, &mut vm.vmrun);
+        }
         resolve(base, &mut self.analysis.ghidra_cache_dir);
         if let Some(p) = &mut self.skills_dir {
             resolve(base, p);
@@ -180,6 +252,7 @@ impl AppConfig {
     }
     pub fn validate(&self) -> Result<()> {
         self.model.validate()?;
+        self.validate_windows_lab()?;
         ensure!(
             self.execution.output_recovery_attempts <= 2,
             "output_recovery_attempts must be at most 2"

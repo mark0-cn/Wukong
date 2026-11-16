@@ -14,8 +14,8 @@
       "zh-CN": "c7347269092896acf0a14bf5ec23ed7a4082e233587c83df2d8689af14ee129b"
     },
     "docs/README.md": {
-      "en": "5b258ea0bf3bcbc247c65020829271334302fe0dc2e01d9847fa154f354f091f",
-      "zh-CN": "04ef38f29d72fd0ea63c0106c81e86210272b0617def67218e6079dbbcf6d01d"
+      "en": "4a3e81ec55758eca24625918a8e33351ad2dac8f0b117d867c2a10dc11bf07ab",
+      "zh-CN": "f3d70c02fab4d30f2b1ea9141eaf5ce0a02f053413629cf70d84e0af3ab7c9e4"
     },
     "docs/design/architecture.md": {
       "en": "b9125bf15f017ca01fdff24c0ae32e946afe1b1cc56c36a9e0b3317f79350031",
@@ -28,6 +28,10 @@
     "docs/design/implementation-contract.md": {
       "en": "579c18b2a2fe5944c829359f89e0a7c3b143555666f2c15ed5c1d710f1f8b94c",
       "zh-CN": "99de4fb39618f470be7eb5adc193c69ae9761d359dce89bce9dae569d24f4343"
+    },
+    "docs/design/windows-lab.md": {
+      "en": "f822dcadbfd8e860c05a29f22e57c9b2b7b40ed606858577a9b5e1f1027c593b",
+      "zh-CN": "7ccd3ef55a6a6ad264436348f654956acb764b8c221d5f4ff347aeae18ddf54d"
     },
     "docs/development/commits.md": {
       "en": "328bb6704645a84d522c3b2a6a122d0c7c580287ec5321f7e70b5b3aadf52bf5",
@@ -122,8 +126,8 @@
       "zh-CN": "11b6e828ccc1953a223f868a234c45ea53abed0a94d3b3602866035e5b1fd483"
     },
     "docs/user/usage.md": {
-      "en": "47b9c79ed859c7aedfd0cc55a6287770735daccee7fe9e7d2f26dc0ae87029e1",
-      "zh-CN": "d7b690ba78bbe5f92ceb2423a2e8014394a132e130954c8176a11580ccd4c6cb"
+      "en": "eb74da6df27563db18666ef79dee4efcba15e2ab7d63e5e3a0499781d45fbc20",
+      "zh-CN": "59d957448a604702469cfa5afdd2bc3a68f7d52d104b6fda1c05720bee780a32"
     },
     "evals/README.md": {
       "en": "8fb115c1b503627b087374bb0a3b254a140e6094baa6df91452a763a761b78ed",

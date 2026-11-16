@@ -112,3 +112,14 @@ root = ".wukong/workbench"
 image = "wukong:0.1"
 memory = "4g"
 cpus = 2
+
+# Controller-owned Windows experiment VM lifecycle (`wukong lab`). Paths must be
+# absolute; only these registered identities can be addressed and the adapter
+# builds every VMware argument.
+# [windows_lab.vms.lab]
+# vmx = "D:/vm/win10/Windows 10 x64.vmx"
+# vmrun = "D:/VMware/VMware Workstation/vmrun.exe"
+# baseline_snapshot = "wukong-lab-baseline"
+# snapshot_prefix = "wukong-lab"
+# operation_timeout_seconds = 300
+# start_after_restore = true

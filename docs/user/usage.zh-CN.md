@@ -115,6 +115,18 @@ API key 内容不写入 TOML；填写环境变量名，而非密钥值。Windows
 
 此后使用发布目录中的 `Wukong.lnk` 启动。配置仍保存到指定的原始文件；脚本不修改工作区或 Docker 权限。重新构建后，关闭旧窗口并再次运行脚本即可更新。
 
+### Windows 实验 VM 生命周期
+
+`wukong lab` 准备、恢复并围栏已登记的 VMware 实验 VM。每台 VM 同时只允许一个实验。`lab prepare` 在缺失时创建基线并创建一份实验快照，返回租约；`lab restore` 先提升代次再恢复，因此旧租约无法再次执行；`lab reconcile` 在检查 VM 后解决中断的操作。
+
+```powershell
+wukong --config wukong.toml lab status --vm lab
+wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parser --spec spec.json
+wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
+```
+
+CLI 必须从正常完整性目录运行，不能位于带 Low 标签的构建目录。参见 [Windows 实验实验室](../design/windows-lab.zh-CN.md)。第一阶段仅覆盖生命周期；依赖打包、harness 准入与 guest 安装另行处理。
+
 <a id="configuration-and-models"></a>
 
 ## 配置与模型

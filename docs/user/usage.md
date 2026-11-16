@@ -111,6 +111,18 @@ Run at the repository root, using the quick-start release binary and root config
 
 Launch `Wukong.lnk` in the destination thereafter. Configuration still saves to the original selected file; the script does not change workspace or Docker permissions. Close the old window and rerun the script after rebuilding.
 
+### Windows experiment VM lifecycle
+
+`wukong lab` prepares, restores and fences the registered VMware experiment VM. One experiment runs per VM at a time. `lab prepare` creates the baseline when missing plus one experiment snapshot and returns a lease; `lab restore` advances the generation before reverting, so an old lease cannot run again; `lab reconcile` resolves an interrupted operation after you inspect the VM.
+
+```powershell
+wukong --config wukong.toml lab status --vm lab
+wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parser --spec spec.json
+wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
+```
+
+Run the CLI from a normal-integrity directory outside a Low-labeled build tree. See [Windows experiment lab](../design/windows-lab.md). Phase 1 covers lifecycle only; dependency packaging, harness admission and guest installation remain separate.
+
 <a id="配置与模型"></a>
 
 ## Configuration and models

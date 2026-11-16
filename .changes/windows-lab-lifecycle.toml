@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add a controller-side Windows experiment lab lifecycle: one registered VMware VM per experiment, baseline and per-generation snapshots, generation fencing, and restart/timeout reconciliation through `wukong lab`."
+zh_CN = "新增控制端 Windows 实验 VM 生命周期：每个实验使用一台已登记 VMware VM，创建基线与按代次隔离的快照，实施代次围栏，并通过 `wukong lab` 处理重启与超时协调。"

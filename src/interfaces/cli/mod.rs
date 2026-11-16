@@ -1,4 +1,5 @@
 pub mod cleanup;
+pub mod lab;
 pub mod workbench;
 use crate::{
     adapters::binary,
@@ -58,6 +59,11 @@ pub enum Command {
     Challenge {
         #[command(subcommand)]
         command: crate::interfaces::cli::workbench::ChallengeCommand,
+    },
+    /// Manage the registered Windows experiment VM lifecycle without a model.
+    Lab {
+        #[command(subcommand)]
+        command: crate::interfaces::cli::lab::Command,
     },
     /// Write a configuration without overwriting an existing file.
     Init {
@@ -249,6 +255,10 @@ pub async fn run(cli: Cli) -> Result<()> {
         )?)?;
         return Ok(());
     }
+    if let Command::Lab { command } = command {
+        print_json(&crate::interfaces::cli::lab::run(&config, command).await?)?;
+        return Ok(());
+    }
     let store = Store::open(&config.state_dir)?;
     let service = AssessmentService::new(config.clone(), store.clone());
     match command {
@@ -260,7 +270,8 @@ pub async fn run(cli: Cli) -> Result<()> {
         | Command::ToolCatalog
         | Command::SkillCatalog
         | Command::Env { .. }
-        | Command::Challenge { .. } => unreachable!(),
+        | Command::Challenge { .. }
+        | Command::Lab { .. } => unreachable!(),
         Command::Doctor => {
             let registry = crate::adapters::environments::EnvironmentRegistry::new(
                 config.environments.clone(),
