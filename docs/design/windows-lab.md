@@ -137,20 +137,14 @@ Test signing is sufficient for test drivers. PatchGuard is not bypassed or disab
 
 Limits: the entry is a heuristic (first PE executable, preferring `.exe`); large trees are truncated at the scan bounds, launch members are limited to 64, and symbol/PDB pairing and automatic multi-entry execution are not implemented. Cross-file behavior is still a hypothesis until the entry and its imports are actually exercised.
 
-## Multi-environment analysis
-
-A Windows execution worker does not need to carry every reverse-engineering tool. Register a Linux worker (the Docker image already contains Ghidra, capstone, pefile and angr) and name it as the static backend:
+## Static backend selection
 
 ```toml
 [analysis]
 static_environment = "linux-static"
 ```
 
-- With this setting, Ghidra tools are advertised to Windows-bound analysts. The controller stages the target into the Linux environment, runs `ghidra.query` there and imports the returned artifacts, while `debug_*`, `crash_replay`, `poc_verify` and `py_run` stay on the Windows worker.
-- Each tool call binds only the environment it needs; static and dynamic calls can therefore be used in the same assessment without adding a decompiler to the Windows worker.
-- Tool availability still comes from preflight, not from the catalog. Only capabilities observed for the chosen backend are advertised; a missing tool is a planning constraint.
-- Agent-facing lab tools expose the same lifecycle as the CLI: `lab_status` (omit `vm` to list configured VMs), `lab_prepare`, `lab_run`, `lab_install`, `lab_restore` and `lab_prune`. They are child-only controller tools; `lab_run`/`lab_install` use the registered worker and administrative channel.
-- `py_run` accepts either inline `source` or a worker `source_file` created with `file_put`; large scripts should be uploaded first instead of embedded in one tool argument.
+Ghidra probes and binds only the chosen static environment; ordinary execution/status/cleanup binds only the primary environment. Both validate the assessment's configuration snapshot and persisted worker identity. Static tools are advertised only after observing that backend's capability, not from a configured name alone. A failed static connection cannot break ordinary worker cleanup, and a failed Windows worker cannot prevent an otherwise available static query.
 
 ## Host operations
 

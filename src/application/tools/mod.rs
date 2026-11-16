@@ -146,21 +146,43 @@ impl ToolService {
             )
             .await?;
         let primary = gateway::BoundWorker::new(client)?;
-        let static_worker = match &self.static_environment {
-            Some(static_environment) if static_environment != environment_id => {
-                let client = self
-                    .environments
-                    .bind(
-                        static_environment,
-                        &agent.run_id,
-                        self.store.controller_owner().as_deref(),
-                    )
-                    .await?;
-                Some(gateway::BoundWorker::new(client)?)
+        Ok(ToolContext::new(self, Some(primary)))
+    }
+
+    async fn bound_for(
+        &self,
+        agent: &AgentMetadata,
+        requirement: requirements::Requirement,
+    ) -> Result<ToolContext> {
+        if matches!(requirement, requirements::Requirement::Ghidra)
+            && let Some(environment) = &self.static_environment
+        {
+            let run: RunRecord = self.store.load(&agent.run_id)?;
+            ensure!(
+                run.config["analysis"]["static_environment"].as_str() == Some(environment.as_str()),
+                "static backend selection changed since assessment creation"
+            );
+            environment_service::EnvironmentService {
+                store: self.store.clone(),
+                registry: self.environments.clone(),
             }
-            _ => None,
-        };
-        Ok(ToolContext::with_static(self, Some(primary), static_worker))
+            .checked_id(agent, environment)
+            .await?;
+            let client = self
+                .environments
+                .bind(
+                    environment,
+                    &agent.run_id,
+                    self.store.controller_owner().as_deref(),
+                )
+                .await?;
+            return Ok(ToolContext::with_static(
+                self,
+                None,
+                Some(gateway::BoundWorker::new(client)?),
+            ));
+        }
+        self.bound_to(agent).await
     }
 
     async fn checked_environment(&self, agent: &AgentMetadata) -> Result<RuntimeClient> {
@@ -304,7 +326,7 @@ impl ToolService {
             };
             if let Some(spec) = builtin {
                 if self.needs_worker(spec) {
-                    let scoped = self.bound_to(&agent).await?;
+                    let scoped = self.bound_for(&agent, spec.requirement).await?;
                     scoped.require_backend(spec, &args).await?;
                     (spec.handler)(&scoped, &agent, call_id, name, args).await
                 } else {

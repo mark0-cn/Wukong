@@ -86,7 +86,7 @@ impl ToolService {
     pub(super) fn needs_worker(&self, spec: &catalog::Spec) -> bool {
         match spec.requirement {
             Requirement::Controller | Requirement::Probe => false,
-            Requirement::Ghidra => self.local_ghidra().is_none(),
+            Requirement::Ghidra => !self.local_ghidra().is_some_and(|path| path.is_file()),
             Requirement::Worker(_) | Requirement::ScriptValidation => true,
         }
     }

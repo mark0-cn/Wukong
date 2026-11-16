@@ -137,20 +137,14 @@ verifier.exe /querysettings
 
 限制：入口是启发式（优先第一个 `.exe` PE 可执行文件）；大树会在扫描边界截断，启动成员限制 64；尚未实现符号/PDB 配对和自动多入口执行。跨文件行为在真正执行入口及其导入之前仍是假设。
 
-## 多环境分析
-
-Windows 执行 worker 不必携带全部逆向工具。注册一个 Linux worker（Docker 镜像已包含 Ghidra、capstone、pefile 和 angr），并把它指定为静态分析后端：
+## 静态后端选择
 
 ```toml
 [analysis]
 static_environment = "linux-static"
 ```
 
-- 设置后，绑定 Windows 的分析师仍会看到 Ghidra 工具。控制器把目标 staging 到 Linux 环境，在那里执行 `ghidra.query` 并导入返回产物；`debug_*`、`crash_replay`、`poc_verify` 与 `py_run` 仍留在 Windows worker。
-- 每次工具调用只绑定它需要的环境，因此同一次评估可以同时使用静态与动态工具，而无需给 Windows worker 增加反编译器。
-- 工具可用性仍来自 preflight，而不是工具目录。只宣传所选后端实际观察到的能力；缺失工具是规划约束。
-- Agent 侧 lab 工具与 CLI 生命周期一致：`lab_status`（省略 `vm` 时列出已配置 VM）、`lab_prepare`、`lab_run`、`lab_install`、`lab_restore`、`lab_prune`。它们是仅子代理可用的控制器工具；`lab_run`/`lab_install` 使用已登记 worker 和管理通道。
-- `py_run` 支持内联 `source`，也支持先用 `file_put` 创建 worker 文件再传 `source_file`；大脚本应先上传，避免塞进单个工具参数。
+Ghidra 只探测和绑定选定的静态环境；普通执行/状态/清理只绑定主环境。两者都校验评估配置快照和持久化 worker 身份。只有观测到该后端能力后才公布静态工具，不能只凭配置名称。静态连接失败不会阻断普通 worker 清理；Windows worker 故障也不会阻断另一个可用静态环境的查询。
 
 ## 宿主操作
 
