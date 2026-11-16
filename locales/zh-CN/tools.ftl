@@ -82,3 +82,6 @@ tool-functions-list = 查找程序函数
 tool-ghidra-decompile = 反编译函数
 tool-write-stdin = 与运行中的进程交互
 tool-file-list = 列出工作区文件
+tool-bundle-manifest = 查看目录包
+tool-bundle-evidence = 导入目录包证据
+tool-bundle-stage = 准备目录包

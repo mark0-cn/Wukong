@@ -126,16 +126,13 @@ verifier.exe /querysettings
 
 测试签名足以加载测试驱动。本流程不会绕过或关闭 PatchGuard，第三方 PatchGuard 绕过工具不属于实验室；若某个实验确实需要，应作为独立的操作步骤并在结束后恢复基线。恢复基线会同时移除测试证书、testsigning 标志、服务和 Verifier 设置。
 
-## 目录 bundle
+## 目录包与 Python 脚本
 
-`wukong analyze` 除了单个二进制，也接受目录。目录会递归扫描（最多 256 个文件、512 MiB、16 层），每个文件绑定 SHA-256，PE 成员会被检查格式、推断 executable/library/data 类型、入口 RVA 和导入。入口候选是自动推断的，不需要用户标注角色。
+目录分析最多发现 256 个文件、512 MiB 和 16 层目录，计算成员哈希，推断可执行文件/库/数据类型及导入边。`bundle_manifest` 提供发现结果；`bundle_evidence` 导入校验成员用于静态分析。入口推断只是建议。
 
-- `bundle_manifest` 返回清单：成员、哈希、推断类型、导入和跨成员导入边，例如 `vulnserver.exe -> essfunc.dll`。
-- `bundle_evidence` 把某个已校验成员导入为证据，因此 Ghidra 可以通过 `target_evidence_id` 反编译该 DLL，而 run 的主目标仍是 EXE。
-- `bundle_stage` 最多把 64 个成员上传到同一个 worker 目录，并写入 schema-1 LaunchSpec，以该目录为 cwd、推断入口为 target。
-- 用该 `launch_spec` 且不带 argv/timeout_secs/cwd/env 调用 `job_start`，入口会带着同目录 DLL 启动；timeout 由 LaunchSpec 持有（默认 300 秒）。验证中 `vulnserver.exe` 与 `essfunc.dll` 同目录启动成功并干净取消。
+`bundle_stage` 接受明确的 `entry`、可选 `members` 子集（必须包含入口，最多 64 个）、`args`、`cwd`、`input_mode`（`stdin_pipe` 或 `argv_file`）及超时（默认 300 秒）。成员/cwd 相对路径必须满足原生路径预算；选择成员在 bundle 下最多六层。`argv_file` 要求 `@@`，完整 LaunchSpec 不超过 64 KiB。无效选择/选项在上传前被拒绝。更换入口使用独立的执行准入目录，更改启动配置生成不同的内容寻址路径。调用 `job_start` 时传返回的 `launch_spec`，省略 argv/timeout_secs/cwd/env 覆盖项。
 
-限制：入口是启发式（优先第一个 `.exe` PE 可执行文件）；大树会在扫描边界截断，启动成员限制 64；尚未实现符号/PDB 配对和自动多入口执行。跨文件行为在真正执行入口及其导入之前仍是假设。
+`py_run` 必须提供且只提供一个非空 `source` 或 `source_file`；schema 拒绝缺失、空值和组合形式。Linux 与原生 Windows 均执行 256 KiB UTF-8 字节限制。原生文件输入在已准入的拥有者作用域内解析，按内容哈希封存后执行。Linux 也把脚本保留在内容派生路径下。两条路径都不能绕过普通任务归属或隔离。
 
 ## 静态后端选择
 

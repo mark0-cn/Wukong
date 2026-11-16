@@ -1002,7 +1002,7 @@ fn build_catalog() -> Vec<Spec> {
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_bundle_manifest(services, agent, call, name, args)
+                handlers::handle_bundle_manifest(&services.bundle, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,
@@ -1014,7 +1014,7 @@ fn build_catalog() -> Vec<Spec> {
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_bundle_evidence(services, agent, call, name, args)
+                handlers::handle_bundle_evidence(&services.bundle, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,
@@ -1022,11 +1022,11 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::BundleStageArgs>(
             "bundle_stage",
             "tool-bundle-stage",
-            "Stage every bundle member into one worker directory, create a LaunchSpec that sets that directory as cwd, and return the launch_spec path plus member identities. Then call job_start with launch_spec and no argv/timeout_secs/cwd/env to run the inferred entry with its sidecar DLLs present. timeout_secs (default 300) is stored in the LaunchSpec. At most 64 members.",
+            "Stage a selected bundle entry and up to 64 members, validating paths and launch options before upload. Optional entry, members, args, cwd and input_mode override the inferred defaults. The immutable LaunchSpec path is content-addressed; call job_start with launch_spec and omit argv/timeout_secs/cwd/env.",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_bundle_stage(services, agent, call, name, args)
+                handlers::handle_bundle_stage(&services.bundle, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Worker(&[

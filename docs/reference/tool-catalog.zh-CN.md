@@ -17,7 +17,7 @@
 | `binary_strings` | analyst / verifier | 否 | controller | 分页搜索可打印字符串，附文件偏移地址引用。 |
 | `bundle_evidence` | analyst / verifier | 否 | controller | 把一个已校验 bundle 成员导入为不可变证据，以便用 target_evidence_id 检查或反编译。路径相对于被分析目录。 |
 | `bundle_manifest` | analyst / verifier | 否 | controller | 返回目录 bundle 清单：自动哈希的成员、推断的 executable/library/data 类型、PE 导入和跨成员导入边。无需用户标注角色；entry 是推断出的启动候选。 |
-| `bundle_stage` | analyst / verifier | 是 | file.upload.begin + file.upload.write + file.upload.commit + file.put | 把全部 bundle 成员 staging 到同一个 worker 目录，创建以该目录为 cwd 的 LaunchSpec，并返回 launch_spec 路径和成员身份。随后用 launch_spec 且不带 argv/timeout_secs/cwd/env 调用 job_start，让推断入口带着同目录 DLL 运行。timeout_secs（默认 300）写入 LaunchSpec；最多 64 个成员。 |
+| `bundle_stage` | analyst / verifier | 是 | file.upload.begin + file.upload.write + file.upload.commit + file.put | 上传选定的 bundle 入口及最多 64 个成员；上传前校验路径和启动选项。可用 entry、members、args、cwd、input_mode 覆盖推断的默认值。不可变 LaunchSpec 路径包含内容哈希；调用 job_start 时传 launch_spec，省略 argv/timeout_secs/cwd/env。 |
 | `context_read` | 全部 | 否 | controller | 按字符范围读取同 run 的确切共享文档 JSON，含 amendments。kind/id 来自 context_search；沿 content.next_offset 读取所需完整内容。 |
 | `context_search` | 全部 | 否 | controller | 按文本、kind、作者 scope 或 agent_id 搜索同 run 的笔记、待办和可选威胁模型。返回有界预览和 next_offset；用 context_read 读取完整正文及 amendments。 |
 | `coverage_list` | 全部 | 否 | controller | 列出本次分析的全部覆盖记录。 |

@@ -82,3 +82,6 @@ tool-functions-list = Find program functions
 tool-ghidra-decompile = Decompile function
 tool-write-stdin = Interact with running process
 tool-file-list = List workspace files
+tool-bundle-manifest = Inspect directory bundle
+tool-bundle-evidence = Import bundle evidence
+tool-bundle-stage = Stage directory bundle

@@ -126,16 +126,13 @@ verifier.exe /querysettings
 
 Test signing is sufficient for test drivers. PatchGuard is not bypassed or disabled by this workflow, and third-party PatchGuard-bypass tooling is not part of the lab; if an experiment needs one, treat it as an isolated operator step and restore the baseline afterwards. The baseline restore removes the test certificate, testsigning flag, service and Verifier settings together.
 
-## Directory bundles
+## Directory bundles and Python scripts
 
-`wukong analyze` accepts a directory as well as a single binary. A directory is scanned recursively (at most 256 files, 512 MiB and 16 levels), every file is SHA-256-bound, and PE members are inspected for format, inferred executable/library/data kind, entry RVA and imports. The entry candidate is inferred; the user does not label roles.
+Directory analysis discovers up to 256 files, 512 MiB and 16 levels, hashes members and infers executable/library/data kinds plus import edges. `bundle_manifest` exposes discovery; `bundle_evidence` imports a verified member for static analysis. Entry inference is a recommendation.
 
-- `bundle_manifest` returns the manifest: members, hashes, inferred kinds, imports and cross-member import edges such as `vulnserver.exe -> essfunc.dll`.
-- `bundle_evidence` imports one verified member as evidence, so Ghidra can decompile that DLL through `target_evidence_id` while the EXE remains the run target.
-- `bundle_stage` uploads at most 64 members into one worker directory and writes a schema-1 LaunchSpec with that directory as cwd and the inferred entry as target.
-- `job_start` with that `launch_spec` and no argv/timeout_secs/cwd/env runs the entry with its sidecar DLLs present; the LaunchSpec owns the timeout (default 300 seconds). Successful validation started `vulnserver.exe` with `essfunc.dll` in the same directory and cancelled it cleanly.
+`bundle_stage` accepts an explicit `entry`, optional `members` subset (including entry, at most 64), `args`, `cwd`, `input_mode` (`stdin_pipe` or `argv_file`) and timeout (default 300 seconds). Relative member/cwd paths must fit the native path budget; selected paths use at most six levels below the bundle. `argv_file` requires `@@`. The complete LaunchSpec must fit 64 KiB. Invalid selections/options are rejected before upload. Entry changes use a separate executable-admission namespace; launch configuration changes receive different content-addressed paths. Call `job_start` with the returned `launch_spec`, omitting argv/timeout_secs/cwd/env overrides.
 
-Limits: the entry is a heuristic (first PE executable, preferring `.exe`); large trees are truncated at the scan bounds, launch members are limited to 64, and symbol/PDB pairing and automatic multi-entry execution are not implemented. Cross-file behavior is still a hypothesis until the entry and its imports are actually exercised.
+`py_run` requires exactly one nonempty `source` or `source_file`; the schema rejects missing, empty and combined forms. Linux and native Windows enforce the same 256 KiB UTF-8 byte limit. Native file input is resolved in the admitted owner scope and sealed by content hash before execution. Linux also retains the script under a content-derived path. Neither path bypasses normal job ownership or isolation.
 
 ## Static backend selection
 

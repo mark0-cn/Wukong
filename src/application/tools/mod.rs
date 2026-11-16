@@ -43,6 +43,7 @@ mod analysis;
 mod analysis_verification;
 mod args;
 mod artifact_validation;
+mod bundle;
 mod catalog;
 mod coordination;
 mod discovery;

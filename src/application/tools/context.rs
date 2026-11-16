@@ -11,6 +11,7 @@ pub(crate) struct ToolContext {
     pub(super) execution: ExecutionService,
     pub(super) analysis: AnalysisService,
     pub(super) lab: LabService,
+    pub(super) bundle: bundle::BundleService,
 }
 impl ToolContext {
     pub(super) fn new(service: &ToolService, worker: Option<gateway::BoundWorker>) -> Self {
@@ -66,6 +67,10 @@ impl ToolContext {
             },
             local_ghidra: service.local_ghidra(),
             static_gateway,
+            bundle: bundle::BundleService {
+                store: service.store.clone(),
+                execution: execution.clone(),
+            },
             execution,
             analysis,
             lab: LabService {
