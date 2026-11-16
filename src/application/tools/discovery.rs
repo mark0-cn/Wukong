@@ -56,17 +56,7 @@ impl ToolService {
                     .push(json!({"tool":spec.definition.name,"requires":spec.requirement.label()}));
             }
         }
-        if agent.role != Role::Root
-            && self
-                .store
-                .get::<Value>("tool_selection", &agent.id)
-                .ok()
-                .flatten()
-                .is_some_and(|s| {
-                    s["groups"]
-                        .as_array()
-                        .is_some_and(|g| g.iter().any(|x| x == "external"))
-                })
+        if agent.role != Role::Root && capabilities::selected_group(&self.store, agent, "external")
         {
             names.extend(
                 self.mcp

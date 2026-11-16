@@ -51,6 +51,15 @@ impl ExecutionService {
         call: &str,
         input: args::DifferentialTestArgs,
     ) -> Result<Value> {
+        let inputs = input
+            .input_evidence_ids
+            .iter()
+            .map(|id| {
+                let evidence: Evidence = require_in_run(&self.store, id, &agent.run_id)?;
+                ensure!(evidence.size <= 65536, "differential input exceeds 64 KiB");
+                Ok(evidence)
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut identities = Vec::new();
         for path in [&input.target_launch_spec, &input.reference_launch_spec] {
             self.files.known_file(agent, path, false)?;
@@ -77,9 +86,9 @@ impl ExecutionService {
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
         let mut rows = Vec::new();
+        let mut budget_exhausted = false;
         'cases: for (index, id) in input.input_evidence_ids.iter().enumerate() {
-            let evidence: Evidence = require_in_run(&self.store, id, &agent.run_id)?;
-            ensure!(evidence.size <= 65536, "differential input exceeds 64 KiB");
+            let evidence = &inputs[index];
             let staged = self
                 .files
                 .file_put(
@@ -94,6 +103,7 @@ impl ExecutionService {
                 .enumerate()
             {
                 if tokio::time::Instant::now() >= deadline {
+                    budget_exhausted = true;
                     rows.push(json!({"input_evidence_id":id,"job_ids":jobs,"verdict":"inconclusive","reason":"comparison budget expired"}));
                     break 'cases;
                 }
@@ -131,9 +141,11 @@ impl ExecutionService {
                 }
                 let stdout = self.comparison_stream(agent, id, "stdout").await?;
                 let stderr = self.comparison_stream(agent, id, "stderr").await?;
-                if !matches!(input.comparison, args::ComparisonRule::ExitStatus) {
-                    complete &= stdout.is_some() && stderr.is_some();
-                }
+                complete &= match input.comparison {
+                    args::ComparisonRule::ExitStatus => true,
+                    args::ComparisonRule::StdoutJson => stdout.is_some(),
+                    args::ComparisonRule::ExactOutput => stdout.is_some() && stderr.is_some(),
+                };
                 observations.push(json!({"job_id":id,"exit_code":exit,"state":job.status.state,"status_evidence_id":job.status_evidence_id,"stdout_evidence_id":stdout.as_ref().map(|s|&s.0),"stderr_evidence_id":stderr.as_ref().map(|s|&s.0)}));
                 exits.push(exit);
                 outputs.push((
@@ -155,10 +167,11 @@ impl ExecutionService {
             };
             rows.push(json!({"input_evidence_id":id,"input_sha256":evidence.sha256,"observations":observations,"verdict":verdict}));
             if tokio::time::Instant::now() >= deadline {
+                budget_exhausted = true;
                 break;
             }
         }
-        let result = json!({"comparison":input.comparison,"launches":identities,"cases":rows,"requested_cases":input.input_evidence_ids.len(),"complete":rows.len()==input.input_evidence_ids.len(),"matches":rows.iter().filter(|r|r["verdict"]=="match").count(),"mismatches":rows.iter().filter(|r|r["verdict"]=="mismatch").count(),"inconclusive":rows.iter().filter(|r|r["verdict"]=="inconclusive").count()});
+        let result = json!({"comparison":input.comparison,"launches":identities,"cases":rows,"requested_cases":input.input_evidence_ids.len(),"complete":!budget_exhausted && rows.len()==input.input_evidence_ids.len(),"matches":rows.iter().filter(|r|r["verdict"]=="match").count(),"mismatches":rows.iter().filter(|r|r["verdict"]=="mismatch").count(),"inconclusive":rows.iter().filter(|r|r["verdict"]=="inconclusive").count()});
         let evidence = self.store.artifact(
             &agent.run_id,
             &agent.id,

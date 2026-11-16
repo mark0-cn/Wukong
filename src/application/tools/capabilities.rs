@@ -26,10 +26,22 @@ pub(super) fn authorized(agent: &AgentMetadata, name: &str) -> bool {
 
 pub(super) fn selected(store: &Store, agent: &AgentMetadata, name: &str) -> bool {
     // Lifecycle observation/cleanup must remain available after switching groups.
-    if matches!(name, "debug_close" | "debug_inspect" | "debug_control") {
+    if matches!(
+        name,
+        "debug_close"
+            | "debug_inspect"
+            | "debug_control"
+            | "lab_status"
+            | "lab_operation_status"
+            | "lab_operation_cancel"
+            | "lab_restore"
+    ) {
         return true;
     }
-    let group = group(name);
+    selected_group(store, agent, group(name))
+}
+
+pub(super) fn selected_group(store: &Store, agent: &AgentMetadata, group: &str) -> bool {
     if group == "core" {
         return true;
     }
@@ -74,7 +86,7 @@ impl coordination::CoordinationService {
             .store
             .get::<Value>("tool_availability", &agent.id)?
             .unwrap_or(json!({}));
-        let rows = builtins().iter().filter(|spec|spec.model_visible)
+        let mut rows: Vec<Value> = builtins().iter().filter(|spec|spec.model_visible)
             .filter(|spec|args["group"].as_str().is_none_or(|g|g==group(spec.definition.name.as_str())))
             .map(|spec| {
                 let name = spec.definition.name.as_str();
@@ -85,6 +97,16 @@ impl coordination::CoordinationService {
                     else { "backend unavailable or not yet observed" };
                 json!({"id":name,"group":group(name),"status":reason,"requires":spec.requirement.label()})
             }).collect();
-        inventory::page(rows, args, "tools")
+        if args["group"].as_str().is_none_or(|g| g == "external") {
+            rows.extend(self.external_tools.iter().map(|name| {
+                let status = if agent.role == Role::Root { "role denied" }
+                    else if !selected_group(&self.store,agent,"external") { "group not selected" }
+                    else { "configured; rechecked on invocation" };
+                json!({"id":name,"group":"external","status":status,"requires":"configured MCP server"})
+            }));
+        }
+        let mut result = inventory::page(rows, args, "tools")?;
+        result["observed_at"] = snapshot["observed_at"].clone();
+        Ok(result)
     }
 }

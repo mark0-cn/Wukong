@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct CoordinationService {
     pub(super) store: Store,
     pub(super) skills_dir: Option<PathBuf>,
+    pub(super) external_tools: Vec<String>,
     pub(super) output_limit: usize,
 }
 impl CoordinationService {

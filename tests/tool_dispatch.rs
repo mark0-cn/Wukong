@@ -1585,6 +1585,21 @@ for line in sys.stdin:
         timeout_seconds: 10,
     });
     let service = ToolService::new(config, store.clone()).await?;
+    let catalog = service
+        .execute(
+            &agent.id,
+            "mcp-catalog",
+            "tool_catalog",
+            json!({"group":"external"}),
+        )
+        .await?;
+    assert!(!catalog.is_error, "{catalog:?}");
+    assert_eq!(result(&catalog)["tools"][0]["id"], "mcp_fixture_mutate");
+    assert_eq!(result(&catalog)["tools"][0]["status"], "group not selected");
+    assert!(
+        !counter.exists(),
+        "tool discovery must not invoke the external tool"
+    );
     let first = service
         .execute(&agent.id, "mcp-once", "mcp_fixture_mutate", json!({}))
         .await?;
@@ -2403,6 +2418,80 @@ async fn static_target_refs_and_evidence_inventory_stay_run_scoped() -> Result<(
     assert!(!found.is_error, "{found:?}");
     assert_eq!(result(&found)["evidence"][0]["id"], secondary.id);
     assert!(!result(&found).to_string().contains(&foreign.id));
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn launch_preparation_keeps_selected_identity_and_immutable_configuration() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let config = worker_config(temp.path());
+    let (store, _, run, agent) = fixture_with_config(temp.path(), &config)?;
+    let service = ToolService::new(config, store.clone()).await?;
+    let primary = json!({"source":{"kind":"primary"},"input_mode":"stdin_pipe","timeout_secs":5});
+    let prepared = service
+        .execute(
+            &agent.id,
+            "prepare-primary",
+            "launch_prepare",
+            primary.clone(),
+        )
+        .await?;
+    assert!(!prepared.is_error, "{prepared:?}");
+    let launch = result(&prepared);
+    assert_eq!(launch["executed"], false);
+    let manifest = &launch["manifest"];
+    assert_eq!(
+        manifest["files"][manifest["target"].as_str().unwrap()],
+        run.target_sha256
+    );
+    let original =
+        store.read_evidence(&run.id, launch["manifest_evidence_id"].as_str().unwrap())?;
+    assert_eq!(serde_json::from_slice::<Value>(&original)?, *manifest);
+    let replay = service
+        .execute(
+            &agent.id,
+            "prepare-primary",
+            "launch_prepare",
+            primary.clone(),
+        )
+        .await?;
+    assert_eq!(result(&replay), launch);
+    let mut changed = primary;
+    changed["timeout_secs"] = json!(6);
+    let other = service
+        .execute(&agent.id, "prepare-changed", "launch_prepare", changed)
+        .await?;
+    assert!(!other.is_error, "{other:?}");
+    assert_ne!(result(&other)["launch_spec"], launch["launch_spec"]);
+    assert_eq!(
+        store.read_evidence(&run.id, launch["manifest_evidence_id"].as_str().unwrap())?,
+        original
+    );
+    let staged = service
+        .execute(
+            &agent.id,
+            "put-secondary",
+            "file_put",
+            json!({"path":"secondary.bin","text":"secondary trusted fixture"}),
+        )
+        .await?;
+    assert!(!staged.is_error, "{staged:?}");
+    let selected=service.execute(&agent.id,"prepare-secondary","launch_prepare",json!({"source":{"kind":"staged","target":result(&staged)["file"]["path"]},"input_mode":"stdin_pipe","timeout_secs":5})).await?;
+    assert!(!selected.is_error, "{selected:?}");
+    let manifest = &result(&selected)["manifest"];
+    assert_eq!(
+        manifest["files"][manifest["target"].as_str().unwrap()],
+        result(&staged)["file"]["sha256"]
+    );
+    assert_ne!(
+        manifest["files"][manifest["target"].as_str().unwrap()],
+        run.target_sha256
+    );
+    assert!(
+        store.records::<JobRecord>(&run.id)?.is_empty(),
+        "preparation must not execute"
+    );
     service.close().await;
     Ok(())
 }

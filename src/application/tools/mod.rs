@@ -419,6 +419,12 @@ impl ToolService {
         coordination::CoordinationService {
             store: self.store.clone(),
             skills_dir: self.skills_dir.clone(),
+            external_tools: self
+                .mcp
+                .definitions()
+                .into_iter()
+                .map(|d| d.name.to_string())
+                .collect(),
             output_limit: self.limits.max_output_bytes,
         }
     }

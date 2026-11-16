@@ -9,6 +9,10 @@ fn exclusive(fields: &[&str]) -> Value {
 
 pub(super) fn schema(name: &str, mut schema: Value) -> Value {
     let constraint = match name {
+        "resource_read" => json!({"oneOf":[
+            {"properties":{"kind":{"const":"job"},"stream":{"enum":["stdout","stderr"]}}},
+            {"properties":{"kind":{"enum":["debugger","interactive"]},"stream":{"const":"transcript"}}}
+        ]}),
         "file_put" => exclusive(&["text", "data_base64", "evidence_id"]),
         "crash_snapshot" => exclusive(&["session_id", "core"]),
         "job_start" | "interactive_start" => json!({"oneOf":[
@@ -71,6 +75,18 @@ mod tests {
             ),
             ("todo_update", json!({"id":"t"})),
             ("agent_finish", json!({"summary":"old shorthand"})),
+            (
+                "resource_read",
+                json!({"kind":"job","resource_id":"j","stream":"transcript"}),
+            ),
+            (
+                "resource_read",
+                json!({"kind":"interactive","resource_id":"s","stream":"stdout"}),
+            ),
+            (
+                "lab_restore",
+                json!({"vm":"old","lab_id":"old","generation":1}),
+            ),
         ] {
             assert!(!valid(name, args), "{name}");
         }

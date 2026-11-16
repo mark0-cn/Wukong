@@ -97,7 +97,12 @@ impl ExecutionService {
                     && raw["chunk_sha256"] == hex::encode(Sha256::digest(&bytes)),
                 "worker chunk identity or bound mismatch"
             );
-            (bytes, number(&raw, "size", 0))
+            let size = raw["size"].as_u64().context("worker omitted output size")?;
+            ensure!(
+                offset <= size && bytes.len() as u64 <= size - offset,
+                "worker output size or offset mismatch"
+            );
+            (bytes, size)
         };
         let next = offset
             .checked_add(bytes.len() as u64)
@@ -114,5 +119,128 @@ impl ExecutionService {
         Ok(
             json!({"resource_id":id,"offset":offset,"next_offset":next,"observed_total":total,"at_snapshot_end":next>=total,"eof":settled && next>=total,"data_base64":BASE64.encode(bytes),"evidence_id":evidence.id}),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn transcript_pages_preserve_owner_offsets_and_lifecycle() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let target = temp.path().join("target");
+        fs::write(&target, b"trusted fixture")?;
+        let mut config = AppConfig {
+            default_environment: Some("fixture".into()),
+            ..Default::default()
+        };
+        config.environments.insert(
+            "fixture".into(),
+            crate::adapters::environments::EnvironmentConfig {
+                name: "Fixture".into(),
+                platform: crate::adapters::environments::Platform::current(),
+                installation_id: None,
+                runtime: crate::adapters::worker::RuntimeConfig {
+                    transport: crate::adapters::worker::TransportConfig::TrustedLocal(
+                        crate::adapters::worker::TrustedLocalConfig {
+                            state_dir: temp.path().join("worker"),
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                },
+            },
+        );
+        let store = Store::open(temp.path().join("state"))?;
+        let coordinator = Coordinator::new(store.clone());
+        let run = coordinator.create_run(
+            &target,
+            "resource pages",
+            Budget::default(),
+            serde_json::to_value(&config)?,
+        )?;
+        let agent = coordinator
+            .create_child(
+                &run.root_id,
+                crate::application::coordinator::ChildRequest {
+                    name: "Reader".into(),
+                    role: Role::Analyst,
+                    task: "read trusted transcript".into(),
+                    scope: "fixture".into(),
+                    environment_id: None,
+                    skills: vec![],
+                    inherit_context: false,
+                    wait_for_predecessors: vec![],
+                    dependency_policy: Default::default(),
+                    contract: Default::default(),
+                },
+            )?
+            .agent;
+        let tools = ToolService::new(config, store.clone()).await?;
+        let execution = tools.bound_to(&agent).await?.execution;
+        let original = store.artifact(
+            &run.id,
+            &agent.id,
+            "transcript",
+            "fixture",
+            b"abcdef",
+            "text/plain",
+            json!({}),
+        )?;
+        let mut session = SessionRecord {
+            id: "fixture-session".into(),
+            worker_resource_id: "fixture-worker-session".into(),
+            run_id: run.id.clone(),
+            agent_id: agent.id.clone(),
+            worker_id: execution.gateway.worker_identity()?,
+            state: SessionState::Running,
+            worker: None,
+            transcript_evidence_id: Some(original.id),
+            cleanup_intent: None,
+            created_at: now(),
+            updated_at: now(),
+        };
+        store.save_session(SessionKind::Debugger, &session)?;
+        let mut input =
+            json!({"kind":"debugger","resource_id":session.id,"stream":"transcript","length":3});
+        let first = execution.resource_read(&agent, "read-one", &input).await?;
+        assert_eq!(first["data_base64"], BASE64.encode(b"abc"));
+        assert_eq!(first["next_offset"], 3);
+        assert_eq!(first["at_snapshot_end"], false);
+        assert_eq!(
+            store.read_evidence(&run.id, first["evidence_id"].as_str().unwrap())?,
+            b"abc"
+        );
+        input["offset"] = first["next_offset"].clone();
+        for state in [
+            SessionState::Running,
+            SessionState::Lost,
+            SessionState::Closed,
+        ] {
+            session.state = state;
+            store.save_session(SessionKind::Debugger, &session)?;
+            let end = execution
+                .resource_read(&agent, &format!("read-{state:?}"), &input)
+                .await?;
+            assert_eq!(end["at_snapshot_end"], true);
+            assert_eq!(end["eof"], state == SessionState::Closed);
+        }
+        let mut other = agent.clone();
+        other.id = "foreign-agent".into();
+        assert!(
+            execution
+                .resource_read(&other, "foreign-read", &input)
+                .await
+                .is_err()
+        );
+        input["offset"] = json!(7);
+        assert!(
+            execution
+                .resource_read(&agent, "past-end", &input)
+                .await
+                .is_err()
+        );
+        tools.close().await;
+        Ok(())
     }
 }
