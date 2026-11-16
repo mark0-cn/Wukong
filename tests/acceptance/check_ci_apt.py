@@ -42,6 +42,12 @@ def source(suite, uri):
 @contextmanager
 def slow_server(index=None):
     release, reached, index_requested = threading.Event(), threading.Event(), threading.Event()
+    sizes = {}
+    if index is not None:
+        for line in index.decode("utf-8").splitlines():
+            fields = line.split()
+            if len(fields) == 3 and len(fields[0]) == 64 and fields[1].isdigit():
+                sizes[fields[0]] = int(fields[1])
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -58,11 +64,17 @@ def slow_server(index=None):
                     self.wfile.flush()
                     return
                 if index is not None:
+                    size = sizes.get(self.path.rsplit("/", 1)[-1])
+                    if size is None:
+                        self.send_error(404)
+                        return
                     index_requested.set()
                     # Signed metadata was already served. Stall after a partial
                     # index body to exercise read timeout, not connection refusal.
                     self.send_response(200)
-                    self.send_header("Content-Length", "1000000")
+                    # Match the original signed size so APT really waits for
+                    # bytes instead of rejecting the headers immediately.
+                    self.send_header("Content-Length", str(size))
                     self.end_headers()
                     self.wfile.write(b"partial-index")
                     self.wfile.flush()
@@ -92,7 +104,7 @@ def main():
     package = next((p for p in ("hello", "sl", "toilet") if not apt.installed(p)), None)
     if package is None:
         raise AssertionError("All acceptance fixture packages are unexpectedly preinstalled")
-    good = ("official", source(suite, mirror))
+    good = [(mirror, source(suite, mirror)) for mirror in apt.MIRRORS]
     for mode, index in [("silent-server", None), ("partial-index", signed)]:
         with slow_server(index) as (uri, reached, index_requested):
             started = time.monotonic()
@@ -108,14 +120,14 @@ def main():
                     raise
 
             with patch.object(apt, "apt", side_effect=bounded_fixture):
-                apt.download([package], [(mode, source(suite, uri)), good])
+                apt.download([package], [(mode, source(suite, uri)), *good])
             if not reached.is_set() or (index is not None and not index_requested.is_set()):
                 raise AssertionError(f"Slow-server fixture was not exercised: {mode}")
             if not failures or "timed out" not in failures[0]:
                 raise AssertionError(f"Expected a real read timeout, got {failures}")
             # The failed mirror must have been abandoned for all subsequent reads.
             active = Path(apt.SOURCES).read_text(encoding="utf-8")
-            if uri in active or mirror not in active:
+            if uri in active or not any(mirror in active for mirror in apt.MIRRORS):
                 raise AssertionError("Failed mirror remained in the selected APT source")
             print(
                 f"{mode}: entire mirror abandoned; signed fallback passed in {time.monotonic() - started:.1f}s",
