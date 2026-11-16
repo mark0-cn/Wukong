@@ -376,6 +376,9 @@ export interface Messages {
   'tool-artifact-validate': undefined;
   'tool-binary-inspect': undefined;
   'tool-binary-strings': undefined;
+  'tool-bundle-evidence': undefined;
+  'tool-bundle-manifest': undefined;
+  'tool-bundle-stage': undefined;
   'tool-context-read': undefined;
   'tool-context-search': undefined;
   'tool-coverage-list': undefined;
@@ -421,6 +424,15 @@ export interface Messages {
   'tool-job-cancel': undefined;
   'tool-job-start': undefined;
   'tool-job-status': undefined;
+  'tool-lab-install': undefined;
+  'tool-lab-list': undefined;
+  'tool-lab-operation-cancel': undefined;
+  'tool-lab-operation-status': undefined;
+  'tool-lab-prepare': undefined;
+  'tool-lab-prune': undefined;
+  'tool-lab-restore': undefined;
+  'tool-lab-run': undefined;
+  'tool-lab-status': undefined;
   'tool-libc-identify': undefined;
   'tool-load-skill': undefined;
   'tool-message': undefined;
