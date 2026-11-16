@@ -10,6 +10,8 @@ Startup records deployment identity, resource recovery, dependency self-test, gu
 
 The project no longer subscribes to or matches WFP events, and startup does not require loopback-block evidence. AppContainer/token, ACL, process ownership, cleanup and debugger checks remain guest controls. Fresh schema-5 qualification receipts use `scope: "disposable_vm_guest_controls"`. Reports and `doctor` declare `execution_boundary: "disposable_vm"` and `external_isolation_verified: false`; `doctor.guest_controls_verified` describes the current startup checks. These checks cannot certify hypervisor isolation or evidence integrity after guest compromise. Windows may still use its own WFP facilities internally; this change does not disable the OS firewall.
 
+Unexpected stops in the sealed startup debugger fixture retain a bounded diagnostic projection in the protected host log: architecture, expected/observed addresses, exception flags and the first frame identity. Each selected string is limited to 192 identifier characters; arbitrary MCP output and target contents are omitted. The structured startup report still uses its fixed stage code and summary.
+
 
 ## Ownership and request flow
 

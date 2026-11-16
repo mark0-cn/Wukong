@@ -10,6 +10,8 @@ Windows 执行要求专用、可丢弃的目标 VM。接受目标影响整个 gu
 
 项目不再订阅或匹配 WFP 事件，启动不再要求回环阻断证据。AppContainer／令牌、ACL、进程归属、清理及调试器检查仍作为 guest 内部控制。每次启动的新 schema-5 资格回执采用 `scope: "disposable_vm_guest_controls"`。报告和 `doctor` 声明 `execution_boundary: "disposable_vm"`、`external_isolation_verified: false`；`doctor.guest_controls_verified` 表示本次启动检查结果。这些检查不能认证虚拟化层隔离，也不能保证 guest 被攻陷后的证据真实性。Windows 内部仍可能使用系统 WFP 能力；此修改不关闭系统防火墙。
 
+密封的启动调试器夹具遇到异常停止时，受保护的宿主日志保留有界诊断：架构、预期／实际地址、异常标志及首帧身份。各选定字符串限制为 192 个标识符字符，不复制任意 MCP 输出或目标内容。结构化启动报告仍使用固定阶段错误码和摘要。
+
 
 ## 职责与请求链路
 

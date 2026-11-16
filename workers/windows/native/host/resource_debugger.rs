@@ -187,7 +187,8 @@ async fn probe(
                 .await?;
             ensure!(
                 initial_breaks.observe(architecture, &stop, &event),
-                "single-pass fixture stopped at an unexpected or repeated exception"
+                "single-pass fixture stopped at an unexpected or repeated exception: {}",
+                stop_diagnostic(architecture, address, &stop, &event)
             );
             // At most one native break-in and one WOW64 loader notification,
             // in either order. This policy belongs only to the sealed fixture.
@@ -237,6 +238,35 @@ async fn probe(
 struct InitialBreaks {
     native: bool,
     wow64: bool,
+}
+
+// Only the sealed startup fixture uses this projection. Keep the protected
+// failure log useful without copying arbitrary MCP output or target contents.
+fn stop_diagnostic(architecture: &str, expected: &str, stop: &Value, event: &Value) -> Value {
+    fn scalar(value: &Value) -> Value {
+        match value {
+            Value::Bool(_) | Value::Number(_) => value.clone(),
+            Value::String(text)
+                if text.len() <= 192
+                    && text
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"_!.:+-".contains(&c)) =>
+            {
+                value.clone()
+            }
+            _ => Value::Null,
+        }
+    }
+    let exception = &event["exception"];
+    let frame = &event["frames"][0];
+    json!({"architecture":architecture,"expected":scalar(&json!(expected)),
+        "stopped_at":scalar(&stop["stopped_at"]),"status":scalar(&event["status"]),
+        "kind":scalar(&event["kind"]),"stored_crash_context":scalar(&event["stored_crash_context"]),
+        "frames_from_stored_context":scalar(&event["frames_from_stored_context"]),
+        "exception":{"code":scalar(&exception["code"]),"address":scalar(&exception["address"]),
+            "first_chance":scalar(&exception["first_chance"]),"noncontinuable":scalar(&exception["noncontinuable"])},
+        "frame":{"module":scalar(&frame["module"]),"symbol":scalar(&frame["symbol"]),
+            "address":scalar(&frame["address"]),"displacement":scalar(&frame["displacement"])}})
 }
 
 impl InitialBreaks {
@@ -335,6 +365,23 @@ pub(super) fn validate_report(value: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixture_stop_diagnostics_are_bounded_and_omit_arbitrary_output() {
+        let event = json!({"status":"ok","stdout":"PRIVATE-CANARY",
+            "exception":{"code":"0x80000003","first_chance":true},
+            "frames":[{"symbol":"ntdll!DbgBreakPoint","module":"x".repeat(193),"address":"C:\\secret","displacement":0}]});
+        let report = stop_diagnostic("x64", "0x1234", &json!({"stopped_at":"0x5678"}), &event);
+        assert_eq!(report["frame"]["symbol"], "ntdll!DbgBreakPoint");
+        assert_eq!(report["frame"]["module"], Value::Null);
+        assert_eq!(report["frame"]["address"], Value::Null);
+        assert_eq!(report["frame"]["displacement"], 0);
+        assert_eq!(report["exception"]["first_chance"], true);
+        let raw = report.to_string();
+        assert!(!raw.contains("PRIVATE-CANARY"));
+        assert!(!raw.contains("secret"));
+        assert!(raw.len() < 4096);
+    }
 
     #[test]
     fn fixture_continuation_refuses_other_faults_or_a_different_stop() {
