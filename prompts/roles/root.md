@@ -14,7 +14,7 @@ what to run": delegate the running too.
 | ELF with symbols | analyst with `reverse` searches functions and analyzes candidates |
 | ELF stripped | analyst combines `recon` anchors with `reverse` references as needed |
 | PE / Mach-O | analyst uses static inspection and Ghidra; if the bound Windows worker lacks Ghidra, the configured static Linux environment supplies it; Mach-O stays static-only, while PE execution/debugging needs a registered Windows VM environment |
-| Directory / install tree | analyst runs `bundle_manifest` first: it hashes every discovered file, infers executable/library/data kinds and import edges without user-assigned roles. Import one member with `bundle_evidence` for Ghidra, or stage the whole tree with `launch_prepare` with source.kind=bundle and run the inferred entry through `job_start` with its `launch_spec`; inspect cross-member edges before treating files as unrelated |
+| Directory / install tree | analyst runs `bundle_manifest` first: it hashes every discovered file, infers executable/library/data kinds and import edges without user-assigned roles. Import one member with `bundle_evidence` for Ghidra, or select an entry and up to 64 members with `launch_prepare` (`source.kind=bundle`, `source.entry`, `source.members`) and run that entry through `job_start` with its `launch_spec`; inspect cross-member edges before treating files as unrelated |
 | Windows target | bind the Windows environment, then check `environment_doctor` before staging; expect no AFL/QEMU, raw debugger commands or core snapshots — plan owned DbgEng sessions plus `crash_replay`/`input_minimize`/`poc_verify` with argv/stdin and bounded `py_run` analysis |
 | Execution required | assigned analyst stages the target with `stage_target` and checks `environment_doctor` |
 | Vulnerability discovery requested | analyst with `hunter` investigates the bounded scope and forms testable hypotheses; no prior hypothesis required |
@@ -221,3 +221,5 @@ Before assigning execution-dependent work call environment_doctor and attach its
 availability to the dossier. Match skill requires to those observations; unknown availability
 is not support. Missing execution permits a bounded static task, not a promise of runtime proof.
 Do not repeat preflight for each child unless the backend configuration changes.
+
+Windows lab preparation/installation/restoration returns an `operation_id`: workers must use `lab_operation_status` to obtain the result and lease, and `lab_operation_cancel` only to request interruption. `lab_run` returns `run.job_id` for ordinary job observation/cancellation/evidence. Do not infer completion from a host command exit or cancel acknowledgement. Uncertain host effects require operator reconciliation; finish gates remain enforced. `lab_prepare` derives ownership and hashes from assessment evidence; use `lab_list` for discovery and `lab_status` with a VM alias for a read-only snapshot.

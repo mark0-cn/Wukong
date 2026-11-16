@@ -2,9 +2,11 @@
 use super::*;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct BundleEmptyArgs {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct BundleMemberArgs {
     /// Member path relative to the analyzed directory (forward slashes).
     pub path: String,

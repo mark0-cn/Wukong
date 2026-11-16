@@ -162,6 +162,18 @@ impl StateSession<'_> {
                 .into_iter()
                 .filter(|job| !job.status.state.terminal() || job.status.cleanup_pending)
                 .map(|job| job.id)
+                .chain(
+                    self.records::<ToolCallRecord>(run)?
+                        .into_iter()
+                        .filter(|call| {
+                            call.name.starts_with("lab.operation.")
+                                && matches!(
+                                    call.state,
+                                    CallState::Prepared | CallState::Running | CallState::Uncertain
+                                )
+                        })
+                        .map(|call| call.id),
+                )
                 .collect(),
         })
     }

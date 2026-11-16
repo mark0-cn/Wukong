@@ -13,6 +13,7 @@ struct FakeState {
     snapshots: Vec<String>,
     calls: Vec<String>,
     fail_snapshot: bool,
+    fail_revert: bool,
     delay: Option<Duration>,
 }
 
@@ -87,6 +88,7 @@ impl VmHost for FakeHost {
             .calls
             .push(format!("revert {name}"));
         self.wait().await;
+        ensure!(!self.state.lock().unwrap().fail_revert, "revert failed");
         Ok(())
     }
     async fn start(&self) -> Result<()> {
@@ -129,8 +131,10 @@ fn spec() -> ExperimentSpec {
         launch: LaunchKind::Exe,
         input_channel: InputChannel::Stdin,
         account: AccountContext::User,
-        os_build: "10.0.17134".into(),
-        toolchain_sha256: "b".repeat(64),
+        annotations: ExperimentAnnotations {
+            os_build: Some("10.0.17134".into()),
+            toolchain: None,
+        },
         recovery: "revert to baseline".into(),
         dependencies: vec![],
         install: None,
@@ -268,7 +272,10 @@ async fn timeout_marks_unknown_and_blocks_until_reconciled() {
     config.operation_timeout_seconds = 1;
     let lab = WindowsLab::open(dir.path(), "labvm", &config, host).unwrap();
     let error = lab.prepare("analyst", "slow", spec()).await.unwrap_err();
-    assert!(format!("{error:#}").contains("unknown after timeout"));
+    assert_eq!(
+        error.downcast_ref::<LabError>().unwrap().code,
+        "lab_operation_unknown"
+    );
     let state = state(dir.path());
     assert_eq!(state.phase, LabPhase::RecoveryRequired);
     let operation = state.pending.clone().unwrap().operation_id;
@@ -320,7 +327,8 @@ async fn controller_restart_requires_reconciliation_for_a_pending_effect() {
     });
     store.save(&interrupted).unwrap();
     let status = lab.status().await.unwrap();
-    assert_eq!(status["state"]["phase"], "recovery_required");
+    assert_eq!(status["state"]["phase"], "preparing");
+    assert_eq!(state(dir.path()).phase, LabPhase::Preparing);
     assert!(lab.prepare("analyst", "again", spec()).await.is_err());
     assert!(lab.restore(&lease.lab_id, lease.generation).await.is_err());
 }
@@ -391,6 +399,7 @@ async fn run_executes_a_packaged_exe_and_writes_a_receipt() {
     let lab = lab(dir.path(), host).with_worker(worker.clone());
     let mut spec = spec();
     spec.dependencies = vec![dependency(dir.path(), "harness.exe", b"MZ-fake")];
+    spec.target_sha256 = spec.dependencies[0].sha256.clone();
     let lease = lab.prepare("analyst", "run", spec).await.unwrap();
     let result = lab
         .run(
@@ -421,12 +430,16 @@ async fn unknown_run_record_is_reconciled_by_restore() {
     let lab = lab(dir.path(), host).with_worker(worker);
     let mut spec = spec();
     spec.dependencies = vec![dependency(dir.path(), "harness.exe", b"MZ-fake")];
+    spec.target_sha256 = spec.dependencies[0].sha256.clone();
     let lease = lab.prepare("analyst", "run", spec).await.unwrap();
     let error = lab
         .run(&lease.lab_id, lease.generation, "harness.exe", None, 30)
         .await
         .unwrap_err();
-    assert!(format!("{error:#}").contains("outcome is unknown"));
+    assert_eq!(
+        error.downcast_ref::<LabError>().unwrap().code,
+        "lab_run_unknown"
+    );
     assert_eq!(
         state(dir.path()).last_run.unwrap().status,
         RunStatus::Unknown
@@ -453,7 +466,7 @@ async fn run_rejects_non_exe_launch_kinds() {
         .run(&lease.lab_id, lease.generation, "service.exe", None, 30)
         .await
         .unwrap_err();
-    assert!(format!("{error:#}").contains("only launch=exe"));
+    assert!(format!("{error:#}").contains("only exe/user"));
 }
 
 struct FakeWorker {
@@ -618,6 +631,8 @@ impl LabAdmin for FakeAdmin {
             guest_media: r"C:\Windows\Temp\wukong-lab.zip".into(),
             guest_script: r"C:\Windows\Temp\wukong-lab\install.ps1".into(),
             settled: true,
+            verified: true,
+            guest_receipt: serde_json::json!({"verified":true}),
         })
     }
 }
@@ -678,9 +693,133 @@ async fn experiment_spec_rejects_invalid_identity_fields() {
     invalid.target_sha256 = "A".repeat(63);
     assert!(invalid.validate().is_err());
     invalid.target_sha256 = "a".repeat(64);
-    invalid.os_build = String::new();
+    invalid.annotations.os_build = Some("x".repeat(129));
     assert!(invalid.validate().is_err());
-    invalid.os_build = "10.0.17134".into();
+    invalid.annotations.os_build = Some("10.0.17134".into());
     invalid.recovery = "x".repeat(513);
     assert!(invalid.validate().is_err());
+}
+
+#[tokio::test]
+async fn stale_or_failed_restore_preserves_unknown_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab =
+        lab(dir.path(), host.clone()).with_worker(Arc::new(FakeWorker::failing("transport lost")));
+    let mut spec = spec();
+    spec.dependencies = vec![dependency(dir.path(), "harness.exe", b"MZ-fixture")];
+    spec.target_sha256 = spec.dependencies[0].sha256.clone();
+    let lease = lab.prepare("owner", "regression", spec).await.unwrap();
+    assert!(
+        lab.run(&lease.lab_id, lease.generation, "harness.exe", None, 30)
+            .await
+            .is_err()
+    );
+    let before = fs::read(dir.path().join("windows-lab/labvm.json")).unwrap();
+    assert!(lab.restore("wrong-lab", lease.generation).await.is_err());
+    assert_eq!(
+        before,
+        fs::read(dir.path().join("windows-lab/labvm.json")).unwrap()
+    );
+    assert_eq!(
+        lab.status().await.unwrap()["state"]["last_run"]["status"],
+        "unknown"
+    );
+    assert_eq!(
+        before,
+        fs::read(dir.path().join("windows-lab/labvm.json")).unwrap()
+    );
+    host.state.lock().unwrap().fail_revert = true;
+    assert!(lab.restore(&lease.lab_id, lease.generation).await.is_err());
+    assert_eq!(
+        state(dir.path()).last_run.unwrap().status,
+        RunStatus::Unknown
+    );
+}
+
+#[tokio::test]
+async fn caller_and_physical_configuration_are_fenced() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host.clone()).with_caller("agent-one".into());
+    assert!(lab.prepare("spoofed", "purpose", spec()).await.is_err());
+    let lease = lab.prepare("agent-one", "purpose", spec()).await.unwrap();
+    let other = WindowsLab::open(dir.path(), "labvm", &config(dir.path()), host.clone())
+        .unwrap()
+        .with_caller("agent-two".into());
+    let before = host.calls();
+    assert!(
+        other
+            .restore(&lease.lab_id, lease.generation)
+            .await
+            .is_err()
+    );
+    assert_eq!(before, host.calls());
+    let mut changed = config(dir.path());
+    changed.vmx = dir.path().join("another.vmx");
+    assert!(WindowsLab::open(dir.path(), "labvm", &changed, host.clone()).is_err());
+    let alias = WindowsLab::open(dir.path(), "alias", &config(dir.path()), host.clone()).unwrap();
+    assert!(alias.prepare("agent", "alias", spec()).await.is_err());
+    assert_eq!(before, host.calls());
+}
+
+#[tokio::test]
+async fn assessment_connection_blocks_vm_mutations_but_not_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host.clone());
+    let lease = lab.prepare("owner", "purpose", spec()).await.unwrap();
+    let guard_path =
+        crate::adapters::environments::lab_guard::path(&config(dir.path()).vmx).unwrap();
+    let _worker = crate::adapters::environments::lab_guard::acquire(&guard_path, false).unwrap();
+    assert!(lab.restore(&lease.lab_id, lease.generation).await.is_err());
+    assert_eq!(lab.status().await.unwrap()["state"]["phase"], "ready");
+    assert!(!host.calls().iter().any(|call| call.starts_with("revert")));
+}
+
+#[tokio::test]
+async fn unsupported_execution_requirements_never_reach_worker() {
+    for (account, channel) in [
+        (AccountContext::System, InputChannel::Stdin),
+        (AccountContext::User, InputChannel::Network),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let worker = Arc::new(FakeWorker::completed());
+        let lab = lab(dir.path(), Arc::new(FakeHost::new())).with_worker(worker.clone());
+        let mut spec = spec();
+        spec.account = account;
+        spec.input_channel = channel;
+        spec.dependencies = vec![dependency(dir.path(), "harness.exe", b"MZ-fixture")];
+        spec.target_sha256 = spec.dependencies[0].sha256.clone();
+        let lease = lab.prepare("owner", "requirements", spec).await.unwrap();
+        assert!(
+            lab.run(&lease.lab_id, lease.generation, "harness.exe", None, 30)
+                .await
+                .is_err()
+        );
+        assert!(worker.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn terminal_job_without_cleanup_blocks_the_next_harness() {
+    let dir = tempfile::tempdir().unwrap();
+    let worker = Arc::new(FakeWorker::completed());
+    if let Some(Ok(outcome)) = worker.outcome.lock().unwrap().as_mut() {
+        outcome.settled = false;
+    }
+    let lab = lab(dir.path(), Arc::new(FakeHost::new())).with_worker(worker.clone());
+    let mut spec = spec();
+    spec.dependencies = vec![dependency(dir.path(), "harness.exe", b"MZ-fixture")];
+    spec.target_sha256 = spec.dependencies[0].sha256.clone();
+    let lease = lab.prepare("owner", "cleanup fence", spec).await.unwrap();
+    lab.run(&lease.lab_id, lease.generation, "harness.exe", None, 30)
+        .await
+        .unwrap();
+    assert!(
+        lab.run(&lease.lab_id, lease.generation, "harness.exe", None, 30)
+            .await
+            .is_err()
+    );
+    assert_eq!(worker.requests.lock().unwrap().len(), 1);
 }

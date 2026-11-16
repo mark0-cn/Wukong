@@ -102,7 +102,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::LaunchPrepareArgs>(
             "launch_prepare",
             "tool-launch-prepare",
-            "Prepare an immutable hash-bound LaunchSpec from the primary target, directory bundle, staged target/dependencies or Linux target/libc/loader. Own args, cwd, environment, input mode and timeout here; reuse the returned launch_spec in jobs and sessions without overrides. Preparation does not execute the target.",
+            "Prepare an immutable hash-bound LaunchSpec from the primary target, selected directory bundle, staged target/dependencies or Linux target/libc/loader. For a bundle, source.entry and source.members choose the executable and member subset. Own args, cwd, environment, input mode and timeout here; reuse launch_spec in jobs and sessions without overrides. Preparation does not execute the target.",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {
@@ -1004,7 +1004,7 @@ fn build_catalog() -> Vec<Spec> {
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_bundle_manifest(services, agent, call, name, args)
+                handlers::handle_bundle_manifest(&services.bundle, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,
@@ -1016,7 +1016,7 @@ fn build_catalog() -> Vec<Spec> {
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_bundle_evidence(services, agent, call, name, args)
+                handlers::handle_bundle_evidence(&services.bundle, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,
@@ -1033,14 +1033,50 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::Verifier,
             Requirement::Worker(&[Method::PocVerify]),
         ),
-        spec::<args::LabStatusArgs>(
-            "lab_status",
-            "tool-lab-status",
-            "Inspect a registered Windows lab VM: host reachability, snapshots, phase and the last run/installation. Read-only; no worker or host mutation.",
+        spec::<args::BundleEmptyArgs>(
+            "lab_list",
+            "tool-lab-list",
+            "List configured Windows lab VM aliases and assigned environments without connecting or changing state.",
             ReplayPolicy::ReadOnly,
             false,
             |services, agent, call, name, args| {
-                handlers::handle_lab_status(services, agent, call, name, args)
+                handlers::handle_lab_list(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabOperationArgs>(
+            "lab_operation_status",
+            "tool-lab-operation-status",
+            "Read a durable lab host operation by operation_id, including its result and evidence. A lost controller leaves the operation uncertain and never replays it.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_operation(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabOperationArgs>(
+            "lab_operation_cancel",
+            "tool-lab-operation-cancel",
+            "Request interruption of your lab host operation. Cancellation can leave guest effects unknown; inspect and reconcile the existing operation before another mutation.",
+            ReplayPolicy::Transactional,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_operation(&services.lab, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabStatusArgs>(
+            "lab_status",
+            "tool-lab-status",
+            "Read the persisted state and bounded host observations for one registered Windows lab VM. Requires vm; use lab_list for discovery. Does not reconcile or modify state and remains available during long operations.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_status(&services.lab, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,
@@ -1048,11 +1084,11 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::LabPrepareArgs>(
             "lab_prepare",
             "tool-lab-prepare",
-            "Prepare a registered Windows lab: materialize the spec's hash-verified package, validate its install plan, create the baseline if needed and take the experiment snapshot. Returns an opaque lab_ref bound to this agent, run, assigned VM and lease generation. Requires the windows_lab task grant.",
+            "Start preparation of the assigned Windows lab and return operation_id. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Requires the windows_lab task grant. Unsupported execution requirements are rejected at run admission.",
             ReplayPolicy::OperatorOnly,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_lab_prepare(services, agent, call, name, args)
+                handlers::handle_lab_prepare(&services.lab, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,
@@ -1060,23 +1096,28 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::LabRunArgs>(
             "lab_run",
             "tool-lab-run",
-            "Run one artifact from the experiment's verified package through the registered Windows worker; optional stdin comes from bounded evidence. Writes an immutable run receipt and marks transport failures unknown. Restore the baseline to reconcile.",
+            "Start a verified exe/user harness using the owned lab_ref as an ordinary durable assessment job and return run.job_id. Use job_status, job_cancel and job_artifacts with that handle. Supports stdin evidence or empty argv; declared target hash must match. Shared assessment leases and completion gates remain in force.",
             ReplayPolicy::OperatorOnly,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_lab_run(services, agent, call, name, args)
+                handlers::handle_lab_run(&services.lab, agent, call, name, args)
             },
             Visibility::Child,
-            Requirement::Controller,
+            Requirement::Worker(&[
+                Method::JobStart,
+                Method::FilePut,
+                Method::JobStatus,
+                Method::JobCancel,
+            ]),
         ),
         spec::<args::LabInstallArgs>(
             "lab_install",
             "tool-lab-install",
-            "Run the package's hash-pinned install.ps1 through the lab administrative channel. Requires the configured password environment variable; writes an immutable installation receipt.",
+            "Start installation using the owned lab_ref and return operation_id. Uses one overall timeout (1-600 seconds), hash-pinned media and a guest receipt checking declared files, service and account. Query lab_operation_status; missing receipts remain uncertain. Requires idle worker resources and synchronized evidence.",
             ReplayPolicy::OperatorOnly,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_lab_install(services, agent, call, name, args)
+                handlers::handle_lab_install(&services.lab, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,
@@ -1084,11 +1125,11 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::LabRestoreArgs>(
             "lab_restore",
             "tool-lab-restore",
-            "Revert the registered lab to its baseline, optionally start it and prune the experiment snapshot. Reconciles unknown run/install outcomes; requires the owned lab_ref returned by lab_prepare.",
+            "Start a fenced baseline restore using the owned lab_ref and return operation_id. Requires idle worker resources and synchronized evidence. Unknown effects become lost only after confirmed restoration; snapshot pruning is reported separately. Query lab_operation_status.",
             ReplayPolicy::OperatorOnly,
             true,
             |services, agent, call, name, args| {
-                handlers::handle_lab_restore(services, agent, call, name, args)
+                handlers::handle_lab_restore(&services.lab, agent, call, name, args)
             },
             Visibility::Child,
             Requirement::Controller,

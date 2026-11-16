@@ -73,6 +73,17 @@ impl Coordinator {
         if agent.status.terminal() {
             bail!("agent already terminated with {}", agent.status);
         }
+        ensure!(
+            tx.records::<ToolCallRecord>(&agent.run_id)?
+                .iter()
+                .all(|call| !(call.name.starts_with("lab.operation.")
+                    && (agent.role == Role::Root || call.agent_id == agent.id)
+                    && matches!(
+                        call.state,
+                        CallState::Prepared | CallState::Running | CallState::Uncertain
+                    ))),
+            "lab host operations remain active or uncertain; inspect their handles and reconcile before finishing"
+        );
         CompletionRules::validate_result(&agent, &result)?;
         Self::validate_evidence(tx, &agent.run_id, &result.evidence_links())?;
         CompletionRules::check_ready(&agent, &tx.completion_facts(&agent.run_id, &agent.id)?)?;

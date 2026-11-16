@@ -1,8 +1,8 @@
 //! Offline installation media: the verified package directory plus the
 //! hash-pinned `install.ps1` the administrative channel executes in the guest.
-use super::package::PackageManifest;
 use anyhow::{Context, Result, ensure};
 use sha2::{Digest, Sha256};
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -12,6 +12,7 @@ pub const INSTALL_SCRIPT: &str = "install.ps1";
 pub struct MediaFile {
     pub name: String,
     pub path: PathBuf,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone)]
@@ -29,16 +30,16 @@ pub fn prepare(store_root: &Path, package_sha256: &str) -> Result<Media> {
         "invalid package identity"
     );
     let package = store_root.join("packages").join(package_sha256);
-    let manifest: PackageManifest = serde_json::from_slice(
-        &fs::read(package.join("manifest.json"))
-            .with_context(|| format!("read package manifest {}", package.display()))?,
-    )?;
+    let manifest = super::package::open_verified(&package, package_sha256)?;
     let script = manifest
         .artifacts
         .iter()
         .find(|artifact| artifact.name == INSTALL_SCRIPT)
         .with_context(|| format!("offline media requires a packaged {INSTALL_SCRIPT}"))?;
-    let script_bytes = fs::read(package.join(INSTALL_SCRIPT))?;
+    let script_bytes = super::package::read_bounded(
+        &package.join(INSTALL_SCRIPT),
+        super::package::MAX_ARTIFACT_BYTES,
+    )?;
     ensure!(
         script_bytes.len() as u64 == script.size
             && hex::encode(Sha256::digest(&script_bytes)) == script.sha256,
@@ -48,15 +49,23 @@ pub fn prepare(store_root: &Path, package_sha256: &str) -> Result<Media> {
         MediaFile {
             name: "manifest.json".into(),
             path: package.join("manifest.json"),
+            sha256: hex::encode(Sha256::digest(super::package::read_bounded(
+                &package.join("manifest.json"),
+                1024 * 1024,
+            )?)),
         },
         MediaFile {
             name: "SHA256SUMS".into(),
             path: package.join("SHA256SUMS"),
+            sha256: hex::encode(Sha256::digest(super::package::read_bounded(
+                &package.join("SHA256SUMS"),
+                1024 * 1024,
+            )?)),
         },
     ];
     for artifact in &manifest.artifacts {
         let path = package.join(&artifact.name);
-        let bytes = fs::read(&path)?;
+        let bytes = super::package::read_bounded(&path, super::package::MAX_ARTIFACT_BYTES)?;
         ensure!(
             bytes.len() as u64 == artifact.size
                 && hex::encode(Sha256::digest(&bytes)) == artifact.sha256,
@@ -66,6 +75,7 @@ pub fn prepare(store_root: &Path, package_sha256: &str) -> Result<Media> {
         files.push(MediaFile {
             name: artifact.name.clone(),
             path,
+            sha256: artifact.sha256.clone(),
         });
     }
     Ok(Media {

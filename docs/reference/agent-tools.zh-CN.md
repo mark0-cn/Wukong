@@ -23,14 +23,14 @@
 | 静态地址裸整数 | 绑定目标的 module_relative AddressRef |
 | `artifact_stage.artifact_id` | `evidence_id` |
 | 完成参数 `summary` | 结构化 result 中的 `result.answer` |
-| Lab vm/lab_id/generation 输入组合 | `lab_prepare` 返回的所属不透明 `lab_ref` |
+| Lab vm/lab_id/generation 输入组合 | `lab_prepare` 操作完成结果中的所属不透明 `lab_ref` |
 | `interactive_send.data_base64` | 带类型的 `source`：text、base64 或 evidence |
 
 只有 verifier 可以调用 `analysis_verify`、`poc_verify` 和 `verification_record`。业务层在认证及提升发现阶段时也会检查 verifier 角色。
 
 ## 执行与结果
 
-`launch_prepare` 从 primary、bundle、已暂存文件／依赖或 Linux target/libc/loader 创建绑定哈希的不可变目录布局。在此设置 args、cwd、环境、输入模式和时限。job_start、interactive_start 或 debug_start 复用返回的 `launch_spec`，省略 argv／target／环境／时限覆盖参数。schema 在分派给 worker 前拒绝冲突选项。准备记录身份，实际 worker 执行才构成验收证据。
+`launch_prepare` 从 primary、bundle、已暂存文件／依赖或 Linux target/libc/loader 创建绑定哈希的不可变目录布局。在此设置 args、cwd、环境、输入模式和时限。目录包可用 `source.entry` 和 `source.members` 在上传前选择入口及成员子集。job_start、interactive_start 或 debug_start 复用返回的 `launch_spec`，省略 argv／target／环境／时限覆盖参数。schema 在分派给 worker 前拒绝冲突选项。准备记录身份，实际 worker 执行才构成验收证据。
 
 `file_put` 必须且只能提供 text／base64／evidence 中一种来源。`debug_start` 分离启动与 dump 输入，`debug_control` 按动作要求相应字段，`crash_snapshot` 必须且只能提供 session 或 core。`artifact_validate.interpreter` 为 python3 或 bash。交互输入最多 64 KiB。后端声明 debug.events 时，`debug_inspect` 的 kind=events 提供有界事件快照；其他后端明确报告不可用。
 

@@ -276,8 +276,9 @@ pub struct AngrSolveArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(transform = python_source_schema)]
 pub struct PyRunArgs {
-    #[schemars(length(min = 0, max = 262144))]
+    #[schemars(length(min = 1, max = 262144), regex(pattern = "[^\\s]"))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// Worker file containing the script; mutually exclusive with source.
@@ -685,4 +686,11 @@ pub struct ResourceList {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1, max = 64))]
     pub limit: Option<u64>,
+}
+
+fn python_source_schema(schema: &mut schemars::Schema) {
+    schema.insert("oneOf".into(), serde_json::json!([
+        {"required":["source"],"not":{"required":["source_file"]},"properties":{"source":{"type":"string"}}},
+        {"required":["source_file"],"not":{"required":["source"]},"properties":{"source_file":{"type":"string","minLength":1}}}
+    ]));
 }

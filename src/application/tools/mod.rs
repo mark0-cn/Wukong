@@ -35,6 +35,7 @@ pub struct ToolService {
     environments: crate::adapters::environments::EnvironmentRegistry,
     static_environment: Option<String>,
     windows_lab: crate::config::WindowsLabConfig,
+    lab_operations: lab_operations::Operations,
     default_environment: Option<String>,
     sync_limits: evidence_sync::SyncLimits,
 }
@@ -43,6 +44,7 @@ mod analysis;
 mod analysis_verification;
 mod args;
 mod artifact_validation;
+mod bundle;
 mod capabilities;
 mod catalog;
 mod coordination;
@@ -60,6 +62,7 @@ mod context;
 mod execution;
 mod gateway;
 mod lab;
+mod lab_operations;
 use context::ToolContext;
 pub(crate) use lab::LabService;
 mod requirements;
@@ -119,7 +122,8 @@ impl ToolService {
         mcp: McpRegistry,
     ) -> Result<Self> {
         let environments =
-            crate::adapters::environments::EnvironmentRegistry::new(config.environments.clone())?;
+            crate::adapters::environments::EnvironmentRegistry::new(config.environments.clone())?
+                .with_lab_guards(&config.windows_lab)?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
         let static_environment = config.analysis.static_environment.clone();
         let windows_lab = config.windows_lab.clone();
@@ -134,6 +138,7 @@ impl ToolService {
             environments,
             static_environment,
             windows_lab,
+            lab_operations: Default::default(),
             default_environment: config.default_environment,
             sync_limits: Default::default(),
         })
@@ -151,22 +156,44 @@ impl ToolService {
                 self.store.controller_owner().as_deref(),
             )
             .await?;
-        let primary = gateway::BoundWorker::new(client)?;
-        let static_worker = match &self.static_environment {
-            Some(static_environment) if static_environment != environment_id => {
-                let client = self
-                    .environments
-                    .bind(
-                        static_environment,
-                        &agent.run_id,
-                        self.store.controller_owner().as_deref(),
-                    )
-                    .await?;
-                Some(gateway::BoundWorker::new(client)?)
+        let primary = gateway::BoundWorker::new(client, environment_id)?;
+        Ok(ToolContext::new(self, Some(primary)))
+    }
+
+    async fn bound_for(
+        &self,
+        agent: &AgentMetadata,
+        requirement: requirements::Requirement,
+    ) -> Result<ToolContext> {
+        if matches!(requirement, requirements::Requirement::Ghidra)
+            && let Some(environment) = &self.static_environment
+        {
+            let run: RunRecord = self.store.load(&agent.run_id)?;
+            ensure!(
+                run.config["analysis"]["static_environment"].as_str() == Some(environment.as_str()),
+                "static backend selection changed since assessment creation"
+            );
+            environment_service::EnvironmentService {
+                store: self.store.clone(),
+                registry: self.environments.clone(),
             }
-            _ => None,
-        };
-        Ok(ToolContext::with_static(self, Some(primary), static_worker))
+            .checked_id(agent, environment)
+            .await?;
+            let client = self
+                .environments
+                .bind(
+                    environment,
+                    &agent.run_id,
+                    self.store.controller_owner().as_deref(),
+                )
+                .await?;
+            return Ok(ToolContext::with_static(
+                self,
+                None,
+                Some(gateway::BoundWorker::new(client, environment)?),
+            ));
+        }
+        self.bound_to(agent).await
     }
 
     async fn checked_environment(&self, agent: &AgentMetadata) -> Result<RuntimeClient> {
@@ -214,6 +241,20 @@ impl ToolService {
         definitions
     }
     pub async fn close(&self) {
+        for cancellation in self.lab_operations.lock().await.values() {
+            cancellation.cancel();
+        }
+        let drained = tokio::time::timeout(Duration::from_secs(10), async {
+            while !self.lab_operations.lock().await.is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        if drained.is_err() {
+            tracing::warn!(
+                "lab operations did not finish reconciliation before controller shutdown"
+            );
+        }
         self.mcp.close().await;
         self.environments.close().await;
     }
@@ -314,7 +355,7 @@ impl ToolService {
             };
             if let Some(spec) = builtin {
                 if self.needs_worker(spec) {
-                    let scoped = self.bound_to(&agent).await?;
+                    let scoped = self.bound_for(&agent, spec.requirement).await?;
                     scoped.require_backend(spec, &args).await?;
                     (spec.handler)(&scoped, &agent, call_id, name, args).await
                 } else {
@@ -335,9 +376,10 @@ impl ToolService {
                 self.finish_raw(record, value, is_error, if is_error {CallState::Failed} else {CallState::Completed})
             }
             Ok(Err(error)) => {
-                let state = self.effects().failure_state(policy, &agent, call_id, &error)?;
+                let state = if error.is::<crate::application::windows_lab::LabError>() { CallState::Uncertain } else { self.effects().failure_state(policy, &agent, call_id, &error)? };
                 let kind = error.downcast_ref::<crate::adapters::worker::protocol::WorkerError>().map(|e| json!(e.kind));
-                self.finish_raw(record, json!({"error":format!("{error:#}"),"kind":kind,
+                let lab_error = error.downcast_ref::<crate::application::windows_lab::LabError>();
+                self.finish_raw(record, json!({"error":format!("{error:#}"),"kind":kind,"lab_error":lab_error,
                     "effect_state":if state == CallState::Uncertain {"unknown"} else {"rejected"},
                     "next_action":if state == CallState::Uncertain {"reconcile the existing request; do not change arguments or issue a replacement write"} else {"correct the indicated input; preserve returned references and completed results"}}), true, state)
             }

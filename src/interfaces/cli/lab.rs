@@ -1,6 +1,6 @@
 //! Operator entry point for the registered Windows experiment VM.
 use crate::adapters::environments::EnvironmentRegistry;
-use crate::application::windows_lab::{ReconcileOutcome, WindowsLab};
+use crate::application::windows_lab::ReconcileOutcome;
 use crate::config::AppConfig;
 use anyhow::{Context, Result};
 use clap::Subcommand;
@@ -90,8 +90,22 @@ pub enum Command {
 }
 
 pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
+    let registry = EnvironmentRegistry::new(config.environments.clone())?
+        .with_lab_guards(&config.windows_lab)?;
+    let result = run_with_registry(config, command, &registry).await;
+    registry.close().await;
+    result
+}
+
+async fn run_with_registry(
+    config: &AppConfig,
+    command: Command,
+    registry: &EnvironmentRegistry,
+) -> Result<Value> {
+    let open =
+        |vm: &str| crate::application::windows_lab::service::open_configured(config, registry, vm);
     match command {
-        Command::Status { vm } => open(config, &vm)?.status().await,
+        Command::Status { vm } => open(&vm)?.status().await,
         Command::Package { vm, spec } => {
             ensure_registered(config, &vm)?;
             let spec = read_spec(&spec)?;
@@ -112,7 +126,7 @@ pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
             spec,
         } => {
             let spec = read_spec(&spec)?;
-            let lease = open(config, &vm)?.prepare(&owner, &purpose, spec).await?;
+            let lease = open(&vm)?.prepare(&owner, &purpose, spec).await?;
             Ok(serde_json::to_value(lease)?)
         }
         Command::Run {
@@ -130,30 +144,25 @@ pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
                 ),
                 None => None,
             };
-            let lab = open(config, &vm)?;
-            let result = lab
-                .run(&lab_id, generation, &artifact, stdin, timeout)
-                .await;
-            lab.finish().await;
-            result
+            let lab = open(&vm)?;
+            lab.run(&lab_id, generation, &artifact, stdin, timeout)
+                .await
         }
-        Command::Prune { vm } => open(config, &vm)?.prune().await,
+        Command::Prune { vm } => open(&vm)?.prune().await,
         Command::Install {
             vm,
             lab: lab_id,
             generation,
             timeout,
         } => {
-            let lab = open(config, &vm)?;
-            let result = lab.install(&lab_id, generation, timeout).await;
-            lab.finish().await;
-            result
+            let lab = open(&vm)?;
+            lab.install(&lab_id, generation, timeout).await
         }
         Command::Restore {
             vm,
             lab,
             generation,
-        } => open(config, &vm)?.restore(&lab, generation).await,
+        } => open(&vm)?.restore(&lab, generation).await,
         Command::Reconcile {
             vm,
             operation,
@@ -165,7 +174,7 @@ pub async fn run(config: &AppConfig, command: Command) -> Result<Value> {
                 "unknown" => ReconcileOutcome::Unknown,
                 other => anyhow::bail!("unsupported reconcile outcome: {other}"),
             };
-            open(config, &vm)?.reconcile(&operation, outcome).await
+            open(&vm)?.reconcile(&operation, outcome).await
         }
     }
 }
@@ -179,11 +188,6 @@ fn ensure_registered<'a>(
         .vms
         .get(vm_id)
         .with_context(|| format!("VM {vm_id} is not registered under [windows_lab.vms]"))
-}
-
-fn open(config: &AppConfig, vm_id: &str) -> Result<WindowsLab> {
-    let registry = EnvironmentRegistry::new(config.environments.clone())?;
-    crate::application::windows_lab::service::open_configured(config, &registry, vm_id)
 }
 
 fn read_spec(path: &Path) -> Result<crate::application::windows_lab::ExperimentSpec> {

@@ -144,7 +144,21 @@ impl Default for WindowsLabAdmin {
 }
 impl AppConfig {
     fn validate_windows_lab(&self) -> Result<()> {
+        let mut physical_vms = std::collections::BTreeSet::new();
+        let mut lab_environments = std::collections::BTreeSet::new();
         for (id, vm) in &self.windows_lab.vms {
+            ensure!(
+                physical_vms.insert(crate::adapters::environments::lab_guard::physical_identity(
+                    &vm.vmx
+                )?),
+                "multiple lab aliases name the same physical VM"
+            );
+            if let Some(environment) = &vm.environment {
+                ensure!(
+                    lab_environments.insert(environment),
+                    "multiple lab VMs name the same environment"
+                );
+            }
             crate::adapters::environments::validate_id(id)?;
             ensure!(
                 vm.vmx.is_absolute() && vm.vmrun.is_absolute(),

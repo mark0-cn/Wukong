@@ -5,7 +5,13 @@ use super::*;
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(in crate::application::tools) enum LaunchSource {
     Primary,
-    Bundle,
+    Bundle {
+        /// Explicit entry member; omission uses the inferred entry.
+        entry: Option<String>,
+        /// Subset including entry; omission uses all members (at most 64).
+        #[schemars(length(min = 1, max = 64))]
+        members: Option<Vec<String>>,
+    },
     Staged {
         target: String,
         #[serde(default)]

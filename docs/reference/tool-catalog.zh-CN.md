@@ -58,12 +58,15 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `job_cancel` | analyst / verifier | 是 | job.cancel | 请求取消所属的同 run job。 |
 | `job_start` | analyst / verifier | 是 | job.start | 在配置的 worker 启动持久进程任务，立即返回 job_id。使用 argv，或已暂存的 launch_spec（记录目标、文件、参数、cwd、环境和输入模式）；input 选择已暂存数据文件。有 launch_spec 时省略 argv/env/cwd 覆盖并保留其超时。原始 argv 与 executable_inputs 可使用 {target}；files/... 引用只解析直接参数，不解析 shell 字符串。隔离 Linux 中 argv[0] 和显式 executable_inputs 获得可执行副本，其余文件参数只读。结果包含 cwd、输入哈希与权限。可通过环境变量 WUKONG_STATE_DIR 和 WUKONG_JOB_DIR 读取路径。 |
 | `job_status` | analyst / verifier | 否 | job.status | 观察同 run job，刷新持久状态并导入原始观察。 |
-| `lab_install` | analyst / verifier | 是 | controller | 通过 lab 管理通道运行包中哈希固定的 install.ps1。需要配置的密码环境变量；写入不可变安装回执。 |
-| `lab_prepare` | analyst / verifier | 是 | controller | 准备已登记的 Windows Lab：物化经哈希校验的包、校验安装计划、按需创建基线并获取实验快照。返回绑定 agent、运行、指定 VM 和租约代次的不透明 lab_ref。需要 windows_lab 任务授权。 |
-| `lab_restore` | analyst / verifier | 是 | controller | 将已登记的 Lab 回滚到基线，可选启动并清理实验快照。对账未知的运行／安装结果；需要 lab_prepare 返回的所属 lab_ref。 |
-| `lab_run` | analyst / verifier | 是 | controller | 通过已登记 Windows worker 运行实验已校验包中的一个产物；可选 stdin 来自有界证据。写入不可变 run 回执，传输失败标记为 unknown；恢复基线来核对。 |
-| `lab_status` | analyst / verifier | 否 | controller | 检查已登记的 Windows lab VM：宿主可达性、快照、阶段以及最近一次 run/安装。只读，不修改 worker 或宿主。 |
-| `launch_prepare` | analyst / verifier | 是 | file.put + file.stat + file.read + file.upload.begin + file.upload.write + file.upload.commit | 从主目标、目录 bundle、已暂存目标／依赖或 Linux target/libc/loader 准备不可变且绑定哈希的 LaunchSpec。参数、cwd、环境、输入模式和时限在此设置；作业和会话复用 launch_spec，不允许逐次覆盖。准备过程不执行目标。 |
+| `lab_install` | analyst / verifier | 是 | controller | 使用所属 lab_ref 启动安装并返回 operation_id。全程统一采用 1–600 秒时限、固定哈希介质及检查声明文件、服务和账户的客体回执。通过 lab_operation_status 查询；缺少回执保持未知。要求 worker 资源空闲且证据同步完成。 |
+| `lab_list` | analyst / verifier | 否 | controller | 列出已配置的 Windows 实验 VM 别名及分配的环境，不连接或修改状态。 |
+| `lab_operation_cancel` | analyst / verifier | 是 | controller | 请求中断自己拥有的实验宿主操作。取消后客体影响可能仍未知；再次修改前须检查并调和原操作。 |
+| `lab_operation_status` | analyst / verifier | 否 | controller | 按 operation_id 读取持久化实验宿主操作的结果和证据。控制器归属丢失时保留结果未知，不重放操作。 |
+| `lab_prepare` | analyst / verifier | 是 | controller | 启动指定 Windows Lab 的准备并返回 operation_id。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。需要 windows_lab 任务授权；不支持的执行要求在运行准入时拒绝。 |
+| `lab_restore` | analyst / verifier | 是 | controller | 使用所属 lab_ref 启动带隔离保护的基线恢复并返回 operation_id。要求 worker 资源空闲且证据同步完成。未知影响只有在确认恢复后才标记 lost，快照清理单独报告。通过 lab_operation_status 查询。 |
+| `lab_run` | analyst / verifier | 是 | job.start + file.put + job.status + job.cancel | 用所属 lab_ref 将已验证的 exe/user harness 作为普通持久化评估作业启动，返回 run.job_id。通过该句柄调用 job_status、job_cancel 和 job_artifacts。支持 stdin 证据或空 argv，目标哈希必须匹配。保留共享评估租约和完成条件。 |
+| `lab_status` | analyst / verifier | 否 | controller | 读取指定 Windows 实验 VM 的持久状态及有时限的宿主观测。必须提供 vm；发现配置请使用 lab_list。不执行调和或状态修改，长操作期间仍可查询。 |
+| `launch_prepare` | analyst / verifier | 是 | file.put + file.stat + file.read + file.upload.begin + file.upload.write + file.upload.commit | 从主目标、选择的目录包、已暂存目标／依赖或 Linux target/libc/loader 准备绑定哈希的不可变 LaunchSpec。目录包用 source.entry 和 source.members 选择入口及成员子集。在此统一设置参数、工作目录、环境、输入模式和时限；作业与会话复用 launch_spec，不再覆盖。准备不会执行目标。 |
 | `libc_identify` | analyst / verifier | 否 | libc.identify | 使用同进程符号泄漏比较最多 16 份同 run ELF libc 候选；省略时只检查 worker libc。保留哈希、Build ID、架构、不一致泄漏和歧义。候选不确认映射身份，无匹配仅描述搜索集合。 |
 | `load_skill` | 全部 | 是 | controller | 激活内置或自定义能力/方法。root/analyst/verifier 角色指令自动安装，不能在此加载。初始与动态能力合计最多五个名称。精确正文/哈希持久化，下一新模型边界生效，替代同名初始正文并跨压缩/恢复保留。加载不改变角色、权限或完成条件。 |
 | `message_status` | 全部 | 否 | controller | 查看收发消息、投递状态和关联回复。 |

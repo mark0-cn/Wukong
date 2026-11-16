@@ -18,7 +18,7 @@ pub const MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_PACKAGE_BYTES: u64 = 512 * 1024 * 1024;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Dependency {
     pub name: String,
@@ -26,7 +26,7 @@ pub struct Dependency {
     pub source: DependencySource,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DependencySource {
     Url { url: String },
@@ -36,7 +36,7 @@ pub enum DependencySource {
 impl Dependency {
     fn validate(&self) -> Result<()> {
         ensure!(
-            valid_name(&self.name),
+            valid_name(&self.name) && !reserved_name(&self.name),
             "dependency name must be 1–128 safe filename characters"
         );
         ensure!(
@@ -88,7 +88,7 @@ fn lowercase_digest(value: &str) -> bool {
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PackageArtifact {
     pub name: String,
@@ -96,14 +96,14 @@ pub struct PackageArtifact {
     pub size: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(schemars::JsonSchema, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PackageManifest {
     pub schema: u32,
     pub artifacts: Vec<PackageArtifact>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(schemars::JsonSchema, Serialize, Deserialize, Clone, Debug)]
 pub struct Package {
     pub id: String,
     pub root: PathBuf,
@@ -112,6 +112,10 @@ pub struct Package {
 
 /// Validate every declared dependency and reject case-insensitive name clashes.
 pub fn validate_dependencies(dependencies: &[Dependency]) -> Result<()> {
+    ensure!(
+        dependencies.len() <= 256,
+        "package supports at most 256 dependencies"
+    );
     let mut names = std::collections::BTreeSet::new();
     for dependency in dependencies {
         dependency.validate()?;
@@ -214,7 +218,8 @@ async fn read_source(source: &DependencySource, name: &str) -> Result<Vec<u8>> {
                 metadata.len() <= MAX_ARTIFACT_BYTES,
                 "dependency {name} exceeds the per-artifact bound"
             );
-            fs::read(path).with_context(|| format!("read dependency {name}"))
+            read_bounded(path, MAX_ARTIFACT_BYTES)
+                .with_context(|| format!("read dependency {name}"))
         }
         DependencySource::Url { url } => {
             let client = reqwest::Client::builder()
@@ -248,11 +253,79 @@ async fn read_source(source: &DependencySource, name: &str) -> Result<Vec<u8>> {
     }
 }
 
+/// Re-open by immutable identity; a rewritten manifest cannot bless changed bytes.
+pub fn open_verified(root: &Path, id: &str) -> Result<PackageManifest> {
+    ensure!(lowercase_digest(id), "invalid package identity");
+    crate::adapters::files::safety::safe(root)?;
+    let manifest_path = root.join("manifest.json");
+    ensure!(
+        fs::symlink_metadata(root)?.is_dir()
+            && !fs::symlink_metadata(root)?.file_type().is_symlink(),
+        "package directory must not be a link"
+    );
+    ensure!(
+        fs::symlink_metadata(&manifest_path)?.is_file()
+            && fs::metadata(&manifest_path)?.len() <= 1024 * 1024,
+        "invalid package manifest file"
+    );
+    let manifest: PackageManifest =
+        serde_json::from_slice(&read_bounded(&manifest_path, 1024 * 1024)?)?;
+    ensure!(
+        manifest.schema == 1 && manifest.artifacts.len() <= 256,
+        "unsupported package manifest"
+    );
+    ensure!(
+        hex::encode(Sha256::digest(serde_json::to_vec(&manifest)?)) == id,
+        "package manifest identity mismatch"
+    );
+    let mut names = std::collections::BTreeSet::new();
+    let mut total = 0u64;
+    for artifact in &manifest.artifacts {
+        ensure!(
+            valid_name(&artifact.name)
+                && !reserved_name(&artifact.name)
+                && lowercase_digest(&artifact.sha256)
+                && names.insert(artifact.name.to_ascii_lowercase()),
+            "invalid package member"
+        );
+        ensure!(
+            artifact.size <= MAX_ARTIFACT_BYTES,
+            "package member too large"
+        );
+        total = total
+            .checked_add(artifact.size)
+            .context("package size overflow")?;
+        ensure!(total <= MAX_PACKAGE_BYTES, "package exceeds size budget");
+        let path = root.join(&artifact.name);
+        crate::adapters::files::safety::safe(&path)?;
+        let metadata = fs::symlink_metadata(&path)?;
+        ensure!(
+            metadata.is_file()
+                && !metadata.file_type().is_symlink()
+                && metadata.len() == artifact.size,
+            "package member metadata changed"
+        );
+        let bytes = read_bounded(&path, MAX_ARTIFACT_BYTES)?;
+        ensure!(
+            bytes.len() as u64 == artifact.size
+                && hex::encode(Sha256::digest(&bytes)) == artifact.sha256,
+            "package member failed verification"
+        );
+    }
+    let expected_sums = manifest
+        .artifacts
+        .iter()
+        .map(|a| format!("{}  {}\n", a.sha256, a.name))
+        .collect::<String>();
+    ensure!(
+        read_bounded(&root.join("SHA256SUMS"), 1024 * 1024)? == expected_sums.as_bytes(),
+        "package checksum index differs from the bound manifest"
+    );
+    Ok(manifest)
+}
+
 fn verify_existing(root: &Path, manifest: &PackageManifest, id: &str) -> Result<()> {
-    let stored: PackageManifest = serde_json::from_slice(
-        &fs::read(root.join("manifest.json"))
-            .with_context(|| format!("read package manifest {}", root.display()))?,
-    )?;
+    let stored = open_verified(root, id)?;
     ensure!(stored == *manifest, "existing package manifest differs");
     ensure!(
         hex::encode(Sha256::digest(serde_json::to_vec(&stored)?)) == id,
@@ -272,6 +345,34 @@ fn verify_existing(root: &Path, manifest: &PackageManifest, id: &str) -> Result<
     Ok(())
 }
 
+fn reserved_name(name: &str) -> bool {
+    [
+        "manifest.json",
+        "sha256sums",
+        "wukong-receipt.ps1",
+        "receipt.json",
+        "receipt.tmp",
+    ]
+    .contains(&name.to_ascii_lowercase().as_str())
+}
+
+pub(crate) fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
+    use std::io::Read;
+    crate::adapters::files::safety::safe(path)?;
+    let file = fs::File::open(path)?;
+    ensure!(
+        file.metadata()?.is_file() && file.metadata()?.len() <= limit,
+        "file exceeds package size budget"
+    );
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() as u64 <= limit,
+        "file grew beyond package size budget"
+    );
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,6 +388,26 @@ mod tests {
             },
             path,
         )
+    }
+
+    #[tokio::test]
+    async fn changing_manifest_and_member_cannot_rebind_an_existing_package() {
+        let dir = tempfile::tempdir().unwrap();
+        let (dependency, _) = source(dir.path(), "install.ps1", b"original");
+        let package = materialize(&dir.path().join("packages"), &[dependency])
+            .await
+            .unwrap();
+        let mut manifest = open_verified(&package.root, &package.id).unwrap();
+        let replacement = b"modified";
+        fs::write(package.root.join("install.ps1"), replacement).unwrap();
+        manifest.artifacts[0].sha256 = hex::encode(Sha256::digest(replacement));
+        fs::write(
+            package.root.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(open_verified(&package.root, &package.id).is_err());
+        assert!(crate::application::windows_lab::media::prepare(dir.path(), &package.id).is_err());
     }
 
     #[tokio::test]

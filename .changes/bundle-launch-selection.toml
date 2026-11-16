@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow explicit bundle entries, member subsets and launch options, and give each launch configuration an immutable content-addressed path."
+zh_CN = "支持显式选择目录包入口、成员子集和启动参数，并为每份启动配置分配基于内容哈希的不可变路径。"

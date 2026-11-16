@@ -8,6 +8,7 @@ impl ExecutionService {
         call: &str,
         input: args::LaunchPrepareArgs,
     ) -> Result<Value> {
+        validate_options(&input)?;
         let run: RunRecord = self.store.load(&agent.run_id)?;
         let mut members: Vec<(String, String)> = Vec::new();
         let mut loader = None;
@@ -26,14 +27,24 @@ impl ExecutionService {
                 members.push((name.clone(), path));
                 name
             }
-            args::LaunchSource::Bundle => {
-                let bundle = run.bundle.context("target is not a directory bundle")?;
-                ensure!(
-                    bundle.members.len() <= 64,
-                    "launch supports at most 64 members"
-                );
+            args::LaunchSource::Bundle {
+                entry,
+                members: selected,
+            } => {
+                let bundle = bundle::select_members(
+                    run.bundle.context("target is not a directory bundle")?,
+                    entry,
+                    selected,
+                )?;
+                let policy = hex::encode(Sha256::digest(serde_json::to_vec(
+                    &json!({"bundle":bundle.bundle_sha256,"entry":bundle.entry}),
+                )?));
+                validate_cwd(
+                    input.cwd.as_deref().unwrap_or("."),
+                    bundle.members.iter().map(|m| m.path.as_str()),
+                )?;
                 for member in bundle.members {
-                    let relative = format!("bundles/{}/{}", bundle.bundle_sha256, member.path);
+                    let relative = format!("bundles/{policy}/{}", member.path);
                     let raw = self
                         .files
                         .upload_path(
@@ -102,11 +113,7 @@ impl ExecutionService {
         let mut files = BTreeMap::new();
         let mut total = 0u64;
         for (name, path) in &members {
-            wukong_worker_package::validate_path(name)?;
-            ensure!(
-                name.split('/').count() <= 5,
-                "launch member path is too deep"
-            );
+            validate_member_path(name)?;
             let file = self.files.known_file(agent, path, false)?;
             total = total
                 .checked_add(file.size)
@@ -118,20 +125,7 @@ impl ExecutionService {
             );
         }
         let cwd = input.cwd.unwrap_or_else(|| ".".into());
-        if cwd != "." {
-            wukong_worker_package::validate_path(&cwd)?;
-            ensure!(
-                members
-                    .iter()
-                    .any(|(n, _)| n.starts_with(&format!("{cwd}/"))),
-                "cwd is not in the launch layout"
-            );
-        }
-        ensure!(
-            !matches!(input.input_mode, args::LaunchInputMode::ArgvFile)
-                || input.args.iter().any(|a| a == "@@"),
-            "argv_file requires an @@ argument"
-        );
+        validate_cwd(&cwd, members.iter().map(|(name, _)| name.as_str()))?;
         let mut launch = json!({"schema_version":1,"target":entry,"files":files,"args":input.args,"cwd":cwd,"env":input.env,"input_mode":input.input_mode,"timeout_secs":input.timeout_secs});
         if let Some(loader) = loader {
             launch["loader"] = json!(loader);
@@ -140,6 +134,10 @@ impl ExecutionService {
         let digest = hex::encode(Sha256::digest(serde_json::to_vec(&launch)?));
         let base = format!("launches/{digest}");
         launch["base"] = json!(format!("files/{base}"));
+        ensure!(
+            serde_json::to_vec(&launch)?.len() <= 65536,
+            "LaunchSpec exceeds 64 KiB; reduce arguments or selected members"
+        );
         for (name, path) in members {
             let content = self
                 .files
@@ -155,5 +153,96 @@ impl ExecutionService {
         Ok(
             json!({"launch_spec":output["file"]["path"],"manifest_evidence_id":output["content_evidence_id"],"manifest":launch,"prepared":true,"executed":false}),
         )
+    }
+}
+
+pub(super) fn validate_member_path(name: &str) -> Result<()> {
+    wukong_worker_package::validate_path(name)?;
+    ensure!(
+        name.len() <= 1024 && name.split('/').count() <= 5,
+        "launch member path is too deep or long"
+    );
+    ensure!(
+        name != "launch.json" && !name.starts_with("launch.json/"),
+        "launch.json is reserved for the manifest"
+    );
+    Ok(())
+}
+fn validate_cwd<'a>(cwd: &str, members: impl Iterator<Item = &'a str>) -> Result<()> {
+    if cwd != "." {
+        validate_member_path(cwd)?;
+        ensure!(
+            members
+                .into_iter()
+                .any(|n| n.starts_with(&format!("{cwd}/"))),
+            "cwd is not in the launch layout"
+        );
+    }
+    Ok(())
+}
+fn validate_options(input: &args::LaunchPrepareArgs) -> Result<()> {
+    ensure!(
+        input.args.len() <= 64
+            && input
+                .args
+                .iter()
+                .all(|a| a.len() <= 32768 && !a.contains('\0')),
+        "invalid launch arguments"
+    );
+    ensure!(
+        (1..=3600).contains(&input.timeout_secs),
+        "invalid launch timeout"
+    );
+    ensure!(
+        input.env.len() <= 64
+            && input.env.iter().all(|(k, v)| !k.is_empty()
+                && k.len() <= 256
+                && !k.contains(['=', '\0'])
+                && v.len() <= 32768
+                && !v.contains('\0')),
+        "invalid launch environment"
+    );
+    ensure!(
+        serde_json::to_vec(input)?.len() <= 60 * 1024,
+        "launch options exceed 60 KiB"
+    );
+    if let Some(cwd) = &input.cwd
+        && cwd != "."
+    {
+        validate_member_path(cwd)?;
+    }
+    ensure!(
+        !matches!(input.input_mode, args::LaunchInputMode::ArgvFile)
+            || input.args.iter().any(|a| a == "@@"),
+        "argv_file requires an @@ argument"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn launch_options_and_layout_are_validated_before_upload() -> Result<()> {
+        let good = json!({"source":{"kind":"bundle","entry":"two.exe","members":["two.exe"]},"args":[],"input_mode":"stdin_pipe","timeout_secs":30});
+        validate_options(&serde_json::from_value(good.clone())?)?;
+        for (key, value) in [
+            ("cwd", json!("../outside")),
+            ("args", json!(["x".repeat(32769)])),
+            ("env", json!({"BAD=KEY":"value"})),
+            ("timeout_secs", json!(0)),
+            ("input_mode", json!("argv_file")),
+        ] {
+            let mut input = good.clone();
+            input[key] = value;
+            assert!(
+                validate_options(&serde_json::from_value(input)?).is_err(),
+                "{key}"
+            );
+        }
+        assert!(validate_member_path("launch.json").is_err());
+        assert!(validate_cwd("work", ["two.exe"].into_iter()).is_err());
+        assert!(validate_cwd("work", ["work/data"].into_iter()).is_ok());
+        Ok(())
     }
 }

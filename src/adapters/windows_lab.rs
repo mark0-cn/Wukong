@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const MAX_SNAPSHOT_NAME: usize = 96;
@@ -56,29 +56,7 @@ impl VmwareVm {
         let executable = self.executable.clone();
         let arguments: Vec<String> = arguments.iter().map(|value| (*value).to_owned()).collect();
         let timeout = self.timeout;
-        let output = tokio::task::spawn_blocking(move || {
-            let mut child = std::process::Command::new(&executable)
-                .args(&arguments)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .with_context(|| format!("start {}", executable.display()))?;
-            let deadline = Instant::now() + timeout;
-            loop {
-                if child.try_wait()?.is_some() {
-                    return child.wait_with_output().context("collect VMware output");
-                }
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    bail!("VMware operation exceeded {} seconds", timeout.as_secs());
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        })
-        .await
-        .context("VMware operation task")??;
+        let output = bounded_output(&executable, arguments, timeout).await?;
         if !output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -239,4 +217,51 @@ mod tests {
             VmwareVm::new(&dir.path().join("vmrun.exe"), &vmx, Duration::from_secs(30)).is_ok()
         );
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct VmwareTimeout;
+impl std::fmt::Display for VmwareTimeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VMware command timed out; external effect requires reconciliation")
+    }
+}
+impl std::error::Error for VmwareTimeout {}
+
+pub(crate) async fn bounded_output(
+    executable: &Path,
+    arguments: Vec<String>,
+    timeout: Duration,
+) -> Result<std::process::Output> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut stdout = tempfile::tempfile()?;
+    let mut stderr = tempfile::tempfile()?;
+    let mut command = tokio::process::Command::new(executable);
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(stdout.try_clone()?)
+        .stderr(stderr.try_clone()?)
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let mut child = command.spawn().context("start VMware operation")?;
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(status) => status?,
+        Err(_) => {
+            let _ = child.kill().await;
+            return Err(VmwareTimeout.into());
+        }
+    };
+    stdout.seek(SeekFrom::Start(0))?;
+    stderr.seek(SeekFrom::Start(0))?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    stdout.take(1024 * 1024).read_to_end(&mut out)?;
+    stderr.take(1024 * 1024).read_to_end(&mut err)?;
+    Ok(std::process::Output {
+        status,
+        stdout: out,
+        stderr: err,
+    })
 }

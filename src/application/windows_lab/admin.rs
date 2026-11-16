@@ -8,12 +8,15 @@ use std::path::PathBuf;
 pub struct AdminFile {
     pub name: String,
     pub path: PathBuf,
+    pub sha256: String,
 }
 
 #[derive(Serialize, Clone, Debug)]
 pub struct AdminRequest {
     pub install_id: String,
     pub media_sha256: String,
+    pub script_sha256: String,
+    pub plan: super::install::InstallPlan,
     pub files: Vec<AdminFile>,
     pub timeout_secs: u64,
 }
@@ -26,9 +29,10 @@ pub struct AdminOutcome {
     pub guest_media: String,
     pub guest_script: String,
     pub settled: bool,
+    pub verified: bool,
+    pub guest_receipt: serde_json::Value,
 }
 #[async_trait]
 pub trait LabAdmin: Send + Sync {
     async fn install(&self, request: AdminRequest) -> Result<AdminOutcome>;
-    async fn finish(&self) {}
 }

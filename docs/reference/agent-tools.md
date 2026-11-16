@@ -23,14 +23,14 @@ Old names and competing input forms are rejected; there are no aliases.
 | Bare static address | A target-bound module_relative AddressRef |
 | `artifact_stage.artifact_id` | `evidence_id` |
 | Completion `summary` | `result.answer` in the structured result |
-| Lab vm/lab_id/generation input tuple | The opaque owned `lab_ref` returned by `lab_prepare` |
+| Lab vm/lab_id/generation input tuple | The owned `lab_ref` in the completed `lab_prepare` operation result |
 | `interactive_send.data_base64` | Tagged `source`: text, base64 or evidence |
 
 Only verifier may call `analysis_verify`, `poc_verify` and `verification_record`. Certification and finding promotion also check the verifier role in the business layer.
 
 ## Execution and results
 
-`launch_prepare` creates a hash-bound immutable layout from primary, bundle, staged files/dependencies or Linux target/libc/loader. Set args, cwd, environment, input mode and timeout there. Reuse the returned `launch_spec` in job_start, interactive_start or debug_start; omit argv/target/environment/timeout overrides. The schema rejects conflicting choices before worker dispatch. Preparation records identity, but actual worker execution remains the acceptance evidence.
+`launch_prepare` creates a hash-bound immutable layout from primary, bundle, staged files/dependencies or Linux target/libc/loader. Set args, cwd, environment, input mode and timeout there. For bundles, optional `source.entry` and `source.members` select the executable and member subset before upload. Reuse the returned `launch_spec` in job_start, interactive_start or debug_start; omit argv/target/environment/timeout overrides. The schema rejects conflicting choices before worker dispatch. Preparation records identity, but actual worker execution remains the acceptance evidence.
 
 `file_put` accepts exactly one text/base64/evidence source. `debug_start` separates launch and dump inputs, `debug_control` requires the fields appropriate to its action, and `crash_snapshot` requires exactly one session or core. `artifact_validate.interpreter` is python3 or bash. Interactive input is bounded to 64 KiB. `debug_inspect` kind=events exposes bounded event snapshots when the backend advertises debug.events; other backends report unavailable.
 

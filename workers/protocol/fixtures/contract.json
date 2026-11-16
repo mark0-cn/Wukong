@@ -648,5 +648,69 @@
       "verifier_agent_id": "verifier"
     },
     "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "py.run",
+    "value": {},
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "py.run",
+    "value": {
+      "source": ""
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "py.run",
+    "value": {
+      "source": "  \n"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "py.run",
+    "value": {
+      "source": "pass",
+      "source_file": "files/script.py"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "py.run",
+    "value": {
+      "source_file": ""
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "py.run",
+    "value": {
+      "source": null,
+      "source_file": "files/script.py"
+    },
+    "valid": false
+  },
+  {
+    "kind": "request",
+    "method": "py.run",
+    "value": {
+      "source_file": "files/script.py"
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "py.run",
+    "value": {
+      "source": "print(1)"
+    },
+    "valid": true
   }
 ]
