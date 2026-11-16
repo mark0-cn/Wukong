@@ -1,3 +1,3 @@
 kind = "fix"
-en = "Report bounded, identity-bound Windows startup stages and WFP rejection counts on installation failure while preserving every isolation readiness gate."
-zh_CN = "Windows 安装失败时提供有界、绑定身份的启动阶段报告及 WFP 拒绝分类计数，保留全部隔离就绪门禁。"
+en = "Report bounded, identity-bound Windows startup stages on installation failure. Keep guest controls and communication readiness checks under the dedicated disposable VM execution contract; diagnostic reports do not certify external isolation."
+zh_CN = "Windows 安装失败时提供有界、绑定身份的启动阶段报告。按专用、可丢弃 VM 执行约定保留 guest 控制与通信就绪检查；诊断报告不认证外部隔离。"
