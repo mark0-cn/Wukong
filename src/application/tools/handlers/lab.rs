@@ -65,16 +65,6 @@ pub(in crate::application::tools) fn handle_lab_restore<'a>(
     Box::pin(async move { service.start_operation(agent, call, name, args).await })
 }
 
-pub(in crate::application::tools) fn handle_lab_prune<'a>(
-    service: &'a LabService,
-    agent: &'a AgentMetadata,
-    call: &'a str,
-    name: &'a str,
-    args: Value,
-) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { service.start_operation(agent, call, name, args).await })
-}
-
 pub(in crate::application::tools) fn handle_lab_operation<'a>(
     service: &'a LabService,
     agent: &'a AgentMetadata,

@@ -63,176 +63,54 @@ pub(super) fn handle_bundle_evidence<'a>(
     })
 }
 
-pub(super) fn handle_bundle_stage<'a>(
-    tools: &'a BundleService,
-    agent: &'a AgentMetadata,
-    call: &'a str,
-    _name: &'a str,
-    args: Value,
-) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move {
-        let input: args::BundleStageArgs = serde_json::from_value(args)?;
-        let StagingPlan {
-            bundle,
-            base_rel,
-            launch_text,
-            launch_sha256,
-        } = StagingPlan::new(run_bundle(tools, agent)?, input)?;
-        let mut staged = Vec::new();
-        for member in &bundle.members {
-            let upload_rel = format!("{base_rel}/{}", member.path);
-            let raw = tools
-                .execution
-                .files
-                .upload_path(
-                    agent,
-                    &format!("{call}:{}", member.path),
-                    &bundle.root.join(&member.path),
-                    &upload_rel,
-                    &member.sha256,
-                    member.path == bundle.entry,
-                )
-                .await?;
-            tools.execution.files.register_file(agent, &raw, None)?;
-            staged.push(json!({
-                "path": member.path,
-                "kind": member.kind,
-                "sha256": member.sha256,
-                "worker_path": raw["path"],
-            }));
-        }
-        let uploaded = tools
-            .execution
-            .files
-            .file_put(
-                agent,
-                &format!("{call}:launch"),
-                &json!({"text": launch_text, "path": format!("{base_rel}/launch-{launch_sha256}.json")}),
-            )
-            .await?;
-        let launch_path = uploaded["file"]["path"]
-            .as_str()
-            .context("launch spec upload returned no path")?
-            .to_owned();
-        Ok(json!({
-            "bundle_sha256": bundle.bundle_sha256,
-            "entry": bundle.entry,
-            "launch_spec": launch_path,
-            "members": staged,
-            "hint": "call job_start with launch_spec and no argv; the worker stages all members into one directory and runs entry there",
-        }))
-    })
-}
-
 #[derive(Clone)]
 pub(super) struct BundleService {
     pub(super) store: Store,
-    pub(super) execution: ExecutionService,
 }
 
-fn safe_member_path(path: &str) -> bool {
-    wukong_worker_package::validate_path(path).is_ok()
-        && !path.is_empty()
-        && path.len() <= 1024
-        && path.split('/').count() <= 6
-        && path
-            .split('/')
-            .all(|part| !part.is_empty() && part != "." && part != "..")
-        && !path.contains(['\\', ':', '\0'])
-}
-
-struct StagingPlan {
-    bundle: crate::domain::bundle::BundleManifest,
-    base_rel: String,
-    launch_text: String,
-    launch_sha256: String,
-}
-impl StagingPlan {
-    fn new(
-        mut bundle: crate::domain::bundle::BundleManifest,
-        input: args::BundleStageArgs,
-    ) -> Result<Self> {
-        if let Some(entry) = input.entry {
-            bundle.entry = entry;
-        }
-        if let Some(selected) = input.members {
-            ensure!(
-                !selected.is_empty() && selected.len() <= 64,
-                "select 1 through 64 bundle members"
-            );
-            for path in &selected {
-                ensure!(
-                    bundle.members.iter().any(|m| &m.path == path),
-                    "unknown bundle member: {path}"
-                );
-            }
-            bundle.members.retain(|m| selected.contains(&m.path));
-        }
-        ensure!(
-            bundle.members.iter().any(|m| m.path == bundle.entry),
-            "entry must be a selected bundle member"
-        );
-        bundle.entry_sha256 = bundle
-            .members
-            .iter()
-            .find(|m| m.path == bundle.entry)
-            .unwrap()
-            .sha256
-            .clone();
-        ensure!(
-            input.args.len() <= 64
-                && input
-                    .args
-                    .iter()
-                    .all(|s| s.len() <= 32768 && !s.contains('\0')),
-            "invalid bundle arguments"
-        );
-        let cwd = input.cwd.unwrap_or_else(|| ".".into());
-        ensure!(
-            cwd == "." || safe_member_path(&cwd),
-            "unsafe bundle working directory"
-        );
-        let mode = input.input_mode.unwrap_or(args::BundleInputMode::StdinPipe);
-        ensure!(
-            !matches!(mode, args::BundleInputMode::ArgvFile)
-                || input.args.iter().any(|a| a == "@@"),
-            "argv_file requires an @@ argument"
-        );
-        ensure!(
-            input.timeout_secs.is_none_or(|t| (1..=3600).contains(&t)),
-            "invalid bundle timeout"
-        );
-        for member in &bundle.members {
-            ensure!(safe_member_path(&member.path), "unsafe bundle member path");
-        }
-        ensure!(
-            bundle.members.len() <= 64,
-            "native bundle launch supports at most 64 members"
-        );
-        let policy = hex::encode(Sha256::digest(serde_json::to_vec(
-            &json!({"bundle":bundle.bundle_sha256,"entry":bundle.entry}),
-        )?));
-        let base_rel = format!("bundles/{policy}");
-        let base = format!("files/{base_rel}");
-        let files: serde_json::Map<String, Value> = bundle
-            .members
-            .iter()
-            .map(|m| (m.path.clone(), json!(m.sha256)))
-            .collect();
-        let launch = json!({"schema_version":1,"base":base,"target":bundle.entry,"files":files,"args":input.args,"cwd":cwd,"input_mode":mode,"timeout_secs":input.timeout_secs.unwrap_or(300)});
-        let launch_text = serde_json::to_string(&launch)?;
-        ensure!(
-            launch_text.len() <= 65536,
-            "LaunchSpec exceeds 64 KiB; reduce arguments or selected members"
-        );
-        let launch_sha256 = hex::encode(Sha256::digest(launch_text.as_bytes()));
-        Ok(Self {
-            bundle,
-            base_rel,
-            launch_text,
-            launch_sha256,
-        })
+/// Resolve explicit entry/member selection before uploading any bundle data.
+pub(super) fn select_members(
+    mut bundle: crate::domain::bundle::BundleManifest,
+    entry: Option<String>,
+    selected: Option<Vec<String>>,
+) -> Result<crate::domain::bundle::BundleManifest> {
+    if let Some(entry) = entry {
+        bundle.entry = entry;
     }
+    if let Some(selected) = selected {
+        ensure!(
+            !selected.is_empty() && selected.len() <= 64,
+            "select 1 through 64 bundle members"
+        );
+        let unique: std::collections::BTreeSet<_> = selected.iter().collect();
+        ensure!(unique.len() == selected.len(), "duplicate selected member");
+        for path in &selected {
+            ensure!(
+                bundle.members.iter().any(|m| &m.path == path),
+                "unknown bundle member: {path}"
+            );
+        }
+        bundle.members.retain(|m| selected.contains(&m.path));
+    }
+    let target = bundle
+        .members
+        .iter()
+        .find(|m| m.path == bundle.entry)
+        .context("entry must be a selected bundle member")?;
+    bundle.entry_sha256 = target.sha256.clone();
+    ensure!(
+        !bundle.members.is_empty() && bundle.members.len() <= 64,
+        "launch supports 1 through 64 members"
+    );
+    let mut total = 0u64;
+    for member in &bundle.members {
+        super::launch::validate_member_path(&member.path)?;
+        total = total
+            .checked_add(member.size)
+            .context("launch size overflow")?;
+    }
+    ensure!(total <= 32 * 1024 * 1024, "launch exceeds 32 MiB");
+    Ok(bundle)
 }
 
 #[cfg(test)]
@@ -244,36 +122,26 @@ mod tests {
             {"path":"two.exe","sha256":"c".repeat(64),"size":1,"format":"pe","kind":"executable"}
         ]})).unwrap()
     }
-    fn plan(input: Value) -> Result<StagingPlan> {
-        StagingPlan::new(bundle(), serde_json::from_value(input)?)
-    }
     #[test]
-    fn launch_changes_get_new_paths_and_entry_changes_get_new_execution_policies() -> Result<()> {
-        let original = plan(json!({}))?;
-        let timeout = plan(json!({"timeout_secs":15}))?;
-        assert_eq!(original.base_rel, timeout.base_rel);
-        assert_ne!(original.launch_sha256, timeout.launch_sha256);
-        let entry = plan(
-            json!({"entry":"two.exe","members":["two.exe"],"args":["--input","@@"],"input_mode":"argv_file","cwd":"work"}),
+    fn entry_and_subset_select_the_executed_identity() -> Result<()> {
+        let selected = select_members(
+            bundle(),
+            Some("two.exe".into()),
+            Some(vec!["two.exe".into()]),
         )?;
-        assert_ne!(original.base_rel, entry.base_rel);
-        let launch: Value = serde_json::from_str(&entry.launch_text)?;
-        assert_eq!(launch["target"], "two.exe");
-        assert_eq!(launch["cwd"], "work");
-        assert_eq!(launch["files"].as_object().unwrap().len(), 1);
+        assert_eq!(selected.entry, "two.exe");
+        assert_eq!(selected.entry_sha256, "c".repeat(64));
+        assert_eq!(selected.members.len(), 1);
         Ok(())
     }
     #[test]
-    fn invalid_launches_fail_before_any_upload_is_planned() {
-        for input in [
-            json!({"entry":"missing"}),
-            json!({"members":["two.exe"]}),
-            json!({"cwd":"../outside"}),
-            json!({"input_mode":"argv_file"}),
-            json!({"typo":true}),
-            json!({"args":["x".repeat(32768),"x".repeat(32768)]}),
-        ] {
-            assert!(plan(input).is_err());
-        }
+    fn invalid_selection_rejected_before_upload() {
+        assert!(select_members(bundle(), Some("missing".into()), None).is_err());
+        assert!(select_members(bundle(), None, Some(vec!["two.exe".into()])).is_err());
+        assert!(select_members(bundle(), None, Some(vec![])).is_err());
+        assert!(select_members(bundle(), None, Some(vec!["one.exe".into(); 2])).is_err());
+        let mut unsafe_bundle = bundle();
+        unsafe_bundle.members[1].path = "../outside".into();
+        assert!(select_members(unsafe_bundle, None, None).is_err());
     }
 }

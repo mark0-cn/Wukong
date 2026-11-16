@@ -156,7 +156,7 @@ wukong --config ./wukong.toml analyze ./sample.elf --task "还原记录格式并
 wukong --config ./wukong.toml analyze ./install-dir --task "查找该程序的跨文件漏洞"
 ```
 
-目录目标会作为 bundle 扫描：每个文件都计算哈希，推断 PE 类型与导入，并给出跨成员调用边。可用 `bundle_manifest`、`bundle_evidence` 和 `bundle_stage` 单独检查 DLL，或带着同目录依赖运行推断出的入口。
+目录目标会作为 bundle 扫描：每个文件都计算哈希，推断 PE 类型与导入，并给出跨成员调用边。可用 `bundle_manifest`、`bundle_evidence` 和 `launch_prepare` (`source.kind=bundle`) 单独检查 DLL，或带着同目录依赖运行推断出的入口。
 
 <a id="model-services"></a>
 
@@ -338,9 +338,9 @@ wukong verify-bundle ./reports/assessment-01
 
 ### 共用分析工具
 
-`function_instructions` 返回分页指令、所属基本块起点、分支／调用流和 fallthrough；所有地址携带模块 SHA256。Ghidra 查询可设置 `target_evidence_id` 使用本任务已有的另一个二进制证据作为基线，原任务目标保持不变。缺少基线必须显式报告，不能拿当前目标代替。
+`function_instructions` 返回分页指令、所属基本块起点、分支／调用流和 fallthrough；所有地址携带模块 SHA256。Ghidra 查询可设置 `target_ref={kind:"evidence",evidence_id:"..."}` 使用本任务已有的另一个二进制证据作为基线，原任务目标保持不变。缺少基线必须显式报告，不能拿当前目标代替。
 
-`differential_test` 接收本任务已登记的 worker `target` 和 `reference` 文件、`reference_python`、`inputs_base64` 和每例 1–10 秒时限；最多 64 个 stdin 输入，每个最多 64 KiB。它通过现有隔离任务生命周期运行，`job_artifacts` 导入 `differential-results.json`，保留输入、原始输出、退出码、两侧哈希和差异。超时、输出截断、非零退出归为 inconclusive。当前协议只比较 stdin；argv／状态会话需单独 harness。
+`differential_test` 接收 `target_launch_spec`、`reference_launch_spec`、1–8 个 `input_evidence_ids`（每个最多 64 KiB）、明确的 `comparison`（`exact_output`、`exit_status` 或 `stdout_json`）及 `expected_exit_codes`。每个 LaunchSpec 必须记录 1–10 秒时限，输入方式为 stdin_pipe 或 argv_file。普通作业按顺序运行，也适用于单资源 Windows worker。保留原始清单、输入、输出及状态证据。超时、输出缺失／截断、非预期退出及无效 JSON 均归为 inconclusive。调用总预算为 300 秒；未完成资源仍可通过 `resource_list` 找到。
 
 <a id="pwn-method-heap-analysis"></a>
 
@@ -354,7 +354,7 @@ wukong verify-bundle ./reports/assessment-01
 
 先用 `file_put` 登记用户提供的 libc 和 loader，再用 `runtime_profile` 读取目标与运行库 SHA256、ELF Build ID、架构。它默认只确认文件身份。传入自己拥有的 `session_id`（调试器）或 `interactive_session_id`（交互进程）可读取实际映射，并按哈希逐个标记 mapped_hash_confirmed；不能传任意 PID。进程已退出或模块无法读取时不推断匹配。
 
-`runtime_prepare` 要求 target/libc/loader 三个已登记 ELF，创建内容寻址的独立副本，并返回 loader、library-path、target 的直接 argv。将其用于 `interactive_start` 或 `job_start`，不要拼接为 shell 字符串。原始文件不改写；不同 glibc 版本、附加依赖或 loader ABI 仍可能导致启动失败，需记录实际结果。`libc_identify` 可用同进程的多个泄漏比对用户提供的 ELF 候选集；省略候选集时只检查 worker 自身的 libc。匹配仍为 candidate_only，不代表确认映射；无匹配也不能直接认定目标使用了另一版 libc。参数、歧义和验证边界见 [Pwn 证据工具](../reference/pwn-tools.zh-CN.md#libc_identify)。
+`launch_prepare` (`source.kind=linux_runtime`) 要求 target/libc/loader 三个已登记 ELF，创建内容寻址的独立副本，并返回绑定哈希的 LaunchSpec。`interactive_start`、`debug_start` 或 `job_start` 复用 launch_spec，不允许逐次覆盖。原始文件不改写；不同 glibc 版本、附加依赖或 loader ABI 仍可能导致启动失败，需记录实际结果。`libc_identify` 可用同进程的多个泄漏比对用户提供的 ELF 候选集；省略候选集时只检查 worker 自身的 libc。匹配仍为 candidate_only，不代表确认映射；无匹配也不能直接认定目标使用了另一版 libc。参数、歧义和验证边界见 [Pwn 证据工具](../reference/pwn-tools.zh-CN.md#libc_identify)。
 
 <a id="structured-crash-evidence"></a>
 
@@ -397,3 +397,5 @@ mode 2 不推导 syscall 白名单。环境和映射变化需要重新观察。
 公开分析说明按 Agent 代次和模型请求更新同一条消息，每 250 毫秒最多持久化一次快照，展示上限为 64 Ki 字符。最终文本更新原消息。控制器暂停、失败或断开后，部分文本会明确标记；旧的已完成事件仍可读取。只展示公开文本，不展示内部推理。这不保证固定措辞、Agent 数量或分析成功。
 
 控制器首次启动时标记为新分析；暂停后的再次启动或控制器恢复则标记为恢复分析。这些文案依据已持久化的生命周期事件。
+
+工具选择、任务授权和破坏性接口迁移见 [Agent 工具接口](../reference/agent-tools.zh-CN.md)。

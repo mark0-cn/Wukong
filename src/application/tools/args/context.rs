@@ -3,13 +3,6 @@ use super::*;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct ThreatModelGetArgs {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct ThreatModelSaveArgs {
     #[schemars(length(min = 1))]
     pub title: String,
@@ -34,10 +27,6 @@ pub(in crate::application::tools) struct NoteSaveArgs {
     #[schemars(length(min = 1))]
     pub body: String,
 }
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct NotesListArgs {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -93,10 +82,6 @@ pub(in crate::application::tools) struct TodoUpdateArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct TodosListArgs {}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct CoverageRecordArgs {
     #[schemars(length(min = 1))]
     pub scope: String,
@@ -123,4 +108,11 @@ pub(in crate::application::tools) struct CoverageUpdateArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct CoverageListArgs {}
+pub(in crate::application::tools) struct CoverageListArgs {
+    pub agent_id: Option<String>,
+    pub scope: Option<String>,
+    pub outcome: Option<CoverageOutcome>,
+    pub after: Option<String>,
+    #[schemars(range(min = 1, max = 20))]
+    pub limit: Option<u64>,
+}

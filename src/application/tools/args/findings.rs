@@ -54,7 +54,14 @@ pub(in crate::application::tools) struct FindingUpdateArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct FindingsListArgs {}
+pub(in crate::application::tools) struct FindingsListArgs {
+    pub agent_id: Option<String>,
+    pub stage: Option<FindingStage>,
+    pub severity: Option<Severity>,
+    pub after: Option<String>,
+    #[schemars(range(min = 1, max = 20))]
+    pub limit: Option<u64>,
+}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -87,3 +94,47 @@ pub(in crate::application::tools) struct EvidenceReadArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length: Option<u64>,
 }
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct EvidenceSearchArgs {
+    pub agent_id: Option<String>,
+    pub target_sha256: Option<String>,
+    pub sha256: Option<String>,
+    pub job_id: Option<String>,
+    pub media_type: Option<String>,
+    pub source: Option<String>,
+    pub after: Option<String>,
+    #[schemars(range(min = 1, max = 20))]
+    pub limit: Option<u64>,
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct ResourceListArgs {
+    pub kind: Option<ResourceKind>,
+    pub active_only: Option<bool>,
+    pub after: Option<String>,
+    #[schemars(range(min = 1, max = 20))]
+    pub limit: Option<u64>,
+}
+choices!(ResourceKind {
+    Job,
+    Debugger,
+    Interactive
+});
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct ResourceReadArgs {
+    pub kind: ResourceKind,
+    pub resource_id: String,
+    pub stream: ResourceStream,
+    pub offset: Option<u64>,
+    #[schemars(range(min = 1, max = 65536))]
+    pub length: Option<u64>,
+}
+choices!(ResourceStream {
+    Stdout,
+    Stderr,
+    Transcript
+});

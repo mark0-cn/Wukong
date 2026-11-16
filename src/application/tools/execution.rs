@@ -50,8 +50,29 @@ impl ExecutionService {
         name: &str,
         mut args: Value,
     ) -> Result<Value> {
+        if name == "debug_inspect" && args["kind"] == "events" {
+            return self.sessions.events(agent, call_id, &args).await;
+        }
+        if name == "interactive_send" {
+            let input: args::InteractiveSendArgs = serde_json::from_value(args)?;
+            let bytes = match input.source {
+                args::ByteSource::Text { text } => text.into_bytes(),
+                args::ByteSource::Base64 { data_base64 } => BASE64.decode(data_base64)?,
+                args::ByteSource::Evidence { evidence_id } => {
+                    let record: Evidence =
+                        require_in_run(&self.store, &evidence_id, &agent.run_id)?;
+                    ensure!(record.size <= 65536, "interactive input exceeds 64 KiB");
+                    self.store.read_evidence(&agent.run_id, &evidence_id)?
+                }
+            };
+            ensure!(bytes.len() <= 65536, "interactive input exceeds 64 KiB");
+            args = json!({"session_id":input.session_id,"data_base64":BASE64.encode(bytes)});
+            if let Some(timeout) = input.read_timeout_secs {
+                args["read_timeout_secs"] = json!(timeout);
+            }
+        }
         match name {
-            "job_status" | "fuzz_status" => {
+            "job_status" => {
                 self.jobs
                     .observe(agent, call_id, text(&args, "job_id")?)
                     .await
@@ -86,6 +107,7 @@ impl ExecutionService {
             "job_start" | "fuzz_start" | "crash_replay" | "input_minimize" | "poc_verify"
             | "angr_solve" | "py_run" => {
                 let run: RunRecord = self.store.load(&agent.run_id)?;
+                let mut execution_target_sha256 = run.target_sha256.clone();
                 if name == "job_start" {
                     args = substitute_target_argv(&args, &run.target_sha256);
                 }
@@ -124,7 +146,37 @@ impl ExecutionService {
                         self.files.known_file(agent, &input, false)?;
                     }
                     if let Some(launch) = args["launch_spec"].as_str() {
-                        self.files.known_file(agent, launch, false)?;
+                        let manifest_file = self.files.known_file(agent, launch, false)?;
+                        ensure!(manifest_file.size <= 65536, "LaunchSpec exceeds 64 KiB");
+                        let imported = self
+                            .files
+                            .file_get(
+                                agent,
+                                &format!("{call_id}:launch-identity"),
+                                &json!({"path":launch,"max_bytes":65536}),
+                            )
+                            .await?;
+                        let bytes = self.store.read_evidence(
+                            &agent.run_id,
+                            text(&imported, "content_evidence_id")?,
+                        )?;
+                        ensure!(
+                            hex::encode(Sha256::digest(&bytes)) == manifest_file.sha256,
+                            "LaunchSpec changed since registration"
+                        );
+                        let manifest: Value = serde_json::from_slice(&bytes)?;
+                        let target_name = text(&manifest, "target")?;
+                        let declared = text(&manifest, "base")?;
+                        let member = self.files.known_file(
+                            agent,
+                            &format!("{declared}/{target_name}"),
+                            false,
+                        )?;
+                        ensure!(
+                            manifest["files"][target_name] == member.sha256,
+                            "LaunchSpec target identity mismatch"
+                        );
+                        execution_target_sha256 = member.sha256;
                         ensure!(
                             string_list(&args, "argv")?.is_empty(),
                             "LaunchSpec owns job argv"
@@ -197,7 +249,7 @@ impl ExecutionService {
                     call_id: call_id.into(),
                     worker_request_id: self.gateway.request_identity(agent, call_id),
                     parameters: params,
-                    target_sha256: run.target_sha256,
+                    target_sha256: execution_target_sha256,
                     status,
                     status_evidence_id: None,
                     imported_artifacts: None,

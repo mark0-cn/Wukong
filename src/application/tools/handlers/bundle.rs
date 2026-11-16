@@ -19,12 +19,3 @@ pub(in crate::application::tools) fn handle_bundle_evidence<'a>(
 ) -> BoxFuture<'a, Result<Value>> {
     bundle::handle_bundle_evidence(service, agent, call, name, args)
 }
-pub(in crate::application::tools) fn handle_bundle_stage<'a>(
-    service: &'a BundleService,
-    agent: &'a AgentMetadata,
-    call: &'a str,
-    name: &'a str,
-    args: Value,
-) -> BoxFuture<'a, Result<Value>> {
-    bundle::handle_bundle_stage(service, agent, call, name, args)
-}

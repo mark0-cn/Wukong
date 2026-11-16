@@ -3,12 +3,12 @@ use super::*;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct RuntimeDoctorArgs {}
+pub(in crate::application::tools) struct EnvironmentListArgs {}
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct EnvironmentDoctorArgs {
-    pub environment_id: String,
+    pub environment_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -18,7 +18,7 @@ pub(in crate::application::tools) struct StageTargetArgs {}
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct ArtifactStageArgs {
-    pub artifact_id: String,
+    pub evidence_id: String,
     #[serde(default)]
     pub executable: bool,
 }
@@ -77,10 +77,9 @@ pub(in crate::application::tools) struct FileGetArgs {
 
 pub(in crate::application::tools) use wukong_worker_protocol::params::{
     AngrSolveArgs, CrashReplayArgs, DebugCloseArgs, DebugCommandArgs, DebugControlArgs,
-    DebugInspectArgs, DebugStartArgs, EmulateRunArgs, ExecCommandArgs, FuzzStartArgs,
-    FuzzStatusArgs, InputMinimizeArgs, InteractiveCloseArgs, InteractiveSendArgs,
-    InteractiveStartArgs, JobArtifactsArgs, JobCancelArgs, JobStartArgs, JobStatusArgs,
-    LibcIdentifyArgs, NetworkReplay, PocVerifyArgs, PyRunArgs, SeccompAnalyzeArgs,
+    DebugStartArgs, EmulateRunArgs, ExecCommandArgs, FuzzStartArgs, InputMinimizeArgs,
+    InteractiveCloseArgs, InteractiveStartArgs, JobArtifactsArgs, JobCancelArgs, JobStartArgs,
+    JobStatusArgs, LibcIdentifyArgs, NetworkReplay, PocVerifyArgs, PyRunArgs, SeccompAnalyzeArgs,
 };
 
 pub(in crate::application::tools) use wukong_worker_protocol::params::RuntimeProfileArgs;
@@ -96,4 +95,53 @@ pub(in crate::application::tools) struct MitigationProfileArgs {
     pub interactive_session_id: Option<String>,
     /// Optional runtime address: report only the actual containing mapping's permissions.
     pub address: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(in crate::application::tools) enum ByteSource {
+    Text { text: String },
+    Base64 { data_base64: String },
+    Evidence { evidence_id: String },
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct InteractiveSendArgs {
+    pub session_id: String,
+    pub source: ByteSource,
+    #[schemars(range(min = 1, max = 300))]
+    pub read_timeout_secs: Option<u64>,
+}
+
+choices!(DebugView {
+    Registers,
+    Stack,
+    Memory,
+    Modules,
+    Threads,
+    Disassembly,
+    Exception,
+    State,
+    Events
+});
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct DebugInspectArgs {
+    pub session_id: String,
+    pub kind: DebugView,
+    /// Runtime virtual address in this owned debugger session, never a file/module offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u64>,
+    #[schemars(range(min = 1, max = 65536))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<u64>,
+    #[schemars(range(min = 1, max = 256))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    /// Offset in the event snapshot. Events require observed debug.events support.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    #[schemars(range(min = 1, max = 60))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
 }

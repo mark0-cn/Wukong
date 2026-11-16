@@ -401,8 +401,7 @@ async fn role_catalog_enforces_coordinator_boundary() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, _agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    // Strix-style visibility: the whole catalog is attached from the first
-    // request; no model turn is spent discovering or loading tools.
+    // Definitions expose role policy; model selection further filters groups and readiness.
     let analyst: BTreeSet<String> = service
         .definitions(Role::Analyst)
         .iter()
@@ -418,8 +417,6 @@ async fn role_catalog_enforces_coordinator_boundary() -> Result<()> {
         "interactive_start",
         "fuzz_start",
         "crash_replay",
-        "poc_verify",
-        "verification_record",
         "coverage_record",
         "finding_file",
         "threat_model_save",
@@ -508,11 +505,11 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
         .await?;
     assert!(denied.is_error);
     assert!(
-        !result(&denied)["error"]
+        result(&denied)["error"]
             .as_str()
             .unwrap()
-            .contains("verifier role"),
-        "poc_verify is no longer role-gated"
+            .contains("unavailable for role"),
+        "poc_verify must reject analysts before dispatch"
     );
 
     let report = service
@@ -574,18 +571,26 @@ async fn capabilities_preserve_role_lifecycle_permissions_and_total_limit() -> R
 }
 
 #[tokio::test]
-async fn finish_result_accepts_a_differing_free_text_summary() -> Result<()> {
+async fn finish_result_rejects_duplicate_summary() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, _run, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    // A result plus a different free-text summary must succeed: result.answer
-    // is canonical and equality checks only burned retry turns.
+    // Completion has one canonical input; no ignored competing summary.
     let finished = service
         .execute(
             &agent.id,
             "finish-differing",
             "agent_finish",
             json!({"result":{"outcome":"success","answer":"canonical answer"},"summary":"a different free text summary"}),
+        )
+        .await?;
+    assert!(finished.is_error, "{finished:?}");
+    let finished = service
+        .execute(
+            &agent.id,
+            "finish-canonical",
+            "agent_finish",
+            json!({"result":{"outcome":"success","answer":"canonical answer"}}),
         )
         .await?;
     assert!(!finished.is_error, "{finished:?}");
@@ -941,7 +946,7 @@ async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Re
             &owner.id,
             "interactive:send",
             "interactive_send",
-            json!({"session_id":session_id,"data_base64":"aGVsbG8K","read_timeout_secs":3}),
+            json!({"session_id":session_id,"source":{"kind":"base64","data_base64":"aGVsbG8K"},"read_timeout_secs":3}),
         )
         .await?;
     assert!(!sent.is_error, "{sent:?}");
@@ -970,7 +975,7 @@ async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Re
             &cleaner.id,
             "foreign:send",
             "interactive_send",
-            json!({"session_id":session_id,"data_base64":"eA=="}),
+            json!({"session_id":session_id,"source":{"kind":"base64","data_base64":"eA=="}}),
         )
         .await?;
     assert!(denied.is_error, "cleanup must not permit sending commands");
@@ -1004,7 +1009,7 @@ async fn interactive_tools_execute_and_terminal_owners_can_be_cleaned_up() -> Re
                 &cleaner.id,
                 &format!("exited:observe:{index}"),
                 "interactive_send",
-                json!({"session_id":exited_id,"data_base64":"","read_timeout_secs":1}),
+                json!({"session_id":exited_id,"source":{"kind":"base64","data_base64":""},"read_timeout_secs":1}),
             )
             .await?;
         assert!(!output.is_error, "{output:?}");
@@ -1237,7 +1242,7 @@ async fn lifecycle_tools_replay_receipts_after_uncertain_outcomes() -> Result<()
         Budget::default(),
         json!({}),
     )?;
-    let finish_args = json!({"summary":"assessment complete"});
+    let finish_args = json!({"result":{"outcome":"success","answer":"assessment complete"}});
     let finish = service
         .execute(
             &second.root_id,
@@ -1459,11 +1464,11 @@ async fn model_boolean_or_fake_verification_cannot_promote_a_finding() -> Result
         .await?;
     assert!(producer_verify.is_error);
     assert!(
-        !result(&producer_verify)["error"]
+        result(&producer_verify)["error"]
             .as_str()
             .unwrap()
-            .contains("verifier role"),
-        "poc_verify is no longer role-gated"
+            .contains("unavailable for role"),
+        "poc_verify must reject analysts before dispatch"
     );
     let finding: Finding = store.require("finding", id)?;
     assert_eq!(finding.stage, FindingStage::Suspected);
@@ -1478,7 +1483,7 @@ async fn lifecycle_rejects_unread_messages_and_new_effects_after_finish_but_allo
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    let finish_args = json!({"summary":"Trusted fixture inspected"});
+    let finish_args = json!({"result":{"outcome":"success","answer":"Trusted fixture inspected"}});
     let finished = service
         .execute(
             &agent.id,
@@ -1507,7 +1512,7 @@ async fn lifecycle_rejects_unread_messages_and_new_effects_after_finish_but_allo
             &run.root_id,
             "finish-root-too-early",
             "finish_scan",
-            json!({"summary":"done"}),
+            json!({"result":{"outcome":"success","answer":"done"}}),
         )
         .await?;
     assert!(root_finish.is_error);
@@ -1532,7 +1537,7 @@ async fn lifecycle_rejects_unread_messages_and_new_effects_after_finish_but_allo
             &run.root_id,
             "finish-root",
             "finish_scan",
-            json!({"summary":"done"}),
+            json!({"result":{"outcome":"success","answer":"done"}}),
         )
         .await?;
     assert!(!done.is_error);
@@ -1580,6 +1585,21 @@ for line in sys.stdin:
         timeout_seconds: 10,
     });
     let service = ToolService::new(config, store.clone()).await?;
+    let catalog = service
+        .execute(
+            &agent.id,
+            "mcp-catalog",
+            "tool_catalog",
+            json!({"group":"external"}),
+        )
+        .await?;
+    assert!(!catalog.is_error, "{catalog:?}");
+    assert_eq!(result(&catalog)["tools"][0]["id"], "mcp_fixture_mutate");
+    assert_eq!(result(&catalog)["tools"][0]["status"], "group not selected");
+    assert!(
+        !counter.exists(),
+        "tool discovery must not invoke the external tool"
+    );
     let first = service
         .execute(&agent.id, "mcp-once", "mcp_fixture_mutate", json!({}))
         .await?;
@@ -1734,35 +1754,20 @@ async fn docker_independent_verification_uses_real_trials_and_limits_impact() ->
 }
 
 #[tokio::test]
-async fn think_has_an_agent_scoped_audit_record_and_severity_is_gated_by_stage() -> Result<()> {
+async fn removed_think_is_rejected_and_severity_is_gated_by_stage() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
-    // Audit records have an agent owner and a small acknowledgment. The
-    // original tool-call arguments still belong to the model's history.
-    let first = service
+    let removed = service
         .execute(
             &agent.id,
-            "think-1",
+            "removed-think",
             "think",
-            json!({"content":"partial plan: xref the prompt string"}),
+            json!({"content":"no scratch tool"}),
         )
         .await?;
-    assert!(!first.is_error);
-    assert_eq!(result(&first)["recorded"], true);
-    assert_eq!(result(&first)["thoughts"], 1);
-    let second = service
-        .execute(
-            &agent.id,
-            "think-2",
-            "think",
-            json!({"content":"revised plan"}),
-        )
-        .await?;
-    assert_eq!(result(&second)["thoughts"], 2);
-    let thoughts = store.list::<Thought>("thought", &run.id)?;
-    assert_eq!(thoughts.len(), 2);
-    assert!(thoughts.iter().all(|thought| thought.agent_id == agent.id));
+    assert!(removed.is_error);
+    assert!(store.list::<Thought>("thought", &run.id)?.is_empty());
     // Real evidence from a static tool, so the severity gate is what we test.
     let evidence = service
         .execute(&agent.id, "evidence", "binary_strings", json!({"limit":5}))
@@ -1811,7 +1816,7 @@ async fn contracted_tool_tasks_deliver_structured_results_without_vulnerability_
             child_id,
             "missing-table",
             "agent_finish",
-            json!({"summary":"done"}),
+            json!({"result":{"outcome":"success","answer":"done"}}),
         )
         .await?;
     assert!(invalid.is_error);
@@ -2215,7 +2220,7 @@ async fn placeholder_completion_is_rejected_without_terminating_the_agent() -> R
                 &agent.id,
                 &format!("placeholder-{index}"),
                 "agent_finish",
-                json!({"summary":answer}),
+                json!({"result":{"outcome":"success","answer":answer}}),
             )
             .await?;
         assert!(outcome.is_error, "placeholder was accepted: {answer}");
@@ -2226,13 +2231,266 @@ async fn placeholder_completion_is_rejected_without_terminating_the_agent() -> R
             &agent.id,
             "negative-finish",
             "agent_finish",
-            json!({"summary":"No flag found in the inspected input path."}),
+            json!({"result":{"outcome":"success","answer":"No flag found in the inspected input path."}}),
         )
         .await?;
     assert!(!outcome.is_error, "{:?}", outcome.value);
     assert_eq!(
         store.load::<AgentMetadata>(&agent.id)?.status,
         Status::Completed
+    );
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn tool_interfaces_enforce_roles_grants_and_remove_aliases() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    for name in ["analysis_verify", "poc_verify", "verification_record"] {
+        assert!(
+            !service
+                .definitions(Role::Analyst)
+                .iter()
+                .any(|d| d.name.as_str() == name)
+        );
+        assert!(
+            service
+                .definitions(Role::Verifier)
+                .iter()
+                .any(|d| d.name.as_str() == name)
+        );
+        let denied = service
+            .execute(&agent.id, &format!("denied:{name}"), name, json!({}))
+            .await?;
+        assert!(denied.is_error, "{name}");
+    }
+    for name in [
+        "think",
+        "runtime_doctor",
+        "fuzz_status",
+        "notes_list",
+        "todos_list",
+        "threat_model_get",
+        "lab_prune",
+        "runtime_prepare",
+        "bundle_stage",
+    ] {
+        assert!(
+            !service
+                .definitions(Role::Analyst)
+                .iter()
+                .any(|d| d.name.as_str() == name),
+            "{name}"
+        );
+    }
+    let denied = service
+        .execute(
+            &agent.id,
+            "raw-denied",
+            "debug_command",
+            json!({"session_id":"s","command":"info registers"}),
+        )
+        .await?;
+    assert!(denied.is_error && denied.value.to_string().contains("task grant"));
+    let denied = service
+        .execute(
+            &agent.id,
+            "select-denied",
+            "tool_select",
+            json!({"groups":["raw_debugger"]}),
+        )
+        .await?;
+    assert!(denied.is_error);
+    let denied=service.execute(&agent.id,"delegate-denied","create_agent",json!({"name":"escape","role":"analyst","task":"inspect","scope":"escape","contract":{"tool_grants":["raw_debugger"]}})).await?;
+    assert!(denied.is_error);
+    let selected = service
+        .execute(
+            &agent.id,
+            "select-static",
+            "tool_select",
+            json!({"groups":["static_analysis"]}),
+        )
+        .await?;
+    assert!(!selected.is_error, "{selected:?}");
+    let catalog = service
+        .execute(
+            &agent.id,
+            "catalog",
+            "tool_catalog",
+            json!({"group":"raw_debugger"}),
+        )
+        .await?;
+    assert_eq!(
+        result(&catalog)["tools"][0]["status"],
+        "task grant required"
+    );
+    let granted = coordinator
+        .create_child(
+            &run.root_id,
+            ChildRequest {
+                name: "raw debugger".into(),
+                role: Role::Analyst,
+                task: "trusted advanced debugging".into(),
+                scope: "debug".into(),
+                environment_id: None,
+                skills: vec![],
+                inherit_context: false,
+                wait_for_predecessors: vec![],
+                dependency_policy: Default::default(),
+                contract: TaskContract {
+                    tool_grants: vec![ToolGrant::RawDebugger],
+                    ..Default::default()
+                },
+            },
+        )?
+        .agent;
+    let selected = service
+        .execute(
+            &granted.id,
+            "select-granted",
+            "tool_select",
+            json!({"groups":["raw_debugger"]}),
+        )
+        .await?;
+    assert!(!selected.is_error, "{selected:?}");
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn static_target_refs_and_evidence_inventory_stay_run_scoped() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let secondary = store.artifact(
+        &run.id,
+        &agent.id,
+        "secondary",
+        "fixture",
+        b"UNIQUE_SECONDARY_STRING\0",
+        "application/octet-stream",
+        json!({"target_sha256":"secondary"}),
+    )?;
+    let strings=service.execute(&agent.id,"secondary-strings","binary_strings",json!({"target_ref":{"kind":"evidence","evidence_id":secondary.id},"contains":"UNIQUE_SECONDARY"})).await?;
+    assert!(!strings.is_error, "{strings:?}");
+    assert!(
+        result(&strings)
+            .to_string()
+            .contains("UNIQUE_SECONDARY_STRING")
+    );
+    let rejected = service
+        .execute(
+            &agent.id,
+            "old-target",
+            "binary_strings",
+            json!({"target_evidence_id":secondary.id}),
+        )
+        .await?;
+    assert!(rejected.is_error);
+    let foreign = store.artifact(
+        "other-run",
+        "other-agent",
+        "other",
+        "fixture",
+        b"OTHER_RUN_ONLY",
+        "application/octet-stream",
+        json!({}),
+    )?;
+    let rejected = service
+        .execute(
+            &agent.id,
+            "foreign-target",
+            "binary_strings",
+            json!({"target_ref":{"kind":"evidence","evidence_id":foreign.id}}),
+        )
+        .await?;
+    assert!(rejected.is_error);
+    let found = service
+        .execute(
+            &agent.id,
+            "search-secondary",
+            "evidence_search",
+            json!({"sha256":secondary.sha256,"limit":1}),
+        )
+        .await?;
+    assert!(!found.is_error, "{found:?}");
+    assert_eq!(result(&found)["evidence"][0]["id"], secondary.id);
+    assert!(!result(&found).to_string().contains(&foreign.id));
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn launch_preparation_keeps_selected_identity_and_immutable_configuration() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let config = worker_config(temp.path());
+    let (store, _, run, agent) = fixture_with_config(temp.path(), &config)?;
+    let service = ToolService::new(config, store.clone()).await?;
+    let primary = json!({"source":{"kind":"primary"},"input_mode":"stdin_pipe","timeout_secs":5});
+    let prepared = service
+        .execute(
+            &agent.id,
+            "prepare-primary",
+            "launch_prepare",
+            primary.clone(),
+        )
+        .await?;
+    assert!(!prepared.is_error, "{prepared:?}");
+    let launch = result(&prepared);
+    assert_eq!(launch["executed"], false);
+    let manifest = &launch["manifest"];
+    assert_eq!(
+        manifest["files"][manifest["target"].as_str().unwrap()],
+        run.target_sha256
+    );
+    let original =
+        store.read_evidence(&run.id, launch["manifest_evidence_id"].as_str().unwrap())?;
+    assert_eq!(serde_json::from_slice::<Value>(&original)?, *manifest);
+    let replay = service
+        .execute(
+            &agent.id,
+            "prepare-primary",
+            "launch_prepare",
+            primary.clone(),
+        )
+        .await?;
+    assert_eq!(result(&replay), launch);
+    let mut changed = primary;
+    changed["timeout_secs"] = json!(6);
+    let other = service
+        .execute(&agent.id, "prepare-changed", "launch_prepare", changed)
+        .await?;
+    assert!(!other.is_error, "{other:?}");
+    assert_ne!(result(&other)["launch_spec"], launch["launch_spec"]);
+    assert_eq!(
+        store.read_evidence(&run.id, launch["manifest_evidence_id"].as_str().unwrap())?,
+        original
+    );
+    let staged = service
+        .execute(
+            &agent.id,
+            "put-secondary",
+            "file_put",
+            json!({"path":"secondary.bin","text":"secondary trusted fixture"}),
+        )
+        .await?;
+    assert!(!staged.is_error, "{staged:?}");
+    let selected=service.execute(&agent.id,"prepare-secondary","launch_prepare",json!({"source":{"kind":"staged","target":result(&staged)["file"]["path"]},"input_mode":"stdin_pipe","timeout_secs":5})).await?;
+    assert!(!selected.is_error, "{selected:?}");
+    let manifest = &result(&selected)["manifest"];
+    assert_eq!(
+        manifest["files"][manifest["target"].as_str().unwrap()],
+        result(&staged)["file"]["sha256"]
+    );
+    assert_ne!(
+        manifest["files"][manifest["target"].as_str().unwrap()],
+        run.target_sha256
+    );
+    assert!(
+        store.records::<JobRecord>(&run.id)?.is_empty(),
+        "preparation must not execute"
     );
     service.close().await;
     Ok(())

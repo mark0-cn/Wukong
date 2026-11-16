@@ -19,10 +19,10 @@ pub(in crate::application::tools) fn handle_binary_inspect<'a>(
     agent: &'a AgentMetadata,
     call_id: &'a str,
     __name: &'a str,
-    _args: Value,
+    args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let run = target(&tools.store, agent)?;
+        let (run, _secondary) = tools.resolve_target(agent, &args)?;
         let full = serde_json::to_value(binary::inspect(&run.target_path)?)?;
         let bytes = serde_json::to_vec(&full)?;
         let evidence = tools.store.artifact(
@@ -73,8 +73,13 @@ pub(in crate::application::tools) fn handle_binary_strings<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let run = target(&tools.store, agent)?;
-        let query: StringsQuery = serde_json::from_value(args)?;
+        let (run, _secondary) = tools.resolve_target(agent, &args)?;
+        let mut query_args = args;
+        query_args
+            .as_object_mut()
+            .context("arguments must be an object")?
+            .remove("target_ref");
+        let query: StringsQuery = serde_json::from_value(query_args)?;
         Ok(serde_json::to_value(binary::strings(
             &run.target_path,
             &query,
@@ -182,34 +187,8 @@ pub(in crate::application::tools) fn handle_differential_test<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let input: args::DifferentialTestArgs = serde_json::from_value(args)?;
-        ensure!(
-            (1..=64).contains(&input.inputs_base64.len())
-                && (1..=10).contains(&input.case_timeout_seconds),
-            "invalid differential budget"
-        );
-        for encoded in &input.inputs_base64 {
-            ensure!(
-                BASE64.decode(encoded)?.len() <= 65536,
-                "input vector too large"
-            );
-        }
-        tools.files.known_file(agent, &input.target, true)?;
-        tools.files.known_file(agent, &input.reference, false)?;
-        let config = serde_json::to_string(
-            &json!({"inputs":input.inputs_base64,"timeout":input.case_timeout_seconds,"python":input.reference_python}),
-        )?;
         tools
-            .runtime_tool(
-                agent,
-                call_id,
-                "py_run",
-                json!({
-                    "source":include_str!("../../../../workers/runtime/wukong_worker/execution/differential.py"),
-                    "argv":[input.reference,config], "target":input.target,
-                    "timeout_secs":(input.case_timeout_seconds*128+20).min(3600)
-                }),
-            )
+            .differential(agent, call_id, serde_json::from_value(args)?)
             .await
     })
 }

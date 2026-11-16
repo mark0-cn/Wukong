@@ -53,7 +53,7 @@ CLI 操作者可提供绝对现存路径或 HTTP(S) URL 以及 SHA-256。限制�
 
 `lab_list` 列出配置别名；`lab_status` 必须提供 `vm`，返回单 VM 状态。子 Agent 只能访问分配给自己的 VM/环境，并使用评估创建时记录的配置。其他 Agent 或代际不能复用租约。
 
-`lab_prepare`、`lab_install`、`lab_restore`、`lab_prune` 会及时返回 `operation_id`。用 `lab_operation_status` 查询结果和原始证据；准备结果包含 `lab_id`/`generation` 租约。`lab_operation_cancel` 请求中断自己拥有的操作，取消不证明回滚成功。控制器重启后，缺失实时归属的操作会显示为未知，不重放。活动/未知宿主影响会阻止所属 Agent 和评估完成。检查客体后，按需用 `wukong lab reconcile` 调和 VM 意图，再使用现有操作者命令 `wukong reconcile <operation_id> --result-file ... --evidence-id ...` 解决其持久化副作用回执。
+`lab_prepare`、`lab_install`、`lab_restore` 会及时返回 `operation_id`。用 `lab_operation_status` 查询结果和原始证据；准备结果包含不透明的 `lab_ref` 及租约。run/install/restore 只接收绑定当前评估、Agent 代际和 VM 租约的 `lab_ref`，模型无需重建租约字段。这些变更操作需要 `windows_lab` 任务授权。快照裁剪只保留为操作员 CLI 操作。`lab_operation_cancel` 请求中断自己拥有的操作，取消不证明回滚成功。控制器重启后，缺失实时归属的操作会显示为未知，不重放。活动/未知宿主影响会阻止所属 Agent 和评估完成。检查客体后，按需用 `wukong lab reconcile` 调和 VM 意图，再使用现有操作者命令 `wukong reconcile <operation_id> --result-file ... --evidence-id ...` 解决其持久化副作用回执。
 
 `lab_run` 返回普通评估任务账本中的 `run.job_id`。使用 `job_status`、`job_cancel`、`job_artifacts`；常规监督续期相同的评估/控制器租约。完成检查和证据导入遵循现有任务规则。Lab 回执记录准入身份，任务回执承载最终执行证据。后续恢复会先导入已稳定结束的任务观测。
 
@@ -100,7 +100,7 @@ verifier.exe /querysettings
 
 目录分析最多发现 256 个文件、512 MiB 和 16 层目录，计算成员哈希，推断可执行文件/库/数据类型及导入边。`bundle_manifest` 提供发现结果；`bundle_evidence` 导入校验成员用于静态分析。入口推断只是建议。
 
-`bundle_stage` 接受明确的 `entry`、可选 `members` 子集（必须包含入口，最多 64 个）、`args`、`cwd`、`input_mode`（`stdin_pipe` 或 `argv_file`）及超时（默认 300 秒）。成员/cwd 相对路径必须满足原生路径预算；选择成员在 bundle 下最多六层。`argv_file` 要求 `@@`，完整 LaunchSpec 不超过 64 KiB。无效选择/选项在上传前被拒绝。更换入口使用独立的执行准入目录，更改启动配置生成不同的内容寻址路径。调用 `job_start` 时传返回的 `launch_spec`，省略 argv/timeout_secs/cwd/env 覆盖项。
+`launch_prepare` 的 `source.kind=bundle` 接受可选 `source.entry` 和 `source.members`（必须包含入口，最多 64 个），以及 `args`、`cwd`、`env`、`input_mode`（`stdin_pipe` 或 `argv_file`）和必填的 1–3600 秒时限。所选成员总计最多 32 MiB，相对路径最多五层。非根 cwd 必须存在于布局中；`launch.json` 为保留名称。`argv_file` 要求 `@@`，完整 LaunchSpec 不超过 64 KiB。无效选择和启动选项在上传 bundle 前被拒绝。更换入口使用独立的执行准入目录，更改启动配置生成不同的内容寻址路径。调用 `job_start` 时传返回的 `launch_spec`，省略 argv/timeout_secs/cwd/env 覆盖项。
 
 `py_run` 必须提供且只提供一个非空 `source` 或 `source_file`；schema 拒绝缺失、空值和组合形式。Linux 与原生 Windows 均执行 256 KiB UTF-8 字节限制。原生文件输入在已准入的拥有者作用域内解析，按内容哈希封存后执行。Linux 也把脚本保留在内容派生路径下。两条路径都不能绕过普通任务归属或隔离。
 

@@ -44,7 +44,7 @@ pub(in crate::application::tools) fn handle_environment_doctor<'a>(
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
-        let id = text(&args, "environment_id")?;
+        let id = args["environment_id"].as_str().or(agent.environment_id.as_deref()).context("environment_id is required when the task has no assigned environment; use environment_list")?;
         ensure!(
             agent.role == Role::Root || agent.environment_id.as_deref() == Some(id),
             "an agent may probe only its assigned environment"
@@ -137,24 +137,6 @@ pub(in crate::application::tools) fn handle_seccomp_analyze<'a>(
     })
 }
 
-pub(in crate::application::tools) fn handle_runtime_doctor<'a>(
-    tools: &'a environment_service::EnvironmentService,
-    agent: &'a AgentMetadata,
-    _call_id: &'a str,
-    _name: &'a str,
-    _args: Value,
-) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move {
-        if agent.environment_id.is_some() {
-            tools.checked(agent).await?.doctor().await
-        } else {
-            Ok(
-                json!({"enabled":false,"capabilities":{},"reason":"task has no assigned environment"}),
-            )
-        }
-    })
-}
-
 pub(in crate::application::tools) fn handle_stage_target<'a>(
     tools: &'a ExecutionService,
     agent: &'a AgentMetadata,
@@ -199,7 +181,7 @@ pub(in crate::application::tools) fn handle_runtime_profile<'a>(
     tools: &'a ExecutionService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
-    name: &'a str,
+    _name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
     Box::pin(async move {
@@ -217,16 +199,7 @@ pub(in crate::application::tools) fn handle_runtime_profile<'a>(
         }
         let mut raw = tools
             .gateway
-            .worker_call(
-                agent,
-                call_id,
-                (if name == "runtime_prepare" {
-                    Method::RuntimePrepare
-                } else {
-                    Method::RuntimeProfile
-                })
-                .decode(profile_args)?,
-            )
+            .worker_call(agent, call_id, Method::RuntimeProfile.decode(profile_args)?)
             .await?;
         if let Some(files) = raw["artifacts"].as_array() {
             for file in files {
@@ -373,4 +346,28 @@ pub(in crate::application::tools) fn handle_mitigation_profile<'a>(
                 "A selected mapping describes its current permissions, not the entire GOT or all future mappings."]
         }))
     })
+}
+
+pub(in crate::application::tools) fn handle_launch_prepare<'a>(
+    tools: &'a ExecutionService,
+    agent: &'a AgentMetadata,
+    call: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        tools
+            .prepare_launch(agent, call, serde_json::from_value(args)?)
+            .await
+    })
+}
+
+pub(in crate::application::tools) fn handle_resource_read<'a>(
+    tools: &'a ExecutionService,
+    agent: &'a AgentMetadata,
+    call: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move { tools.resource_read(agent, call, &args).await })
 }

@@ -113,6 +113,7 @@ impl LabService {
         call: &str,
         input: args::LabRunArgs,
     ) -> Result<Value> {
+        let reference = self.resolve_reference(agent, &input.lab_ref)?;
         let stdin = input
             .stdin_evidence_id
             .map(|id| self.evidence_bytes(agent, &id, 1024 * 1024))
@@ -122,10 +123,12 @@ impl LabService {
             agent: agent.clone(),
             call: call.into(),
         };
-        let lab = self.open(&input.vm, agent)?.with_worker(Arc::new(worker));
+        let lab = self
+            .open(&reference.vm, agent)?
+            .with_worker(Arc::new(worker));
         lab.run(
-            &input.lab_id,
-            input.generation,
+            &reference.lab_id,
+            reference.generation,
             &input.artifact,
             stdin,
             input.timeout_secs.unwrap_or(120),
@@ -265,5 +268,141 @@ impl crate::application::windows_lab::runner::LabWorker for AssessmentWorker {
             .observe(&self.agent, &format!("{}:observe", self.call), job_id)
             .await?;
         self.outcome(value, None).map(Some)
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct LabReference {
+    pub vm: String,
+    pub lab_id: String,
+    pub generation: u64,
+    run_id: String,
+    agent_id: String,
+    agent_generation: u64,
+}
+impl LabService {
+    pub(super) fn authorize_vm(&self, agent: &AgentMetadata, vm: &str) -> Result<()> {
+        let config = self.config.vms.get(vm).context("VM is not registered")?;
+        ensure!(
+            agent.environment_id.is_some() && agent.environment_id == config.environment,
+            "lab VM is not assigned to this task environment"
+        );
+        ensure!(
+            agent.contract.tool_grants.contains(&ToolGrant::WindowsLab),
+            "Windows lab task grant required"
+        );
+        Ok(())
+    }
+    pub(super) fn bind_reference(
+        &self,
+        agent: &AgentMetadata,
+        vm: &str,
+        lab_id: &str,
+        generation: u64,
+    ) -> Result<String> {
+        self.authorize_vm(agent, vm)?;
+        let id = stable(
+            "lab-ref",
+            &format!(
+                "{}:{}:{vm}:{lab_id}:{generation}",
+                agent.run_id,
+                self.owner(agent)
+            ),
+        );
+        self.store.put(
+            "lab_reference",
+            &id,
+            &agent.run_id,
+            &LabReference {
+                vm: vm.into(),
+                lab_id: lab_id.into(),
+                generation,
+                run_id: agent.run_id.clone(),
+                agent_id: agent.id.clone(),
+                agent_generation: agent.generation,
+            },
+        )?;
+        Ok(id)
+    }
+    pub(super) fn resolve_reference(
+        &self,
+        agent: &AgentMetadata,
+        id: &str,
+    ) -> Result<LabReference> {
+        let reference: LabReference = self
+            .store
+            .get("lab_reference", id)?
+            .context("unknown lab_ref; use the reference returned by lab_prepare")?;
+        ensure!(
+            reference.run_id == agent.run_id
+                && reference.agent_id == agent.id
+                && reference.agent_generation == agent.generation,
+            "lab_ref belongs to another run or agent"
+        );
+        self.authorize_vm(agent, &reference.vm)?;
+        Ok(reference)
+    }
+}
+
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+    #[tokio::test]
+    async fn references_are_bound_to_run_agent_generation_and_grant() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let target = temporary.path().join("target");
+        fs::write(&target, b"trusted fixture")?;
+        let mut config = AppConfig::default();
+        config.environments.insert(
+            "windows".into(),
+            crate::adapters::environments::EnvironmentConfig {
+                name: "Reference fixture".into(),
+                platform: crate::adapters::environments::Platform::Windows,
+                installation_id: None,
+                runtime: crate::adapters::worker::RuntimeConfig {
+                    transport: crate::adapters::worker::TransportConfig::Ssh(
+                        crate::adapters::worker::SshConfig::new("unused-fixture".into()),
+                    ),
+                    ..Default::default()
+                },
+            },
+        );
+        config.default_environment = Some("windows".into());
+        config.windows_lab.vms.insert(
+            "fixture".into(),
+            crate::config::WindowsLabVm {
+                environment: Some("windows".into()),
+                vmx: temporary.path().join("fixture.vmx"),
+                vmrun: temporary.path().join("vmrun.exe"),
+                ..Default::default()
+            },
+        );
+        let store = Store::open(temporary.path().join("state"))?;
+        let run = Coordinator::new(store.clone()).create_run(
+            &target,
+            "reference test",
+            Budget::default(),
+            serde_json::to_value(&config)?,
+        )?;
+        let mut agent: AgentMetadata = store.load(&run.root_id)?;
+        agent.environment_id = Some("windows".into());
+        agent.contract.tool_grants = vec![ToolGrant::WindowsLab];
+        let tools = ToolService::new(config, store).await?;
+        let service = ToolContext::new(&tools, None).lab;
+        let reference = service.bind_reference(&agent, "fixture", "lease", 4)?;
+        assert_eq!(service.resolve_reference(&agent, &reference)?.generation, 4);
+        for changed in 0..5 {
+            let mut actor = agent.clone();
+            match changed {
+                0 => actor.run_id = "foreign-run".into(),
+                1 => actor.id = "foreign-agent".into(),
+                2 => actor.generation += 1,
+                3 => actor.environment_id = Some("other".into()),
+                _ => actor.contract.tool_grants.clear(),
+            }
+            assert!(service.resolve_reference(&actor, &reference).is_err());
+        }
+        tools.close().await;
+        Ok(())
     }
 }

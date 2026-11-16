@@ -51,6 +51,15 @@ impl Coordinator {
         if request.contract.objective.trim().is_empty() {
             request.contract.objective = request.task.clone();
         }
+        ensure!(
+            parent.role == Role::Root
+                || request
+                    .contract
+                    .tool_grants
+                    .iter()
+                    .all(|grant| parent.contract.tool_grants.contains(grant)),
+            "a child may only delegate its existing tool grants"
+        );
         CompletionRules::validate_contract(&request.contract)?;
         Self::validate_evidence(tx, &run.id, &request.contract.input_evidence_ids)?;
         let agents = tx.records::<AgentMetadata>(&run.id)?;

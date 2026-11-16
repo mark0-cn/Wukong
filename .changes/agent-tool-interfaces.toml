@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Unify agent tool selection, verification permissions, target references and launch preparation; add bounded evidence/resource queries. Migrate removed aliases to job_status, environment_doctor, context_search/read and launch_prepare. Complete with result, stage with evidence_id, use target_ref/AddressRef, lab_ref and tagged interactive sources; advanced tools require task grants."
+zh_CN = "统一 agent 工具选择、验证权限、目标引用和启动准备，并增加有界证据／资源查询。旧别名迁移到 job_status、environment_doctor、context_search/read 和 launch_prepare。完成时使用 result，暂存使用 evidence_id；改用 target_ref/AddressRef、lab_ref 和带类型的交互输入来源；高级工具需要任务授权。"

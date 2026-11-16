@@ -69,7 +69,6 @@ impl ToolContext {
             static_gateway,
             bundle: bundle::BundleService {
                 store: service.store.clone(),
-                execution: execution.clone(),
             },
             execution: execution.clone(),
             analysis,

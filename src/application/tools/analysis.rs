@@ -11,6 +11,35 @@ pub(super) struct AnalysisService {
     pub(super) config: crate::config::StaticConfig,
 }
 impl AnalysisService {
+    /// Resolve and keep secondary bytes alive for every static backend.
+    pub(super) fn resolve_target(
+        &self,
+        agent: &AgentMetadata,
+        args: &Value,
+    ) -> Result<(RunRecord, Option<tempfile::NamedTempFile>)> {
+        let mut run = target(&self.store, agent)?;
+        if let Some(reference) = args.get("target_ref").filter(|v| !v.is_null()) {
+            match serde_json::from_value::<args::TargetRef>(reference.clone())? {
+                args::TargetRef::Primary => {}
+                args::TargetRef::Evidence { evidence_id } => {
+                    let record: Evidence =
+                        require_in_run(&self.store, &evidence_id, &agent.run_id)?;
+                    ensure!(
+                        record.size <= 32 * 1024 * 1024,
+                        "secondary binary exceeds 32 MiB"
+                    );
+                    let bytes = self.store.read_evidence(&agent.run_id, &evidence_id)?;
+                    let mut file = tempfile::NamedTempFile::new()?;
+                    std::io::Write::write_all(&mut file, &bytes)?;
+                    run.target_path = file.path().into();
+                    run.target_sha256 = record.sha256;
+                    return Ok((run, Some(file)));
+                }
+            }
+        }
+        Ok((run, None))
+    }
+
     pub(super) async fn ghidra(
         &self,
         agent: &AgentMetadata,
@@ -18,20 +47,7 @@ impl AnalysisService {
         name: &str,
         args: &Value,
     ) -> Result<Value> {
-        let mut run = target(&self.store, agent)?;
-        let mut secondary = None;
-        if let Some(id) = args["target_evidence_id"].as_str() {
-            let bytes = self.store.read_evidence(&agent.run_id, id)?;
-            ensure!(
-                bytes.len() <= 32 * 1024 * 1024,
-                "secondary binary exceeds 32 MiB"
-            );
-            let mut file = tempfile::NamedTempFile::new()?;
-            std::io::Write::write_all(&mut file, &bytes)?;
-            run.target_path = file.path().into();
-            run.target_sha256 = hex::encode(Sha256::digest(&bytes));
-            secondary = Some(file);
-        }
+        let (run, secondary) = self.resolve_target(agent, args)?;
         let query = match name {
             "functions_search" => GhidraQuery::Functions {
                 pattern: args["pattern"].as_str().map(str::to_owned),
@@ -68,7 +84,7 @@ impl AnalysisService {
                 _ => (&self.files, &self.gateway),
             };
             let staged = if secondary.is_some() {
-                files.file_put(agent, &format!("{call_id}:target"), &json!({"path":format!("files/{}.bin",run.target_sha256),"evidence_id":args["target_evidence_id"],"executable":false})).await?["file"].clone()
+                files.file_put(agent, &format!("{call_id}:target"), &json!({"path":format!("files/{}.bin",run.target_sha256),"evidence_id":args["target_ref"]["evidence_id"],"executable":false})).await?["file"].clone()
             } else {
                 files
                     .stage_target(agent, &format!("{call_id}:target"))
@@ -138,23 +154,18 @@ impl AnalysisService {
 }
 
 fn static_address(args: &Value, run: &RunRecord) -> Result<u64> {
-    let input: args::StaticAddress = serde_json::from_value(args["address"].clone())
-        .context("address requires a module-relative AddressRef or a byte offset")?;
-    let offset = match input {
-        args::StaticAddress::Offset(value) => value,
-        args::StaticAddress::Reference(address) => {
-            address.validate()?;
-            ensure!(
-                address.module_sha256 == run.target_sha256,
-                "address belongs to another module SHA256"
-            );
-            ensure!(
-                address.space == binary::AddressSpace::ModuleRelative,
-                "static analysis requires module_relative byte offsets; convert VA using the observed image/load base, never page numbers or file offsets"
-            );
-            address.value
-        }
-    };
+    let address: args::StaticAddress = serde_json::from_value(args["address"].clone())
+        .context("address requires a target-bound module-relative AddressRef")?;
+    address.validate()?;
+    ensure!(
+        address.module_sha256 == run.target_sha256,
+        "address belongs to another module SHA256"
+    );
+    ensure!(
+        address.space == binary::AddressSpace::ModuleRelative,
+        "static analysis requires module_relative byte offsets"
+    );
+    let offset = address.value;
     if let Ok(profile) = binary::inspect(&run.target_path)
         && !binary::contains_module_offset(&run.target_path, profile.image_base, offset)?
     {
@@ -208,11 +219,7 @@ mod address_tests {
             static_address(&json!({"address":profile.entry}), &run)?,
             0x1080
         );
-        assert_eq!(static_address(&json!({"address":0x1080}), &run)?, 0x1080);
-        let error = static_address(&json!({"address":0x401080}), &run)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("0x1080") && error.contains("image_base=0x400000"));
+        assert!(static_address(&json!({"address":0x1080}), &run).is_err());
         for address in [
             binary::AddressRef::file_offset(&run.target_sha256, 0x1080),
             binary::AddressRef::runtime(&run.target_sha256, 0x401080, "instance", 0x400000)?,

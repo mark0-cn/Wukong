@@ -12,7 +12,7 @@ not claims.
   at least one seed file. Document argv/file/stdin mode, seed coverage, memory
   and per-exec time limits, and the environment in the call itself.
 - Fuzzing is a background job: `fuzz_start` returns a `job_id` immediately.
-  Poll `fuzz_status` occasionally and keep doing other work — never occupy a
+  Poll `job_status` occasionally and keep doing other work — never occupy a
   model turn waiting on it.
 
 ## Monitoring and triage handoff

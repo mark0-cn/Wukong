@@ -1,6 +1,6 @@
 # Worker toolchain quick reference
 
-Use `runtime_doctor` to check the selected worker's actual capabilities.
+Use `environment_doctor` to check the selected worker's actual capabilities.
 The bundled worker includes Python 3, pwntools, z3-solver, angr and ropper;
 other configured workers may not. Reach available tools through execution.
 
@@ -202,8 +202,8 @@ symbol subtraction are candidate evidence, not proof of a loaded library. An own
 debugger session enables observed mappings and per-file mapped_hash_confirmed status.
 Windows profiles preserve admitted file hashes and observe the owned process handle;
 mapped Windows paths have unverified contents and cannot confirm mapped hashes.
-For supplied runtime files, runtime_prepare returns immutable copies and direct launch_argv;
-pass those argv entries unchanged to job_start or interactive_start. Extra libraries may
+For supplied runtime files, launch_prepare with source.kind=linux_runtime returns an immutable
+launch_spec; pass it unchanged to job_start or interactive_start without argv overrides. Extra libraries may
 still be missing. Preserve the original target and all runtime hashes. Never patch the
 original binary or silently substitute the worker's libc. A mapping that could not be
 hashed or a missing process remains unknown, not a confirmed match.

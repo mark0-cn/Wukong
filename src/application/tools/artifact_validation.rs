@@ -85,7 +85,7 @@ pub(super) async fn start(
         .context("baseline must be the documented raw argv reproduction")?;
     ensure!(
         original_argv.len() >= 2
-            && original_argv[0] == input.interpreter
+            && original_argv[0] == input.interpreter.as_str()
             && original_argv[2..]
                 == input
                     .arguments

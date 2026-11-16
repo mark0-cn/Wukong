@@ -24,7 +24,7 @@ independent verification protocol.
 ## Shared preconditions
 
 Pin target/runtime hashes with `runtime_profile`. When a loader and libc are
-supplied, use `runtime_prepare` for immutable launch copies and check live
+supplied, use `launch_prepare` with source.kind=linux_runtime for immutable launch copies and check live
 mappings after startup. A library filename or page-aligned subtraction is not a
 match. Leaks and derived addresses belong to the observed process/session.
 

@@ -12,7 +12,14 @@ impl LabService {
         name: &str,
         args: Value,
     ) -> Result<Value> {
-        let vm = text(&args, "vm")?.to_owned();
+        let vm = match name {
+            "lab_prepare" => text(&args, "vm")?.to_owned(),
+            "lab_restore" | "lab_install" => {
+                self.resolve_reference(agent, text(&args, "lab_ref")?)?.vm
+            }
+            _ => bail!("unsupported lab operation"),
+        };
+        self.authorize_vm(agent, &vm)?;
         let lab = self.open(&vm, agent)?;
         self.start_lab_operation(agent, call, name, args, lab).await
     }
@@ -95,10 +102,8 @@ impl LabService {
         args: Value,
     ) -> Result<Value> {
         if matches!(name, "lab_restore" | "lab_install") {
-            lab.validate_lease(
-                text(&args, "lab_id")?,
-                args["generation"].as_u64().context("generation required")?,
-            )?;
+            let reference = self.resolve_reference(agent, text(&args, "lab_ref")?)?;
+            lab.validate_lease(&reference.lab_id, reference.generation)?;
         }
         if matches!(name, "lab_restore" | "lab_install")
             && let Some(recorded) = lab.recorded_run()?
@@ -131,29 +136,49 @@ impl LabService {
         match name {
             "lab_prepare" => {
                 let input: args::LabPrepareArgs = serde_json::from_value(args)?;
-                Ok(serde_json::to_value(
-                    lab.prepare(
+                let lease = lab
+                    .prepare(
                         &self.owner(agent),
                         &input.purpose,
                         self.materialize_spec(agent, input.spec)?,
                     )
-                    .await?,
-                )?)
+                    .await?;
+                let value = serde_json::to_value(&lease)?;
+                let reference = self
+                    .bind_reference(
+                        agent,
+                        &input.vm,
+                        text(&value, "lab_id")?,
+                        value["generation"]
+                            .as_u64()
+                            .context("lease generation missing")?,
+                    )
+                    .map_err(|error| crate::application::windows_lab::LabError {
+                        code: "lab_reference_persistence_failed",
+                        operation_id: lease.lab_id.clone(),
+                        generation: lease.generation,
+                        receipt: None,
+                        message: format!(
+                            "preparation completed but reference publication failed: {error:#}"
+                        ),
+                    })?;
+                Ok(json!({"lab_ref": reference, "lease": value}))
             }
             "lab_install" => {
                 let input: args::LabInstallArgs = serde_json::from_value(args)?;
+                let reference = self.resolve_reference(agent, &input.lab_ref)?;
                 lab.install(
-                    &input.lab_id,
-                    input.generation,
+                    &reference.lab_id,
+                    reference.generation,
                     input.timeout_secs.unwrap_or(300),
                 )
                 .await
             }
             "lab_restore" => {
                 let input: args::LabRestoreArgs = serde_json::from_value(args)?;
-                lab.restore(&input.lab_id, input.generation).await
+                let reference = self.resolve_reference(agent, &input.lab_ref)?;
+                lab.restore(&reference.lab_id, reference.generation).await
             }
-            "lab_prune" => lab.prune().await,
             _ => bail!("unsupported lab operation"),
         }
     }

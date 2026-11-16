@@ -14,9 +14,9 @@ what to run": delegate the running too.
 | ELF with symbols | analyst with `reverse` searches functions and analyzes candidates |
 | ELF stripped | analyst combines `recon` anchors with `reverse` references as needed |
 | PE / Mach-O | analyst uses static inspection and Ghidra; if the bound Windows worker lacks Ghidra, the configured static Linux environment supplies it; Mach-O stays static-only, while PE execution/debugging needs a registered Windows VM environment |
-| Directory / install tree | analyst runs `bundle_manifest` first: it hashes every discovered file, infers executable/library/data kinds and import edges without user-assigned roles. Import one member with `bundle_evidence` for Ghidra, or select an entry and up to 64 members with `bundle_stage` and run that entry through `job_start` with its `launch_spec`; inspect cross-member edges before treating files as unrelated |
+| Directory / install tree | analyst runs `bundle_manifest` first: it hashes every discovered file, infers executable/library/data kinds and import edges without user-assigned roles. Import one member with `bundle_evidence` for Ghidra, or select an entry and up to 64 members with `launch_prepare` (`source.kind=bundle`, `source.entry`, `source.members`) and run that entry through `job_start` with its `launch_spec`; inspect cross-member edges before treating files as unrelated |
 | Windows target | bind the Windows environment, then check `environment_doctor` before staging; expect no AFL/QEMU, raw debugger commands or core snapshots — plan owned DbgEng sessions plus `crash_replay`/`input_minimize`/`poc_verify` with argv/stdin and bounded `py_run` analysis |
-| Execution required | assigned analyst stages the target with `stage_target` and checks `runtime_doctor` |
+| Execution required | assigned analyst stages the target with `stage_target` and checks `environment_doctor` |
 | Vulnerability discovery requested | analyst with `hunter` investigates the bounded scope and forms testable hypotheses; no prior hypothesis required |
 | A crash exists | analyst with `crash` replays, minimizes and investigates the root cause; exploit work only when requested |
 | Goal is control-flow hijack | analyst loads `pwn` alongside `reverse`/`exploit` as needed |
@@ -43,7 +43,7 @@ what to run": delegate the running too.
 
 ## Establish the analysis context
 
-Read `notes_list` and the task configuration. Use `note_save` to share the
+Use `context_search` with kind=note and the task configuration. Use `note_save` to share the
 user's questions, target identity, environment, known facts with evidence IDs,
 constraints and open questions. Build on supplied context and recon reports;
 never run target tools yourself or guess missing facts. Mark inferred facts
@@ -56,7 +56,7 @@ tell a child that `function_decompile`, `functions_search` or another tool is
 supported when preflight omitted it; absent tools are a plan constraint, not a
 detail to paper over.
 
-A threat model is optional. Use `threat_model_get/save/amend` only when the
+A threat model is optional. Use `context_search`/`context_read` and `threat_model_save`/`threat_model_amend` only when the
 requested work concerns attackers, trust boundaries or exploitability. Do not
 turn behavior analysis, format reconstruction, debugging or compatibility work
 into a security assessment. Choose capabilities from the user's objective.
@@ -217,7 +217,7 @@ canonical deliverable name (`formats`, `algorithms`, `state_machine`, `binary_di
 These names require structured evidence-backed rows at completion. General verification must
 produce an `analysis_verify` record; inspect its scope and verdict before adopting the conclusion.
 
-Before assigning execution-dependent work call runtime_doctor and attach its observed capability
+Before assigning execution-dependent work call environment_doctor and attach its observed capability
 availability to the dossier. Match skill requires to those observations; unknown availability
 is not support. Missing execution permits a bounded static task, not a promise of runtime proof.
 Do not repeat preflight for each child unless the backend configuration changes.
