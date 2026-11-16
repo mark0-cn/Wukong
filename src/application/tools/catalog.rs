@@ -938,7 +938,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::PyRunArgs>(
             "py_run",
             "tool-py-run",
-            "Run a Python script in the worker in ONE step: pass the source text directly (no base64, no file_put). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv as a read-only executable copy in isolated jobs — read it from sys.argv[-1]. Prefer this over file_put+job_start for any script longer than one line.",
+            "Run a Python script in the worker in ONE step. Pass small scripts as source text; for larger scripts use file_put with text and pass the returned path as source_file (exactly one of source/source_file). The worker syntax-checks it and returns the compiler error inline before spending a job; then runs it as a background job (job_status for stdout/stderr). Optional argv entries arrive as sys.argv[1..]; an optional target=<staged path> is appended LAST to argv as a read-only executable copy in isolated jobs — read it from sys.argv[-1].",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {
@@ -1007,6 +1007,78 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::All,
             Requirement::Worker(&[Method::PocVerify]),
         ),
+        spec::<args::LabStatusArgs>(
+            "lab_status",
+            "tool-lab-status",
+            "Inspect a registered Windows lab VM: host reachability, snapshots, phase and the last run/installation. Read-only; no worker or host mutation.",
+            ReplayPolicy::ReadOnly,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_status(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabPrepareArgs>(
+            "lab_prepare",
+            "tool-lab-prepare",
+            "Prepare a registered Windows lab: materialize the spec's hash-verified package, validate its install plan, create the baseline if needed and take the experiment snapshot. Returns the lease with lab_id and generation; target tools use that lease.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_prepare(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabRunArgs>(
+            "lab_run",
+            "tool-lab-run",
+            "Run one artifact from the experiment's verified package through the registered Windows worker; optional stdin comes from bounded evidence. Writes an immutable run receipt and marks transport failures unknown. Restore the baseline to reconcile.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_run(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabInstallArgs>(
+            "lab_install",
+            "tool-lab-install",
+            "Run the package's hash-pinned install.ps1 through the lab administrative channel. Requires the configured password environment variable; writes an immutable installation receipt.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_install(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabRestoreArgs>(
+            "lab_restore",
+            "tool-lab-restore",
+            "Revert the registered lab to its baseline, optionally start it and prune the experiment snapshot. Reconciles unknown run/install outcomes; requires the active lab_id and generation.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_restore(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
+        spec::<args::LabPruneArgs>(
+            "lab_prune",
+            "tool-lab-prune",
+            "Delete unused lab-prefixed snapshots while keeping the baseline and the active experiment snapshot. Reports per-snapshot failures and never touches unrelated snapshots.",
+            ReplayPolicy::OperatorOnly,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_lab_prune(services, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
     ]
 }
 pub(crate) fn child_schema() -> Value {
@@ -1025,6 +1097,15 @@ mod role_tests {
         assert!(!validator.allows(Role::Root));
         assert!(!validator.allows(Role::Analyst));
         assert!(validator.allows(Role::Verifier));
+        for name in ["lab_status", "lab_prepare", "lab_run", "lab_install"] {
+            let spec = builtins()
+                .iter()
+                .find(|s| s.definition.name.as_str() == name)
+                .unwrap();
+            assert!(!spec.allows(Role::Root), "{name}");
+            assert!(spec.allows(Role::Analyst), "{name}");
+            assert!(spec.allows(Role::Verifier), "{name}");
+        }
         for name in [
             "binary_inspect",
             "function_decompile",

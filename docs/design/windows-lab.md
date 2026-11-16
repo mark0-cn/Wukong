@@ -126,6 +126,21 @@ verifier.exe /querysettings
 
 Test signing is sufficient for test drivers. PatchGuard is not bypassed or disabled by this workflow, and third-party PatchGuard-bypass tooling is not part of the lab; if an experiment needs one, treat it as an isolated operator step and restore the baseline afterwards. The baseline restore removes the test certificate, testsigning flag, service and Verifier settings together.
 
+## Multi-environment analysis
+
+A Windows execution worker does not need to carry every reverse-engineering tool. Register a Linux worker (the Docker image already contains Ghidra, capstone, pefile and angr) and name it as the static backend:
+
+```toml
+[analysis]
+static_environment = "linux-static"
+```
+
+- With this setting, Ghidra tools are advertised to Windows-bound analysts. The controller stages the target into the Linux environment, runs `ghidra.query` there and imports the returned artifacts, while `debug_*`, `crash_replay`, `poc_verify` and `py_run` stay on the Windows worker.
+- Each tool call binds only the environment it needs; static and dynamic calls can therefore be used in the same assessment without adding a decompiler to the Windows worker.
+- Tool availability still comes from preflight, not from the catalog. Only capabilities observed for the chosen backend are advertised; a missing tool is a planning constraint.
+- Agent-facing lab tools expose the same lifecycle as the CLI: `lab_status` (omit `vm` to list configured VMs), `lab_prepare`, `lab_run`, `lab_install`, `lab_restore` and `lab_prune`. They are child-only controller tools; `lab_run`/`lab_install` use the registered worker and administrative channel.
+- `py_run` accepts either inline `source` or a worker `source_file` created with `file_put`; large scripts should be uploaded first instead of embedded in one tool argument.
+
 ## Host operations
 
 The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx> <name>`, `revertToSnapshot <vmx> <name>` and `start <vmx> nogui`. Each call has a timeout and captured stdout/stderr, never a shell. Baseline snapshots are created only when absent; existing snapshots are never deleted.
@@ -139,6 +154,7 @@ The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx>
 - Cleanup actions are not executed. Restoring the disposable VM to the baseline is the cleanup boundary, so installation plans may omit cleanup entries.
 - A real service installation was validated: the packaged `install.ps1` created a manual service in generation 15 (exit code 0, immutable receipt), and the generation 16 baseline restore removed that service and pruned the experiment snapshot while the administrator login kept working.
 - A minimal WDM driver signed with a self-signed certificate loaded under testsigning (service RUNNING) and again under standard Driver Verifier after a reboot; reverting the baseline removed the service, test certificate and Verifier settings and left the worker `doctor` ready.
+- A Windows-bound analyst obtained `mainCRTStartup` for the PE target through Ghidra 12.2 running in the registered Docker Linux environment, while `lab_status` listed the configured lab VM (`vm=lab`). This confirms static tools can be called from a Windows-bound assessment without adding a decompiler to the Windows worker.
 - Driver coverage is limited to a legacy kernel service with no device I/O. Production/attestation signing, PnP device stacks and PatchGuard-bypass scenarios are not exercised.
 - Phase 1 validation used the real VM: baseline and experiment snapshots were created, restores to the baseline ran in generations 2 and 4, and the worker `doctor` reported ready again after the VM start. A packaged prebuilt EXE was then uploaded and executed through the registered worker in generation 9 (job completed with exit code 0, immutable receipt written), and the baseline restore in generation 10 left the worker `doctor` ready again. Controller-restart, timeout and stale-generation behavior are covered by unit tests with a fake host.
 

@@ -16,13 +16,17 @@ impl ToolService {
 
     fn selection(&self, agent: &AgentMetadata, observation: Option<&Value>) -> ToolSelection {
         let local = self.local_ghidra().is_some_and(|path| path.is_file());
+        let static_ghidra = self.static_environment.is_some();
         let mut names = BTreeSet::new();
         let mut unavailable = Vec::new();
         for spec in builtins()
             .iter()
             .filter(|spec| spec.model_visible && spec.allows(agent.role))
         {
-            if spec.requirement.available(observation, local) {
+            if spec
+                .requirement
+                .available(observation, local, static_ghidra)
+            {
                 names.insert(spec.definition.name.to_string());
             } else {
                 unavailable

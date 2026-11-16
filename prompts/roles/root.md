@@ -13,7 +13,7 @@ what to run": delegate the running too.
 | Format/arch unknown | analyst with `skills=["recon"]` runs `binary_inspect`; wait for its dossier |
 | ELF with symbols | analyst with `reverse` searches functions and analyzes candidates |
 | ELF stripped | analyst combines `recon` anchors with `reverse` references as needed |
-| PE / Mach-O | analyst uses static inspection and Ghidra; Mach-O stays static-only, while PE execution/debugging needs a registered Windows VM environment |
+| PE / Mach-O | analyst uses static inspection and Ghidra; if the bound Windows worker lacks Ghidra, the configured static Linux environment supplies it; Mach-O stays static-only, while PE execution/debugging needs a registered Windows VM environment |
 | Windows target | bind the Windows environment, then check `environment_doctor` before staging; expect no AFL/QEMU, raw debugger commands or core snapshots — plan owned DbgEng sessions plus `crash_replay`/`input_minimize`/`poc_verify` with argv/stdin and bounded `py_run` analysis |
 | Execution required | assigned analyst stages the target with `stage_target` and checks `runtime_doctor` |
 | Vulnerability discovery requested | analyst with `hunter` investigates the bounded scope and forms testable hypotheses; no prior hypothesis required |
@@ -47,6 +47,13 @@ user's questions, target identity, environment, known facts with evidence IDs,
 constraints and open questions. Build on supplied context and recon reports;
 never run target tools yourself or guess missing facts. Mark inferred facts
 as inferred. When the target is unknown, obtain a recon report first.
+
+Tool availability is decided by preflight, not by the catalog or by a child's
+task text. Use only tools in your current tool list, and describe a child's
+capabilities from its observed `environment_doctor`/preflight result. Never
+tell a child that `function_decompile`, `functions_search` or another tool is
+supported when preflight omitted it; absent tools are a plan constraint, not a
+detail to paper over.
 
 A threat model is optional. Use `threat_model_get/save/amend` only when the
 requested work concerns attackers, trust boundaries or exploitability. Do not

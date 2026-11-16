@@ -23,5 +23,7 @@ mod findings;
 pub(super) use findings::*;
 mod analysis;
 pub(super) use analysis::*;
+mod lab;
+pub(super) use lab::*;
 mod execution;
 pub(super) use execution::*;

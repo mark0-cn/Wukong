@@ -24,11 +24,17 @@ impl Requirement {
             observation.is_some_and(|value| value["capabilities"][capability] == true)
         })
     }
-    pub(super) fn available(self, observation: Option<&Value>, local_ghidra: bool) -> bool {
+    pub(super) fn available(
+        self,
+        observation: Option<&Value>,
+        local_ghidra: bool,
+        static_ghidra: bool,
+    ) -> bool {
         match self {
             Self::Controller | Self::Probe => true,
             Self::Ghidra => {
                 local_ghidra
+                    || static_ghidra
                     || observation.is_some_and(|value| {
                         value["methods"][Method::GhidraQuery.name()]["ready"] == true
                     })
@@ -47,7 +53,7 @@ impl Requirement {
                     Method::JobStatus,
                     Method::JobArtifacts,
                 ])
-                .available(observation, false)
+                .available(observation, false, false)
             }
         }
     }
@@ -88,22 +94,37 @@ impl ToolService {
 
 impl ToolContext {
     pub(super) async fn require_backend(&self, spec: &catalog::Spec, args: &Value) -> Result<()> {
-        let observation = if match spec.requirement {
-            Requirement::Controller | Requirement::Probe => false,
-            Requirement::Ghidra => self.local_ghidra.is_none(),
-            _ => true,
-        } && !matches!(spec.requirement, Requirement::Probe)
-        {
-            Some(self.execution.gateway.runtime()?.doctor().await?)
-        } else {
-            None
+        let observation = match spec.requirement {
+            Requirement::Controller | Requirement::Probe => None,
+            Requirement::Ghidra
+                if self
+                    .local_ghidra
+                    .as_ref()
+                    .is_some_and(|path| path.is_file()) =>
+            {
+                None
+            }
+            Requirement::Ghidra => {
+                let gateway = match &self.static_gateway {
+                    Some(gateway) => gateway,
+                    None if self.static_environment.is_some() => {
+                        anyhow::bail!(
+                            "analysis.static_environment is configured but no static worker is bound"
+                        )
+                    }
+                    None => &self.execution.gateway,
+                };
+                Some(gateway.runtime()?.doctor().await?)
+            }
+            _ => Some(self.execution.gateway.runtime()?.doctor().await?),
         };
         ensure!(
             spec.requirement.available(
                 observation.as_ref(),
                 self.local_ghidra
                     .as_ref()
-                    .is_some_and(|path| path.is_file())
+                    .is_some_and(|path| path.is_file()),
+                false
             ),
             "tool {} requires an observed backend capability: {}",
             spec.definition.name,
@@ -147,12 +168,14 @@ mod tests {
     #[test]
     fn new_job_inputs_require_observed_support_without_hiding_basic_jobs() {
         let methods = json!({"py_run":{"ready":true},"file.put":{"ready":true},"job.status":{"ready":true},"job.artifacts":{"ready":true}});
-        assert!(
-            !Requirement::ScriptValidation
-                .available(Some(&json!({"os":"linux","methods":methods})), false)
-        );
+        assert!(!Requirement::ScriptValidation.available(
+            Some(&json!({"os":"linux","methods":methods})),
+            false,
+            false
+        ));
         assert!(!Requirement::ScriptValidation.available(
             Some(&json!({"os":"windows","methods":methods,"capabilities":{"self_check_v1":true}})),
+            false,
             false
         ));
         let old = json!({"os":"linux","capabilities":{"process_jobs":true}});
@@ -172,6 +195,14 @@ mod tests {
     }
 
     #[test]
+    fn static_ghidra_environment_is_a_real_backend() {
+        assert!(!Requirement::Ghidra.available(None, false, false));
+        assert!(Requirement::Ghidra.available(None, false, true));
+        assert!(Requirement::Ghidra.available(None, true, false));
+        assert!(!Requirement::Worker(&[Method::DebugStart]).available(None, false, true));
+    }
+
+    #[test]
     fn windows_debugger_never_enables_linux_tools_or_unobserved_execution() {
         let doctor = json!({"os":"windows","capabilities":{"debug_dbgeng":true,"debug_gdb_mi":true,"fuzz_qemu":true,"resumable_file_transfer":true},"methods":{"debug.start":{"ready":true},"debug.control":{"ready":true},"file.put":{"ready":true}}});
         for name in ["debug_start", "debug_control", "file_put"] {
@@ -181,7 +212,7 @@ mod tests {
                     .find(|spec| spec.definition.name.as_str() == name)
                     .unwrap()
                     .requirement
-                    .available(Some(&doctor), false),
+                    .available(Some(&doctor), false, false),
                 "{name}"
             );
         }
@@ -199,11 +230,11 @@ mod tests {
                     .find(|spec| spec.definition.name.as_str() == name)
                     .unwrap()
                     .requirement
-                    .available(Some(&doctor), false),
+                    .available(Some(&doctor), false, false),
                 "{name}"
             );
         }
-        assert!(!Requirement::Worker(&[Method::DebugStart]).available(None, false));
-        assert!(Requirement::Controller.available(None, false));
+        assert!(!Requirement::Worker(&[Method::DebugStart]).available(None, false, false));
+        assert!(Requirement::Controller.available(None, false, false));
     }
 }

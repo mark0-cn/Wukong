@@ -276,8 +276,12 @@ pub struct AngrSolveArgs {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PyRunArgs {
-    #[schemars(length(min = 1, max = 262144))]
-    pub source: String,
+    #[schemars(length(min = 0, max = 262144))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Worker file containing the script; mutually exclusive with source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Target appended to sys.argv as an immutable executable copy in isolation.
     pub target: Option<String>,

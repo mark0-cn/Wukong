@@ -6,6 +6,8 @@ pub(super) struct AnalysisService {
     pub(super) store: Store,
     pub(super) gateway: WorkerGateway,
     pub(super) files: FilesService,
+    pub(super) static_gateway: Option<WorkerGateway>,
+    pub(super) static_files: Option<FilesService>,
     pub(super) config: crate::config::StaticConfig,
 }
 impl AnalysisService {
@@ -59,15 +61,20 @@ impl AnalysisService {
             .ghidra_executable
             .clone()
             .or_else(|| std::env::var_os("WUKONG_GHIDRA_HEADLESS").map(PathBuf::from));
-        if executable.is_none() && self.gateway.worker.is_some() {
+        if executable.is_none() && (self.gateway.worker.is_some() || self.static_gateway.is_some())
+        {
+            let (files, gateway) = match (&self.static_files, &self.static_gateway) {
+                (Some(files), Some(gateway)) => (files, gateway),
+                _ => (&self.files, &self.gateway),
+            };
             let staged = if secondary.is_some() {
-                self.files.file_put(agent, &format!("{call_id}:target"), &json!({"path":format!("files/{}.bin",run.target_sha256),"evidence_id":args["target_evidence_id"],"executable":false})).await?["file"].clone()
+                files.file_put(agent, &format!("{call_id}:target"), &json!({"path":format!("files/{}.bin",run.target_sha256),"evidence_id":args["target_evidence_id"],"executable":false})).await?["file"].clone()
             } else {
-                self.files
+                files
                     .stage_target(agent, &format!("{call_id}:target"))
                     .await?
             };
-            let result=self.gateway.worker_call(agent, call_id, Request::GhidraQuery(serde_json::from_value(json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.timeout_seconds,"analysis_timeout_secs":self.config.analysis_timeout_seconds,"max_cpu":self.config.max_cpu}))?)).await?;
+            let result=gateway.worker_call(agent, call_id, Request::GhidraQuery(serde_json::from_value(json!({"target":staged["path"],"target_sha256":run.target_sha256,"query":query,"timeout_secs":self.config.timeout_seconds,"analysis_timeout_secs":self.config.analysis_timeout_seconds,"max_cpu":self.config.max_cpu}))?)).await?;
             ensure!(
                 result["target_sha256"] == run.target_sha256,
                 "remote Ghidra analyzed another target"
@@ -76,8 +83,7 @@ impl AnalysisService {
             let mut evidence_ids = Vec::new();
             if let Some(artifacts) = result["artifacts"].as_array() {
                 for artifact in artifacts {
-                    let raw = self
-                        .gateway
+                    let raw = gateway
                         .runtime()?
                         .call(
                             "file.get",

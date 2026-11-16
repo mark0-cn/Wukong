@@ -71,6 +71,15 @@ class JobService:
 
     def python(self, params):
         source = params.get("source")
+        source_file = params.get("source_file")
+        if source is None and source_file:
+            path = confined(self.root, source_file)
+            try:
+                source = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as error:
+                raise ValueError("cannot read source_file: %s" % error) from error
+        elif source is not None and source_file:
+            raise ValueError("py_run accepts source or source_file, not both")
         if (
             not isinstance(source, str)
             or not source.strip()

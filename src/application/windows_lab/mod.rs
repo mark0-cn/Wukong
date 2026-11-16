@@ -29,6 +29,7 @@ pub mod install;
 pub mod media;
 pub mod package;
 pub mod runner;
+pub mod service;
 use admin::{AdminFile, AdminRequest, LabAdmin};
 
 pub const STATE_SCHEMA: u32 = 1;

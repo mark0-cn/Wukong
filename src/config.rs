@@ -18,6 +18,9 @@ pub struct StaticConfig {
     pub ghidra_executable: Option<PathBuf>,
     pub ghidra_cache_dir: PathBuf,
     pub ghidra_script_dir: Option<PathBuf>,
+    /// Registered Linux environment used for Ghidra static analysis when the
+    /// bound worker has no Ghidra (for example a Windows execution worker).
+    pub static_environment: Option<String>,
     pub timeout_seconds: u64,
     pub analysis_timeout_seconds: u64,
     pub max_cpu: usize,
@@ -28,6 +31,7 @@ impl Default for StaticConfig {
             ghidra_executable: None,
             ghidra_cache_dir: PathBuf::from(".wukong/ghidra"),
             ghidra_script_dir: None,
+            static_environment: None,
             timeout_seconds: 300,
             analysis_timeout_seconds: 240,
             max_cpu: 2,
@@ -311,6 +315,16 @@ impl AppConfig {
             ensure!(
                 self.environments.contains_key(default),
                 "default environment is not registered: {default}"
+            );
+        }
+        if let Some(static_environment) = &self.analysis.static_environment {
+            let environment = self
+                .environments
+                .get(static_environment)
+                .with_context(|| "analysis.static_environment references an unknown environment")?;
+            ensure!(
+                environment.platform == crate::adapters::environments::Platform::Linux,
+                "analysis.static_environment must be a Linux environment"
             );
         }
         ensure!(

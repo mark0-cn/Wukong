@@ -7,16 +7,33 @@ pub(crate) struct ToolContext {
     pub(super) evidence: evidence::EvidenceService,
     pub(super) environments: environment_service::EnvironmentService,
     pub(super) local_ghidra: Option<PathBuf>,
+    pub(super) static_gateway: Option<WorkerGateway>,
+    pub(super) static_environment: Option<String>,
     pub(super) execution: ExecutionService,
     pub(super) analysis: AnalysisService,
+    pub(super) lab: LabService,
 }
 impl ToolContext {
     pub(super) fn new(service: &ToolService, worker: Option<gateway::BoundWorker>) -> Self {
+        Self::with_static(service, worker, None, None)
+    }
+
+    pub(super) fn with_static(
+        service: &ToolService,
+        worker: Option<gateway::BoundWorker>,
+        static_worker: Option<gateway::BoundWorker>,
+        static_environment: Option<String>,
+    ) -> Self {
         let gateway = WorkerGateway {
             store: service.store.clone(),
             worker,
             output_limit: service.limits.max_output_bytes,
         };
+        let static_gateway = static_worker.map(|worker| WorkerGateway {
+            store: service.store.clone(),
+            worker: Some(worker),
+            output_limit: service.limits.max_output_bytes,
+        });
         let execution = ExecutionService::new(
             service.store.clone(),
             gateway.clone(),
@@ -26,7 +43,12 @@ impl ToolContext {
         let analysis = AnalysisService {
             store: service.store.clone(),
             files: execution.files.clone(),
-            gateway,
+            gateway: gateway.clone(),
+            static_files: static_gateway.as_ref().map(|gateway| FilesService {
+                store: service.store.clone(),
+                gateway: gateway.clone(),
+            }),
+            static_gateway: static_gateway.clone(),
             config: service.analysis_config.clone(),
         };
         Self {
@@ -45,8 +67,15 @@ impl ToolContext {
                 registry: service.environments.clone(),
             },
             local_ghidra: service.local_ghidra(),
+            static_gateway,
+            static_environment,
             execution,
             analysis,
+            lab: LabService {
+                config: service.windows_lab.clone(),
+                state_dir: service.store.root().to_path_buf(),
+                environments: service.environments.clone(),
+            },
         }
     }
     #[cfg(test)]

@@ -4999,8 +4999,18 @@
           },
           "source": {
             "maxLength": 262144,
-            "minLength": 1,
-            "type": "string"
+            "minLength": 0,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_file": {
+            "description": "Worker file containing the script; mutually exclusive with source.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "target": {
             "description": "Target appended to sys.argv as an immutable executable copy in isolation.",
@@ -5019,9 +5029,6 @@
             ]
           }
         },
-        "required": [
-          "source"
-        ],
         "title": "PyRunArgs",
         "type": "object"
       },

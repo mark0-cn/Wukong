@@ -126,6 +126,21 @@ verifier.exe /querysettings
 
 测试签名足以加载测试驱动。本流程不会绕过或关闭 PatchGuard，第三方 PatchGuard 绕过工具不属于实验室；若某个实验确实需要，应作为独立的操作步骤并在结束后恢复基线。恢复基线会同时移除测试证书、testsigning 标志、服务和 Verifier 设置。
 
+## 多环境分析
+
+Windows 执行 worker 不必携带全部逆向工具。注册一个 Linux worker（Docker 镜像已包含 Ghidra、capstone、pefile 和 angr），并把它指定为静态分析后端：
+
+```toml
+[analysis]
+static_environment = "linux-static"
+```
+
+- 设置后，绑定 Windows 的分析师仍会看到 Ghidra 工具。控制器把目标 staging 到 Linux 环境，在那里执行 `ghidra.query` 并导入返回产物；`debug_*`、`crash_replay`、`poc_verify` 与 `py_run` 仍留在 Windows worker。
+- 每次工具调用只绑定它需要的环境，因此同一次评估可以同时使用静态与动态工具，而无需给 Windows worker 增加反编译器。
+- 工具可用性仍来自 preflight，而不是工具目录。只宣传所选后端实际观察到的能力；缺失工具是规划约束。
+- Agent 侧 lab 工具与 CLI 生命周期一致：`lab_status`（省略 `vm` 时列出已配置 VM）、`lab_prepare`、`lab_run`、`lab_install`、`lab_restore`、`lab_prune`。它们是仅子代理可用的控制器工具；`lab_run`/`lab_install` 使用已登记 worker 和管理通道。
+- `py_run` 支持内联 `source`，也支持先用 `file_put` 创建 worker 文件再传 `source_file`；大脚本应先上传，避免塞进单个工具参数。
+
 ## 宿主操作
 
 适配器只使用 `vmrun -T ws list`、`listSnapshots <vmx>`、`snapshot <vmx> <name>`、`revertToSnapshot <vmx> <name>` 和 `start <vmx> nogui`。每次调用都有超时并捕获 stdout/stderr，从不经过 shell。基线仅在缺失时创建；已有快照从不删除。
@@ -139,6 +154,7 @@ verifier.exe /querysettings
 - 不执行清理动作。把一次性 VM 恢复到基线就是清理边界，因此安装计划可以省略清理条目。
 - 已用真实服务安装验证：打包的 `install.ps1` 在第 15 代创建一个手动服务（退出码 0、不可变回执），第 16 代恢复基线后该服务被移除、实验快照被清理，管理员登录仍可用。
 - 一个用自签名证书签名的极简 WDM 驱动在 testsigning 下加载成功（服务 RUNNING），重启后又在标准 Driver Verifier 下再次加载；恢复基线移除了服务、测试证书和 Verifier 设置，worker `doctor` 仍 ready。
+- 绑定 Windows 的分析师通过运行在已登记 Docker Linux 环境中的 Ghidra 12.2 取得了 PE 目标的 `mainCRTStartup`，同时 `lab_status` 列出了配置的 lab VM（`vm=lab`）。这确认了 Windows 绑定的评估可以调用静态工具，而无需给 Windows worker 增加反编译器。
 - 驱动覆盖仅限无设备 I/O 的旧式内核服务；生产/证明签名、PnP 设备栈和 PatchGuard 绕过场景未演练。
 - 第一阶段已用真实 VM 验证：创建基线与实验快照，在第 2、4 代恢复到基线，VM 启动后 worker `doctor` 再次就绪。随后在第 9 代通过已登记 worker 上传并执行一个预编译 EXE（job 完成、退出码 0、写入不可变回执），第 10 代恢复基线后 worker `doctor` 仍就绪。控制器重启、超时和过期代次行为由使用假宿主的单元测试覆盖。
 

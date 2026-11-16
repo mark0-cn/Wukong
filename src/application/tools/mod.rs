@@ -33,6 +33,8 @@ pub struct ToolService {
     mcp: McpRegistry,
     locks: Arc<Mutex<BTreeMap<String, Arc<Mutex<()>>>>>,
     environments: crate::adapters::environments::EnvironmentRegistry,
+    static_environment: Option<String>,
+    windows_lab: crate::config::WindowsLabConfig,
     default_environment: Option<String>,
     sync_limits: evidence_sync::SyncLimits,
 }
@@ -51,7 +53,9 @@ pub(crate) use discovery::ToolSelection;
 mod context;
 mod execution;
 mod gateway;
+mod lab;
 use context::ToolContext;
+pub(crate) use lab::LabService;
 mod requirements;
 use analysis::AnalysisService;
 use execution::ExecutionService;
@@ -111,6 +115,8 @@ impl ToolService {
         let environments =
             crate::adapters::environments::EnvironmentRegistry::new(config.environments.clone())?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
+        let static_environment = config.analysis.static_environment.clone();
+        let windows_lab = config.windows_lab.clone();
         Ok(Self {
             store: store.clone(),
             coordinator: Coordinator::new(store),
@@ -120,6 +126,8 @@ impl ToolService {
             mcp,
             locks,
             environments,
+            static_environment,
+            windows_lab,
             default_environment: config.default_environment,
             sync_limits: Default::default(),
         })
@@ -137,9 +145,26 @@ impl ToolService {
                 self.store.controller_owner().as_deref(),
             )
             .await?;
-        Ok(ToolContext::new(
+        let primary = gateway::BoundWorker::new(client)?;
+        let static_worker = match &self.static_environment {
+            Some(static_environment) if static_environment != environment_id => {
+                let client = self
+                    .environments
+                    .bind(
+                        static_environment,
+                        &agent.run_id,
+                        self.store.controller_owner().as_deref(),
+                    )
+                    .await?;
+                Some(gateway::BoundWorker::new(client)?)
+            }
+            _ => None,
+        };
+        Ok(ToolContext::with_static(
             self,
-            Some(gateway::BoundWorker::new(client)?),
+            Some(primary),
+            static_worker,
+            self.static_environment.clone(),
         ))
     }
 

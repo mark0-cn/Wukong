@@ -1,15 +1,11 @@
 //! Operator entry point for the registered Windows experiment VM.
 use crate::adapters::environments::EnvironmentRegistry;
-use crate::adapters::windows_lab_admin::VmwareAdmin;
-use crate::adapters::windows_lab_worker::WindowsWorker;
 use crate::application::windows_lab::{ReconcileOutcome, WindowsLab};
 use crate::config::AppConfig;
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -186,29 +182,8 @@ fn ensure_registered<'a>(
 }
 
 fn open(config: &AppConfig, vm_id: &str) -> Result<WindowsLab> {
-    let vm = ensure_registered(config, vm_id)?;
-    let host = crate::adapters::windows_lab::VmwareVm::new(
-        &vm.vmrun,
-        &vm.vmx,
-        Duration::from_secs(vm.operation_timeout_seconds),
-    )?;
-    let lab = WindowsLab::open(&config.state_dir, vm_id, vm, Arc::new(host))?;
-    let mut lab = lab;
-    if let Some(environment) = &vm.environment {
-        let registry = EnvironmentRegistry::new(config.environments.clone())?;
-        lab = lab.with_worker(Arc::new(WindowsWorker::new(registry, environment.clone())));
-    }
-    if let Some(admin) = &vm.admin
-        && let Some(channel) = VmwareAdmin::from_env(
-            &vm.vmrun,
-            &vm.vmx,
-            admin,
-            Duration::from_secs(vm.operation_timeout_seconds),
-        )?
-    {
-        lab = lab.with_admin(Arc::new(channel));
-    }
-    Ok(lab)
+    let registry = EnvironmentRegistry::new(config.environments.clone())?;
+    crate::application::windows_lab::service::open_configured(config, &registry, vm_id)
 }
 
 fn read_spec(path: &Path) -> Result<crate::application::windows_lab::ExperimentSpec> {
