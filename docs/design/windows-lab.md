@@ -37,7 +37,7 @@ Assessment worker bindings hold a shared lock beside the canonical VMX (`.wukong
 - `status` reads a snapshot without reconciling or rewriting it; bounded host probes are observations. It remains usable while another operation holds the mutation lock.
 - Interrupted host effects are never replayed. Mutating recovery classifies interrupted intents as `recovery_required`; an operator must inspect the guest and reconcile the exact operation ID. Ordinary worker starts are blocked by unresolved maintenance effects, while observation and cleanup remain available.
 
-Schema-1 files are deliberately rejected: finish/reconcile the old experiment with its original version, preserve its evidence, and explicitly archive the old lab state before creating schema-2 state. Do not copy an old lease to another VM or silently edit its identity. Move old `os_build` and `toolchain_sha256` declarations into optional `annotations.os_build` and `annotations.toolchain` notes.
+Only the current state format and tool contracts are supported. There is no migration workflow or compatibility layer for earlier branch-local formats. OS and toolchain descriptions use optional `annotations.os_build` and `annotations.toolchain` notes.
 
 ## Experiment and package contracts
 

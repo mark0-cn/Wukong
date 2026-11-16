@@ -823,3 +823,20 @@ async fn terminal_job_without_cleanup_blocks_the_next_harness() {
     );
     assert_eq!(worker.requests.lock().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn current_lab_state_rejects_incomplete_records_without_repairing_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host);
+    lab.prepare("owner", "current contract", spec())
+        .await
+        .unwrap();
+    let path = dir.path().join("windows-lab/labvm.json");
+    let mut record: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    record["updated_at"] = serde_json::json!("");
+    let bytes = serde_json::to_vec(&record).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    assert!(lab.status().await.is_err());
+    assert_eq!(fs::read(path).unwrap(), bytes);
+}
