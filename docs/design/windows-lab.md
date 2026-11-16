@@ -1,99 +1,69 @@
 # Windows experiment lab lifecycle
 
-[简体中文](windows-lab.zh-CN.md)
+English · [简体中文](windows-lab.zh-CN.md)
 
-## Scope
+## Scope and ownership
 
-Phase 1 of the Windows capability plan gives the controller a bounded lifecycle for one registered VMware experiment VM: prepare a baseline and a per-experiment snapshot, fence every generation, restore to the baseline, and reconcile an interrupted or timed-out host operation. It also locks and verifies controller-side dependency packages, validates install/cleanup plans, executes one prebuilt user-mode EXE through the registered worker, and can run a hash-pinned `install.ps1` through an administrative channel. The operator entry point is `wukong lab`. It does not yet compile harnesses in the VM, generate service/driver logic, or expose debugger, network and fuzz tools.
+The controller manages a registered disposable VMware VM, verified offline packages, prebuilt user-mode harnesses, and administrative installation scripts. Host paths and credentials come from operator configuration. Models cannot supply VMware commands, controller file paths or guest administrator credentials. Harness compilation and generation of service/driver implementations are outside this lifecycle.
 
-## Registered identity and configuration
-
-Only `[windows_lab.vms.<id>]` entries can be addressed. `vmx` and `vmrun` are operator-supplied absolute paths and the adapter builds every argument; model input never provides a VMX, a `vmrun` flag or a host command.
+The implementation separates typed records (`types`), atomic persistence (`store`), host lifecycle, packaged execution (`execution`), package/media validation and worker/admin adapters. Tool handlers receive concrete services. Assessment execution uses the ordinary job ledger; asynchronous host operations use the existing durable effect ledger.
 
 ```toml
 [windows_lab.vms.lab]
 vmx = "D:/vm/win10/Windows 10 x64.vmx"
 vmrun = "D:/VMware/VMware Workstation/vmrun.exe"
+environment = "windows"
 baseline_snapshot = "wukong-lab-baseline"
 snapshot_prefix = "wukong-lab"
 operation_timeout_seconds = 300
 start_after_restore = true
-```
 
-An ID is 1–64 ASCII letters, digits, underscores or hyphens. Snapshot names allow letters, digits, `.`, `_` and `-`; the prefix must differ from the baseline and stay short. Operations are bounded by 30–3600 seconds.
-
-## State and generation
-
-State lives in `<state_dir>/windows-lab/<vm_id>.json` and records the schema, VM identity, generation, phase, baseline, active experiment, pending operation, last error and update time. A cross-process lock serializes operations and every replacement is published atomically.
-
-Phases are `idle`, `preparing`, `ready`, `restoring`, `recovery_required` and `failed`.
-
-- `prepare` is accepted only while `idle` or `failed`. It advances the generation, persists a pending intent, creates the baseline only when absent, creates one `<prefix>-<lab_id>` snapshot, and reaches `ready` with an active lease.
-- `restore` requires the active lab ID and generation. It advances the generation before asking VMware to revert, clears the active experiment, reverts to the baseline, optionally starts the VM, and reaches `idle`. After a successful restore it deletes that experiment's snapshot best-effort and reports `pruned_snapshot` or `prune_error`.
-- `prune` deletes every snapshot with the lab prefix except the baseline and the active experiment snapshot; unrelated snapshots and failures are reported, never silently removed.
-- A stale generation is rejected before any host call, so an old lease cannot regain execution rights even when the VM is restored.
-- A definitive prepare failure becomes `failed` and may be retried. Restore failures and every timeout become `recovery_required`.
-- Finding a pending `preparing` or `restoring` state on process start means a controller restart interrupted a host effect. The state becomes `recovery_required`; nothing is replayed.
-- `reconcile` resolves that exact operation ID as `completed`, `failed` or `unknown` after the operator inspects the VM.
-
-## Experiment description
-
-`ExperimentSpec` binds `target_sha256`, `launch` (`exe`, `dll_harness`, `service`, `gui`, `driver`), `input_channel` (`argv`, `stdin`, `file`, `network`, `named_pipe`, `com`, `gui`, `ioctl`), `account` (`user`, `elevated_user`, `system`, `driver`), `os_build`, `toolchain_sha256` and a bounded recovery note. Hashes must be 64 lowercase hexadecimal characters. The specification hash is bound into the lease and active state. A valid description is an admission precondition, not execution evidence.
-
-## Preparation pipeline
-
-Dependencies and installation are part of the experiment description:
-
-```json
-{
-  "dependencies": [
-    {"name": "harness.c", "sha256": "<64 lowercase hex>",
-     "source": {"kind": "path", "path": "D:/lab/harness.c"}}
-  ],
-  "install": {
-    "targets": ["C:\\lab\\harness.exe"],
-    "cleanup": [{"kind": "file", "target": "C:\\lab\\harness.exe"}]
-  }
-}
-```
-
-- A dependency source is an absolute existing `path` or an `http`/`https` `url`. Each artifact is bounded to 64 MiB, a package to 512 MiB, and a download to 60 seconds.
-- Every byte is verified against the declared SHA-256. The package ID is the hash of the canonical manifest, and the package is published under `<state_dir>/windows-lab/packages/<id>/` with `manifest.json` and `SHA256SUMS`.
-- Reuse re-verifies every existing byte. A mismatch fails instead of overwriting; operators remove a broken package explicitly.
-- `install.targets` are absolute Windows paths without dot segments. A service binary must be one of them, `kernel_driver` requires `launch=driver`, and every target, service and account needs a covering cleanup action (`file`, `directory`, `service` or `account`).
-- `wukong lab package` materializes and verifies a package without touching the VM. `lab prepare` materializes it before any state change and binds `package_sha256` and `install_sha256` into the pending intent, active experiment and lease.
-- A verified package and a valid install plan are admission inputs, not qualification. Harness compilation, dry-run admission and guest installation remain later phase work.
-
-## Harness execution
-
-A registered Windows environment inside the VM executes the packaged harness:
-
-```toml
-[windows_lab.vms.lab]
-environment = "windows"
-```
-
-- `lab run` requires `launch=exe` and one artifact from the experiment's verified package. It re-verifies the artifact, uploads it through the normal environment lease (single upload ≤32 MiB) with optional stdin (≤1 MiB), starts one bounded job (1–600 seconds, 1 MiB output) and polls to a terminal state.
-- The immutable receipt records run/lab IDs, generation, artifact hash, environment and installation IDs, worker job ID, exit code, stdout/stderr sizes and previews, and the settled flag. Receipts live under `<state_dir>/windows-lab/runs/<run_id>.json`.
-- A transport or poll failure records `unknown` and is never retried automatically. A baseline restore marks that run `lost` and is the only reconciliation path; completed, failed, timed-out or cancelled runs may be followed by another run or a restore.
-- `restore` is rejected while a run is in flight, and the state lock is held for the whole run so another operation cannot revert the VM underneath the job.
-- No installation happens yet: the EXE runs from the worker's uploaded file area under the worker's normal isolated persona, and cleanup ownership remains in the worker resource journal. The lab never claims it deleted worker files.
-
-## Offline media and the administrative channel
-
-```toml
 [windows_lab.vms.lab.admin]
 user = "Administrator"
 password_env = "WUKONG_LAB_ADMIN_PASSWORD"
 ```
 
-- The media is the verified package directory. It must contain a hash-pinned `install.ps1`; the controller generates no service or driver logic.
-- `lab install` copies the manifest, sums, artifacts and script into `C:\Windows\Temp\wukong-lab-<install_id>` with `vmrun copyFileFromHostToGuest`, then runs `install.ps1` through `runProgramInGuest` PowerShell as the configured local administrator.
-- The password is read only from the named process environment variable. It is never written to TOML, state or receipts. `vmrun` receives it on its command line, so process inspection on the controller can observe it; use a trusted controller.
-- The receipt records package/media identity, the install-script hash, exit code, stdout/stderr and guest paths. Transport failures are `unknown` and are reconciled by restoring the baseline, exactly like a harness run.
-- Cleanup is not executed. The disposable VM is discarded by the baseline restore after each analysis, so cleanup actions in an install plan are optional notes rather than preconditions. `lab restore` is rejected while an installation is in flight.
-- The administrative channel was provisioned once offline: a clone was edited while powered off to install a LocalSystem provisioning service, the guest then set a temporary local-administrator password, and a real `New-Service` installation returned exit code 0. Rotate the password and treat the provisioned VM as disposable.
-- The original VM and its snapshots were left untouched; only the clone is registered as the lab VM.
+VM aliases contain 1–64 ASCII letters, digits, underscores or hyphens. Snapshot names additionally allow dots; the experiment prefix must differ from the baseline. Host commands have a configured 30–3600 second bound. The adapter builds fixed arguments, runs without a shell and bounds returned output. The password is read from its named environment variable and excluded from state and receipts; `vmrun` necessarily receives it on its command line on the trusted controller.
+
+## State, identity and resource fencing
+
+Schema-2 state lives in `<state_dir>/windows-lab/<vm_id>.json`. It binds the canonical VMX identity and configuration fingerprint, baseline, generation, active experiment, pending host operation and execution receipts. Atomic replacement preserves the previous state on failed publication. Physical VM identities own the operation lock and alias registration; duplicate aliases and shared environment mappings are rejected. Changing the VMX, worker environment or other bound configuration cannot reuse an existing lease.
+
+Assessment worker bindings hold a shared lock beside the canonical VMX (`.wukong-environment.lock`). Prepare/install/restore require exclusive admission. Before maintenance, the caller may release only its own idle assessment lease, after all job evidence is synchronized. A fresh native worker lease prevents takeover while orphan jobs or debugger/interactive resources remain. A powered-off VM needs no worker connection. Other assessments' connections and leases are never closed by a lab tool. After a baseline restore, the old assessment's worker identity remains pinned; further execution requires a fresh assessment if the boot identity changed.
+
+- `prepare` admits only `idle` or `failed`, validates/materializes inputs, advances the generation, persists intent, creates a missing baseline and an experiment snapshot, then publishes a `ready` lease.
+- `restore` validates the caller, active lab ID and generation before recovery writes. It fences the old generation before reverting. Unknown run/install records become `lost` only after restoration succeeds. Failure or timeout preserves uncertainty. Successful restore attempts to prune its experiment snapshot and reports pruning failures separately.
+- `prune` rejects pending recovery and preserves baseline/active snapshots. It deletes only unused snapshots with the configured prefix.
+- `status` reads a snapshot without reconciling or rewriting it; bounded host probes are observations. It remains usable while another operation holds the mutation lock.
+- Interrupted host effects are never replayed. Mutating recovery classifies interrupted intents as `recovery_required`; an operator must inspect the guest and reconcile the exact operation ID. Ordinary worker starts are blocked by unresolved maintenance effects, while observation and cleanup remain available.
+
+Schema-1 files are deliberately rejected: finish/reconcile the old experiment with its original version, preserve its evidence, and explicitly archive the old lab state before creating schema-2 state. Do not copy an old lease to another VM or silently edit its identity. Move old `os_build` and `toolchain_sha256` declarations into optional `annotations.os_build` and `annotations.toolchain` notes.
+
+## Experiment and package contracts
+
+The CLI `ExperimentSpec` contains a verified `target_sha256`, typed launch/input/account requirements, optional descriptive `annotations`, dependencies, install plan and recovery note. Notes are not enforced environmental requirements or observed facts. Harness admission supports only `launch=exe`, `account=user`, and `input_channel=stdin` or empty `argv`; other requirements are rejected before dispatch. The selected executable must match the bound target hash.
+
+Agent `lab_prepare` has a typed `spec`. It derives ownership from assessment/agent/generation, uses the assessment target unless `target_evidence_id` is supplied, and accepts dependencies as `{name,evidence_id}`. The service resolves evidence within that assessment, computes hashes and materializes controller copies. Models neither invent target hashes nor supply an `owner`, URL or controller path. All new tool argument objects reject unknown fields.
+
+CLI operators may provide dependencies with an absolute existing path or HTTP(S) URL and a SHA-256. Limits are 256 members, 64 MiB per artifact, 512 MiB per package and 60 seconds per download. The package ID is the canonical manifest hash. Every reopen for execution or media verifies that identity, member names, size budgets and member bytes, rejecting links/reparse paths. Changing both a member and its manifest cannot rebind the original package ID.
+
+Install plans declare absolute Windows target paths and optional service/account postconditions. A service binary must be a declared target; kernel services require `launch=driver`. Cleanup actions are optional ownership notes. Baseline restoration is the cleanup boundary; scripts are not automatically reversed.
+
+## Tool handles and execution
+
+`lab_list` lists configured aliases; `lab_status` requires `vm` and returns one VM's state. Child agents can address only their assigned VM/environment, using the configuration captured at assessment creation. Leases cannot be reused by another agent or generation.
+
+`lab_prepare`, `lab_install`, `lab_restore` and `lab_prune` return `operation_id` promptly. Poll `lab_operation_status` for the result and original evidence. Preparation's result contains the `lab_id`/`generation` lease. `lab_operation_cancel` requests interruption of an owned operation; cancellation does not prove rollback. A controller restart exposes a missing live operation as uncertain without replay. Active/uncertain host effects prevent the owning agent and assessment from completing. Inspect the guest, use `wukong lab reconcile` for the VM intent when applicable, and use the existing operator `wukong reconcile <operation_id> --result-file ... --evidence-id ...` to resolve its durable effect receipt.
+
+`lab_run` returns `run.job_id` from the normal assessment job ledger. Use `job_status`, `job_cancel` and `job_artifacts`; ordinary supervision renews the same assessment/controller lease. Task completion and evidence import use the existing job rules. The lab receipt records admission identity; job receipts carry final execution evidence. A subsequent restore imports a settled job observation before changing the VM.
+
+The CLI `lab run` waits for the result and maintains its standalone lease heartbeat every 15 seconds. It releases only its own settled scope. Execution is bounded to 1–600 seconds, one executable upload to 32 MiB, stdin to 1 MiB and output previews to 1 MiB. Transport/poll uncertainty retains the existing run identity and blocks replacement execution. No privileged account, GUI, network or driver execution is implied by a descriptive spec.
+
+## Administrative installation evidence
+
+Media requires hash-pinned `install.ps1`. The controller verifies the package again, copies verified bytes into a temporary host snapshot, transfers them into `C:\Windows\Temp\wukong-lab-<install_id>`, and invokes a fixed receipt wrapper. A single 1–600 second deadline covers all administrative commands. Cancellation kills the host command but may leave guest effects; these remain uncertain.
+
+The guest wrapper verifies media hashes, waits for a separate PowerShell script process, records its exit code, and checks declared target files, service binary/type/running state and account existence. It publishes an identity-bound JSON receipt which is retrieved and retained in the installation record. A successful host `vmrun` exit is not installation success. Missing/mismatched receipts stay unknown; completed success requires guest exit zero and passing postconditions. Script identity, guest receipt and cleanup requirement are distinct from the install-plan hash. Guest observations are evidence from the disposable guest, not an independent exploit verifier.
 
 ## Driver installation, test signing and Verifier
 
@@ -143,23 +113,11 @@ static_environment = "linux-static"
 
 Ghidra probes and binds only the chosen static environment; ordinary execution/status/cleanup binds only the primary environment. Both validate the assessment's configuration snapshot and persisted worker identity. Static tools are advertised only after observing that backend's capability, not from a configured name alone. A failed static connection cannot break ordinary worker cleanup, and a failed Windows worker cannot prevent an otherwise available static query.
 
-## Host operations
+## Validation limits and historical evidence
 
-The adapter uses only `vmrun -T ws list`, `listSnapshots <vmx>`, `snapshot <vmx> <name>`, `revertToSnapshot <vmx> <name>` and `start <vmx> nogui`. Each call has a timeout and captured stdout/stderr, never a shell. Baseline snapshots are created only when absent; existing snapshots are never deleted.
+The branch history before the audit fixes (`231d180`) recorded real VMware snapshots/restores, a prebuilt EXE run, service installation/removal, a self-signed legacy WDM driver under test signing and standard Driver Verifier, Windows-to-Linux Ghidra analysis, and a two-member `vulnserver.exe`/`essfunc.dll` LaunchSpec run with cancellation. Those are historical observations of the earlier implementation, not acceptance of the new schema, asynchronous handles, lease fences or guest receipt wrapper.
 
-## Limits
-
-- The CLI must run from a normal-integrity directory. A build tree can carry a Low mandatory label, and VMware refuses to start under it. The desktop publish script already copies executables outside the workspace; manual CLI runs should do the same.
-- Guest installation still needs the documented offline media and an operator/admin path. This lifecycle never guesses passwords and never edits VM disks or accounts.
-- `start_after_restore` must match how the host restores a running snapshot: on this host a running-VM snapshot restores powered off, so the lab starts it when configured.
-- Experiment snapshots are not deleted automatically; operators remove them explicitly after preserving evidence.
-- Cleanup actions are not executed. Restoring the disposable VM to the baseline is the cleanup boundary, so installation plans may omit cleanup entries.
-- A real service installation was validated: the packaged `install.ps1` created a manual service in generation 15 (exit code 0, immutable receipt), and the generation 16 baseline restore removed that service and pruned the experiment snapshot while the administrator login kept working.
-- A minimal WDM driver signed with a self-signed certificate loaded under testsigning (service RUNNING) and again under standard Driver Verifier after a reboot; reverting the baseline removed the service, test certificate and Verifier settings and left the worker `doctor` ready.
-- A Windows-bound analyst obtained `mainCRTStartup` for the PE target through Ghidra 12.2 running in the registered Docker Linux environment, while `lab_status` listed the configured lab VM (`vm=lab`). This confirms static tools can be called from a Windows-bound assessment without adding a decompiler to the Windows worker.
-- A directory bundle containing `vulnserver.exe` and `essfunc.dll` produced an inferred entry, an import edge from the EXE to the DLL, staged both members into one directory, started the EXE through a LaunchSpec job and cancelled it with confirmed cleanup.
-- Driver coverage is limited to a legacy kernel service with no device I/O. Production/attestation signing, PnP device stacks and PatchGuard-bypass scenarios are not exercised.
-- Phase 1 validation used the real VM: baseline and experiment snapshots were created, restores to the baseline ran in generations 2 and 4, and the worker `doctor` reported ready again after the VM start. A packaged prebuilt EXE was then uploaded and executed through the registered worker in generation 9 (job completed with exit code 0, immutable receipt written), and the baseline restore in generation 10 left the worker `doctor` ready again. Controller-restart, timeout and stale-generation behavior are covered by unit tests with a fake host.
+Current regression coverage exercises stale/failed recovery, caller/configuration fences, package tampering, interface schemas and native/Python source admission. Real VMware guest installation and reboot acceptance must be rerun for the final commit. Driver coverage does not include PnP/device I/O, production signing or PatchGuard bypass. Native installer tests belong on isolated runners, not the user's installation.
 
 ## CLI
 
@@ -169,3 +127,5 @@ wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parse
 wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
 wukong --config wukong.toml lab reconcile --vm lab --operation <operation_id> --outcome completed
 ```
+
+Use a normal-integrity directory for VMware command execution; a Low-integrity build tree can prevent VMware from starting. `start_after_restore` should reflect the host's actual powered-off/running snapshot behavior.

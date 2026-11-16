@@ -51,7 +51,38 @@ impl WindowsWorker {
 
 #[async_trait]
 impl LabWorker for WindowsWorker {
+    async fn maintenance(
+        &self,
+    ) -> Result<Box<dyn crate::application::windows_lab::runner::LabMaintenance>> {
+        Ok(Box::new(WorkerMaintenance(
+            self.registry.maintenance(&self.environment_id).await?,
+        )))
+    }
     async fn execute(&self, request: LabWorkerRequest) -> Result<LabWorkerOutcome> {
+        let run = request.run_id.clone();
+        let owner = request.owner.clone();
+        let execution = self.execute_inner(request);
+        tokio::pin!(execution);
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
+        let result = loop {
+            tokio::select! {
+                result = &mut execution => break result,
+                _ = heartbeat.tick() => { self.registry.renew_leases(&run, &owner).await?; }
+            }
+        };
+        // This CLI adapter owns only this standalone scope. Shared assessment
+        // execution uses the ordinary JobService adapter instead.
+        if result.as_ref().is_ok_and(|outcome| outcome.settled) {
+            self.registry
+                .release_scope(&self.environment_id, &run, &owner)
+                .await?;
+        }
+        result
+    }
+}
+
+impl WindowsWorker {
+    async fn execute_inner(&self, request: LabWorkerRequest) -> Result<LabWorkerOutcome> {
         let client = self
             .registry
             .bind(&self.environment_id, &request.run_id, Some(&request.owner))
@@ -93,12 +124,9 @@ impl LabWorker for WindowsWorker {
         let deadline = Instant::now() + Duration::from_secs(request.timeout_secs + 60);
         let status = loop {
             let status = client.call("job.status", json!({"job_id": job_id})).await?;
-            let state = status["state"].as_str().unwrap_or("unknown");
-            if matches!(
-                state,
-                "completed" | "failed" | "cancelled" | "timed_out" | "lost"
-            ) || Instant::now() >= deadline
-            {
+            let observed: crate::adapters::worker::protocol::JobStatus =
+                serde_json::from_value(status.clone())?;
+            if observed.settled() || Instant::now() >= deadline {
                 break status;
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -118,7 +146,10 @@ impl LabWorker for WindowsWorker {
             installation_id: client.identity().installation_id.clone(),
             job_id,
             state,
-            settled: status["cleanup_confirmed"] == true,
+            settled: serde_json::from_value::<crate::adapters::worker::protocol::JobStatus>(
+                status.clone(),
+            )?
+            .settled(),
             exit_code: status["result"]["exit_code"].as_i64(),
             executable_path: Some(executable),
             stdout_bytes: status["stdout_bytes"]
@@ -131,8 +162,12 @@ impl LabWorker for WindowsWorker {
             stderr,
         })
     }
+}
 
-    async fn finish(&self) {
-        self.registry.close().await;
+struct WorkerMaintenance(crate::adapters::environments::MaintenanceLease);
+#[async_trait]
+impl crate::application::windows_lab::runner::LabMaintenance for WorkerMaintenance {
+    async fn finish(self: Box<Self>) -> Result<()> {
+        self.0.finish().await
     }
 }

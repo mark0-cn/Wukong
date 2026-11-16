@@ -1,99 +1,69 @@
-# Windows 实验 VM 生命周期
+# Windows 实验环境生命周期
 
-[English](windows-lab.md)
+[English](windows-lab.md) · 简体中文
 
-## 范围
+## 范围与归属
 
-Windows 能力计划的第一阶段为控制器提供一台已登记 VMware 实验 VM 的有界生命周期：创建基线与每次实验的快照、按代次围栏、恢复到基线，并对中断或超时的宿主操作进行核对。它还锁定并校验控制端依赖包、校验安装与清理计划，通过已登记 worker 执行一个预编译用户态 EXE，并可通过管理通道运行哈希固定的 `install.ps1`。操作入口是 `wukong lab`。它尚未在 VM 内编译 harness、生成服务/驱动逻辑，也不暴露调试、网络和 fuzz 工具。
+控制器管理已登记的一次性 VMware VM、校验过的离线包、预编译用户态测试程序和管理安装脚本。宿主路径与凭据来自操作者配置。模型不能提供 VMware 命令、控制器文件路径或客体管理员凭据。该生命周期不负责在 VM 内编译测试程序或生成服务/驱动实现。
 
-## 登记身份与配置
-
-只能寻址 `[windows_lab.vms.<id>]` 条目。`vmx` 和 `vmrun` 是运维提供的绝对路径，所有参数由适配器构造；模型输入永远不提供 VMX、`vmrun` 参数或宿主命令。
+实现按类型记录（`types`）、原子持久化（`store`）、宿主生命周期、包执行（`execution`）、包/介质校验和 worker/admin 适配器拆分。工具处理器接收具体服务。评估执行复用普通任务账本，异步宿主操作复用现有持久化副作用账本。
 
 ```toml
 [windows_lab.vms.lab]
 vmx = "D:/vm/win10/Windows 10 x64.vmx"
 vmrun = "D:/VMware/VMware Workstation/vmrun.exe"
+environment = "windows"
 baseline_snapshot = "wukong-lab-baseline"
 snapshot_prefix = "wukong-lab"
 operation_timeout_seconds = 300
 start_after_restore = true
-```
 
-ID 为 1–64 个 ASCII 字母、数字、下划线或连字符。快照名允许字母、数字、`.`、`_` 和 `-`；前缀必须与基线不同且足够短。单次操作限制在 30–3600 秒。
-
-## 状态与代次
-
-状态位于 `<state_dir>/windows-lab/<vm_id>.json`，记录 schema、VM 身份、代次、阶段、基线、活动实验、待定操作、最后错误和更新时间。跨进程锁串行化操作，每次替换都原子发布。
-
-阶段为 `idle`、`preparing`、`ready`、`restoring`、`recovery_required` 和 `failed`。
-
-- `prepare` 仅在 `idle` 或 `failed` 时接受。它提升代次、持久化待定意图、仅在缺失时创建基线、创建一份 `<prefix>-<lab_id>` 快照，并进入带活动租约的 `ready`。
-- `restore` 要求活动实验 ID 与代次。它先提升代次再请求 VMware 恢复，清空活动实验，恢复到基线，按配置启动 VM，并进入 `idle`。恢复成功后尽力删除该实验的快照，并报告 `pruned_snapshot` 或 `prune_error`。
-- `prune` 删除所有带实验前缀的快照，但保留基线和活动实验快照；无关快照和失败都会被报告，绝不静默删除。
-- 过期代次在任何宿主调用之前被拒绝，因此旧租约即使在 VM 恢复后也无法重新获得执行权。
-- 明确的 prepare 失败进入 `failed` 并允许重试；restore 失败和所有超时进入 `recovery_required`。
-- 进程启动时发现待定的 `preparing` 或 `restoring`，说明控制器重启中断了宿主副作用，状态转为 `recovery_required`，不会重放。
-- `reconcile` 由运维检查 VM 后，按精确操作 ID 将其解决为 `completed`、`failed` 或 `unknown`。
-
-## 实验描述
-
-`ExperimentSpec` 绑定 `target_sha256`、`launch`（`exe`、`dll_harness`、`service`、`gui`、`driver`）、`input_channel`（`argv`、`stdin`、`file`、`network`、`named_pipe`、`com`、`gui`、`ioctl`）、`account`（`user`、`elevated_user`、`system`、`driver`）、`os_build`、`toolchain_sha256` 和有界恢复说明。哈希必须是 64 个小写十六进制字符。规格哈希绑定到租约和活动状态。有效描述只是准入前提，不是执行证据。
-
-## 准备流水线
-
-依赖与安装属于实验描述的一部分：
-
-```json
-{
-  "dependencies": [
-    {"name": "harness.c", "sha256": "<64 个小写十六进制>",
-     "source": {"kind": "path", "path": "D:/lab/harness.c"}}
-  ],
-  "install": {
-    "targets": ["C:\\lab\\harness.exe"],
-    "cleanup": [{"kind": "file", "target": "C:\\lab\\harness.exe"}]
-  }
-}
-```
-
-- 依赖来源可以是绝对且存在的 `path`，也可以是 `http`/`https` 的 `url`。单件产物上限 64 MiB，整包上限 512 MiB，下载超时 60 秒。
-- 每个字节都按声明的 SHA-256 校验。包 ID 是规范清单的哈希，包发布到 `<state_dir>/windows-lab/packages/<id>/`，并包含 `manifest.json` 与 `SHA256SUMS`。
-- 复用时会重新校验每个已有字节。不匹配直接失败，不会覆盖；损坏的包由运维显式删除。
-- `install.targets` 是不含点段的绝对 Windows 路径。服务二进制必须是其中一个目标；`kernel_driver` 要求 `launch=driver`；每个目标、服务和账号都必须有覆盖它的清理动作（`file`、`directory`、`service` 或 `account`）。
-- `wukong lab package` 在不接触 VM 的情况下物化并校验依赖包。`lab prepare` 在改变任何状态之前物化依赖包，并把 `package_sha256` 与 `install_sha256` 绑定到待定意图、活动实验和租约。
-- 校验通过的依赖包和合法安装计划只是准入输入，不是资格认证。harness 编译、试运行准入与 guest 安装仍属于后续阶段。
-
-## Harness 执行
-
-VM 内已登记的 Windows 环境负责执行打包后的 harness：
-
-```toml
-[windows_lab.vms.lab]
-environment = "windows"
-```
-
-- `lab run` 要求 `launch=exe`，且产物来自实验已校验的依赖包。它会重新校验该产物，通过常规环境租约上传（单次 ≤32 MiB），可附带 stdin（≤1 MiB），启动一个有界 job（1–600 秒、输出 1 MiB），并轮询到终态。
-- 不可变回执记录 run/lab ID、代次、产物哈希、环境与安装身份、worker job ID、退出码、stdout/stderr 大小与预览，以及 settled 标志。回执位于 `<state_dir>/windows-lab/runs/<run_id>.json`。
-- 传输或轮询失败记录为 `unknown`，不会自动重试。恢复基线会将该 run 标记为 `lost`，这是唯一的核对路径；completed、failed、timed_out 或 cancelled 的 run 之后可以再运行或恢复。
-- run 进行中拒绝 `restore`，且整个 run 期间持有状态锁，避免其他操作在 job 运行期间回滚 VM。
-- 目前不做安装：EXE 从 worker 的上传文件区、在 worker 常规隔离身份下运行，清理归属仍在 worker 资源账本中。实验室不会声称删除了 worker 文件。
-
-## 离线介质与管理通道
-
-```toml
 [windows_lab.vms.lab.admin]
 user = "Administrator"
 password_env = "WUKONG_LAB_ADMIN_PASSWORD"
 ```
 
-- 介质就是已校验的依赖包目录。它必须包含哈希固定的 `install.ps1`；控制器不生成服务或驱动逻辑。
-- `lab install` 通过 `vmrun copyFileFromHostToGuest` 把清单、校验和、产物与脚本复制到 `C:\Windows\Temp\wukong-lab-<install_id>`，再以配置的本地管理员身份通过 `runProgramInGuest` PowerShell 运行 `install.ps1`。
-- 密码只从指定的进程环境变量读取，绝不写入 TOML、状态或回执。`vmrun` 会把它放在命令行上，控制端进程检查可以看到；应在可信控制端运行。
-- 回执记录包/介质身份、安装脚本哈希、退出码、stdout/stderr 与 guest 路径。传输失败为 `unknown`，与 harness run 一样通过恢复基线核对。
-- 不执行清理。每次分析后恢复基线即可丢弃这台一次性 VM，因此安装计划中的清理动作只是可选备注，不是前置条件。安装进行中拒绝 `lab restore`。
-- 管理通道通过一次离线置备建立：在关机状态下编辑克隆盘，安装一个以 LocalSystem 运行的置备服务，guest 随后设置临时本地管理员密码，真实的 `New-Service` 安装返回退出码 0。请轮换密码，并把置备后的 VM 视为一次性环境。
-- 原 VM 及其快照保持不变；只有克隆被登记为实验 VM。
+VM 别名包含 1–64 个 ASCII 字母、数字、下划线或连字符。快照名还允许点号，实验前缀必须与基线不同。宿主命令的配置时限为 30–3600 秒。适配器构造固定参数，不经过 shell，并限制返回输出。密码只从指定环境变量读取，不写入状态或回执；可信控制器上的 `vmrun` 必须通过命令行接收密码。
+
+## 状态、身份与资源隔离
+
+Schema-2 状态位于 `<state_dir>/windows-lab/<vm_id>.json`，绑定规范化 VMX 身份与配置指纹、基线、代际、活动实验、待定宿主操作和执行回执。原子替换在发布失败时保留旧状态。物理 VM 身份拥有操作锁和别名登记；重复别名及共享环境映射会被拒绝。修改 VMX、worker 环境或其他绑定配置不能复用原租约。
+
+评估 worker 绑定在规范化 VMX 旁持有共享锁（`.wukong-environment.lock`）；prepare/install/restore 要求独占准入。维护前，调用者只能在所有任务证据同步后释放本评估的空闲租约。新的原生 worker 租约阻止在遗留任务或调试/交互资源存活时接管。关机 VM 不需要 worker 连接。Lab 工具不会关闭其他评估的连接和租约。基线恢复后，旧评估的 worker 身份仍保持固定；若启动身份变化，后续执行需要新建评估。
+
+- `prepare` 只接受 `idle` 或 `failed`，校验并准备输入、推进代际、持久化意图、创建缺失的基线和实验快照，然后发布 `ready` 租约。
+- `restore` 在恢复写入前校验调用者、活动 lab ID 和代际；回滚前使旧代际失效。只有确认恢复成功后，未知运行/安装记录才变为 `lost`。失败或超时保留不确定性。恢复成功后尝试清理该实验快照，并单独报告清理失败。
+- `prune` 拒绝待恢复状态，保留基线/活动快照，只删除配置前缀下的闲置快照。
+- `status` 读取快照，不调和或重写状态；有时限的宿主探测只是观测。其他操作持有修改锁时仍可查询。
+- 中断的宿主影响不会重放。修改型恢复把中断意图归为 `recovery_required`；操作者须检查客体并调和准确的 operation ID。未解决的维护影响会阻止普通 worker 新任务，但观测与清理仍可使用。
+
+Schema-1 文件会被明确拒绝：先用原版本完成/调和旧实验、保留证据，再明确归档旧 lab 状态并创建 schema-2 状态。不要把旧租约复制给另一 VM 或静默修改身份。旧的 `os_build`、`toolchain_sha256` 声明需移入可选说明 `annotations.os_build`、`annotations.toolchain`。
+
+## 实验与包契约
+
+CLI `ExperimentSpec` 包含校验的 `target_sha256`、有类型的启动/输入/账户要求、可选描述性 `annotations`、依赖、安装计划和恢复说明。说明不代表强制环境要求或已观测事实。测试程序运行准入只支持 `launch=exe`、`account=user`，以及 `input_channel=stdin` 或空 `argv`；其他要求在分发前被拒绝。所选可执行文件必须匹配绑定的目标哈希。
+
+Agent 的 `lab_prepare` 使用有类型的 `spec`。归属由评估/Agent/代际推导，未传 `target_evidence_id` 时使用评估目标，依赖格式为 `{name,evidence_id}`。服务在该评估内解析证据、计算哈希并生成控制器副本。模型无需编造目标哈希，也不能传入 `owner`、URL 或控制器路径。新增工具参数对象均拒绝未知字段。
+
+CLI 操作者可提供绝对现存路径或 HTTP(S) URL 以及 SHA-256。限制为 256 个成员、单文件 64 MiB、整包 512 MiB、单次下载 60 秒。包 ID 是规范 manifest 哈希。每次执行或准备介质前重新打开包时，都会校验该身份、成员名、大小预算和字节，拒绝链接/reparse 路径。同时修改成员和 manifest 也无法重新绑定原包 ID。
+
+安装计划声明 Windows 绝对目标路径及可选服务/账户后置条件。服务二进制必须是声明目标，内核服务要求 `launch=driver`。清理动作是可选归属说明；基线恢复是清理边界，不自动反向执行脚本。
+
+## 工具句柄与执行
+
+`lab_list` 列出配置别名；`lab_status` 必须提供 `vm`，返回单 VM 状态。子 Agent 只能访问分配给自己的 VM/环境，并使用评估创建时记录的配置。其他 Agent 或代际不能复用租约。
+
+`lab_prepare`、`lab_install`、`lab_restore`、`lab_prune` 会及时返回 `operation_id`。用 `lab_operation_status` 查询结果和原始证据；准备结果包含 `lab_id`/`generation` 租约。`lab_operation_cancel` 请求中断自己拥有的操作，取消不证明回滚成功。控制器重启后，缺失实时归属的操作会显示为未知，不重放。活动/未知宿主影响会阻止所属 Agent 和评估完成。检查客体后，按需用 `wukong lab reconcile` 调和 VM 意图，再使用现有操作者命令 `wukong reconcile <operation_id> --result-file ... --evidence-id ...` 解决其持久化副作用回执。
+
+`lab_run` 返回普通评估任务账本中的 `run.job_id`。使用 `job_status`、`job_cancel`、`job_artifacts`；常规监督续期相同的评估/控制器租约。完成检查和证据导入遵循现有任务规则。Lab 回执记录准入身份，任务回执承载最终执行证据。后续恢复会先导入已稳定结束的任务观测。
+
+CLI `lab run` 等待结果，每 15 秒续期独立租约，只释放自己的已稳定作用域。执行限制为 1–600 秒、单个可执行文件上传 32 MiB、stdin 1 MiB、输出预览 1 MiB。传输/轮询不确定时保留原运行身份并阻止替代执行。描述性规格不代表支持特权账户、GUI、网络或驱动执行。
+
+## 管理安装证据
+
+介质必须包含固定哈希的 `install.ps1`。控制器再次校验包，把已校验字节复制为宿主临时快照，传输到 `C:\Windows\Temp\wukong-lab-<install_id>`，再调用固定回执包装脚本。所有管理命令共享一个 1–600 秒总时限。取消会终止宿主命令，但客体影响可能仍然存在，因此保留未知状态。
+
+客体包装脚本校验介质哈希，等待独立 PowerShell 脚本进程退出，记录退出码，并检查声明的目标文件、服务二进制/类型/运行状态及账户存在性。它发布绑定身份的 JSON 回执，控制器取回后保存在安装记录中。宿主 `vmrun` 退出成功不代表安装成功。缺失/不匹配回执保留未知结果；成功完成要求客体退出码为零且后置检查通过。脚本身份、客体回执、清理要求与安装计划哈希分别记录。客体观测是一次性环境提供的证据，不能替代独立利用验证。
 
 ## 驱动安装、测试签名与 Verifier
 
@@ -143,25 +113,13 @@ static_environment = "linux-static"
 
 Ghidra 只探测和绑定选定的静态环境；普通执行/状态/清理只绑定主环境。两者都校验评估配置快照和持久化 worker 身份。只有观测到该后端能力后才公布静态工具，不能只凭配置名称。静态连接失败不会阻断普通 worker 清理；Windows worker 故障也不会阻断另一个可用静态环境的查询。
 
-## 宿主操作
+## 验证边界与历史证据
 
-适配器只使用 `vmrun -T ws list`、`listSnapshots <vmx>`、`snapshot <vmx> <name>`、`revertToSnapshot <vmx> <name>` 和 `start <vmx> nogui`。每次调用都有超时并捕获 stdout/stderr，从不经过 shell。基线仅在缺失时创建；已有快照从不删除。
+审计修复前的分支历史（`231d180`）记录过真实 VMware 快照/恢复、预编译 EXE 运行、服务安装/移除、自签名传统 WDM 驱动在测试签名及标准 Driver Verifier 下运行、Windows 到 Linux 的 Ghidra 分析，以及 `vulnserver.exe`/`essfunc.dll` 两成员 LaunchSpec 运行和取消。这些属于旧实现的历史观测，不是新 schema、异步句柄、租约隔离或客体回执包装脚本的验收证据。
 
-## 限制
+当前回归覆盖过期/失败恢复、调用者/配置约束、包篡改、接口 schema 和原生/Python 源码准入。最终提交仍需重新进行真实 VMware 客体安装及重启验收。驱动覆盖不含 PnP/设备 I/O、生产签名或 PatchGuard 绕过。原生安装器测试应在隔离 runner 上运行，不能覆盖用户安装。
 
-- CLI 必须从正常完整性目录运行。构建目录可能带有 Low 强制标签，VMware 在该标签下拒绝启动。桌面发布脚本已经把可执行文件复制到工作区之外；手工运行 CLI 也应这样做。
-- guest 安装仍需要既定的离线介质和运维/管理员路径。本生命周期不猜密码，也不修改 VM 磁盘或账号。
-- `start_after_restore` 必须与宿主恢复运行中快照的行为一致：在本机上运行中 VM 的快照恢复后处于关机状态，因此实验室按配置启动它。
-- 实验快照不会自动删除；运维在保留证据后显式删除。
-- 不执行清理动作。把一次性 VM 恢复到基线就是清理边界，因此安装计划可以省略清理条目。
-- 已用真实服务安装验证：打包的 `install.ps1` 在第 15 代创建一个手动服务（退出码 0、不可变回执），第 16 代恢复基线后该服务被移除、实验快照被清理，管理员登录仍可用。
-- 一个用自签名证书签名的极简 WDM 驱动在 testsigning 下加载成功（服务 RUNNING），重启后又在标准 Driver Verifier 下再次加载；恢复基线移除了服务、测试证书和 Verifier 设置，worker `doctor` 仍 ready。
-- 绑定 Windows 的分析师通过运行在已登记 Docker Linux 环境中的 Ghidra 12.2 取得了 PE 目标的 `mainCRTStartup`，同时 `lab_status` 列出了配置的 lab VM（`vm=lab`）。这确认了 Windows 绑定的评估可以调用静态工具，而无需给 Windows worker 增加反编译器。
-- 包含 `vulnserver.exe` 与 `essfunc.dll` 的目录 bundle 推断出了入口、EXE 到 DLL 的导入边，把两个成员 staging 到同一目录，通过 LaunchSpec job 启动 EXE 并取消，清理得到确认。
-- 驱动覆盖仅限无设备 I/O 的旧式内核服务；生产/证明签名、PnP 设备栈和 PatchGuard 绕过场景未演练。
-- 第一阶段已用真实 VM 验证：创建基线与实验快照，在第 2、4 代恢复到基线，VM 启动后 worker `doctor` 再次就绪。随后在第 9 代通过已登记 worker 上传并执行一个预编译 EXE（job 完成、退出码 0、写入不可变回执），第 10 代恢复基线后 worker `doctor` 仍就绪。控制器重启、超时和过期代次行为由使用假宿主的单元测试覆盖。
-
-## 命令行
+## CLI
 
 ```powershell
 wukong --config wukong.toml lab status --vm lab
@@ -169,3 +127,5 @@ wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parse
 wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
 wukong --config wukong.toml lab reconcile --vm lab --operation <operation_id> --outcome completed
 ```
+
+VMware 命令应从正常完整性目录执行，Low 完整性的构建目录可能导致 VMware 无法启动。`start_after_restore` 应符合宿主实际的关机/运行快照行为。

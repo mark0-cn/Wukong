@@ -296,28 +296,28 @@
     "text": "从原始 UTF-8 内容证据和 1–64 个按顺序唯一匹配的文本替换创建不可变修订。name 是逻辑文件名；后续复用返回的哈希绑定工作区路径和 content_evidence_id。绝不覆盖原件。小改动优先使用局部修订，避免重传整份脚本。"
   },
   "lab_status": {
-    "source": "Inspect a registered Windows lab VM: host reachability, snapshots, phase and the last run/installation. Read-only; no worker or host mutation.",
-    "text": "检查已登记的 Windows lab VM：宿主可达性、快照、阶段以及最近一次 run/安装。只读，不修改 worker 或宿主。"
+    "source": "Read the persisted state and bounded host observations for one registered Windows lab VM. Requires vm; use lab_list for discovery. Does not reconcile or modify state and remains available during long operations.",
+    "text": "读取指定 Windows 实验 VM 的持久状态及有时限的宿主观测。必须提供 vm；发现配置请使用 lab_list。不执行调和或状态修改，长操作期间仍可查询。"
   },
   "lab_prepare": {
-    "source": "Prepare a registered Windows lab: materialize the spec's hash-verified package, validate its install plan, create the baseline if needed and take the experiment snapshot. Returns the lease with lab_id and generation; target tools use that lease.",
-    "text": "准备已登记的 Windows lab：生成规格中经哈希校验的包、校验安装计划、按需创建基线并拍实验快照。返回含 lab_id 和 generation 的租约；后续目标工具使用该租约。"
+    "source": "Start preparation of the assigned Windows lab and return operation_id. The controller derives caller ownership and target/package hashes from assessment evidence references; spec is typed. Query lab_operation_status for the lab_id/generation lease. Unsupported execution requirements are rejected at run admission.",
+    "text": "启动当前分配的 Windows 实验环境准备并返回 operation_id。控制器依据调用者和评估证据引用确定归属、目标与包哈希；spec 使用明确类型。通过 lab_operation_status 获取 lab_id/generation 租约；运行准入会拒绝未支持的执行要求。"
   },
   "lab_run": {
-    "source": "Run one artifact from the experiment's verified package through the registered Windows worker; optional stdin comes from bounded evidence. Writes an immutable run receipt and marks transport failures unknown. Restore the baseline to reconcile.",
-    "text": "通过已登记 Windows worker 运行实验已校验包中的一个产物；可选 stdin 来自有界证据。写入不可变 run 回执，传输失败标记为 unknown；恢复基线来核对。"
+    "source": "Start a verified exe/user harness as an ordinary durable assessment job and return run.job_id. Use job_status, job_cancel and job_artifacts with that handle. Supports stdin evidence or empty argv; declared target hash must match. Shared assessment leases and completion gates remain in force.",
+    "text": "将校验后的 exe/user 测试程序作为普通持久化评估任务启动，返回 run.job_id。用该句柄调用 job_status、job_cancel 和 job_artifacts。支持 stdin 证据或空 argv；声明的目标哈希必须匹配。继续使用评估共享租约及任务完成检查。"
   },
   "lab_install": {
-    "source": "Run the package's hash-pinned install.ps1 through the lab administrative channel. Requires the configured password environment variable; writes an immutable installation receipt.",
-    "text": "通过 lab 管理通道运行包中哈希固定的 install.ps1。需要配置的密码环境变量；写入不可变安装回执。"
+    "source": "Start installation through the configured administrative channel and return operation_id. Uses one overall timeout (1-600 seconds), hash-pinned media and a guest receipt checking declared files, service and account. Query lab_operation_status; missing receipts remain uncertain. Requires idle worker resources and synchronized evidence.",
+    "text": "通过已配置的管理通道启动安装并返回 operation_id。整个安装受 1–600 秒总时限约束，使用固定哈希介质及检查声明文件、服务、账户的客体回执。通过 lab_operation_status 查询；缺少回执时保留未知结果。要求工作节点资源空闲且证据同步完毕。"
   },
   "lab_restore": {
-    "source": "Revert the registered lab to its baseline, optionally start it and prune the experiment snapshot. Reconciles unknown run/install outcomes; requires the active lab_id and generation.",
-    "text": "把已登记 lab 恢复到基线，按需启动并清理实验快照。核对未知 run/安装结果；需要活动 lab_id 与 generation。"
+    "source": "Start a fenced baseline restore and return operation_id. Requires the caller-owned active lab_id/generation and idle worker resources with synchronized evidence. Unknown effects become lost only after confirmed restoration; snapshot pruning is reported separately. Query lab_operation_status.",
+    "text": "启动受归属和代际约束的基线恢复并返回 operation_id。要求调用者持有有效的 lab_id/generation，工作节点资源空闲且证据同步完毕。只有确认恢复后才将未知影响标记为 lost；快照清理单独报告。用 lab_operation_status 查询。"
   },
   "lab_prune": {
-    "source": "Delete unused lab-prefixed snapshots while keeping the baseline and the active experiment snapshot. Reports per-snapshot failures and never touches unrelated snapshots.",
-    "text": "删除未使用的 lab 前缀快照，保留基线和活动实验快照。逐个报告失败，绝不触碰无关快照。"
+    "source": "Start pruning unused lab-prefixed snapshots and return operation_id. Keeps the baseline and active snapshot, rejects pending recovery and checks ownership. Query lab_operation_status for per-snapshot results.",
+    "text": "启动闲置实验前缀快照清理并返回 operation_id。保留基线及活动快照，拒绝待恢复状态并检查归属。用 lab_operation_status 查询逐快照结果。"
   },
   "bundle_manifest": {
     "source": "Return the directory bundle manifest: auto-hashed members, inferred executable/library/data kinds, PE imports and cross-member import edges. No user-assigned roles; entry is the inferred launch candidate.",
@@ -330,5 +330,17 @@
   "bundle_stage": {
     "source": "Stage a selected bundle entry and up to 64 members, validating paths and launch options before upload. Optional entry, members, args, cwd and input_mode override the inferred defaults. The immutable LaunchSpec path is content-addressed; call job_start with launch_spec and omit argv/timeout_secs/cwd/env.",
     "text": "上传选定的 bundle 入口及最多 64 个成员；上传前校验路径和启动选项。可用 entry、members、args、cwd、input_mode 覆盖推断的默认值。不可变 LaunchSpec 路径包含内容哈希；调用 job_start 时传 launch_spec，省略 argv/timeout_secs/cwd/env。"
+  },
+  "lab_list": {
+    "source": "List configured Windows lab VM aliases and assigned environments without connecting or changing state.",
+    "text": "列出已配置的 Windows 实验 VM 别名及分配的环境，不连接或修改状态。"
+  },
+  "lab_operation_status": {
+    "source": "Read a durable lab host operation by operation_id, including its result and evidence. A lost controller leaves the operation uncertain and never replays it.",
+    "text": "按 operation_id 读取持久化实验宿主操作的结果和证据。控制器归属丢失时保留结果未知，不重放操作。"
+  },
+  "lab_operation_cancel": {
+    "source": "Request interruption of your lab host operation. Cancellation can leave guest effects unknown; inspect and reconcile the existing operation before another mutation.",
+    "text": "请求中断自己拥有的实验宿主操作。取消后客体影响可能仍未知；再次修改前须检查并调和原操作。"
   }
 }

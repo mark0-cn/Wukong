@@ -8,7 +8,7 @@
 //! timed-out operation stays `recovery_required` until an operator reconciles
 //! it, and no state transition re-issues an uncertain host effect.
 use crate::config::WindowsLabVm;
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
 use chrono::Utc;
 use fs2::FileExt;
@@ -25,6 +25,7 @@ use std::{
 use tokio::sync::Mutex;
 
 pub mod admin;
+mod execution;
 pub mod install;
 pub mod media;
 pub mod package;
@@ -32,7 +33,7 @@ pub mod runner;
 pub mod service;
 use admin::{AdminFile, AdminRequest, LabAdmin};
 
-pub const STATE_SCHEMA: u32 = 1;
+pub const STATE_SCHEMA: u32 = 2;
 
 /// Fixed host operations the lab may request. There is no generic run method.
 #[async_trait]
@@ -45,364 +46,11 @@ pub trait VmHost: Send + Sync {
     async fn delete_snapshot(&self, name: &str) -> Result<()>;
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LabPhase {
-    Idle,
-    Preparing,
-    Ready,
-    Restoring,
-    RecoveryRequired,
-    Failed,
-}
+mod types;
+pub use types::*;
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum OperationKind {
-    Prepare,
-    Restore,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LaunchKind {
-    Exe,
-    DllHarness,
-    Service,
-    Gui,
-    Driver,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum InputChannel {
-    Argv,
-    Stdin,
-    File,
-    Network,
-    NamedPipe,
-    Com,
-    Gui,
-    Ioctl,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AccountContext {
-    User,
-    ElevatedUser,
-    System,
-    Driver,
-}
-
-/// Bound to one experiment generation together with its target and toolchain
-/// identities. A valid description is a precondition, not proof of execution.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ExperimentSpec {
-    pub target_sha256: String,
-    pub launch: LaunchKind,
-    pub input_channel: InputChannel,
-    pub account: AccountContext,
-    pub os_build: String,
-    pub toolchain_sha256: String,
-    #[serde(default)]
-    pub recovery: String,
-    /// Controller-fetched, hash-verified artifacts assembled into an offline package.
-    #[serde(default)]
-    pub dependencies: Vec<package::Dependency>,
-    /// Guest-side installation and cleanup ownership. Validation only in Phase 1.
-    #[serde(default)]
-    pub install: Option<install::InstallPlan>,
-}
-
-impl ExperimentSpec {
-    pub fn validate(&self) -> Result<()> {
-        ensure!(
-            hex_digest(&self.target_sha256),
-            "experiment target_sha256 must be 64 lowercase hex characters"
-        );
-        ensure!(
-            hex_digest(&self.toolchain_sha256),
-            "experiment toolchain_sha256 must be 64 lowercase hex characters"
-        );
-        ensure!(
-            !self.os_build.trim().is_empty() && self.os_build.len() <= 128,
-            "experiment os_build must be 1–128 characters"
-        );
-        ensure!(
-            self.recovery.len() <= 512,
-            "experiment recovery note exceeds 512 characters"
-        );
-        package::validate_dependencies(&self.dependencies)?;
-        if let Some(install) = &self.install {
-            install.validate(self.launch)?;
-        }
-        Ok(())
-    }
-
-    pub fn sha256(&self) -> Result<String> {
-        self.validate()?;
-        Ok(hex::encode(Sha256::digest(serde_json::to_vec(self)?)))
-    }
-}
-
-fn hex_digest(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct ActiveExperiment {
-    pub lab_id: String,
-    pub owner: String,
-    pub purpose: String,
-    pub generation: u64,
-    pub spec_sha256: String,
-    pub spec: ExperimentSpec,
-    #[serde(default)]
-    pub snapshot: Option<String>,
-    #[serde(default)]
-    pub package_sha256: Option<String>,
-    #[serde(default)]
-    pub install_sha256: Option<String>,
-    pub started_at: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct PendingOperation {
-    pub operation_id: String,
-    pub kind: OperationKind,
-    pub generation: u64,
-    pub lab_id: String,
-    pub owner: String,
-    pub purpose: String,
-    pub spec_sha256: String,
-    pub spec: ExperimentSpec,
-    #[serde(default)]
-    pub package_sha256: Option<String>,
-    #[serde(default)]
-    pub install_sha256: Option<String>,
-    pub snapshot: String,
-    pub started_at: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RunStatus {
-    Running,
-    Completed,
-    Failed,
-    TimedOut,
-    Lost,
-    Cancelled,
-    Unknown,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct LabRun {
-    pub run_id: String,
-    pub lab_id: String,
-    pub generation: u64,
-    pub artifact: String,
-    pub artifact_sha256: String,
-    pub status: RunStatus,
-    #[serde(default)]
-    pub environment_id: Option<String>,
-    #[serde(default)]
-    pub installation_id: Option<String>,
-    #[serde(default)]
-    pub job_id: Option<String>,
-    #[serde(default)]
-    pub exit_code: Option<i64>,
-    pub stdout: String,
-    pub stderr: String,
-    pub stdout_bytes: u64,
-    pub stderr_bytes: u64,
-    #[serde(default)]
-    pub executable_path: Option<String>,
-    pub settled: bool,
-    pub started_at: String,
-    #[serde(default)]
-    pub ended_at: Option<String>,
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct LabInstall {
-    pub install_id: String,
-    pub lab_id: String,
-    pub generation: u64,
-    pub package_sha256: String,
-    pub media_sha256: String,
-    pub install_sha256: String,
-    pub status: RunStatus,
-    #[serde(default)]
-    pub exit_code: Option<i64>,
-    pub stdout: String,
-    pub stderr: String,
-    #[serde(default)]
-    pub guest_media: Option<String>,
-    #[serde(default)]
-    pub guest_script: Option<String>,
-    pub settled: bool,
-    pub started_at: String,
-    #[serde(default)]
-    pub ended_at: Option<String>,
-    #[serde(default)]
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct LabState {
-    pub schema: u32,
-    pub vm_id: String,
-    pub generation: u64,
-    pub phase: LabPhase,
-    pub baseline_snapshot: String,
-    pub active: Option<ActiveExperiment>,
-    pub pending: Option<PendingOperation>,
-    #[serde(default)]
-    pub last_run: Option<LabRun>,
-    #[serde(default)]
-    pub last_install: Option<LabInstall>,
-    pub last_error: Option<String>,
-    pub updated_at: String,
-}
-
-impl LabState {
-    fn fresh(vm_id: &str, baseline: &str) -> Self {
-        Self {
-            schema: STATE_SCHEMA,
-            vm_id: vm_id.to_owned(),
-            generation: 0,
-            phase: LabPhase::Idle,
-            baseline_snapshot: baseline.to_owned(),
-            active: None,
-            pending: None,
-            last_run: None,
-            last_install: None,
-            last_error: None,
-            updated_at: now(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct LabLease {
-    pub vm_id: String,
-    pub lab_id: String,
-    pub generation: u64,
-    pub snapshot: String,
-    pub spec_sha256: String,
-    pub package_sha256: Option<String>,
-    pub install_sha256: Option<String>,
-    pub owner: String,
-}
-
-pub struct LabStore {
-    root: PathBuf,
-}
-
-impl LabStore {
-    pub fn new(state_dir: &Path) -> Self {
-        Self {
-            root: state_dir.join("windows-lab"),
-        }
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    pub fn packages_root(&self) -> PathBuf {
-        self.root.join("packages")
-    }
-
-    fn state_path(&self, vm_id: &str) -> PathBuf {
-        self.root.join(format!("{vm_id}.json"))
-    }
-
-    fn ensure_root(&self) -> Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("create lab state directory {}", self.root.display()))
-    }
-
-    /// Cross-process exclusion for one VM. The guard lives for the operation.
-    fn lock(&self, vm_id: &str) -> Result<File> {
-        self.ensure_root()?;
-        let path = self.root.join(format!("{vm_id}.lock"));
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)
-            .with_context(|| format!("open lab lock {}", path.display()))?;
-        file.try_lock_exclusive()
-            .with_context(|| format!("VM {vm_id} already has an active lab operation"))?;
-        Ok(file)
-    }
-
-    fn load(&self, vm_id: &str, baseline: &str) -> Result<LabState> {
-        let path = self.state_path(vm_id);
-        let text = match fs::read(&path) {
-            Ok(bytes) => String::from_utf8(bytes)
-                .with_context(|| format!("lab state is not UTF-8: {}", path.display()))?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(LabState::fresh(vm_id, baseline));
-            }
-            Err(error) => {
-                return Err(error).with_context(|| format!("read lab state {}", path.display()));
-            }
-        };
-        let mut state: LabState = serde_json::from_str(&text)
-            .with_context(|| format!("parse lab state {}", path.display()))?;
-        ensure!(
-            state.schema == STATE_SCHEMA,
-            "unsupported lab state schema {} (expected {STATE_SCHEMA})",
-            state.schema
-        );
-        ensure!(
-            state.vm_id == vm_id,
-            "lab state belongs to a different VM identity"
-        );
-        ensure!(
-            state.baseline_snapshot == baseline,
-            "lab state baseline snapshot changed; reconcile the previous baseline first"
-        );
-        if state.updated_at.is_empty() {
-            state.updated_at = now();
-        }
-        Ok(state)
-    }
-
-    fn save(&self, state: &LabState) -> Result<()> {
-        self.ensure_root()?;
-        let mut state = state.clone();
-        state.updated_at = now();
-        let mut bytes = serde_json::to_vec_pretty(&state)?;
-        bytes.push(b'\n');
-        let mut staged = tempfile::NamedTempFile::new_in(&self.root)?;
-        staged.write_all(&bytes)?;
-        staged.as_file().sync_all()?;
-        staged
-            .persist(self.state_path(&state.vm_id))
-            .map_err(|error| error.error)
-            .context("publish lab state")?;
-        #[cfg(unix)]
-        File::open(&self.root)?.sync_all()?;
-        Ok(())
-    }
-}
+mod store;
+pub use store::LabStore;
 
 fn now() -> String {
     Utc::now().to_rfc3339()
@@ -438,6 +86,8 @@ pub struct WindowsLab {
     worker: Option<Arc<dyn LabWorker>>,
     admin: Option<Arc<dyn LabAdmin>>,
     gate: Mutex<()>,
+    vmx: PathBuf,
+    caller: Option<String>,
 }
 
 impl WindowsLab {
@@ -447,23 +97,78 @@ impl WindowsLab {
         config: &WindowsLabVm,
         host: Arc<dyn VmHost>,
     ) -> Result<Self> {
+        Self::open_with_environment(state_dir, vm_id, config, None, host)
+    }
+
+    pub(crate) fn open_with_environment(
+        state_dir: &Path,
+        vm_id: &str,
+        config: &WindowsLabVm,
+        environment: Option<&crate::adapters::environments::EnvironmentConfig>,
+        host: Arc<dyn VmHost>,
+    ) -> Result<Self> {
         crate::adapters::environments::validate_id(vm_id)?;
         ensure!(
             config.vmx.is_absolute() && config.vmrun.is_absolute(),
             "registered lab VM paths must be absolute"
         );
+        let physical_id = physical_identity(&config.vmx)?;
+        let mut store = LabStore::new(state_dir);
+        store.physical_id = Some(physical_id.clone());
+        store.configuration_sha256 = Some(hex::encode(Sha256::digest(serde_json::to_vec(
+            &serde_json::json!({"physical_vm":physical_id,"config":config,"environment":environment}),
+        )?)));
+        // Read validates the persisted configuration before opening any capability.
+        store.load(vm_id, &config.baseline_snapshot)?;
         Ok(Self {
             vm_id: vm_id.to_owned(),
             baseline: config.baseline_snapshot.clone(),
             snapshot_prefix: config.snapshot_prefix.clone(),
             timeout: Duration::from_secs(config.operation_timeout_seconds),
             start_after_restore: config.start_after_restore,
-            store: LabStore::new(state_dir),
+            store,
             host,
             worker: None,
             admin: None,
             gate: Mutex::new(()),
+            vmx: config.vmx.clone(),
+            caller: None,
         })
+    }
+
+    pub fn with_caller(mut self, caller: String) -> Self {
+        self.caller = Some(caller);
+        self
+    }
+
+    /// Reject stale or foreign requests before observation or lease release.
+    pub fn validate_lease(&self, lab_id: &str, generation: u64) -> Result<()> {
+        let state = self.store.load(&self.vm_id, &self.baseline)?;
+        self.validate_active(&state, lab_id, generation)
+    }
+
+    fn validate_active(&self, state: &LabState, lab_id: &str, generation: u64) -> Result<()> {
+        let active = state
+            .active
+            .as_ref()
+            .context("lab has no active experiment")?;
+        ensure!(state.phase == LabPhase::Ready, "lab is not ready");
+        self.authorize(active)?;
+        ensure!(
+            active.lab_id == lab_id && active.generation == generation,
+            "stale lab lease"
+        );
+        Ok(())
+    }
+
+    fn authorize(&self, active: &ActiveExperiment) -> Result<()> {
+        ensure!(
+            self.caller
+                .as_ref()
+                .is_none_or(|caller| caller == &active.owner),
+            "lab lease belongs to another assessment agent"
+        );
+        Ok(())
     }
 
     /// Attach the registered worker that executes packaged harnesses.
@@ -478,22 +183,14 @@ impl WindowsLab {
         self
     }
 
-    pub async fn finish(&self) {
-        if let Some(worker) = &self.worker {
-            worker.finish().await;
-        }
-        if let Some(admin) = &self.admin {
-            admin.finish().await;
-        }
-    }
-
     pub async fn status(&self) -> Result<serde_json::Value> {
-        let _gate = self.gate.lock().await;
-        let _lock = self.store.lock(&self.vm_id)?;
-        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
-        self.mark_restart_recovery(&mut state)?;
-        let running = self.host.running().await;
-        let snapshots = self.host.snapshots().await;
+        let state = self.store.load(&self.vm_id, &self.baseline)?;
+        let running = tokio::time::timeout(Duration::from_secs(5), self.host.running())
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("VM status probe timed out")));
+        let snapshots = tokio::time::timeout(Duration::from_secs(5), self.host.snapshots())
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("VM snapshot probe timed out")));
         Ok(serde_json::json!({
             "vm_id": self.vm_id,
             "state": state,
@@ -511,7 +208,11 @@ impl WindowsLab {
         purpose: &str,
         spec: ExperimentSpec,
     ) -> Result<LabLease> {
-        ensure!(valid_label(owner, 64), "lab owner must be 1–64 characters");
+        ensure!(
+            self.caller.as_ref().is_none_or(|caller| caller == owner),
+            "owner must match the admitted caller"
+        );
+        ensure!(valid_label(owner, 256), "lab owner must be 1–64 characters");
         ensure!(
             valid_label(purpose, 256),
             "lab purpose must be 1–256 characters"
@@ -531,6 +232,10 @@ impl WindowsLab {
             .transpose()?;
         let _gate = self.gate.lock().await;
         let _lock = self.store.lock(&self.vm_id)?;
+        let _environment_guard = crate::adapters::environments::lab_guard::acquire(
+            &crate::adapters::environments::lab_guard::path(&self.vmx)?,
+            true,
+        )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         self.mark_restart_recovery(&mut state)?;
         ensure!(
@@ -539,6 +244,13 @@ impl WindowsLab {
             self.vm_id,
             state.phase
         );
+        let maintenance = if let Some(worker) = &self.worker
+            && self.host.running().await?
+        {
+            Some(worker.maintenance().await?)
+        } else {
+            None
+        };
         let generation = state.generation + 1;
         let lab_id = uuid::Uuid::new_v4().simple().to_string();
         let snapshot = format!("{}-{}", self.snapshot_prefix, lab_id);
@@ -592,6 +304,9 @@ impl WindowsLab {
         });
         state.pending = None;
         self.store.save(&state)?;
+        if let Some(maintenance) = maintenance {
+            maintenance.finish().await?;
+        }
         Ok(LabLease {
             vm_id: self.vm_id.clone(),
             lab_id,
@@ -609,32 +324,11 @@ impl WindowsLab {
     pub async fn restore(&self, lab_id: &str, generation: u64) -> Result<serde_json::Value> {
         let _gate = self.gate.lock().await;
         let _lock = self.store.lock(&self.vm_id)?;
+        let _environment_guard = crate::adapters::environments::lab_guard::acquire(
+            &crate::adapters::environments::lab_guard::path(&self.vmx)?,
+            true,
+        )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
-        self.mark_restart_recovery(&mut state)?;
-        if let Some(run) = state.last_run.as_mut() {
-            ensure!(
-                run.status != RunStatus::Running,
-                "harness run is still in flight; wait for it or inspect the worker"
-            );
-            if run.status == RunStatus::Unknown {
-                run.status = RunStatus::Lost;
-                run.ended_at = Some(now());
-                run.error = Some("baseline restore abandoned an unknown harness run".into());
-                self.store.save(&state)?;
-            }
-        }
-        if let Some(install) = state.last_install.as_mut() {
-            ensure!(
-                install.status != RunStatus::Running,
-                "installation is still in flight; wait for it or inspect the VM"
-            );
-            if install.status == RunStatus::Unknown {
-                install.status = RunStatus::Lost;
-                install.ended_at = Some(now());
-                install.error = Some("baseline restore abandoned an unknown installation".into());
-                self.store.save(&state)?;
-            }
-        }
         let active = state
             .active
             .as_ref()
@@ -650,6 +344,28 @@ impl WindowsLab {
             "stale lab lease: request generation {generation} is not the active generation {}",
             state.generation
         );
+        self.authorize(active)?;
+        self.mark_restart_recovery(&mut state)?;
+        let active = state.active.as_ref().context("active experiment missing")?;
+        ensure!(
+            state
+                .last_run
+                .as_ref()
+                .is_none_or(|r| r.status != RunStatus::Running)
+                && state
+                    .last_install
+                    .as_ref()
+                    .is_none_or(|r| r.status != RunStatus::Running),
+            "an operation is still running; reconcile it before restoring"
+        );
+        self.authorize(active)?;
+        let maintenance = if let Some(worker) = &self.worker
+            && self.host.running().await?
+        {
+            Some(worker.maintenance().await?)
+        } else {
+            None
+        };
         let experiment_snapshot = active.snapshot.clone();
         let next_generation = state.generation + 1;
         let pending = PendingOperation {
@@ -700,6 +416,21 @@ impl WindowsLab {
                 }
             }
         }
+        if let Some(run) = state.last_run.as_mut()
+            && run.status == RunStatus::Unknown
+        {
+            run.status = RunStatus::Lost;
+            run.ended_at = Some(now());
+            run.error = Some("unknown harness abandoned after successful baseline restore".into());
+        }
+        if let Some(install) = state.last_install.as_mut()
+            && install.status == RunStatus::Unknown
+        {
+            install.status = RunStatus::Lost;
+            install.ended_at = Some(now());
+            install.error =
+                Some("unknown installation abandoned after successful baseline restore".into());
+        }
         state.phase = LabPhase::Idle;
         state.pending = None;
         state.last_error = None;
@@ -713,6 +444,9 @@ impl WindowsLab {
                 Err(_) => prune_error = Some("snapshot deletion timed out".into()),
             }
         }
+        if let Some(maintenance) = maintenance {
+            maintenance.finish().await?;
+        }
         Ok(serde_json::json!({
             "vm_id": self.vm_id,
             "generation": next_generation,
@@ -723,337 +457,23 @@ impl WindowsLab {
         }))
     }
 
-    /// Execute one packaged, prebuilt user-mode EXE through the registered
-    /// worker. The store lock is held for the whole run so another operation
-    /// cannot restore the VM underneath the job.
-    pub async fn run(
-        &self,
-        lab_id: &str,
-        generation: u64,
-        artifact: &str,
-        stdin: Option<Vec<u8>>,
-        timeout_secs: u64,
-    ) -> Result<serde_json::Value> {
-        ensure!(
-            package::valid_artifact_name(artifact),
-            "invalid packaged artifact name"
-        );
-        ensure!(
-            (1..=600).contains(&timeout_secs),
-            "harness timeout must be 1–600 seconds"
-        );
-        if let Some(stdin) = &stdin {
-            ensure!(stdin.len() <= 1024 * 1024, "harness stdin exceeds 1 MiB");
-        }
-        let worker = self.worker.as_ref().cloned().context(
-            "registered lab VM has no worker environment; set windows_lab.vms.<id>.environment",
-        )?;
-        let _gate = self.gate.lock().await;
-        let _lock = self.store.lock(&self.vm_id)?;
-        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
-        self.mark_restart_recovery(&mut state)?;
-        ensure!(
-            state.phase == LabPhase::Ready,
-            "lab VM {} is {:?}, not ready",
-            self.vm_id,
-            state.phase
-        );
-        let active = state
-            .active
-            .as_ref()
-            .context("lab has no active experiment")?
-            .clone();
-        ensure!(
-            active.lab_id == lab_id && active.generation == generation,
-            "stale lab lease: request generation {generation} is not the active generation {}",
-            state.generation
-        );
-        ensure!(
-            active.spec.launch == LaunchKind::Exe,
-            "this phase runs only launch=exe harnesses"
-        );
-        ensure!(
-            !matches!(
-                state.last_run.as_ref().map(|run| run.status),
-                Some(RunStatus::Running | RunStatus::Unknown)
-            ) && !matches!(
-                state.last_install.as_ref().map(|install| install.status),
-                Some(RunStatus::Running | RunStatus::Unknown)
-            ),
-            "reconcile the previous harness run or installation (restore the baseline) before starting another"
-        );
-        let package_id = active
-            .package_sha256
-            .clone()
-            .context("experiment has no verified offline package")?;
-        let (executable, artifact_sha256) = self.load_artifact(&package_id, artifact)?;
-        let run_id = uuid::Uuid::new_v4().simple().to_string();
-        let mut run = LabRun {
-            run_id: run_id.clone(),
-            lab_id: lab_id.to_owned(),
-            generation,
-            artifact: artifact.to_owned(),
-            artifact_sha256,
-            status: RunStatus::Running,
-            environment_id: None,
-            installation_id: None,
-            job_id: None,
-            exit_code: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            stdout_bytes: 0,
-            stderr_bytes: 0,
-            executable_path: None,
-            settled: false,
-            started_at: now(),
-            ended_at: None,
-            error: None,
-        };
-        state.last_run = Some(run.clone());
-        self.store.save(&state)?;
-        let outcome = worker
-            .execute(LabWorkerRequest {
-                run_id: run_id.clone(),
-                owner: active.owner.clone(),
-                artifact_name: artifact.to_owned(),
-                executable,
-                stdin,
-                timeout_secs,
-            })
-            .await;
-        match outcome {
-            Ok(outcome) => {
-                run.status = run_status(&outcome.state);
-                run.settled = outcome.settled;
-                run.environment_id = Some(outcome.environment_id);
-                run.installation_id = Some(outcome.installation_id);
-                run.job_id = Some(outcome.job_id);
-                run.exit_code = outcome.exit_code;
-                run.executable_path = outcome.executable_path;
-                run.stdout = outcome.stdout;
-                run.stderr = outcome.stderr;
-                run.stdout_bytes = outcome.stdout_bytes;
-                run.stderr_bytes = outcome.stderr_bytes;
-            }
-            Err(error) => {
-                run.status = RunStatus::Unknown;
-                run.error = Some(format!("{error:#}"));
-            }
-        }
-        run.ended_at = Some(now());
-        state.last_run = Some(run.clone());
-        self.store.save(&state)?;
-        let receipt = self.write_run_receipt(&run)?;
-        if run.status == RunStatus::Unknown {
-            bail!(
-                "harness run {run_id} outcome is unknown; inspect the VM and restore the baseline (receipt {})",
-                receipt.display()
-            );
-        }
-        Ok(serde_json::json!({
-            "vm_id": self.vm_id,
-            "receipt": receipt,
-            "run": run,
-        }))
-    }
-
-    fn load_artifact(&self, package_id: &str, artifact: &str) -> Result<(Vec<u8>, String)> {
-        let root = self.store.packages_root().join(package_id);
-        let manifest: package::PackageManifest = serde_json::from_slice(
-            &fs::read(root.join("manifest.json"))
-                .with_context(|| format!("read package manifest {}", root.display()))?,
-        )?;
-        let entry = manifest
-            .artifacts
-            .iter()
-            .find(|entry| entry.name == artifact)
-            .with_context(|| format!("artifact {artifact} is not in package {package_id}"))?;
-        let path = root.join(artifact);
-        let bytes = fs::read(&path)
-            .with_context(|| format!("read packaged artifact {}", path.display()))?;
-        let hash = hex::encode(Sha256::digest(&bytes));
-        ensure!(
-            bytes.len() as u64 == entry.size && hash == entry.sha256,
-            "packaged artifact {artifact} failed verification"
-        );
-        Ok((bytes, hash))
-    }
-
-    fn write_run_receipt(&self, run: &LabRun) -> Result<PathBuf> {
-        let directory = self.store.root().join("runs");
-        fs::create_dir_all(&directory)?;
-        let path = directory.join(format!("{}.json", run.run_id));
-        if path.exists() {
-            return Ok(path);
-        }
-        let mut bytes = serde_json::to_vec_pretty(run)?;
-        bytes.push(b'\n');
-        let mut staged = tempfile::NamedTempFile::new_in(&directory)?;
-        staged.write_all(&bytes)?;
-        staged.as_file().sync_all()?;
-        staged
-            .persist_noclobber(&path)
-            .map_err(|error| error.error)
-            .context("publish harness receipt")?;
-        Ok(path)
-    }
-
-    /// Build and run the experiment's offline installation media through the
-    /// administrative channel. The service/driver logic lives in the
-    /// hash-pinned `install.ps1`; the controller only transports and records it.
-    pub async fn install(
-        &self,
-        lab_id: &str,
-        generation: u64,
-        timeout_secs: u64,
-    ) -> Result<serde_json::Value> {
-        ensure!(
-            (1..=600).contains(&timeout_secs),
-            "installation timeout must be 1–600 seconds"
-        );
-        let admin = self.admin.as_ref().cloned().context(
-            "administrative channel is unavailable; configure windows_lab.vms.<id>.admin and set its password environment variable",
-        )?;
-        let _gate = self.gate.lock().await;
-        let _lock = self.store.lock(&self.vm_id)?;
-        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
-        self.mark_restart_recovery(&mut state)?;
-        ensure!(
-            state.phase == LabPhase::Ready,
-            "lab VM {} is {:?}, not ready",
-            self.vm_id,
-            state.phase
-        );
-        let active = state
-            .active
-            .as_ref()
-            .context("lab has no active experiment")?
-            .clone();
-        ensure!(
-            active.lab_id == lab_id && active.generation == generation,
-            "stale lab lease: request generation {generation} is not the active generation {}",
-            state.generation
-        );
-        ensure!(
-            active.spec.install.is_some(),
-            "experiment has no install plan"
-        );
-        ensure!(
-            !matches!(
-                state.last_run.as_ref().map(|run| run.status),
-                Some(RunStatus::Running | RunStatus::Unknown)
-            ) && !matches!(
-                state.last_install.as_ref().map(|install| install.status),
-                Some(RunStatus::Running | RunStatus::Unknown)
-            ),
-            "reconcile the previous harness run or installation (restore the baseline) first"
-        );
-        let package_id = active
-            .package_sha256
-            .clone()
-            .context("experiment has no verified offline package")?;
-        let install_sha256 = active
-            .install_sha256
-            .clone()
-            .context("experiment has no install plan identity")?;
-        let media = media::prepare(self.store.root(), &package_id)?;
-        let install_id = uuid::Uuid::new_v4().simple().to_string();
-        let mut record = LabInstall {
-            install_id: install_id.clone(),
-            lab_id: lab_id.to_owned(),
-            generation,
-            package_sha256: package_id,
-            media_sha256: media.sha256.clone(),
-            install_sha256,
-            status: RunStatus::Running,
-            exit_code: None,
-            stdout: String::new(),
-            stderr: String::new(),
-            guest_media: None,
-            guest_script: None,
-            settled: false,
-            started_at: now(),
-            ended_at: None,
-            error: None,
-        };
-        state.last_install = Some(record.clone());
-        self.store.save(&state)?;
-        let outcome = admin
-            .install(AdminRequest {
-                install_id: install_id.clone(),
-                media_sha256: media.sha256,
-                files: media
-                    .files
-                    .iter()
-                    .map(|file| AdminFile {
-                        name: file.name.clone(),
-                        path: file.path.clone(),
-                    })
-                    .collect(),
-                timeout_secs,
-            })
-            .await;
-        match outcome {
-            Ok(outcome) => {
-                record.status = if outcome.exit_code == Some(0) {
-                    RunStatus::Completed
-                } else {
-                    RunStatus::Failed
-                };
-                record.exit_code = outcome.exit_code;
-                record.stdout = outcome.stdout;
-                record.stderr = outcome.stderr;
-                record.guest_media = Some(outcome.guest_media);
-                record.guest_script = Some(outcome.guest_script);
-                record.settled = outcome.settled;
-            }
-            Err(error) => {
-                record.status = RunStatus::Unknown;
-                record.error = Some(format!("{error:#}"));
-            }
-        }
-        record.ended_at = Some(now());
-        state.last_install = Some(record.clone());
-        self.store.save(&state)?;
-        let receipt = self.write_install_receipt(&record)?;
-        if record.status == RunStatus::Unknown {
-            bail!(
-                "installation {install_id} outcome is unknown; inspect the VM and restore the baseline (receipt {})",
-                receipt.display()
-            );
-        }
-        Ok(serde_json::json!({
-            "vm_id": self.vm_id,
-            "receipt": receipt,
-            "install": record,
-        }))
-    }
-
-    fn write_install_receipt(&self, record: &LabInstall) -> Result<PathBuf> {
-        let directory = self.store.root().join("installs");
-        fs::create_dir_all(&directory)?;
-        let path = directory.join(format!("{}.json", record.install_id));
-        if path.exists() {
-            return Ok(path);
-        }
-        let mut bytes = serde_json::to_vec_pretty(record)?;
-        bytes.push(b'\n');
-        let mut staged = tempfile::NamedTempFile::new_in(&directory)?;
-        staged.write_all(&bytes)?;
-        staged.as_file().sync_all()?;
-        staged
-            .persist_noclobber(&path)
-            .map_err(|error| error.error)
-            .context("publish installation receipt")?;
-        Ok(path)
-    }
-
     /// Delete unused experiment snapshots. The baseline and the active
     /// experiment snapshot are always kept.
     pub async fn prune(&self) -> Result<serde_json::Value> {
         let _gate = self.gate.lock().await;
         let _lock = self.store.lock(&self.vm_id)?;
+        let _environment_guard = crate::adapters::environments::lab_guard::acquire(
+            &crate::adapters::environments::lab_guard::path(&self.vmx)?,
+            true,
+        )?;
         let state = self.store.load(&self.vm_id, &self.baseline)?;
+        ensure!(
+            state.pending.is_none() && matches!(state.phase, LabPhase::Idle | LabPhase::Ready),
+            "cannot prune while a host operation needs recovery"
+        );
+        if let Some(active) = &state.active {
+            self.authorize(active)?;
+        }
         let active = state
             .active
             .as_ref()
@@ -1096,6 +516,10 @@ impl WindowsLab {
     ) -> Result<serde_json::Value> {
         let _gate = self.gate.lock().await;
         let _lock = self.store.lock(&self.vm_id)?;
+        let _environment_guard = crate::adapters::environments::lab_guard::acquire(
+            &crate::adapters::environments::lab_guard::path(&self.vmx)?,
+            true,
+        )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         let pending = state
             .pending
@@ -1164,6 +588,9 @@ impl WindowsLab {
     ) -> std::result::Result<T, StepFailure> {
         match tokio::time::timeout(self.timeout, future).await {
             Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) if error.is::<crate::adapters::windows_lab::VmwareTimeout>() => {
+                Err(StepFailure::Timeout)
+            }
             Ok(Err(error)) => Err(StepFailure::Failed(error)),
             Err(_) => Err(StepFailure::Timeout),
         }
@@ -1184,7 +611,7 @@ impl WindowsLab {
         if state
             .last_run
             .as_ref()
-            .is_some_and(|run| run.status == RunStatus::Running)
+            .is_some_and(|run| run.status == RunStatus::Running && run.job_id.is_none())
         {
             if let Some(run) = state.last_run.as_mut() {
                 run.status = RunStatus::Unknown;
@@ -1230,11 +657,14 @@ impl WindowsLab {
             pending.kind, pending.operation_id
         ));
         self.store.save(&state)?;
-        bail!(
-            "lab operation {} outcome is unknown after timeout; inspect the VM and reconcile (generation {})",
-            pending.operation_id,
-            pending.generation
-        )
+        Err(LabError {
+            code: "lab_operation_unknown",
+            operation_id: pending.operation_id,
+            generation: pending.generation,
+            receipt: None,
+            message: "inspect the VM and reconcile the existing operation".into(),
+        }
+        .into())
     }
 
     fn mark_failed<T>(
@@ -1244,6 +674,8 @@ impl WindowsLab {
         error: anyhow::Error,
         keep_pending: bool,
     ) -> Result<T> {
+        let operation_id = pending.operation_id.clone();
+        let generation = pending.generation;
         if keep_pending {
             state.phase = LabPhase::RecoveryRequired;
             state.pending = Some(pending);
@@ -1254,7 +686,20 @@ impl WindowsLab {
         state.active = None;
         state.last_error = Some(error.to_string());
         self.store.save(&state)?;
-        Err(error)
+        if keep_pending {
+            Err(LabError {
+                code: "lab_operation_unknown",
+                operation_id,
+                generation,
+                receipt: None,
+                message: format!(
+                    "host operation failed after intent: {error:#}; inspect and reconcile"
+                ),
+            }
+            .into())
+        } else {
+            Err(error)
+        }
     }
 }
 
@@ -1272,6 +717,7 @@ pub enum ReconcileOutcome {
 
 fn run_status(state: &str) -> RunStatus {
     match state {
+        "running" | "queued" => RunStatus::Running,
         "completed" => RunStatus::Completed,
         "failed" => RunStatus::Failed,
         "timed_out" => RunStatus::TimedOut,
@@ -1294,3 +740,56 @@ fn host_error(running: &Result<bool>, snapshots: &Result<Vec<String>>) -> Option
 
 #[cfg(test)]
 mod tests;
+
+pub use crate::adapters::environments::lab_guard::physical_identity;
+
+#[derive(Debug, Serialize)]
+pub struct LabError {
+    pub code: &'static str,
+    pub operation_id: String,
+    pub generation: u64,
+    pub receipt: Option<PathBuf>,
+    pub message: String,
+}
+impl std::fmt::Display for LabError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: {} (operation {}, generation {})",
+            self.code, self.message, self.operation_id, self.generation
+        )
+    }
+}
+impl std::error::Error for LabError {}
+
+/// Ordinary worker starts share the persisted maintenance fence. Observation
+/// and cleanup remain available to reconcile resources after an interruption.
+pub(crate) fn check_execution_admission(
+    state_dir: &Path,
+    labs: &crate::config::WindowsLabConfig,
+    environment: Option<&str>,
+) -> Result<()> {
+    for (id, vm) in &labs.vms {
+        if vm.environment.as_deref() != environment || environment.is_none() {
+            continue;
+        }
+        let state = LabStore::new(state_dir).load(id, &vm.baseline_snapshot)?;
+        ensure!(
+            state.pending.is_none()
+                && !matches!(
+                    state.phase,
+                    LabPhase::Preparing | LabPhase::Restoring | LabPhase::RecoveryRequired
+                )
+                && state
+                    .last_run
+                    .as_ref()
+                    .is_none_or(|run| run.status != RunStatus::Unknown)
+                && state.last_install.as_ref().is_none_or(|install| !matches!(
+                    install.status,
+                    RunStatus::Running | RunStatus::Unknown
+                )),
+            "lab VM has an unresolved maintenance/execution effect; observe and reconcile it before starting new work"
+        );
+    }
+    Ok(())
+}

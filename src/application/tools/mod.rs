@@ -35,6 +35,7 @@ pub struct ToolService {
     environments: crate::adapters::environments::EnvironmentRegistry,
     static_environment: Option<String>,
     windows_lab: crate::config::WindowsLabConfig,
+    lab_operations: lab_operations::Operations,
     default_environment: Option<String>,
     sync_limits: evidence_sync::SyncLimits,
 }
@@ -55,6 +56,7 @@ mod context;
 mod execution;
 mod gateway;
 mod lab;
+mod lab_operations;
 use context::ToolContext;
 pub(crate) use lab::LabService;
 mod requirements;
@@ -114,7 +116,8 @@ impl ToolService {
         mcp: McpRegistry,
     ) -> Result<Self> {
         let environments =
-            crate::adapters::environments::EnvironmentRegistry::new(config.environments.clone())?;
+            crate::adapters::environments::EnvironmentRegistry::new(config.environments.clone())?
+                .with_lab_guards(&config.windows_lab)?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
         let static_environment = config.analysis.static_environment.clone();
         let windows_lab = config.windows_lab.clone();
@@ -129,6 +132,7 @@ impl ToolService {
             environments,
             static_environment,
             windows_lab,
+            lab_operations: Default::default(),
             default_environment: config.default_environment,
             sync_limits: Default::default(),
         })
@@ -146,7 +150,7 @@ impl ToolService {
                 self.store.controller_owner().as_deref(),
             )
             .await?;
-        let primary = gateway::BoundWorker::new(client)?;
+        let primary = gateway::BoundWorker::new(client, environment_id)?;
         Ok(ToolContext::new(self, Some(primary)))
     }
 
@@ -180,7 +184,7 @@ impl ToolService {
             return Ok(ToolContext::with_static(
                 self,
                 None,
-                Some(gateway::BoundWorker::new(client)?),
+                Some(gateway::BoundWorker::new(client, environment)?),
             ));
         }
         self.bound_to(agent).await
@@ -231,6 +235,20 @@ impl ToolService {
         definitions
     }
     pub async fn close(&self) {
+        for cancellation in self.lab_operations.lock().await.values() {
+            cancellation.cancel();
+        }
+        let drained = tokio::time::timeout(Duration::from_secs(10), async {
+            while !self.lab_operations.lock().await.is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        if drained.is_err() {
+            tracing::warn!(
+                "lab operations did not finish reconciliation before controller shutdown"
+            );
+        }
         self.mcp.close().await;
         self.environments.close().await;
     }
@@ -348,9 +366,10 @@ impl ToolService {
                 self.finish_raw(record, value, is_error, if is_error {CallState::Failed} else {CallState::Completed})
             }
             Ok(Err(error)) => {
-                let state = self.effects().failure_state(policy, &agent, call_id, &error)?;
+                let state = if error.is::<crate::application::windows_lab::LabError>() { CallState::Uncertain } else { self.effects().failure_state(policy, &agent, call_id, &error)? };
                 let kind = error.downcast_ref::<crate::adapters::worker::protocol::WorkerError>().map(|e| json!(e.kind));
-                self.finish_raw(record, json!({"error":format!("{error:#}"),"kind":kind,
+                let lab_error = error.downcast_ref::<crate::application::windows_lab::LabError>();
+                self.finish_raw(record, json!({"error":format!("{error:#}"),"kind":kind,"lab_error":lab_error,
                     "effect_state":if state == CallState::Uncertain {"unknown"} else {"rejected"},
                     "next_action":if state == CallState::Uncertain {"reconcile the existing request; do not change arguments or issue a replacement write"} else {"correct the indicated input; preserve returned references and completed results"}}), true, state)
             }

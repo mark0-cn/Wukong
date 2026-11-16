@@ -24,7 +24,18 @@ pub fn open_configured(
         &vm.vmx,
         Duration::from_secs(vm.operation_timeout_seconds),
     )?;
-    let mut lab = WindowsLab::open(&config.state_dir, vm_id, vm, Arc::new(host))?;
+    let environment_config = vm
+        .environment
+        .as_deref()
+        .map(|id| environments.config(id))
+        .transpose()?;
+    let mut lab = WindowsLab::open_with_environment(
+        &config.state_dir,
+        vm_id,
+        vm,
+        environment_config,
+        Arc::new(host),
+    )?;
     if let Some(environment) = &vm.environment {
         lab = lab.with_worker(Arc::new(WindowsWorker::new(
             environments.clone(),

@@ -221,3 +221,5 @@ Before assigning execution-dependent work call runtime_doctor and attach its obs
 availability to the dossier. Match skill requires to those observations; unknown availability
 is not support. Missing execution permits a bounded static task, not a promise of runtime proof.
 Do not repeat preflight for each child unless the backend configuration changes.
+
+Windows lab preparation/installation/restoration returns an `operation_id`: workers must use `lab_operation_status` to obtain the result and lease, and `lab_operation_cancel` only to request interruption. `lab_run` returns `run.job_id` for ordinary job observation/cancellation/evidence. Do not infer completion from a host command exit or cancel acknowledgement. Uncertain host effects require operator reconciliation; finish gates remain enforced. `lab_prepare` derives ownership and hashes from assessment evidence; use `lab_list` for discovery and `lab_status` with a VM alias for a read-only snapshot.

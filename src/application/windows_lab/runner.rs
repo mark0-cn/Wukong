@@ -37,6 +37,22 @@ pub struct LabWorkerOutcome {
 #[async_trait]
 pub trait LabWorker: Send + Sync {
     async fn execute(&self, request: LabWorkerRequest) -> Result<LabWorkerOutcome>;
-    /// Release the run lease and close transports after the experiment.
-    async fn finish(&self) {}
+    async fn maintenance(&self) -> Result<Box<dyn LabMaintenance>> {
+        Ok(Box::new(()))
+    }
+    async fn observe(&self, _job_id: &str) -> Result<Option<LabWorkerOutcome>> {
+        Ok(None)
+    }
+}
+
+/// A maintenance scope owns its heartbeat and scoped release, never registry shutdown.
+#[async_trait]
+pub trait LabMaintenance: Send + Sync {
+    async fn finish(self: Box<Self>) -> Result<()>;
+}
+#[async_trait]
+impl LabMaintenance for () {
+    async fn finish(self: Box<Self>) -> Result<()> {
+        Ok(())
+    }
 }

@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Fence Windows lab operations by physical VM, configuration and caller; use durable host-operation handles and supervised jobs; verify offline packages and guest installation receipts. Schema-1 users must finish or reconcile with the old version, preserve evidence and archive the old lab state before creating schema-2 state. Agent prepare now takes evidence references and injected ownership; move OS/toolchain notes to annotations."
+zh_CN = "按物理虚拟机、配置和调用者约束 Windows 实验操作；使用持久化宿主操作句柄和受监督任务，验证离线包与来宾安装回执。Schema-1 用户须用旧版本完成或核对实验、保留证据并归档旧实验状态，再创建 schema-2 状态。Agent prepare 改用证据引用并自动绑定所有者；系统和工具链说明迁入 annotations。"
