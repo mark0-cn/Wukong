@@ -37,7 +37,7 @@ RPC 在调用管理器前，将已注册处理器解析为资源操作；资源�
 
 公开传输继续使用 JSON-RPC 2.0。控制器使用 `jsonrpsee`，共用 Rust 类型使用 Serde。内部会话消息采用 Prost 生成的 protobuf 和 Tokio 帧处理，外部调试器使用 `rmcp`。原始调试回复保留为带哈希的证据，不重新实现一套调试协议。Linux 保留现有 Python Worker。
 
-`ping`、`doctor` 由原生层直接回答。只有签名包检查、遗留资源恢复、离线依赖检查和本次服务启动的新 guest 控制／调试器资格检查全部完成，服务才开放已注册的执行能力。`doctor.readiness` 说明当前状态。历史资格回执不能替代新启动检查。注册表只声明可调用的原生执行或隔离分析方法；Windows 不声明 Linux GDB 命令、AFL/QEMU 和运行时准备能力。
+`ping`、`doctor` 由原生层直接回答。只有签名包检查、遗留资源恢复、离线依赖检查和本次服务启动的新 guest 控制／调试器资格检查全部完成，服务才开放已注册的执行能力。`doctor.readiness` 说明当前状态。历史资格回执不能替代新启动检查。注册表只声明可调用的原生执行或隔离分析方法；Windows 不声明 Linux GDB 命令、原始调试命令、AFL/QEMU、core 文件快照和运行时准备能力。崩溃判定使用所属 DbgEng 会话及 `crash_replay`/`input_minimize`；`poc_verify` 仅重放 argv/stdin，映射模块内容保持未确认，因为内核报告的路径不是内容哈希。
 
 ## 租约、容量与持久化状态
 

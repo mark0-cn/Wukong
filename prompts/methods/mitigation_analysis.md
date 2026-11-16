@@ -32,6 +32,10 @@ being observed. A failed observation is unknown, not evidence of no protection.
   syscall result in the requested experiment. Preserve errno, signal and fault
   context; SIGSYS alone does not explain the entire policy. Debugger behavior can
   differ from untraced execution, so replay the required behavior natively.
+- PE: `binary_inspect` reports `NX_COMPAT` (DEP opt-in), `DYNAMIC_BASE` (ASLR
+  opt-in) and `GUARD_CF` (CFG instrumentation). Loader policy and per-process
+  enablement remain separate observations; high-entropy VA, CET and ACG are not
+  reported there, so keep them unknown.
 
 Do not alter protections simply to make a hypothesis pass. Record an unsupported
 path or a separate changed-environment experiment accurately. Recheck after exec,

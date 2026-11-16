@@ -342,7 +342,7 @@ Register supplied libc/loader with `file_put`; `runtime_profile` reads target/li
 
 ### Load Pwn methods on demand
 
-`pwn` provides shared evidence/routing. `heap_ptmalloc` covers allocator lifecycle; `rop_analysis` covers ABI, stack state, gadget semantics and path preconditions; `format_string` separates format control, argument access, leaks, writes and final triggers. Load methods for the current subtask instead of injecting every technique. Prove advanced-path preconditions first; helper-generated payloads are not proof of success.
+`pwn` provides shared evidence/routing. `heap_ptmalloc` covers allocator lifecycle; `rop_analysis` covers ABI, stack state, gadget semantics and path preconditions; `format_string` separates format control, argument access, leaks, writes and final triggers. Load methods for the current subtask instead of injecting every technique. Prove advanced-path preconditions first; helper-generated payloads are not proof of success. For a Windows PE target, `windows_userland` covers loader mitigations, IPC and token boundaries, NT heap/SEH and the Windows worker's evidence limits; it never implies AFL/QEMU or raw debugger commands.
 
 <a id="缓解机制证据分层"></a>
 

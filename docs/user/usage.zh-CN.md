@@ -357,6 +357,9 @@ alphabet、n 和内存顺序的恰好 n 字节，避免默认 n 或寄存器截�
 `rop_analysis` 处理 ABI、栈状态、gadget 语义及各路径前提，`format_string`
 区分格式控制、参数访问、泄漏、写入和最终触发。按当前子任务加载，避免一次
 灌入所有利用技巧。高级路径必须先证明前提，helper 生成 payload 不代表成功。
+Windows PE 目标使用 `windows_userland`，覆盖加载器缓解、IPC/令牌边界、
+NT 堆/SEH 及 Windows worker 的证据限制；它不表示具备 AFL/QEMU 或原始调试
+命令。
 
 <a id="mitigation-evidence-layers"></a>
 

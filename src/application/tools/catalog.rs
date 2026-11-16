@@ -986,7 +986,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::InputMinimizeArgs>(
             "input_minimize",
             "tool-input-minimize",
-            "Minimize a crashing input with fresh module-hash, PC-offset and frame signatures; requires GDB. allow_signal_only explicitly permits weaker signal-only equivalence. Poll job_status and collect job_artifacts.",
+            "Minimize a crashing input with fresh module-hash, PC-offset and frame signatures using the worker's debugger (GDB on Linux, DbgEng through WinDbg MCP on Windows). allow_signal_only explicitly permits weaker signal-only equivalence. Poll job_status and collect job_artifacts.",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {
@@ -998,7 +998,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::PocVerifyArgs>(
             "poc_verify",
             "tool-poc-verify",
-            "Independently replay a finding in fresh trial directories. Use argv/stdin delivery, or a bounded declarative network plan with the host-prepared launch_spec. Network trials use fresh TCP connections, capture/patch ASLR-dependent values and hash raw transcripts; server state is not reset and deployed runtime identity remains unconfirmed. Worker observations determine success.",
+            "Independently replay a finding in fresh trial directories. Use argv/stdin delivery, or a bounded declarative network plan with the host-prepared launch_spec. Network trials use fresh TCP connections, capture/patch ASLR-dependent values and hash raw transcripts; server state is not reset and deployed runtime identity remains unconfirmed. Native Windows workers support argv/stdin replay only. Worker observations determine success.",
             ReplayPolicy::WorkerIdempotent,
             true,
             |services, agent, call, name, args| {
