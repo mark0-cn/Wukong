@@ -48,6 +48,8 @@ def prepare(
         text=True,
     )
     verified = json.loads(result.stdout)
+    if verified.get("execution_boundary") != "disposable_vm":
+        raise ValueError("Offline setup requires a signed disposable_vm execution boundary")
     if (previous_package is None) != (previous_enrollment is None):
         raise ValueError("Recovery media requires both previous public sources")
     if previous_package is not None:

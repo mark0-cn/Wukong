@@ -2,9 +2,13 @@
 
 [English](README.md) · 简体中文
 
-启动过程将部署身份检查、资源恢复、依赖自检、隔离资格检查及通信就绪划分为独立阶段。每个阶段发布开始和成功／失败事件，记录耗时与稳定错误码。受保护的 `metadata/startup-diagnostics.json` 原子替换，大小限制为 16 KiB，绑定安装身份、已验证且可取得的包／启动身份及新的启动尝试身份。`last-service-error.txt` 同步刷新为同次尝试，包含等待／就绪状态，不再保留上一次启动错误。摘要使用固定分类，不复制任意异常文本。安装失败自动附带当前诊断身份、错误码和有界 WFP 计数；hosted 验收保留并验证完整报告，诊断有效与安装成功分别记录。
+Windows 执行要求专用、可丢弃的目标 VM。接受目标影响整个 guest（包括 worker）；宿主访问、共享目录／设备及对外网络由虚拟化层限制。控制器／模型凭据与签名私钥留在 guest 外，原始证据保留在控制器，不可信执行后重置或丢弃 VM。worker 不创建 VM、不配置虚拟化层策略，也不自动管理快照。
 
-WFP 诊断计数包括收到回调、解析失败、字段缺失、身份／地址／端口／方向／时间窗口不匹配、精确匹配和溢出。计数饱和增长，保留事件仍最多 16 条。原有应用／监听端口订阅过滤、30 秒关联窗口及实时 AppContainerLoopback 过滤器验证保持强制执行。零回调只描述该过滤后的订阅。诊断不能证明隔离，也不能在资格检查失败后允许就绪。本次改动不修复此前观察到的 WFP 资格检查失败；当前安装结果必须由专用 hosted 安装尝试确认。
+签名部署记录必须明确包含 `"execution_boundary": "disposable_vm"`。签名 CLI、离线介质准备、安装器及服务均检查此声明。旧签名记录仍可读取以核对历史身份，但不能授权新边界下的启动。应在新的可丢弃 VM 中部署并重新签署声明，单独保留此前安装和证据。
+
+启动分为部署身份检查、资源恢复、依赖自检、guest 控制自检及通信就绪阶段。各阶段发布开始和成功／失败事件，记录耗时和稳定错误码。受保护的 `metadata/startup-diagnostics.json` 使用 schema 2，原子替换、上限 16 KiB，绑定安装身份、已验证且可取得的包／启动身份及新的启动尝试身份。`last-service-error.txt` 同步刷新为同次尝试（包括等待／就绪状态）。固定摘要不复制任意异常文本。安装失败携带当前诊断身份与错误码；hosted 验收分别验证完整报告和安装结果。
+
+项目不再订阅或匹配 WFP 事件，启动不再要求回环阻断证据。AppContainer／令牌、ACL、进程归属、清理及调试器检查仍作为 guest 内部控制。每次启动的新 schema-5 资格回执采用 `scope: "disposable_vm_guest_controls"`。报告和 `doctor` 声明 `execution_boundary: "disposable_vm"`、`external_isolation_verified: false`；`doctor.guest_controls_verified` 表示本次启动检查结果。这些检查不能认证虚拟化层隔离，也不能保证 guest 被攻陷后的证据真实性。Windows 内部仍可能使用系统 WFP 能力；此修改不关闭系统防火墙。
 
 
 ## 职责与请求链路
@@ -21,14 +25,14 @@ WFP 诊断计数包括收到回调、解析失败、字段缺失、身份／地�
 | `native/resources/` | 单一资源管理器拥有准入、操作票据、账本及恢复 |
 | `native/executors/` | 进程／会话计划、受控执行观察及结果适配；不修改账本 |
 | `native/artifacts/` | 租约范围内的不可变输入、运行／资源范围内的输出及受限保护文件 IO |
-| `native/isolation/` | Windows Token、AppContainer、Job、ACL/WFP 及进程启动 |
+| `native/isolation/` | Windows Token、AppContainer、Job、ACL 及进程启动 |
 | 外部 WinDbg MCP / Python | 在受控资源内执行调试或有界分析，不独立管理 Worker |
 
 RPC 在调用管理器前，将已注册处理器解析为资源操作；资源和制品模块不查询 RPC 注册表。`executors/results.rs` 校验并发布进程/重放观察，管理器独占清理和账本状态转换的提交。Shell 和分析适配器负责各自的响应投影。共享协议提供有类型的结果/清理观察；原生账本保留更严格的 OS 清理证明。
 
 公开传输继续使用 JSON-RPC 2.0。控制器使用 `jsonrpsee`，共用 Rust 类型使用 Serde。内部会话消息采用 Prost 生成的 protobuf 和 Tokio 帧处理，外部调试器使用 `rmcp`。原始调试回复保留为带哈希的证据，不重新实现一套调试协议。Linux 保留现有 Python Worker。
 
-`ping`、`doctor` 由原生层直接回答。只有签名包检查、遗留资源恢复、离线依赖检查和本次服务启动的新隔离/调试器资格检查全部完成，服务才开放已注册的执行能力。`doctor.readiness` 说明当前状态。历史资格回执不能替代新启动检查。注册表只声明可调用的原生执行或隔离分析方法；Windows 不声明 Linux GDB 命令、AFL/QEMU 和运行时准备能力。
+`ping`、`doctor` 由原生层直接回答。只有签名包检查、遗留资源恢复、离线依赖检查和本次服务启动的新 guest 控制／调试器资格检查全部完成，服务才开放已注册的执行能力。`doctor.readiness` 说明当前状态。历史资格回执不能替代新启动检查。注册表只声明可调用的原生执行或隔离分析方法；Windows 不声明 Linux GDB 命令、AFL/QEMU 和运行时准备能力。
 
 ## 租约、容量与持久化状态
 

@@ -108,7 +108,7 @@ pub(super) fn check(process: u32, thread: u32) -> Result<Value> {
     let mut token = null_mut();
     security::check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
     let token = Handle(token);
-    token_policy::verify_network_isolation(token.0)?;
+    token_policy::verify_appcontainer_policy(token.0)?;
     crate::isolation::processes::verify_sandbox_privileges(&token)?;
     ensure!(
         process > 0

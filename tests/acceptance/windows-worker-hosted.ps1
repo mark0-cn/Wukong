@@ -87,7 +87,7 @@ function Read-ResourceReceipt([string]$receipt){
     $file=Get-Item -LiteralPath $receipt
     if($file.Length -gt 8192 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Resource receipt exceeds bound or is a reparse point'}
     $value=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
-    if($value.schema -ne 4 -or -not $value.passed -or $value.scope -cne 'owned_appcontainer_trusted_probes' -or $value.manifest_sha256 -cne $fixture.manifest_sha256 -or $value.production_execution -or @($value.dbgeng).Count -ne 2 -or $value.qualification_id -cnotmatch '^[0-9a-f]{32}$'){throw 'Resource receipt differs'}
+    if($value.schema -ne 5 -or -not $value.passed -or $value.scope -cne 'disposable_vm_guest_controls' -or $value.execution_boundary -cne 'disposable_vm' -or $value.external_isolation_verified -cne $false -or $value.manifest_sha256 -cne $fixture.manifest_sha256 -or $value.production_execution -or @($value.dbgeng).Count -ne 2 -or $value.qualification_id -cnotmatch '^[0-9a-f]{32}$'){throw 'Resource receipt differs'}
     if($file.Name -cne ('isolation-selftest-'+$fixture.manifest_sha256+'-'+$value.qualification_id+'.json')){throw 'Resource receipt identity differs from its file'}
     return $value
 }

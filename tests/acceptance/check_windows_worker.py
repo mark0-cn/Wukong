@@ -124,9 +124,10 @@ def startup_diagnostic(installed, installation=None, package=None):
         "started_at_ms",
         "ready",
         "events",
-        "wfp",
+        "execution_boundary",
+        "external_isolation_verified",
     }
-    if set(value) != expected or value["schema"] != 1:
+    if set(value) != expected or value["schema"] != 2:
         raise ValueError("startup diagnostic schema mismatch")
     if not re.fullmatch(r"[0-9a-f]{32}", value["attempt_id"]):
         raise ValueError("startup diagnostic attempt identity missing")
@@ -138,7 +139,7 @@ def startup_diagnostic(installed, installation=None, package=None):
         "deployment_identity",
         "resource_recovery",
         "dependency_selftest",
-        "isolation_qualification",
+        "guest_controls_selftest",
         "communication_ready",
     ]
     events = value["events"]
@@ -159,23 +160,11 @@ def startup_diagnostic(installed, installation=None, package=None):
             raise ValueError("startup continued after a failed stage")
     if value["ready"] != (len(events) == 10 and events[-1]["status"] == "succeeded"):
         raise ValueError("startup diagnostic readiness mismatch")
-    if value["wfp"] is not None:
-        kinds = {
-            "received",
-            "parse_failed",
-            "fields_missing",
-            "identity_mismatch",
-            "address_mismatch",
-            "port_mismatch",
-            "direction_mismatch",
-            "time_window_mismatch",
-            "matched",
-            "overflow",
-        }
-        if set(value["wfp"]) != kinds or any(
-            type(count) is not int or not 0 <= count <= 2**64 - 1 for count in value["wfp"].values()
-        ):
-            raise ValueError("startup diagnostic counters mismatch")
+    if (
+        value["execution_boundary"] != "disposable_vm"
+        or value["external_isolation_verified"] is not False
+    ):
+        raise ValueError("startup diagnostic boundary mismatch")
     with (installed / "metadata/last-service-error.txt").open(encoding="utf-8") as incoming:
         summary = incoming.read(1025)
     if len(summary) > 1024 or f"attempt={value['attempt_id']} " not in summary:
@@ -405,6 +394,7 @@ def main():
             port = candidate.getsockname()[1]
         management = local_management_ip()
         draft = dict(
+            execution_boundary="disposable_vm",
             schema=1,
             generation=1,
             installation_id=installation,
@@ -467,9 +457,16 @@ def main():
             or installed_result["manifest_sha256"] != sealed["manifest_sha256"]
         ):
             raise RuntimeError("Installer receipt differs from prepared fixture")
+        report["execution_boundary"] = "disposable_vm"
+        report["external_isolation_verified"] = False
         report["native_isolation"] = control("Isolation")
+        report["startup_diagnostic"] = startup_diagnostic(
+            installed, installation, sealed["manifest_sha256"]
+        )
         if (
             report["native_isolation"].get("passed") is not True
+            or report["native_isolation"].get("execution_boundary") != "disposable_vm"
+            or report["native_isolation"].get("external_isolation_verified") is not False
             or report["native_isolation"].get("production_execution") is not False
             or len(report["native_isolation"].get("personas", [])) != 2
             or [item.get("architecture") for item in report["native_isolation"].get("dbgeng", [])]
@@ -575,7 +572,8 @@ def main():
                         "passed": True,
                         "attempt_id": current["attempt_id"],
                         "ready": current["ready"],
-                        "wfp_counters_present": current["wfp"] is not None,
+                        "execution_boundary": current["execution_boundary"],
+                        "external_isolation_verified": current["external_isolation_verified"],
                     }
                 except (OSError, ValueError, KeyError, TypeError) as diagnostic_error:
                     report["startup_diagnostic_validation"] = {

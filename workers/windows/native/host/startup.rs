@@ -13,7 +13,7 @@ pub(crate) enum Stage {
     DeploymentIdentity,
     ResourceRecovery,
     DependencySelftest,
-    IsolationQualification,
+    GuestControlsSelftest,
     CommunicationReady,
 }
 impl Stage {
@@ -22,7 +22,7 @@ impl Stage {
             Self::DeploymentIdentity => "deployment_identity_failed",
             Self::ResourceRecovery => "resource_recovery_failed",
             Self::DependencySelftest => "dependency_selftest_failed",
-            Self::IsolationQualification => "isolation_qualification_failed",
+            Self::GuestControlsSelftest => "guest_controls_failed",
             Self::CommunicationReady => "communication_readiness_failed",
         }
     }
@@ -33,8 +33,8 @@ impl Stage {
             }
             Self::ResourceRecovery => "Owned resources could not be reconciled before startup.",
             Self::DependencySelftest => "Sealed dependency self-test did not pass.",
-            Self::IsolationQualification => {
-                "Isolation qualification did not pass; execution remains unavailable."
+            Self::GuestControlsSelftest => {
+                "Guest controls check did not pass; execution remains unavailable."
             }
             Self::CommunicationReady => {
                 "Authenticated worker communication could not become ready."
@@ -60,7 +60,8 @@ pub(crate) struct Report {
     started_at_ms: u64,
     ready: bool,
     events: Vec<Event>,
-    wfp: Option<super::resource_host::NetworkCounters>,
+    execution_boundary: wukong_worker_package::ExecutionBoundary,
+    external_isolation_verified: bool,
     #[serde(skip)]
     directory: PathBuf,
     #[serde(skip)]
@@ -92,7 +93,7 @@ impl Report {
             "invalid diagnostic installation identity"
         );
         let report = Self {
-            schema: 1,
+            schema: 2,
             installation_id: installation.into(),
             package_sha256: None,
             boot_id: None,
@@ -103,7 +104,8 @@ impl Report {
                 .min(u64::MAX as u128) as u64,
             ready: false,
             events: vec![],
-            wfp: None,
+            execution_boundary: wukong_worker_package::ExecutionBoundary::DisposableVm,
+            external_isolation_verified: false,
             directory: configuration
                 .parent()
                 .context("startup configuration parent missing")?
@@ -131,7 +133,7 @@ impl Report {
             Stage::DeploymentIdentity,
             Stage::ResourceRecovery,
             Stage::DependencySelftest,
-            Stage::IsolationQualification,
+            Stage::GuestControlsSelftest,
             Stage::CommunicationReady,
         ];
         ensure!(
@@ -172,14 +174,7 @@ impl Report {
             "startup_pending"
         })
     }
-    pub(crate) fn wfp(&mut self, counters: super::resource_host::NetworkCounters) {
-        self.wfp = Some(counters);
-    }
-    pub(crate) fn fail(&mut self, error: &anyhow::Error) -> Result<()> {
-        self.wfp = error
-            .downcast_ref::<super::resource_host::NetworkCounters>()
-            .cloned()
-            .or_else(|| self.wfp.clone());
+    pub(crate) fn fail(&mut self, _error: &anyhow::Error) -> Result<()> {
         let code = if let Some((stage, started)) = self.active.take() {
             self.events.push(Event {
                 stage,
@@ -241,7 +236,9 @@ pub(crate) fn failure_summary(
         MAX_REPORT_BYTES as u64,
     )?)?;
     ensure!(
-        value["schema"] == 1
+        value["schema"] == 2
+            && value["execution_boundary"] == "disposable_vm"
+            && value["external_isolation_verified"] == false
             && value["installation_id"] == installation
             && (value["package_sha256"].is_null() || value["package_sha256"] == package),
         "diagnostic identity mismatch"
@@ -262,9 +259,7 @@ pub(crate) fn failure_summary(
         code.len() <= 64 && code.bytes().all(|c| c.is_ascii_lowercase() || c == b'_'),
         "invalid diagnostic code"
     );
-    let counters: Option<super::resource_host::NetworkCounters> =
-        serde_json::from_value(value["wfp"].clone())?;
-    Ok(serde_json::json!({"attempt_id":attempt,"installation_id":installation,"package_sha256":package,"code":code,"wfp":counters}).to_string())
+    Ok(serde_json::json!({"attempt_id":attempt,"installation_id":installation,"package_sha256":package,"code":code,"execution_boundary":"disposable_vm","external_isolation_verified":false}).to_string())
 }
 
 #[cfg(test)]
@@ -276,7 +271,7 @@ mod tests {
             Stage::DeploymentIdentity,
             Stage::ResourceRecovery,
             Stage::DependencySelftest,
-            Stage::IsolationQualification,
+            Stage::GuestControlsSelftest,
             Stage::CommunicationReady,
         ];
         let codes: std::collections::BTreeSet<_> = stages.iter().map(|s| s.failure()).collect();
@@ -285,7 +280,7 @@ mod tests {
             assert!(stage.summary().len() < 128);
         }
         let report = Report {
-            schema: 1,
+            schema: 2,
             installation_id: "installation".into(),
             package_sha256: Some("a".repeat(64)),
             boot_id: Some("boot".into()),
@@ -302,7 +297,8 @@ mod tests {
                     summary: stage.summary(),
                 })
                 .collect(),
-            wfp: None,
+            execution_boundary: wukong_worker_package::ExecutionBoundary::DisposableVm,
+            external_isolation_verified: false,
             directory: PathBuf::new(),
             started: Instant::now(),
             active: None,
@@ -327,7 +323,7 @@ mod tests {
             Stage::DeploymentIdentity,
             Stage::ResourceRecovery,
             Stage::DependencySelftest,
-            Stage::IsolationQualification,
+            Stage::GuestControlsSelftest,
             Stage::CommunicationReady,
         ];
         let mut previous = String::new();
@@ -341,11 +337,8 @@ mod tests {
                 report.succeed()?;
             }
             report.begin(stages[failed])?;
-            report.fail(
-                &anyhow::anyhow!("token=PRIVATE-CANARY path=C:\\secret")
-                    .context(super::super::resource_host::NetworkCounters::default()),
-            )?;
-            assert!(report.wfp.is_some());
+            report.fail(&anyhow::anyhow!("token=PRIVATE-CANARY"))?;
+            assert!(!report.external_isolation_verified);
             let raw = std::fs::read_to_string(directory.path().join("startup-diagnostics.json"))?;
             let summary = std::fs::read_to_string(directory.path().join("last-service-error.txt"))?;
             assert!(!raw.contains("PRIVATE-CANARY"));

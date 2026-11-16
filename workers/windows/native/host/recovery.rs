@@ -137,6 +137,7 @@ mod tests {
         blob.extend_from_slice(&[0, 0, 0, 32]);
         blob.extend_from_slice(&[7; 32]);
         let record = Enrollment {
+            execution_boundary: Some(wukong_worker_package::ExecutionBoundary::DisposableVm),
             schema: 1,
             generation,
             installation_id: "a".repeat(32),
