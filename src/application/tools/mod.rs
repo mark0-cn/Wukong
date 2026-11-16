@@ -160,12 +160,7 @@ impl ToolService {
             }
             _ => None,
         };
-        Ok(ToolContext::with_static(
-            self,
-            Some(primary),
-            static_worker,
-            self.static_environment.clone(),
-        ))
+        Ok(ToolContext::with_static(self, Some(primary), static_worker))
     }
 
     async fn checked_environment(&self, agent: &AgentMetadata) -> Result<RuntimeClient> {

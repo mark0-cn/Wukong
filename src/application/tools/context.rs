@@ -8,21 +8,19 @@ pub(crate) struct ToolContext {
     pub(super) environments: environment_service::EnvironmentService,
     pub(super) local_ghidra: Option<PathBuf>,
     pub(super) static_gateway: Option<WorkerGateway>,
-    pub(super) static_environment: Option<String>,
     pub(super) execution: ExecutionService,
     pub(super) analysis: AnalysisService,
     pub(super) lab: LabService,
 }
 impl ToolContext {
     pub(super) fn new(service: &ToolService, worker: Option<gateway::BoundWorker>) -> Self {
-        Self::with_static(service, worker, None, None)
+        Self::with_static(service, worker, None)
     }
 
     pub(super) fn with_static(
         service: &ToolService,
         worker: Option<gateway::BoundWorker>,
         static_worker: Option<gateway::BoundWorker>,
-        static_environment: Option<String>,
     ) -> Self {
         let gateway = WorkerGateway {
             store: service.store.clone(),
@@ -68,7 +66,6 @@ impl ToolContext {
             },
             local_ghidra: service.local_ghidra(),
             static_gateway,
-            static_environment,
             execution,
             analysis,
             lab: LabService {

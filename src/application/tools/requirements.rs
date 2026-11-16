@@ -107,11 +107,6 @@ impl ToolContext {
             Requirement::Ghidra => {
                 let gateway = match &self.static_gateway {
                     Some(gateway) => gateway,
-                    None if self.static_environment.is_some() => {
-                        anyhow::bail!(
-                            "analysis.static_environment is configured but no static worker is bound"
-                        )
-                    }
                     None => &self.execution.gateway,
                 };
                 Some(gateway.runtime()?.doctor().await?)
