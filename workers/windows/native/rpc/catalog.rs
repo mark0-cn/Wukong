@@ -205,11 +205,11 @@ pub(crate) fn doctor(identity: &WorkerIdentity, qualified: bool) -> Value {
     }
     capabilities.insert("formats".into(), json!(["PE"]));
     json!({"protocol":identity.protocol,"identity":identity,"os":"windows",
-        "isolation":"appcontainer","metadata_protected_from_targets":true,
+        "isolation":"appcontainer","execution_boundary":"disposable_vm","external_isolation_verified":false,"guest_controls_verified":qualified,"metadata_protected_from_targets":qualified,
         "exclusive_run_lease":true,"capabilities":capabilities,
         "methods":GROUPS.iter().flat_map(|group| group.methods.iter().map(move |entry| (entry.method.name().to_owned(), json!({"ready":entry.method.resources() == wukong_worker_protocol::ResourceDemand::None || qualified})))).collect::<serde_json::Map<String,Value>>(),
         "capacity":WorkerCapacity{max_active_resources:1,exclusive_run_lease:true},
-        "readiness":{"ready":qualified,"reason":if qualified {"current service isolation and toolchain qualification passed"} else {"startup qualification incomplete"}},
+        "readiness":{"ready":qualified,"reason":if qualified {"current service guest controls and toolchain checks passed; hypervisor isolation is externally configured"} else {"startup qualification incomplete"}},
         "implementation":"native_windows","execution_owner":"native_windows",
         "analysis_runtime":"isolated_python_process","production_execution":qualified})
 }
@@ -234,6 +234,13 @@ mod tests {
             boot_id: "fixture".into(),
             package_sha256: "b".repeat(64),
         };
+        for qualified in [false, true] {
+            let report = doctor(&identity, qualified);
+            assert_eq!(report["execution_boundary"], "disposable_vm");
+            assert_eq!(report["external_isolation_verified"], false);
+            assert_eq!(report["guest_controls_verified"], qualified);
+            assert_eq!(report["readiness"]["ready"], qualified);
+        }
         for group in GROUPS {
             for entry in group.methods {
                 let method = entry.method;

@@ -1,7 +1,9 @@
 //! Signed offline worker package format, shared by the controller and native installer.
 mod enrollment;
 mod files;
-pub use enrollment::{Enrollment, SshPublicKey, VerifiedEnrollment, write_enrollment};
+pub use enrollment::{
+    Enrollment, ExecutionBoundary, SshPublicKey, VerifiedEnrollment, write_enrollment,
+};
 pub use files::verify_package;
 mod keys;
 pub use keys::load_controller_signer;

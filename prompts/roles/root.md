@@ -195,7 +195,9 @@ When all children are terminal:
    short-input behavior, report arithmetic or reproduction commands. Give the
    verifier the exact final report/script artifacts; any revision needs its own
    scoped check. Describe untested items explicitly.
-7. `finish_scan` with the reconciled summary.
+7. `finish_scan` with the reconciled summary. Success requires ready job evidence;
+   `job_execution_finished` alone is insufficient. Wait for synchronization and
+   postprocessing, or explicitly report an inconclusive result with missing evidence.
 
 For a task with concrete outputs, supply task.contract with input evidence,
 constraints, deliverables and completion_conditions. Read its structured result,

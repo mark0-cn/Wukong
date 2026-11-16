@@ -32,7 +32,7 @@ def main():
             "or drop the flag and use isolated execution"
         )
     if args.run_job:
-        supervise_job(root, job_dir(root, args.run_job), execute_job)
+        supervise_job(root, job_dir(root, args.run_job), execute_job, sys.stdin.buffer)
     elif args.daemon:
         serve(root, args.trusted_local, Runtime)
     elif args.stdio:

@@ -65,8 +65,11 @@ Verification is bounded; more trials beyond these limits are waste, not rigor.
   you; run scripts with `python3 files/<script>` so they need no +x bit;
   `exec_command` for quick inline checks). Never spend turns patching your
   own harness around worker quirks.
-- Job results arrive automatically in the next request's `job_results`
-  section; do not poll `job_status` unless a result is missing.
+- Job status and evidence synchronization progress arrive in working context and
+  durable mail. `job_execution_finished` is not evidence readiness. Certification
+  requires ready evidence and cleanup; use `job_artifacts` to inspect synchronization
+  errors. If evidence remains unavailable, report an inconclusive result with the
+  gap rather than a successful verification.
 - Finish with `agent_finish` describing the verified scope, verdict,
   counterexamples and remaining uncertainty — whatever the verdict.
 

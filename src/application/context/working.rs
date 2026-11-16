@@ -33,6 +33,7 @@ pub(crate) fn snapshot(tx: &StateSession<'_>, agent: &AgentMetadata) -> Result<V
         json!({"id":job.id,"tool":job.tool_name,"state":job.status.state,
             "target_sha256":job.target_sha256,"generation":job.owner_generation,
             "status_evidence_id":job.status_evidence_id,
+            "evidence_sync":job.evidence_sync.progress(job.evidence_ready()),
             "stdout_observation":ends(&job.status.stdout,1600),
             "stderr_observation":ends(&job.status.stderr,400),
             "result_preview":ends(&json!(job.status.result).to_string(),800),

@@ -453,8 +453,17 @@ pub fn install(plan: Plan) -> Result<Value> {
         &json!({"name":pipe_transport::service_name(&deployment.installation_id)?}),
         &private,
     )?;
-    register_service(&root, &deployment, &plan.manifest)
-        .context("register and start owned worker service")?;
+    register_service(&root, &deployment, &plan.manifest).with_context(|| {
+        format!(
+            "register and start owned worker service; startup diagnostic: {}",
+            super::startup::failure_summary(
+                &metadata.join("deployment.json"),
+                &deployment.installation_id,
+                plan.manifest.sha256()
+            )
+            .unwrap_or_else(|_| "current bounded diagnostic unavailable".into())
+        )
+    })?;
     let result = json!({"schema":1,"installed":true,"installation_id":deployment.installation_id,"environment_id":enrollment.environment_id,"generation":enrollment.generation,"manifest_sha256":plan.manifest.sha256(),"ssh_user":management.name,"ssh_port":enrollment.ssh_port,"host_key":host_public,"host_fingerprint":fingerprint,"production_isolation_verified":false});
     crate::artifacts::io::write_new_json(&root.join("connection.json"), &result, &code)?;
     Ok(result)

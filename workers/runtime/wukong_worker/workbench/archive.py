@@ -5,6 +5,12 @@ import sys
 import tarfile
 from pathlib import Path
 
+if __name__ == "__main__" and not __package__:
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from wukong_worker.resources.job_ledger import JobLedger
+
 
 def export(root, archive):
     def selected(info):
@@ -23,7 +29,9 @@ def restore(root, archive):
             raise ValueError("volume archive exceeds limits")
         stream.extractall(root, members=members, filter="data")
     # An imported PID, socket, or daemon ownership record is never live authority.
-    for pattern in ["debug/*/session.json", "interact/*/session.json", "jobs/*/status.json"]:
+    for path in root.glob("jobs/*/status.json"):
+        JobLedger(path.parent).import_snapshot()
+    for pattern in ["debug/*/session.json", "interact/*/session.json"]:
         for path in root.glob(pattern):
             value = json.loads(path.read_text())
             if value.get("state") in {

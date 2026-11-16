@@ -2,6 +2,20 @@
 
 [English](README.md) · 简体中文
 
+Windows 执行要求专用、可丢弃的目标 VM。接受目标影响整个 guest（包括 worker）；宿主访问、共享目录／设备及对外网络由虚拟化层限制。控制器／模型凭据与签名私钥留在 guest 外，原始证据保留在控制器，不可信执行后重置或丢弃 VM。worker 不创建 VM、不配置虚拟化层策略，也不自动管理快照。
+
+签名部署记录要求必填 `"execution_boundary": "disposable_vm"`。签名记录 schema、签名 CLI、离线介质准备、安装器及服务均执行此约束，拒绝缺失、null 或不支持的边界。按专用、可丢弃 VM 全新部署，不提供迁移或旧部署记录兼容。
+
+启动分为部署身份检查、资源恢复、依赖自检、guest 控制自检及通信就绪阶段。各阶段发布开始和成功／失败事件，记录耗时和稳定错误码。受保护的 `metadata/startup-diagnostics.json` 使用 schema 2，原子替换、上限 16 KiB，绑定安装身份、已验证且可取得的包／启动身份及新的启动尝试身份。`last-service-error.txt` 同步刷新为同次尝试（包括等待／就绪状态）。固定摘要不复制任意异常文本。安装失败携带当前诊断身份与错误码；hosted 验收分别验证完整报告和安装结果。
+
+项目不再订阅或匹配 WFP 事件，启动不再要求回环阻断证据。AppContainer／令牌、ACL、进程归属、清理及调试器检查仍作为 guest 内部控制。每次启动的新 schema-5 资格回执采用 `scope: "disposable_vm_guest_controls"`。报告和 `doctor` 声明 `execution_boundary: "disposable_vm"`、`external_isolation_verified: false`；`doctor.guest_controls_verified` 表示本次启动检查结果。这些检查不能认证虚拟化层隔离，也不能保证 guest 被攻陷后的证据真实性。Windows 内部仍可能使用系统 WFP 能力；此修改不关闭系统防火墙。
+
+密封的启动调试器夹具遇到异常停止时，受保护的宿主日志保留有界诊断：架构、预期／实际地址、异常标志及首帧身份。各选定字符串限制为 192 个标识符字符，不复制任意 MCP 输出或目标内容。结构化启动报告仍使用固定阶段错误码和摘要。
+
+hosted 服务重启验收在重启前后核对有界报告及匹配的 `startup_ready` 文本摘要，并要求新的启动尝试身份。摘要文件存在本身不代表错误；身份过期、启动等待中或运行故障摘要仍会使验收失败。
+
+密封夹具允许继续一次实时、首次机会、可继续的原生断点，且异常地址、首帧地址及当前停止地址必须一致，首帧归属于 `ntdll`；x86 另外允许一次 WOW64 加载器通知。离线导出符号可能将原生加载器断点归属到附近的导出函数，因此资格检查不要求特定系统函数名或零符号偏移。重复停止、地址不符、其他模块／故障及保存的崩溃上下文仍会被拒绝。最终仍必须命中夹具自身由 PDB 解析的断点，并验证寄存器和栈一致。普通目标不使用此放行逻辑。参见微软的[初始断点说明](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/initial-breakpoint)。
+
 ## 职责与请求链路
 
 原生 Rust Worker 是 Windows 上唯一的执行管理入口。托管 SSH 调用固定 relay，经命名管道认证已登记的 SCM 服务。服务负责启动、资格检查、恢复和关闭，`native/rpc/worker.rs` 分发公开 API。不再存在常驻 Python 元数据 Worker、内层 Python 租约、回环 Worker 端点或反向 broker-health 通道。
@@ -16,14 +30,14 @@
 | `native/resources/` | 单一资源管理器拥有准入、操作票据、账本及恢复 |
 | `native/executors/` | 进程／会话计划、受控执行观察及结果适配；不修改账本 |
 | `native/artifacts/` | 租约范围内的不可变输入、运行／资源范围内的输出及受限保护文件 IO |
-| `native/isolation/` | Windows Token、AppContainer、Job、ACL/WFP 及进程启动 |
+| `native/isolation/` | Windows Token、AppContainer、Job、ACL 及进程启动 |
 | 外部 WinDbg MCP / Python | 在受控资源内执行调试或有界分析，不独立管理 Worker |
 
 RPC 在调用管理器前，将已注册处理器解析为资源操作；资源和制品模块不查询 RPC 注册表。`executors/results.rs` 校验并发布进程/重放观察，管理器独占清理和账本状态转换的提交。Shell 和分析适配器负责各自的响应投影。共享协议提供有类型的结果/清理观察；原生账本保留更严格的 OS 清理证明。
 
 公开传输继续使用 JSON-RPC 2.0。控制器使用 `jsonrpsee`，共用 Rust 类型使用 Serde。内部会话消息采用 Prost 生成的 protobuf 和 Tokio 帧处理，外部调试器使用 `rmcp`。原始调试回复保留为带哈希的证据，不重新实现一套调试协议。Linux 保留现有 Python Worker。
 
-`ping`、`doctor` 由原生层直接回答。只有签名包检查、遗留资源恢复、离线依赖检查和本次服务启动的新隔离/调试器资格检查全部完成，服务才开放已注册的执行能力。`doctor.readiness` 说明当前状态。历史资格回执不能替代新启动检查。注册表只声明可调用的原生执行或隔离分析方法；Windows 不声明 Linux GDB 命令、原始调试命令、AFL/QEMU、core 文件快照和运行时准备能力。崩溃判定使用所属 DbgEng 会话及 `crash_replay`/`input_minimize`；`poc_verify` 仅重放 argv/stdin，映射模块内容保持未确认，因为内核报告的路径不是内容哈希。
+`ping`、`doctor` 由原生层直接回答。只有签名包检查、遗留资源恢复、离线依赖检查和本次服务启动的新 guest 控制／调试器资格检查全部完成，服务才开放已注册的执行能力。`doctor.readiness` 说明当前状态。历史资格回执不能替代新启动检查。注册表只声明可调用的原生执行或隔离分析方法；Windows 不声明 Linux GDB 命令、原始调试命令、AFL/QEMU、core 文件快照和运行时准备能力。崩溃判定使用所属 DbgEng 会话及 `crash_replay`/`input_minimize`；`poc_verify` 仅重放 argv/stdin，映射模块内容保持未确认，因为内核报告的路径不是内容哈希。
 
 ## 租约、容量与持久化状态
 

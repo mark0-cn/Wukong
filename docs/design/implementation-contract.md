@@ -32,6 +32,7 @@ New tasks default to a private conversation containing their brief and evidence 
 12. Native task creation returns before predecessor completion; business dependency gates hold model IO and supply released predecessor results. Rig owns generic effects, retries, conversation pairing and subagent reports. Business tool reconciliation uses stable wire call identities, not restored ECS entity/effect IDs. Inherited context contains only closed parent turns.
 13. Resolved model endpoint/configuration is saved before model IO. Resume uses that configuration even if endpoint environment defaults change. Role output budgets remain distinct from model capacity. Missing usage/cost information preserves the response and pauses before tool IO. Remote MCP read-only hints cannot authorize replay of uncertain effects.
 14. Runtime roles are root, analyst and verifier. Capability skills supplement methods and artifacts without changing the assigned role, permissions or completion protocol. Role instructions cannot be added as skills. Analyst work in the same active scope shares a deduplication owner across capabilities; independent verification uses a separate verifier instance. Ordinary reporting belongs to root.
+15. Execution completion and evidence readiness are distinct. `job_execution_finished` is informational; `job_completed` requires confirmed cleanup, complete evidence and postprocessing. Verifier certification and root success require ready evidence. Missing evidence must remain an explicit gap in an inconclusive result.
 
 <a id="验收证据"></a>
 

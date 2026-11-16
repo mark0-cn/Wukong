@@ -4,7 +4,7 @@ use super::*;
 const DRIVER: &str = include_str!("../../../workers/runtime/wukong_worker/execution/validator.py");
 
 pub(super) async fn start(
-    tools: &ToolContext<'_>,
+    tools: &ExecutionService,
     agent: &AgentMetadata,
     call: &str,
     input: args::ArtifactValidateArgs,
@@ -14,7 +14,7 @@ pub(super) async fn start(
         "artifact_validate requires an independent verifier"
     );
     ensure!(
-        tools.execution.gateway.runtime()?.doctor().await?["os"] == "linux",
+        tools.gateway.runtime()?.doctor().await?["os"] == "linux",
         "self_check_v1 execution currently requires a configured Linux worker; report other platforms as an explicit gap"
     );
     ensure!(
@@ -23,10 +23,7 @@ pub(super) async fn start(
     );
     let artifact: Evidence = tools.store.load(&input.artifact_evidence_id)?;
     let baseline: Evidence = tools.store.load(&input.baseline_evidence_id)?;
-    let job = tools
-        .execution
-        .jobs
-        .known_job(agent, &input.baseline_job_id, true)?;
+    let job = tools.jobs.known_job(agent, &input.baseline_job_id, true)?;
     let run: RunRecord = tools.store.load(&agent.run_id)?;
     ensure!(
         artifact.size <= 1024 * 1024 && baseline.size <= 1024 * 1024,
@@ -103,7 +100,6 @@ pub(super) async fn start(
         .context("baseline script path missing")?;
     ensure!(
         tools
-            .execution
             .files
             .known_file(agent, original_script, false)?
             .sha256
@@ -112,11 +108,10 @@ pub(super) async fn start(
     );
     for argument in &input.arguments {
         if argument.starts_with("files/") {
-            tools.execution.files.known_file(agent, argument, false)?;
+            tools.files.known_file(agent, argument, false)?;
         }
     }
     let script = tools
-        .execution
         .files
         .file_put(
             agent,
@@ -125,7 +120,6 @@ pub(super) async fn start(
         )
         .await?;
     let staged = tools
-        .execution
         .files
         .file_put(
             agent,
@@ -140,7 +134,6 @@ pub(super) async fn start(
     ];
     argv.extend(input.arguments.into_iter().map(Value::String));
     let result = tools
-        .execution
         .runtime_tool(
             agent,
             &format!("{call}:driver"),

@@ -22,6 +22,8 @@
 
 Windows 按 `host`、`resources`、`executors`、`artifacts`、`isolation` 和 `rpc` 分组。`ResourceManager` 统一串行处理生命周期准入、预留和核对票据后的提交。输入准备、执行等待与恢复在状态锁外运行，调用方断开后活动操作仍保有归属。显式活动资源状态区分启动、执行、收尾、关闭与恢复。执行器返回观察结果，不写账本；宿主注入已验证运行上下文，Windows API 细节保留在隔离层。内部会话继续使用 Prost/Protobuf。
 
+Windows 目标运行在签名部署记录声明的专用、可丢弃 VM 中。宿主／对外网络隔离由虚拟化层策略负责；guest 内部保留 AppContainer／令牌／ACL 检查，不再收集 WFP 事件。就绪报告明确说明外部隔离未验证。操作者接受 guest 被影响并重置／丢弃 VM；控制器凭据留在外部。参见 [Windows 边界契约](../../workers/windows/README.zh-CN.md)。
+
 `workers/analysis` 是只接收明确输入、不拥有 Worker 状态或传输的 Python 包。Linux 适配器保留文件约束和真实调试，Windows 一次性辅助程序使用同一分析包。Windows 组件清单排除 Linux Worker 服务及依赖。架构检查位于 `tests/automation/test_execution_boundaries.py`。
 
 控制器存储要求 schema 5，Windows 资源账本要求版本 2，包清单要求 schema 2。旧格式或协议直接拒绝；v3 使用新工作区和新 Worker 实例，不提供迁移、自动删除或旧配置适配层。现有目录及证据保持原样。当前验收与历史结果分别记录。
@@ -82,9 +84,13 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止及操作员消息。`PreparedAssessment` 保留已解析的运行配置与事件订阅，在执行完成或错误后关闭控制端工具连接；前端不自行编排租约或构造恢复配置。恢复准备不修改任务，预算修改在监督器取得正式租约后提交。
 
-`FilesService`、`JobService`、`SessionsService` 和 `AnalysisService` 各自持有局部配置与所需依赖，worker 传输和稳定请求回执集中在 `WorkerGateway`。控制端使用 `JobRecord`、`SessionRecord`、`WorkerFileRecord` 和 `RunScoped` 检查归属，原始 worker 扩展载荷保留为 JSON。
+`ToolContext` 显式装配执行、分析、协调、文档、证据及环境服务，不再解引用为 `ToolService`。目录适配器向每个处理器传入具体服务，处理器不能访问完整入口对象。目录继续管理 schema、注册、权限和恢复策略，Rig 保留通用调度职责。`FilesService`、`JobService` 和 `SessionsService` 负责 worker 用例；`WorkerGateway` 集中管理传输与稳定回执。控制端使用 `JobRecord`、`SessionRecord`、`WorkerFileRecord` 和 `RunScoped` 检查归属，原始 worker 扩展载荷保留为 JSON。
 
-`JobService` 统一自动监控和手动状态查询：检查任务归属、解析类型化 `JobStatus`、导入终止状态原始证据及产物后，发布可供模型读取的通知。同一任务的观察串行化，更新时合并最新账本，避免覆盖已导入产物或通知状态。`lost` 是终止状态，退出码和验证标志来自 `result`。任务通知与完成标识在同一事务写入持久化邮箱，沿用会话检查点与消息确认的原子提交；重启后未确认消息继续投递，旧 generation 的迟到任务结果标记为 stale。worker 错误通过 RPC `error.data.kind` 携带类别，业务会话和恢复代码按错误类别对账。
+`JobService::observe` 统一自动和手动状态查询，检查归属并仅导入原始状态证据。同一资源串行处理，更新时合并最新记录。公平观察器对作业观察和会话清理使用统一资源身份去重：全局最多八个请求、每环境最多两个，观察超时十秒，单资源失败按一至三十秒退避，成功后复位。控制端心跳与环境租约续期保持独立；迟到写入必须通过 controller fence。清理在手动调用、超时和重启之间保留首次持久化的操作身份。
+
+`EvidenceSyncService` 在资源锁外传输，全局最多两个任务、每个 worker 环境最多一个。产物清单和逐文件进度持久化，以 worker 身份、路径、SHA256 和大小标识文件；重启后复用已验证文件，无需重新下载。网络失败按有界退避重试；完整性或大小失败明确保留为失败。提交时重新获取资源锁，校验当前身份及 controller fence。状态查询和工作上下文展示有界进度与错误。
+
+首次观察到执行终态时，事务性发送 `job_execution_finished`，包含原始证据、清理及同步状态，不能据此认定业务成功。只有清理确认、证据齐全且后处理完成后，才发送现有 `job_completed`。两阶段分别去重；未确认邮件在重启后继续投递，旧 generation 通知标记为 stale。verifier 认证和 root 成功完成必须要求证据就绪；证据无法取得时可以明确报告带缺口的不确定结果。`lost` 保持终态，退出码和验证标志来自 `result`。控制端新增字段带默认值：已有完整产物记录映射为就绪，已有最终通知不补发第一阶段通知。worker 协议 v3、工具名和权限保持不变，RPC `error.data.kind` 继续提供类型化恢复类别。
 
 运行时角色只有 `root`、`analyst`、`verifier`。root 负责拆解、派单、证据协调和最终交付；analyst 负责目标分析；verifier 独立检查其他实例的结论。子任务的 `role` 只接受 analyst 或 verifier。模型、预算和工具权限由角色决定，`skills` 不授予新权限。
 

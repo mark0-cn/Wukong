@@ -98,6 +98,10 @@ pub(super) fn validate(
                 );
                 if matches!(check.verdict, args::AnalysisVerdict::Supported) {
                     ensure!(
+                        job.status.settled() && job.evidence_ready(),
+                        "supported reproduction requires ready evidence and confirmed cleanup"
+                    );
+                    ensure!(
                         job.status.state == JobState::Completed
                             || (job.status.state == JobState::Failed
                                 && check.expected_exit_code.is_some_and(|code| code > 0)

@@ -1,96 +1,83 @@
-//! Reconcile controller cleanup intent with existing worker resource owners.
+//! Reconcile durable cleanup intent with existing worker resource owners.
 use super::*;
 
 impl ToolService {
-    /// Reconcile owned cleanup intents independently of model turns. Closing a
-    /// session never replays debugger commands or interactive writes.
     pub(crate) async fn reconcile_resources(&self, run: &str) -> Result<()> {
-        for kind in [SessionKind::Debugger, SessionKind::Interactive] {
-            for listed in self.store.sessions(kind, run)? {
-                let lock = {
-                    let mut locks = self.locks.lock().await;
-                    locks
-                        .entry(format!("resource:session:{}", listed.id))
-                        .or_insert_with(|| Arc::new(Mutex::new(())))
-                        .clone()
-                };
-                let guard = lock.lock().await;
-                let mut session = self.store.session(kind, &listed.id)?;
-                if matches!(session.state, SessionState::Closed | SessionState::Lost) {
-                    continue;
-                }
-                let owner: AgentMetadata = require_in_run(&self.store, &session.agent_id, run)?;
-                let pending = matches!(
-                    session.state,
-                    SessionState::Closing | SessionState::RecoveryRequired
-                );
-                if !pending && !matches!(owner.status, Status::Stopped | Status::Failed) {
-                    continue;
-                }
-                if pending && (now() - session.updated_at).num_seconds() < 5 {
-                    continue;
-                }
-                session.state = SessionState::Closing;
-                session.updated_at = now();
-                self.store.save_session(kind, &session)?;
-                drop(guard);
-                let attempt = format!(
-                    "cleanup:{}:{}",
-                    session.id,
-                    session.updated_at.timestamp_micros()
-                );
-                let result = async {
-                    let tools = self.bound_to(&owner).await?;
-                    tools
-                        .execution
-                        .sessions
-                        .session_tool(
-                            &owner,
-                            &attempt,
-                            if kind == SessionKind::Debugger {
-                                "debug_close"
-                            } else {
-                                "interactive_close"
-                            },
-                            json!({"session_id":session.id}),
-                        )
-                        .await
-                }
-                .await;
-                if let Err(error) = result {
-                    tracing::warn!(session_id=%session.id, %error, "owned session cleanup remains pending");
-                }
-            }
+        self.observe_once(run).await
+    }
+
+    pub(super) async fn reconcile_session(
+        &self,
+        run: &str,
+        kind: SessionKind,
+        id: &str,
+    ) -> Result<()> {
+        let session = self.store.session(kind, id)?;
+        if matches!(session.state, SessionState::Closed | SessionState::Lost) {
+            return Ok(());
         }
-        for job in self.store.records::<JobRecord>(run)? {
-            if job.status.settled() {
-                continue;
-            }
-            let owner: AgentMetadata = require_in_run(&self.store, &job.agent_id, run)?;
-            if !matches!(owner.status, Status::Stopped | Status::Failed) {
-                continue;
-            }
-            let result = async {
-                let tools = self.bound_to(&owner).await?;
+        let owner: AgentMetadata = require_in_run(&self.store, &session.agent_id, run)?;
+        if !matches!(
+            session.state,
+            SessionState::Closing | SessionState::RecoveryRequired
+        ) && !matches!(owner.status, Status::Stopped | Status::Failed)
+        {
+            return Ok(());
+        }
+        let tools = self.bound_to(&owner).await?;
+        // SessionsService persists the first operation identity before dispatch;
+        // manual and background closes reconcile that same effect after timeout.
+        tools
+            .execution
+            .sessions
+            .session_tool(
+                &owner,
+                &format!("cleanup-session:{id}"),
+                if kind == SessionKind::Debugger {
+                    "debug_close"
+                } else {
+                    "interactive_close"
+                },
+                json!({"session_id":id}),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub(super) async fn observe_job(&self, run: &str, id: &str, sync: bool) -> Result<()> {
+        let job: JobRecord = require_in_run(&self.store, id, run)?;
+        let owner: AgentMetadata = require_in_run(&self.store, &job.agent_id, run)?;
+        let tools = self.bound_to(&owner).await?;
+        if sync {
+            tools
+                .execution
+                .jobs
+                .import_job_artifacts(&owner, &format!("job-sync:{id}"), id)
+                .await?;
+        } else {
+            tools
+                .execution
+                .jobs
+                .observe(&owner, &format!("job-observation:{id}"), id)
+                .await?;
+            // A cancellation failure must not suppress the status observation.
+            let cancellation = if !job.status.settled()
+                && matches!(owner.status, Status::Stopped | Status::Failed)
+            {
                 tools
                     .execution
                     .runtime_tool(
                         &owner,
-                        &format!("cleanup-job:{}", job.id),
+                        &format!("cleanup-job:{id}"),
                         "job_cancel",
-                        json!({"job_id":job.id}),
+                        json!({"job_id":id}),
                     )
-                    .await?;
-                tools
-                    .execution
-                    .jobs
-                    .observe(&owner, &format!("cleanup-job-status:{}", job.id), &job.id)
                     .await
-            }
-            .await;
-            if let Err(error) = result {
-                tracing::warn!(job_id=%job.id, %error, "owned job cleanup remains pending");
-            }
+                    .map(|_| ())
+            } else {
+                Ok(())
+            };
+            cancellation?;
         }
         Ok(())
     }
@@ -153,11 +140,28 @@ mod tests {
             .await?;
         assert!(!started.is_error, "{started:?}");
         let session_id = text(&started.value["result"], "session_id")?;
+        // A manual close may have persisted intent just before controller loss.
+        // Recovery must use this identity instead of its background call ID.
+        let mut interrupted = store.session(SessionKind::Interactive, session_id)?;
+        interrupted.state = SessionState::RecoveryRequired;
+        interrupted.cleanup_intent = Some(CleanupIntent {
+            call_id: "manual-close-before-restart".into(),
+            agent_id: owner.id.clone(),
+        });
+        store.save_session(SessionKind::Interactive, &interrupted)?;
         coordinator.stop(&owner.id, "fixture stop")?;
         service.reconcile_resources(&run.id).await?;
         assert_eq!(
             store.session(SessionKind::Interactive, session_id)?.state,
             SessionState::Closed
+        );
+        assert_eq!(
+            store
+                .session(SessionKind::Interactive, session_id)?
+                .cleanup_intent
+                .unwrap()
+                .call_id,
+            "manual-close-before-restart"
         );
         service.reconcile_resources(&run.id).await?;
         service.close().await;

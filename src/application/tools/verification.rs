@@ -188,6 +188,10 @@ impl VerificationService {
             .jobs
             .import_job_artifacts(agent, call_id, job_id)
             .await?;
+        ensure!(
+            self.jobs.known_job(agent, job_id, true)?.evidence_ready(),
+            "verification evidence is not ready; report the gap or wait for synchronization"
+        );
         if network {
             let imported = artifacts["artifacts"]
                 .as_array()

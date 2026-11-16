@@ -10,3 +10,4 @@ pub mod service;
 pub(crate) mod service_access;
 pub mod setup_ui;
 pub mod staging;
+pub(crate) mod startup;

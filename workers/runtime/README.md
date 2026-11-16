@@ -36,6 +36,10 @@ and the original `record`. Original MI transcripts remain available as evidence.
 
 Isolated shell targets, Python targets and process inputs share the execution-copy preparation path. `py_run.target` is appended as a read-only executable copy, not as data requiring chmod. Raw `job_start` can name up to sixteen staged argv files in `executable_inputs`; other argv files stay read-only data. LaunchSpec retains authority over its executable files, cwd and input mode. Results expose execution cwd and each prepared file's source hash, executed hash and access mode. Copy hash mismatches fail preparation; original attachments are never chmodded. Each isolated invocation has a fresh writable working directory, so retrieve artifacts explicitly instead of assuming another call sees relative files.
 
+Job lifecycle writes go through `JobLedger` under a per-job process lock. The parent registers the supervisor creation identity before it can claim an execution token; queries and late supervisors cannot overwrite terminal records. Missing PID or legacy active records are uncertain and require recovery, never automatic replay. Upgrade Python workers only when idle. Snapshot imports revoke execution authority while retaining terminal results. Ledger tokens, registration handshakes and lock files are private metadata, excluded from RPC status and artifact lists.
+
+After registration commits successfully, the parent releases the supervisor through a one-byte acknowledgement on its inherited, unbuffered stdin pipe. A visible registration record alone cannot authorize execution: parent exit or a failed registration closes the pipe without acknowledgement, even when publishing the revocation also fails. The supervisor then still claims the token under the ledger lock.
+
 ## Docker
 
 From the repository root (PowerShell):

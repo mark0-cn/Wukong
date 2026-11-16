@@ -1,6 +1,8 @@
 """Regression checks for crash evidence, not an exploit evaluation suite."""
 
 import base64
+import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +11,8 @@ from wukong_worker.artifacts.metadata import atomic_json, load_json
 from wukong_worker.debugger.crash import CrashService
 from wukong_analysis.crash import location_signature, normalize_address
 from wukong_worker.resources.supervisor import supervise_job
+from wukong_worker.resources.job_ledger import JobLedger
+from unittest.mock import Mock
 from wukong_worker.operations.executors import execute_job
 
 
@@ -69,7 +73,15 @@ class CrashTests(unittest.TestCase):
                     "allow_signal_only": weak,
                 },
             )
-            atomic_json(job / "status.json", {})
+            with patch(
+                "wukong_worker.resources.job_ledger.process_identity", return_value="fixture"
+            ):
+                JobLedger(job).announce("test")
+                JobLedger(job).reserve_and_spawn(
+                    load_json(job / "spec.json"),
+                    {"state": "queued", "runner_token": "test"},
+                    lambda: Mock(pid=os.getpid(), **{"stdin.write.return_value": 1}),
+                )
 
             def replay(root, directory, spec, data, index):
                 result = {"state": "completed", "signal": 11, "exit_code": -11}
@@ -77,8 +89,13 @@ class CrashTests(unittest.TestCase):
                     result["location_signature"] = "location:" + ("A" if b"A" in data else "other")
                 return result
 
-            with patch("wukong_worker.operations.reduce_job.replay", side_effect=replay):
-                supervise_job(root, job, execute_job)
+            with (
+                patch("wukong_worker.operations.reduce_job.replay", side_effect=replay),
+                patch(
+                    "wukong_worker.resources.job_ledger.process_identity", return_value="fixture"
+                ),
+            ):
+                supervise_job(root, job, execute_job, io.BytesIO(b"\x01"))
             status = load_json(job / "status.json")
             return status, (job / "minimized.bin").read_bytes() if (
                 job / "minimized.bin"
