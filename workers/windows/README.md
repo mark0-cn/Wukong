@@ -67,15 +67,25 @@ The current offline package does not ship pwntools, pyelftools or Unicorn, so cy
 
 Build in an x64 MSVC environment. Keep model credentials and signing private keys on the controller. Install/uninstall acceptance belongs only on dedicated VMs or isolated runners, never over a developer's installation.
 
+CI stages the exact payload and native binaries without controller keys; the operator finalizes the downloadable template with the controller key directory:
+
 ```powershell
 python -m scripts.worker.toolchain --cache target/windows-offline-cache --download
 python -m scripts.worker.build_native
-python -m scripts.worker.layout --cache target/windows-offline-cache --output target/windows-offline-layout
-python -m scripts.worker.assemble --cache target/windows-offline-cache --output target/windows-worker-package --keys ABSOLUTE_CONTROLLER_KEY_DIRECTORY
+python -m scripts.worker.media template --cache target/windows-offline-cache --native target/windows-worker-native --output target/windows-worker-media-template --version VERSION
+python -m scripts.worker.media check --template target/windows-worker-media-template --report target/windows-worker-media-check.json
+python -m scripts.worker.media pack --template target/windows-worker-media-template --version VERSION --output target/windows-worker-media
+python -m scripts.worker.media finalize --template ABSOLUTE_TEMPLATE_DIRECTORY --keys ABSOLUTE_CONTROLLER_KEY_DIRECTORY --spec enrollment-spec.json --output ABSOLUTE_MEDIA_DIRECTORY --generate-ssh-key ABSOLUTE_SSH_PRIVATE_PATH
 cargo fmt --manifest-path workers/windows/Cargo.toml --all -- --check
 cargo clippy --locked --manifest-path workers/windows/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 ```
+
+`template` stages `payload/`, `binaries/{wukong-worker.exe,wukong-package.exe}`, the unsigned `manifest-draft.json`, `native-build.json` and `media-template.json`; `check` then finalizes that template in a temporary directory with an ephemeral key and runs `WukongWorkerSetup.exe verify-enrollment`, so CI proves sealing, enrollment and media wiring without elevation or installation. Release builds publish the deterministic archive `wukong-windows-worker-media-<version>.zip`; verify it against `SHA256SUMS` and unpack it outside the key directory.
+
+`finalize` requires an absolute controller key directory outside the template and output. The enrollment spec (`schema: 1`) provides a 32-character lowercase hexadecimal `installation_id`, an `environment_id` of 1–64 ASCII letters/digits/underscores/hyphens, `generation` (default 1), an IPv4 `management_peer` (loopback, unspecified, multicast and broadcast addresses are rejected), `ssh_port`, optional `execution_boundary` (only `disposable_vm`) and either a canonical `ssh_public_key {algorithm, key}` or `--generate-ssh-key`. SSH key generation uses the packaged `ssh-keygen.exe`; the private key is written outside the media and only the public key enters the signed enrollment. Finalize seals the staged payload, signs enrollment, bundles public media (`WukongWorkerSetup.exe`, `setup.json`, `payload/`, `enrollment/`, optional `recovery/`) and writes a hashed `media.json` receipt. It fails closed when the key directory or any private-key filename would appear inside the template or output. Never copy the controller key directory, SSH private keys or model credentials into the media or the guest.
+
+Any Windows host can pre-check finalized public media without elevation: `WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`. Installation uses the elevated `WukongWorkerSetup.exe install-reviewed setup.json <controller-key-hex> <sha256-of-enrollment.json>` and belongs only on the dedicated disposable VM.
 
 Native build identity includes the shared protocol crate, native/Python sources, locked inputs and build scripts. Assembly verifies this identity and preserves dependency licenses. Enrollment pins the controller signer and installation; SSH independently pins the worker host key. Use the [cross-platform environment guide](../../docs/design/cross-platform-environments.md) for connection and task binding, and [worker acceptance guide](../tests/README.md) for installed process/debugger/recovery fixtures.
 

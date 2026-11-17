@@ -30,8 +30,8 @@
       "zh-CN": "99de4fb39618f470be7eb5adc193c69ae9761d359dce89bce9dae569d24f4343"
     },
     "docs/design/windows-lab.md": {
-      "en": "771a0b77318d32d9d3bbd932f5ba70c556ee23df9d7c6c132ca9ad6d58f90e5d",
-      "zh-CN": "bf0bff9edfd642db31a6ef5a43fdecb48ec2c64347168baec640222a7e5c20f9"
+      "en": "379b3872e39beb05a0a5e6ff845a730fe70488b5a343b36070799c304d753d5a",
+      "zh-CN": "41955d147efcae94cd4b4582e3f39e098811dda0015fbe2927ee03da543be936"
     },
     "docs/development/commits.md": {
       "en": "328bb6704645a84d522c3b2a6a122d0c7c580287ec5321f7e70b5b3aadf52bf5",
@@ -62,8 +62,8 @@
       "zh-CN": "4aa6d90511d24aa68571190528faa7458667f77a167b710a75dea09144bfeb66"
     },
     "docs/development/releases.md": {
-      "en": "dac0dd35da874f75c80bda7df2863abf61d3e378e86fc0e30e67b6aa4a4d8f44",
-      "zh-CN": "72d2f15a219acd20e33ebd816c8d4b373f22fb0365ecefb9d4717541c0b81c15"
+      "en": "5c06ad27c1572b783c9eb6794ecd0a516862e21b4cce16dbb588b43ba065d35a",
+      "zh-CN": "bc02172ebe743eb4576bfad601cccc2981740d188dc4ae31f0593a13aecfd87b"
     },
     "docs/history/README.md": {
       "en": "dc9906830ecbb0c106b647ef4513032bef03e89f8dc0daa3eddc1e4762299500",
@@ -182,8 +182,8 @@
       "zh-CN": "dc5c89b8cc73bb1f734fde41a6e9fa61a9a82a8d817fb1048bd2c259641ea831"
     },
     "workers/windows/README.md": {
-      "en": "3f43285d0a5e373643a2b744452db85264e696840d532a8c350f44757a17ab34",
-      "zh-CN": "171749316074273d66e3bad3e89b59a7f02642904058440a733af2d60c72c559"
+      "en": "be4e6ef9a4c652aa0289c84b6baeba393b5e40889a819278214406966b07408c",
+      "zh-CN": "5414ddc374584ca7712ef084142c7949424a2a8176e3a3cc6c50a0f70555a399"
     },
     "workers/windows/VALIDATION-HISTORY.md": {
       "en": "0d0397e04441b89da389edcc895fb469ebce0fdea4521dea4315f2fd7d863772",

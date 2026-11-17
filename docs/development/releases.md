@@ -88,8 +88,9 @@ The workflow listens to all tags and validates metadata before image build/packa
 2. Find trusted same-SHA CI/release clients or build them. Before execution/packaging, verify platform, version, full commit, recipe and binary SHA256/size. Bake stable toolchain/workbench together; verify external assets against `workers/toolchain.lock.json`, even on cache hits. Publish candidate `build-<fullcommit>` with SBOM/provenance.
 3. On a fresh runner pull by digest and run network isolation, fixed-target relay, LaunchSpec/archive tests, and host-CLI doctor, challenge import/build/extract/start/connect, GDB attach, update/rollback.
 4. Package both platforms' validated desktop binaries directly into NSIS/AppImage without recompiling; reuse Linux acceptance CLI separately. Sign and run native install/start checks. Combine platform files into signed `latest.json`, `release.json`, SHA256SUMS and acceptance reports; Rust verifies every installer signature/hash.
-5. Upload a draft GitHub Release, add fixed-version tags to the same image digest, then publish.
-6. Advance Docker/GitHub latest only if no higher stable version exists; finally recheck attachments/digest.
+5. On `windows-2025`, build the offline Windows worker media template without controller keys, check it with an ephemeral key, pack the deterministic zip and add it to the release asset set.
+6. Upload a draft GitHub Release, add fixed-version tags to the same image digest, then publish.
+7. Advance Docker/GitHub latest only if no higher stable version exists; finally recheck attachments/digest.
 
 Fixed versions never overwrite published images. GitHub/Docker Hub have no cross-service atomic transaction: failures may leave candidates, drafts or fixed image tags. Use **Re-run failed jobs** after repair, reusing original artifacts/digest. Different bytes for already-published attachments are rejected; publish a new version.
 
@@ -122,6 +123,14 @@ Inspect failed jobs:
 - Acceptance: inspect doctor/failure reports in `image-validation`; do not advance latest.
 
 Candidates/buildcache share the public repository. Periodically clean unreferenced old candidates as capacity requires. CI lacks Delete permission and does not remove tags. Preserve official versions/digests still in use.
+
+<a id="offline-windows-worker-media"></a>
+
+## Offline Windows worker media
+
+Release builds also publish `wukong-windows-worker-media-<version>.zip` from the `windows-worker` job on `windows-2025`. That job runs the shared Windows worker checks, stages the unsigned payload with the authenticated native binaries, checks finalization with an ephemeral key and packs the deterministic archive without any controller private key. The archive root `wukong-windows-worker-media-<version>/` contains `payload/`, `binaries/`, `manifest-draft.json`, `native-build.json` and `media-template.json`. It is a separate release asset outside the desktop update manifests: `latest.json`/`release.json` keep listing only the Windows NSIS EXE and Linux AppImage, and the updater never references this zip.
+
+An operator downloads the asset, verifies it against `SHA256SUMS`, unpacks it, and runs `python -m scripts.worker.media finalize --template <unpacked template> --keys <absolute controller key directory> --spec <enrollment spec> --output <new media directory>` to seal the payload, sign enrollment and produce the offline `WukongWorkerSetup.exe` media. The controller key directory and SSH private keys stay outside the template and output. Before installation, any Windows host can run `WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>` without elevation; installation requires elevation and belongs on a dedicated disposable VM. See [native Windows worker components](../../workers/windows/README.md) for the complete commands and spec fields.
 
 <a id="验收边界"></a>
 

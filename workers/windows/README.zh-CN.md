@@ -67,15 +67,25 @@ RPC 在调用管理器前，将已注册处理器解析为资源操作；资源�
 
 在 x64 MSVC 环境构建。模型凭据和签名私钥只保留在控制器。安装/卸载验收只在专用 VM 或隔离 runner 上执行，不覆盖开发者安装。
 
+CI 在没有控制器密钥的情况下暂存准确的载荷和原生二进制文件；操作员使用控制器密钥目录对可下载模板执行 finalize：
+
 ```powershell
 python -m scripts.worker.toolchain --cache target/windows-offline-cache --download
 python -m scripts.worker.build_native
-python -m scripts.worker.layout --cache target/windows-offline-cache --output target/windows-offline-layout
-python -m scripts.worker.assemble --cache target/windows-offline-cache --output target/windows-worker-package --keys ABSOLUTE_CONTROLLER_KEY_DIRECTORY
+python -m scripts.worker.media template --cache target/windows-offline-cache --native target/windows-worker-native --output target/windows-worker-media-template --version VERSION
+python -m scripts.worker.media check --template target/windows-worker-media-template --report target/windows-worker-media-check.json
+python -m scripts.worker.media pack --template target/windows-worker-media-template --version VERSION --output target/windows-worker-media
+python -m scripts.worker.media finalize --template ABSOLUTE_TEMPLATE_DIRECTORY --keys ABSOLUTE_CONTROLLER_KEY_DIRECTORY --spec enrollment-spec.json --output ABSOLUTE_MEDIA_DIRECTORY --generate-ssh-key ABSOLUTE_SSH_PRIVATE_PATH
 cargo fmt --manifest-path workers/windows/Cargo.toml --all -- --check
 cargo clippy --locked --manifest-path workers/windows/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 ```
+
+`template` 暂存 `payload/`、`binaries/{wukong-worker.exe,wukong-package.exe}`、未签名的 `manifest-draft.json`、`native-build.json` 与 `media-template.json`；随后 `check` 在临时目录用临时密钥对该模板执行 finalize，并运行 `WukongWorkerSetup.exe verify-enrollment`，因此 CI 无需提权或安装即可验证密封、登记与介质装配。发布构建会发布确定性归档 `wukong-windows-worker-media-<version>.zip`；请按 `SHA256SUMS` 校验并在密钥目录之外解包。
+
+`finalize` 要求使用位于模板和输出之外的绝对控制器密钥目录。登记规格（`schema: 1`）提供 32 位小写十六进制 `installation_id`、由 1–64 个 ASCII 字母/数字/下划线/连字符组成的 `environment_id`、`generation`（默认 1）、IPv4 `management_peer`（拒绝环回、未指定、组播和广播地址）、`ssh_port`、可选的 `execution_boundary`（仅允许 `disposable_vm`），以及规范的 `ssh_public_key {algorithm, key}` 或 `--generate-ssh-key` 二者之一。SSH 密钥由包内 `ssh-keygen.exe` 生成；私钥写到介质之外，只有公钥进入签名登记记录。finalize 会密封已暂存载荷、签署登记、装配公开介质（`WukongWorkerSetup.exe`、`setup.json`、`payload/`、`enrollment/`、可选 `recovery/`）并写入带哈希的 `media.json` 回执。若密钥目录或任何私钥文件名将出现在模板或输出内，命令会失败关闭。绝不要把控制器密钥目录、SSH 私钥或模型凭据复制进介质或客体。
+
+任意 Windows 主机都可在不提权的情况下预检最终公开介质：`WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`。安装使用提权的 `WukongWorkerSetup.exe install-reviewed setup.json <controller-key-hex> <sha256-of-enrollment.json>`，且只应在专用可丢弃 VM 上执行。
 
 原生构建身份包含共用协议 crate、原生/Python 源码、锁定输入和构建脚本。组装时验证该身份并保留依赖许可证。登记绑定控制器签名者和安装身份；SSH 独立绑定 Worker 主机密钥。连接与任务绑定见[跨平台环境指南](../../docs/design/cross-platform-environments.zh-CN.md)，实际安装后的进程/调试器/恢复用例见[Worker 验收指南](../tests/README.zh-CN.md)。
 

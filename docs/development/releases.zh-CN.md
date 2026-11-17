@@ -106,8 +106,9 @@ tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `mas
 2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
 3. 新 runner 按 digest 拉取候选，运行网络隔离、固定目标转发、LaunchSpec、归档测试，以及 host CLI 的 doctor、题目导入/构建/提取/启动/连接、GDB 附加、更新回滚。
 4. Windows/Linux 均使用已校验桌面客户端直接打包 NSIS EXE/AppImage，不重复编译；Linux 验收 CLI 单独复用；签名并执行原生安装/启动检查。汇总两个平台文件，生成签名 `latest.json`、`release.json`、SHA256SUMS 与验收报告，再用 Rust 验证全部安装文件签名与哈希。
-5. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
-6. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
+5. 在 `windows-2025` 上构建离线 Windows Worker 介质模板（不接触控制器密钥），用临时密钥执行检查，打包确定性 zip 并加入发布附件。
+6. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
+7. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
 
 固定版本不会覆盖已发布镜像。GitHub 与 Docker Hub 没有跨服务原子事务，失败时可能留有候选或草稿/固定镜像标签；修复后使用 Actions **Re-run failed jobs**，复用原始 artifacts 和候选 digest。已经发布的附件若与重试产物不同，流程拒绝覆盖，应发布新版本。
 
@@ -145,6 +146,14 @@ Actions → **Release** → Run workflow，选择 master 和 `operation=inspect`
 - 验收失败：查看 `image-validation` artifact 的 doctor 与失败报告，不升级 latest。
 
 候选标签与 buildcache 共用公开镜像仓库，需按空间情况定期清理无引用的旧候选。CI Token 没有 Delete 权限，因此工作流不删除仓库标签。正式版本及用户正在使用的 digest 应保留。
+
+<a id="offline-windows-worker-media"></a>
+
+## 离线 Windows Worker 介质
+
+发布构建还会在 `windows-2025` 的 `windows-worker` job 中发布 `wukong-windows-worker-media-<version>.zip`。该 job 运行共用的 Windows Worker 检查，在没有任何控制器私钥的情况下暂存未签名载荷和已校验的原生二进制文件，用临时密钥执行一次 finalize 检查，并打包确定性归档。归档根目录 `wukong-windows-worker-media-<version>/` 包含 `payload/`、`binaries/`、`manifest-draft.json`、`native-build.json` 与 `media-template.json`。它是独立发布附件，不属于桌面更新清单：`latest.json`/`release.json` 仍只列出 Windows NSIS EXE 与 Linux AppImage，更新器不会引用该 zip。
+
+操作员下载附件、按 `SHA256SUMS` 校验并解包后，运行 `python -m scripts.worker.media finalize --template <解包后的模板> --keys <绝对控制器密钥目录> --spec <登记规格> --output <新的介质目录>`，以密封载荷、签署登记并生成离线 `WukongWorkerSetup.exe` 介质。控制器密钥目录和 SSH 私钥必须位于模板和输出之外。安装前，任意 Windows 主机都可在不提权的情况下运行 `WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`；安装需要提权，且只应在专用可丢弃 VM 上执行。完整命令与规格字段见[原生 Windows Worker 组件](../../workers/windows/README.zh-CN.md)。
 
 <a id="acceptance-boundary"></a>
 
