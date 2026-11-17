@@ -472,7 +472,7 @@ impl Store {
         clippy::too_many_arguments,
         reason = "the parameters mirror the artifact columns inserted by one statement"
     )]
-    pub fn artifact(
+    fn publish_artifact(
         &self,
         run_id: &str,
         agent_id: &str,
@@ -517,7 +517,50 @@ impl Store {
             metadata,
             created_at: now(),
         };
-        self.put("evidence", &evidence.id, run_id, &evidence)?;
+        Ok(evidence)
+    }
+    // The provenance tuple and payload deliberately stay explicit at call sites.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the artifact columns inserted by one statement"
+    )]
+    pub fn artifact(
+        &self,
+        run_id: &str,
+        agent_id: &str,
+        call_id: &str,
+        source: &str,
+        bytes: &[u8],
+        media_type: &str,
+        metadata: Value,
+    ) -> Result<Evidence> {
+        self.transaction(|tx| {
+            self.tx_artifact(
+                tx, run_id, agent_id, call_id, source, bytes, media_type, metadata,
+            )
+        })
+    }
+    /// Publish the blob and insert the evidence row inside the caller's transaction, so a
+    /// committed evidence row cannot exist without the state that references it.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the artifact columns inserted by one statement"
+    )]
+    pub fn tx_artifact(
+        &self,
+        tx: &Connection,
+        run_id: &str,
+        agent_id: &str,
+        call_id: &str,
+        source: &str,
+        bytes: &[u8],
+        media_type: &str,
+        metadata: Value,
+    ) -> Result<Evidence> {
+        let evidence = self.publish_artifact(
+            run_id, agent_id, call_id, source, bytes, media_type, metadata,
+        )?;
+        Self::tx_put(tx, "evidence", &evidence.id, run_id, &evidence)?;
         Ok(evidence)
     }
     pub fn read_evidence(&self, run_id: &str, evidence_id: &str) -> Result<Vec<u8>> {
