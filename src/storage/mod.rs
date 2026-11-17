@@ -38,9 +38,17 @@ impl Store {
         fs::create_dir_all(root.join("artifacts"))?;
         let conn = Connection::open(root.join("state.sqlite3"))?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        // SQLite keeps the previous journal mode and does not fail when the directory
+        // cannot support WAL, while the reader connection's non-blocking snapshot
+        // contract depends on WAL actually being active.
+        let mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
+        anyhow::ensure!(
+            mode.eq_ignore_ascii_case("wal"),
+            "state directory does not support WAL (journal_mode={mode}); choose a local directory"
+        );
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-          CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
           INSERT OR IGNORE INTO meta VALUES('schema_version','5');
           ",
         )?;
