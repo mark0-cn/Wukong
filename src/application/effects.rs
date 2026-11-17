@@ -443,11 +443,14 @@ pub fn reconcile_record(
 }
 
 pub(crate) fn prefix_utf8(bytes: &[u8], limit: usize) -> String {
-    let mut end = bytes.len().min(limit);
-    while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
-        end -= 1;
-    }
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
+    let end = bytes.len().min(limit);
+    // One validation pass; the error reports the byte length of the valid prefix,
+    // so invalid bytes anywhere ahead of the cut are ignored instead of re-scanning.
+    let valid = match std::str::from_utf8(&bytes[..end]) {
+        Ok(_) => end,
+        Err(error) => error.valid_up_to(),
+    };
+    String::from_utf8_lossy(&bytes[..valid]).into_owned()
 }
 
 #[cfg(test)]
