@@ -54,7 +54,7 @@ impl EvidenceSyncService {
                 .clone()
         };
         let _sync = lock.lock().await;
-        let mut job = self.jobs.known_job(agent, id, false)?;
+        let mut job = self.jobs.known_job(agent, id, true)?;
         if job.evidence_ready() {
             return self.complete(&job).await;
         }
@@ -164,7 +164,7 @@ impl EvidenceSyncService {
                 let imported = {
                     let resource = self.jobs.resource_lock(id).await;
                     let _guard = resource.lock().await;
-                    let current = self.jobs.known_job(agent, id, false)?;
+                    let current = self.jobs.known_job(agent, id, true)?;
                     jobs::JobService::check_identity(&job, &current)?;
                     ensure!(
                         current.status.settled(),

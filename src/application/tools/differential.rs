@@ -28,7 +28,7 @@ impl ExecutionService {
             return Ok(None);
         };
         for item in items {
-            let path = item["path"].as_str().unwrap_or_default();
+            let path = item["artifact"]["path"].as_str().unwrap_or_default();
             if path.ends_with(&format!("/{stream}")) || path.ends_with(&format!("/output.{stream}"))
             {
                 let id = text(item, "evidence_id")?;
