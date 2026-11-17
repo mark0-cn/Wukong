@@ -81,7 +81,8 @@ impl Docker {
                 "volume" => lowered.starts_with("error: no such volume:"),
                 "network" => lowered.starts_with("error: no such network:"),
                 _ => false,
-            } || error.contains(&format!("network {name} not found"));
+            } || lowered
+                .contains(&format!("network {} not found", name.to_lowercase()));
             if absent {
                 return Ok(None);
             }
