@@ -138,6 +138,10 @@ impl Budget {
     /// Per-agent token quota derived from the run budget. A 10k floor keeps
     /// small-budget runs governed by the run-level budget alone instead of
     /// degenerating into role quotas that kill every agent on its first call.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the share is validated to (0, 1], so the product is a fractional count below the run token budget"
+    )]
     pub fn role_token_cap(&self, role: Role) -> u64 {
         ((self.role_share(role) * self.max_total_tokens as f64) as u64).max(10_000)
     }

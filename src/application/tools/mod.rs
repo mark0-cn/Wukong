@@ -489,6 +489,12 @@ fn number(args: &Value, key: &str, default: u64) -> u64 {
         _ => default,
     }
 }
+/// A model-supplied count as a host size. Saturates instead of truncating when the
+/// value does not fit the platform's address space, so a huge limit cannot wrap
+/// into a small one and a huge offset still fails the "beyond the snapshot" check.
+pub(crate) fn host_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
 fn address_list(args: &Value, key: &str) -> Result<Vec<u64>> {
     let Some(value) = args.get(key) else {
         return Ok(vec![]);

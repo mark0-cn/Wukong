@@ -94,3 +94,6 @@ allow_attributes_without_reason = "warn"
 # Prefer `?` where a caller can act on the failure; an intentional panic uses
 # `expect` with the invariant that makes it impossible. Tests are exempt.
 unwrap_used = "warn"
+# A narrowing cast silently keeps the low bits; convert with `try_from` or state
+# the bound that makes the cast lossless.
+cast_possible_truncation = "warn"

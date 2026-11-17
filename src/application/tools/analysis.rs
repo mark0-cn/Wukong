@@ -51,13 +51,13 @@ impl AnalysisService {
         let query = match name {
             "functions_search" => GhidraQuery::Functions {
                 pattern: args["pattern"].as_str().map(str::to_owned),
-                offset: number(args, "offset", 0) as usize,
-                limit: number(args, "limit", 25) as usize,
+                offset: crate::application::tools::host_usize(number(args, "offset", 0)),
+                limit: crate::application::tools::host_usize(number(args, "limit", 25)),
             },
             "function_instructions" => GhidraQuery::Instructions {
                 address: static_address(args, &run)?,
-                offset: number(args, "offset", 0) as usize,
-                limit: number(args, "limit", 100) as usize,
+                offset: crate::application::tools::host_usize(number(args, "offset", 0)),
+                limit: crate::application::tools::host_usize(number(args, "limit", 100)),
             },
             "function_decompile" => GhidraQuery::Decompile {
                 address: static_address(args, &run)?,
@@ -69,7 +69,7 @@ impl AnalysisService {
                     "from" => XrefDirection::From,
                     _ => XrefDirection::Both,
                 },
-                limit: number(args, "limit", 100) as usize,
+                limit: crate::application::tools::host_usize(number(args, "limit", 100)),
             },
         };
         let executable = self

@@ -157,8 +157,9 @@ pub(crate) fn search(
     args: &Value,
     max_bytes: usize,
 ) -> Result<Value> {
-    let offset = args["offset"].as_u64().unwrap_or(0) as usize;
-    let limit = args["limit"].as_u64().unwrap_or(6).clamp(1, 10) as usize;
+    let offset = crate::application::tools::host_usize(args["offset"].as_u64().unwrap_or(0));
+    let limit =
+        crate::application::tools::host_usize(args["limit"].as_u64().unwrap_or(6).clamp(1, 10));
     let query = args["query"].as_str().unwrap_or_default().to_lowercase();
     let words = query.split_whitespace().collect::<Vec<_>>();
     store.read(|tx| {
@@ -212,12 +213,14 @@ pub(crate) fn read(
         "document belongs to another run"
     );
     let content = serde_json::to_string(&document)?;
-    let offset = args["offset"].as_u64().unwrap_or(0) as usize;
+    let offset = crate::application::tools::host_usize(args["offset"].as_u64().unwrap_or(0));
     ensure!(
         offset <= content.chars().count(),
         "offset exceeds document length"
     );
-    let mut limit = args["max_chars"].as_u64().unwrap_or(4000).clamp(1, 12000) as usize;
+    let mut limit = crate::application::tools::host_usize(
+        args["max_chars"].as_u64().unwrap_or(4000).clamp(1, 12000),
+    );
     loop {
         let result = json!({"id":id,"kind":kind,"encoding":"json; offsets count Unicode characters","content":range(&content,offset,limit)});
         if serde_json::to_vec(&result)?.len() <= max_bytes.saturating_sub(512) {

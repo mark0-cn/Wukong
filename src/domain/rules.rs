@@ -415,7 +415,7 @@ mod tests {
             skills: vec![],
             active_skills: vec![],
             status: Status::Running,
-            depth: usize::from(parent.is_some()) as u32,
+            depth: u32::from(parent.is_some()),
             generation: 0,
             inherit_context: false,
             wait_for: vec![],

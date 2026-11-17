@@ -24,8 +24,10 @@ pub(in crate::application::tools) fn handle_view_agent_graph<'a>(
             let target = TaskGraph::resolve(&agents, reference)?;
             return Ok(json!({"caller_id":agent.id,"agent":target}));
         }
-        let offset = number(&args, "offset", 0).min(agents.len() as u64) as usize;
-        let limit = number(&args, "limit", 8).clamp(1, 16) as usize;
+        let offset = crate::application::tools::host_usize(
+            number(&args, "offset", 0).min(agents.len() as u64),
+        );
+        let limit = crate::application::tools::host_usize(number(&args, "limit", 8).clamp(1, 16));
         let page: Vec<_> = agents.iter().skip(offset).take(limit).collect();
         let brief = |text: &str| text.chars().take(160).collect::<String>();
         let mut sessions = Vec::new();

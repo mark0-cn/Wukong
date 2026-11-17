@@ -1,6 +1,10 @@
 //! Project the existing worker job lifecycle onto its originating tool row.
 use super::*;
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "a finite seconds value in chrono's range yields an i64 millisecond count; anything else returns None"
+)]
 fn timestamp(value: Option<&Value>) -> Option<chrono::DateTime<chrono::Utc>> {
     let seconds = value?.as_f64()?;
     if !seconds.is_finite() {

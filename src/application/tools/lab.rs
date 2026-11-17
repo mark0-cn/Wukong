@@ -26,8 +26,13 @@ impl LabService {
     fn evidence_bytes(&self, agent: &AgentMetadata, id: &str, limit: u64) -> Result<Vec<u8>> {
         let evidence: Evidence = require_in_run(&self.store, id, &agent.run_id)?;
         ensure!(evidence.size <= limit, "lab evidence exceeds size budget");
-        self.store
-            .read_evidence_range(&agent.run_id, id, 0, evidence.size as usize)
+        self.store.read_evidence_range(
+            &agent.run_id,
+            id,
+            0,
+            usize::try_from(evidence.size)
+                .map_err(|_| anyhow::anyhow!("lab evidence exceeds the address space"))?,
+        )
     }
 
     pub(super) fn materialize_spec(

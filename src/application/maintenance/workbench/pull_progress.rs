@@ -113,12 +113,16 @@ pub(super) fn monitor(
             }
             parser.feed(&chunk[..count]);
         }
-        parser.progress.elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        parser.progress.elapsed_ms =
+            u64::try_from(started.elapsed().as_millis().min(u64::MAX as u128))
+                .expect("clamped to u64::MAX above");
         if revision != parser.revision {
             revision = parser.revision;
             last_change = Instant::now();
         }
-        parser.progress.quiet_ms = last_change.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        parser.progress.quiet_ms =
+            u64::try_from(last_change.elapsed().as_millis().min(u64::MAX as u128))
+                .expect("clamped to u64::MAX above");
         if let Some(status) = exit
             && drained
         {

@@ -31,7 +31,8 @@ pub(super) fn stop_workers(home: &Path) -> Result<()> {
             .as_u64()
             .filter(|p| *p > 0 && *p <= 65535)
             .context("invalid local worker port")?;
-        let address = SocketAddr::from(([127, 0, 0, 1], port as u16));
+        let port = u16::try_from(port).map_err(|_| anyhow::anyhow!("invalid local worker port"))?;
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
         let ping = match call(address, &value, "ping") {
             Ok(reply) => reply,
             Err(error)

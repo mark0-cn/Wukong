@@ -540,12 +540,12 @@ impl SessionsService {
         let events = raw["events"]
             .as_array()
             .context("worker returned no event snapshot")?;
-        let offset = number(args, "offset", 0) as usize;
+        let offset = crate::application::tools::host_usize(number(args, "offset", 0));
         ensure!(
             offset <= events.len(),
             "offset is beyond the current event snapshot; start a fresh snapshot at zero"
         );
-        let limit = number(args, "limit", 32).min(256) as usize;
+        let limit = crate::application::tools::host_usize(number(args, "limit", 32).min(256));
         let page = events.iter().skip(offset).take(limit).collect::<Vec<_>>();
         let evidence = self.store.artifact(
             &agent.run_id,

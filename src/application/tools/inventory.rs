@@ -11,7 +11,7 @@ pub(super) fn page(mut rows: Vec<Value>, args: &Value, key: &str) -> Result<Valu
     if let Some(after) = after {
         rows.retain(|row| row["id"].as_str().is_some_and(|id| id > after));
     }
-    let limit = number(args, "limit", 10) as usize;
+    let limit = crate::application::tools::host_usize(number(args, "limit", 10));
     ensure!((1..=20).contains(&limit), "limit must be between 1 and 20");
     let more = rows.len() > limit;
     rows.truncate(limit);

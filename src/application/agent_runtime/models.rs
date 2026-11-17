@@ -333,11 +333,14 @@ pub(super) fn retry_policy(
     application: Res<Application>,
 ) {
     let policy = rig_ecs::retry::RetryPolicy {
-        max_retries: application
-            .runner
-            .execution()
-            .model_retries
-            .min(u32::MAX as usize) as u32,
+        max_retries: u32::try_from(
+            application
+                .runner
+                .execution()
+                .model_retries
+                .min(u32::MAX as usize),
+        )
+        .expect("clamped to u32::MAX above"),
         ..rig_ecs::retry::RetryPolicy::DEFAULT
     };
     for (outcome, of, mut verdict) in &mut calls {
