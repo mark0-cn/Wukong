@@ -130,3 +130,13 @@ cpus = 2
 # [windows_lab.vms.lab.admin]
 # user = "Administrator"
 # password_env = "WUKONG_LAB_ADMIN_PASSWORD"
+# Offline provisioning tooling for `wukong lab provision` on a powered-off VM.
+# WSL provides libguestfs (guestfish) and hivexsh; the Windows host provides
+# mkisofs. A missing section makes `lab provision` fail with an actionable error.
+# [windows_lab.vms.lab.offline]
+# wsl_executable = "C:/Windows/System32/wsl.exe"
+# wsl_distribution = "Ubuntu"
+# guestfish = "/usr/bin/guestfish"
+# hivexsh = "/usr/bin/hivexsh"
+# mkisofs = "D:/VMware/VMware Workstation/mkisofs.exe"
+# timeout_seconds = 600

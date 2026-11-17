@@ -29,6 +29,7 @@ mod execution;
 pub mod install;
 pub mod media;
 pub mod package;
+pub mod provision;
 pub mod runner;
 pub mod service;
 use admin::{AdminFile, AdminRequest, LabAdmin};
@@ -262,7 +263,8 @@ impl WindowsLab {
             owner: owner.to_owned(),
             purpose: purpose.to_owned(),
             spec_sha256: spec_sha256.clone(),
-            spec: spec.clone(),
+            spec: Some(spec.clone()),
+            provision: None,
             package_sha256: package_sha256.clone(),
             install_sha256: install_sha256.clone(),
             snapshot: snapshot.clone(),
@@ -376,7 +378,8 @@ impl WindowsLab {
             owner: active.owner.clone(),
             purpose: active.purpose.clone(),
             spec_sha256: active.spec_sha256.clone(),
-            spec: active.spec.clone(),
+            spec: Some(active.spec.clone()),
+            provision: None,
             package_sha256: active.package_sha256.clone(),
             install_sha256: active.install_sha256.clone(),
             snapshot: state.baseline_snapshot.clone(),
@@ -531,27 +534,46 @@ impl WindowsLab {
             pending.operation_id
         );
         match outcome {
-            ReconcileOutcome::Completed => {
-                state.phase = match pending.kind {
-                    OperationKind::Prepare => LabPhase::Ready,
-                    OperationKind::Restore => LabPhase::Idle,
-                };
-                state.active = (pending.kind == OperationKind::Prepare).then(|| ActiveExperiment {
-                    lab_id: pending.lab_id.clone(),
-                    owner: pending.owner.clone(),
-                    purpose: pending.purpose.clone(),
-                    generation: pending.generation,
-                    spec_sha256: pending.spec_sha256.clone(),
-                    spec: pending.spec.clone(),
-                    snapshot: (pending.kind == OperationKind::Prepare)
-                        .then(|| pending.snapshot.clone()),
-                    package_sha256: pending.package_sha256.clone(),
-                    install_sha256: pending.install_sha256.clone(),
-                    started_at: pending.started_at.clone(),
-                });
-                state.pending = None;
-                state.last_error = None;
-            }
+            ReconcileOutcome::Completed => match pending.kind {
+                OperationKind::Prepare => {
+                    state.phase = LabPhase::Ready;
+                    state.active = Some(ActiveExperiment {
+                        lab_id: pending.lab_id.clone(),
+                        owner: pending.owner.clone(),
+                        purpose: pending.purpose.clone(),
+                        generation: pending.generation,
+                        spec_sha256: pending.spec_sha256.clone(),
+                        spec: pending
+                            .spec
+                            .clone()
+                            .context("pending prepare operation lost its spec")?,
+                        snapshot: Some(pending.snapshot.clone()),
+                        package_sha256: pending.package_sha256.clone(),
+                        install_sha256: pending.install_sha256.clone(),
+                        started_at: pending.started_at.clone(),
+                    });
+                    state.pending = None;
+                    state.last_error = None;
+                }
+                OperationKind::Restore => {
+                    state.phase = LabPhase::Idle;
+                    state.active = None;
+                    state.pending = None;
+                    state.last_error = None;
+                }
+                OperationKind::Provision => {
+                    state.phase = LabPhase::Idle;
+                    state.active = None;
+                    state.pending = None;
+                    state.last_error = None;
+                    if let Some(record) = state.last_provision.as_mut() {
+                        record.status = RunStatus::Completed;
+                        record.settled = true;
+                        record.ended_at = Some(now());
+                        record.error = None;
+                    }
+                }
+            },
             ReconcileOutcome::Failed => {
                 state.phase = LabPhase::Failed;
                 state.active = None;
@@ -560,6 +582,16 @@ impl WindowsLab {
                     "operator recorded failure for {:?} operation {operation_id}",
                     pending.kind
                 ));
+                if pending.kind == OperationKind::Provision
+                    && let Some(record) = state.last_provision.as_mut()
+                {
+                    record.status = RunStatus::Failed;
+                    record.settled = true;
+                    record.ended_at = Some(now());
+                    record.error = Some(format!(
+                        "operator recorded failure for provisioning operation {operation_id}"
+                    ));
+                }
             }
             ReconcileOutcome::Unknown => {
                 state.phase = LabPhase::RecoveryRequired;

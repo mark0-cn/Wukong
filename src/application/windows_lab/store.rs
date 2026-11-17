@@ -110,6 +110,14 @@ impl LabStore {
             !state.updated_at.is_empty(),
             "lab state timestamp is missing"
         );
+        if let Some(pending) = &state.pending {
+            pending.validate_shape().with_context(|| {
+                format!(
+                    "lab state {} has an inconsistent pending operation",
+                    path.display()
+                )
+            })?;
+        }
         Ok(state)
     }
 
