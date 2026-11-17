@@ -8,7 +8,6 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use std::{
     collections::BTreeMap,
-    mem::size_of,
     ptr::{addr_of, null_mut},
 };
 use windows_sys::Win32::{
@@ -17,7 +16,7 @@ use windows_sys::Win32::{
         ACE_HEADER,
         Authorization::{SE_KERNEL_OBJECT, SetSecurityInfo},
         GetAce, GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-        SECURITY_ATTRIBUTES, SYSTEM_MANDATORY_LABEL_ACE,
+        SECURITY_ATTRIBUTES, SID, SYSTEM_MANDATORY_LABEL_ACE,
     },
     System::Threading::PROCESS_ALL_ACCESS,
 };
@@ -33,6 +32,8 @@ pub(crate) struct Policy {
 pub(crate) fn seal_low_integrity(handle: HANDLE) -> Result<()> {
     let descriptor = SecurityDescriptor::from_sddl("S:(ML;;NW;;;LW)")?;
     let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
+    // SAFETY: descriptor.attributes() exposes the pointer inside the Local-owned
+    // self-relative descriptor from from_sddl, which outlives this call; out-params are stack.
     security::check(unsafe {
         GetSecurityDescriptorSacl(
             descriptor.attributes().lpSecurityDescriptor,
@@ -45,6 +46,8 @@ pub(crate) fn seal_low_integrity(handle: HANDLE) -> Result<()> {
         present != 0 && !sacl.is_null(),
         "missing low-integrity label"
     );
+    // SAFETY: handle is the live suspended-child process/thread handle owned by the caller,
+    // and sacl points into the descriptor above after ensure! proved it present and non-null.
     let status = unsafe {
         SetSecurityInfo(
             handle,
@@ -138,28 +141,48 @@ impl Policy {
 
 pub(crate) fn verify_integrity_label(descriptor: PSECURITY_DESCRIPTOR) -> Result<()> {
     let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
+    // SAFETY: every caller passes a descriptor owned by a live SecurityDescriptor/Local, so
+    // the pointer is valid for the call; present, sacl and defaulted are stack out-params.
     security::check(unsafe {
         GetSecurityDescriptorSacl(descriptor, &mut present, &mut sacl, &mut defaulted)
     })
     .context("inspect resource object DACL/label")?;
     ensure!(
+        // SAFETY: the checked GetSecurityDescriptorSacl above succeeded, and this condition
+        // requires present != 0 and a non-null sacl before dereferencing AceCount.
         present != 0 && !sacl.is_null() && unsafe { (*sacl).AceCount } == 1,
         "resource object integrity label is ambiguous"
     );
     let mut ace = null_mut();
+    // SAFETY: the ensure! above proved sacl non-null with AceCount == 1, so index 0 is in
+    // range; GetAce returns a pointer into the still-live descriptor and writes it to ace.
     security::check(unsafe { GetAce(sacl, 0, &mut ace) })?;
+    // SAFETY: GetAce succeeded just above, so ace points at a valid ACE inside the live
+    // descriptor; ACE_HEADER sits at offset 0 and the borrow ends within this function.
     let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+    // The label ACE embeds a SID at SidStart whose length depends on the
+    // sub-authority count, so the whole SID must fit inside AceSize.
+    let ace_size = header.AceSize as usize;
+    let sid_offset = std::mem::offset_of!(SYSTEM_MANDATORY_LABEL_ACE, SidStart);
+    const SID_HEADER: usize = 8;
     ensure!(
-        header.AceType == 0x11
-            && header.AceFlags == 0
-            && header.AceSize as usize >= size_of::<SYSTEM_MANDATORY_LABEL_ACE>(),
+        header.AceType == 0x11 && header.AceFlags == 0 && ace_size >= sid_offset + SID_HEADER,
         "resource object integrity ACE differs"
     );
+    // SAFETY: the ensure! above proved AceType 0x11 and room for the mask plus the SID
+    // header, so both the struct read and the header read stay inside the ACE.
     let label = unsafe { &*ace.cast::<SYSTEM_MANDATORY_LABEL_ACE>() };
-    let sid = security::sid_text(addr_of!(label.SidStart).cast_mut().cast())?;
+    let sid = addr_of!(label.SidStart).cast::<SID>();
+    // SAFETY: the SID header is inside the ACE, so its sub-authority count is readable.
+    let sub_authorities = unsafe { (*sid).SubAuthorityCount as usize };
     ensure!(
-        label.Mask == 1 && sid == "S-1-16-4096",
-        "resource object is not low/no-write-up (mask={},sid={sid})",
+        sid_offset + SID_HEADER + sub_authorities * 4 <= ace_size,
+        "truncated resource object integrity SID"
+    );
+    let sid_text = security::sid_text(sid.cast_mut().cast())?;
+    ensure!(
+        label.Mask == 1 && sid_text == "S-1-16-4096",
+        "resource object is not low/no-write-up (mask={},sid={sid_text})",
         label.Mask
     );
     Ok(())
@@ -194,6 +217,8 @@ mod tests {
         // CreateRestrictedToken rejects package SIDs; do not counterfeit a lowbox token.
         assert_eq!(PROCESS_ALL_ACCESS, THREAD_ALL_ACCESS);
         let mut token = null_mut();
+        // SAFETY: GetCurrentProcess is a valid pseudo-handle, token is a stack out-param, and
+        // security::check rejects failure before Handle(token) takes ownership.
         security::check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
         let token = Handle(token);
         let logon = security::token_logon_sid(&token)?;
