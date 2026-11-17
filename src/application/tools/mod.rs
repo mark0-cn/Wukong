@@ -369,7 +369,9 @@ impl ToolService {
                 bail!("unknown tool {name}")
             }
         };
-        let result = tokio::time::timeout(outer_timeout, result).await;
+        // Box the dispatch: this future is awaited for every tool call, and holding the
+        // whole match state machine inline costs about 36 KiB per in-flight call.
+        let result = tokio::time::timeout(outer_timeout, Box::pin(result)).await;
         match result {
             Ok(Ok(value)) => {
                 let is_error = self.mcp.contains(name) && value["isError"].as_bool() == Some(true);

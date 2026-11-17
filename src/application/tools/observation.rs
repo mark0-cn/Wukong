@@ -175,12 +175,14 @@ impl ToolService {
         Ok(candidates)
     }
     async fn observe_candidate(&self, run: &str, resource: Resource, sync: bool) -> Result<()> {
-        let operation = async {
+        // Boxed so each monitor task holds a small future instead of the whole
+        // observe/reconcile state machine (about 24 KiB per candidate task).
+        let operation = Box::pin(async {
             match resource {
                 Resource::Job(id) => self.observe_job(run, &id, sync).await,
                 Resource::Session(kind, id) => self.reconcile_session(run, kind, &id).await,
             }
-        };
+        });
         if sync {
             operation.await
         } else {
