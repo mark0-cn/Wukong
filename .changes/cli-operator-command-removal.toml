@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Remove the operator-control CLI commands `pause`, `stop`, `message`, `report` and `verify-bundle`; the coordinator, assessment and report library functions used by the desktop workspace remain. Pause, stop, messaging and follow-ups are performed in the desktop workspace, report bundles are exported from the desktop or with `analyze --output`, and the SHA256 manifest can be checked with any checksum tool. `reconcile` remains available for resolving uncertain effects."
+zh_CN = "移除操作员控制类 CLI 命令 `pause`、`stop`、`message`、`report` 与 `verify-bundle`，桌面工作区使用的协调器、评估和报告库函数保持不变。暂停、停止、消息与追加任务改在桌面工作区操作，报告包从桌面导出或通过 `analyze --output` 生成，SHA256 清单可用任意校验和工具核对。用于解决不确定外部效果的 `reconcile` 命令保留。"

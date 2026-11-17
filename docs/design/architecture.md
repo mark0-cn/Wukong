@@ -70,7 +70,7 @@ Windows has one native worker authority. The controller owns business tasks/evid
 
 Agent states: queued, running, waiting, budget_paused, completed, stopped, crashed, failed. Completion/stop notify parents. Budget pauses retain checkpoints and resume scheduling later.
 
-Within an active run, `follow_up_agent` (CLI `message --kind follow_up`) adds work to a completed child, preserving history/cumulative usage and starting a new generation. Calls/notices are generation-scoped. Completed parents are awakened too; stopped/failed branches need new tasks. Explicit predecessor dependencies combine with parent-completion dependencies; ancestor dependencies/indirect cycles are rejected.
+Within an active run, `follow_up_agent` (desktop **Assign follow-up**) adds work to a completed child, preserving history/cumulative usage and starting a new generation. Calls/notices are generation-scoped. Completed parents are awakened too; stopped/failed branches need new tasks. Explicit predecessor dependencies combine with parent-completion dependencies; ancestor dependencies/indirect cycles are rejected.
 
 Children close owned debug/interactive sessions before finishing; root resolves all sessions. Other Agents in the same run may close abandoned sessions of stopped/failed owners, but cannot issue debug commands/interactive input.
 
@@ -82,7 +82,7 @@ Native logs in `state_dir/rig/RUN_ID` contain model conversations, effects and p
 
 `RunSupervisor` independently manages controller leases, duration budgets and background worker observation; Rig frames do not await worker RPC. Leases carry persistent increasing versions. Runner/coordinator/tools share versioned store handles; every write transaction validates owner/version/expiry before mutation. Expired controllers stop and late results cannot overwrite a successor. Supervision ends with run completion/cancellation; lease release also checks version.
 
-CLI/GUI use `AssessmentService` for start/resume/pause/stop/operator messages. `PreparedAssessment` retains resolved configuration/event subscriptions and closes controller tool connections on success/error. Frontends do not orchestrate leases or construct resume configuration. Resume preparation does not mutate tasks; budget changes commit only after the supervisor acquires the lease.
+The desktop and CLI use `AssessmentService` for assessment start/resume; the desktop additionally uses it for pause, stop and operator messages. `PreparedAssessment` retains resolved configuration/event subscriptions and closes controller tool connections on success/error. Frontends do not orchestrate leases or construct resume configuration. Resume preparation does not mutate tasks; budget changes commit only after the supervisor acquires the lease.
 
 `ToolContext` explicitly assembles execution, analysis, coordination, document, evidence and environment services without dereferencing to `ToolService`. Catalog adapters pass each handler its concrete service; handlers cannot reach the complete entry point. The catalog still owns schemas, registration, permissions and recovery policy, and Rig retains generic scheduling. `FilesService`, `JobService` and `SessionsService` own worker use cases; `WorkerGateway` centralizes transport/stable receipts. Controller ownership uses `JobRecord`, `SessionRecord`, `WorkerFileRecord`, `RunScoped`; original worker extension payloads remain JSON.
 
@@ -176,8 +176,8 @@ retained as `stale` and never injected as current work. `message_status` exposes
 these states. In-flight model requests keep their original mailbox snapshot.
 This increment uses a fresh schema 5 store; no old-database migration is provided.
 Informational mail left on completed work becomes
-stale when a new generation starts. CLI messages default to information; GUI
-operator input defaults to information; the explicit follow-up option reopens completed work.
+stale when a new generation starts. GUI operator input defaults to information;
+the explicit follow-up option reopens completed work.
 
 The native `message` tool opens a request or sends a reply to a reachable active
 agent. Use typed `send_message_to_agent` for informational updates and correlated

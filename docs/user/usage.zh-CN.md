@@ -208,7 +208,7 @@ verifier = { model = "your-verifier-model", max_tokens = 16384 }
 
 ## 任务管理与恢复
 
-以下示例中的 `RUN_ID`、`AGENT_ID`、`CALL_ID` 和 `EVIDENCE_ID` 均替换为实际 ID。
+以下示例中的 `RUN_ID`、`CALL_ID` 和 `EVIDENCE_ID` 均替换为实际 ID。
 
 <a id="inspect-and-intervene"></a>
 
@@ -218,23 +218,19 @@ verifier = { model = "your-verifier-model", max_tokens = 16384 }
 wukong runs
 wukong status RUN_ID --events 30
 wukong gui RUN_ID
-wukong message AGENT_ID "请记录这条新的分析约束"
-wukong message AGENT_ID "请继续调查该函数的边界条件" --kind follow_up
-wukong stop AGENT_ID --reason "停止该分支"
 ```
 
-普通消息补充信息，不会重新开启已完成任务。`--kind follow_up` 用于向已完成的 Agent 追加工作，保留其历史和累计预算；暂停状态仍需显式恢复。停止分支也会停止其子任务，已记录证据保留。
+在桌面工作区中补充信息、追加任务、暂停分析或停止分支。普通消息补充信息，不会重新开启已完成任务；follow-up 用于向已完成的 Agent 追加工作，保留其历史和累计预算。暂停状态仍需显式恢复。停止分支也会停止其子任务，已记录证据保留。
 
 <a id="pause-and-resume"></a>
 
 ### 暂停与恢复
 
 ```sh
-wukong pause RUN_ID
 wukong resume RUN_ID --max-tokens 1000000
 ```
 
-CLI 的 Ctrl+C 请求在持久化边界停止调度，保留状态以便恢复。`resume` 使用保存的配置与检查点，并可通过 `--max-tokens`、`--max-usd` 调整累计预算上限。活动控制端通过租约互斥。
+桌面工作区可暂停活动任务并保存进度。CLI 的 Ctrl+C 请求在持久化边界停止调度，保留状态以便恢复。`resume` 使用保存的配置与检查点，并可通过 `--max-tokens`、`--max-usd` 调整累计预算上限。活动控制端通过租约互斥。
 
 原生 Rig 日志位于状态目录的 `rig/RUN_ID`。当前状态目录使用 schema 3，不提供旧数据库迁移；旧目录会返回版本提示，新任务应选择新的状态目录。
 
@@ -317,12 +313,7 @@ Token 预算按 provider 返回的用量累计。缺少必要用量时，系统�
 
 ## 报告与复核
 
-```sh
-wukong report RUN_ID --output ./reports/assessment-01
-wukong verify-bundle ./reports/assessment-01
-```
-
-导出目录必须是新目录。报告包包含目标快照、原始证据、配置与复现元数据、JSON、Markdown、HTML 及 SHA256 清单。导出不执行目标；`verify-bundle` 校验文件与映射的完整性。校验和不认证发布者；原始证据不脱敏，配置导出会隐藏凭据字段，不是凭据备份。标题和状态按导出语言显示，已有正文不重写。文件清单和复现方法见 [报告格式](../reference/report-format.zh-CN.md)。
+在桌面工作区中导出报告，或为 `analyze` 传入 `--output`；导出目录必须是新目录。报告包包含目标快照、原始证据、配置与复现元数据、JSON、Markdown、HTML 及 SHA256 清单。导出不执行目标，并在发布前校验每个暂存文件；SHA256 清单可用任意校验和工具发现后续改动。校验和不认证发布者；原始证据不脱敏，配置导出会隐藏凭据字段，不是凭据备份。标题和状态按导出语言显示，已有正文不重写。文件清单和复现方法见 [报告格式](../reference/report-format.zh-CN.md)。
 
 独立复核必须由不同 Agent 执行，并关联实际 worker 结果。静态可疑特征或单纯崩溃不会自动升级为已验证影响。
 

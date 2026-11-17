@@ -70,7 +70,7 @@ Windows 的执行管理入口只有原生 Worker。控制器负责业务任务�
 
 agent 状态包括 queued、running、waiting、budget_paused、completed、stopped、crashed、failed。完成/停止事件通知父任务。预算暂停保留检查点，恢复后继续调度。
 
-活动任务内，通过 `follow_up_agent`（CLI `message --kind follow_up`）向 completed 子 agent 追加任务会保留其历史和累计用量，并开始新的 generation；工具调用与完成通知按 generation 区分。父任务已完成时一并唤醒，已停止或失败的分支需新建任务。显式前驱依赖与父子完成依赖合并检查，拒绝祖先依赖及间接循环。
+活动任务内，通过 `follow_up_agent`（桌面“安排后续任务”）向 completed 子 agent 追加任务会保留其历史和累计用量，并开始新的 generation；工具调用与完成通知按 generation 区分。父任务已完成时一并唤醒，已停止或失败的分支需新建任务。显式前驱依赖与父子完成依赖合并检查，拒绝祖先依赖及间接循环。
 
 子 agent 完成前须关闭自己持有的调试和交互会话，根任务完成前须处理全部会话。停止或失败的 owner 遗留会话可以由同任务的其他子 agent 关闭；该权限不允许发送调试命令或交互输入。
 
@@ -82,7 +82,7 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 `RunSupervisor` 独立管理控制端租约、时间预算和后台 worker 观察，Rig 帧不等待 worker RPC。租约带持久化递增版本；运行中的 runner、coordinator 和工具共享带该版本的存储句柄，每次业务写事务在提交修改前验证 owner、版本和有效期。租约失效后旧控制端停止执行，其迟到结果不能覆盖接管者。监督任务随运行结束或取消清理，释放租约时也核对版本。
 
-CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止及操作员消息。`PreparedAssessment` 保留已解析的运行配置与事件订阅，在执行完成或错误后关闭控制端工具连接；前端不自行编排租约或构造恢复配置。恢复准备不修改任务，预算修改在监督器取得正式租约后提交。
+桌面与 CLI 通过 `AssessmentService` 执行启动、恢复，桌面端还使用其暂停、停止及操作员消息能力。`PreparedAssessment` 保留已解析的运行配置与事件订阅，在执行完成或错误后关闭控制端工具连接；前端不自行编排租约或构造恢复配置。恢复准备不修改任务，预算修改在监督器取得正式租约后提交。
 
 `ToolContext` 显式装配执行、分析、协调、文档、证据及环境服务，不再解引用为 `ToolService`。目录适配器向每个处理器传入具体服务，处理器不能访问完整入口对象。目录继续管理 schema、注册、权限和恢复策略，Rig 保留通用调度职责。`FilesService`、`JobService` 和 `SessionsService` 负责 worker 用例；`WorkerGateway` 集中管理传输与稳定回执。控制端使用 `JobRecord`、`SessionRecord`、`WorkerFileRecord` 和 `RunScoped` 检查归属，原始 worker 扩展载荷保留为 JSON。
 
@@ -164,7 +164,7 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 
 消息携带 kind、correlation/reply ID、收发 generation、当前任务身份和证据引用。send_message_to_agent 默认 information：不重开任务、不打断等待。question、reply、result、blocked 可唤醒等待者但不清除等待条件。只有显式 follow_up_agent 重开已完成任务。
 
-queued 表示持久入队；included 表示进入原生会话/上下文及日志，不表示模型已执行或处理。replied 表示显式关联回复，不判断正确性。旧代次回复保留为 stale，不注入当前工作。message_status 展示状态；在途请求保留原邮箱快照。此增量使用新 schema 5，不迁移旧数据库。已完成任务遗留 information 在新代次开始时变 stale。CLI/GUI 默认 information，显式 follow-up 才重开。
+queued 表示持久入队；included 表示进入原生会话/上下文及日志，不表示模型已执行或处理。replied 表示显式关联回复，不判断正确性。旧代次回复保留为 stale，不注入当前工作。message_status 展示状态；在途请求保留原邮箱快照。此增量使用新 schema 5，不迁移旧数据库。已完成任务遗留 information 在新代次开始时变 stale。桌面操作员输入默认 information，显式 follow-up 才重开。
 
 原生 message 向可达活动 Agent 发请求或回复。信息/关联邮件使用类型化 send_message_to_agent，完成后的新工作用 follow_up_agent。原生等待投递与类型化回执一起投影；included 不证明模型已处理或回答。
 

@@ -96,34 +96,6 @@ pub enum Command {
         #[arg(long, default_value_t = 20)]
         events: usize,
     },
-    Message {
-        agent_id: String,
-        text: String,
-        #[arg(long, default_value="information", value_parser=["information","question","reply","follow_up","result","blocked"])]
-        kind: String,
-        #[arg(long)]
-        reply_to: Option<i64>,
-        #[arg(long)]
-        generation: Option<u64>,
-        #[arg(long)]
-        correlation_id: Option<String>,
-    },
-    Pause {
-        run_id: String,
-    },
-    Stop {
-        agent_id: String,
-        #[arg(long, default_value = "operator stopped task")]
-        reason: String,
-    },
-    Report {
-        run_id: String,
-        #[arg(long)]
-        output: PathBuf,
-    },
-    VerifyBundle {
-        path: PathBuf,
-    },
     /// Resolve an uncertain external effect using an operator-reviewed result and evidence.
     Reconcile {
         call_id: String,
@@ -284,41 +256,6 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Status { run_id, events } => print_json(&serde_json::to_value(
             crate::queries::AssessmentQueries::new(&store).status(&run_id, events)?,
         )?)?,
-        Command::Message {
-            agent_id,
-            text,
-            kind,
-            reply_to,
-            generation,
-            correlation_id,
-        } => {
-            let receipt = service.message(
-                &agent_id,
-                &text,
-                MessageOptions {
-                    kind: serde_json::from_value(json!(kind))?,
-                    reply_to,
-                    recipient_generation: generation,
-                    correlation_id,
-                    ..Default::default()
-                },
-            )?;
-            print_json(&serde_json::to_value(receipt)?)?;
-        }
-        Command::Pause { run_id } => {
-            service.pause(&run_id, "operator paused assessment")?;
-            let run: RunRecord = store.require("run", &run_id)?;
-            println!("{}", json!({"run_id":run_id,"status":run.status}));
-        }
-        Command::Stop { agent_id, reason } => {
-            print_json(&json!({"stopped_agents":service.stop(&agent_id,&reason)?}))?
-        }
-        Command::Report { run_id, output } => print_json(&serde_json::to_value(
-            report::export_with_locale(&store, &run_id, &output, locale)?,
-        )?)?,
-        Command::VerifyBundle { path } => {
-            print_json(&serde_json::to_value(report::verify_bundle(&path)?)?)?
-        }
         Command::Reconcile {
             call_id,
             result_file,

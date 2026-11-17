@@ -52,7 +52,7 @@ report-bundle-readme = wukong evidence bundle
     config.redacted.json: settings with credential fields redacted.
     target/sample.bin: original target bytes (not executed during export).
     evidence/: deduplicated original evidence bytes, addressed by SHA256.
-    manifest.json / SHA256SUMS: all payload digests. Use wukong verify-bundle.
+    manifest.json / SHA256SUMS: all payload digests. Compare them with any checksum tool.
 
     A checksum verifies integrity, not publisher identity. Original evidence is not redacted.
     Redacted configuration and event metadata are not a credential backup.

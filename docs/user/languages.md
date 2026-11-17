@@ -22,7 +22,7 @@ CLI examples:
 ```sh
 wukong --locale en-US --help
 wukong --locale zh-CN analyze ./sample --output-language en-US --task "分析输入格式"
-wukong --locale en-US report RUN_ID --output ./report-en
+wukong --locale en-US analyze ./sample --task "Recover the input format" --output ./report-en
 ```
 
-`WUKONG_LOCALE` and `WUKONG_OUTPUT_LANGUAGE` supply CLI defaults; explicit options take priority. Resumed tasks retain the output language saved at creation. Language changes do not require rebuilding or downloading Docker images.
+`WUKONG_LOCALE` and `WUKONG_OUTPUT_LANGUAGE` supply CLI defaults; explicit options take priority. Resumed tasks retain the output language saved at creation. Report export in the desktop workspace follows the interface language at export time. Language changes do not require rebuilding or downloading Docker images.

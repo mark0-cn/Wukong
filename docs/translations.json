@@ -10,16 +10,16 @@
       "zh-CN": "d1df1e41e1b87b740712d33a98edb92a2bc1bb246de619d912966b510c8ca622"
     },
     "README.md": {
-      "en": "d77b454b37bfab80fdbec80b9927ac81eefba878d25667e3d4773c0b82ba5baa",
-      "zh-CN": "c7347269092896acf0a14bf5ec23ed7a4082e233587c83df2d8689af14ee129b"
+      "en": "25b40d1412fcc85f6bc27939388fe167877e037df5019125fd5c81886de2df26",
+      "zh-CN": "b013f93ed0f491692066a7e91f887adf97d239912fb993c421ff07c7a90a1d5a"
     },
     "docs/README.md": {
       "en": "4a3e81ec55758eca24625918a8e33351ad2dac8f0b117d867c2a10dc11bf07ab",
       "zh-CN": "f3d70c02fab4d30f2b1ea9141eaf5ce0a02f053413629cf70d84e0af3ab7c9e4"
     },
     "docs/design/architecture.md": {
-      "en": "2d23cfa9ebb56fd79f817456e2122b18d6c9ba014133e1cd2a1c082ce9320ca1",
-      "zh-CN": "3547e59140379d69c762ad8b2d56a8f30981a6fb39b3216b5af2db827599b1c1"
+      "en": "53df30fcd5a04578311a05a5c7aeac32c51e5ea6b5c6b6c1df72d504ed59c341",
+      "zh-CN": "2330cf5f1562a86eab780b36c53fdc6cd2b301b9ebd7e63f6b73abf9459b2536"
     },
     "docs/design/cross-platform-environments.md": {
       "en": "05d2b32a6adfbdccfe7d50c11a995dac78af519797af5eeb443f43a5a1bd525e",
@@ -118,8 +118,8 @@
       "zh-CN": "b2a62ceb80106b4707d4159f9e09031ebf9d33d31505761a84861ba60ce4fbf8"
     },
     "docs/user/languages.md": {
-      "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
-      "zh-CN": "7065aba25b92383295d5a7c7d21cb0b7ea70885614959fb196e65d4b266beb29"
+      "en": "86aee34cae2199a005e6e552158cb4f42db3e2168662c6f8acd17713898931db",
+      "zh-CN": "fc9a780fc71d1c0df7d92048951e1e66705ba1410f7c6547cb9c347ed1de73d8"
     },
     "docs/user/online-install.md": {
       "en": "bc29afadfcbb3c42342291379f514b3ddc20ccff2d14a9052666604354d6f453",
@@ -130,8 +130,8 @@
       "zh-CN": "11b6e828ccc1953a223f868a234c45ea53abed0a94d3b3602866035e5b1fd483"
     },
     "docs/user/usage.md": {
-      "en": "3e077da39f5c574ea76b1d8a405417d89329c63dec133403617849ee911095dc",
-      "zh-CN": "536fa3ec0a04974249212c1412ba1837de164475b5171f10032ff2c19d5f9efe"
+      "en": "343568443d779a8282f9f232b1d87dd2f0846c1249b24e048774362dd1ba0a76",
+      "zh-CN": "d585b46ba2381838372b0b2b9df58d5dba377ddd2e8d55cc1567f2c535152ac8"
     },
     "evals/README.md": {
       "en": "8fb115c1b503627b087374bb0a3b254a140e6094baa6df91452a763a761b78ed",
