@@ -1207,7 +1207,7 @@ fn dependency_policies_distinguish_success_alternatives_and_terminal_collection(
     collect.wait_for_predecessors = vec![failed.id.clone()];
     collect.dependency_policy = DependencyPolicy::AllTerminal;
     let collect = c.create_child(&run.root_id, collect).unwrap().agent;
-    c.set_status(&failed.id, Status::Failed, Some("test failure".into()))
+    c.fail_agent(&failed.id, "test failure".into(), FailureCause::Error)
         .unwrap();
     c.release_dependencies(&run.id).unwrap();
     assert!(
@@ -1302,7 +1302,7 @@ fn waits_report_unsatisfied_requirements_and_wake_on_any_success() {
         .create_child(&run.root_id, request("wait winner"))
         .unwrap()
         .agent;
-    c.set_status(&failed.id, Status::Crashed, Some("test crash".into()))
+    c.fail_agent(&failed.id, "test crash".into(), FailureCause::Error)
         .unwrap();
     let rejected = c
         .wait_with_policy(

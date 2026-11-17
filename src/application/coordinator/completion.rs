@@ -1,7 +1,13 @@
 use super::*;
 
 impl Coordinator {
+    /// Move an agent into a live state. Terminal transitions must use the finish and
+    /// stop paths, which also archive results, release resources and update the run.
     pub fn set_status(&self, agent_id: &str, status: Status, error: Option<String>) -> Result<()> {
+        ensure!(
+            !status.terminal(),
+            "terminal transitions must use agent_finish or stop_agent"
+        );
         self.store.write(|tx| {
             let mut agent: AgentMetadata = tx
                 .get_record::<AgentMetadata>(agent_id)?
