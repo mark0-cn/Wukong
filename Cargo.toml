@@ -81,3 +81,13 @@ tauri-build = { version = "2", optional = true , features = [] }
 
 [target.'cfg(windows)'.dev-dependencies]
 junction = { version = "2.1", default-features = false }
+
+[lints.clippy]
+# Every unsafe block states its invariant; the controller has two FFI blocks and the
+# Windows worker documented all 306 of its own.
+undocumented_unsafe_blocks = "warn"
+# Debug leftovers and unfinished markers must not reach a release build.
+dbg_macro = "warn"
+todo = "warn"
+# A suppression without a reason is an unexplained contract change.
+allow_attributes_without_reason = "warn"

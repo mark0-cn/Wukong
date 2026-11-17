@@ -1,0 +1,9 @@
+# Clippy configuration shared by the controller and, through directory lookup, the
+# worker crates. The repository turns these on per lint in each Cargo.toml so that a
+# single new warning cannot fail an unrelated pull request.
+
+# A panic is the assertion in test code, so unwrap/expect/print stay allowed there.
+# Production code is held to the unwrap_used lint once that wave lands.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-print-in-tests = true
