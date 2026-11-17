@@ -26,8 +26,11 @@ pub const ENROLLMENT_RECORD: &str = "enrollment/enrollment.json";
 pub const ENROLLMENT_SIGNATURE: &str = "enrollment/enrollment.sig";
 pub const MANIFEST_RECORD: &str = "payload/manifest.json";
 pub const MANIFEST_SIGNATURE: &str = "payload/manifest.sig";
+pub const GUEST_PROGRAM_DATA: &str = r"C:\ProgramData";
+pub const GUEST_PROVISION_BASE: &str = r"C:\ProgramData\WukongLab";
 pub const GUEST_PROVISION_ROOT: &str = r"C:\ProgramData\WukongLab\provision";
-pub const GUEST_SYSTEM_HIVE: &str = "/Windows/System32/config/SYSTEM";
+pub const GUEST_SYSTEM_CONFIG: &str = r"C:\Windows\System32\config";
+pub const GUEST_SYSTEM_HIVE: &str = r"C:\Windows\System32\config\SYSTEM";
 pub const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
 pub const MAX_MEDIA_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const MAX_RECEIPT_BYTES: u64 = 1024 * 1024;
@@ -66,18 +69,69 @@ impl GuestPaths {
         })
     }
 
-    /// Guest-relative path form used by libguestfs (the Windows system volume
-    /// is mounted at `/`).
+    /// Convert the canonical Windows guest path (`C:\...`) to the form used by
+    /// libguestfs, where the Windows system volume is mounted at `/`.
+    ///
+    /// This is the only place the two representations may differ: provision
+    /// requests and persisted records always carry absolute `C:\` paths, and
+    /// host adapters call this once at their boundary. Relative, UNC, drive
+    /// aliases, empty components and `.`/`..` traversal are rejected so the
+    /// translated path can never leave the guest volume.
     pub fn guestfish(path: &str) -> Result<String> {
         let relative = path
             .strip_prefix(r"C:\")
             .context("guest path must be an absolute C: path")?;
-        ensure!(
-            !relative.contains(['\n', '\r', '\0', '"']),
-            "guest path contains an unsupported character"
-        );
-        Ok(format!("/{}", relative.replace('\\', "/")))
+        let mut guest = String::with_capacity(relative.len() + 1);
+        guest.push('/');
+        for (index, component) in relative.split('\\').enumerate() {
+            validate_guest_component(component)?;
+            if index > 0 {
+                guest.push('/');
+            }
+            guest.push_str(component);
+        }
+        Ok(guest)
     }
+
+    /// Inverse of [`GuestPaths::guestfish`]: the canonical `C:\` form of a
+    /// libguestfs guest path. Test and evidence helpers use it to prove the two
+    /// representations round-trip exactly.
+    pub fn windows(guest: &str) -> Result<String> {
+        let relative = guest
+            .strip_prefix('/')
+            .context("guestfish path must be absolute")?;
+        ensure!(
+            !relative.starts_with('/'),
+            "guestfish path may not be a network path"
+        );
+        ensure!(!relative.is_empty(), "guest path must name a file");
+        let mut windows = String::from(r"C:\");
+        for (index, component) in relative.split('/').enumerate() {
+            validate_guest_component(component)?;
+            if index > 0 {
+                windows.push('\\');
+            }
+            windows.push_str(component);
+        }
+        Ok(windows)
+    }
+}
+
+/// One guest path component shared by both representations.
+fn validate_guest_component(component: &str) -> Result<()> {
+    ensure!(
+        !component.is_empty(),
+        "guest path contains an empty component"
+    );
+    ensure!(
+        component != "." && component != "..",
+        "guest path may not contain a relative component"
+    );
+    ensure!(
+        !component.contains(['\n', '\r', '\0', '"', '/', '\\', ':']),
+        "guest path contains an unsupported character"
+    );
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +155,8 @@ pub struct DiskInspection {
     pub provision_root_entries: Vec<String>,
 }
 
+/// Paths inspected on the powered-off system volume. Every field is an
+/// absolute Windows guest path; host adapters translate it once for libguestfs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiskInspectionRequest {
     pub system_hive: String,
@@ -113,8 +169,8 @@ impl DiskInspectionRequest {
     pub fn new() -> Self {
         Self {
             system_hive: GUEST_SYSTEM_HIVE.into(),
-            program_data: "/ProgramData".into(),
-            provision_root: "/ProgramData/WukongLab".into(),
+            program_data: GUEST_PROGRAM_DATA.into(),
+            provision_root: GUEST_PROVISION_BASE.into(),
             service_prefix: "WukongLabProvision".into(),
         }
     }
@@ -128,6 +184,7 @@ impl Default for DiskInspectionRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HivePatch {
+    /// Absolute Windows guest path of the SYSTEM hive inside the system volume.
     pub system_hive: String,
     pub control_set: u32,
     pub script: String,
@@ -143,6 +200,8 @@ pub struct HivePatchEvidence {
     pub verify_output: String,
 }
 
+/// Fixed guest artifacts read back after the one-shot service ran. Every path
+/// field is an absolute Windows guest path; adapters translate them once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GuestObservationRequest {
     pub system_hive: String,
@@ -312,15 +371,22 @@ pub fn read_finalize_spec(path: &Path) -> Result<FinalizeSpec> {
 /// Planned snapshot transition before provisioning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapshotPlan {
-    /// No snapshots exist; provisioning starts from the powered-off base disk.
+    /// No snapshots exist; provisioning starts from the powered-off base disk
+    /// and creates the baseline after the guest receipt verifies.
     Pristine,
     /// Only the configured baseline exists and `--replace-baseline` was passed.
+    /// The caller persists its intent and backs up the VMX, deletes exactly that
+    /// snapshot, and only then resolves and validates the committed boot disk.
     ReplaceBaseline,
 }
 
 /// A provisioned VM must be powered off with no snapshot chain. The only
 /// tolerated snapshot is the configured baseline when it is being replaced;
 /// no other snapshot is ever deleted.
+///
+/// `--replace-baseline` is explicitly a no-op when no snapshot exists: the
+/// pristine flow already creates the baseline after the guest receipt verifies,
+/// so the caller keeps working and only logs that the flag had no effect.
 pub fn plan_snapshot(
     snapshots: &[String],
     baseline: &str,
@@ -335,7 +401,7 @@ pub fn plan_snapshot(
     );
     ensure!(
         replace_baseline,
-        "baseline snapshot {baseline} already exists; pass --replace-baseline to delete and recreate it after all validations"
+        "baseline snapshot {baseline} already exists; pass --replace-baseline to delete and recreate it"
     );
     Ok(SnapshotPlan::ReplaceBaseline)
 }
@@ -1190,7 +1256,10 @@ pub struct ProvisionArtifactPaths {
     pub record: PathBuf,
 }
 
-/// Persisted intent for one provisioning attempt.
+/// Durable provision intent. `guest_disk` is unknown only when
+/// `replaces_baseline` is set: the intent must be persisted before the baseline
+/// deletion, and the boot disk can only be resolved after the snapshot delta is
+/// committed. The service re-records the resolved path once it is known.
 #[allow(
     clippy::too_many_arguments,
     reason = "a provisioning intent binds every fixed identity at once"
@@ -1201,7 +1270,7 @@ pub fn provisioning_spec(
     media: MediaIdentity,
     source: ProvisionSource,
     paths: &ProvisionArtifactPaths,
-    guest_disk: &Path,
+    guest_disk: Option<&Path>,
     guest: &GuestPaths,
     baseline: &str,
     replaces_baseline: bool,
@@ -1215,7 +1284,7 @@ pub fn provisioning_spec(
         source,
         iso: paths.iso.clone(),
         vmx_backup: paths.vmx_backup.clone(),
-        guest_disk: guest_disk.to_path_buf(),
+        guest_disk: guest_disk.map(Path::to_path_buf),
         service_name: guest.service.clone(),
         guest_root: guest.root.clone(),
         baseline_snapshot: baseline.into(),

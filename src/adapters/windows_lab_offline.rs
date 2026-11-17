@@ -10,9 +10,9 @@
 #[cfg(windows)]
 mod platform {
     use crate::application::windows_lab::provision::{
-        self, DiskInspection, DiskInspectionRequest, FinalizeRequest, GuestFile, GuestNetwork,
-        GuestObservation, GuestObservationRequest, GuestPaths, HivePatch, HivePatchEvidence,
-        IsoBuilder, MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk,
+        self, DiskInspection, DiskInspectionRequest, FinalizeRequest, GUEST_SYSTEM_CONFIG,
+        GuestFile, GuestNetwork, GuestObservation, GuestObservationRequest, GuestPaths, HivePatch,
+        HivePatchEvidence, IsoBuilder, MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk,
     };
     use anyhow::{Context, Result, bail, ensure};
     use async_trait::async_trait;
@@ -352,11 +352,12 @@ mod platform {
             disk_posix: &str,
             request: &DiskInspectionRequest,
         ) -> Result<DiskInspection> {
+            let system_config = guestfish_path(GUEST_SYSTEM_CONFIG)?;
             let system_hive = guestfish_path(&request.system_hive)?;
             let program_data = guestfish_path(&request.program_data)?;
             let provision_root = guestfish_path(&request.provision_root)?;
             let probe = format!(
-                "is-dir /Windows/System32/config\nis-file {system_hive}\nis-dir {program_data}\nis-dir {provision_root}\n"
+                "is-dir {system_config}\nis-file {system_hive}\nis-dir {program_data}\nis-dir {provision_root}\n"
             );
             let output = self.guestfish(disk_posix, false, &probe).await?;
             require_success(&output, "libguestfs preflight")?;

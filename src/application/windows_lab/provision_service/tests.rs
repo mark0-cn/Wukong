@@ -15,13 +15,15 @@ use crate::application::windows_lab::types::{
 };
 use crate::application::windows_lab::{LabStore, VmHost};
 use crate::config::WindowsLabVm;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use std::{
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
+
+type Events = Arc<Mutex<Vec<String>>>;
 
 #[derive(Default)]
 struct HostState {
@@ -36,16 +38,31 @@ struct HostState {
     fail_snapshot: bool,
     fail_revert: bool,
     fail_delete: bool,
+    /// Emulated VMware snapshot commit: rewrite the VMX when the snapshot goes.
+    rewrite_vmx_on_delete: Option<(PathBuf, Vec<u8>)>,
+    state_dir: Option<PathBuf>,
+    delete_observation: Option<DeleteObservation>,
+}
+
+/// What the controller state and provision directory looked like when the
+/// configured baseline snapshot was deleted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DeleteObservation {
+    vmx_backups: usize,
+    phase: Option<String>,
+    pending_provision: bool,
 }
 
 struct FakeHost {
     state: Mutex<HostState>,
+    events: Events,
 }
 
 impl FakeHost {
     fn new() -> Self {
         Self {
             state: Mutex::new(HostState::default()),
+            events: Arc::new(Mutex::new(Vec::new())),
         }
     }
     fn calls(&self) -> Vec<String> {
@@ -60,11 +77,60 @@ impl FakeHost {
     fn set_boot_polls(&self, polls: u32) {
         self.state.lock().unwrap().boot_polls = polls;
     }
+    fn events(&self) -> Events {
+        self.events.clone()
+    }
+    fn record(&self, event: impl Into<String>) {
+        self.events.lock().unwrap().push(event.into());
+    }
+    fn rewrite_vmx_on_delete(&self, vmx: &Path, bytes: Vec<u8>) {
+        self.state.lock().unwrap().rewrite_vmx_on_delete = Some((vmx.to_path_buf(), bytes));
+    }
+    fn watch_state(&self, state_dir: &Path) {
+        self.state.lock().unwrap().state_dir = Some(state_dir.to_path_buf());
+    }
+    fn delete_observation(&self) -> Option<DeleteObservation> {
+        self.state.lock().unwrap().delete_observation.clone()
+    }
+
+    /// Record what a controller crash right after the snapshot deletion would
+    /// leave behind: the backed-up VMX file and the persisted provisioning
+    /// intent.
+    fn observe_delete(&self, state: &mut HostState) {
+        let Some(directory) = state.state_dir.clone() else {
+            return;
+        };
+        let provisions = directory.join("windows-lab").join("provisions");
+        let vmx_backups = fs::read_dir(&provisions)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|entry| entry.path().join("vmx.bak").is_file())
+                    .count()
+            })
+            .unwrap_or_default();
+        let (phase, pending_provision) = fs::read(directory.join("windows-lab").join("labvm.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .map(|value| {
+                (
+                    value["phase"].as_str().map(str::to_owned),
+                    value["pending"]["kind"].as_str() == Some("provision"),
+                )
+            })
+            .unwrap_or((None, false));
+        state.delete_observation = Some(DeleteObservation {
+            vmx_backups,
+            phase,
+            pending_provision,
+        });
+    }
 }
 
 #[async_trait]
 impl VmHost for FakeHost {
     async fn running(&self) -> Result<bool> {
+        self.record("host:running");
         let mut state = self.state.lock().unwrap();
         state.calls.push("running".into());
         if state.fail_running {
@@ -83,11 +149,13 @@ impl VmHost for FakeHost {
     }
 
     async fn snapshots(&self) -> Result<Vec<String>> {
+        self.record("host:snapshots");
         self.state.lock().unwrap().calls.push("snapshots".into());
         Ok(self.state.lock().unwrap().snapshots.clone())
     }
 
     async fn snapshot(&self, name: &str) -> Result<()> {
+        self.record(format!("host:snapshot {name}"));
         let mut state = self.state.lock().unwrap();
         state.calls.push(format!("snapshot {name}"));
         if state.fail_snapshot {
@@ -98,6 +166,7 @@ impl VmHost for FakeHost {
     }
 
     async fn revert(&self, name: &str) -> Result<()> {
+        self.record(format!("host:revert {name}"));
         let mut state = self.state.lock().unwrap();
         state.calls.push(format!("revert {name}"));
         if state.fail_revert {
@@ -108,6 +177,7 @@ impl VmHost for FakeHost {
     }
 
     async fn start(&self) -> Result<()> {
+        self.record("host:start");
         let mut state = self.state.lock().unwrap();
         state.calls.push("start".into());
         if state.fail_start {
@@ -120,10 +190,16 @@ impl VmHost for FakeHost {
     }
 
     async fn delete_snapshot(&self, name: &str) -> Result<()> {
+        self.record(format!("host:delete {name}"));
         let mut state = self.state.lock().unwrap();
         state.calls.push(format!("delete {name}"));
         if state.fail_delete {
             bail!("delete snapshot failed");
+        }
+        self.observe_delete(&mut state);
+        // A real VMware snapshot commit rewrites the VMX away from the delta.
+        if let Some((vmx, bytes)) = state.rewrite_vmx_on_delete.clone() {
+            fs::write(vmx, bytes)?;
         }
         state.snapshots.retain(|snapshot| snapshot != name);
         Ok(())
@@ -134,6 +210,8 @@ impl VmHost for FakeHost {
 struct DiskState {
     calls: Vec<String>,
     written: Vec<GuestFile>,
+    /// Guest paths converted exactly as the WSL adapter would convert them.
+    guest_paths: Vec<String>,
     inspection: Option<DiskInspection>,
     tamper: Option<Tampered>,
 }
@@ -147,6 +225,12 @@ enum Tampered {
 struct FakeDisk {
     state: Mutex<DiskState>,
     connection: PublicConnection,
+    events: Option<Events>,
+}
+
+fn guest_path(windows: &str) -> Result<String> {
+    GuestPaths::guestfish(windows)
+        .context("offline disk requests must carry absolute Windows guest paths")
 }
 
 impl FakeDisk {
@@ -164,10 +248,23 @@ impl FakeDisk {
                 ..Default::default()
             }),
             connection,
+            events: None,
         }
+    }
+    fn with_events(mut self, events: Events) -> Self {
+        self.events = Some(events);
+        self
     }
     fn calls(&self) -> Vec<String> {
         self.state.lock().unwrap().calls.clone()
+    }
+    fn guest_paths(&self) -> Vec<String> {
+        self.state.lock().unwrap().guest_paths.clone()
+    }
+    fn record(&self, event: &str) {
+        if let Some(events) = &self.events {
+            events.lock().unwrap().push(format!("disk:{event}"));
+        }
     }
     fn tamper(&self, tamper: Tampered) {
         self.state.lock().unwrap().tamper = Some(tamper);
@@ -208,29 +305,35 @@ impl OfflineDisk for FakeDisk {
     async fn inspect(
         &self,
         _disk: &Path,
-        _request: &DiskInspectionRequest,
+        request: &DiskInspectionRequest,
     ) -> Result<DiskInspection> {
-        self.state.lock().unwrap().calls.push("inspect".into());
-        Ok(self
-            .state
-            .lock()
-            .unwrap()
-            .inspection
-            .clone()
-            .expect("inspection configured"))
+        self.record("inspect");
+        let mut state = self.state.lock().unwrap();
+        state.calls.push("inspect".into());
+        for windows in [
+            &request.system_hive,
+            &request.program_data,
+            &request.provision_root,
+        ] {
+            let guest = guest_path(windows)?;
+            state.guest_paths.push(guest);
+        }
+        Ok(state.inspection.clone().expect("inspection configured"))
     }
 
     async fn write_guest_files(&self, _disk: &Path, files: &[GuestFile]) -> Result<()> {
-        self.state.lock().unwrap().calls.push("write".into());
-        self.state
-            .lock()
-            .unwrap()
-            .written
-            .extend(files.iter().map(|file| GuestFile {
-                windows_path: file.windows_path.clone(),
-                bytes: file.bytes.clone(),
-                sha256: file.sha256.clone(),
-            }));
+        self.record("write");
+        let mut state = self.state.lock().unwrap();
+        state.calls.push("write".into());
+        for file in files {
+            let guest = guest_path(&file.windows_path)?;
+            state.guest_paths.push(guest);
+        }
+        state.written.extend(files.iter().map(|file| GuestFile {
+            windows_path: file.windows_path.clone(),
+            bytes: file.bytes.clone(),
+            sha256: file.sha256.clone(),
+        }));
         Ok(())
     }
 
@@ -239,7 +342,10 @@ impl OfflineDisk for FakeDisk {
         _disk: &Path,
         patch: &HivePatch,
     ) -> Result<HivePatchEvidence> {
-        self.state.lock().unwrap().calls.push("patch".into());
+        self.record("patch");
+        let mut state = self.state.lock().unwrap();
+        state.calls.push("patch".into());
+        state.guest_paths.push(guest_path(&patch.system_hive)?);
         let image = image_path_from_script(&patch.script);
         let output = format!(
             "\"Type\"=dword:00000010\n\"Start\"=dword:00000002\n\"ErrorControl\"=dword:00000001\n\"ImagePath\"=str(2):\"{}\"\n\"ObjectName\"=\"LocalSystem\"\n",
@@ -255,9 +361,22 @@ impl OfflineDisk for FakeDisk {
     async fn observe_guest(
         &self,
         _disk: &Path,
-        _request: &GuestObservationRequest,
+        request: &GuestObservationRequest,
     ) -> Result<GuestObservation> {
-        self.state.lock().unwrap().calls.push("observe".into());
+        self.record("observe");
+        {
+            let mut state = self.state.lock().unwrap();
+            state.calls.push("observe".into());
+            for windows in [
+                &request.system_hive,
+                &request.wrapper,
+                &request.plan,
+                &request.receipt,
+            ] {
+                let guest = guest_path(windows)?;
+                state.guest_paths.push(guest);
+            }
+        }
         let written = self.written();
         let plan = plan_json(&written);
         let mut connection = self.connection.clone();
@@ -444,6 +563,32 @@ fn deployment() -> Deployment {
         host: Arc::new(FakeHost::new()),
         fixture: fixture::media(),
     }
+}
+
+/// A powered-off deployment whose VM currently sits at the configured baseline
+/// snapshot, so its boot disk is the snapshot delta. `committed` emulates the
+/// VMware snapshot commit that rewrites the VMX to the base disk.
+fn replacement_deployment(committed: bool) -> Deployment {
+    let deployment = deployment();
+    let base_vmx = deployment.vmx_initial.clone();
+    let delta = deployment
+        .directory
+        .path()
+        .join("Windows 10 x64-000001.vmdk");
+    fs::write(&delta, b"fixture delta disk").unwrap();
+    let delta_vmx = String::from_utf8(base_vmx.clone())
+        .unwrap()
+        .replace("Windows 10 x64.vmdk", "Windows 10 x64-000001.vmdk")
+        .into_bytes();
+    fs::write(&deployment.vmx, &delta_vmx).unwrap();
+    deployment.host.add_snapshot("baseline");
+    deployment.host.watch_state(&deployment.state_dir);
+    if committed {
+        deployment
+            .host
+            .rewrite_vmx_on_delete(&deployment.vmx, base_vmx);
+    }
+    deployment
 }
 
 impl Deployment {
@@ -650,6 +795,297 @@ async fn provision_refuses_snapshot_chains_but_replaces_only_the_baseline() {
             .snapshots
             .contains(&"baseline".to_string())
     );
+}
+
+#[tokio::test]
+async fn offline_disk_requests_use_canonical_windows_guest_paths() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let lab = wired(&deployment, disk.clone(), iso);
+    lab.provision(deployment.options(deployment.media_source()))
+        .await
+        .unwrap();
+    let paths = disk.guest_paths();
+    assert!(
+        paths.contains(&"/Windows/System32/config/SYSTEM".to_string()),
+        "{paths:?}"
+    );
+    assert!(paths.contains(&"/ProgramData".to_string()), "{paths:?}");
+    assert!(
+        paths.contains(&"/ProgramData/WukongLab".to_string()),
+        "{paths:?}"
+    );
+    assert!(
+        paths.iter().any(|path| path.ends_with("/provision.ps1")),
+        "{paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.ends_with("/provision-plan.json")),
+        "{paths:?}"
+    );
+    assert!(
+        paths.iter().any(|path| path.ends_with("/receipt.json")),
+        "{paths:?}"
+    );
+    // Requests carry Windows guest paths, so the adapter sees only the
+    // canonical libguestfs form after its single conversion.
+    assert!(
+        paths
+            .iter()
+            .all(|path| path.starts_with('/') && !path.contains('\\')),
+        "{paths:?}"
+    );
+}
+
+#[tokio::test]
+async fn replace_baseline_is_deleted_before_disk_validation_and_recreated() {
+    let deployment = replacement_deployment(true);
+    let delta_vmx = fs::read(&deployment.vmx).unwrap();
+    assert_ne!(
+        delta_vmx, deployment.vmx_initial,
+        "the VM starts at the delta"
+    );
+    let disk = Arc::new(
+        FakeDisk::new(deployment.fixture.connection.clone()).with_events(deployment.host.events()),
+    );
+    let iso = Arc::new(FakeIso::new());
+    let lab = wired(&deployment, disk, iso);
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    let outcome = lab.provision(options).await.unwrap();
+    assert_eq!(
+        outcome.provision.as_ref().unwrap().status,
+        RunStatus::Completed
+    );
+
+    let events = deployment.host.events();
+    let events = events.lock().unwrap();
+    let delete = events
+        .iter()
+        .position(|event| event == "host:delete baseline")
+        .unwrap_or_else(|| panic!("baseline was not deleted: {events:?}"));
+    let inspect = events
+        .iter()
+        .position(|event| event == "disk:inspect")
+        .unwrap_or_else(|| panic!("disk was not inspected: {events:?}"));
+    assert!(
+        delete < inspect,
+        "baseline deletion must precede disk resolution: {events:?}"
+    );
+    drop(events);
+
+    // The VMX backup and the persisted intent existed when the baseline was
+    // deleted, and no other snapshot was touched.
+    let observation = deployment
+        .host
+        .delete_observation()
+        .expect("snapshot deletion was observed");
+    assert_eq!(
+        observation,
+        DeleteObservation {
+            vmx_backups: 1,
+            phase: Some("provisioning".into()),
+            pending_provision: true,
+        }
+    );
+    assert_eq!(
+        deployment
+            .host
+            .calls()
+            .iter()
+            .filter(|call| *call == "snapshot baseline")
+            .count(),
+        1
+    );
+    assert!(
+        deployment
+            .host
+            .state
+            .lock()
+            .unwrap()
+            .snapshots
+            .contains(&"baseline".to_string())
+    );
+    assert_eq!(
+        fs::read(&deployment.vmx).unwrap(),
+        deployment.vmx_initial,
+        "the committed VMX is restored byte for byte"
+    );
+    let state = deployment.state();
+    assert_eq!(state.phase, LabPhase::Idle);
+    assert!(state.pending.is_none());
+    let record = state.last_provision.expect("provision record");
+    assert_eq!(record.status, RunStatus::Completed);
+    assert_eq!(record.baseline_snapshot.as_deref(), Some("baseline"));
+}
+
+#[tokio::test]
+async fn replace_baseline_refuses_extra_snapshots_without_deleting_anything() {
+    let deployment = deployment();
+    deployment.host.add_snapshot("baseline");
+    deployment.host.add_snapshot("lab-unexpected");
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let lab = wired(&deployment, disk.clone(), iso);
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    let error = lab.provision(options).await.unwrap_err();
+    let message = format!("{error:#}");
+    assert!(message.contains("snapshot"), "{message}");
+    assert!(
+        !deployment
+            .host
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("delete")),
+        "{:?}",
+        deployment.host.calls()
+    );
+    assert!(disk.calls().is_empty());
+    assert!(deployment.provision_directories().is_empty());
+    assert!(deployment.state().last_provision.is_none());
+}
+
+#[tokio::test]
+async fn failed_validation_after_baseline_deletion_requires_recovery() {
+    // The snapshot is gone but the VMX still points at the delta, so the boot
+    // disk cannot be resolved after the forced deletion.
+    let deployment = replacement_deployment(false);
+    let delta_vmx = fs::read(&deployment.vmx).unwrap();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let lab = wired(&deployment, disk.clone(), iso);
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    let error = lab.provision(options).await.unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<LabError>().unwrap().code,
+        "lab_provision_unknown"
+    );
+    assert!(
+        deployment
+            .host
+            .calls()
+            .contains(&"delete baseline".to_string())
+    );
+    assert!(!deployment.host.calls().contains(&"start".to_string()));
+    assert!(disk.calls().is_empty());
+    assert!(deployment.host.state.lock().unwrap().snapshots.is_empty());
+
+    let state = deployment.state();
+    assert_eq!(state.phase, LabPhase::RecoveryRequired);
+    let pending = state
+        .pending
+        .clone()
+        .expect("provision intent stays pending");
+    assert_eq!(pending.kind, OperationKind::Provision);
+    let spec = pending.provision.expect("provision spec");
+    assert!(spec.replaces_baseline);
+    assert!(spec.guest_disk.is_none());
+    assert_eq!(
+        state.last_provision.as_ref().unwrap().status,
+        RunStatus::Unknown
+    );
+    let message = state.last_error.clone().expect("actionable error");
+    assert!(message.contains("deleted"), "{message}");
+    assert!(
+        message.contains(&spec.vmx_backup.display().to_string()),
+        "{message}"
+    );
+
+    let directories = deployment.provision_directories();
+    assert_eq!(directories.len(), 1);
+    assert_eq!(
+        fs::read(directories[0].join("vmx.bak")).unwrap(),
+        delta_vmx,
+        "the VMX backup is retained for reconciliation"
+    );
+}
+
+#[tokio::test]
+async fn replace_baseline_without_a_snapshot_is_a_noop() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let lab = wired(&deployment, disk, iso);
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    let outcome = lab.provision(options).await.unwrap();
+    assert_eq!(outcome.provision.unwrap().status, RunStatus::Completed);
+    let calls = deployment.host.calls();
+    assert!(
+        !calls.iter().any(|call| call.starts_with("delete")),
+        "{calls:?}"
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| *call == "snapshot baseline")
+            .count(),
+        1,
+        "the pristine flow creates the baseline after provisioning"
+    );
+    assert!(
+        deployment
+            .host
+            .state
+            .lock()
+            .unwrap()
+            .snapshots
+            .contains(&"baseline".to_string())
+    );
+    assert_eq!(deployment.state().phase, LabPhase::Idle);
+    assert_eq!(fs::read(&deployment.vmx).unwrap(), deployment.vmx_initial);
+}
+
+#[tokio::test]
+async fn replace_baseline_dry_run_plans_without_deleting_or_inspecting_the_disk() {
+    let deployment = replacement_deployment(true);
+    let delta_vmx = fs::read(&deployment.vmx).unwrap();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let lab = wired(&deployment, disk.clone(), iso.clone());
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    options.dry_run = true;
+    let outcome = lab.provision(options).await.unwrap();
+    assert!(outcome.dry_run);
+    let planned = outcome.planned_actions.join("\n");
+    assert!(
+        planned.contains("delete the configured baseline snapshot 'baseline'"),
+        "{planned}"
+    );
+    assert!(planned.contains("after the baseline deletion"), "{planned}");
+    assert!(
+        planned.contains("create the baseline snapshot 'baseline'"),
+        "{planned}"
+    );
+    assert_eq!(fs::read(&deployment.vmx).unwrap(), delta_vmx);
+    assert!(
+        deployment
+            .host
+            .state
+            .lock()
+            .unwrap()
+            .snapshots
+            .contains(&"baseline".to_string())
+    );
+    assert!(
+        !deployment
+            .host
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("delete")),
+        "{:?}",
+        deployment.host.calls()
+    );
+    assert!(disk.calls().is_empty());
+    assert!(iso.state.lock().unwrap().builds.is_empty());
+    assert!(deployment.provision_directories().is_empty());
+    assert!(deployment.state().last_provision.is_none());
 }
 
 #[tokio::test]
@@ -900,7 +1336,7 @@ async fn restart_recovery_covers_provisioning_intent() {
         },
         iso: paths.iso.clone(),
         vmx_backup: paths.vmx_backup.clone(),
-        guest_disk: deployment.disk.clone(),
+        guest_disk: Some(deployment.disk.clone()),
         service_name: "WukongLabProvision-a".into(),
         guest_root: GuestPaths::for_provision(&"a".repeat(32)).unwrap().root,
         baseline_snapshot: "baseline".into(),

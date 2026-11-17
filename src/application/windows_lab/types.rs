@@ -211,7 +211,12 @@ pub struct ProvisioningSpec {
     pub iso: PathBuf,
     /// Original VMX bytes written here before the CD device edit.
     pub vmx_backup: PathBuf,
-    pub guest_disk: PathBuf,
+    /// Boot disk resolved before the offline writes. Absent only while
+    /// `--replace-baseline` has persisted the intent but not yet deleted the
+    /// configured baseline: the powered-off VM still points at the snapshot
+    /// delta, so the committed disk cannot be resolved before that deletion.
+    #[serde(default)]
+    pub guest_disk: Option<PathBuf>,
     pub service_name: String,
     pub guest_root: String,
     pub baseline_snapshot: String,

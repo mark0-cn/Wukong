@@ -13,6 +13,12 @@ fn provisioning_requires_a_snapshot_free_vm() {
         plan_snapshot(&[], "baseline", false).unwrap(),
         SnapshotPlan::Pristine
     );
+    // `--replace-baseline` without an existing snapshot is a documented no-op:
+    // the pristine flow creates the baseline after the guest receipt verifies.
+    assert_eq!(
+        plan_snapshot(&[], "baseline", true).unwrap(),
+        SnapshotPlan::Pristine
+    );
     assert_eq!(
         plan_snapshot(&snapshot_names(&["baseline"]), "baseline", true).unwrap(),
         SnapshotPlan::ReplaceBaseline
@@ -47,6 +53,156 @@ fn guest_paths_are_fixed_and_translate_to_libguestfs() {
     assert!(image.starts_with(POWERSHELL));
     assert!(image.ends_with(&format!("-File {}", paths.wrapper)));
     assert!(service_image_path(r"D:\rogue\provision.ps1").is_err());
+}
+
+/// The offline disk adapter converts exactly once, at its boundary. Requests
+/// therefore must carry absolute Windows guest paths, not libguestfs paths.
+#[test]
+fn provision_requests_carry_windows_guest_paths_that_convert_once() {
+    let paths = GuestPaths::for_provision(&"e".repeat(32)).unwrap();
+    let inspection = DiskInspectionRequest::new();
+    assert_eq!(inspection.system_hive, GUEST_SYSTEM_HIVE);
+    assert_eq!(inspection.program_data, GUEST_PROGRAM_DATA);
+    assert_eq!(inspection.provision_root, GUEST_PROVISION_BASE);
+    assert_eq!(
+        GuestPaths::guestfish(&inspection.system_hive).unwrap(),
+        "/Windows/System32/config/SYSTEM"
+    );
+    assert_eq!(
+        GuestPaths::guestfish(&inspection.program_data).unwrap(),
+        "/ProgramData"
+    );
+    assert_eq!(
+        GuestPaths::guestfish(&inspection.provision_root).unwrap(),
+        "/ProgramData/WukongLab"
+    );
+    assert_eq!(
+        GuestPaths::guestfish(GUEST_SYSTEM_CONFIG).unwrap(),
+        "/Windows/System32/config"
+    );
+
+    // Hive patch and observation requests reach the adapter exactly like the
+    // inspection request: every guest path is absolute `C:\` form.
+    let patch = HivePatch {
+        system_hive: GUEST_SYSTEM_HIVE.into(),
+        control_set: 1,
+        script: String::new(),
+        verify_script: String::new(),
+        host_backup: None,
+    };
+    assert_eq!(
+        GuestPaths::guestfish(&patch.system_hive).unwrap(),
+        "/Windows/System32/config/SYSTEM"
+    );
+    let observation = GuestObservationRequest {
+        system_hive: GUEST_SYSTEM_HIVE.into(),
+        control_set: 1,
+        service_name: paths.service.clone(),
+        wrapper: paths.wrapper.clone(),
+        plan: paths.plan.clone(),
+        receipt: paths.receipt.clone(),
+    };
+    let id = "e".repeat(32);
+    for (windows, guest) in [
+        (
+            observation.system_hive,
+            "/Windows/System32/config/SYSTEM".to_owned(),
+        ),
+        (
+            observation.wrapper,
+            format!("/ProgramData/WukongLab/provision/{id}/provision.ps1"),
+        ),
+        (
+            observation.plan,
+            format!("/ProgramData/WukongLab/provision/{id}/provision-plan.json"),
+        ),
+        (
+            observation.receipt,
+            format!("/ProgramData/WukongLab/provision/{id}/receipt.json"),
+        ),
+    ] {
+        assert_eq!(GuestPaths::guestfish(&windows).unwrap(), guest);
+        assert_eq!(GuestPaths::windows(&guest).unwrap(), windows);
+    }
+}
+
+#[test]
+fn guest_path_conversion_matrix_round_trips_and_rejects_escapes() {
+    for windows in [
+        r"C:\Windows\System32\config\SYSTEM",
+        r"C:\ProgramData\WukongLab",
+        r"C:\Program Files\Wukong Worker\setup.exe",
+    ] {
+        let guest = GuestPaths::guestfish(windows).unwrap();
+        assert!(guest.starts_with('/'));
+        assert_eq!(GuestPaths::windows(&guest).unwrap(), windows);
+    }
+    assert_eq!(
+        GuestPaths::guestfish(r"C:\Windows\System32\config\SYSTEM").unwrap(),
+        "/Windows/System32/config/SYSTEM"
+    );
+    assert_eq!(
+        GuestPaths::windows("/Windows/System32/config/SYSTEM").unwrap(),
+        r"C:\Windows\System32\config\SYSTEM"
+    );
+
+    // Relative paths, other drives and UNC paths never reach libguestfs.
+    for windows in [
+        r"Windows\System32",
+        "relative",
+        r"D:\Windows",
+        r"\\server\share\SYSTEM",
+        r"\\?\C:\Windows\SYSTEM",
+        r"C:relative\SYSTEM",
+    ] {
+        assert!(
+            GuestPaths::guestfish(windows).is_err(),
+            "guestfish accepted {windows}"
+        );
+    }
+    // The inverse conversion has the same contract: only one absolute POSIX
+    // path form is accepted, and nothing may escape the guest volume.
+    for guest in [
+        "relative",
+        "C:\\Windows",
+        r"\Windows",
+        "//server/share/SYSTEM",
+        r"/Windows\System32",
+    ] {
+        assert!(
+            GuestPaths::windows(guest).is_err(),
+            "windows accepted {guest}"
+        );
+    }
+    // Traversal, empty components and separator/stream aliases are rejected in
+    // both directions.
+    for windows in [
+        r"C:\Windows\..\..\SYSTEM",
+        r"C:\Windows\.\SYSTEM",
+        r"C:\Windows\\System32\SYSTEM",
+        r"C:\Windows/System32/SYSTEM",
+        r"C:\Windows\System32\SYSTEM:stream",
+        r"C:\",
+    ] {
+        let error = GuestPaths::guestfish(windows).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("guest path"),
+            "{windows}: {error:#}"
+        );
+    }
+    for guest in [
+        "/Windows/../SYSTEM",
+        "/Windows/./SYSTEM",
+        "/Windows//System32",
+        "/Windows/System32/",
+        "/.",
+        "/",
+    ] {
+        assert!(
+            GuestPaths::windows(guest).is_err(),
+            "windows accepted {guest}"
+        );
+    }
 }
 
 #[test]

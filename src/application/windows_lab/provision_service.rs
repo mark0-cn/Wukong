@@ -5,7 +5,7 @@
 //! removes the generated ISO/media and resolves the operation before the lab is
 //! usable again.
 use super::provision::{
-    DiskInspectionRequest, FinalizeRequest, GUEST_SYSTEM_HIVE, GuestDisk, GuestNetwork,
+    DiskInspectionRequest, FinalizeRequest, GUEST_SYSTEM_HIVE, GuestDisk, GuestFile, GuestNetwork,
     GuestObservationRequest, GuestPaths, HivePatch, IsoBuilder, MediaFinalizer, OfflineDisk,
     PROVISION_WRAPPER, ProvisionEnvironment, PublicConnection, ReceiptExpectation, SnapshotPlan,
     VmxEdit, attach_offline_iso, injected_file, plan_snapshot, provision_paths, provision_plan,
@@ -52,6 +52,29 @@ pub struct ProvisionOutcome {
     pub verification: Option<Value>,
 }
 
+/// Durable facts for one provisioning attempt that do not depend on the guest
+/// disk. They are persisted before the configured baseline is replaced, because
+/// the committed boot disk can only be resolved after that deletion.
+struct ProvisionIntent {
+    provision_id: String,
+    paths: ProvisionArtifactPaths,
+    guest: GuestPaths,
+    media: MediaIdentity,
+    source: ProvisionSource,
+    identity_file: Option<PathBuf>,
+    guest_files: Vec<GuestFile>,
+    injected: Vec<InjectedFile>,
+}
+
+/// Guest-disk facts established only once the powered-off disk is addressable.
+struct ProvisionDiskPlan {
+    guest_disk: GuestDisk,
+    control_set: u32,
+    vmx_edit: VmxEdit,
+    hive: HivePatch,
+    image_path: String,
+}
+
 struct PlannedProvision {
     provision_id: String,
     paths: ProvisionArtifactPaths,
@@ -63,13 +86,42 @@ struct PlannedProvision {
     control_set: u32,
     vmx_bytes: Vec<u8>,
     vmx_edit: VmxEdit,
-    guest_files: Vec<super::provision::GuestFile>,
+    guest_files: Vec<GuestFile>,
     hive: HivePatch,
     image_path: String,
     baseline: String,
-    snapshot_plan: SnapshotPlan,
     iso_builder: Arc<dyn IsoBuilder>,
     timeout: Duration,
+}
+
+impl PlannedProvision {
+    fn assemble(
+        intent: ProvisionIntent,
+        vmx_bytes: Vec<u8>,
+        disk: ProvisionDiskPlan,
+        baseline: String,
+        iso_builder: Arc<dyn IsoBuilder>,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            provision_id: intent.provision_id,
+            paths: intent.paths,
+            guest: intent.guest,
+            media: intent.media,
+            source: intent.source,
+            identity_file: intent.identity_file,
+            guest_disk: disk.guest_disk,
+            control_set: disk.control_set,
+            vmx_bytes,
+            vmx_edit: disk.vmx_edit,
+            guest_files: intent.guest_files,
+            hive: disk.hive,
+            image_path: disk.image_path,
+            baseline,
+            iso_builder,
+            timeout,
+        }
+    }
 }
 
 struct ProvisionEvidence {
@@ -102,6 +154,13 @@ impl WindowsLab {
             (!options.register && !options.verify_environment)
                 || self.environment_registrar.is_some(),
             "--register/--verify-environment require the controller environment registrar"
+        );
+        ensure!(
+            options
+                .iso_tool
+                .as_ref()
+                .is_none_or(|path| path.is_absolute()),
+            "--iso-tool must be an absolute path"
         );
         let registrar = self.environment_registrar.clone();
         let offline = self.offline.clone().context(
@@ -145,6 +204,13 @@ impl WindowsLab {
         );
         let snapshots = self.step(self.host.snapshots()).await.map_err(step_error)?;
         let snapshot_plan = plan_snapshot(&snapshots, &self.baseline, options.replace_baseline)?;
+        if options.replace_baseline && snapshot_plan == SnapshotPlan::Pristine {
+            tracing::info!(
+                vm = %self.vm_id,
+                baseline = %self.baseline,
+                "--replace-baseline requested but no snapshot exists; the flag is a no-op and the baseline is created after provisioning"
+            );
+        }
         let provision_id = uuid::Uuid::new_v4().simple().to_string();
         let paths = provision_paths(self.store.root(), &provision_id)?;
         let guest = GuestPaths::for_provision(&provision_id)?;
@@ -160,95 +226,80 @@ impl WindowsLab {
             Some(executable) => iso_builder.with_executable(executable)?,
             None => iso_builder,
         };
-        let plan = self
-            .plan_provision(
-                &options,
-                provision_id,
-                paths,
-                guest,
-                media,
-                source,
-                identity_file,
-                snapshot_plan,
+        let timeout = Duration::from_secs(options.timeout_seconds);
+        let replaces_baseline = snapshot_plan == SnapshotPlan::ReplaceBaseline;
+        let intent = self.prepare_provision_intent(
+            provision_id,
+            paths,
+            guest,
+            media,
+            source,
+            identity_file,
+        )?;
+        let (plan, mut record) = if replaces_baseline {
+            // The powered-off VM still boots the configured baseline snapshot's
+            // delta, so the committed boot disk cannot be resolved yet. Back up
+            // the VMX and persist the intent before deleting exactly the
+            // configured baseline, then resolve and validate the committed disk.
+            let vmx_before = self.read_vmx_bytes()?;
+            write_synced(&intent.paths.vmx_backup, &vmx_before)?;
+            let (_, mut record) =
+                self.persist_provision_intent(&mut state, &intent, None, true, None)?;
+            match self
+                .replace_baseline_snapshot(&intent, offline.as_ref())
+                .await
+            {
+                Ok((vmx_bytes, disk)) => {
+                    let plan = PlannedProvision::assemble(
+                        intent,
+                        vmx_bytes,
+                        disk,
+                        self.baseline.clone(),
+                        effective_builder,
+                        timeout,
+                    );
+                    match self.record_resolved_boot_disk(&mut state, &mut record, &plan) {
+                        Ok(()) => (plan, record),
+                        Err(error) => return self.abandon_provision(state, record, error),
+                    }
+                }
+                Err(error) => return self.abandon_provision(state, record, error),
+            }
+        } else {
+            let vmx_bytes = self.read_vmx_bytes()?;
+            let disk = self
+                .plan_guest_disk(&vmx_bytes, &intent, offline.as_ref())
+                .await?;
+            let (_, record) = self.persist_provision_intent(
+                &mut state,
+                &intent,
+                Some(&disk.guest_disk.path),
+                false,
+                Some(&vmx_bytes),
+            )?;
+            let plan = PlannedProvision::assemble(
+                intent,
+                vmx_bytes,
+                disk,
+                self.baseline.clone(),
                 effective_builder,
-                offline.clone(),
-            )
-            .await?;
+                timeout,
+            );
+            (plan, record)
+        };
         let mut actions = planned_actions(&plan);
-        if plan.snapshot_plan == SnapshotPlan::ReplaceBaseline {
-            actions.push(format!(
-                "delete the configured baseline snapshot '{}' after all validations",
-                plan.baseline
-            ));
+        if replaces_baseline {
+            actions.insert(
+                0,
+                format!(
+                    "replace the configured baseline snapshot '{}' before validating the guest disk",
+                    plan.baseline
+                ),
+            );
         }
-        fs::create_dir_all(&plan.paths.root)
-            .with_context(|| format!("create provision directory {}", plan.paths.root.display()))?;
-        fs::create_dir_all(&plan.paths.injected)?;
-        let injected = write_injected_copies(&plan)?;
-        let generation = state.generation + 1;
-        let spec = provisioning_spec(
-            &plan.provision_id,
-            generation,
-            plan.media.clone(),
-            plan.source.clone(),
-            &plan.paths,
-            &plan.guest_disk.path,
-            &plan.guest,
-            &plan.baseline,
-            plan.snapshot_plan == SnapshotPlan::ReplaceBaseline,
-            plan.identity_file.clone(),
-            injected,
-        );
-        let pending = PendingOperation {
-            operation_id: plan.provision_id.clone(),
-            kind: OperationKind::Provision,
-            generation,
-            lab_id: String::new(),
-            owner: String::new(),
-            purpose: String::new(),
-            spec_sha256: String::new(),
-            spec: None,
-            provision: Some(spec),
-            package_sha256: None,
-            install_sha256: None,
-            snapshot: plan.baseline.clone(),
-            started_at: now(),
-        };
-        let mut record = LabProvision {
-            provision_id: plan.provision_id.clone(),
-            operation_id: plan.provision_id.clone(),
-            generation,
-            status: RunStatus::Running,
-            source: plan.source.clone(),
-            media: plan.media.clone(),
-            iso_sha256: None,
-            iso_size: None,
-            vmx_sha256_before: Some(sha256(&plan.vmx_bytes)),
-            vmx_sha256_after: None,
-            hive_sha256_before: None,
-            hive_sha256_after: None,
-            identity_file: plan.identity_file.clone(),
-            guest_receipt: None,
-            connection: None,
-            environment_verified: None,
-            verification: None,
-            baseline_snapshot: None,
-            settled: false,
-            started_at: now(),
-            ended_at: None,
-            error: None,
-        };
-        state.generation = generation;
-        state.phase = LabPhase::Provisioning;
-        state.pending = Some(pending.clone());
-        state.active = None;
-        state.last_error = None;
-        state.last_provision = Some(record.clone());
-        self.store.save(&state)?;
-        let _ = self.write_provision_receipt(&record);
         let evidence = match self.execute_provision(&plan, offline).await {
             Ok(evidence) => evidence,
-            Err(error) => return self.abandon_provision(state, pending, record, error),
+            Err(error) => return self.abandon_provision(state, record, error),
         };
         record.status = RunStatus::Completed;
         record.iso_sha256 = Some(evidence.iso_sha256);
@@ -337,6 +388,241 @@ impl WindowsLab {
         })
     }
 
+    /// Collect the media-derived guest files and the durable intent fields that
+    /// do not depend on the guest disk. Nothing is mutated here.
+    fn prepare_provision_intent(
+        &self,
+        provision_id: String,
+        paths: ProvisionArtifactPaths,
+        guest: GuestPaths,
+        media: MediaIdentity,
+        source: ProvisionSource,
+        identity_file: Option<PathBuf>,
+    ) -> Result<ProvisionIntent> {
+        let plan_bytes = provision_plan(&provision_id, &media, &guest)?;
+        let guest_files = vec![
+            injected_file(&guest.wrapper, PROVISION_WRAPPER.as_bytes().to_vec()),
+            injected_file(&guest.plan, plan_bytes),
+        ];
+        let injected = injected_records(&guest_files)?;
+        Ok(ProvisionIntent {
+            provision_id,
+            paths,
+            guest,
+            media,
+            source,
+            identity_file,
+            guest_files,
+            injected,
+        })
+    }
+
+    /// Persist the provisioning intent and publish its receipt before the first
+    /// VM or guest mutation. `guest_disk` and `vmx_before` are absent only when
+    /// the intent precedes the forced baseline deletion.
+    fn persist_provision_intent(
+        &self,
+        state: &mut LabState,
+        intent: &ProvisionIntent,
+        guest_disk: Option<&Path>,
+        replaces_baseline: bool,
+        vmx_before: Option<&[u8]>,
+    ) -> Result<(PendingOperation, LabProvision)> {
+        fs::create_dir_all(&intent.paths.root).with_context(|| {
+            format!("create provision directory {}", intent.paths.root.display())
+        })?;
+        fs::create_dir_all(&intent.paths.injected)?;
+        write_injected_copies(&intent.paths, &intent.guest_files)?;
+        let generation = state.generation + 1;
+        let spec = provisioning_spec(
+            &intent.provision_id,
+            generation,
+            intent.media.clone(),
+            intent.source.clone(),
+            &intent.paths,
+            guest_disk,
+            &intent.guest,
+            &self.baseline,
+            replaces_baseline,
+            intent.identity_file.clone(),
+            intent.injected.clone(),
+        );
+        let pending = PendingOperation {
+            operation_id: intent.provision_id.clone(),
+            kind: OperationKind::Provision,
+            generation,
+            lab_id: String::new(),
+            owner: String::new(),
+            purpose: String::new(),
+            spec_sha256: String::new(),
+            spec: None,
+            provision: Some(spec),
+            package_sha256: None,
+            install_sha256: None,
+            snapshot: self.baseline.clone(),
+            started_at: now(),
+        };
+        let record = LabProvision {
+            provision_id: intent.provision_id.clone(),
+            operation_id: intent.provision_id.clone(),
+            generation,
+            status: RunStatus::Running,
+            source: intent.source.clone(),
+            media: intent.media.clone(),
+            iso_sha256: None,
+            iso_size: None,
+            vmx_sha256_before: vmx_before.map(sha256),
+            vmx_sha256_after: None,
+            hive_sha256_before: None,
+            hive_sha256_after: None,
+            identity_file: intent.identity_file.clone(),
+            guest_receipt: None,
+            connection: None,
+            environment_verified: None,
+            verification: None,
+            baseline_snapshot: None,
+            settled: false,
+            started_at: now(),
+            ended_at: None,
+            error: None,
+        };
+        state.generation = generation;
+        state.phase = LabPhase::Provisioning;
+        state.pending = Some(pending.clone());
+        state.active = None;
+        state.last_error = None;
+        state.last_provision = Some(record.clone());
+        self.store.save(state)?;
+        let _ = self.write_provision_receipt(&record);
+        Ok((pending, record))
+    }
+
+    fn read_vmx_bytes(&self) -> Result<Vec<u8>> {
+        super::provision::read_bounded(&self.vmx, 4 * 1024 * 1024)
+            .with_context(|| format!("read registered VMX {}", self.vmx.display()))
+    }
+
+    /// Resolve one full boot disk and inspect the powered-off system volume.
+    /// This is only valid once the VM no longer points at a snapshot delta.
+    async fn plan_guest_disk(
+        &self,
+        vmx_bytes: &[u8],
+        intent: &ProvisionIntent,
+        offline: &dyn OfflineDisk,
+    ) -> Result<ProvisionDiskPlan> {
+        let vmx_text =
+            std::str::from_utf8(vmx_bytes).context("registered VMX is not valid UTF-8")?;
+        let guest_disk = resolve_guest_disk(vmx_text, &self.vmx)?;
+        let inspection = offline
+            .inspect(&guest_disk.path, &DiskInspectionRequest::new())
+            .await
+            .context("offline preflight of the powered-off guest disk")?;
+        ensure!(
+            inspection.windows_volume && inspection.system_hive_present,
+            "guest disk has no inspectable Windows system volume"
+        );
+        let control_set = inspection
+            .control_set
+            .context("guest SYSTEM hive has no readable current control set")?;
+        ensure!(
+            inspection.existing_service.is_none(),
+            "guest already contains a one-shot provisioning service; inspect and clean it before provisioning"
+        );
+        ensure!(
+            inspection.provision_root_entries.is_empty(),
+            "guest already contains WukongLab provisioning state; inspect and clean it before provisioning"
+        );
+        let vmx_edit = attach_offline_iso(vmx_text, &intent.paths.iso)?;
+        let image_path = super::provision::service_image_path(&intent.guest.wrapper)?;
+        let hive = HivePatch {
+            system_hive: GUEST_SYSTEM_HIVE.into(),
+            control_set,
+            script: super::provision::hive_patch_script(
+                control_set,
+                &intent.guest.service,
+                &image_path,
+            )?,
+            verify_script: super::provision::hive_verify_script(
+                control_set,
+                &intent.guest.service,
+            )?,
+            host_backup: Some(intent.paths.root.join("SYSTEM.bak")),
+        };
+        Ok(ProvisionDiskPlan {
+            guest_disk,
+            control_set,
+            vmx_edit,
+            hive,
+            image_path,
+        })
+    }
+
+    /// Delete exactly the configured baseline snapshot on a powered-off VM and
+    /// validate the committed boot disk. The caller has already backed up the
+    /// VMX and persisted the intent; every failure here stays recoverable and
+    /// names the VMX backup.
+    async fn replace_baseline_snapshot(
+        &self,
+        intent: &ProvisionIntent,
+        offline: &dyn OfflineDisk,
+    ) -> Result<(Vec<u8>, ProvisionDiskPlan)> {
+        let backup = intent.paths.vmx_backup.display();
+        self.step(self.host.delete_snapshot(&self.baseline))
+            .await
+            .map_err(step_error)
+            .with_context(|| {
+                format!(
+                    "delete the configured baseline snapshot '{}'; the VMX backup is {backup}",
+                    self.baseline
+                )
+            })?;
+        let vmx_bytes = self.read_vmx_bytes().with_context(|| {
+            format!(
+                "re-read the VMX after deleting the configured baseline snapshot '{}'; the VMX backup is {backup}",
+                self.baseline
+            )
+        })?;
+        // Replacing the backup with the committed VMX keeps reconciliation able
+        // to restore a bootable VMX even though the snapshot delta is gone.
+        write_synced(&intent.paths.vmx_backup, &vmx_bytes).with_context(|| {
+            format!(
+                "refresh the VMX backup after deleting the configured baseline snapshot '{}'",
+                self.baseline
+            )
+        })?;
+        self.plan_guest_disk(&vmx_bytes, intent, offline)
+            .await
+            .with_context(|| {
+                format!(
+                    "the configured baseline snapshot '{}' was deleted and the VMX backup is {backup}; inspect the powered-off VM",
+                    self.baseline
+                )
+            })
+            .map(|disk| (vmx_bytes, disk))
+    }
+
+    /// Record the boot disk and VMX hash that only become known after the forced
+    /// baseline deletion. A failure here keeps the persisted intent and is
+    /// resolved through recovery.
+    fn record_resolved_boot_disk(
+        &self,
+        state: &mut LabState,
+        record: &mut LabProvision,
+        plan: &PlannedProvision,
+    ) -> Result<()> {
+        let spec = state
+            .pending
+            .as_mut()
+            .and_then(|pending| pending.provision.as_mut())
+            .context("provisioning intent was lost after the baseline deletion")?;
+        spec.guest_disk = Some(plan.guest_disk.path.clone());
+        record.vmx_sha256_before = Some(sha256(&plan.vmx_bytes));
+        state.last_provision = Some(record.clone());
+        self.store.save(state)?;
+        let _ = self.write_provision_receipt(record);
+        Ok(())
+    }
+
     async fn resolve_media(
         &self,
         options: &ProvisionOptions,
@@ -417,92 +703,6 @@ impl WindowsLab {
         }
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "planning inputs are assembled once"
-    )]
-    async fn plan_provision(
-        &self,
-        options: &ProvisionOptions,
-        provision_id: String,
-        paths: ProvisionArtifactPaths,
-        guest: GuestPaths,
-        media: MediaIdentity,
-        source: ProvisionSource,
-        identity_file: Option<PathBuf>,
-        snapshot_plan: SnapshotPlan,
-        iso_builder: Arc<dyn IsoBuilder>,
-        offline: Arc<dyn OfflineDisk>,
-    ) -> Result<PlannedProvision> {
-        let vmx_bytes = super::provision::read_bounded(&self.vmx, 4 * 1024 * 1024)
-            .with_context(|| format!("read registered VMX {}", self.vmx.display()))?;
-        let vmx_text =
-            String::from_utf8(vmx_bytes.clone()).context("registered VMX is not valid UTF-8")?;
-        let guest_disk = resolve_guest_disk(&vmx_text, &self.vmx)?;
-        let inspection = offline
-            .inspect(
-                &guest_disk.path,
-                &super::provision::DiskInspectionRequest::new(),
-            )
-            .await
-            .context("offline preflight of the powered-off guest disk")?;
-        ensure!(
-            inspection.windows_volume && inspection.system_hive_present,
-            "guest disk has no inspectable Windows system volume"
-        );
-        let control_set = inspection
-            .control_set
-            .context("guest SYSTEM hive has no readable current control set")?;
-        ensure!(
-            inspection.existing_service.is_none(),
-            "guest already contains a one-shot provisioning service; inspect and clean it before provisioning"
-        );
-        ensure!(
-            inspection.provision_root_entries.is_empty(),
-            "guest already contains WukongLab provisioning state; inspect and clean it before provisioning"
-        );
-        let vmx_edit = attach_offline_iso(&vmx_text, &paths.iso)?;
-        let plan_bytes = provision_plan(&provision_id, &media, &guest)?;
-        let guest_files = vec![
-            injected_file(&guest.wrapper, PROVISION_WRAPPER.as_bytes().to_vec()),
-            injected_file(&guest.plan, plan_bytes),
-        ];
-        let image_path = super::provision::service_image_path(&guest.wrapper)?;
-        let hive = HivePatch {
-            system_hive: GUEST_SYSTEM_HIVE.into(),
-            control_set,
-            script: super::provision::hive_patch_script(control_set, &guest.service, &image_path)?,
-            verify_script: super::provision::hive_verify_script(control_set, &guest.service)?,
-            host_backup: Some(paths.root.join("SYSTEM.bak")),
-        };
-        ensure!(
-            options
-                .iso_tool
-                .as_ref()
-                .is_none_or(|path| path.is_absolute()),
-            "--iso-tool must be an absolute path"
-        );
-        Ok(PlannedProvision {
-            provision_id,
-            paths,
-            guest,
-            media,
-            source,
-            identity_file,
-            guest_disk,
-            control_set,
-            vmx_bytes,
-            vmx_edit,
-            guest_files,
-            hive,
-            image_path,
-            baseline: self.baseline.clone(),
-            snapshot_plan,
-            iso_builder,
-            timeout: Duration::from_secs(options.timeout_seconds),
-        })
-    }
-
     /// Validate and describe the plan without mutating the VM, the guest, the
     /// controller state or (for `--template`) the finalized media directory.
     async fn dry_run_plan(
@@ -521,6 +721,9 @@ impl WindowsLab {
                 .is_none_or(|path| path.is_absolute()),
             "--iso-tool must be an absolute path"
         );
+        if snapshot_plan == SnapshotPlan::ReplaceBaseline {
+            return self.dry_run_replace_baseline(options, paths, guest).await;
+        }
         let mut actions = Vec::new();
         match &options.source {
             ProvisionSource::Media { directory } => {
@@ -537,20 +740,26 @@ impl WindowsLab {
                     Some(executable) => iso_builder.with_executable(executable)?,
                     None => iso_builder,
                 };
-                let plan = self
-                    .plan_provision(
-                        options,
-                        uuid::Uuid::new_v4().simple().to_string(),
-                        paths,
-                        guest,
-                        media,
-                        options.source.clone(),
-                        None,
-                        snapshot_plan,
-                        builder,
-                        offline,
-                    )
+                let intent = self.prepare_provision_intent(
+                    uuid::Uuid::new_v4().simple().to_string(),
+                    paths,
+                    guest,
+                    media,
+                    options.source.clone(),
+                    None,
+                )?;
+                let vmx_bytes = self.read_vmx_bytes()?;
+                let disk = self
+                    .plan_guest_disk(&vmx_bytes, &intent, offline.as_ref())
                     .await?;
+                let plan = PlannedProvision::assemble(
+                    intent,
+                    vmx_bytes,
+                    disk,
+                    self.baseline.clone(),
+                    builder,
+                    Duration::from_secs(options.timeout_seconds),
+                );
                 actions = planned_actions(&plan);
             }
             ProvisionSource::Template {
@@ -677,12 +886,148 @@ impl WindowsLab {
                 ));
             }
         }
-        if snapshot_plan == SnapshotPlan::ReplaceBaseline {
-            actions.push(format!(
-                "delete the configured baseline snapshot '{}' after all validations",
-                self.baseline
-            ));
+        Ok(ProvisionOutcome {
+            dry_run: true,
+            planned_actions: actions,
+            provision: None,
+            receipt: None,
+            environment_block: None,
+            registration: None,
+            verification: None,
+        })
+    }
+
+    /// `--dry-run` with `--replace-baseline`: the powered-off VM still points at
+    /// the baseline snapshot's delta, so the committed guest disk can only be
+    /// validated after the deletion. Report the ordering and every non-disk
+    /// action without mutating the VM, the guest or the controller state.
+    async fn dry_run_replace_baseline(
+        &self,
+        options: &ProvisionOptions,
+        paths: ProvisionArtifactPaths,
+        guest: GuestPaths,
+    ) -> Result<ProvisionOutcome> {
+        let mut actions = Vec::new();
+        match &options.source {
+            ProvisionSource::Media { directory } => {
+                ensure!(
+                    directory.is_absolute(),
+                    "offline media directory must be absolute"
+                );
+                let media = verify_media(directory)?;
+                ensure!(
+                    !options.register,
+                    "--register requires --template media so lab provision can generate the controller-managed SSH identity key"
+                );
+                actions.push(format!(
+                    "re-verify finalized media {} (setup {}, enrollment {}, manifest {})",
+                    media.media_root.display(),
+                    media.setup_sha256,
+                    media.enrollment_sha256,
+                    media.manifest_sha256
+                ));
+            }
+            ProvisionSource::Template {
+                template,
+                keys,
+                spec,
+            } => {
+                ensure!(
+                    template.is_absolute() && keys.is_absolute() && spec.is_absolute(),
+                    "template, key directory and finalize spec paths must be absolute"
+                );
+                ensure!(
+                    template.is_dir(),
+                    "offline media template directory is missing: {}",
+                    template.display()
+                );
+                ensure!(
+                    keys.is_dir(),
+                    "controller key directory is missing: {}",
+                    keys.display()
+                );
+                let finalize_spec = read_finalize_spec(spec)?;
+                let identity_file = if finalize_spec.ssh_public_key.is_none() {
+                    Some(paths.root.join("ssh").join("management_ed25519"))
+                } else {
+                    None
+                };
+                ensure!(
+                    !options.register || identity_file.is_some(),
+                    "--register requires a controller-generated SSH identity; omit ssh_public_key from the finalize spec"
+                );
+                ensure!(
+                    !paths.media.exists(),
+                    "finalize media output already exists: {}",
+                    paths.media.display()
+                );
+                actions.push(format!(
+                    "validate the finalize spec for environment {} (installation {}, generation {}, ssh_port {})",
+                    finalize_spec.environment_id,
+                    finalize_spec.installation_id,
+                    finalize_spec.generation,
+                    finalize_spec.ssh_port
+                ));
+                actions.push(format!(
+                    "run python -m scripts.worker.media finalize --template {} --keys {} --spec {} --output {}{}",
+                    template.display(),
+                    keys.display(),
+                    spec.display(),
+                    paths.media.display(),
+                    match &identity_file {
+                        Some(key) => format!(" --generate-ssh-key {}", key.display()),
+                        None => String::new(),
+                    }
+                ));
+                actions.push(
+                    "re-verify the finalized media signatures, receipt hashes and generated SSH identity"
+                        .into(),
+                );
+            }
         }
+        let vmx_bytes = self.read_vmx_bytes()?;
+        let vmx_text = String::from_utf8(vmx_bytes).context("registered VMX is not valid UTF-8")?;
+        let edit = attach_offline_iso(&vmx_text, &paths.iso)?;
+        actions.push(format!(
+            "back up VMX bytes to {}",
+            paths.vmx_backup.display()
+        ));
+        actions.push(format!(
+            "persist the provisioning intent and delete the configured baseline snapshot '{}'",
+            self.baseline
+        ));
+        actions.push(
+            "resolve and validate the guest disk and powered-off system volume after the baseline deletion"
+                .into(),
+        );
+        actions.push(format!(
+            "build ISO {} with the configured mkisofs (-V WUKONG_OFFLINE)",
+            paths.iso.display()
+        ));
+        actions.push(format!(
+            "attach {} to {} in the VMX",
+            paths.iso.display(),
+            edit.device
+        ));
+        actions.push(format!(
+            "write fixed guest files {} and {} through libguestfs",
+            guest.wrapper, guest.plan
+        ));
+        actions.push(
+            "patch the guest SYSTEM hive one-shot LocalSystem service and verify the values".into(),
+        );
+        actions.push(
+            "start the VM and wait for the guest provisioning wrapper to power it off".into(),
+        );
+        actions.push("restore the original VMX bytes and verify the guest receipt offline".into());
+        actions.push(format!(
+            "create the baseline snapshot '{}' and leave the VM powered off",
+            self.baseline
+        ));
+        actions.push(format!(
+            "publish the provisioning receipt under {}/provisions",
+            self.store.root().display()
+        ));
         Ok(ProvisionOutcome {
             dry_run: true,
             planned_actions: actions,
@@ -699,11 +1044,6 @@ impl WindowsLab {
         plan: &PlannedProvision,
         offline: Arc<dyn OfflineDisk>,
     ) -> Result<ProvisionEvidence> {
-        if plan.snapshot_plan == SnapshotPlan::ReplaceBaseline {
-            self.step(self.host.delete_snapshot(&plan.baseline))
-                .await
-                .map_err(step_error)?;
-        }
         plan.iso_builder
             .build(&plan.media.media_root, &plan.paths.iso)
             .await
@@ -877,10 +1217,13 @@ impl WindowsLab {
     fn abandon_provision<T>(
         &self,
         mut state: LabState,
-        pending: PendingOperation,
         mut record: LabProvision,
         error: anyhow::Error,
     ) -> Result<T> {
+        let pending = state
+            .pending
+            .clone()
+            .context("provisioning intent was lost before its failure was recorded")?;
         record.status = RunStatus::Unknown;
         record.error = Some(format!("{error:#}"));
         record.ended_at = Some(now());
@@ -1022,21 +1365,31 @@ fn planned_actions(plan: &PlannedProvision) -> Vec<String> {
     actions
 }
 
-fn write_injected_copies(plan: &PlannedProvision) -> Result<Vec<InjectedFile>> {
-    let mut injected = Vec::new();
-    for file in &plan.guest_files {
-        let name = Path::new(&file.windows_path)
-            .file_name()
-            .map(|value| value.to_string_lossy().into_owned())
-            .with_context(|| format!("guest file has no file name: {}", file.windows_path))?;
-        fs::write(plan.paths.injected.join(&name), &file.bytes)?;
-        injected.push(InjectedFile {
-            guest_path: file.windows_path.clone(),
-            sha256: file.sha256.clone(),
-            size: file.bytes.len() as u64,
-        });
+fn injected_name(file: &GuestFile) -> Result<String> {
+    Path::new(&file.windows_path)
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .with_context(|| format!("guest file has no file name: {}", file.windows_path))
+}
+
+fn injected_records(files: &[GuestFile]) -> Result<Vec<InjectedFile>> {
+    files
+        .iter()
+        .map(|file| {
+            Ok(InjectedFile {
+                guest_path: file.windows_path.clone(),
+                sha256: file.sha256.clone(),
+                size: file.bytes.len() as u64,
+            })
+        })
+        .collect()
+}
+
+fn write_injected_copies(paths: &ProvisionArtifactPaths, files: &[GuestFile]) -> Result<()> {
+    for file in files {
+        fs::write(paths.injected.join(injected_name(file)?), &file.bytes)?;
     }
-    Ok(injected)
+    Ok(())
 }
 
 fn remove_provision_working_files(plan: &PlannedProvision, store: &LabStore) {

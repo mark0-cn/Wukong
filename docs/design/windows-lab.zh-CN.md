@@ -76,7 +76,7 @@ CLI `lab run` 等待结果，每 15 秒续期独立租约，只释放自己的�
 - Windows 控制器；其他平台会以明确错误失败关闭。WSL 命令以该发行版的 `root` 用户运行。
 - `[windows_lab.vms.<alias>.offline]`：`wsl_executable` 与 `mkisofs` 为绝对 Windows 路径，`wsl_distribution` 指定一个已注册 WSL 发行版，`guestfish`/`hivexsh` 为该发行版内的绝对 POSIX 路径，`timeout_seconds`（60–1800）限制单条工具命令。发行版必须提供 libguestfs `guestfish`、`hivexsh`、`wslpath`、`sha256sum`、`tee` 与 coreutils，并能通过 `wslpath` 访问 VM 的 VMDK。缺少该配置段会得到可操作的错误；控制器从不假设宿主工具布局。
 - `python` 在 `PATH` 中，且使用 `--template` 时在 wukong 检出目录中执行命令，因为部署过程会自行调用 `python -m scripts.worker.media finalize`。`--media` 部署不使用 Python。
-- 已登记且关机的实验 VM，且不存在快照链。只允许存在配置的 `baseline_snapshot`，并且仅当传入 `--replace-baseline`；任何其他快照都会拒绝命令且永不被删除。启动盘必须是 VMX 目录内的完整本地 VMDK，位于 `nvme0:0`、`scsi0:0` 或 `sata0:0`；差异盘、链接盘与外部盘会被拒绝。VMX 必须启用 SATA 控制器并有空闲 CD 槽位。
+- 已登记且关机的实验 VM，且不存在快照链。只允许存在配置的 `baseline_snapshot`，并且仅当传入 `--replace-baseline`；任何其他快照都会拒绝命令且永不被删除。不存在快照时，`--replace-baseline` 是明确记录的空操作。启动盘必须是 VMX 目录内的完整本地 VMDK，位于 `nvme0:0`、`scsi0:0` 或 `sata0:0`；差异盘、链接盘与外部盘会被拒绝。VMX 必须启用 SATA 控制器并有空闲 CD 槽位。
 - 请求 `--register` 时需要 VMware Tools：控制器在写入环境前用 `vmrun getGuestIPAddress` 发现客体 IPv4。
 - finalize 规格中的 `management_peer` 必须是客体视角的控制器 IPv4 源地址。安装后的 Worker 把 SSH 精确固定到该地址（授权键 `from=`、`AllowUsers user@address`、自有防火墙规则），其他地址会导致环境 doctor 无法连通。
 - `--register` 需要一个活动配置文件：传入全局 `--config`，或在可发现 `wukong.toml` 的位置运行。
@@ -105,13 +105,13 @@ timeout_seconds = 600
 
 ### 部署顺序与基线
 
-在任何变更之前，命令校验来源介质/模板与规格、VM 电源状态、快照计划、VMX 启动盘/CD 规划，以及关机系统卷（Windows 卷、SYSTEM 注册表配置单元、当前 control set、无遗留一次性服务或部署目录）。只有通过这些校验后才会把意图持久化为 `provisioning` 阶段和待定 `provision` 操作并发布部署回执，因此之后的每次失败都可恢复而不会被重放。
+在任何变更之前，命令校验来源介质/模板与规格、VM 电源状态、快照规则以及 VMX CD 设备规划。无快照的原始 VM 还会在持久化任何内容之前预检关机系统卷（Windows 卷、SYSTEM 注册表配置单元、当前 control set、无遗留一次性服务或部署目录）。传入 `--replace-baseline` 时，关机的 VM 仍指向基线快照的差异盘，因此只有在删除该快照之后才能解析和预检客体磁盘：命令会先备份 VMX 并持久化意图，然后只删除配置的基线并校验提交后的磁盘。意图持久化之后的每次失败都可恢复而不会被重放。
 
-变更顺序固定：仅当传入 `--replace-baseline` 时删除配置的基线；用 `-V WUKONG_OFFLINE` 构建 ISO；备份原始 VMX 字节；把 ISO 挂到空闲 SATA CD 设备；把包装脚本和计划写入固定客体路径；把 `ControlSetNNN\Services\WukongLabProvision-<id>` 补丁为一次性 LocalSystem 服务并校验取值；启动 VM 并在 `--timeout` 内等待客体关机（60–7200 秒，默认 1800；单条工具命令改用 `offline.timeout_seconds`）。客体包装脚本按卷标找到 CD，重新校验 setup/enrollment/manifest 哈希与签名登记记录，运行无需提权的 `verify-enrollment`，再执行经审阅的安装，写入回执，删除自身服务，安排删除自身文件并关闭客体。控制器恢复 VMX，离线确认服务、包装脚本和计划已被删除，重新校验回执身份，创建基线快照并保持 VM 关机。
+变更顺序固定：在任何 VM 或客体变更之前备份原始 VMX 字节并持久化意图；传入 `--replace-baseline` 时，先删除配置的基线快照，随后才解析并预检提交后的客体磁盘；用 `-V WUKONG_OFFLINE` 构建 ISO；把 ISO 挂到空闲 SATA CD 设备；把包装脚本和计划写入固定客体路径；把 `ControlSetNNN\Services\WukongLabProvision-<id>` 补丁为一次性 LocalSystem 服务并校验取值；启动 VM 并在 `--timeout` 内等待客体关机（60–7200 秒，默认 1800；单条工具命令改用 `offline.timeout_seconds`）。客体包装脚本按卷标找到 CD，重新校验 setup/enrollment/manifest 哈希与签名登记记录，运行无需提权的 `verify-enrollment`，再执行经审阅的安装，写入回执，删除自身服务，安排删除自身文件并关闭客体。控制器恢复 VMX，离线确认服务、包装脚本和计划已被删除，重新校验回执身份，创建基线快照并保持 VM 关机。
 
 部署完成后 VM 在新基线上关机。之后通常依次执行 `lab prepare`（为该实验代际从基线创建快照）和 `lab run`（通过已登记的 managed-SSH Worker 运行打包测试程序），`lab restore` 返回基线。`last_provision` 处于 running 或 unknown 时 `lab prepare` 会拒绝。`--register` 只写入 `[environments.<id>]`，不会修改 `[windows_lab.vms.<alias>]`；在运行打包测试程序前，需要把该 VM 的 `environment` 设为登记的环境 id。
 
-只有当配置的基线已存在时才需要 `--replace-baseline`。基线只会在所有前置校验之后、构建 ISO 之前被删除，并且只在客体回执通过校验后才重建；其他快照永不被删除。删除后失败会留下无基线状态；先调和该操作，再重新部署（仅当基线重新存在时才再次需要 `--replace-baseline`）。
+只有当配置的基线已存在时才需要 `--replace-baseline`；不存在快照时它是明确记录的空操作（无快照流程会在客体回执通过校验后创建基线）。基线存在时，命令先备份 VMX 并持久化恢复意图，只删除该快照，然后才解析并预检提交后的客体磁盘；基线只在客体回执通过校验后才重建，其他快照永不被删除。删除后失败会留下无基线状态；操作保持 `recovery_required` 并指出 VMX 备份，因此先调和该操作，再重新部署（仅当基线重新存在时才再次需要 `--replace-baseline`）。
 
 ### 环境登记与 doctor
 
@@ -121,7 +121,7 @@ timeout_seconds = 600
 
 ### 试运行、失败与调和
 
-`--dry-run` 执行相同的只读前置校验并打印精确的宿主机/客体计划动作（重新校验介质、ISO 路径、VMX 备份与 CD 设备、固定客体文件、注册表服务补丁、启动/关机、VMX 恢复、基线创建、回执路径），但不 finalize 模板介质、不构建 ISO、不编辑 VMX、不写客体文件、不创建快照，也不发布部署状态或回执。由于计划会只读检查磁盘，VM 仍需关机且离线工具必须可用。`--iso-tool` 仅对本次命令覆盖配置的 `mkisofs` 可执行文件（必须是绝对路径，配置不变）；`--force` 只能与 `--register` 一起使用。
+`--dry-run` 执行相同的只读前置校验并打印精确的宿主机/客体计划动作（重新校验介质、ISO 路径、VMX 备份与 CD 设备、固定客体文件、注册表服务补丁、启动/关机、VMX 恢复、基线创建、回执路径），但不 finalize 模板介质、不构建 ISO、不编辑 VMX、不写客体文件、不创建快照，也不发布部署状态或回执。VM 仍需关机且离线工具必须已配置；无快照计划会只读检查磁盘。传入 `--replace-baseline` 且基线已存在时，只读计划止步于客体磁盘之前：关机的 VM 仍指向快照差异盘，因此计划会报告 VMX 备份、意图持久化和基线删除，并说明磁盘只在删除后才校验；它不会检查客体系统卷。`--iso-tool` 仅对本次命令覆盖配置的 `mkisofs` 可执行文件（必须是绝对路径，配置不变）；`--force` 只能与 `--register` 一起使用。
 
 意图持久化之前的失败不会改动 VM、客体或快照，也不会创建部署记录；模板 finalize 可能在本次部署目录下留下未发布的中间文件。持久化之后的任何失败都会把 VM 置为 `recovery_required`，保留待定 `provision` 操作并写入状态为 unknown 的 `last_provision` 记录；错误会携带操作 id 与回执（`lab_provision_unknown`）。VMX 可能仍引用生成的 ISO，客体也可能残留部分部署状态，因此操作者必须先检查 VM 并在关机后执行 `wukong lab reconcile --vm <alias> --operation <operation_id> --outcome completed|failed|unknown`。`completed` 与 `failed` 会在解决操作前恢复原始 VMX 字节并删除生成的 ISO 和最终介质；`unknown` 保持未解决。调和绝不会重跑客体安装，也不会伪造通过的回执。控制器重启后，下一条会加载状态的 lab 变更命令会把未完成的待定部署操作转为 `recovery_required`；不会自动重放任何操作。
 
