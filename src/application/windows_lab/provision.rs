@@ -1,14 +1,24 @@
 //! Offline provisioning of the registered lab VM.
 //!
 //! The worker is installed while the guest is powered off: finalized media is
-//! re-verified, a fixed local Group Policy machine-startup script is injected
-//! with a backup of the previous policy files, the guest boots once and runs the
-//! wrapper without a login, then the controller restores the VMX and reads the
-//! guest receipt through libguestfs. A Windows service cannot run PowerShell
-//! scripts (SCM requires `StartServiceCtrlDispatcher`), so the boot mechanism is
-//! the local-GPO startup script, the same layout used by the earlier manual
-//! provisioning. Host tools are fixed, bounded and addressed only from operator
-//! configuration; model input never reaches this module.
+//! re-verified, a fixed Windows Task Scheduler boot-trigger task is injected
+//! into the guest `SOFTWARE` hive and `System32\Tasks`, the guest boots once and
+//! the task runs the wrapper as `NT AUTHORITY\SYSTEM` without a login, then the
+//! controller restores the VMX and reads the guest receipt through libguestfs.
+//! The boot trigger does not depend on local Group Policy applicability: the
+//! previous local-GPO startup-script mechanism was filtered out as "empty" on
+//! every real boot (Group Policy Operational events 5312/5313) and never ran.
+//! A Windows service is equally unsuitable because SCM requires a dispatcher
+//! and kills a PowerShell service process after its start timeout (7009/7000).
+//!
+//! The task registration is a captured canonical fixture ([`BOOT_TASK_XML`] and
+//! the TaskCache values): Task Scheduler's `Hash`/`Triggers`/`Actions` registry
+//! values are its internal binary serialization and cannot be regenerated from
+//! the XML with documented APIs, so the file and registry cache are replayed
+//! byte for byte and kept mutually consistent. The retired local-GPO injection
+//! code is gone; the policy helpers below only detect and clean artifacts of
+//! earlier attempts. Host tools are fixed, bounded and addressed only from
+//! operator configuration; model input never reaches this module.
 use super::{MediaIdentity, ProvisionSource, ProvisioningSpec, SshKey};
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
@@ -34,21 +44,47 @@ pub const GUEST_PROVISION_BASE: &str = r"C:\ProgramData\WukongLab";
 pub const GUEST_PROVISION_ROOT: &str = r"C:\ProgramData\WukongLab\provision";
 pub const GUEST_SYSTEM_CONFIG: &str = r"C:\Windows\System32\config";
 pub const GUEST_SYSTEM_HIVE: &str = r"C:\Windows\System32\config\SYSTEM";
+/// Hive that holds `HKLM\SOFTWARE`, including the Task Scheduler cache.
+pub const GUEST_SOFTWARE_HIVE: &str = r"C:\Windows\System32\config\SOFTWARE";
 pub const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
-/// Local Group Policy locations. Windows runs machine startup scripts from
-/// `scripts.ini` under `Scripts\Startup` without a user login; this is the same
-/// layout the earlier hand-provisioned lab used and it replaces the broken
-/// PowerShell-as-a-service one-shot.
+/// Fixed Task Scheduler boot-task registration. The task runs
+/// `powershell.exe -File <guest launcher>` as `S-1-5-18` (SYSTEM) at boot
+/// without a login. The name and GUID are deterministic constants: only one
+/// provisioning operation may be in flight on a guest (the leftover preflight
+/// enforces this), and every artifact is unregistered before shutdown.
+pub const GUEST_TASKS_DIR: &str = r"C:\Windows\System32\Tasks";
+pub const BOOT_TASK_NAME: &str = "WukongLabProvision";
+pub const BOOT_TASK_FILE: &str = r"C:\Windows\System32\Tasks\WukongLabProvision";
+pub const BOOT_TASK_GUID: &str = "{A861DA08-B3C7-44C1-8BAC-579B48F54859}";
+pub const BOOT_TASK_SCHEMA: u32 = 65538;
+pub const BOOT_TASK_INDEX: u32 = 1;
+pub const BOOT_TASK_SDDL: &str = "D:P(A;;FA;;;BA)(A;;FA;;;SY)";
+/// TaskCache root inside the guest `SOFTWARE` hive (Windows form, no drive).
+pub const TASK_CACHE_ROOT: &str = r"\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache";
+/// Fixed per-operation boot launcher. The task action always runs this exact
+/// path; its content names the operation wrapper so leftovers stay attributable.
+pub const BOOT_LAUNCHER: &str = r"C:\ProgramData\WukongLab\provision\launch.ps1";
+pub const MAX_TASK_XML_BYTES: u64 = 16 * 1024;
+pub const MAX_LAUNCHER_BYTES: u64 = 4096;
+pub const MAX_SOFTWARE_HIVE_BYTES: u64 = 512 * 1024 * 1024;
+/// Fixed prefix/suffix of the retired local-GPO startup entry
+/// (`wukong-provision-<id>.cmd`). Cleanup uses these to recognise and remove
+/// artifacts written by the earlier local-GPO mechanism.
+pub const STARTUP_ENTRY_PREFIX: &str = "wukong-provision-";
+pub const STARTUP_ENTRY_SUFFIX: &str = ".cmd";
+/// Fixed suffix of the per-operation policy backups written beside the originals.
+pub const POLICY_BACKUP_SUFFIX: &str = ".wukong-lab-";
+/// Legacy local Group Policy locations. New provisioning never writes them;
+/// they are inspected and restored only when cleaning an earlier attempt.
 pub const GUEST_GPO_ROOT: &str = r"C:\Windows\System32\GroupPolicy";
 pub const GUEST_SCRIPTS_DIR: &str = r"C:\Windows\System32\GroupPolicy\Machine\Scripts";
 pub const GUEST_SCRIPTS_INI: &str = r"C:\Windows\System32\GroupPolicy\Machine\Scripts\scripts.ini";
 pub const GUEST_STARTUP_DIR: &str = r"C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup";
 pub const GUEST_GPT_INI: &str = r"C:\Windows\System32\GroupPolicy\gpt.ini";
-/// Fixed prefix/suffix of the injected startup entry (`wukong-provision-<id>.cmd`).
-pub const STARTUP_ENTRY_PREFIX: &str = "wukong-provision-";
-pub const STARTUP_ENTRY_SUFFIX: &str = ".cmd";
-/// Fixed suffix of the per-operation policy backups written beside the originals.
-pub const POLICY_BACKUP_SUFFIX: &str = ".wukong-lab-";
+/// Exact bytes the retired CLI wrote when the guest had no `gpt.ini`. The file
+/// has no per-operation backup in that case, so cleanup deletes it only when the
+/// current bytes are exactly this document (nothing else can be preserved).
+pub const LEGACY_CREATED_GPT_INI: &[u8] = b"[General]\r\nVersion=1\r\n";
 pub const MAX_MEDIA_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const MAX_RECEIPT_BYTES: u64 = 1024 * 1024;
 pub const MAX_INSTALLER_OUTPUT: usize = 64 * 1024;
@@ -58,6 +94,410 @@ const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const UTF16_LE_BOM: [u8; 2] = [0xff, 0xfe];
 const UTF8_BOM: [u8; 3] = [0xef, 0xbb, 0xbf];
 
+/// Canonical task file bytes captured from a real Task Scheduler registration.
+pub const BOOT_TASK_XML: &[u8] = include_bytes!("provision/fixtures/boot_task.xml");
+pub const BOOT_TASK_TREE_SD: &[u8] = include_bytes!("provision/fixtures/task_tree_sd.bin");
+pub const BOOT_TASK_HASH: &[u8] = include_bytes!("provision/fixtures/task_hash.bin");
+pub const BOOT_TASK_TRIGGERS: &[u8] = include_bytes!("provision/fixtures/task_triggers.bin");
+pub const BOOT_TASK_ACTIONS: &[u8] = include_bytes!("provision/fixtures/task_actions.bin");
+pub const BOOT_TASK_DYNAMIC_INFO: &[u8] = include_bytes!("provision/fixtures/task_dynamicinfo.bin");
+/// Pinned SHA-256 of each canonical fixture. A changed fixture is a new boot
+/// mechanism and must be re-captured from a real registration, not edited.
+pub const BOOT_TASK_XML_SHA256: &str =
+    "2ed727452daccccccb5d22bd0d7738bc1278c951fee20bbcc2489ddec5466dcc";
+pub const BOOT_TASK_TREE_SD_SHA256: &str =
+    "6a17264456e063bb45618a0366e49078d9cdf01112b0172d18a9bf771c7d5041";
+pub const BOOT_TASK_HASH_SHA256: &str =
+    "94282a40104050f806292198e7b36c30364411272f3863e13a655d3336301cc7";
+pub const BOOT_TASK_TRIGGERS_SHA256: &str =
+    "437b7273854af8656d35e191b94b96f17683d5a28a49574779a94186eb23d803";
+pub const BOOT_TASK_ACTIONS_SHA256: &str =
+    "217e6fc505fb2e36e3509d9e8e25098d1821daa195975308ec43d3f6a7092da1";
+pub const BOOT_TASK_DYNAMIC_INFO_SHA256: &str =
+    "20ae9a8448cb16e50d60025fe373d5b50f2887e620b61f2575cea8b8225fa32e";
+
+/// One Task Scheduler `TaskCache` registry value in its hive encoding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TaskCacheValue {
+    String(String),
+    Dword(u32),
+    /// `REG_BINARY`; length is bounded by the canonical fixture.
+    Binary(Vec<u8>),
+}
+
+/// Fixed TaskCache registry edit that registers [`BOOT_TASK_FILE`] with the
+/// Windows Task Scheduler at boot. `write_script`/`remove_script` are `hivexsh`
+/// scripts; the adapter applies them to a downloaded copy of the guest
+/// `SOFTWARE` hive and verifies the values before uploading it back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootTaskRegistry {
+    pub hive: String,
+    pub key: String,
+    pub tree_name: String,
+    pub guid: String,
+    pub index: u32,
+    pub values: Vec<(String, TaskCacheValue)>,
+}
+
+impl BootTaskRegistry {
+    fn canonical() -> Self {
+        Self {
+            hive: GUEST_SOFTWARE_HIVE.into(),
+            key: TASK_CACHE_ROOT.into(),
+            tree_name: BOOT_TASK_NAME.into(),
+            guid: BOOT_TASK_GUID.into(),
+            index: BOOT_TASK_INDEX,
+            values: vec![
+                (
+                    "Path".into(),
+                    TaskCacheValue::String(format!(r"\{BOOT_TASK_NAME}")),
+                ),
+                (
+                    "Hash".into(),
+                    TaskCacheValue::Binary(BOOT_TASK_HASH.to_vec()),
+                ),
+                ("Schema".into(), TaskCacheValue::Dword(BOOT_TASK_SCHEMA)),
+                (
+                    "SecurityDescriptor".into(),
+                    TaskCacheValue::String(BOOT_TASK_SDDL.into()),
+                ),
+                (
+                    "URI".into(),
+                    TaskCacheValue::String(format!(r"\{BOOT_TASK_NAME}")),
+                ),
+                (
+                    "Triggers".into(),
+                    TaskCacheValue::Binary(BOOT_TASK_TRIGGERS.to_vec()),
+                ),
+                (
+                    "Actions".into(),
+                    TaskCacheValue::Binary(BOOT_TASK_ACTIONS.to_vec()),
+                ),
+                (
+                    "DynamicInfo".into(),
+                    TaskCacheValue::Binary(BOOT_TASK_DYNAMIC_INFO.to_vec()),
+                ),
+            ],
+        }
+    }
+
+    /// TaskCache key paths as `hivexsh` addresses them (Windows form).
+    pub fn tree_path(&self) -> String {
+        format!(r"{}\Tree\{}", self.key, self.tree_name)
+    }
+
+    pub fn tasks_parent(&self) -> String {
+        format!(r"{}\Tasks", self.key)
+    }
+
+    pub fn tasks_path(&self) -> String {
+        format!(r"{}\Tasks\{}", self.key, self.guid)
+    }
+
+    pub fn boot_parent(&self) -> String {
+        format!(r"{}\Boot", self.key)
+    }
+
+    pub fn boot_path(&self) -> String {
+        format!(r"{}\Boot\{}", self.key, self.guid)
+    }
+
+    /// `hivexsh -w` script that creates the Tree/Tasks/Boot keys exactly as the
+    /// reference registration. The caller has verified these keys are absent.
+    pub fn write_script(&self) -> String {
+        let mut script = String::new();
+        script.push_str(&format!("cd {}\n", self.key));
+        script.push_str("cd Tree\n");
+        script.push_str(&format!("add {}\n", self.tree_name));
+        script.push_str(&format!("cd {}\n", self.tree_name));
+        script.push_str("setval 3\n");
+        script.push_str("Id\n");
+        script.push_str(&format!("string:{}\n", self.guid));
+        script.push_str("Index\n");
+        script.push_str(&format!("dword:0x{:x}\n", self.index));
+        script.push_str("SD\n");
+        script.push_str(&hex_literal(BOOT_TASK_TREE_SD));
+        script.push_str(&format!("cd {}\n", self.key));
+        script.push_str("cd Tasks\n");
+        script.push_str(&format!("add {}\n", self.guid));
+        script.push_str(&format!("cd {}\n", self.guid));
+        script.push_str(&format!("setval {}\n", self.values.len()));
+        for (name, value) in &self.values {
+            script.push_str(name);
+            script.push('\n');
+            script.push_str(&task_cache_literal(value));
+            script.push('\n');
+        }
+        script.push_str(&format!("cd {}\n", self.key));
+        script.push_str("cd Boot\n");
+        script.push_str(&format!("add {}\n", self.guid));
+        script.push_str("commit\n");
+        script
+    }
+
+    /// Read-only `hivexsh` script that prints the injected Tree and Tasks values
+    /// for [`verify_boot_task_values`].
+    pub fn verify_script(&self) -> String {
+        format!(
+            "cd {}\nlsval\ncd {}\nlsval\nquit\n",
+            self.tree_path(),
+            self.tasks_path()
+        )
+    }
+
+    /// Delete script for the nodes that are still present. The caller decides
+    /// presence from the parent listings and only names existing nodes because
+    /// `hivexsh` continues after a failed `cd`.
+    pub fn remove_script(&self, tree: bool, tasks: bool, boot: bool) -> Option<String> {
+        if !tree && !tasks && !boot {
+            return None;
+        }
+        let mut script = String::new();
+        if tree {
+            script.push_str(&format!("cd {}\ndel\n", self.tree_path()));
+        }
+        if tasks {
+            script.push_str(&format!("cd {}\ndel\n", self.tasks_path()));
+        }
+        if boot {
+            script.push_str(&format!("cd {}\ndel\n", self.boot_path()));
+        }
+        script.push_str("commit\n");
+        Some(script)
+    }
+
+    pub fn expected_tree_values(&self) -> Vec<(String, TaskCacheValue)> {
+        vec![
+            ("Id".into(), TaskCacheValue::String(self.guid.clone())),
+            ("Index".into(), TaskCacheValue::Dword(self.index)),
+            (
+                "SD".into(),
+                TaskCacheValue::Binary(BOOT_TASK_TREE_SD.to_vec()),
+            ),
+        ]
+    }
+}
+
+fn hex_literal(bytes: &[u8]) -> String {
+    let mut text = String::with_capacity(bytes.len() * 3 + 8);
+    text.push_str("hex:3:");
+    for (index, byte) in bytes.iter().enumerate() {
+        if index > 0 {
+            text.push(',');
+        }
+        text.push_str(&format!("{byte:02x}"));
+    }
+    text.push('\n');
+    text
+}
+
+fn task_cache_literal(value: &TaskCacheValue) -> String {
+    match value {
+        TaskCacheValue::String(text) => format!("string:{text}"),
+        TaskCacheValue::Dword(number) => format!("dword:0x{number:08x}"),
+        TaskCacheValue::Binary(bytes) => hex_literal(bytes).trim_end_matches('\n').to_owned(),
+    }
+}
+
+/// Parse the `hivexsh` `lsval` output into `(name, value)` pairs. Strings are
+/// returned with their `hivexsh` backslash escaping removed; malformed input is
+/// an error so verification can never pass on a partial listing.
+pub fn parse_task_cache_values(text: &str) -> Result<Vec<(String, TaskCacheValue)>> {
+    let mut values = Vec::new();
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let (name, raw) = line
+            .split_once('=')
+            .with_context(|| format!("unexpected hivexsh value line: {line}"))?;
+        let name = name
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .with_context(|| format!("unexpected hivexsh value name: {line}"))?;
+        let value = if let Some(raw) = raw.strip_prefix("hex(3):") {
+            TaskCacheValue::Binary(parse_hex_bytes(raw)?)
+        } else if let Some(raw) = raw.strip_prefix("dword:") {
+            TaskCacheValue::Dword(
+                u32::from_str_radix(raw, 16)
+                    .with_context(|| format!("unexpected hivexsh dword: {line}"))?,
+            )
+        } else if let Some(raw) = raw
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+        {
+            TaskCacheValue::String(raw.replace(r"\\", r"\"))
+        } else {
+            bail!("unexpected hivexsh value encoding: {line}");
+        };
+        values.push((name.to_owned(), value));
+    }
+    Ok(values)
+}
+
+fn parse_hex_bytes(text: &str) -> Result<Vec<u8>> {
+    text.split(',')
+        .filter(|part| !part.is_empty())
+        .map(|part| u8::from_str_radix(part, 16).with_context(|| "invalid hive hex byte"))
+        .collect()
+}
+
+/// Verify the canonical Tree and Tasks values against the parsed `hivexsh`
+/// listing. Every expected value must be present exactly; unexpected values are
+/// rejected because the fixed registration has a closed value set.
+pub fn verify_boot_task_values(text: &str) -> Result<()> {
+    let registry = BootTaskRegistry::canonical();
+    let actual = parse_task_cache_values(text)?;
+    let expected = registry
+        .expected_tree_values()
+        .into_iter()
+        .chain(registry.values.iter().cloned())
+        .collect::<Vec<_>>();
+    let mut actual = actual;
+    actual.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut expected = expected;
+    expected.sort_by(|left, right| left.0.cmp(&right.0));
+    ensure!(
+        actual == expected,
+        "injected TaskCache values differ from the canonical boot task reference"
+    );
+    Ok(())
+}
+
+/// Pin the canonical fixture contents. Any mismatch is a data error: the task
+/// file, its internal Task Scheduler serialization and the security descriptor
+/// must stay mutually consistent or Windows can no longer load the task.
+pub fn validate_boot_task_fixture() -> Result<()> {
+    ensure!(
+        BOOT_TASK_XML.len() as u64 <= MAX_TASK_XML_BYTES,
+        "canonical boot task file exceeds the task size bound"
+    );
+    ensure!(
+        sha256(BOOT_TASK_XML) == BOOT_TASK_XML_SHA256
+            && sha256(BOOT_TASK_TREE_SD) == BOOT_TASK_TREE_SD_SHA256
+            && sha256(BOOT_TASK_HASH) == BOOT_TASK_HASH_SHA256
+            && sha256(BOOT_TASK_TRIGGERS) == BOOT_TASK_TRIGGERS_SHA256
+            && sha256(BOOT_TASK_ACTIONS) == BOOT_TASK_ACTIONS_SHA256
+            && sha256(BOOT_TASK_DYNAMIC_INFO) == BOOT_TASK_DYNAMIC_INFO_SHA256,
+        "canonical boot task fixtures do not match their pinned digests"
+    );
+    ensure!(
+        BOOT_TASK_XML.starts_with(&UTF16_LE_BOM),
+        "canonical boot task file is not UTF-16LE with a BOM"
+    );
+    let body = &BOOT_TASK_XML[UTF16_LE_BOM.len()..];
+    ensure!(
+        body.len().is_multiple_of(2),
+        "canonical boot task file has odd length"
+    );
+    let units = body
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    let text = String::from_utf16(&units).context("canonical boot task file is not UTF-16LE")?;
+    for needle in [
+        r#"<Task version="1.2""#,
+        "<BootTrigger>",
+        "<UserId>S-1-5-18</UserId>",
+        "<LogonType>InteractiveToken</LogonType>",
+        "<Delay>PT1M</Delay>",
+        "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+        BOOT_TASK_NAME,
+        BOOT_LAUNCHER,
+    ] {
+        ensure!(
+            text.contains(needle),
+            "canonical boot task file lost required content: {needle}"
+        );
+    }
+    ensure!(
+        BOOT_TASK_TREE_SD.len() <= 4096
+            && BOOT_TASK_HASH.len() == 32
+            && BOOT_TASK_TRIGGERS.len() == 288
+            && BOOT_TASK_ACTIONS.len() == 400
+            && BOOT_TASK_DYNAMIC_INFO.len() == 36,
+        "canonical boot task registry values have unexpected sizes"
+    );
+    Ok(())
+}
+
+/// Fixed artifacts injected for the scheduled-task boot trigger. All fields are
+/// constants: the registration carries no per-operation identity, so a
+/// byte-identical canonical replay is possible.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootTaskInjection {
+    pub file: GuestFile,
+    pub registry: BootTaskRegistry,
+}
+
+pub fn boot_task_injection() -> Result<BootTaskInjection> {
+    validate_boot_task_fixture()?;
+    Ok(BootTaskInjection {
+        file: injected_file(BOOT_TASK_FILE, BOOT_TASK_XML.to_vec()),
+        registry: BootTaskRegistry::canonical(),
+    })
+}
+
+/// The fixed TaskCache registration data, shared with the offline adapter.
+pub fn boot_task_registry() -> BootTaskRegistry {
+    BootTaskRegistry::canonical()
+}
+
+/// Presence of the three TaskCache keys of the fixed boot task. They are written
+/// and deleted together, so any partial state is a leftover that must be
+/// refused (provisioning) or removed (cleanup).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BootTaskCacheState {
+    pub tree: bool,
+    pub tasks: bool,
+    pub boot: bool,
+}
+
+impl BootTaskCacheState {
+    pub fn is_registered(self) -> bool {
+        self.tree || self.tasks || self.boot
+    }
+
+    pub fn is_complete(self) -> bool {
+        self.tree && self.tasks && self.boot
+    }
+}
+
+/// Classify the fixed task from the parent-key listings returned by the adapter.
+/// Names are compared case-insensitively like the registry itself.
+pub fn boot_task_cache_state(
+    tree_names: &[String],
+    task_ids: &[String],
+    boot_ids: &[String],
+) -> BootTaskCacheState {
+    let has = |names: &[String], wanted: &str| {
+        names
+            .iter()
+            .any(|name| name.trim().eq_ignore_ascii_case(wanted))
+    };
+    BootTaskCacheState {
+        tree: has(tree_names, BOOT_TASK_NAME),
+        tasks: has(task_ids, BOOT_TASK_GUID),
+        boot: has(boot_ids, BOOT_TASK_GUID),
+    }
+}
+
+/// Extract the operation identity from a per-operation boot launcher: the file
+/// always names `...\provision\<32 lowercase hex>\provision.ps1`.
+pub fn launcher_operation_id(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let marker = r"\provision\";
+    let start = text.find(marker)? + marker.len();
+    let candidate = &text[start..];
+    let id = &candidate[..32.min(candidate.len())];
+    if id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        Some(id.to_owned())
+    } else {
+        None
+    }
+}
+
 /// Fixed guest paths written before boot and inspected afterwards.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GuestPaths {
@@ -66,9 +506,17 @@ pub struct GuestPaths {
     pub wrapper: String,
     pub plan: String,
     pub receipt: String,
-    /// Command line injected under `[Startup]` in the machine `scripts.ini`.
+    /// Fixed boot launcher that the scheduled task action runs. Its content names
+    /// this operation's wrapper so a leftover stays attributable.
+    pub launcher: String,
+    /// Fixed scheduled-task XML file and its deterministic TaskCache identity.
+    pub task_file: String,
+    pub task_guid: String,
+    /// Legacy local-GPO startup entry of an earlier attempt
+    /// (`wukong-provision-<id>.cmd`). Provisioning no longer writes it; cleanup
+    /// uses it to remove artifacts of the retired mechanism.
     pub startup_entry: String,
-    /// Fixed launcher run by the local Group Policy machine startup script.
+    /// Legacy command line injected under `[Startup]` in `scripts.ini`.
     pub startup_script: String,
     pub scripts_ini: String,
     /// Per-operation backup of the previous `scripts.ini` bytes.
@@ -97,6 +545,9 @@ impl GuestPaths {
             wrapper: format!(r"{root}\provision.ps1"),
             plan: format!(r"{root}\provision-plan.json"),
             receipt: format!(r"{root}\receipt.json"),
+            launcher: BOOT_LAUNCHER.into(),
+            task_file: BOOT_TASK_FILE.into(),
+            task_guid: BOOT_TASK_GUID.into(),
             startup_script: format!(r"{GUEST_STARTUP_DIR}\{startup_entry}"),
             startup_entry,
             scripts_ini: GUEST_SCRIPTS_INI.into(),
@@ -197,6 +648,8 @@ pub struct GuestFile {
 pub struct DiskInspection {
     pub windows_volume: bool,
     pub system_hive_present: bool,
+    /// The `SOFTWARE` hive that holds the Task Scheduler cache.
+    pub software_hive_present: bool,
     pub program_data_present: bool,
     /// Current control set from the hive `Select` key.
     pub control_set: Option<u32>,
@@ -204,7 +657,14 @@ pub struct DiskInspection {
     pub existing_service: Option<String>,
     /// Entries left below the fixed provision root directory.
     pub provision_root_entries: Vec<String>,
-    /// Existing local Group Policy files and injected startup artifacts.
+    /// Fixed scheduled-task file from a previous or current injection.
+    pub task_file_present: bool,
+    /// Presence of the three fixed TaskCache keys.
+    pub boot_task: BootTaskCacheState,
+    /// Bytes of the fixed boot launcher, when present. Its content identifies the
+    /// operation that wrote it.
+    pub launcher: Option<Vec<u8>>,
+    /// Existing retired local Group Policy files and injected startup artifacts.
     pub policy: GuestPolicyFiles,
 }
 
@@ -216,6 +676,9 @@ impl DiskInspection {
         if let Some(service) = &self.existing_service
             && let Some(id) = marker_id(service, "WukongLabProvision-", "")
         {
+            ids.push(id);
+        }
+        if let Some(id) = self.launcher.as_deref().and_then(launcher_operation_id) {
             ids.push(id);
         }
         for entry in &self.provision_root_entries {
@@ -230,6 +693,12 @@ impl DiskInspection {
         ids.sort();
         ids.dedup();
         ids
+    }
+
+    /// Any artifact of the new scheduled-task mechanism is a leftover that
+    /// blocks provisioning until an explicit cleanup resolves it.
+    pub fn has_boot_task_leftovers(&self) -> bool {
+        self.task_file_present || self.boot_task.is_registered() || self.launcher.is_some()
     }
 }
 
@@ -313,9 +782,16 @@ fn backup_marker_id(name: &str, file: &str, suffix: &str) -> Option<String> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiskInspectionRequest {
     pub system_hive: String,
+    pub software_hive: String,
     pub program_data: String,
     pub provision_root: String,
+    pub launcher: String,
     pub service_prefix: String,
+    pub tasks_dir: String,
+    pub task_file: String,
+    pub task_cache_root: String,
+    pub task_name: String,
+    pub task_guid: String,
     pub gpo_root: String,
     pub scripts_dir: String,
     pub startup_dir: String,
@@ -331,9 +807,16 @@ impl DiskInspectionRequest {
     pub fn for_provision(paths: &GuestPaths) -> Self {
         Self {
             system_hive: GUEST_SYSTEM_HIVE.into(),
+            software_hive: GUEST_SOFTWARE_HIVE.into(),
             program_data: GUEST_PROGRAM_DATA.into(),
             provision_root: GUEST_PROVISION_ROOT.into(),
+            launcher: paths.launcher.clone(),
             service_prefix: "WukongLabProvision".into(),
+            tasks_dir: GUEST_TASKS_DIR.into(),
+            task_file: paths.task_file.clone(),
+            task_cache_root: TASK_CACHE_ROOT.into(),
+            task_name: BOOT_TASK_NAME.into(),
+            task_guid: paths.task_guid.clone(),
             gpo_root: GUEST_GPO_ROOT.into(),
             scripts_dir: GUEST_SCRIPTS_DIR.into(),
             startup_dir: GUEST_STARTUP_DIR.into(),
@@ -396,14 +879,21 @@ pub struct GuestRemovalEvidence {
     pub absent: Vec<String>,
 }
 
-/// Fixed guest artifacts read back after the one-shot startup script ran. Every
-/// path field is an absolute Windows guest path; adapters translate them once.
+/// Fixed guest artifacts read back after the one-shot boot task ran. Every path
+/// field is an absolute Windows guest path; adapters translate them once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GuestObservationRequest {
     pub wrapper: String,
     pub plan: String,
     pub receipt: String,
-    pub startup_script: String,
+    pub launcher: String,
+    pub task_file: String,
+    pub software_hive: String,
+    pub task_cache_root: String,
+    pub task_name: String,
+    pub task_guid: String,
+    /// Legacy local-GPO paths of the retired mechanism. They must stay absent on
+    /// a guest provisioned by the scheduled-task mechanism.
     pub startup_entry: String,
     pub scripts_ini: String,
     pub scripts_ini_backup: String,
@@ -416,7 +906,12 @@ impl GuestObservationRequest {
             wrapper: paths.wrapper.clone(),
             plan: paths.plan.clone(),
             receipt: paths.receipt.clone(),
-            startup_script: paths.startup_script.clone(),
+            launcher: paths.launcher.clone(),
+            task_file: paths.task_file.clone(),
+            software_hive: GUEST_SOFTWARE_HIVE.into(),
+            task_cache_root: TASK_CACHE_ROOT.into(),
+            task_name: BOOT_TASK_NAME.into(),
+            task_guid: paths.task_guid.clone(),
             startup_entry: paths.startup_entry.clone(),
             scripts_ini: paths.scripts_ini.clone(),
             scripts_ini_backup: paths.scripts_ini_backup.clone(),
@@ -430,10 +925,14 @@ pub struct GuestObservation {
     pub receipt: Option<Vec<u8>>,
     pub wrapper_present: bool,
     pub plan_present: bool,
-    /// The local-GPO startup launcher must be gone after the wrapper runs.
-    pub startup_script_present: bool,
+    /// The fixed scheduled-task XML file must be gone after the wrapper runs.
+    pub task_file_present: bool,
+    /// Any of the three fixed TaskCache keys is still registered.
+    pub boot_task_registered: bool,
+    /// The fixed boot launcher must be gone after the wrapper runs.
+    pub launcher_present: bool,
     pub scripts_ini_present: bool,
-    /// The injected `[Startup]` command line is still present in `scripts.ini`.
+    /// The retired local-GPO `[Startup]` command line is still present.
     pub startup_entry_present: bool,
     pub scripts_ini_backup_present: bool,
     pub gpt_ini_backup_present: bool,
@@ -447,6 +946,19 @@ pub trait OfflineDisk: Send + Sync {
     async fn inspect(&self, disk: &Path, request: &DiskInspectionRequest)
     -> Result<DiskInspection>;
     async fn write_guest_files(&self, disk: &Path, files: &[GuestFile]) -> Result<()>;
+    /// Register the fixed boot-trigger scheduled task by editing the guest
+    /// `SOFTWARE` hive. Must fail if any fixed TaskCache key already exists.
+    async fn inject_boot_task(
+        &self,
+        disk: &Path,
+        injection: &BootTaskInjection,
+    ) -> Result<BootTaskEvidence>;
+    /// Unregister the fixed boot task if any of its keys exist. Idempotent.
+    async fn remove_boot_task(
+        &self,
+        disk: &Path,
+        removal: &BootTaskRemoval,
+    ) -> Result<BootTaskRemovalEvidence>;
     /// Delete the fixed legacy one-shot service key if it is present.
     async fn remove_service_key(
         &self,
@@ -464,6 +976,30 @@ pub trait OfflineDisk: Send + Sync {
         disk: &Path,
         request: &GuestObservationRequest,
     ) -> Result<GuestObservation>;
+}
+
+/// Hive edit that registers the fixed scheduled task in a powered-off guest.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootTaskEvidence {
+    /// SHA-256 of the guest `SOFTWARE` hive before and after the edit.
+    pub hive_sha256_before: String,
+    pub hive_sha256_after: String,
+}
+
+/// Removal request for the fixed scheduled task; names the hive and the fixed
+/// keys so an adapter never guesses at other tasks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootTaskRemoval {
+    pub software_hive: String,
+    pub registry: BootTaskRegistry,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BootTaskRemovalEvidence {
+    /// Any fixed TaskCache key existed before the cleanup.
+    pub present: bool,
+    /// The fixed TaskCache keys are gone afterwards.
+    pub removed: bool,
 }
 
 /// Builds the `WUKONG_OFFLINE` ISO image from finalized media.
@@ -1127,8 +1663,8 @@ fn section_bounds(lines: &[String], section: &str) -> Option<(usize, usize)> {
         if trimmed.len() < 2 || !trimmed.starts_with('[') || !trimmed.ends_with(']') {
             continue;
         }
-        if let Some(header) = start {
-            return Some((header, index));
+        if start.is_some() {
+            return start.map(|header| (header, index));
         }
         if trimmed[1..trimmed.len() - 1]
             .trim()
@@ -1182,70 +1718,12 @@ fn validate_startup_entry(entry: &str) -> Result<()> {
     Ok(())
 }
 
-fn next_script_index(lines: &[String]) -> u32 {
-    lines
-        .iter()
-        .filter_map(|line| {
-            let (key, _) = line.split_once('=')?;
-            let key = key.trim();
-            let index = key
-                .strip_suffix("CmdLine")
-                .or_else(|| key.strip_suffix("Parameters"))?;
-            index.parse::<u32>().ok()
-        })
-        .max()
-        .map_or(0, |value| value.saturating_add(1))
-}
-
-/// Inject one `[Startup]` entry while preserving every existing section. The
-/// previous bytes are backed up by the caller before this rewritten document is
-/// published, and the wrapper restores that backup after it runs.
-pub fn inject_startup_script(original: Option<&[u8]>, entry: &str) -> Result<Vec<u8>> {
-    validate_startup_entry(entry)?;
-    let (encoding, text) = match original {
-        Some(bytes) => decode_policy_document(bytes, "guest scripts.ini")?,
-        None => (PolicyEncoding::Utf8, String::new()),
-    };
-    let newline = if text.is_empty() {
-        "\r\n"
-    } else {
-        policy_newline(&text)
-    };
-    let mut lines = policy_lines(&text);
-    ensure!(
-        startup_entries_from_lines(&lines)
-            .iter()
-            .all(|line| !line.starts_with(STARTUP_ENTRY_PREFIX)),
-        "guest scripts.ini already contains a provisioning startup entry"
-    );
-    match section_bounds(&lines, "Startup") {
-        Some((header, end)) => {
-            let next = next_script_index(&lines[header + 1..end]);
-            let mut insert = end;
-            while insert > header + 1 && lines[insert - 1].trim().is_empty() {
-                insert -= 1;
-            }
-            lines.insert(insert, format!("{next}Parameters="));
-            lines.insert(insert, format!("{next}CmdLine={entry}"));
-        }
-        None => {
-            if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
-                lines.push(String::new());
-            }
-            lines.push("[Startup]".into());
-            lines.push(format!("0CmdLine={entry}"));
-            lines.push("0Parameters=".into());
-        }
-    }
-    Ok(encode_policy_document(
-        encoding,
-        &render_policy(&lines, newline),
-    ))
-}
-
 /// Remove this operation's `[Startup]` entry (and its parameters line) while
 /// preserving unrelated sections. `None` means the document became empty and the
 /// injected `scripts.ini` itself should be deleted.
+///
+/// Only the retired local-GPO mechanism used this fallback; the per-operation
+/// backup restore is preferred because it is byte exact.
 pub fn remove_startup_script(original: &[u8], entry: &str) -> Result<Option<Vec<u8>>> {
     validate_startup_entry(entry)?;
     let (encoding, text) = decode_policy_document(original, "guest scripts.ini")?;
@@ -1300,128 +1778,26 @@ pub fn remove_startup_script(original: &[u8], entry: &str) -> Result<Option<Vec<
     )))
 }
 
-fn parse_version_line(value: &str) -> Option<&str> {
-    let rest = value.trim().strip_prefix("Version")?;
-    rest.trim_start().strip_prefix('=').map(str::trim)
-}
-
-/// Bump the computer half of the local-GPO `Version` DWORD, creating a minimal
-/// `gpt.ini` when the guest has none. The original bytes are backed up by the
-/// caller and restored by the wrapper; the extension list is left untouched
-/// because machine startup scripts are a standard local-GPO extension and the
-/// recovered working layout only changed `scripts.ini` plus the startup folder.
-pub fn bump_gpt_version(original: Option<&[u8]>) -> Result<Vec<u8>> {
-    let (encoding, text) = match original {
-        Some(bytes) => decode_policy_document(bytes, "guest gpt.ini")?,
-        None => (PolicyEncoding::Utf8, String::new()),
-    };
-    let newline = if text.is_empty() {
-        "\r\n"
-    } else {
-        policy_newline(&text)
-    };
-    let mut lines = policy_lines(&text);
-    let mut bumped = false;
-    if let Some((header, end)) = section_bounds(&lines, "General") {
-        for content in lines.iter_mut().take(end).skip(header + 1) {
-            let Some(version) = parse_version_line(content) else {
-                continue;
-            };
-            ensure!(
-                !version.is_empty() && version.bytes().all(|byte| byte.is_ascii_digit()),
-                "guest gpt.ini Version is not a decimal number"
-            );
-            let current: u32 = version
-                .parse()
-                .with_context(|| format!("guest gpt.ini Version is out of range: {version}"))?;
-            let user = current & 0xffff_0000;
-            let computer = current & 0xffff;
-            let computer = if computer == 0xffff { 1 } else { computer + 1 };
-            *content = format!("Version={}", user | computer);
-            bumped = true;
-            break;
-        }
-        if !bumped {
-            let mut insert = end;
-            while insert > header + 1 && lines[insert - 1].trim().is_empty() {
-                insert -= 1;
-            }
-            lines.insert(insert, "Version=1".into());
-        }
-    } else {
-        if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
-            lines.push(String::new());
-        }
-        lines.push("[General]".into());
-        lines.push("Version=1".into());
-    }
-    Ok(encode_policy_document(
-        encoding,
-        &render_policy(&lines, newline),
-    ))
-}
-
-/// Local-GPO machine startup injection planned from the existing policy files.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StartupInjection {
-    /// Per-operation backups first, then the rewritten policy files.
-    pub files: Vec<GuestFile>,
-    pub scripts_ini_sha256: String,
-    pub gpt_ini_sha256: String,
-    pub scripts_ini_preexisting: bool,
-    pub gpt_ini_preexisting: bool,
-}
-
-/// Plan the policy backups and the injected startup entry. The launcher itself
-/// is part of the fixed provision intent and is written with the wrapper.
-pub fn plan_startup_injection(
-    paths: &GuestPaths,
-    policy: &GuestPolicyFiles,
-) -> Result<StartupInjection> {
+/// Fixed per-operation boot launcher. The scheduled task action always runs
+/// this exact path, so the task XML and TaskCache registration stay constant;
+/// the launcher content names the operation wrapper so leftovers stay
+/// attributable to exactly one operation.
+pub fn boot_launcher(provision_id: &str, wrapper: &str) -> Result<Vec<u8>> {
+    let expected = format!(r"{GUEST_PROVISION_ROOT}\{provision_id}\provision.ps1");
     ensure!(
-        policy.scripts_ini_backup.is_none() && policy.gpt_ini_backup.is_none(),
-        "guest already contains backups for this operation; clean the previous attempt before provisioning"
+        wrapper == expected,
+        "boot launcher wrapper path differs from the operation directory"
     );
-    let scripts_preexisting = policy.scripts_ini.is_some();
-    let gpt_preexisting = policy.gpt_ini.is_some();
-    let mut files = Vec::new();
-    if let Some(original) = &policy.scripts_ini {
-        files.push(injected_file(&paths.scripts_ini_backup, original.clone()));
-    }
-    let scripts_ini = inject_startup_script(policy.scripts_ini.as_deref(), &paths.startup_entry)?;
-    files.push(injected_file(&paths.scripts_ini, scripts_ini.clone()));
-    if let Some(original) = &policy.gpt_ini {
-        files.push(injected_file(&paths.gpt_ini_backup, original.clone()));
-    }
-    let gpt_ini = bump_gpt_version(policy.gpt_ini.as_deref())?;
-    files.push(injected_file(&paths.gpt_ini, gpt_ini.clone()));
-    Ok(StartupInjection {
-        files,
-        scripts_ini_sha256: sha256(&scripts_ini),
-        gpt_ini_sha256: sha256(&gpt_ini),
-        scripts_ini_preexisting: scripts_preexisting,
-        gpt_ini_preexisting: gpt_preexisting,
-    })
-}
-
-/// Fixed `.cmd` launcher executed by the machine startup script. It starts the
-/// wrapper detached so the Group Policy startup phase is not held open for the
-/// whole worker installation; the wrapper powers the guest off when it finishes.
-pub fn startup_launcher(provision_id: &str, wrapper: &str) -> Result<Vec<u8>> {
-    let entry = format!("{STARTUP_ENTRY_PREFIX}{provision_id}{STARTUP_ENTRY_SUFFIX}");
-    validate_startup_entry(&entry)?;
     ensure!(
-        wrapper.starts_with(r"C:\ProgramData\WukongLab\provision\")
-            && wrapper.is_ascii()
-            && !wrapper.contains(['\n', '\r', '\0', '"']),
+        wrapper.is_ascii() && !wrapper.contains(['\n', '\r', '\0', '"', '\'']),
         "invalid guest wrapper path"
     );
     let launcher = format!(
-        "@echo off\r\nrem Wukong offline worker provisioning launcher. The controller removes this file after the wrapper runs.\r\nstart \"\" /b \"{POWERSHELL}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{wrapper}\"\r\n"
+        "# Wukong offline worker provisioning boot launcher. The fixed scheduled\r\n# task runs this file as SYSTEM; the wrapper removes it with the rest of the\r\n# operation. The launcher exists only for its own provisioning operation.\r\n& '{wrapper}'\r\n"
     );
     ensure!(
         launcher.len() <= 4096,
-        "machine startup launcher exceeds the guest bound"
+        "guest boot launcher exceeds the guest bound"
     );
     Ok(launcher.into_bytes())
 }
@@ -1429,12 +1805,17 @@ pub fn startup_launcher(provision_id: &str, wrapper: &str) -> Result<Vec<u8>> {
 /// One explicit cleanup action for the named operation's powered-off guest disk.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GuestCleanupPlan {
-    /// Restored policy files to write through the offline disk adapter.
+    /// Restored or rewritten policy files to write through the offline disk
+    /// adapter.
     pub files: Vec<GuestFile>,
-    /// Files removed after the restore (backups and the startup launcher).
+    /// Backups, the retired startup launcher and the fixed boot-task artifacts
+    /// removed after the restore.
     pub files_to_remove: Vec<String>,
     /// Directories removed recursively (only this operation's provision tree).
     pub directories_to_remove: Vec<String>,
+    /// Fixed scheduled-task TaskCache keys must be removed from the SOFTWARE
+    /// hive.
+    pub boot_task: bool,
     /// Legacy one-shot service key from an earlier attempt.
     pub service_key: Option<String>,
     /// Bounded human-readable action list shared by the command and its dry run.
@@ -1446,25 +1827,76 @@ impl GuestCleanupPlan {
         self.files.is_empty()
             && self.files_to_remove.is_empty()
             && self.directories_to_remove.is_empty()
+            && !self.boot_task
             && self.service_key.is_none()
     }
 }
 
-/// Plan removal of exactly one operation's guest leftovers: the startup
-/// launcher and policy entry, the per-operation policy backups, the legacy
-/// service key written by earlier attempts, and the provision directory. Other
-/// policy content, other operation directories and unrelated services are never
-/// named here.
+/// Plan removal of exactly one operation's guest leftovers: the fixed
+/// scheduled-task registration, the per-operation boot launcher, the retired
+/// local-GPO startup entry/backups (including a `gpt.ini` the retired CLI
+/// created without a backup), the legacy service key written by earlier
+/// attempts, and the provision directory.
+///
+/// Other policy content, other operation directories and unrelated tasks are
+/// never named here. `last_operation` is true when the caller recorded this
+/// operation as the most recent provisioning of the VM: only then can a
+/// CLI-created `gpt.ini` (which carries no operation identity) be attributed and
+/// deleted, and only when its bytes still equal the exact created document.
 pub fn plan_guest_cleanup(
     paths: &GuestPaths,
     inspection: &DiskInspection,
+    last_operation: bool,
 ) -> Result<GuestCleanupPlan> {
     ensure!(
         inspection.windows_volume && inspection.system_hive_present,
         "guest disk has no inspectable Windows system volume"
     );
+    ensure!(
+        inspection.software_hive_present,
+        "guest disk has no inspectable SOFTWARE hive"
+    );
     let mut plan = GuestCleanupPlan::default();
     let policy = &inspection.policy;
+
+    // Boot-task ownership: the fixed launcher names its operation wrapper, so a
+    // launcher belonging to another operation is left for that operation's
+    // cleanup. Without a launcher, the fixed task keys are only claimed when this
+    // operation's provision directory (or no directory at all) is present.
+    let launcher_owner = inspection
+        .launcher
+        .as_deref()
+        .and_then(launcher_operation_id);
+    let owns_boot_artifacts = match launcher_owner.as_deref() {
+        Some(owner) => owner == paths.provision_id(),
+        None => {
+            inspection.provision_root_entries.is_empty()
+                || inspection
+                    .provision_root_entries
+                    .iter()
+                    .any(|entry| entry == paths.provision_id())
+        }
+    };
+    if owns_boot_artifacts && inspection.boot_task.is_registered() {
+        plan.boot_task = true;
+        plan.actions.push(format!(
+            "delete the fixed {BOOT_TASK_NAME} scheduled-task registration from the guest SOFTWARE hive"
+        ));
+    }
+    if owns_boot_artifacts && inspection.task_file_present {
+        plan.files_to_remove.push(paths.task_file.clone());
+        plan.actions.push(format!(
+            "delete the fixed scheduled-task file {}",
+            paths.task_file
+        ));
+    }
+    if owns_boot_artifacts && inspection.launcher.is_some() {
+        plan.files_to_remove.push(paths.launcher.clone());
+        plan.actions
+            .push(format!("delete the boot launcher {}", paths.launcher));
+    }
+
+    // Retired local-GPO startup script.
     let startup_present = policy
         .startup_directory_entries
         .iter()
@@ -1472,7 +1904,7 @@ pub fn plan_guest_cleanup(
     if startup_present {
         plan.files_to_remove.push(paths.startup_script.clone());
         plan.actions.push(format!(
-            "delete the injected machine startup launcher {}",
+            "delete the retired machine startup launcher {}",
             paths.startup_script
         ));
     }
@@ -1481,7 +1913,7 @@ pub fn plan_guest_cleanup(
             .push(injected_file(&paths.scripts_ini, backup.clone()));
         plan.files_to_remove.push(paths.scripts_ini_backup.clone());
         plan.actions.push(format!(
-            "restore the previous machine scripts.ini bytes from {}",
+            "restore the previous machine scripts.ini bytes verbatim from {}",
             paths.scripts_ini_backup
         ));
     } else if policy
@@ -1497,14 +1929,14 @@ pub fn plan_guest_cleanup(
             Some(bytes) => {
                 plan.files.push(injected_file(&paths.scripts_ini, bytes));
                 plan.actions.push(format!(
-                    "remove the startup entry from {}",
+                    "remove the retired startup entry from {}",
                     paths.scripts_ini
                 ));
             }
             None => {
                 plan.files_to_remove.push(paths.scripts_ini.clone());
                 plan.actions
-                    .push(format!("delete the injected {}", paths.scripts_ini));
+                    .push(format!("delete the retired {}", paths.scripts_ini));
             }
         }
     }
@@ -1513,8 +1945,17 @@ pub fn plan_guest_cleanup(
             .push(injected_file(&paths.gpt_ini, backup.clone()));
         plan.files_to_remove.push(paths.gpt_ini_backup.clone());
         plan.actions.push(format!(
-            "restore the previous local Group Policy gpt.ini bytes from {}",
+            "restore the previous local Group Policy gpt.ini bytes verbatim from {}",
             paths.gpt_ini_backup
+        ));
+    } else if last_operation && policy.gpt_ini.as_deref() == Some(LEGACY_CREATED_GPT_INI) {
+        // The retired CLI created this document from nothing and recorded no
+        // backup; only the last recorded operation can own it, and only the exact
+        // created bytes may be deleted.
+        plan.files_to_remove.push(paths.gpt_ini.clone());
+        plan.actions.push(format!(
+            "delete the retired CLI-created {} (no previous policy was backed up)",
+            paths.gpt_ini
         ));
     }
     if inspection.existing_service.as_deref() == Some(paths.service.as_str()) {
@@ -1550,7 +1991,7 @@ pub fn provision_plan(
     paths: &GuestPaths,
 ) -> Result<Vec<u8>> {
     let plan = serde_json::json!({
-        "schema": 2,
+        "schema": 3,
         "provision_id": provision_id,
         "installation_id": media.installation_id,
         "environment_id": media.environment_id,
@@ -1562,11 +2003,10 @@ pub fn provision_plan(
         "controller_version": media.controller_version,
         "ssh_port": media.ssh_port,
         "media_label": MEDIA_LABEL,
-        "startup_script": paths.startup_script,
-        "scripts_ini": paths.scripts_ini,
-        "scripts_ini_backup": paths.scripts_ini_backup,
-        "gpt_ini": paths.gpt_ini,
-        "gpt_ini_backup": paths.gpt_ini_backup,
+        "launcher": paths.launcher,
+        "task_file": paths.task_file,
+        "task_name": BOOT_TASK_NAME,
+        "task_guid": paths.task_guid,
     });
     let mut bytes = serde_json::to_vec_pretty(&plan)?;
     bytes.push(b'\n');
@@ -1593,7 +2033,7 @@ pub fn verify_guest_receipt(
     let receipt: serde_json::Value =
         serde_json::from_slice(bytes).context("parse guest provisioning receipt")?;
     ensure!(
-        receipt["schema"] == 2 && receipt["provision_id"] == expectation.provision_id,
+        receipt["schema"] == 3 && receipt["provision_id"] == expectation.provision_id,
         "guest provisioning receipt identity mismatch"
     );
     ensure!(
@@ -1607,16 +2047,12 @@ pub fn verify_guest_receipt(
         receipt["error"]
     );
     ensure!(
-        matches!(
-            receipt["startup_cleanup"].as_str(),
-            Some("restored" | "removed")
-        ),
-        "guest machine startup policy was not restored: {}",
-        receipt["startup_cleanup"]
+        receipt["boot_task_removed"] == true,
+        "guest wrapper did not remove its own scheduled-task registration"
     );
     ensure!(
-        receipt["startup_script_deleted"] == true,
-        "guest machine startup launcher was not deleted"
+        receipt["launcher_deleted"] == true,
+        "guest wrapper did not delete the scheduled-task boot launcher"
     );
     ensure!(
         receipt["cleanup_scheduled"] == true,

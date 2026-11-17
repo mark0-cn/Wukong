@@ -9,10 +9,13 @@ use crate::application::windows_lab::provision;
 use crate::application::windows_lab::provision::GuestFile;
 use crate::application::windows_lab::provision::fixture;
 use crate::application::windows_lab::provision::{
-    DiskInspection, DiskInspectionRequest, FinalizeRequest, GUEST_GPT_INI, GUEST_PROVISION_ROOT,
-    GUEST_SCRIPTS_INI, GUEST_STARTUP_DIR, GuestNetwork, GuestObservation, GuestObservationRequest,
-    GuestPaths, GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder, MediaFinalizer,
-    OfflineDisk, ProvisionEnvironment, PublicConnection, ServiceRemoval, ServiceRemovalEvidence,
+    BOOT_LAUNCHER, BOOT_TASK_FILE, BOOT_TASK_GUID, BOOT_TASK_NAME, BOOT_TASK_XML,
+    BOOT_TASK_XML_SHA256, BootTaskCacheState, BootTaskEvidence, BootTaskInjection, BootTaskRemoval,
+    BootTaskRemovalEvidence, DiskInspection, DiskInspectionRequest, FinalizeRequest,
+    GUEST_PROVISION_ROOT, GUEST_STARTUP_DIR, GuestNetwork, GuestObservation,
+    GuestObservationRequest, GuestPaths, GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence,
+    IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment, PublicConnection,
+    ServiceRemoval, ServiceRemovalEvidence, boot_launcher, boot_task_injection,
     startup_command_lines,
 };
 use crate::application::windows_lab::types::{
@@ -225,6 +228,11 @@ struct DiskState {
     directories: BTreeSet<String>,
     /// Legacy one-shot service key still present in the fake SYSTEM hive.
     service: Option<String>,
+    /// Fixed scheduled-task registration in the fake SOFTWARE hive.
+    boot_task: BootTaskCacheState,
+    /// Fixed scheduled-task injections requested by the controller.
+    boot_task_injections: Vec<BootTaskInjection>,
+    boot_task_removals: Vec<BootTaskRemoval>,
     tamper: Option<Tampered>,
     removals: Vec<GuestRemoval>,
     service_removals: Vec<ServiceRemoval>,
@@ -232,14 +240,16 @@ struct DiskState {
     fail_service_removal: bool,
     /// Test-only fault injection for leftover-file removal.
     fail_file_removal: bool,
+    /// Test-only fault injection for the fixed scheduled-task hive edits.
+    fail_boot_task_injection: bool,
+    fail_boot_task_removal: bool,
 }
 
 #[derive(Clone, Copy)]
 enum Tampered {
     ReceiptInstallation,
-    StartupPolicyLeftBehind,
+    BootTaskLeftBehind,
 }
-
 struct FakeDisk {
     state: Mutex<DiskState>,
     connection: PublicConnection,
@@ -329,10 +339,41 @@ impl FakeDisk {
     }
 
     /// Seed leftovers of one failed provisioning attempt on the fake guest.
+    /// Seed leftovers of one failed provisioning attempt on the fake guest: the
+    /// fixed boot task registration and launcher, the provision directory, and
+    /// the legacy one-shot service key from an earlier mechanism.
     fn seed_provision_leftover(&self, paths: &GuestPaths) {
         let mut state = self.state.lock().unwrap();
         state.directories.insert(paths.root.clone());
         state.service = Some(paths.service.clone());
+        state.boot_task = BootTaskCacheState {
+            tree: true,
+            tasks: true,
+            boot: true,
+        };
+        state
+            .files
+            .insert(paths.task_file.clone(), BOOT_TASK_XML.to_vec());
+        state.files.insert(
+            paths.launcher.clone(),
+            boot_launcher(paths.provision_id(), &paths.wrapper).unwrap(),
+        );
+    }
+
+    fn boot_task_state(&self) -> BootTaskCacheState {
+        self.state.lock().unwrap().boot_task
+    }
+    fn boot_task_injections(&self) -> Vec<BootTaskInjection> {
+        self.state.lock().unwrap().boot_task_injections.clone()
+    }
+    fn boot_task_removals(&self) -> Vec<BootTaskRemoval> {
+        self.state.lock().unwrap().boot_task_removals.clone()
+    }
+    fn fail_boot_task_injection(&self, fail: bool) {
+        self.state.lock().unwrap().fail_boot_task_injection = fail;
+    }
+    fn fail_boot_task_removal(&self, fail: bool) {
+        self.state.lock().unwrap().fail_boot_task_removal = fail;
     }
 }
 
@@ -356,8 +397,12 @@ impl OfflineDisk for FakeDisk {
         state.calls.push("inspect".into());
         for windows in [
             &request.system_hive,
+            &request.software_hive,
             &request.program_data,
             &request.provision_root,
+            &request.tasks_dir,
+            &request.task_file,
+            &request.launcher,
             &request.scripts_dir,
             &request.startup_dir,
             &request.scripts_ini,
@@ -411,14 +456,17 @@ impl OfflineDisk for FakeDisk {
         Ok(DiskInspection {
             windows_volume: true,
             system_hive_present: true,
+            software_hive_present: true,
             program_data_present: true,
             control_set: Some(1),
             existing_service: state.service.clone(),
             provision_root_entries,
+            task_file_present: files.contains_key(&request.task_file),
+            boot_task: state.boot_task,
+            launcher: files.get(&request.launcher).cloned(),
             policy,
         })
     }
-
     async fn write_guest_files(&self, _disk: &Path, files: &[GuestFile]) -> Result<()> {
         self.record("write");
         let mut state = self.state.lock().unwrap();
@@ -502,6 +550,53 @@ impl OfflineDisk for FakeDisk {
         Ok(evidence)
     }
 
+    async fn inject_boot_task(
+        &self,
+        _disk: &Path,
+        injection: &BootTaskInjection,
+    ) -> Result<BootTaskEvidence> {
+        self.record("inject-boot-task");
+        let mut state = self.state.lock().unwrap();
+        state.calls.push("inject-boot-task".into());
+        if state.fail_boot_task_injection {
+            bail!("hivexsh failed: simulated boot-task registration failure");
+        }
+        assert!(
+            !state.boot_task.is_registered(),
+            "the controller must not overwrite an existing fixed boot task"
+        );
+        state.boot_task_injections.push(injection.clone());
+        state.boot_task = BootTaskCacheState {
+            tree: true,
+            tasks: true,
+            boot: true,
+        };
+        Ok(BootTaskEvidence {
+            hive_sha256_before: "1".repeat(64),
+            hive_sha256_after: "2".repeat(64),
+        })
+    }
+
+    async fn remove_boot_task(
+        &self,
+        _disk: &Path,
+        removal: &BootTaskRemoval,
+    ) -> Result<BootTaskRemovalEvidence> {
+        self.record("remove-boot-task");
+        let mut state = self.state.lock().unwrap();
+        state.calls.push("remove-boot-task".into());
+        state.boot_task_removals.push(removal.clone());
+        if state.fail_boot_task_removal {
+            bail!("hivexsh failed: simulated boot-task removal failure");
+        }
+        let present = state.boot_task.is_registered();
+        state.boot_task = BootTaskCacheState::default();
+        Ok(BootTaskRemovalEvidence {
+            present,
+            removed: present,
+        })
+    }
+
     async fn observe_guest(
         &self,
         _disk: &Path,
@@ -515,7 +610,9 @@ impl OfflineDisk for FakeDisk {
                 &request.wrapper,
                 &request.plan,
                 &request.receipt,
-                &request.startup_script,
+                &request.launcher,
+                &request.task_file,
+                &request.software_hive,
                 &request.scripts_ini,
                 &request.scripts_ini_backup,
                 &request.gpt_ini_backup,
@@ -536,30 +633,21 @@ impl OfflineDisk for FakeDisk {
         if matches!(state.tamper, Some(Tampered::ReceiptInstallation)) {
             connection.installation_id = "0".repeat(32);
         }
-        // Emulate the wrapper's finally block: it writes the receipt, restores
-        // the machine startup policy (or leaves the injected entry on failure),
-        // and schedules deletion of the wrapper and plan.
+        let left_behind = matches!(state.tamper, Some(Tampered::BootTaskLeftBehind));
+        // Emulate the wrapper's finally block: it writes the receipt first, then
+        // removes the fixed scheduled-task registration, its launcher, the
+        // wrapper and the plan before shutting the guest down.
         state.files.insert(
             request.receipt.clone(),
             fixture::guest_receipt(&provision_id, &connection),
         );
-        if !matches!(state.tamper, Some(Tampered::StartupPolicyLeftBehind)) {
-            if let Some(bytes) = state.files.get(&request.scripts_ini).cloned() {
-                match provision::remove_startup_script(&bytes, &request.startup_entry)? {
-                    Some(updated) => {
-                        state.files.insert(request.scripts_ini.clone(), updated);
-                    }
-                    None => {
-                        state.files.remove(&request.scripts_ini);
-                    }
-                }
-            }
-            state.files.remove(&request.scripts_ini_backup);
-            state.files.remove(&request.gpt_ini_backup);
-            state.files.remove(&request.startup_script);
+        if !left_behind {
+            state.boot_task = BootTaskCacheState::default();
+            state.files.remove(&request.task_file);
+            state.files.remove(&request.launcher);
+            state.files.remove(&request.wrapper);
+            state.files.remove(&request.plan);
         }
-        state.files.remove(&request.wrapper);
-        state.files.remove(&request.plan);
         let startup_entry_present = state
             .files
             .get(&request.scripts_ini)
@@ -572,7 +660,9 @@ impl OfflineDisk for FakeDisk {
             receipt: state.files.get(&request.receipt).cloned(),
             wrapper_present: state.files.contains_key(&request.wrapper),
             plan_present: state.files.contains_key(&request.plan),
-            startup_script_present: state.files.contains_key(&request.startup_script),
+            task_file_present: state.files.contains_key(&request.task_file),
+            boot_task_registered: state.boot_task.is_registered(),
+            launcher_present: state.files.contains_key(&request.launcher),
             scripts_ini_present: state.files.contains_key(&request.scripts_ini),
             startup_entry_present,
             scripts_ini_backup_present: state.files.contains_key(&request.scripts_ini_backup),
@@ -874,6 +964,9 @@ fn record_failed_provision(deployment: &Deployment, operation_id: &str) -> Guest
         vmx_sha256_after: None,
         hive_sha256_before: None,
         hive_sha256_after: None,
+        injected: Vec::new(),
+        boot_task_sha256: None,
+        launcher_sha256: None,
         scripts_ini_sha256: None,
         gpt_ini_sha256: None,
         identity_file: None,
@@ -891,15 +984,11 @@ fn record_failed_provision(deployment: &Deployment, operation_id: &str) -> Guest
     paths
 }
 
-fn written_file(disk: &FakeDisk, windows: &str) -> GuestFile {
-    disk.written()
-        .into_iter()
-        .find(|file| file.windows_path == windows)
-        .unwrap_or_else(|| panic!("{windows} was not written to the guest"))
-}
-
 /// Emulate the guest state a failed attempt left behind: injected startup
 /// policy, its launcher, the provision directory and the legacy service key.
+/// Emulate the guest state a failed attempt left behind: the fixed boot-task
+/// registration and launcher, the provision directory, an injected retired
+/// startup policy (optionally with backups) and the legacy service key.
 fn seed_leftovers(disk: &FakeDisk, paths: &GuestPaths, with_backup: bool) {
     disk.seed_provision_leftover(paths);
     disk.set_file(&paths.startup_script, b"@echo off\r\n");
@@ -911,7 +1000,7 @@ fn seed_leftovers(disk: &FakeDisk, paths: &GuestPaths, with_backup: bool) {
         )
         .into_bytes(),
     );
-    disk.set_file(&paths.plan, b"{\"schema\":2}\n");
+    disk.set_file(&paths.plan, b"{\"schema\":3}\n");
     if with_backup {
         disk.set_file(
             &paths.scripts_ini_backup,
@@ -924,7 +1013,6 @@ fn seed_leftovers(disk: &FakeDisk, paths: &GuestPaths, with_backup: bool) {
         disk.set_file(&paths.gpt_ini, b"[General]\r\nVersion=65540\r\n".to_vec());
     }
 }
-
 #[tokio::test]
 async fn provision_injects_media_and_verifies_the_guest_receipt() {
     let deployment = deployment();
@@ -951,8 +1039,8 @@ async fn provision_injects_media_and_verifies_the_guest_receipt() {
     let disk_calls = disk.calls();
     assert_eq!(
         disk_calls,
-        ["inspect", "write", "observe"].map(str::to_string),
-        "provisioning never writes a SYSTEM service key"
+        ["inspect", "write", "inject-boot-task", "observe"].map(str::to_string),
+        "provisioning never writes a SYSTEM service key or a local-GPO script"
     );
     assert!(
         disk.service_removals().is_empty(),
@@ -968,28 +1056,68 @@ async fn provision_injects_media_and_verifies_the_guest_receipt() {
     assert!(!directories[0].join("offline.iso").exists());
     assert!(!directories[0].join("vmx.bak").exists());
     assert!(directories[0].join("guest-receipt.json").is_file());
-    assert!(directories[0].join("injected/provision.ps1").is_file());
-    assert!(directories[0].join("injected/scripts.ini").is_file());
-    assert!(directories[0].join("injected/gpt.ini").is_file());
-    assert!(
-        directories[0]
-            .join("injected")
-            .read_dir()
-            .unwrap()
-            .flatten()
-            .any(|entry| entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with("wukong-provision-")),
-        "the machine startup launcher is retained as host evidence"
-    );
+    for name in ["provision.ps1", "provision-plan.json", "launch.ps1"] {
+        assert!(
+            directories[0].join("injected").join(name).is_file(),
+            "{name} is retained as host evidence"
+        );
+    }
     let state = deployment.state();
     assert_eq!(state.phase, LabPhase::Idle);
     let record = state.last_provision.unwrap();
     assert_eq!(record.status, RunStatus::Completed);
-    assert!(record.scripts_ini_sha256.is_some());
-    assert!(record.gpt_ini_sha256.is_some());
-    assert!(record.hive_sha256_before.is_none());
+    assert_eq!(
+        record.boot_task_sha256.as_deref(),
+        Some(BOOT_TASK_XML_SHA256)
+    );
+    assert!(record.launcher_sha256.is_some());
+    assert_eq!(
+        record.hive_sha256_before.as_deref(),
+        Some("1".repeat(64).as_str())
+    );
+    assert_eq!(
+        record.hive_sha256_after.as_deref(),
+        Some("2".repeat(64).as_str())
+    );
+    assert!(record.scripts_ini_sha256.is_none());
+    assert!(record.gpt_ini_sha256.is_none());
+    let injected = record.injected.clone();
+    assert!(
+        injected.iter().any(|file| file.guest_path == BOOT_TASK_FILE
+            && !file.preexisting
+            && file.sha256 == BOOT_TASK_XML_SHA256),
+        "the record persists the created scheduled-task file: {injected:?}"
+    );
+    assert!(
+        injected
+            .iter()
+            .any(|file| file.guest_path == BOOT_LAUNCHER && !file.preexisting),
+        "the record persists the created boot launcher"
+    );
+    assert!(
+        injected.iter().all(|file| !file.preexisting),
+        "the scheduled-task mechanism creates every guest file it writes"
+    );
+}
+#[tokio::test]
+async fn boot_task_injection_failure_requires_recovery() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    disk.fail_boot_task_injection(true);
+    deployment.host.set_boot_polls(1);
+    let lab = wired(&deployment, disk.clone(), iso);
+    let error = lab
+        .provision(deployment.options(deployment.media_source()))
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("simulated boot-task registration failure"),
+        "{error:#}"
+    );
+    assert_eq!(deployment.state().phase, LabPhase::RecoveryRequired);
+    assert!(!deployment.host.calls().contains(&"start".to_string()));
+    assert!(!disk.boot_task_state().is_registered());
 }
 
 #[tokio::test]
@@ -1078,15 +1206,19 @@ async fn offline_disk_requests_use_canonical_windows_guest_paths() {
         .await
         .unwrap();
     let paths = disk.guest_paths();
-    assert!(
-        paths.contains(&"/Windows/System32/config/SYSTEM".to_string()),
-        "{paths:?}"
-    );
-    assert!(paths.contains(&"/ProgramData".to_string()), "{paths:?}");
-    assert!(
-        paths.contains(&"/ProgramData/WukongLab/provision".to_string()),
-        "{paths:?}"
-    );
+    for expected in [
+        "/Windows/System32/config/SYSTEM",
+        "/Windows/System32/config/SOFTWARE",
+        "/ProgramData",
+        "/ProgramData/WukongLab/provision",
+        "/ProgramData/WukongLab/provision/launch.ps1",
+        "/Windows/System32/Tasks/WukongLabProvision",
+    ] {
+        assert!(
+            paths.contains(&expected.to_string()),
+            "{expected}: {paths:?}"
+        );
+    }
     assert!(
         paths.iter().any(|path| path.ends_with("/provision.ps1")),
         "{paths:?}"
@@ -1101,25 +1233,6 @@ async fn offline_disk_requests_use_canonical_windows_guest_paths() {
         paths.iter().any(|path| path.ends_with("/receipt.json")),
         "{paths:?}"
     );
-    assert!(
-        paths
-            .iter()
-            .any(|path| path.contains("/Scripts/Startup/wukong-provision-")
-                && path.ends_with(".cmd")),
-        "the machine startup launcher path is fixed: {paths:?}"
-    );
-    assert!(
-        paths
-            .iter()
-            .any(|path| path.ends_with("/Machine/Scripts/scripts.ini")),
-        "{paths:?}"
-    );
-    assert!(
-        paths
-            .iter()
-            .any(|path| path.ends_with("/GroupPolicy/gpt.ini")),
-        "{paths:?}"
-    );
     // Requests carry Windows guest paths, so the adapter sees only the
     // canonical libguestfs form after its single conversion.
     assert!(
@@ -1129,7 +1242,6 @@ async fn offline_disk_requests_use_canonical_windows_guest_paths() {
         "{paths:?}"
     );
 }
-
 #[tokio::test]
 async fn replace_baseline_is_deleted_before_disk_validation_and_recreated() {
     let deployment = replacement_deployment(true);
@@ -1487,10 +1599,10 @@ async fn receipt_mismatch_requires_reconciliation_and_cleanup() {
 }
 
 #[tokio::test]
-async fn reconcile_completed_resolves_a_leftover_startup_policy() {
+async fn reconcile_completed_resolves_a_leftover_boot_task() {
     let deployment = deployment();
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
-    disk.tamper(Tampered::StartupPolicyLeftBehind);
+    disk.tamper(Tampered::BootTaskLeftBehind);
     let iso = Arc::new(FakeIso::new());
     let lab = wired(&deployment, disk, iso);
     lab.provision(deployment.options(deployment.media_source()))
@@ -1520,79 +1632,65 @@ async fn reconcile_completed_resolves_a_leftover_startup_policy() {
 }
 
 #[tokio::test]
-async fn startup_policy_left_behind_keeps_recovery_required() {
+async fn boot_task_left_behind_keeps_recovery_required() {
     let deployment = deployment();
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
-    disk.tamper(Tampered::StartupPolicyLeftBehind);
+    disk.tamper(Tampered::BootTaskLeftBehind);
     let iso = Arc::new(FakeIso::new());
     let lab = wired(&deployment, disk, iso);
     let error = lab
         .provision(deployment.options(deployment.media_source()))
         .await
         .unwrap_err();
-    assert!(
-        format!("{error:#}").contains("machine startup"),
-        "{error:#}"
-    );
+    assert!(format!("{error:#}").contains("scheduled-task"), "{error:#}");
     assert_eq!(deployment.state().phase, LabPhase::RecoveryRequired);
 }
-
 #[tokio::test]
-async fn provision_preserves_existing_machine_policy_in_per_operation_backups() {
+async fn provision_injects_the_canonical_scheduled_task_and_removes_it() {
     let deployment = deployment();
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
     let iso = Arc::new(FakeIso::new());
-    let lab = wired(&deployment, disk.clone(), iso.clone());
-    let paths = GuestPaths::for_provision(&"1".repeat(32)).unwrap();
-    // The recovered working layout carried an unrelated startup script; the
-    // existing local-GPO version must be preserved as a backup and bumped.
-    disk.set_file(
-        &paths.scripts_ini,
-        b"[Startup]\r\n0CmdLine=enable-admin.cmd\r\n0Parameters=\r\n\r\n[Shutdown]\r\n0CmdLine=cleanup.cmd\r\n0Parameters=\r\n".to_vec(),
-    );
-    disk.set_file(&paths.gpt_ini, b"[General]\r\nVersion=65539\r\n");
     deployment.host.set_boot_polls(1);
+    let lab = wired(&deployment, disk.clone(), iso);
     lab.provision(deployment.options(deployment.media_source()))
         .await
         .unwrap();
 
-    // Provisioning uses its own fresh operation identity, so inspect the files
-    // that were actually written for the injected operation.
-    let written = disk.written();
-    let scripts = written_file(&disk, GUEST_SCRIPTS_INI);
-    let text = String::from_utf8(scripts.bytes.clone()).unwrap();
-    assert!(text.contains("0CmdLine=enable-admin.cmd"), "{text}");
-    assert!(text.contains("0CmdLine=cleanup.cmd"), "{text}");
+    let injections = disk.boot_task_injections();
+    assert_eq!(injections.len(), 1);
+    assert_eq!(injections[0], boot_task_injection().unwrap());
+    // The guest wrapper (emulated by observation) unregisters the task itself;
+    // the controller-side `remove_boot_task` is only used by `clean-guest`.
+    assert!(disk.boot_task_removals().is_empty());
     assert!(
-        text.contains("wukong-provision-"),
-        "the operation startup entry is injected: {text}"
+        !disk.boot_task_state().is_registered(),
+        "the fake wrapper unregistered the boot task"
+    );
+
+    let written = disk.written();
+    assert!(
+        written
+            .iter()
+            .any(|file| file.windows_path == BOOT_TASK_FILE && file.bytes == BOOT_TASK_XML)
     );
     assert!(
         written
             .iter()
-            .any(|file| file.windows_path.ends_with(".bak")
-                && file.bytes.starts_with(b"[Startup]")),
-        "the previous scripts.ini bytes are backed up"
-    );
-    let gpt = written
-        .iter()
-        .find(|file| file.windows_path == GUEST_GPT_INI)
-        .expect("gpt.ini was bumped");
-    assert!(
-        String::from_utf8(gpt.bytes.clone())
-            .unwrap()
-            .contains("Version=65540"),
-        "the computer version half is bumped"
+            .any(|file| file.windows_path == BOOT_LAUNCHER)
     );
     assert!(
-        written.iter().all(|file| !file
-            .bytes
-            .windows(11)
-            .any(|window| window == b"LocalSystem")),
-        "no LocalSystem service key is written through the guest files"
+        written
+            .iter()
+            .all(|file| !file.windows_path.contains("GroupPolicy")),
+        "provisioning must not write local Group Policy files"
     );
+    let plan = plan_json(&written);
+    assert_eq!(plan["schema"], 3);
+    assert_eq!(plan["task_name"], BOOT_TASK_NAME);
+    assert_eq!(plan["task_guid"], BOOT_TASK_GUID);
+    assert!(plan.get("scripts_ini").is_none());
+    assert!(plan.get("gpt_ini").is_none());
 }
-
 #[tokio::test]
 async fn stale_guest_leftovers_are_refused_with_the_cleanup_command() {
     let deployment = deployment();
@@ -1628,7 +1726,7 @@ async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
     let paths = record_failed_provision(&deployment, &operation);
     seed_leftovers(&disk, &paths, true);
     // Unrelated content must survive: another operation's provision directory
-    // and an unrelated Group Policy file are never named by the cleanup plan.
+    // and an unrelated retired startup script are never named by the plan.
     let unrelated = format!("{GUEST_PROVISION_ROOT}\\{}", "8".repeat(32));
     disk.set_directories([unrelated.clone()]);
     disk.set_file(&format!("{GUEST_STARTUP_DIR}\\other.cmd"), b"@echo off\r\n");
@@ -1643,23 +1741,32 @@ async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
     assert_eq!(outcome.operation_id, operation);
     assert!(!outcome.dry_run);
     assert_eq!(outcome.files_written, 2, "scripts.ini and gpt.ini restored");
+    assert!(outcome.boot_task_removed);
+    assert!(outcome.files_removed.contains(&paths.task_file));
+    assert!(outcome.files_removed.contains(&paths.launcher));
     assert!(outcome.files_removed.contains(&paths.startup_script));
     assert!(outcome.files_removed.contains(&paths.scripts_ini_backup));
     assert!(outcome.files_removed.contains(&paths.gpt_ini_backup));
     assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
     assert_eq!(outcome.service_key_removed, Some(paths.service.clone()));
-    // Restored policy keeps the unrelated startup entry and drops ours.
+    assert!(!disk.boot_task_state().is_registered());
+    // Restored policy keeps the unrelated startup entry and drops ours; the
+    // backup bytes are written verbatim.
     let restored = disk
         .file(&paths.scripts_ini)
         .expect("scripts.ini was restored");
-    let restored_text = String::from_utf8(restored).unwrap();
-    assert!(restored_text.contains("0CmdLine=unrelated.cmd"));
-    assert!(!restored_text.contains(&paths.startup_entry));
+    assert_eq!(
+        restored,
+        b"[Startup]\r\n0CmdLine=unrelated.cmd\r\n0Parameters=\r\n".to_vec(),
+        "restore is byte exact"
+    );
     assert_eq!(
         disk.file(&paths.gpt_ini).unwrap(),
         b"[General]\r\nVersion=65539\r\n".to_vec()
     );
     assert!(disk.file(&paths.startup_script).is_none());
+    assert!(disk.file(&paths.task_file).is_none());
+    assert!(disk.file(&paths.launcher).is_none());
     assert!(
         disk.file(&format!("{GUEST_STARTUP_DIR}\\other.cmd"))
             .is_some()
@@ -1670,6 +1777,8 @@ async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
     assert_eq!(
         removals[0].files,
         vec![
+            paths.task_file.clone(),
+            paths.launcher.clone(),
             paths.startup_script.clone(),
             paths.scripts_ini_backup.clone(),
             paths.gpt_ini_backup.clone(),
@@ -1683,16 +1792,16 @@ async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
         calls,
         [
             "inspect",
+            "remove-boot-task",
             "remove-service",
             "write",
             "remove-paths",
             "remove-paths"
         ]
         .map(str::to_string),
-        "the legacy hive key is removed before any guest path; the provision directory is removed last"
+        "the boot registration is removed first and the provision directory last"
     );
-    // Verification/deletion calls the unrelated directory is not touched, and a
-    // second cleanup run is an idempotent no-op.
+    // A second cleanup run is an idempotent no-op.
     let again = lab
         .clean_guest_leftovers(CleanGuestOptions {
             operation_id: operation,
@@ -1703,6 +1812,7 @@ async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
     assert_eq!(again.files_written, 0);
     assert!(again.files_removed.is_empty());
     assert!(again.directories_removed.is_empty());
+    assert!(!again.boot_task_removed);
     assert!(again.service_key_removed.is_none());
     assert!(
         again
@@ -1713,7 +1823,6 @@ async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
         again.actions
     );
 }
-
 #[tokio::test]
 async fn clean_guest_hive_failure_stops_before_removing_anything_else() {
     let deployment = deployment();
@@ -1742,7 +1851,10 @@ async fn clean_guest_hive_failure_stops_before_removing_anything_else() {
         message.contains("hivexsh: 'del' command should not be given arguments"),
         "{message}"
     );
-    assert!(message.contains("completed: [none]"), "{message}");
+    assert!(
+        message.contains("completed: [remove the fixed scheduled-task boot registration]"),
+        "{message}"
+    );
     for step in [
         "restore the machine startup policy",
         "remove the operation's leftover guest files",
@@ -1755,7 +1867,7 @@ async fn clean_guest_hive_failure_stops_before_removing_anything_else() {
     }
     assert_eq!(
         disk.calls(),
-        ["inspect", "remove-service"].map(str::to_string)
+        ["inspect", "remove-boot-task", "remove-service"].map(str::to_string)
     );
     assert!(disk.directories().contains(&paths.root));
     assert!(disk.file(&paths.startup_script).is_some());
@@ -1780,7 +1892,6 @@ async fn clean_guest_hive_failure_stops_before_removing_anything_else() {
     assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
     assert!(disk.directories().is_empty());
 }
-
 #[tokio::test]
 async fn clean_guest_file_failure_keeps_the_provision_directory() {
     let deployment = deployment();
@@ -1809,7 +1920,14 @@ async fn clean_guest_file_failure_keeps_the_provision_directory() {
     );
     assert_eq!(
         disk.calls(),
-        ["inspect", "remove-service", "write", "remove-paths"].map(str::to_string)
+        [
+            "inspect",
+            "remove-boot-task",
+            "remove-service",
+            "write",
+            "remove-paths"
+        ]
+        .map(str::to_string)
     );
     assert!(disk.directories().contains(&paths.root));
     // The retry only repeats the pending file and directory removals.
@@ -1824,7 +1942,6 @@ async fn clean_guest_file_failure_keeps_the_provision_directory() {
     assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
     assert!(outcome.service_key_removed.is_none());
 }
-
 #[tokio::test]
 async fn clean_guest_without_a_legacy_service_key_is_idempotent() {
     let deployment = deployment();
@@ -1847,10 +1964,18 @@ async fn clean_guest_without_a_legacy_service_key_is_idempotent() {
         "a missing legacy key must not open the SYSTEM hive"
     );
     assert!(outcome.service_key_removed.is_none());
+    assert!(outcome.boot_task_removed);
     assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
     assert_eq!(
         disk.calls(),
-        ["inspect", "write", "remove-paths", "remove-paths"].map(str::to_string)
+        [
+            "inspect",
+            "remove-boot-task",
+            "write",
+            "remove-paths",
+            "remove-paths"
+        ]
+        .map(str::to_string)
     );
     let again = lab
         .clean_guest_leftovers(CleanGuestOptions {
@@ -1869,7 +1994,6 @@ async fn clean_guest_without_a_legacy_service_key_is_idempotent() {
     );
     assert!(disk.service_removals().is_empty());
 }
-
 #[tokio::test]
 async fn clean_guest_without_a_backup_removes_only_the_startup_entry() {
     let deployment = deployment();
@@ -1886,13 +2010,85 @@ async fn clean_guest_without_a_backup_removes_only_the_startup_entry() {
         })
         .await
         .unwrap();
-    assert_eq!(outcome.files_written, 1);
+    assert_eq!(
+        outcome.files_written, 1,
+        "scripts.ini is rewritten in place"
+    );
     let restored = disk.file(&paths.scripts_ini).expect("scripts.ini survives");
     let text = String::from_utf8(restored).unwrap();
     assert!(text.contains("0CmdLine=unrelated.cmd"), "{text}");
     assert!(!text.contains(&paths.startup_entry), "{text}");
+    assert!(outcome.boot_task_removed);
+    assert!(outcome.files_removed.contains(&paths.task_file));
+    assert!(outcome.files_removed.contains(&paths.launcher));
     assert!(outcome.files_removed.contains(&paths.startup_script));
     assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
+}
+
+#[tokio::test]
+async fn clean_guest_deletes_a_cli_created_gpt_ini_for_the_last_operation() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "2".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    // The retired CLI created gpt.ini from nothing: no backup exists and the
+    // document is still exactly the created form, so cleanup may delete it.
+    disk.set_file(&paths.gpt_ini, provision::LEGACY_CREATED_GPT_INI.to_vec());
+    let lab = wired(&deployment, disk.clone(), iso);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert!(outcome.files_removed.contains(&paths.gpt_ini));
+    assert!(disk.file(&paths.gpt_ini).is_none());
+}
+#[tokio::test]
+async fn clean_guest_boot_task_failure_stops_before_removing_guest_paths() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "d".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    seed_leftovers(&disk, &paths, true);
+    disk.fail_boot_task_removal(true);
+    let lab = wired(&deployment, disk.clone(), iso);
+    let error = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation.clone(),
+            dry_run: false,
+        })
+        .await
+        .unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("remove the fixed scheduled-task boot registration"),
+        "{message}"
+    );
+    assert!(message.contains("completed: [none]"), "{message}");
+    assert_eq!(
+        disk.calls(),
+        ["inspect", "remove-boot-task"].map(str::to_string)
+    );
+    assert!(disk.boot_task_state().is_registered());
+    assert!(disk.file(&paths.task_file).is_some());
+    assert!(disk.file(&paths.startup_script).is_some());
+    assert!(disk.directories().contains(&paths.root));
+
+    disk.fail_boot_task_removal(false);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert!(outcome.boot_task_removed);
+    assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
+    assert!(!disk.boot_task_state().is_registered());
 }
 
 #[tokio::test]
@@ -1917,8 +2113,9 @@ async fn clean_guest_dry_run_is_read_only() {
     assert!(!outcome.actions.is_empty());
     assert!(disk.file(&paths.scripts_ini).is_some());
     assert!(disk.file(&paths.startup_script).is_some());
+    assert!(disk.file(&paths.task_file).is_some());
+    assert!(disk.boot_task_state().is_registered());
 }
-
 #[tokio::test]
 async fn clean_guest_never_touches_an_unrelated_legacy_service() {
     let deployment = deployment();
@@ -2129,6 +2326,9 @@ async fn restart_recovery_covers_provisioning_intent() {
         vmx_sha256_after: None,
         hive_sha256_before: None,
         hive_sha256_after: None,
+        injected: Vec::new(),
+        boot_task_sha256: None,
+        launcher_sha256: None,
         scripts_ini_sha256: None,
         gpt_ini_sha256: None,
         identity_file: None,
@@ -2171,4 +2371,36 @@ async fn scheme_two_state_without_provision_fields_still_loads() {
     let status = lab.status().await.unwrap();
     assert_eq!(status["state"]["last_provision"], serde_json::Value::Null);
     assert_eq!(status["state"]["schema"], 2);
+}
+
+#[test]
+fn transient_file_removal_failures_are_retried_with_a_bound() {
+    let mut attempts = 0;
+    retry_bounded(|| {
+        attempts += 1;
+        if attempts < 3 {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        } else {
+            Ok(())
+        }
+    })
+    .unwrap();
+    assert_eq!(attempts, 3, "a transient failure is retried");
+
+    let mut attempts = 0;
+    let error = retry_bounded(|| {
+        attempts += 1;
+        Err::<(), _>(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    })
+    .unwrap_err();
+    assert_eq!(attempts, 5, "retries are bounded");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+
+    let mut attempts = 0;
+    retry_bounded(|| {
+        attempts += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(attempts, 1, "a success is not retried");
 }

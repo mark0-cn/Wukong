@@ -42,12 +42,13 @@ fn guest_paths_are_fixed_and_translate_to_libguestfs() {
         paths.wrapper,
         format!(r"C:\ProgramData\WukongLab\provision\{id}\provision.ps1")
     );
+    assert_eq!(paths.launcher, BOOT_LAUNCHER);
+    assert_eq!(paths.task_file, BOOT_TASK_FILE);
+    assert_eq!(paths.task_guid, BOOT_TASK_GUID);
     assert_eq!(paths.service, format!("WukongLabProvision-{id}"));
-    assert_eq!(
-        paths.startup_entry,
-        format!("wukong-provision-{id}.cmd"),
-        "the machine startup entry is the proven .cmd launcher layout"
-    );
+    // Retired local-GPO locations stay addressable so `clean-guest` can remove
+    // artifacts of earlier attempts.
+    assert_eq!(paths.startup_entry, format!("wukong-provision-{id}.cmd"));
     assert_eq!(
         paths.startup_script,
         format!(
@@ -70,21 +71,26 @@ fn guest_paths_are_fixed_and_translate_to_libguestfs() {
         format!("/ProgramData/WukongLab/provision/{id}/provision-plan.json")
     );
     assert_eq!(
-        GuestPaths::guestfish(&paths.startup_script).unwrap(),
-        format!("/Windows/System32/GroupPolicy/Machine/Scripts/Startup/wukong-provision-{id}.cmd")
+        GuestPaths::guestfish(&paths.launcher).unwrap(),
+        "/ProgramData/WukongLab/provision/launch.ps1"
+    );
+    assert_eq!(
+        GuestPaths::guestfish(&paths.task_file).unwrap(),
+        "/Windows/System32/Tasks/WukongLabProvision"
     );
     assert!(GuestPaths::guestfish(r"D:\outside").is_err());
     assert!(GuestPaths::for_provision("short").is_err());
-    let launcher = String::from_utf8(startup_launcher(&id, &paths.wrapper).unwrap()).unwrap();
-    assert!(launcher.starts_with("@echo off\r\n"));
-    assert!(
-        launcher.contains(&format!(
-            "start \"\" /b \"{POWERSHELL}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{}\"",
-            paths.wrapper
-        )),
-        "{launcher}"
+
+    let launcher = boot_launcher(&id, &paths.wrapper).unwrap();
+    let text = String::from_utf8(launcher.clone()).unwrap();
+    assert!(text.contains(&format!("& '{}'", paths.wrapper)), "{text}");
+    assert!(!text.contains("Startup"));
+    assert_eq!(
+        launcher_operation_id(&launcher).as_deref(),
+        Some(id.as_str())
     );
-    assert!(startup_launcher(&id, r"D:\rogue\provision.ps1").is_err());
+    assert!(boot_launcher(&id, r"D:\rogue\provision.ps1").is_err());
+    assert!(launcher_operation_id(b"no operation identity").is_none());
 }
 
 /// The offline disk adapter converts exactly once, at its boundary. Requests
@@ -95,8 +101,15 @@ fn provision_requests_carry_windows_guest_paths_that_convert_once() {
     let paths = GuestPaths::for_provision(&id).unwrap();
     let inspection = DiskInspectionRequest::for_provision(&paths);
     assert_eq!(inspection.system_hive, GUEST_SYSTEM_HIVE);
+    assert_eq!(inspection.software_hive, GUEST_SOFTWARE_HIVE);
     assert_eq!(inspection.program_data, GUEST_PROGRAM_DATA);
     assert_eq!(inspection.provision_root, GUEST_PROVISION_ROOT);
+    assert_eq!(inspection.tasks_dir, GUEST_TASKS_DIR);
+    assert_eq!(inspection.task_file, paths.task_file);
+    assert_eq!(inspection.launcher, paths.launcher);
+    assert_eq!(inspection.task_cache_root, TASK_CACHE_ROOT);
+    assert_eq!(inspection.task_name, BOOT_TASK_NAME);
+    assert_eq!(inspection.task_guid, BOOT_TASK_GUID);
     assert_eq!(inspection.scripts_ini, GUEST_SCRIPTS_INI);
     assert_eq!(inspection.scripts_ini_backup, paths.scripts_ini_backup);
     assert_eq!(inspection.gpt_ini, GUEST_GPT_INI);
@@ -106,68 +119,33 @@ fn provision_requests_carry_windows_guest_paths_that_convert_once() {
         "/Windows/System32/config/SYSTEM"
     );
     assert_eq!(
-        GuestPaths::guestfish(&inspection.program_data).unwrap(),
-        "/ProgramData"
+        GuestPaths::guestfish(&inspection.software_hive).unwrap(),
+        "/Windows/System32/config/SOFTWARE"
     );
     assert_eq!(
-        GuestPaths::guestfish(&inspection.provision_root).unwrap(),
-        "/ProgramData/WukongLab/provision"
+        GuestPaths::guestfish(&inspection.tasks_dir).unwrap(),
+        "/Windows/System32/Tasks"
+    );
+    assert_eq!(
+        GuestPaths::guestfish(&inspection.launcher).unwrap(),
+        "/ProgramData/WukongLab/provision/launch.ps1"
     );
     assert_eq!(
         GuestPaths::guestfish(GUEST_SYSTEM_CONFIG).unwrap(),
         "/Windows/System32/config"
     );
 
-    // Observation and legacy service removal requests reach the adapter exactly
-    // like the inspection request: every guest path is absolute `C:\` form.
-    let removal = ServiceRemoval {
-        system_hive: GUEST_SYSTEM_HIVE.into(),
-        service: paths.service.clone(),
-    };
-    assert_eq!(
-        GuestPaths::guestfish(&removal.system_hive).unwrap(),
-        "/Windows/System32/config/SYSTEM"
-    );
     let observation = GuestObservationRequest::for_provision(&paths);
-    for (windows, guest) in [
-        (
-            observation.wrapper.clone(),
-            format!("/ProgramData/WukongLab/provision/{id}/provision.ps1"),
-        ),
-        (
-            observation.plan.clone(),
-            format!("/ProgramData/WukongLab/provision/{id}/provision-plan.json"),
-        ),
-        (
-            observation.receipt.clone(),
-            format!("/ProgramData/WukongLab/provision/{id}/receipt.json"),
-        ),
-        (
-            observation.startup_script.clone(),
-            format!(
-                "/Windows/System32/GroupPolicy/Machine/Scripts/Startup/wukong-provision-{id}.cmd"
-            ),
-        ),
-        (
-            observation.scripts_ini.clone(),
-            "/Windows/System32/GroupPolicy/Machine/Scripts/scripts.ini".to_owned(),
-        ),
-        (
-            observation.scripts_ini_backup.clone(),
-            format!(
-                "/Windows/System32/GroupPolicy/Machine/Scripts/scripts.ini.wukong-lab-{id}.bak"
-            ),
-        ),
-        (
-            observation.gpt_ini_backup.clone(),
-            format!("/Windows/System32/GroupPolicy/gpt.ini.wukong-lab-{id}.bak"),
-        ),
-    ] {
-        assert_eq!(GuestPaths::guestfish(&windows).unwrap(), guest);
-        assert_eq!(GuestPaths::windows(&guest).unwrap(), windows);
-    }
+    assert_eq!(observation.launcher, BOOT_LAUNCHER);
+    assert_eq!(observation.task_file, BOOT_TASK_FILE);
+    assert_eq!(observation.software_hive, GUEST_SOFTWARE_HIVE);
+    assert_eq!(observation.task_name, BOOT_TASK_NAME);
+    assert_eq!(observation.task_guid, BOOT_TASK_GUID);
+    assert_eq!(
+        GuestPaths::guestfish(&observation.task_file).unwrap(),
+        "/Windows/System32/Tasks/WukongLabProvision"
+    );
 }
-
 #[test]
 fn guest_path_conversion_matrix_round_trips_and_rejects_escapes() {
     for windows in [
@@ -247,90 +225,176 @@ fn guest_path_conversion_matrix_round_trips_and_rejects_escapes() {
     }
 }
 
-#[test]
-fn machine_startup_policy_injection_preserves_existing_content() {
-    let paths = GuestPaths::for_provision(&"b".repeat(32)).unwrap();
-    let entry = paths.startup_entry.clone();
-    // A fresh guest has no scripts.ini: create a minimal ASCII [Startup] section.
-    let fresh = inject_startup_script(None, &entry).unwrap();
-    let fresh_text = String::from_utf8(fresh.clone()).unwrap();
-    assert_eq!(
-        fresh_text,
-        format!("[Startup]\r\n0CmdLine={entry}\r\n0Parameters=\r\n")
-    );
-    assert_eq!(
-        startup_command_lines(&fresh).unwrap(),
-        vec![entry.clone()],
-        "the injected entry is readable again"
-    );
-
-    // The recovered working layout was ANSI `[Startup] 0CmdLine=...`; unrelated
-    // entries and sections are preserved and our entry uses the next index.
-    let existing = b"[Startup]\r\n0CmdLine=enable-admin.cmd\r\n0Parameters=\r\n\r\n[Shutdown]\r\n0CmdLine=cleanup.cmd\r\n0Parameters=\r\n";
-    let injected = inject_startup_script(Some(existing), &entry).unwrap();
-    let text = String::from_utf8(injected.clone()).unwrap();
-    assert!(text.contains("0CmdLine=enable-admin.cmd\r\n0Parameters=\r\n"));
-    assert!(text.contains(&format!("1CmdLine={entry}\r\n1Parameters=\r\n")));
-    assert!(text.contains("[Shutdown]\r\n0CmdLine=cleanup.cmd\r\n0Parameters=\r\n"));
-    assert_eq!(
-        startup_command_lines(&injected).unwrap(),
-        vec!["enable-admin.cmd".to_owned(), entry.clone()]
-    );
-
-    // UTF-16LE policy files keep their encoding and BOM.
-    let mut utf16 = vec![0xff, 0xfe];
-    utf16.extend(
-        "[Startup]\r\n0CmdLine=enable-admin.cmd\r\n0Parameters=\r\n"
-            .encode_utf16()
-            .flat_map(u16::to_le_bytes),
-    );
-    let injected = inject_startup_script(Some(&utf16), &entry).unwrap();
-    assert_eq!(&injected[..2], &[0xff, 0xfe]);
-    assert!(startup_command_lines(&injected).unwrap().contains(&entry));
-
-    // An already-injected provisioning entry is refused instead of stacked.
-    assert!(inject_startup_script(Some(&injected), &entry).is_err());
-    // Unsupported encodings and malformed entries fail closed.
-    assert!(inject_startup_script(Some(&[0xff, 0x00, 0x01]), &entry).is_err());
-    assert!(inject_startup_script(None, "wukong-provision-short.cmd").is_err());
-
-    // Removal restores a pre-existing unrelated startup entry and drops the
-    // [Startup] section only when this entry was the only content. The UTF-16LE
-    // encoding of the removed document is preserved.
-    let removed = remove_startup_script(&injected, &entry).unwrap().unwrap();
-    assert_eq!(&removed[..2], &[0xff, 0xfe]);
-    let entries = startup_command_lines(&removed).unwrap();
-    assert_eq!(entries, vec!["enable-admin.cmd".to_owned()]);
-    assert!(remove_startup_script(&fresh, &entry).unwrap().is_none());
+/// Encode a parsed TaskCache value exactly as `hivexsh lsval` prints it.
+fn hivexsh_encoded(value: &TaskCacheValue) -> String {
+    match value {
+        TaskCacheValue::String(text) => format!("\"{}\"", text.replace('\\', "\\\\")),
+        TaskCacheValue::Dword(number) => format!("dword:{number:08x}"),
+        TaskCacheValue::Binary(bytes) => format!(
+            "hex(3):{}",
+            bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+    }
 }
 
 #[test]
-fn local_gpo_version_bump_preserves_the_user_half() {
-    let created = bump_gpt_version(None).unwrap();
+fn canonical_boot_task_fixtures_are_pinned_and_complete() {
+    validate_boot_task_fixture().unwrap();
+    assert_eq!(BOOT_TASK_XML.len(), 3160);
+    assert_eq!(BOOT_TASK_TREE_SD.len(), 124);
+    assert_eq!(BOOT_TASK_HASH.len(), 32);
+    assert_eq!(BOOT_TASK_TRIGGERS.len(), 288);
+    assert_eq!(BOOT_TASK_ACTIONS.len(), 400);
+    assert_eq!(BOOT_TASK_DYNAMIC_INFO.len(), 36);
+    assert_eq!(sha256(BOOT_TASK_XML), BOOT_TASK_XML_SHA256);
+    assert_eq!(sha256(BOOT_TASK_TREE_SD), BOOT_TASK_TREE_SD_SHA256);
+    assert_eq!(sha256(BOOT_TASK_HASH), BOOT_TASK_HASH_SHA256);
+    assert_eq!(sha256(BOOT_TASK_TRIGGERS), BOOT_TASK_TRIGGERS_SHA256);
+    assert_eq!(sha256(BOOT_TASK_ACTIONS), BOOT_TASK_ACTIONS_SHA256);
     assert_eq!(
-        String::from_utf8(created).unwrap(),
-        "[General]\r\nVersion=1\r\n"
+        sha256(BOOT_TASK_DYNAMIC_INFO),
+        BOOT_TASK_DYNAMIC_INFO_SHA256
     );
-    // 65539 is 0x00010003: user version 1, computer version 3.
-    let bumped = bump_gpt_version(Some(
-        b"[General]\r\nVersion=65539\r\ngPCMachineExtensionNames=x\r\n",
-    ))
-    .unwrap();
-    let text = String::from_utf8(bumped).unwrap();
-    assert!(text.contains("Version=65540\r\n"), "{text}");
-    assert!(text.contains("gPCMachineExtensionNames=x\r\n"), "{text}");
 
-    // No [General] section and no Version: the section is appended, not guessed.
-    let appended =
-        String::from_utf8(bump_gpt_version(Some(b"[Other]\r\nA=1\r\n")).unwrap()).unwrap();
-    assert!(appended.contains("[General]\r\nVersion=1\r\n"));
-    assert!(appended.contains("[Other]\r\nA=1\r\n"));
-    assert!(bump_gpt_version(Some(b"[General]\r\nVersion=nope\r\n")).is_err());
+    let body = &BOOT_TASK_XML[2..];
+    let units = body
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    let text = String::from_utf16(&units).unwrap();
+    for needle in [
+        "<BootTrigger>",
+        "<UserId>S-1-5-18</UserId>",
+        "<Delay>PT1M</Delay>",
+        "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+        "WukongLabProvision",
+        BOOT_LAUNCHER,
+    ] {
+        assert!(
+            text.contains(needle),
+            "canonical boot task file lost {needle}"
+        );
+    }
+    assert!(!text.contains("GroupPolicy"));
+    assert!(!text.contains("scripts.ini"));
+
+    let injection = boot_task_injection().unwrap();
+    assert_eq!(injection.file.windows_path, BOOT_TASK_FILE);
+    assert_eq!(injection.file.bytes, BOOT_TASK_XML);
+    assert_eq!(injection.file.sha256, BOOT_TASK_XML_SHA256);
+    assert_eq!(injection.registry.guid, BOOT_TASK_GUID);
+    assert_eq!(injection.registry.tree_name, BOOT_TASK_NAME);
+    assert_eq!(injection.registry.index, 1);
+    assert_eq!(injection.registry.values.len(), 8);
+    assert_eq!(injection.registry.expected_tree_values().len(), 3);
+    // Only well-known SIDs may appear in the security descriptor; it is
+    // machine independent so it can be replayed into any guest.
+    assert!(BOOT_TASK_TREE_SD.starts_with(&[0x01, 0x00, 0x04]));
 }
 
-/// The `hivexsh` command subset the service-key script must stay inside:
-/// exactly `cd <service key>`, a bare `del` (hivexsh rejects arguments), then
-/// `commit` and `quit`. Returns the key the script deletes.
+#[test]
+fn boot_task_hive_scripts_create_and_remove_only_the_fixed_registration() {
+    let registry = boot_task_registry();
+    let write = registry.write_script();
+    assert!(write.contains(&format!("add {BOOT_TASK_NAME}")));
+    assert!(write.contains(&format!("add {BOOT_TASK_GUID}")));
+    assert!(write.contains(&format!("string:{BOOT_TASK_GUID}")));
+    assert!(write.contains("dword:0x00010002"));
+    assert!(write.contains("string:\\WukongLabProvision"));
+    assert!(write.contains(&format!("string:{BOOT_TASK_SDDL}")));
+    assert!(write.ends_with("commit\n"));
+    assert!(write.contains("cd \\Microsoft\\Windows NT\\CurrentVersion\\Schedule\\TaskCache"));
+    // Every binary literal in the script must decode to the pinned fixture bytes.
+    let hive_write_literal = |bytes: &[u8]| {
+        format!(
+            "hex:3:{}",
+            bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    for (name, value) in &registry.values {
+        if let TaskCacheValue::Binary(bytes) = value {
+            let literal = hive_write_literal(bytes);
+            assert!(
+                write.contains(&format!("{name}\n{literal}")),
+                "{name} literal missing"
+            );
+        }
+    }
+    assert!(write.contains(&format!("SD\n{}", hive_write_literal(BOOT_TASK_TREE_SD))));
+
+    let verify = registry.verify_script();
+    assert!(verify.contains(&registry.tree_path()));
+    assert!(verify.contains(&registry.tasks_path()));
+    assert_eq!(registry.remove_script(false, false, false), None);
+    let remove = registry.remove_script(true, true, true).unwrap();
+    for path in [
+        registry.tree_path(),
+        registry.tasks_path(),
+        registry.boot_path(),
+    ] {
+        assert!(remove.contains(&format!("cd {path}\ndel\n")), "{remove}");
+    }
+    assert!(remove.ends_with("commit\n"));
+    let boot_only = registry.remove_script(false, false, true).unwrap();
+    assert_eq!(
+        boot_only,
+        format!("cd {}\ndel\ncommit\n", registry.boot_path())
+    );
+}
+
+#[test]
+fn task_cache_values_parse_and_reject_tampering() {
+    let registry = boot_task_registry();
+    let mut canonical = String::new();
+    for (name, value) in registry
+        .expected_tree_values()
+        .iter()
+        .chain(registry.values.iter())
+    {
+        canonical.push_str(&format!("\"{name}\"={}\n", hivexsh_encoded(value)));
+    }
+    verify_boot_task_values(&canonical).unwrap();
+    let mut tampered = canonical.clone();
+    tampered.push_str("\"Extra\"=dword:00000001\n");
+    assert!(verify_boot_task_values(&tampered).is_err());
+    let tampered = canonical.replace("dword:00010002", "dword:00010003");
+    assert!(verify_boot_task_values(&tampered).is_err());
+    let tampered = canonical.replace("D:P(A;;FA;;;BA)", "D:(A;;FA;;;BA)");
+    assert!(verify_boot_task_values(&tampered).is_err());
+
+    let parsed =
+        parse_task_cache_values("\"Path\"=\"\\\\WukongLabProvision\"\n\"Index\"=dword:00000001\n")
+            .unwrap();
+    assert_eq!(
+        parsed[0].1,
+        TaskCacheValue::String(r"\WukongLabProvision".into())
+    );
+    assert_eq!(parsed[1].1, TaskCacheValue::Dword(1));
+    assert!(parse_task_cache_values("not a value line").is_err());
+    assert!(parse_task_cache_values("\"Hash\"=hex(3):zz").is_err());
+}
+
+#[test]
+fn boot_task_cache_state_detects_partial_and_complete_registrations() {
+    let tree = vec![BOOT_TASK_NAME.to_string()];
+    let tasks = vec![BOOT_TASK_GUID.to_string()];
+    let boot = vec![BOOT_TASK_GUID.to_string()];
+    let complete = boot_task_cache_state(&tree, &tasks, &boot);
+    assert!(complete.is_registered() && complete.is_complete());
+    let partial = boot_task_cache_state(&tree, &[], &[]);
+    assert!(partial.is_registered() && !partial.is_complete());
+    assert!(!boot_task_cache_state(&[], &[], &[]).is_registered());
+    // The registry compares task names case-insensitively.
+    assert!(boot_task_cache_state(&["wukonglabprovision".into()], &[], &[]).tree);
+}
 fn hivexsh_deleted_key(script: &str) -> Option<&str> {
     let lines: Vec<&str> = script.lines().collect();
     let [cd, del, commit, quit] = lines.as_slice() else {
@@ -372,110 +436,171 @@ fn legacy_service_removal_uses_the_bare_hivexsh_del_form() {
     assert!(validate_service_name("bad name").is_err());
 }
 
-#[test]
-fn cleanup_plan_removes_only_the_named_operation() {
-    let paths = GuestPaths::for_provision(&"c".repeat(32)).unwrap();
-    let other = "d".repeat(32);
-    let mut policy = GuestPolicyFiles {
-        scripts_ini: Some(
-            format!(
-                "[Startup]\r\n0CmdLine=other.cmd\r\n0Parameters=\r\n1CmdLine={}\r\n1Parameters=\r\n",
-                paths.startup_entry
-            )
-            .into_bytes(),
-        ),
-        startup_command_lines: vec!["other.cmd".into(), paths.startup_entry.clone()],
-        startup_directory_entries: vec![paths.startup_entry.clone()],
-        ..Default::default()
-    };
-    let inspection = DiskInspection {
+fn cleanup_inspection(_paths: &GuestPaths) -> DiskInspection {
+    DiskInspection {
         windows_volume: true,
         system_hive_present: true,
+        software_hive_present: true,
         program_data_present: true,
         control_set: Some(1),
-        existing_service: Some(paths.service.clone()),
-        provision_root_entries: vec![paths.provision_id().to_owned(), other.clone()],
-        policy: policy.clone(),
-    };
-    let plan = plan_guest_cleanup(&paths, &inspection).unwrap();
-    assert_eq!(plan.files.len(), 1, "scripts.ini is rewritten in place");
-    let rewritten = String::from_utf8(plan.files[0].bytes.clone()).unwrap();
-    assert!(rewritten.contains("0CmdLine=other.cmd"));
-    assert!(!rewritten.contains(&paths.startup_entry));
-    assert_eq!(plan.files_to_remove, vec![paths.startup_script.clone()]);
-    assert_eq!(plan.directories_to_remove, vec![paths.root.clone()]);
-    assert_eq!(plan.service_key, Some(paths.service.clone()));
-    assert!(
-        !plan.actions.iter().any(|action| action.contains(&other)),
-        "unrelated operation ids are never named: {plan:?}"
-    );
-
-    // A backup (when the previous scripts.ini existed) is restored verbatim and
-    // both backup files are removed.
-    policy.scripts_ini = Some(b"[Startup]\r\n0CmdLine=other.cmd\r\n0Parameters=\r\n".to_vec());
-    policy.scripts_ini_backup = Some(b"previous scripts.ini".to_vec());
-    policy.gpt_ini_backup = Some(b"previous gpt.ini".to_vec());
-    let inspection = DiskInspection {
         existing_service: None,
         provision_root_entries: Vec::new(),
-        policy,
-        ..inspection
-    };
-    let plan = plan_guest_cleanup(&paths, &inspection).unwrap();
-    assert_eq!(plan.files.len(), 2);
-    assert!(plan.files.iter().any(
-        |file| file.windows_path == paths.scripts_ini && file.bytes == b"previous scripts.ini"
-    ));
-    assert!(
-        plan.files
-            .iter()
-            .any(|file| file.windows_path == paths.gpt_ini && file.bytes == b"previous gpt.ini")
+        task_file_present: false,
+        boot_task: BootTaskCacheState::default(),
+        launcher: None,
+        policy: GuestPolicyFiles::default(),
+    }
+}
+
+#[test]
+fn cleanup_plan_restores_policy_byte_exactly_and_removes_created_task_artifacts() {
+    let paths = GuestPaths::for_provision(&"c".repeat(32)).unwrap();
+    // The recovered backup was 53 bytes; any restore must reproduce these exact
+    // bytes and must never append a newline.
+    let original_scripts = b"[Startup]\r\n0CmdLine=enable-admin.cmd\r\n0Parameters=\r\n".to_vec();
+    assert_eq!(original_scripts.len(), 52);
+    let injected_scripts = format!(
+        "[Startup]\r\n0CmdLine=enable-admin.cmd\r\n0Parameters=\r\n1CmdLine={}\r\n1Parameters=\r\n",
+        paths.startup_entry
+    )
+    .into_bytes();
+    let mut inspection = cleanup_inspection(&paths);
+    inspection.policy.scripts_ini = Some(injected_scripts);
+    inspection.policy.scripts_ini_backup = Some(original_scripts.clone());
+    inspection.policy.startup_command_lines =
+        vec!["enable-admin.cmd".into(), paths.startup_entry.clone()];
+    inspection.policy.startup_directory_entries = vec![paths.startup_entry.clone()];
+    inspection.policy.gpt_ini = Some(b"[General]\r\nVersion=65539\r\n".to_vec());
+    inspection.policy.gpt_ini_backup = Some(b"previous gpt.ini".to_vec());
+    inspection.policy.group_policy_entries =
+        vec![format!("gpt.ini.wukong-lab-{}.bak", paths.provision_id())];
+    let plan = plan_guest_cleanup(&paths, &inspection, true).unwrap();
+    let restored = plan
+        .files
+        .iter()
+        .find(|file| file.windows_path == paths.scripts_ini)
+        .expect("scripts.ini is restored");
+    assert_eq!(
+        restored.bytes, original_scripts,
+        "the previous bytes are written verbatim, with no added newline"
     );
+    assert_ne!(
+        restored.bytes.len(),
+        b"[Startup]\r\n0CmdLine=enable-admin.cmd\r\n0Parameters=\r\n\n".len(),
+        "restore must not append a newline"
+    );
+    let restored_gpt = plan
+        .files
+        .iter()
+        .find(|file| file.windows_path == paths.gpt_ini)
+        .expect("gpt.ini is restored");
+    assert_eq!(restored_gpt.bytes, b"previous gpt.ini");
     assert!(plan.files_to_remove.contains(&paths.scripts_ini_backup));
     assert!(plan.files_to_remove.contains(&paths.gpt_ini_backup));
-    assert!(plan.directories_to_remove.is_empty());
-    assert!(plan.service_key.is_none());
+    assert!(plan.files_to_remove.contains(&paths.startup_script));
+    assert!(
+        plan.actions
+            .iter()
+            .any(|action| action.contains("verbatim"))
+    );
 
-    // A pristine disk produces no actions at all (idempotent cleanup).
-    let pristine = DiskInspection {
-        policy: GuestPolicyFiles::default(),
-        existing_service: None,
-        provision_root_entries: Vec::new(),
-        ..inspection
+    // The fixed scheduled-task artifacts are removed as part of the same plan.
+    inspection.boot_task = BootTaskCacheState {
+        tree: true,
+        tasks: true,
+        boot: true,
     };
-    assert!(plan_guest_cleanup(&paths, &pristine).unwrap().is_empty());
+    inspection.task_file_present = true;
+    inspection.launcher = Some(boot_launcher(paths.provision_id(), &paths.wrapper).unwrap());
+    inspection.existing_service = Some(paths.service.clone());
+    inspection.provision_root_entries = vec![paths.provision_id().into()];
+    let plan = plan_guest_cleanup(&paths, &inspection, true).unwrap();
+    assert!(plan.boot_task);
+    assert!(plan.files_to_remove.contains(&paths.task_file));
+    assert!(plan.files_to_remove.contains(&paths.launcher));
+    assert!(plan.directories_to_remove.contains(&paths.root));
+    assert_eq!(plan.service_key.as_deref(), Some(paths.service.as_str()));
+    let boot_action = plan
+        .actions
+        .iter()
+        .position(|action| action.contains("scheduled-task registration"))
+        .unwrap();
+    let launcher_action = plan
+        .actions
+        .iter()
+        .position(|action| action.contains("boot launcher"))
+        .unwrap();
+    assert!(boot_action < launcher_action);
+}
+
+#[test]
+fn cleanup_plan_deletes_a_cli_created_gpt_ini_only_for_the_last_operation() {
+    let paths = GuestPaths::for_provision(&"f".repeat(32)).unwrap();
+    let mut inspection = cleanup_inspection(&paths);
+    inspection.policy.gpt_ini = Some(LEGACY_CREATED_GPT_INI.to_vec());
+    let plan = plan_guest_cleanup(&paths, &inspection, true).unwrap();
+    assert!(plan.files_to_remove.contains(&paths.gpt_ini));
+    assert!(
+        plan.actions
+            .iter()
+            .any(|action| action.contains("CLI-created"))
+    );
+    let plan = plan_guest_cleanup(&paths, &inspection, false).unwrap();
+    assert!(
+        !plan.files_to_remove.contains(&paths.gpt_ini),
+        "a created gpt.ini is only attributable to the last recorded operation"
+    );
+    inspection.policy.gpt_ini = Some(b"[General]\r\nVersion=65537\r\n".to_vec());
+    let plan = plan_guest_cleanup(&paths, &inspection, true).unwrap();
+    assert!(
+        !plan.files_to_remove.contains(&paths.gpt_ini),
+        "only the exact created document may be deleted"
+    );
+}
+
+#[test]
+fn cleanup_plan_leaves_another_operations_boot_task_artifacts_alone() {
+    let paths = GuestPaths::for_provision(&"c".repeat(32)).unwrap();
+    let other = "d".repeat(32);
+    let other_wrapper = format!(r"{GUEST_PROVISION_ROOT}\{other}\provision.ps1");
+    let mut inspection = cleanup_inspection(&paths);
+    inspection.boot_task = BootTaskCacheState {
+        tree: true,
+        tasks: true,
+        boot: true,
+    };
+    inspection.task_file_present = true;
+    inspection.launcher = Some(boot_launcher(&other, &other_wrapper).unwrap());
+    inspection.provision_root_entries = vec![other];
+    let plan = plan_guest_cleanup(&paths, &inspection, true).unwrap();
+    assert!(!plan.boot_task);
+    assert!(!plan.files_to_remove.contains(&paths.task_file));
+    assert!(!plan.files_to_remove.contains(&paths.launcher));
+    assert!(plan.is_empty());
 }
 
 #[test]
 fn leftover_detection_covers_every_injected_artifact() {
-    let id = "f".repeat(32);
-    let policy = GuestPolicyFiles {
-        startup_command_lines: vec![format!("wukong-provision-{id}.cmd")],
-        startup_directory_entries: vec![format!("wukong-provision-{id}.cmd")],
-        scripts_directory_entries: vec![format!("scripts.ini.wukong-lab-{id}.bak")],
-        group_policy_entries: vec![format!("gpt.ini.wukong-lab-{id}.bak")],
-        ..Default::default()
+    let paths = GuestPaths::for_provision(&"c".repeat(32)).unwrap();
+    let mut inspection = cleanup_inspection(&paths);
+    assert!(inspection.leftover_operation_ids().is_empty());
+    assert!(!inspection.has_boot_task_leftovers());
+    inspection.task_file_present = true;
+    assert!(inspection.has_boot_task_leftovers());
+    inspection.boot_task = BootTaskCacheState {
+        tree: true,
+        tasks: true,
+        boot: true,
     };
-    assert_eq!(policy.leftover_operation_ids(), vec![id.clone()]);
-    let inspection = DiskInspection {
-        windows_volume: true,
-        system_hive_present: true,
-        program_data_present: true,
-        control_set: Some(1),
-        existing_service: Some(format!("WukongLabProvision-{id}")),
-        provision_root_entries: vec![id.clone()],
-        policy: GuestPolicyFiles::default(),
-    };
-    assert_eq!(inspection.leftover_operation_ids(), vec![id.clone()]);
-    let pristine = DiskInspection {
-        existing_service: None,
-        provision_root_entries: Vec::new(),
-        policy: GuestPolicyFiles::default(),
-        ..inspection
-    };
-    assert!(pristine.leftover_operation_ids().is_empty());
+    inspection.launcher = Some(boot_launcher(paths.provision_id(), &paths.wrapper).unwrap());
+    inspection.existing_service = Some(paths.service.clone());
+    inspection.provision_root_entries = vec![paths.provision_id().into()];
+    inspection.policy.startup_command_lines = vec![paths.startup_entry.clone()];
+    inspection.policy.group_policy_entries =
+        vec![format!("gpt.ini.wukong-lab-{}.bak", paths.provision_id())];
+    let ids = inspection.leftover_operation_ids();
+    assert_eq!(ids, vec![paths.provision_id().to_owned()]);
 }
-
 #[test]
 fn guest_disk_is_resolved_from_the_registered_vmx() {
     let directory = tempfile::tempdir().unwrap();
@@ -622,72 +747,105 @@ fn finalize_spec_validation_matches_the_media_contract() {
 }
 
 #[test]
-fn guest_receipt_binds_media_identity_and_cleanup() {
-    let fixture = fixture::media();
+fn guest_receipt_binds_media_identity_and_scheduled_task_cleanup() {
+    let media = fixture::media();
     let provision_id = "b".repeat(32);
-    let receipt = fixture::guest_receipt(&provision_id, &fixture.connection);
     let expectation = ReceiptExpectation {
         provision_id: provision_id.clone(),
-        media: fixture.identity.clone(),
+        media: media.identity.clone(),
     };
+    let receipt = fixture::guest_receipt(&provision_id, &media.connection);
     let connection = verify_guest_receipt(&receipt, &expectation).unwrap();
-    assert_eq!(connection, fixture.connection);
+    assert_eq!(connection, media.connection);
 
-    let mut tampered: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
-    tampered["provision_id"] = serde_json::json!("c".repeat(32));
-    assert!(verify_guest_receipt(&serde_json::to_vec(&tampered).unwrap(), &expectation).is_err());
-
-    let mut tampered: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
-    tampered["connection"]["installation_id"] = serde_json::json!("0".repeat(32));
-    assert!(verify_guest_receipt(&serde_json::to_vec(&tampered).unwrap(), &expectation).is_err());
-
-    let mut tampered: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
-    tampered["connection"]["host_fingerprint"] = serde_json::json!("SHA256:wrong");
-    assert!(verify_guest_receipt(&serde_json::to_vec(&tampered).unwrap(), &expectation).is_err());
-
-    let mut tampered: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
-    tampered["cleanup_scheduled"] = serde_json::json!(false);
-    assert!(verify_guest_receipt(&serde_json::to_vec(&tampered).unwrap(), &expectation).is_err());
-
-    let mut tampered: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
-    tampered["startup_cleanup"] = serde_json::json!("failed:busy");
-    assert!(verify_guest_receipt(&serde_json::to_vec(&tampered).unwrap(), &expectation).is_err());
-
-    let mut tampered: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
-    tampered["startup_script_deleted"] = serde_json::json!(false);
-    assert!(verify_guest_receipt(&serde_json::to_vec(&tampered).unwrap(), &expectation).is_err());
-
-    let mut tampered: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
-    tampered["exit_code"] = serde_json::json!(5);
-    assert!(verify_guest_receipt(&serde_json::to_vec(&tampered).unwrap(), &expectation).is_err());
-
-    assert!(verify_guest_receipt(&vec![b'x'; 1024 * 1024 + 1], &expectation).is_err());
+    for field in ["boot_task_removed", "launcher_deleted", "cleanup_scheduled"] {
+        let mut value: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+        value[field] = serde_json::json!(false);
+        let error =
+            verify_guest_receipt(&serde_json::to_vec(&value).unwrap(), &expectation).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("scheduled")
+                || format!("{error:#}").contains("launcher")
+                || format!("{error:#}").contains("cleanup"),
+            "{error:#}"
+        );
+    }
+    let mut value: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+    value["installed"] = serde_json::json!(false);
+    assert!(verify_guest_receipt(&serde_json::to_vec(&value).unwrap(), &expectation).is_err());
+    let mut value: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+    value["error"] = serde_json::json!("media missing");
+    assert!(verify_guest_receipt(&serde_json::to_vec(&value).unwrap(), &expectation).is_err());
+    let mut value: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+    value["connection"] = serde_json::Value::Null;
+    assert!(verify_guest_receipt(&serde_json::to_vec(&value).unwrap(), &expectation).is_err());
+    let mut value: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+    value["provision_id"] = serde_json::json!("c".repeat(32));
+    assert!(verify_guest_receipt(&serde_json::to_vec(&value).unwrap(), &expectation).is_err());
 }
 
 #[test]
 fn provision_plan_exposes_only_verified_identities() {
-    let fixture = fixture::media();
-    let paths = GuestPaths::for_provision(&"d".repeat(32)).unwrap();
-    let plan = provision_plan(&"d".repeat(32), &fixture.identity, &paths).unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&plan).unwrap();
-    assert_eq!(value["schema"], 2);
-    assert_eq!(value["installation_id"], fixture.identity.installation_id);
-    assert_eq!(value["manifest_sha256"], fixture.identity.manifest_sha256);
-    assert_eq!(value["media_label"], MEDIA_LABEL);
-    assert_eq!(value["startup_script"], paths.startup_script);
-    assert_eq!(value["scripts_ini"], GUEST_SCRIPTS_INI);
-    assert_eq!(value["scripts_ini_backup"], paths.scripts_ini_backup);
-    assert_eq!(value["gpt_ini"], GUEST_GPT_INI);
-    assert_eq!(value["gpt_ini_backup"], paths.gpt_ini_backup);
-    assert!(value.get("service_name").is_none());
-    assert!(PROVISION_WRAPPER.contains("install-reviewed"));
-    assert!(PROVISION_WRAPPER.contains("Get-FileHash"));
-    assert!(PROVISION_WRAPPER.contains("startup_cleanup"));
-    assert!(PROVISION_WRAPPER.contains("Remove-StartupEntry"));
-    assert!(PROVISION_WRAPPER.contains("shutdown.exe /s /t 10 /f"));
-    assert!(!PROVISION_WRAPPER.contains("REPLACE"));
+    let media = fixture::media();
+    let provision_id = "b".repeat(32);
+    let paths = GuestPaths::for_provision(&provision_id).unwrap();
+    let plan: serde_json::Value =
+        serde_json::from_slice(&provision_plan(&provision_id, &media.identity, &paths).unwrap())
+            .unwrap();
+    assert_eq!(plan["schema"], 3);
+    assert_eq!(plan["provision_id"], provision_id);
+    assert_eq!(plan["installation_id"], media.identity.installation_id);
+    assert_eq!(plan["launcher"], BOOT_LAUNCHER);
+    assert_eq!(plan["task_file"], BOOT_TASK_FILE);
+    assert_eq!(plan["task_name"], BOOT_TASK_NAME);
+    assert_eq!(plan["task_guid"], BOOT_TASK_GUID);
+    for legacy in [
+        "scripts_ini",
+        "gpt_ini",
+        "startup_script",
+        "scripts_ini_backup",
+    ] {
+        assert!(
+            plan.get(legacy).is_none(),
+            "legacy plan field {legacy} remained"
+        );
+    }
 }
 
+#[test]
+fn wrapper_removes_the_boot_task_and_launcher_before_shutdown() {
+    let wrapper = PROVISION_WRAPPER;
+    let receipt = wrapper
+        .find("# Record the installation outcome")
+        .expect("wrapper writes the receipt before cleanup");
+    let delete = wrapper
+        .find("# Unregister the boot trigger")
+        .expect("wrapper unregisters the boot task first");
+    let launcher = wrapper
+        .find("# Delete the fixed per-operation boot launcher")
+        .expect("wrapper removes the launcher");
+    let shutdown = wrapper
+        .find("shutdown.exe /s")
+        .expect("wrapper always shuts down");
+    assert!(
+        receipt < delete,
+        "the receipt is written before the boot task is removed"
+    );
+    assert!(delete < shutdown, "cleanup runs before shutdown");
+    assert!(
+        launcher < shutdown,
+        "the launcher is removed before shutdown"
+    );
+    assert!(wrapper.contains("boot_task_removed"));
+    assert!(wrapper.contains("launcher_deleted"));
+    assert!(wrapper.contains("Remove-BootTask"));
+    // The retired mechanisms must not reappear in the guest wrapper.
+    assert!(!wrapper.contains("scripts.ini"));
+    assert!(!wrapper.contains("gpt.ini"));
+    assert!(!wrapper.contains("GroupPolicy"));
+    assert!(!wrapper.contains("Startup\\"));
+    assert!(!wrapper.contains("New-Service") && !wrapper.contains("sc.exe create"));
+}
 #[test]
 fn host_key_pin_path_is_derived_from_the_installation() {
     let fixture = fixture::media();

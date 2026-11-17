@@ -195,6 +195,11 @@ pub struct InjectedFile {
     pub guest_path: String,
     pub sha256: String,
     pub size: u64,
+    /// The file already existed on the guest and was preserved (its previous
+    /// bytes are backed up) rather than created by this operation. Guest cleanup
+    /// restores preserved files and deletes created ones.
+    #[serde(default)]
+    pub preexisting: bool,
 }
 
 /// Durable provision intent persisted before the first offline mutation. It is
@@ -242,17 +247,33 @@ pub struct LabProvision {
     pub iso_size: Option<u64>,
     pub vmx_sha256_before: Option<String>,
     pub vmx_sha256_after: Option<String>,
-    /// Legacy evidence from the earlier SYSTEM-hive one-shot service mechanism.
-    /// New provisioning never writes a service; these stay `None` and are kept
-    /// only so laboratory state written by that version still loads.
+    /// SHA-256 of the guest `SOFTWARE` hive before and after the offline
+    /// scheduled-task registration edit.
     #[serde(default)]
     pub hive_sha256_before: Option<String>,
     #[serde(default)]
     pub hive_sha256_after: Option<String>,
-    /// SHA-256 of the injected machine `scripts.ini` (startup entry included).
+    /// Guest files written by this operation, with the origin of each one.
+    /// `preexisting: true` means the guest file was preserved (its previous
+    /// bytes were backed up) and must be restored; `false` means the operation
+    /// created it and cleanup deletes it. This is the durable created-versus-
+    /// preserved record used by `lab clean-guest` after the pending intent is
+    /// resolved.
+    #[serde(default)]
+    pub injected: Vec<InjectedFile>,
+    /// SHA-256 of the fixed scheduled-task XML file injected under
+    /// `C:\Windows\System32\Tasks\WukongLabProvision`.
+    #[serde(default)]
+    pub boot_task_sha256: Option<String>,
+    /// SHA-256 of the per-operation boot launcher whose content names the
+    /// operation wrapper.
+    #[serde(default)]
+    pub launcher_sha256: Option<String>,
+    /// Legacy evidence of the retired local-GPO injection mechanism. New
+    /// provisioning never writes these files; the fields stay so laboratory
+    /// state written by that version still loads.
     #[serde(default)]
     pub scripts_ini_sha256: Option<String>,
-    /// SHA-256 of the injected local-GPO `gpt.ini` (bumped computer version).
     #[serde(default)]
     pub gpt_ini_sha256: Option<String>,
     pub identity_file: Option<PathBuf>,

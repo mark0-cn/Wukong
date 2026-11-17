@@ -1,0 +1,64 @@
+# Canonical Windows Task Scheduler boot-task fixtures
+
+These files are the canonical on-disk form of the fixed
+`\WukongLabProvision` boot task that Windows Task Scheduler runs as
+`NT AUTHORITY\SYSTEM` without a login. Provisioning replays them byte for byte
+into a powered-off guest, so they are data, not generated configuration.
+
+## Provenance
+
+The registration was created on a real Windows 11 host (build 22631) with
+`schtasks /Create /XML` while running as `NT AUTHORITY\SYSTEM`, then read back
+from:
+
+- `C:\Windows\System32\Tasks\WukongLabProvision` (the XML task file), and
+- `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache`
+  (the `Tree`, `Tasks` and `Boot` keys).
+
+The host was disposable; the probe task was deleted after capture. A
+read-only inspection of a Windows 10 22H2 reference system volume confirmed the
+same TaskCache value layout (`SD`/`Id`/`Index` on `Tree`, `Path`/`Hash`/
+`Schema`/`SecurityDescriptor`/`URI`/`Triggers`/`Actions`/`DynamicInfo` on
+`Tasks`, and an empty category key under `Boot`), the same task-XML version 1.2,
+and the same trigger/action serialization headers. The injected task was then
+re-injected offline, the Task Scheduler service was restarted, and the task was
+enumerated and executed as `NT AUTHORITY\SYSTEM`; deleting the registration from
+inside the running wrapper action also succeeded without terminating it.
+
+No machine-local path is stored in these fixtures. The task name, GUID,
+security descriptor, action command and action arguments are fixed constants.
+
+## Files
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `boot_task.xml` | 3160 | `2ed727452daccccccb5d22bd0d7738bc1278c951fee20bbcc2489ddec5466dcc` |
+| `task_tree_sd.bin` | 124 | `6a17264456e063bb45618a0366e49078d9cdf01112b0172d18a9bf771c7d5041` |
+| `task_hash.bin` | 32 | `94282a40104050f806292198e7b36c30364411272f3863e13a655d3336301cc7` |
+| `task_triggers.bin` | 288 | `437b7273854af8656d35e191b94b96f17683d5a28a49574779a94186eb23d803` |
+| `task_actions.bin` | 400 | `217e6fc505fb2e36e3509d9e8e25098d1821daa195975308ec43d3f6a7092da1` |
+| `task_dynamicinfo.bin` | 36 | `20ae9a8448cb16e50d60025fe373d5b50f2887e620b61f2575cea8b8225fa32e` |
+
+`boot_task.xml` is the exact UTF-16LE-with-BOM file the Task Scheduler service
+wrote. The remaining files are the exact registry values:
+
+- `Tree\WukongLabProvision`: `SD` = `task_tree_sd.bin`, `Id` =
+  `{A861DA08-B3C7-44C1-8BAC-579B48F54859}`, `Index` = `1`.
+- `Tasks\{A861DA08-B3C7-44C1-8BAC-579B48F54859}`: `Path` and `URI` =
+  `\WukongLabProvision`, `Hash` = `task_hash.bin`, `Schema` = `65538`,
+  `SecurityDescriptor` = `D:P(A;;FA;;;BA)(A;;FA;;;SY)`, `Triggers` =
+  `task_triggers.bin`, `Actions` = `task_actions.bin`, `DynamicInfo` =
+  `task_dynamicinfo.bin`.
+- `Boot\{A861DA08-B3C7-44C1-8BAC-579B48F54859}`: empty key.
+
+The security descriptor contains only well-known SIDs (BUILTIN\Administrators and
+SYSTEM) because the task was registered from the SYSTEM account.
+
+## Why these are fixtures
+
+The `Hash`, `Triggers` and `Actions` values are Task Scheduler's internal binary
+serialization; they are not derivable from the XML with documented APIs.
+Replaying a captured canonical registration keeps the task file, the registry
+cache and the task hash mutually consistent. Any consumer must treat these bytes
+as opaque constants. `validate_boot_task_fixture` in `provision.rs` pins the
+SHA-256 of every file and the fixed task name, GUID, paths and trigger.

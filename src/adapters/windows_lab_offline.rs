@@ -10,11 +10,13 @@
 #[cfg(windows)]
 mod platform {
     use crate::application::windows_lab::provision::{
-        self, DiskInspection, DiskInspectionRequest, FinalizeRequest, GUEST_SYSTEM_CONFIG,
-        GuestFile, GuestNetwork, GuestObservation, GuestObservationRequest, GuestPaths,
-        GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder, MAX_POLICY_BYTES,
-        MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk, ServiceRemoval, ServiceRemovalEvidence,
-        startup_command_lines,
+        self, BootTaskEvidence, BootTaskInjection, BootTaskRegistry, BootTaskRemoval,
+        BootTaskRemovalEvidence, DiskInspection, DiskInspectionRequest, FinalizeRequest,
+        GUEST_SYSTEM_CONFIG, GuestFile, GuestNetwork, GuestObservation, GuestObservationRequest,
+        GuestPaths, GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder,
+        MAX_POLICY_BYTES, MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk, ServiceRemoval,
+        ServiceRemovalEvidence, boot_task_cache_state, startup_command_lines,
+        verify_boot_task_values,
     };
     use anyhow::{Context, Result, bail, ensure};
     use async_trait::async_trait;
@@ -397,8 +399,12 @@ mod platform {
         ) -> Result<DiskInspection> {
             let system_config = guestfish_path(GUEST_SYSTEM_CONFIG)?;
             let system_hive = guestfish_path(&request.system_hive)?;
+            let software_hive = guestfish_path(&request.software_hive)?;
             let program_data = guestfish_path(&request.program_data)?;
             let provision_root = guestfish_path(&request.provision_root)?;
+            let tasks_dir = guestfish_path(&request.tasks_dir)?;
+            let task_file = guestfish_path(&request.task_file)?;
+            let launcher = guestfish_path(&request.launcher)?;
             let scripts_dir = guestfish_path(&request.scripts_dir)?;
             let startup_dir = guestfish_path(&request.startup_dir)?;
             let scripts_ini = guestfish_path(&request.scripts_ini)?;
@@ -407,44 +413,59 @@ mod platform {
             let gpt_backup = guestfish_path(&request.gpt_ini_backup)?;
             let gpo_root = guestfish_path(&request.gpo_root)?;
             let probe = format!(
-                "is-dir {system_config}\nis-file {system_hive}\nis-dir {program_data}\nis-dir {provision_root}\nis-dir {scripts_dir}\nis-dir {startup_dir}\nis-file {scripts_ini}\nis-file {scripts_backup}\nis-file {gpt_ini}\nis-file {gpt_backup}\nis-dir {gpo_root}\n"
+                "is-dir {system_config}\nis-file {system_hive}\nis-file {software_hive}\nis-dir {program_data}\nis-dir {provision_root}\nis-dir {tasks_dir}\nis-file {task_file}\nis-file {launcher}\nis-dir {scripts_dir}\nis-dir {startup_dir}\nis-file {scripts_ini}\nis-file {scripts_backup}\nis-file {gpt_ini}\nis-file {gpt_backup}\nis-dir {gpo_root}\n"
             );
             let output = self.guestfish(disk_posix, false, &probe).await?;
             require_success(&output, "libguestfs preflight")?;
-            let values = parse_booleans(&output.stdout_text(), 11)?;
+            let values = parse_booleans(&output.stdout_text(), 15)?;
             let mut inspection = DiskInspection {
                 windows_volume: values[0],
                 system_hive_present: values[1],
-                program_data_present: values[2],
+                software_hive_present: values[2],
+                program_data_present: values[3],
                 control_set: None,
                 existing_service: None,
                 provision_root_entries: Vec::new(),
+                task_file_present: values[6],
+                boot_task: provision::BootTaskCacheState::default(),
+                launcher: None,
                 policy: GuestPolicyFiles::default(),
             };
             if !inspection.windows_volume || !inspection.system_hive_present {
                 return Ok(inspection);
             }
-            if values[3] {
+            if values[4] {
                 inspection.provision_root_entries = self
                     .list_entries(disk_posix, &provision_root, "list guest provision root")
                     .await?;
             }
-            if values[4] {
+            if values[7] {
+                inspection.launcher = Some(
+                    self.read_guest_bytes(
+                        disk_posix,
+                        &launcher,
+                        provision::MAX_LAUNCHER_BYTES,
+                        "read guest boot launcher",
+                    )
+                    .await?,
+                );
+            }
+            if values[8] {
                 inspection.policy.scripts_directory_entries = self
                     .list_entries(disk_posix, &scripts_dir, "list guest scripts directory")
                     .await?;
             }
-            if values[5] {
+            if values[9] {
                 inspection.policy.startup_directory_entries = self
                     .list_entries(disk_posix, &startup_dir, "list guest startup directory")
                     .await?;
             }
-            if values[10] {
+            if values[14] {
                 inspection.policy.group_policy_entries = self
                     .list_entries(disk_posix, &gpo_root, "list guest Group Policy directory")
                     .await?;
             }
-            if values[6] {
+            if values[10] {
                 let bytes = self
                     .read_guest_bytes(
                         disk_posix,
@@ -456,7 +477,7 @@ mod platform {
                 inspection.policy.startup_command_lines = startup_command_lines(&bytes)?;
                 inspection.policy.scripts_ini = Some(bytes);
             }
-            if values[7] {
+            if values[11] {
                 inspection.policy.scripts_ini_backup = Some(
                     self.read_guest_bytes(
                         disk_posix,
@@ -467,7 +488,7 @@ mod platform {
                     .await?,
                 );
             }
-            if values[8] {
+            if values[12] {
                 inspection.policy.gpt_ini = Some(
                     self.read_guest_bytes(
                         disk_posix,
@@ -478,7 +499,7 @@ mod platform {
                     .await?,
                 );
             }
-            if values[9] {
+            if values[13] {
                 inspection.policy.gpt_ini_backup = Some(
                     self.read_guest_bytes(
                         disk_posix,
@@ -488,6 +509,18 @@ mod platform {
                     )
                     .await?,
                 );
+            }
+            if values[2] {
+                let software = format!("{staging}/SOFTWARE");
+                self.download_hive(
+                    disk_posix,
+                    &request.software_hive,
+                    &software,
+                    "download guest SOFTWARE hive",
+                )
+                .await?;
+                let registry = provision::boot_task_registry();
+                inspection.boot_task = self.boot_task_state_in(&software, &registry).await?;
             }
             let hive = format!("{staging}/SYSTEM");
             let script = guestfish_download_script(&system_hive, &hive);
@@ -698,24 +731,27 @@ mod platform {
 
         async fn observe_in(
             &self,
+            staging: &str,
             disk_posix: &str,
             request: &GuestObservationRequest,
         ) -> Result<GuestObservation> {
             let wrapper_guest = guestfish_path(&request.wrapper)?;
             let plan_guest = guestfish_path(&request.plan)?;
             let receipt_guest = guestfish_path(&request.receipt)?;
-            let startup_guest = guestfish_path(&request.startup_script)?;
+            let launcher_guest = guestfish_path(&request.launcher)?;
+            let task_file_guest = guestfish_path(&request.task_file)?;
+            let software_hive_guest = guestfish_path(&request.software_hive)?;
             let scripts_ini_guest = guestfish_path(&request.scripts_ini)?;
             let scripts_backup_guest = guestfish_path(&request.scripts_ini_backup)?;
             let gpt_backup_guest = guestfish_path(&request.gpt_ini_backup)?;
             let script = format!(
-                "is-file {wrapper_guest}\nis-file {plan_guest}\nis-file {receipt_guest}\nis-file {startup_guest}\nis-file {scripts_ini_guest}\nis-file {scripts_backup_guest}\nis-file {gpt_backup_guest}\n"
+                "is-file {wrapper_guest}\nis-file {plan_guest}\nis-file {receipt_guest}\nis-file {launcher_guest}\nis-file {task_file_guest}\nis-file {scripts_ini_guest}\nis-file {scripts_backup_guest}\nis-file {gpt_backup_guest}\nis-file {software_hive_guest}\n"
             );
             let output = self.guestfish(disk_posix, false, &script).await?;
             require_success(&output, "inspect provisioned guest")?;
-            let values = parse_booleans(&output.stdout_text(), 7)?;
+            let values = parse_booleans(&output.stdout_text(), 9)?;
             let mut startup_entry_present = false;
-            if values[4] {
+            if values[5] {
                 let bytes = self
                     .read_guest_bytes(
                         disk_posix,
@@ -741,15 +777,212 @@ mod platform {
                 ensure!(!bytes.is_empty(), "guest provisioning receipt is empty");
                 receipt = Some(bytes);
             }
+            let mut boot_task_registered = false;
+            if values[8] {
+                let software = format!("{staging}/SOFTWARE");
+                self.download_hive(
+                    disk_posix,
+                    &request.software_hive,
+                    &software,
+                    "download guest SOFTWARE hive",
+                )
+                .await?;
+                let registry = provision::boot_task_registry();
+                boot_task_registered = self
+                    .boot_task_state_in(&software, &registry)
+                    .await?
+                    .is_registered();
+            }
             Ok(GuestObservation {
                 receipt,
                 wrapper_present: values[0],
                 plan_present: values[1],
-                startup_script_present: values[3],
-                scripts_ini_present: values[4],
+                task_file_present: values[4],
+                boot_task_registered,
+                launcher_present: values[3],
+                scripts_ini_present: values[5],
                 startup_entry_present,
-                scripts_ini_backup_present: values[5],
-                gpt_ini_backup_present: values[6],
+                scripts_ini_backup_present: values[6],
+                gpt_ini_backup_present: values[7],
+            })
+        }
+
+        async fn download_hive(
+            &self,
+            disk_posix: &str,
+            windows_hive: &str,
+            local: &str,
+            operation: &str,
+        ) -> Result<()> {
+            let guest = guestfish_path(windows_hive)?;
+            let output = self
+                .guestfish(disk_posix, false, &guestfish_download_script(&guest, local))
+                .await?;
+            require_success(&output, operation)
+        }
+
+        async fn hive_list(&self, hive: &str, path: &str) -> Result<Vec<String>> {
+            let output = self
+                .hivexsh(hive, &format!("cd {path}\nls\nquit\n"), false)
+                .await?;
+            Ok(parse_lines(&output)
+                .into_iter()
+                .filter(|name| name != "." && name != "..")
+                .collect())
+        }
+
+        async fn boot_task_parents(
+            &self,
+            hive: &str,
+            registry: &BootTaskRegistry,
+        ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
+            let tree = self
+                .hive_list(hive, &format!(r"{}\Tree", registry.key))
+                .await?;
+            let tasks = self
+                .hive_list(hive, &format!(r"{}\Tasks", registry.key))
+                .await?;
+            let boot = self
+                .hive_list(hive, &format!(r"{}\Boot", registry.key))
+                .await?;
+            Ok((tree, tasks, boot))
+        }
+
+        async fn boot_task_state_in(
+            &self,
+            hive: &str,
+            registry: &BootTaskRegistry,
+        ) -> Result<provision::BootTaskCacheState> {
+            let (tree, tasks, boot) = self.boot_task_parents(hive, registry).await?;
+            Ok(boot_task_cache_state(&tree, &tasks, &boot))
+        }
+
+        /// Verify the canonical Tree/Tasks values and the empty Boot category key
+        /// after an offline registration edit.
+        async fn verify_boot_task_in_hive(
+            &self,
+            hive: &str,
+            registry: &BootTaskRegistry,
+        ) -> Result<()> {
+            let values = self.hivexsh(hive, &registry.verify_script(), false).await?;
+            verify_boot_task_values(&values)?;
+            ensure!(
+                self.boot_task_state_in(hive, registry).await?.is_complete(),
+                "injected boot task registration is incomplete"
+            );
+            Ok(())
+        }
+
+        async fn inject_boot_task_in(
+            &self,
+            staging: &str,
+            disk_posix: &str,
+            injection: &BootTaskInjection,
+        ) -> Result<BootTaskEvidence> {
+            let registry = &injection.registry;
+            let hive = format!("{staging}/SOFTWARE");
+            self.download_hive(
+                disk_posix,
+                &registry.hive,
+                &hive,
+                "download guest SOFTWARE hive",
+            )
+            .await?;
+            ensure!(
+                !self
+                    .boot_task_state_in(&hive, registry)
+                    .await?
+                    .is_registered(),
+                "the guest SOFTWARE hive already registers the fixed boot task; clean the previous operation first"
+            );
+            let before = self.sha256(&hive).await?;
+            let patched = format!("{staging}/SOFTWARE.patched");
+            let output = self
+                .wsl_run(&["cp".into(), hive.clone(), patched.clone()], None)
+                .await?;
+            require_success(&output, "stage guest SOFTWARE hive")?;
+            self.hivexsh(&patched, &registry.write_script(), true)
+                .await?;
+            self.verify_boot_task_in_hive(&patched, registry).await?;
+            let after = self.sha256(&patched).await?;
+            ensure!(
+                before != after,
+                "the offline boot-task registration did not change the guest SOFTWARE hive"
+            );
+            let guest = guestfish_path(&registry.hive)?;
+            let output = self
+                .guestfish(
+                    disk_posix,
+                    true,
+                    &format!("upload {patched} {guest}\nsync\nchecksum sha256 {guest}\n"),
+                )
+                .await?;
+            require_success(&output, "upload boot-task SOFTWARE hive")?;
+            ensure!(
+                parse_digest(&output.stdout_text())? == after,
+                "uploaded SOFTWARE hive failed verification"
+            );
+            Ok(BootTaskEvidence {
+                hive_sha256_before: before,
+                hive_sha256_after: after,
+            })
+        }
+
+        async fn remove_boot_task_in(
+            &self,
+            staging: &str,
+            disk_posix: &str,
+            removal: &BootTaskRemoval,
+        ) -> Result<BootTaskRemovalEvidence> {
+            let registry = &removal.registry;
+            let hive = format!("{staging}/SOFTWARE");
+            self.download_hive(
+                disk_posix,
+                &removal.software_hive,
+                &hive,
+                "download guest SOFTWARE hive",
+            )
+            .await?;
+            let state = self.boot_task_state_in(&hive, registry).await?;
+            if !state.is_registered() {
+                return Ok(BootTaskRemovalEvidence {
+                    present: false,
+                    removed: false,
+                });
+            }
+            let patched = format!("{staging}/SOFTWARE.patched");
+            let output = self
+                .wsl_run(&["cp".into(), hive.clone(), patched.clone()], None)
+                .await?;
+            require_success(&output, "stage guest SOFTWARE hive")?;
+            let script = registry
+                .remove_script(state.tree, state.tasks, state.boot)
+                .context("registered boot task has no TaskCache keys to remove")?;
+            self.hivexsh(&patched, &script, true).await?;
+            ensure!(
+                !self
+                    .boot_task_state_in(&patched, registry)
+                    .await?
+                    .is_registered(),
+                "fixed boot task TaskCache keys were not removed"
+            );
+            let after = self.sha256(&patched).await?;
+            let guest = guestfish_path(&removal.software_hive)?;
+            let output = self
+                .guestfish(
+                    disk_posix,
+                    true,
+                    &format!("upload {patched} {guest}\nsync\nchecksum sha256 {guest}\n"),
+                )
+                .await?;
+            require_success(&output, "upload cleaned SOFTWARE hive")?;
+            ensure!(
+                parse_digest(&output.stdout_text())? == after,
+                "uploaded cleaned SOFTWARE hive failed verification"
+            );
+            Ok(BootTaskRemovalEvidence {
+                present: true,
+                removed: true,
             })
         }
     }
@@ -775,6 +1008,36 @@ mod platform {
             let disk_posix = self.wsl_path(disk).await?;
             let staging = self.temp_directory().await?;
             let result = self.write_files_in(&staging, &disk_posix, files).await;
+            self.remove_directory(&staging).await;
+            result
+        }
+
+        async fn inject_boot_task(
+            &self,
+            disk: &Path,
+            injection: &BootTaskInjection,
+        ) -> Result<BootTaskEvidence> {
+            ensure!(disk.is_absolute(), "guest disk path must be absolute");
+            let disk_posix = self.wsl_path(disk).await?;
+            let staging = self.temp_directory().await?;
+            let result = self
+                .inject_boot_task_in(&staging, &disk_posix, injection)
+                .await;
+            self.remove_directory(&staging).await;
+            result
+        }
+
+        async fn remove_boot_task(
+            &self,
+            disk: &Path,
+            removal: &BootTaskRemoval,
+        ) -> Result<BootTaskRemovalEvidence> {
+            ensure!(disk.is_absolute(), "guest disk path must be absolute");
+            let disk_posix = self.wsl_path(disk).await?;
+            let staging = self.temp_directory().await?;
+            let result = self
+                .remove_boot_task_in(&staging, &disk_posix, removal)
+                .await;
             self.remove_directory(&staging).await;
             result
         }
@@ -809,7 +1072,10 @@ mod platform {
         ) -> Result<GuestObservation> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
-            self.observe_in(&disk_posix, request).await
+            let staging = self.temp_directory().await?;
+            let result = self.observe_in(&staging, &disk_posix, request).await;
+            self.remove_directory(&staging).await;
+            result
         }
     }
 

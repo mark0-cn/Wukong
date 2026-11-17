@@ -3,17 +3,20 @@
 //! The durable intent is persisted before the first mutation. Any failure after
 //! that point becomes `recovery_required`; `lab reconcile` then restores the VMX,
 //! removes the generated ISO/media and resolves the operation before the lab is
-//! usable again. The guest boot mechanism is a local Group Policy machine startup
-//! script: Windows runs it at boot without a login, whereas a PowerShell script
-//! registered as a service can never answer the SCM and was killed with 7009.
+//! usable again. The guest boot mechanism is a fixed Windows Task Scheduler
+//! boot-trigger task that runs the wrapper as SYSTEM without a login: unlike a
+//! local Group Policy startup script it does not depend on GP applicability
+//! (that mechanism was filtered out as "empty" on every real boot), and unlike a
+//! one-shot service it does not need to answer the SCM (7009/7000).
 use super::provision::{
-    DiskInspectionRequest, FinalizeRequest, GUEST_SYSTEM_HIVE, GuestDisk, GuestFile, GuestNetwork,
-    GuestObservationRequest, GuestPaths, GuestRemoval, IsoBuilder, MediaFinalizer, OfflineDisk,
-    PROVISION_WRAPPER, ProvisionEnvironment, PublicConnection, ReceiptExpectation, ServiceRemoval,
-    SnapshotPlan, StartupInjection, VmxEdit, attach_offline_iso, injected_file, plan_guest_cleanup,
-    plan_snapshot, plan_startup_injection, provision_paths, provision_plan, provisioning_spec,
-    read_finalize_spec, require_relative_path, resolve_guest_disk, sha256, sha256_file,
-    startup_launcher, verify_guest_receipt, verify_media,
+    BOOT_TASK_NAME, BootTaskInjection, BootTaskRemoval, DiskInspectionRequest, FinalizeRequest,
+    GUEST_SYSTEM_HIVE, GuestDisk, GuestFile, GuestNetwork, GuestObservationRequest, GuestPaths,
+    GuestRemoval, IsoBuilder, MediaFinalizer, OfflineDisk, PROVISION_WRAPPER, ProvisionEnvironment,
+    PublicConnection, ReceiptExpectation, ServiceRemoval, SnapshotPlan, VmxEdit,
+    attach_offline_iso, boot_launcher, boot_task_injection, injected_file, plan_guest_cleanup,
+    plan_snapshot, provision_paths, provision_plan, provisioning_spec, read_finalize_spec,
+    require_relative_path, resolve_guest_disk, sha256, sha256_file, verify_guest_receipt,
+    verify_media,
 };
 use super::*;
 use crate::application::windows_lab::provision::ProvisionArtifactPaths;
@@ -73,6 +76,7 @@ pub struct CleanGuestOutcome {
     pub files_written: usize,
     pub files_removed: Vec<String>,
     pub directories_removed: Vec<String>,
+    pub boot_task_removed: bool,
     pub service_key_removed: Option<String>,
 }
 
@@ -94,9 +98,6 @@ struct ProvisionIntent {
 struct ProvisionDiskPlan {
     guest_disk: GuestDisk,
     vmx_edit: VmxEdit,
-    /// Existing machine policy files preserved as backups plus the injected
-    /// startup entry and bumped local-GPO version.
-    policy: StartupInjection,
 }
 
 struct PlannedProvision {
@@ -110,7 +111,7 @@ struct PlannedProvision {
     vmx_bytes: Vec<u8>,
     vmx_edit: VmxEdit,
     guest_files: Vec<GuestFile>,
-    policy: StartupInjection,
+    boot_task: BootTaskInjection,
     baseline: String,
     iso_builder: Arc<dyn IsoBuilder>,
     timeout: Duration,
@@ -125,12 +126,11 @@ impl PlannedProvision {
         intent: ProvisionIntent,
         vmx_bytes: Vec<u8>,
         disk: ProvisionDiskPlan,
+        boot_task: BootTaskInjection,
         baseline: String,
         iso_builder: Arc<dyn IsoBuilder>,
         timeout: Duration,
     ) -> Self {
-        let mut guest_files = intent.guest_files;
-        guest_files.extend(disk.policy.files.clone());
         Self {
             provision_id: intent.provision_id,
             paths: intent.paths,
@@ -141,8 +141,8 @@ impl PlannedProvision {
             guest_disk: disk.guest_disk,
             vmx_bytes,
             vmx_edit: disk.vmx_edit,
-            guest_files,
-            policy: disk.policy,
+            guest_files: intent.guest_files,
+            boot_task,
             baseline,
             iso_builder,
             timeout,
@@ -154,8 +154,10 @@ struct ProvisionEvidence {
     iso_sha256: String,
     iso_size: u64,
     vmx_sha256_after: String,
-    scripts_ini_sha256: String,
-    gpt_ini_sha256: String,
+    hive_sha256_before: String,
+    hive_sha256_after: String,
+    boot_task_sha256: String,
+    launcher_sha256: String,
     guest_receipt: Value,
     connection: PublicConnection,
 }
@@ -270,16 +272,18 @@ impl WindowsLab {
             let vmx_before = self.read_vmx_bytes()?;
             write_synced(&intent.paths.vmx_backup, &vmx_before)?;
             let (_, mut record) =
-                self.persist_provision_intent(&mut state, &intent, None, true, None, None)?;
+                self.persist_provision_intent(&mut state, &intent, None, true, None)?;
             match self
                 .replace_baseline_snapshot(&intent, offline.as_ref())
                 .await
             {
                 Ok((vmx_bytes, disk)) => {
+                    let boot_task = boot_task_injection()?;
                     let plan = PlannedProvision::assemble(
                         intent,
                         vmx_bytes,
                         disk,
+                        boot_task,
                         self.baseline.clone(),
                         effective_builder,
                         timeout,
@@ -302,12 +306,13 @@ impl WindowsLab {
                 Some(&disk.guest_disk.path),
                 false,
                 Some(&vmx_bytes),
-                Some(&disk.policy),
             )?;
+            let boot_task = boot_task_injection()?;
             let plan = PlannedProvision::assemble(
                 intent,
                 vmx_bytes,
                 disk,
+                boot_task,
                 self.baseline.clone(),
                 effective_builder,
                 timeout,
@@ -332,8 +337,10 @@ impl WindowsLab {
         record.iso_sha256 = Some(evidence.iso_sha256);
         record.iso_size = Some(evidence.iso_size);
         record.vmx_sha256_after = Some(evidence.vmx_sha256_after);
-        record.scripts_ini_sha256 = Some(evidence.scripts_ini_sha256);
-        record.gpt_ini_sha256 = Some(evidence.gpt_ini_sha256);
+        record.hive_sha256_before = Some(evidence.hive_sha256_before);
+        record.hive_sha256_after = Some(evidence.hive_sha256_after);
+        record.boot_task_sha256 = Some(evidence.boot_task_sha256);
+        record.launcher_sha256 = Some(evidence.launcher_sha256);
         record.guest_receipt = Some(evidence.guest_receipt);
         record.connection = Some(serde_json::to_value(&evidence.connection)?);
         record.baseline_snapshot = Some(plan.baseline.clone());
@@ -427,13 +434,15 @@ impl WindowsLab {
         identity_file: Option<PathBuf>,
     ) -> Result<ProvisionIntent> {
         let plan_bytes = provision_plan(&provision_id, &media, &guest)?;
+        let boot_task = boot_task_injection()?;
         let guest_files = vec![
             injected_file(&guest.wrapper, PROVISION_WRAPPER.as_bytes().to_vec()),
             injected_file(&guest.plan, plan_bytes),
             injected_file(
-                &guest.startup_script,
-                startup_launcher(&provision_id, &guest.wrapper)?,
+                &guest.launcher,
+                boot_launcher(&provision_id, &guest.wrapper)?,
             ),
+            boot_task.file.clone(),
         ];
         let injected = injected_records(&guest_files)?;
         Ok(ProvisionIntent {
@@ -450,12 +459,8 @@ impl WindowsLab {
 
     /// Persist the provisioning intent and publish its receipt before the first
     /// VM or guest mutation. `guest_disk` and `vmx_before` are absent only when
-    /// the intent precedes the forced baseline deletion; the machine policy
-    /// backups and injected startup entry are absent then for the same reason.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the intent, resolved disk and policy injection are separate milestones"
-    )]
+    /// the intent precedes the forced baseline deletion; the boot task is a fixed
+    /// constant and is not part of the persisted artifacts.
     fn persist_provision_intent(
         &self,
         state: &mut LabState,
@@ -463,19 +468,12 @@ impl WindowsLab {
         guest_disk: Option<&Path>,
         replaces_baseline: bool,
         vmx_before: Option<&[u8]>,
-        policy: Option<&StartupInjection>,
     ) -> Result<(PendingOperation, LabProvision)> {
         fs::create_dir_all(&intent.paths.root).with_context(|| {
             format!("create provision directory {}", intent.paths.root.display())
         })?;
         fs::create_dir_all(&intent.paths.injected)?;
-        let mut files = intent.guest_files.clone();
-        let mut injected = intent.injected.clone();
-        if let Some(policy) = policy {
-            files.extend(policy.files.iter().cloned());
-            injected.extend(injected_records(&policy.files)?);
-        }
-        write_injected_copies(&intent.paths, &files)?;
+        write_injected_copies(&intent.paths, &intent.guest_files)?;
         let generation = state.generation + 1;
         let spec = provisioning_spec(
             &intent.provision_id,
@@ -488,7 +486,7 @@ impl WindowsLab {
             &self.baseline,
             replaces_baseline,
             intent.identity_file.clone(),
-            injected,
+            intent.injected.clone(),
         );
         let pending = PendingOperation {
             operation_id: intent.provision_id.clone(),
@@ -518,6 +516,9 @@ impl WindowsLab {
             vmx_sha256_after: None,
             hive_sha256_before: None,
             hive_sha256_after: None,
+            injected: intent.injected.clone(),
+            boot_task_sha256: None,
+            launcher_sha256: None,
             scripts_ini_sha256: None,
             gpt_ini_sha256: None,
             identity_file: intent.identity_file.clone(),
@@ -572,16 +573,18 @@ impl WindowsLab {
             "guest disk has no inspectable Windows system volume"
         );
         ensure!(
+            inspection.software_hive_present,
+            "guest disk has no inspectable SOFTWARE hive"
+        );
+        ensure!(
             inspection.control_set.is_some(),
             "guest SYSTEM hive has no readable current control set"
         );
         self.refuse_leftover_guest_state(&inspection)?;
         let vmx_edit = attach_offline_iso(vmx_text, &intent.paths.iso)?;
-        let policy = plan_startup_injection(&intent.guest, &inspection.policy)?;
         Ok(ProvisionDiskPlan {
             guest_disk,
             vmx_edit,
-            policy,
         })
     }
 
@@ -595,6 +598,7 @@ impl WindowsLab {
         if ids.is_empty()
             && inspection.existing_service.is_none()
             && inspection.provision_root_entries.is_empty()
+            && !inspection.has_boot_task_leftovers()
         {
             return Ok(());
         }
@@ -618,8 +622,8 @@ impl WindowsLab {
                 )
             });
         bail!(
-            "guest still carries offline provisioning leftovers from {operations} (provision directory, startup policy entry or legacy service key); \
-             power off the VM and clean that operation first with {example}, then retry provisioning"
+            "guest still carries offline provisioning leftovers from {operations} (scheduled task registration or launcher, provision directory, \
+             retired startup policy entry or legacy service key); power off the VM and clean that operation first with {example}, then retry provisioning"
         )
     }
 
@@ -667,24 +671,21 @@ impl WindowsLab {
             .map(|disk| (vmx_bytes, disk))
     }
 
-    /// Record the boot disk, VMX hash, machine policy backups and injected
-    /// startup entry that only become known after the forced baseline deletion. A
-    /// failure here keeps the persisted intent and is resolved through recovery.
+    /// Record the boot disk and VMX hash that only become known after the forced
+    /// baseline deletion. A failure here keeps the persisted intent and is
+    /// resolved through recovery.
     fn record_resolved_boot_disk(
         &self,
         state: &mut LabState,
         record: &mut LabProvision,
         plan: &PlannedProvision,
     ) -> Result<()> {
-        let injected = injected_records(&plan.policy.files)?;
-        write_injected_copies(&plan.paths, &plan.policy.files)?;
         let spec = state
             .pending
             .as_mut()
             .and_then(|pending| pending.provision.as_mut())
             .context("provisioning intent was lost after the baseline deletion")?;
         spec.guest_disk = Some(plan.guest_disk.path.clone());
-        spec.injected.extend(injected);
         record.vmx_sha256_before = Some(sha256(&plan.vmx_bytes));
         state.last_provision = Some(record.clone());
         self.store.save(state)?;
@@ -810,7 +811,7 @@ impl WindowsLab {
                     None => iso_builder,
                 };
                 let intent = self.prepare_provision_intent(
-                    uuid::Uuid::new_v4().simple().to_string(),
+                    guest.provision_id().to_owned(),
                     paths,
                     guest,
                     media,
@@ -825,6 +826,7 @@ impl WindowsLab {
                     intent,
                     vmx_bytes,
                     disk,
+                    boot_task_injection()?,
                     self.baseline.clone(),
                     builder,
                     Duration::from_secs(options.timeout_seconds),
@@ -881,8 +883,11 @@ impl WindowsLab {
                     inspection.windows_volume && inspection.system_hive_present,
                     "guest disk has no inspectable Windows system volume"
                 );
+                ensure!(
+                    inspection.software_hive_present,
+                    "guest disk has no inspectable SOFTWARE hive"
+                );
                 self.refuse_leftover_guest_state(&inspection)?;
-                let injection = plan_startup_injection(&guest, &inspection.policy)?;
                 let edit = attach_offline_iso(&vmx_text, &paths.iso)?;
                 actions.push(format!(
                     "validate the finalize spec for environment {} (installation {}, generation {}, ssh_port {})",
@@ -920,26 +925,19 @@ impl WindowsLab {
                     edit.device
                 ));
                 actions.push(format!(
-                    "write fixed guest files {} and {} through libguestfs",
-                    guest.wrapper, guest.plan
+                    "write fixed guest files {}, {} and {} through libguestfs",
+                    guest.wrapper, guest.plan, guest.launcher
                 ));
                 actions.push(format!(
-                    "write the machine startup launcher {} and inject the [Startup] entry into {} (preserving {} bytes as {})",
-                    guest.startup_script,
-                    guest.scripts_ini,
-                    injection.scripts_ini_sha256,
-                    guest.scripts_ini_backup
+                    "write the fixed scheduled-task file {} and register the boot task {} ({}) in the guest SOFTWARE hive",
+                    guest.task_file, BOOT_TASK_NAME, guest.task_guid
                 ));
                 actions.push(format!(
-                    "bump the local Group Policy computer version in {} and back up the previous bytes to {}",
-                    guest.gpt_ini, guest.gpt_ini_backup
+                    "start the VM; the {BOOT_TASK_NAME} boot task runs the wrapper as SYSTEM without a login, then powers the guest off"
                 ));
                 actions.push(
-                    "start the VM and wait for the guest provisioning wrapper to power it off"
+                    "restore the original VMX bytes and verify the guest receipt plus the removed boot task offline"
                         .into(),
-                );
-                actions.push(
-                    "restore the original VMX bytes and verify the guest receipt offline".into(),
                 );
                 actions.push(format!(
                     "create the baseline snapshot '{}' and leave the VM powered off",
@@ -1080,21 +1078,20 @@ impl WindowsLab {
             edit.device
         ));
         actions.push(format!(
-            "write fixed guest files {} and {} through libguestfs",
-            guest.wrapper, guest.plan
+            "write fixed guest files {}, {} and {} through libguestfs",
+            guest.wrapper, guest.plan, guest.launcher
         ));
         actions.push(format!(
-            "write the machine startup launcher {} and inject the [Startup] entry into {} (previous bytes are backed up to {})",
-            guest.startup_script, guest.scripts_ini, guest.scripts_ini_backup
+            "write the fixed scheduled-task file {} and register the boot task {} ({}) in the guest SOFTWARE hive",
+            guest.task_file, BOOT_TASK_NAME, guest.task_guid
         ));
         actions.push(format!(
-            "bump the local Group Policy computer version in {} and back up the previous bytes to {}",
-            guest.gpt_ini, guest.gpt_ini_backup
+            "start the VM; the {BOOT_TASK_NAME} boot task runs the wrapper as SYSTEM without a login, then powers the guest off"
         ));
         actions.push(
-            "start the VM and wait for the guest provisioning wrapper to power it off".into(),
+            "restore the original VMX bytes and verify the guest receipt plus the removed boot task offline"
+                .into(),
         );
-        actions.push("restore the original VMX bytes and verify the guest receipt offline".into());
         actions.push(format!(
             "create the baseline snapshot '{}' and leave the VM powered off",
             self.baseline
@@ -1130,11 +1127,16 @@ impl WindowsLab {
         offline
             .write_guest_files(&plan.guest_disk.path, &plan.guest_files)
             .await
-            .context("write guest provisioning files and machine startup policy")?;
+            .context("write guest provisioning files and scheduled-task boot launcher")?;
+        let task = offline
+            .inject_boot_task(&plan.guest_disk.path, &plan.boot_task)
+            .await
+            .context("register the scheduled-task boot trigger in the guest SOFTWARE hive")?;
         tracing::info!(
             vm = %self.vm_id,
             operation = %plan.provision_id,
-            "guest machine startup policy injected; no SYSTEM service key is written"
+            task = BOOT_TASK_NAME,
+            "guest scheduled-task boot trigger injected; no SYSTEM service key or local-GPO startup script is written"
         );
         self.step(self.host.start()).await.map_err(step_error)?;
         self.wait_power_off(plan.timeout).await?;
@@ -1148,16 +1150,22 @@ impl WindowsLab {
             .await
             .context("read the provisioned guest offline")?;
         ensure!(
-            !observation.startup_script_present,
-            "the guest machine startup launcher was not removed"
+            !observation.task_file_present,
+            "the guest scheduled-task file was not removed"
         );
         ensure!(
-            !observation.startup_entry_present,
-            "the guest scripts.ini still contains the provisioning startup entry"
+            !observation.boot_task_registered,
+            "the guest scheduled-task registration was not removed"
         );
         ensure!(
-            !observation.scripts_ini_backup_present && !observation.gpt_ini_backup_present,
-            "the guest machine policy backups were not removed"
+            !observation.launcher_present,
+            "the guest scheduled-task boot launcher was not removed"
+        );
+        ensure!(
+            !observation.startup_entry_present
+                && !observation.scripts_ini_backup_present
+                && !observation.gpt_ini_backup_present,
+            "the guest still carries retired local-GPO provisioning artifacts"
         );
         ensure!(
             !observation.wrapper_present && !observation.plan_present,
@@ -1187,8 +1195,15 @@ impl WindowsLab {
             iso_sha256,
             iso_size,
             vmx_sha256_after,
-            scripts_ini_sha256: plan.policy.scripts_ini_sha256.clone(),
-            gpt_ini_sha256: plan.policy.gpt_ini_sha256.clone(),
+            hive_sha256_before: task.hive_sha256_before,
+            hive_sha256_after: task.hive_sha256_after,
+            boot_task_sha256: plan.boot_task.file.sha256.clone(),
+            launcher_sha256: plan
+                .guest_files
+                .iter()
+                .find(|file| file.windows_path == plan.guest.launcher)
+                .map(|file| file.sha256.clone())
+                .context("boot launcher was not part of the injected guest files")?,
             guest_receipt,
             connection,
         })
@@ -1391,7 +1406,17 @@ impl WindowsLab {
             inspection.windows_volume && inspection.system_hive_present,
             "guest disk has no inspectable Windows system volume"
         );
-        let plan = plan_guest_cleanup(&paths, &inspection)?;
+        ensure!(
+            inspection.software_hive_present,
+            "guest disk has no inspectable SOFTWARE hive"
+        );
+        // Only the last recorded provisioning operation can own a CLI-created
+        // `gpt.ini` (that document carries no operation identity).
+        let last_operation = state
+            .last_provision
+            .as_ref()
+            .is_some_and(|record| record.provision_id == paths.provision_id());
+        let plan = plan_guest_cleanup(&paths, &inspection, last_operation)?;
         let mut outcome = CleanGuestOutcome {
             dry_run: options.dry_run,
             vm_id: self.vm_id.clone(),
@@ -1401,6 +1426,7 @@ impl WindowsLab {
             files_written: 0,
             files_removed: Vec::new(),
             directories_removed: Vec::new(),
+            boot_task_removed: false,
             service_key_removed: None,
         };
         if options.dry_run || plan.is_empty() {
@@ -1412,20 +1438,21 @@ impl WindowsLab {
             }
             return Ok(outcome);
         }
-        // Mutations run least-destructive first: the legacy SYSTEM-hive service
-        // key, then the restored machine startup policy, then the operation's
-        // leftover files, and only last its provision directory. The hive key
-        // used to be removed last, so a hivexsh failure left the directory
-        // already deleted while the key survived: the failure report did not
-        // match what had actually changed on the disk, and provisioning stayed
-        // blocked until another cleanup round. Every step is idempotent, so a
-        // partial failure stops before later removals and a retry only repeats
-        // the reported pending steps.
+        // Mutations run least-destructive first: the fixed scheduled-task
+        // registration (the only artifact that can repeat a boot), the legacy
+        // SYSTEM-hive service key, then the restored machine startup policy, then
+        // the operation's leftover files, and only last its provision directory.
+        // Every step is idempotent, so a partial failure stops before later
+        // removals and a retry only repeats the reported pending steps.
+        let boot_task_step = "remove the fixed scheduled-task boot registration";
         let service_step = "remove the legacy one-shot provisioning service key";
         let policy_step = "restore the machine startup policy";
         let files_step = "remove the operation's leftover guest files";
         let directory_step = "remove the operation's provision directory";
         let mut pending: Vec<&'static str> = Vec::new();
+        if plan.boot_task {
+            pending.push(boot_task_step);
+        }
         if plan.service_key.is_some() {
             pending.push(service_step);
         }
@@ -1439,6 +1466,19 @@ impl WindowsLab {
             pending.push(directory_step);
         }
         let mut completed: Vec<&'static str> = Vec::new();
+        if plan.boot_task {
+            let step = pending.remove(0);
+            let removal = BootTaskRemoval {
+                software_hive: super::provision::GUEST_SOFTWARE_HIVE.into(),
+                registry: boot_task_injection()?.registry,
+            };
+            offline
+                .remove_boot_task(&guest_disk.path, &removal)
+                .await
+                .with_context(|| cleanup_failure(step, &completed, &pending))?;
+            outcome.boot_task_removed = true;
+            completed.push(step);
+        }
         if let Some(service) = &plan.service_key {
             let step = pending.remove(0);
             let evidence = offline
@@ -1558,10 +1598,17 @@ impl WindowsLab {
             let original = super::provision::read_bounded(&spec.vmx_backup, 4 * 1024 * 1024)
                 .context("read the VMX backup")?;
             write_synced(&self.vmx, &original)?;
-            fs::remove_file(&spec.vmx_backup)?;
+            // Reconcile is not atomic: a transient sharing violation on the
+            // backup or ISO can stop it after the VMX was restored. Retry the
+            // removal briefly, and because every step is idempotent a second
+            // reconcile still converges when the file remains locked.
+            retry_file_removal(&spec.vmx_backup).context(
+                "the VMX was restored but its backup could not be removed; rerun lab reconcile",
+            )?;
         }
         if spec.iso.is_file() {
-            fs::remove_file(&spec.iso)?;
+            retry_file_removal(&spec.iso)
+                .context("the generated ISO could not be removed; rerun lab reconcile")?;
         }
         if let ProvisionSource::Template { .. } = &spec.source {
             let media = spec
@@ -1571,11 +1618,42 @@ impl WindowsLab {
                 .join("media");
             require_relative_path(&media, &provisions_root)?;
             if media.is_dir() {
-                fs::remove_dir_all(media)?;
+                retry_directory_removal(&media)
+                    .context("the finalized media could not be removed; rerun lab reconcile")?;
             }
         }
         Ok(())
     }
+}
+
+/// Bounded retry for a filesystem removal that can transiently fail with a
+/// sharing violation (an antivirus scan, the hypervisor still closing the ISO, or
+/// the VMX backup being read). The operation is idempotent: a file that vanished
+/// between attempts counts as success.
+fn retry_bounded(mut operation: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match operation() {
+            Ok(()) => return Ok(()),
+            Err(error) if attempts >= 5 => return Err(error),
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(200)),
+        }
+    }
+}
+
+fn retry_file_removal(path: &Path) -> std::io::Result<()> {
+    retry_bounded(|| match fs::remove_file(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    })
+}
+
+fn retry_directory_removal(path: &Path) -> std::io::Result<()> {
+    retry_bounded(|| match fs::remove_dir_all(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    })
 }
 
 /// Guest cleanup cannot roll back disk mutations, so a partial failure reports
@@ -1617,19 +1695,17 @@ fn planned_actions(plan: &PlannedProvision) -> Vec<String> {
             plan.vmx_edit.device
         ),
         format!(
-            "write fixed guest files {} and {} through libguestfs",
-            plan.guest.wrapper, plan.guest.plan
+            "write fixed guest files {}, {} and {} through libguestfs",
+            plan.guest.wrapper, plan.guest.plan, plan.guest.launcher
         ),
         format!(
-            "write the machine startup launcher {} and inject the [Startup] entry into {} (previous bytes backed up to {})",
-            plan.guest.startup_script, plan.guest.scripts_ini, plan.guest.scripts_ini_backup
+            "write the fixed scheduled-task file {} and register the boot task {} ({}) in the guest SOFTWARE hive",
+            plan.guest.task_file, BOOT_TASK_NAME, plan.guest.task_guid
         ),
         format!(
-            "bump the local Group Policy computer version in {} and back up the previous bytes to {}",
-            plan.guest.gpt_ini, plan.guest.gpt_ini_backup
+            "start the VM; the {BOOT_TASK_NAME} boot task runs the wrapper as SYSTEM without a login, then powers the guest off"
         ),
-        "start the VM and wait for the guest provisioning wrapper to power it off".into(),
-        "restore the original VMX bytes, verify the machine startup policy was restored and verify the guest receipt offline"
+        "restore the original VMX bytes, verify the guest receipt and the removed scheduled-task registration offline"
             .into(),
         format!(
             "create the baseline snapshot '{}' and leave the VM powered off",
@@ -1672,6 +1748,10 @@ fn injected_records(files: &[GuestFile]) -> Result<Vec<InjectedFile>> {
                 guest_path: file.windows_path.clone(),
                 sha256: file.sha256.clone(),
                 size: file.bytes.len() as u64,
+                // The scheduled-task mechanism only writes files it creates:
+                // nothing on the guest is preserved or backed up. The retired
+                // local-GPO mechanism recorded preserved policy files this way.
+                preexisting: false,
             })
         })
         .collect()

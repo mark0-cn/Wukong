@@ -1,24 +1,33 @@
 # One-shot offline worker provisioning wrapper injected into a powered-off
-# Windows guest and launched by a local Group Policy machine startup script.
-# This is a fixed controller asset: identities come from provision-plan.json
-# beside it and the receipt is written beside the plan. The startup entry must
-# run exactly once: the finally block restores the previous machine policy files,
-# deletes the startup launcher, schedules removal of this script and plan, then
+# Windows guest and started at boot by the fixed \WukongLabProvision Task
+# Scheduler task as NT AUTHORITY\SYSTEM (no login, no local Group Policy
+# dependency). This is a fixed controller asset: identities come from
+# provision-plan.json beside it and the receipt is written beside the plan.
+# The finally block writes the receipt first, unregisters the scheduled task,
+# deletes the fixed boot launcher, schedules removal of this script and plan, and
 # always powers the guest off.
 $ErrorActionPreference = 'Stop'
+$taskName = '\WukongLabProvision'
+$taskGuid = '{A861DA08-B3C7-44C1-8BAC-579B48F54859}'
+$taskFile = Join-Path $env:SystemRoot 'System32\Tasks\WukongLabProvision'
+$launcherPath = Join-Path $env:ProgramData 'WukongLab\provision\launch.ps1'
+$taskCache = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache'
+$treeKey = Join-Path $taskCache ('Tree\WukongLabProvision')
+$tasksKey = Join-Path $taskCache ('Tasks\' + $taskGuid)
+$bootKey = Join-Path $taskCache ('Boot\' + $taskGuid)
 $root = Split-Path -Parent $PSCommandPath
 $planPath = Join-Path $root 'provision-plan.json'
 $receiptPath = Join-Path $root 'receipt.json'
 $existingReceipt = Test-Path -LiteralPath $receiptPath
 $receipt = [ordered]@{
-    schema = 2
+    schema = 3
     provision_id = $null
     installed = $false
     already_installed = $false
     exit_code = $null
     connection = $null
-    startup_cleanup = 'not_attempted'
-    startup_script_deleted = $false
+    boot_task_removed = $false
+    launcher_deleted = $false
     cleanup_scheduled = $false
     error = $null
 }
@@ -31,50 +40,46 @@ function Save-Receipt {
     } catch {
     }
 }
-# Restore the bytes we backed up and delete the per-operation backup file.
-function Restore-PolicyFile([string]$path, [string]$backup) {
-    if (-not $path) {
-        return 'skipped'
-    }
-    if ($backup -and (Test-Path -LiteralPath $backup)) {
-        Copy-Item -LiteralPath $backup -Destination $path -Force
-        Remove-Item -LiteralPath $backup -Force
-        return 'restored'
-    }
-    if (Test-Path -LiteralPath $path) {
-        Remove-Item -LiteralPath $path -Force
-    }
-    return 'removed'
+# True when no fixed scheduled-task artifact (file or TaskCache key) remains.
+function Test-BootTaskGone {
+    $registered = (Test-Path -LiteralPath $taskFile) -or (Test-Path -LiteralPath $treeKey) -or (Test-Path -LiteralPath $tasksKey) -or (Test-Path -LiteralPath $bootKey)
+    return (-not $registered)
 }
-# Fallback used only when the plan cannot be read: remove our startup command
-# lines from scripts.ini and delete the document if nothing else remains.
-function Remove-StartupEntry([string]$scriptsIni, [string]$entry) {
-    if (-not (Test-Path -LiteralPath $scriptsIni)) {
-        return 'removed'
-    }
-    $lines = @(Get-Content -LiteralPath $scriptsIni)
-    $kept = New-Object System.Collections.Generic.List[string]
-    $index = $null
-    foreach ($line in $lines) {
-        if ($line -match '^(\d+)CmdLine=(.*)$' -and $Matches[2].Trim() -eq $entry) {
-            $index = $Matches[1]
-            continue
+# Unregister exactly the fixed boot task. `schtasks /Delete` removes the task XML
+# file and all three TaskCache keys; deleting this while the task action is
+# running is supported and does not terminate the action. Retry briefly because
+# the Task Scheduler store can be held during other task operations.
+function Remove-BootTask {
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        if (Test-BootTaskGone) {
+            return $true
         }
-        $kept.Add($line)
+        try {
+            & (Join-Path $env:SystemRoot 'System32\schtasks.exe') /Delete /TN $taskName /F 2>&1 | Out-Null
+        } catch {
+        }
+        Start-Sleep -Milliseconds 500
     }
-    if ($null -ne $index) {
-        $kept = @($kept | Where-Object { $_.Trim() -ne ($index + 'Parameters=') })
+    return (Test-BootTaskGone)
+}
+# Wait until the attached WUKONG_OFFLINE volume is visible. A boot-trigger task
+# can start before the CD-ROM volume and WMI are ready.
+function Find-MediaRoot([string]$label) {
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        try {
+            foreach ($disk in @(Get-CimInstance -ClassName Win32_LogicalDisk)) {
+                if ([string]$disk.VolumeName -eq $label -and [int]$disk.DriveType -eq 5) {
+                    $candidate = [string]$disk.DeviceID + '\'
+                    if (Test-Path -LiteralPath (Join-Path $candidate 'WukongWorkerSetup.exe')) {
+                        return $candidate
+                    }
+                }
+            }
+        } catch {
+        }
+        Start-Sleep -Seconds 5
     }
-    $content = @($kept | Where-Object { $_.Trim() -ne '' })
-    if ($content.Count -eq 0) {
-        Remove-Item -LiteralPath $scriptsIni -Force
-        return 'removed'
-    }
-    if ($null -ne $index) {
-        Set-Content -LiteralPath $scriptsIni -Value $kept -Encoding Unicode
-        return 'removed'
-    }
-    return 'removed'
+    throw 'offline media volume WUKONG_OFFLINE is not attached'
 }
 $plan = $null
 try {
@@ -83,16 +88,7 @@ try {
     if ($existingReceipt) {
         $receipt.already_installed = $true
     } else {
-        $mediaRoot = $null
-        foreach ($disk in @(Get-CimInstance -ClassName Win32_LogicalDisk)) {
-            if ([string]$disk.VolumeName -eq [string]$plan.media_label -and [int]$disk.DriveType -eq 5) {
-                $mediaRoot = [string]$disk.DeviceID + '\'
-                break
-            }
-        }
-        if (-not $mediaRoot) {
-            throw 'offline media volume WUKONG_OFFLINE is not attached'
-        }
+        $mediaRoot = Find-MediaRoot ([string]$plan.media_label)
         $setup = Join-Path $mediaRoot 'WukongWorkerSetup.exe'
         if ((Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$plan.setup_sha256) {
             throw 'offline media setup executable hash mismatch'
@@ -164,71 +160,28 @@ try {
     if (-not $existingReceipt) {
         Save-Receipt
     }
-    $startupScript = $null
-    $scriptsIni = $null
-    $scriptsIniBackup = $null
-    $gptIni = $null
-    $gptIniBackup = $null
-    $startupEntry = $null
-    if ($plan) {
-        $startupScript = [string]$plan.startup_script
-        $scriptsIni = [string]$plan.scripts_ini
-        $scriptsIniBackup = [string]$plan.scripts_ini_backup
-        $gptIni = [string]$plan.gpt_ini
-        $gptIniBackup = [string]$plan.gpt_ini_backup
-    }
-    $provisionId = Split-Path -Leaf $root
-    if ($provisionId -match '^[0-9a-f]{32}$') {
-        $machineScripts = Join-Path $env:SystemRoot 'System32\GroupPolicy\Machine\Scripts'
-        if (-not $startupScript) {
-            $startupScript = Join-Path $machineScripts ('Startup\wukong-provision-' + $provisionId + '.cmd')
-        }
-        if (-not $scriptsIni) {
-            $scriptsIni = Join-Path $machineScripts 'scripts.ini'
-        }
-        if (-not $scriptsIniBackup) {
-            $scriptsIniBackup = Join-Path $machineScripts ('scripts.ini.wukong-lab-' + $provisionId + '.bak')
-        }
-        if (-not $gptIni) {
-            $gptIni = Join-Path $env:SystemRoot 'System32\GroupPolicy\gpt.ini'
-        }
-        if (-not $gptIniBackup) {
-            $gptIniBackup = Join-Path $env:SystemRoot ('System32\GroupPolicy\gpt.ini.wukong-lab-' + $provisionId + '.bak')
-        }
-        $startupEntry = 'wukong-provision-' + $provisionId + '.cmd'
-    }
-    # Remove the machine startup injection before anything else so a later boot
-    # can never repeat the installation.
+    # Unregister the boot trigger before anything else so a later boot can never
+    # repeat the installation. The fixed task name is the only task touched.
     try {
-        $restored = $false
-        if ($scriptsIni) {
-            if (Test-Path -LiteralPath $scriptsIniBackup) {
-                Restore-PolicyFile $scriptsIni $scriptsIniBackup | Out-Null
-                $restored = $true
-            } elseif ($startupEntry) {
-                Remove-StartupEntry $scriptsIni $startupEntry | Out-Null
-            }
-        }
-        if ($gptIni -and (Test-Path -LiteralPath $gptIniBackup)) {
-            # Without a backup the wrapper leaves gpt.ini alone: it never deletes
-            # policy content it cannot restore, and an injected version value is
-            # harmless once the startup entry is gone.
-            Restore-PolicyFile $gptIni $gptIniBackup | Out-Null
-            $restored = $true
-        }
-        if ($startupScript -and (Test-Path -LiteralPath $startupScript)) {
-            Remove-Item -LiteralPath $startupScript -Force
-        }
-        $receipt.startup_script_deleted = [bool]$startupScript
-        $receipt.startup_cleanup = if ($restored) { 'restored' } else { 'removed' }
+        $receipt.boot_task_removed = [bool](Remove-BootTask)
     } catch {
-        $receipt.startup_cleanup = 'failed:' + [string]$_.Exception.Message
+        $receipt.boot_task_removed = $false
+    }
+    # Delete the fixed per-operation boot launcher. The task action runs this
+    # wrapper, so it can be removed while the wrapper is still executing.
+    try {
+        if (Test-Path -LiteralPath $launcherPath) {
+            Remove-Item -LiteralPath $launcherPath -Force
+        }
+        $receipt.launcher_deleted = -not (Test-Path -LiteralPath $launcherPath)
+    } catch {
+        $receipt.launcher_deleted = $false
     }
     try {
         # The wrapper cannot delete the running script itself; a detached helper
         # removes the script and plan after this process exits. Guest shutdown
         # waits long enough for the deletion to finish.
-        $arguments = '/d /c choice /t 3 /d y >nul & del /f /q ' + $planPath + ' ' + $PSCommandPath
+        $arguments = '/d /c choice /t 3 /d y >nul & del /f /q "' + $planPath + '" "' + $PSCommandPath + '"'
         Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -ArgumentList $arguments -WindowStyle Hidden | Out-Null
         $receipt.cleanup_scheduled = $true
     } catch {
