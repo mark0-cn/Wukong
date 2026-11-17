@@ -9,7 +9,7 @@ use crate::{
     interfaces::report,
     storage::Store,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -71,30 +71,35 @@ pub enum Command {
         #[arg(long)]
         strings: bool,
     },
-    /// Start a real model-driven multi-agent assessment. TARGET may be a
-    /// binary or a directory bundle; directories are scanned automatically.
+    /// Start a real model-driven multi-agent assessment, or resume saved work.
+    /// TARGET may be a binary or a directory bundle; directories are scanned
+    /// automatically. Use --resume instead of TARGET to continue nonterminal work.
     Analyze {
-        target: PathBuf,
+        /// Binary or directory bundle; omitted when resuming.
+        #[arg(required_unless_present = "resume")]
+        target: Option<PathBuf>,
+        /// Resume nonterminal work using its saved configuration and checkpoints.
+        #[arg(long, conflicts_with = "target", value_name = "RUN_ID")]
+        resume: Option<String>,
         #[arg(long, default_value = DEFAULT_TASK)]
         task: String,
         #[arg(long)]
         output: Option<PathBuf>,
-    },
-    /// Resume nonterminal work using its saved configuration and checkpoints.
-    Resume {
-        run_id: String,
-        #[arg(long)]
+        /// Cumulative token limit; only with --resume.
+        #[arg(long, conflicts_with = "target")]
         max_tokens: Option<u64>,
-        #[arg(long)]
+        /// Cumulative cost limit in USD; only with --resume.
+        #[arg(long, conflicts_with = "target")]
         max_usd: Option<f64>,
-        #[arg(long)]
-        output: Option<PathBuf>,
     },
-    Runs,
-    Status {
-        run_id: String,
-        #[arg(long, default_value_t = 20)]
-        events: usize,
+    /// List saved assessments, or inspect one and its recent events with --run.
+    Runs {
+        /// Inspect one saved assessment instead of listing all.
+        #[arg(long, value_name = "RUN_ID")]
+        run: Option<String>,
+        /// Maximum recent events included with --run.
+        #[arg(long, requires = "run")]
+        events: Option<usize>,
     },
     /// Resolve an uncertain external effect using an operator-reviewed result and evidence.
     Reconcile {
@@ -107,9 +112,7 @@ pub enum Command {
         error: bool,
     },
     /// Open the desktop workspace, optionally selecting a saved assessment.
-    Gui {
-        run_id: Option<String>,
-    },
+    Gui { run_id: Option<String> },
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
@@ -208,39 +211,32 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Command::Analyze {
             target,
+            resume,
             task,
             output,
-        } => {
-            let prepared = service.start(&target, &task).await?;
-            let run = prepared.run().clone();
-            println!(
-                "{}",
-                json!({"run_id":run.id,"root_agent_id":run.root_id,"state_dir":store.root()})
-            );
-            let result = drive_with_events(prepared, cli.json).await?;
-            if let Some(path) = output {
-                print_json(&serde_json::to_value(report::export_with_locale(
-                    &store, &run.id, &path, locale,
-                )?)?)?;
-            }
-            print_json(&serde_json::to_value(&result)?)?;
-            require_completed(result.status)?;
-        }
-        Command::Resume {
-            run_id,
             max_tokens,
             max_usd,
-            output,
         } => {
-            let run: RunRecord = store.require("run", &run_id)?;
-            let mut budget = run.budget.clone();
-            if let Some(tokens) = max_tokens {
-                budget.max_total_tokens = tokens;
-            }
-            if let Some(usd) = max_usd {
-                budget.max_usd = Some(usd);
-            }
-            let prepared = service.resume(&run_id, Some(budget)).await?;
+            let (prepared, run_id) = if let Some(run_id) = resume {
+                let run: RunRecord = store.require("run", &run_id)?;
+                let mut budget = run.budget.clone();
+                if let Some(tokens) = max_tokens {
+                    budget.max_total_tokens = tokens;
+                }
+                if let Some(usd) = max_usd {
+                    budget.max_usd = Some(usd);
+                }
+                (service.resume(&run_id, Some(budget)).await?, run_id)
+            } else {
+                let target = target.context("a target is required without --resume")?;
+                let prepared = service.start(&target, &task).await?;
+                let run = prepared.run().clone();
+                println!(
+                    "{}",
+                    json!({"run_id":run.id,"root_agent_id":run.root_id,"state_dir":store.root()})
+                );
+                (prepared, run.id)
+            };
             let result = drive_with_events(prepared, cli.json).await?;
             if let Some(path) = output {
                 print_json(&serde_json::to_value(report::export_with_locale(
@@ -250,12 +246,15 @@ pub async fn run(cli: Cli) -> Result<()> {
             print_json(&serde_json::to_value(&result)?)?;
             require_completed(result.status)?;
         }
-        Command::Runs => print_json(&serde_json::to_value(
-            crate::queries::AssessmentQueries::new(&store).runs()?,
-        )?)?,
-        Command::Status { run_id, events } => print_json(&serde_json::to_value(
-            crate::queries::AssessmentQueries::new(&store).status(&run_id, events)?,
-        )?)?,
+        Command::Runs { run, events } => {
+            let queries = crate::queries::AssessmentQueries::new(&store);
+            match run {
+                Some(run_id) => print_json(&serde_json::to_value(
+                    queries.status(&run_id, events.unwrap_or(20))?,
+                )?)?,
+                None => print_json(&serde_json::to_value(queries.runs()?)?)?,
+            }
+        }
         Command::Reconcile {
             call_id,
             result_file,

@@ -154,14 +154,70 @@ mod tests {
         let cli = Cli::from_arg_matches(&matches).unwrap();
         let super::super::Command::Analyze {
             target,
+            resume,
             task,
             output,
+            ..
         } = cli.command.unwrap()
         else {
             panic!("wrong command");
         };
-        assert_eq!(target, std::path::PathBuf::from("target.bin"));
+        assert_eq!(target, Some(std::path::PathBuf::from("target.bin")));
+        assert!(resume.is_none());
         assert_eq!(task, "Inspect only the test fixture");
         assert_eq!(output, Some(std::path::PathBuf::from("report-output")));
+    }
+
+    #[test]
+    fn analyze_requires_a_target_or_resume_and_rejects_ambiguous_budget_flags() {
+        let command = localize(Cli::command(), Locale::EnUs, "");
+        assert!(
+            command
+                .clone()
+                .try_get_matches_from(["wukong", "analyze"])
+                .is_err()
+        );
+        assert!(
+            command
+                .clone()
+                .try_get_matches_from(["wukong", "analyze", "target.bin", "--resume", "run"])
+                .is_err()
+        );
+        assert!(
+            command
+                .clone()
+                .try_get_matches_from(["wukong", "analyze", "target.bin", "--max-tokens", "10"])
+                .is_err()
+        );
+        assert!(
+            command
+                .clone()
+                .try_get_matches_from(["wukong", "analyze", "target.bin", "--max-usd", "1"])
+                .is_err()
+        );
+        assert!(
+            command
+                .clone()
+                .try_get_matches_from(["wukong", "runs", "--events", "5"])
+                .is_err()
+        );
+        assert!(
+            command
+                .clone()
+                .try_get_matches_from(["wukong", "runs", "--run", "run", "--events", "5"])
+                .is_ok()
+        );
+        assert!(
+            command
+                .try_get_matches_from([
+                    "wukong",
+                    "analyze",
+                    "--resume",
+                    "run",
+                    "--max-tokens",
+                    "10"
+                ])
+                .is_ok()
+        );
     }
 }

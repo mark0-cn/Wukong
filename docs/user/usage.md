@@ -211,21 +211,21 @@ Replace `RUN_ID`, `CALL_ID` and `EVIDENCE_ID` with actual IDs.
 
 ```sh
 wukong runs
-wukong status RUN_ID --events 30
+wukong runs --run RUN_ID --events 30
 wukong gui RUN_ID
 ```
 
-Use the desktop workspace to send information, assign follow-ups, pause analysis and stop branches. Ordinary messages add information without reopening completed work; a follow-up assigns more work to a completed Agent, preserving history and cumulative budgets. Paused analysis still requires explicit resume. Stopping a branch stops its subtasks too; recorded evidence remains available.
+Use the desktop workspace to send information, assign follow-ups, pause analysis and stop branches. `runs` lists saved assessments; `runs --run RUN_ID` reports one assessment's status and recent events. Ordinary messages add information without reopening completed work; a follow-up assigns more work to a completed Agent, preserving history and cumulative budgets. Paused analysis still requires explicit resume. Stopping a branch stops its subtasks too; recorded evidence remains available.
 
 <a id="暂停与恢复"></a>
 
 ### Pause and resume
 
 ```sh
-wukong resume RUN_ID --max-tokens 1000000
+wukong analyze --resume RUN_ID --max-tokens 1000000
 ```
 
-The desktop workspace pauses an active assessment and saves progress. CLI Ctrl+C requests scheduling to stop at a persistence boundary, retaining resumable state. `resume` uses saved configuration/checkpoints; `--max-tokens` and `--max-usd` change cumulative limits. A lease excludes simultaneous active controllers.
+The desktop workspace pauses an active assessment and saves progress. CLI Ctrl+C requests scheduling to stop at a persistence boundary, retaining resumable state. `analyze --resume` uses saved configuration/checkpoints; `--max-tokens` and `--max-usd` change cumulative limits and require `--resume`. A lease excludes simultaneous active controllers.
 
 Native Rig logs live in state-directory `rig/RUN_ID`. State schema is currently 3, without legacy database migration. Old directories return a version message; choose a new state directory for new tasks.
 

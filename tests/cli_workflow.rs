@@ -308,7 +308,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         ensure!(paused_calls == 1, "paused checkpoint repeated model work");
         let output = cli_with_base(
             &config_path,
-            &["resume", &run.id, "--max-tokens", "10000"],
+            &["analyze", "--resume", &run.id, "--max-tokens", "10000"],
             Some("http://127.0.0.1:1/v1"),
         )
         .await?;

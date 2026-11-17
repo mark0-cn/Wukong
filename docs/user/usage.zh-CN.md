@@ -216,21 +216,21 @@ verifier = { model = "your-verifier-model", max_tokens = 16384 }
 
 ```sh
 wukong runs
-wukong status RUN_ID --events 30
+wukong runs --run RUN_ID --events 30
 wukong gui RUN_ID
 ```
 
-在桌面工作区中补充信息、追加任务、暂停分析或停止分支。普通消息补充信息，不会重新开启已完成任务；follow-up 用于向已完成的 Agent 追加工作，保留其历史和累计预算。暂停状态仍需显式恢复。停止分支也会停止其子任务，已记录证据保留。
+在桌面工作区中补充信息、追加任务、暂停分析或停止分支。`runs` 列出已保存的任务，`runs --run RUN_ID` 显示单个任务的状态和近期事件。普通消息补充信息，不会重新开启已完成任务；follow-up 用于向已完成的 Agent 追加工作，保留其历史和累计预算。暂停状态仍需显式恢复。停止分支也会停止其子任务，已记录证据保留。
 
 <a id="pause-and-resume"></a>
 
 ### 暂停与恢复
 
 ```sh
-wukong resume RUN_ID --max-tokens 1000000
+wukong analyze --resume RUN_ID --max-tokens 1000000
 ```
 
-桌面工作区可暂停活动任务并保存进度。CLI 的 Ctrl+C 请求在持久化边界停止调度，保留状态以便恢复。`resume` 使用保存的配置与检查点，并可通过 `--max-tokens`、`--max-usd` 调整累计预算上限。活动控制端通过租约互斥。
+桌面工作区可暂停活动任务并保存进度。CLI 的 Ctrl+C 请求在持久化边界停止调度，保留状态以便恢复。`analyze --resume` 使用保存的配置与检查点，并可通过 `--max-tokens`、`--max-usd` 调整累计预算上限（需与 `--resume` 一起使用）。活动控制端通过租约互斥。
 
 原生 Rig 日志位于状态目录的 `rig/RUN_ID`。当前状态目录使用 schema 3，不提供旧数据库迁移；旧目录会返回版本提示，新任务应选择新的状态目录。
 

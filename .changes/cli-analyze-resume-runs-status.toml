@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Merge `resume RUN_ID` into `analyze --resume RUN_ID` and `status RUN_ID --events N` into `runs --run RUN_ID --events N`. `--max-tokens` and `--max-usd` now require `--resume`, and `analyze` requires either a target or `--resume`. Replace scripted `wukong resume` and `wukong status` calls with the new forms; saved runs and checkpoints are unchanged."
+zh_CN = "将 `resume RUN_ID` 合并为 `analyze --resume RUN_ID`，将 `status RUN_ID --events N` 合并为 `runs --run RUN_ID --events N`。`--max-tokens` 与 `--max-usd` 现在必须与 `--resume` 一起使用，`analyze` 需要目标或 `--resume` 之一。脚本中的 `wukong resume` 与 `wukong status` 调用需改用新形式；已保存任务与检查点保持不变。"
