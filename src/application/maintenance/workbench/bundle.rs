@@ -114,7 +114,9 @@ impl Workbench {
                 }
                 let lock: Value = read_json(&source.join("environment.lock.json"))?;
                 if let Some(image) = lock["challenge_image_id"].as_str() {
-                    images.insert(image.into());
+                    // The lock file is copied verbatim from imported bundles, so only a
+                    // digest may reach Dockers argv.
+                    images.insert(valid_image_id(image)?);
                 }
                 ids.push(id);
             }
@@ -282,10 +284,7 @@ impl Workbench {
         let image = manifest["tool_image_id"]
             .as_str()
             .context("tool image ID missing")?;
-        ensure!(
-            image.starts_with("sha256:") && image.len() == 71,
-            "invalid tool image ID"
-        );
+        valid_image_id(image)?;
         let suffixes: Vec<String> = serde_json::from_value(manifest["volumes"].clone())?;
         for suffix in &suffixes {
             valid_id(suffix)?;
@@ -301,10 +300,7 @@ impl Workbench {
         );
         let mut missing = false;
         for id in &images {
-            ensure!(
-                id.starts_with("sha256:") && id.len() == 71,
-                "invalid bundled image ID"
-            );
+            valid_image_id(id)?;
             missing |= self.docker.inspect("image", id)?.is_none();
         }
         if missing {
@@ -324,46 +320,58 @@ impl Workbench {
                 "bundle did not load declared image {id}"
             );
         }
-        for suffix in &suffixes {
-            let volume = self.name(suffix);
-            self.docker.run(&[
-                "volume",
-                "create",
-                "--label",
-                &format!("wukong.workspace={}", self.id),
-                &volume,
-            ])?;
-            self.archive_volume("restore", &volume, &source.join("volumes"), suffix, image)?;
-        }
-        for name in ["challenges", "history"] {
-            if source.join(name).exists() {
-                copy_tree(&source.join(name), &self.root.join(name))?;
+        // Volumes created here are removed if a later step fails; otherwise a retry
+        // refuses with "import volume already exists" and they leak.
+        let mut created_volumes: Vec<String> = Vec::new();
+        let imported = (|| -> Result<Value> {
+            for suffix in &suffixes {
+                let volume = self.name(suffix);
+                self.docker.run(&[
+                    "volume",
+                    "create",
+                    "--label",
+                    &format!("wukong.workspace={}", self.id),
+                    &volume,
+                ])?;
+                created_volumes.push(volume.clone());
+                self.archive_volume("restore", &volume, &source.join("volumes"), suffix, image)?;
+            }
+            for name in ["challenges", "history"] {
+                if source.join(name).exists() {
+                    copy_tree(&source.join(name), &self.root.join(name))?;
+                }
+            }
+            // Preserve historical evidence verbatim. It is not resumed under stale absolute paths.
+            write_json(
+                &self.root.join("import-record.json"),
+                &json!({"source_workspace":manifest["source_workspace"],"source_id":manifest["source_id"],"history_read_only":true,"new_workspace":self.root}),
+            )?;
+            let result = self.up(Some(image))?;
+            for id in manifest["challenge_ids"]
+                .as_array()
+                .context("challenge IDs missing")?
+            {
+                let id = id.as_str().context("invalid challenge ID")?;
+                self.challenge(id)?;
+                let env = Environment {
+                    image: image.into(),
+                    image_id: image.into(),
+                    container: self.name(&format!("{id}-tools")),
+                    volume: self.name(&format!("{id}-state")),
+                    network: self.name(&format!("{id}-net")),
+                };
+                self.write_worker_config(&env, &self.challenge_dir(id)?.join("wukong.toml"))?;
+            }
+            Ok(
+                json!({"environment":result,"imported":true,"history_read_only":true,"credentials_required":true}),
+            )
+        })();
+        if imported.is_err() {
+            for volume in &created_volumes {
+                let _ = self.docker.run(&["volume", "rm", volume]);
             }
         }
-        // Preserve historical evidence verbatim. It is not resumed under stale absolute paths.
-        write_json(
-            &self.root.join("import-record.json"),
-            &json!({"source_workspace":manifest["source_workspace"],"source_id":manifest["source_id"],"history_read_only":true,"new_workspace":self.root}),
-        )?;
-        let result = self.up(Some(image))?;
-        for id in manifest["challenge_ids"]
-            .as_array()
-            .context("challenge IDs missing")?
-        {
-            let id = id.as_str().context("invalid challenge ID")?;
-            self.challenge(id)?;
-            let env = Environment {
-                image: image.into(),
-                image_id: image.into(),
-                container: self.name(&format!("{id}-tools")),
-                volume: self.name(&format!("{id}-state")),
-                network: self.name(&format!("{id}-net")),
-            };
-            self.write_worker_config(&env, &self.challenge_dir(id)?.join("wukong.toml"))?;
-        }
-        Ok(
-            json!({"environment":result,"imported":true,"history_read_only":true,"credentials_required":true}),
-        )
+        imported
     }
 }
 

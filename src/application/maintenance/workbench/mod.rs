@@ -122,6 +122,16 @@ impl Workbench {
     }
 }
 
+/// Image identities are content addressed; only this shape may reach Docker's argv.
+pub fn valid_image_id(value: &str) -> Result<String> {
+    ensure!(
+        value.len() == 71
+            && value.starts_with("sha256:")
+            && value[7..].bytes().all(|b| b.is_ascii_hexdigit()),
+        "image ID must be a sha256 digest"
+    );
+    Ok(value.to_owned())
+}
 pub fn valid_id(value: &str) -> Result<()> {
     ensure!(
         !value.is_empty()

@@ -169,10 +169,11 @@ impl Workbench {
                 == crate::adapters::binary::sha256_file(root.join("challenge.toml"))?,
             "manifest changed since build; run challenge build again"
         );
-        Ok(lock["challenge_image_id"]
-            .as_str()
-            .context("build the challenge first")?
-            .to_owned())
+        valid_image_id(
+            lock["challenge_image_id"]
+                .as_str()
+                .context("build the challenge first")?,
+        )
     }
     pub fn up_challenge(&self, id: &str, allow_privileged: bool) -> Result<Value> {
         self.verify_original(id)?;
