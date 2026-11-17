@@ -187,9 +187,9 @@ impl Coordinator {
         tx.save_record(&agent)?;
         tx.event(
             &run.id,
-            Some(&agent.id),
+            Some(&agent.metadata.id),
             "agent.created",
-            json!({"parent_id":parent.id,"role":agent.role,"scope":agent.scope,"environment_id":agent.environment_id}),
+            json!({"parent_id":parent.id,"role":agent.metadata.role,"scope":agent.metadata.scope,"environment_id":agent.metadata.environment_id}),
         )?;
         Ok(SpawnResult {
             created: true,

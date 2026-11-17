@@ -158,7 +158,7 @@ impl WorkspaceQueries {
                 let deleted = delta.agents.iter().any(|change| Some(change.id.as_str()) == agent && change.value.is_none());
                 if reset || self.agent.as_deref() != agent || conversation_revision != self.conversation_revision || deleted {
                     let record = agent.map(|id| Store::tx_agent_snapshot(tx, id)).transpose()?.flatten();
-                    conversation = Some(record.filter(|record| record.run_id == run));
+                    conversation = Some(record.filter(|record| record.metadata.run_id == run));
                 }
             }
             Ok((delta, revision, conversation_revision, conversation, narration_snapshots))

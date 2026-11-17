@@ -709,10 +709,8 @@ async fn activated_skills_are_exact_durable_snapshots_with_idempotent_receipts()
         activated.value.to_string().len() < 2000,
         "activation must not expose a summarizable copy of the instructions"
     );
-    let snapshot = store
-        .require::<AgentSnapshot>("agent", &agent.id)?
-        .active_skills
-        .remove(0);
+    let mut stored = store.require::<AgentSnapshot>("agent", &agent.id)?;
+    let snapshot = stored.metadata.active_skills.remove(0);
     assert_eq!(snapshot.content, original);
     assert_eq!(
         store.read_evidence(&run.id, &snapshot.evidence_id)?,

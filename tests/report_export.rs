@@ -257,8 +257,8 @@ fn template_escapes_verified_details_and_preserves_independent_replay_status() {
     let directory = tempfile::tempdir().unwrap();
     let (store, run_id, evidence_id) = fixture(directory.path());
     let mut verifier: AgentSnapshot = store.require("agent", "agent_root").unwrap();
-    verifier.id = "independent_verifier".into();
-    verifier.role = Role::Verifier;
+    verifier.metadata.id = "independent_verifier".into();
+    verifier.metadata.role = Role::Verifier;
     store
         .put("agent", &verifier.id, &run_id, &verifier)
         .unwrap();

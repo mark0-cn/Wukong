@@ -140,7 +140,8 @@ fn validated_verification<'a>(
             && !verification.evidence_ids.is_empty()
             && verification.verifier_agent_id != finding.agent_id
             && snapshot.agents.iter().any(|agent| {
-                agent.id == verification.verifier_agent_id && agent.role == Role::Verifier
+                agent.metadata.id == verification.verifier_agent_id
+                    && agent.metadata.role == Role::Verifier
             })
     })
 }

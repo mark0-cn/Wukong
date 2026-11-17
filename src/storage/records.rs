@@ -20,7 +20,16 @@ macro_rules! record {
         }
     };
 }
-record!(AgentSnapshot, "agent");
+// The snapshot wraps its record, so it delegates instead of sharing the field-list macro.
+impl StoredRecord for AgentSnapshot {
+    const KIND: &'static str = "agent";
+    fn record_id(&self) -> &str {
+        &self.metadata.id
+    }
+    fn record_run(&self) -> &str {
+        &self.metadata.run_id
+    }
+}
 record!(JobRecord, "job");
 record!(ArtifactValidation, "artifact_validation");
 record!(WorkerFileRecord, "worker_file");

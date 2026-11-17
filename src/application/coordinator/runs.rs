@@ -91,7 +91,7 @@ impl Coordinator {
             tx.save_record(&root.metadata)?;
             tx.event(
                 &run.id,
-                Some(&root.id),
+                Some(&root.metadata.id),
                 "run.created",
                 json!({"target_sha256":run.target_sha256,"bundle_sha256":run.bundle.as_ref().map(|bundle| &bundle.bundle_sha256),"task":task}),
             )?;

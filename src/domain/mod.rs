@@ -263,15 +263,13 @@ impl AgentSnapshot {
         }
     }
 }
+/// Read-only field access to the wrapped record, so reads stay terse. `DerefMut`
+/// is deliberately absent: mutating a snapshot's metadata through the wrapper
+/// would bypass the store that owns the durable record.
 impl std::ops::Deref for AgentSnapshot {
     type Target = AgentMetadata;
     fn deref(&self) -> &Self::Target {
         &self.metadata
-    }
-}
-impl std::ops::DerefMut for AgentSnapshot {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.metadata
     }
 }
 
@@ -675,7 +673,6 @@ pub trait RunScoped {
 macro_rules! run_scoped { ($($record:ty),+ $(,)?) => { $(impl RunScoped for $record { fn run_id(&self)->&str { &self.run_id } })+ }; }
 run_scoped!(
     AgentMetadata,
-    AgentSnapshot,
     JobRecord,
     SessionRecord,
     WorkerFileRecord,
@@ -688,3 +685,10 @@ run_scoped!(
     Thought,
     PublicReply
 );
+/// The snapshot is a wrapper, not a record: read the run through its metadata
+/// instead of dereferencing the wrapper like a smart pointer.
+impl RunScoped for AgentSnapshot {
+    fn run_id(&self) -> &str {
+        self.metadata.run_id.as_str()
+    }
+}

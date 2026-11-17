@@ -226,7 +226,7 @@ mod tests {
             assert_eq!(end["eof"], state == SessionState::Closed);
         }
         let mut other = agent.clone();
-        other.id = "foreign-agent".into();
+        other.metadata.id = "foreign-agent".into();
         assert!(
             execution
                 .resource_read(&other, "foreign-read", &input)
