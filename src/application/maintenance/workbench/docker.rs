@@ -74,16 +74,10 @@ impl Docker {
             let error = String::from_utf8_lossy(&output.stderr);
             // Only a real "this kind of object is missing" reply means absence; a daemon
             // or socket failure must surface instead of reading as a missing resource.
-            let lowered = error.trim_start().to_ascii_lowercase();
-            let absent = match kind {
-                "container" => lowered.starts_with("error: no such container:"),
-                "image" => lowered.starts_with("error: no such image:"),
-                "volume" => lowered.starts_with("error: no such volume:"),
-                "network" => lowered.starts_with("error: no such network:"),
-                _ => false,
-            } || lowered
-                .contains(&format!("network {} not found", name.to_lowercase()));
-            if absent {
+            // The CLI prefixes its own errors with "Error: ", daemon responses read
+            // "Error response from daemon: ", and volumes answer "get <name>: no such
+            // volume", so match the kind-specific phrase itself.
+            if missing_resource(kind, name, &error) {
                 return Ok(None);
             }
             anyhow::bail!(
@@ -249,5 +243,69 @@ mod tests {
         assert!(detail.len() <= 4096 && detail.lines().count() <= 30);
         assert_eq!(std::fs::read_to_string(&log).unwrap(), content);
         assert!(message.args.contains_key("log"));
+    }
+}
+
+/// Docker reports a missing resource in several shapes: the CLI writes
+/// `Error: No such container: x`, daemon responses write
+/// `Error response from daemon: No such container: x`, and volumes answer
+/// `get x: no such volume`. Only these kind-specific phrases mean absence; a
+/// daemon or socket failure must surface instead of reading as a missing object.
+fn missing_resource(kind: &str, name: &str, stderr: &str) -> bool {
+    let lowered = stderr.to_ascii_lowercase();
+    let missing = match kind {
+        "container" => "no such container",
+        "image" => "no such image",
+        "volume" => "no such volume",
+        "network" => "no such network",
+        _ => "",
+    };
+    (!missing.is_empty() && lowered.contains(missing))
+        || lowered.contains(&format!("network {} not found", name.to_lowercase()))
+}
+
+#[cfg(test)]
+mod missing_resource_tests {
+    use super::missing_resource;
+
+    #[test]
+    fn recognises_cli_and_daemon_absence_messages() {
+        assert!(missing_resource(
+            "container",
+            "x",
+            "Error: No such container: wukong-1-tools"
+        ));
+        assert!(missing_resource(
+            "container",
+            "x",
+            "Error response from daemon: No such container: wukong-1-tools"
+        ));
+        assert!(missing_resource(
+            "image",
+            "x",
+            "Error response from daemon: No such image: sha256:abc"
+        ));
+        assert!(missing_resource(
+            "volume",
+            "x",
+            "Error response from daemon: get wukong-1-state: no such volume"
+        ));
+        assert!(missing_resource(
+            "network",
+            "wukong-1-offline",
+            "Error response from daemon: network wukong-1-offline not found"
+        ));
+    }
+
+    #[test]
+    fn leaves_daemon_and_socket_failures_visible() {
+        for stderr in [
+            "permission denied while trying to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine",
+            "Cannot connect to the Docker daemon at npipe:////./pipe/docker_engine",
+            "open /x: no such file or directory",
+            "error during connect: The system cannot find the file specified",
+        ] {
+            assert!(!missing_resource("container", "x", stderr), "{stderr}");
+        }
     }
 }
