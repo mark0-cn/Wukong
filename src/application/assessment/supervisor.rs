@@ -81,19 +81,25 @@ impl RunSupervisor {
                 runtime,
             )
         });
-        let result = tokio::select! {
-            result = &mut kernel => result.context("Rig kernel thread failed")?,
+        let result: Result<RunRecord> = tokio::select! {
+            result = &mut kernel => result
+                .context("Rig kernel thread failed")
+                .and_then(|result| result),
             result = &mut heartbeat => {
                 supervisor.cancel.cancel();
                 let _ = kernel.await;
-                result.context("controller supervision failed")??;
-                anyhow::bail!("controller supervision ended unexpectedly")
+                result
+                    .context("controller supervision failed")
+                    .and_then(|result| result)
+                    .and_then(|()| anyhow::bail!("controller supervision ended unexpectedly"))
             }
             result = &mut environment_heartbeat => {
                 supervisor.cancel.cancel();
                 let _ = kernel.await;
-                result.context("environment lease supervision failed")??;
-                anyhow::bail!("environment lease supervision ended unexpectedly")
+                result
+                    .context("environment lease supervision failed")
+                    .and_then(|result| result)
+                    .and_then(|()| anyhow::bail!("environment lease supervision ended unexpectedly"))
             }
         };
         // Persisted intents survive a timeout or unreachable worker. Never
