@@ -560,11 +560,13 @@ impl Workbench {
         );
         let env = self.challenge_environment(id)?;
         let name = self.name(&format!("{id}-debug"));
+        let service_id = target["Id"]
+            .as_str()
+            .context("docker inspect omitted the challenge service container ID")?;
         if let Some(existing) = self.docker.inspect("container", &name)? {
             self.owned(&existing, &name)?;
             ensure!(
-                existing["HostConfig"]["PidMode"]
-                    == format!("container:{}", target["Id"].as_str().unwrap()),
+                existing["HostConfig"]["PidMode"] == format!("container:{service_id}"),
                 "debug companion belongs to a previous service instance; run challenge down first"
             );
             self.docker.run(&["start", &name])?;
