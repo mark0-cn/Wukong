@@ -190,6 +190,10 @@ pub(in crate::application::tools) fn handle_runtime_profile<'a>(
                 tools.files.known_file(agent, path, key == "target")?;
             }
         }
+        ensure!(
+            args["session_id"].is_null() || args["interactive_session_id"].is_null(),
+            "choose one session kind"
+        );
         let mut profile_args = args.clone();
         for field in ["session_id", "interactive_session_id", "address"] {
             profile_args
@@ -206,10 +210,6 @@ pub(in crate::application::tools) fn handle_runtime_profile<'a>(
                 tools.files.register_file(agent, file, None)?;
             }
         }
-        ensure!(
-            args["session_id"].is_null() || args["interactive_session_id"].is_null(),
-            "choose one session kind"
-        );
         if let Some(session_id) = args["session_id"]
             .as_str()
             .or(args["interactive_session_id"].as_str())
