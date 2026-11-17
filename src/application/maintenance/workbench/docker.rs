@@ -72,9 +72,17 @@ impl Docker {
         )?;
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            if error.to_ascii_lowercase().contains("no such ")
-                || error.contains(&format!("network {name} not found"))
-            {
+            // Only a real "this kind of object is missing" reply means absence; a daemon
+            // or socket failure must surface instead of reading as a missing resource.
+            let lowered = error.trim_start().to_ascii_lowercase();
+            let absent = match kind {
+                "container" => lowered.starts_with("error: no such container:"),
+                "image" => lowered.starts_with("error: no such image:"),
+                "volume" => lowered.starts_with("error: no such volume:"),
+                "network" => lowered.starts_with("error: no such network:"),
+                _ => false,
+            } || error.contains(&format!("network {name} not found"));
+            if absent {
                 return Ok(None);
             }
             anyhow::bail!(
@@ -120,17 +128,19 @@ impl Docker {
             .stdout(Stdio::from(file.try_clone()?))
             .stderr(Stdio::from(file))
             .spawn()?;
+        // Every streaming command goes through the bounded monitor, which enforces the
+        // log-size cap and the elapsed deadline in addition to cancellation. A bare
+        // child.wait() here had neither.
         let result = match report {
             Some(report) => {
                 super::pull_progress::monitor(&mut child, log, report, self.cancellation.as_ref())
             }
-            None if self.cancellation.is_some() => super::pull_progress::monitor(
+            None => super::pull_progress::monitor(
                 &mut child,
                 log,
                 &mut |_| {},
                 self.cancellation.as_ref(),
             ),
-            None => child.wait().map_err(anyhow::Error::from),
         };
         if result.is_err() {
             let _ = child.kill();

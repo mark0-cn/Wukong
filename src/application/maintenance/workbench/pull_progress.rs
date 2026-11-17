@@ -8,6 +8,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A build or image save that produces more than this is treated as runaway.
+const MAX_LOG_BYTES: u64 = 256 * 1024 * 1024;
+/// Upper bound for a streamed Docker command that has no cancellation token.
+const MAX_STREAM_TIME: Duration = Duration::from_secs(2 * 60 * 60);
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LayerProgress {
     pub id: String,
@@ -101,6 +106,14 @@ pub(super) fn monitor(
     let mut revision = 0;
     report(parser.progress.clone());
     loop {
+        if started.elapsed() > MAX_STREAM_TIME {
+            let _ = child.kill();
+            anyhow::bail!("Docker command exceeded {MAX_STREAM_TIME:?}");
+        }
+        if file.metadata().map(|meta| meta.len()).unwrap_or(0) > MAX_LOG_BYTES {
+            let _ = child.kill();
+            anyhow::bail!("Docker log exceeds {MAX_LOG_BYTES} bytes");
+        }
         super::cancellation::check(cancel)?;
         let exit = child.try_wait()?;
         // Drain incrementally. No raw-output buffers or unbounded lines in the DTO.
