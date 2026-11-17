@@ -86,6 +86,11 @@ pub(super) fn finish_preflights(
                     .insert(ModelTools(selection.clone()));
             }
             Err(error) => {
+                // The probe released its hold; without a refusal the effect can still be
+                // dispatched in this same update and the response is thrown away.
+                commands.entity(held.0).insert(Outcome::refused(format!(
+                    "environment preflight failed: {error}"
+                )));
                 fatal
                     .0
                     .get_or_insert_with(|| anyhow::anyhow!(error.clone()));
