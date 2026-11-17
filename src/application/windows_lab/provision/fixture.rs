@@ -271,13 +271,14 @@ pub fn media() -> MediaFixture {
 /// A valid guest provisioning receipt for the fixture, pre-cleanup.
 pub fn guest_receipt(provision_id: &str, connection: &PublicConnection) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
-        "schema": 1,
+        "schema": 2,
         "provision_id": provision_id,
         "installed": true,
         "already_installed": false,
         "exit_code": 0,
         "connection": connection,
-        "service_delete": "deleted",
+        "startup_cleanup": "restored",
+        "startup_script_deleted": true,
         "cleanup_scheduled": true,
         "error": null,
     }))

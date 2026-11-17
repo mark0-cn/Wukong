@@ -5,7 +5,8 @@ use crate::application::windows_lab::provision_environment::{
     pin_environment, prepare_environment, write_configuration,
 };
 use crate::application::windows_lab::{
-    MediaIdentity, ProvisionOptions, ProvisionOutcome, ProvisionSource, ReconcileOutcome,
+    CleanGuestOptions, MediaIdentity, ProvisionOptions, ProvisionOutcome, ProvisionSource,
+    ReconcileOutcome,
 };
 use crate::config::AppConfig;
 use anyhow::{Context, Result, ensure};
@@ -69,6 +70,17 @@ pub enum Command {
         /// End-to-end provisioning deadline in seconds.
         #[arg(long, default_value_t = 1800)]
         timeout: u64,
+    },
+    /// Remove one failed provisioning attempt's leftovers from the powered-off guest disk.
+    CleanGuest {
+        #[arg(long)]
+        vm: String,
+        /// Operation id reported by the failed `lab provision` run.
+        #[arg(long)]
+        operation: String,
+        /// Inspect the guest and print the planned removals without writing.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Create the baseline (if needed) and one immutable experiment snapshot.
     Prepare {
@@ -221,6 +233,24 @@ async fn run_with_registry(
                     verify_environment,
                     dry_run,
                     timeout_seconds: timeout,
+                })
+                .await?;
+            let mut value = serde_json::to_value(&outcome)?;
+            if let Some(object) = value.as_object_mut() {
+                object.insert("vm_id".into(), json!(vm));
+            }
+            Ok(value)
+        }
+        Command::CleanGuest {
+            vm,
+            operation,
+            dry_run,
+        } => {
+            ensure_registered(config, &vm)?;
+            let outcome = open(&vm)?
+                .clean_guest_leftovers(CleanGuestOptions {
+                    operation_id: operation,
+                    dry_run,
                 })
                 .await?;
             let mut value = serde_json::to_value(&outcome)?;

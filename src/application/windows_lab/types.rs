@@ -242,8 +242,19 @@ pub struct LabProvision {
     pub iso_size: Option<u64>,
     pub vmx_sha256_before: Option<String>,
     pub vmx_sha256_after: Option<String>,
+    /// Legacy evidence from the earlier SYSTEM-hive one-shot service mechanism.
+    /// New provisioning never writes a service; these stay `None` and are kept
+    /// only so laboratory state written by that version still loads.
+    #[serde(default)]
     pub hive_sha256_before: Option<String>,
+    #[serde(default)]
     pub hive_sha256_after: Option<String>,
+    /// SHA-256 of the injected machine `scripts.ini` (startup entry included).
+    #[serde(default)]
+    pub scripts_ini_sha256: Option<String>,
+    /// SHA-256 of the injected local-GPO `gpt.ini` (bumped computer version).
+    #[serde(default)]
+    pub gpt_ini_sha256: Option<String>,
     pub identity_file: Option<PathBuf>,
     pub guest_receipt: Option<serde_json::Value>,
     pub connection: Option<serde_json::Value>,

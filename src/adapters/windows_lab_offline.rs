@@ -1,18 +1,20 @@
 //! Offline-provisioning host adapters.
 //!
-//! `WslOfflineDisk` edits the powered-off guest disk through operator-configured
-//! WSL `guestfish`/`hivexsh`; `MkisofsIsoBuilder` builds the `WUKONG_OFFLINE`
-//! ISO; `VmrunGuestNetwork` reports the guest IPv4 from `vmrun`; and
-//! `PythonMediaFinalizer` invokes the repository's media finalize module. Every
-//! tool path is operator configuration, every argv is fixed and no shell is
-//! involved. The feature is Windows-only: other hosts get inert stubs so the
-//! crate stays portable.
+//! `WslOfflineDisk` reads and edits the powered-off guest disk through
+//! operator-configured WSL `guestfish`/`hivexsh`; `MkisofsIsoBuilder` builds the
+//! `WUKONG_OFFLINE` ISO; `VmrunGuestNetwork` reports the guest IPv4 from
+//! `vmrun`; and `PythonMediaFinalizer` invokes the repository's media finalize
+//! module. Every tool path is operator configuration, every argv is fixed and no
+//! shell is involved. The feature is Windows-only: other hosts get inert stubs
+//! so the crate stays portable.
 #[cfg(windows)]
 mod platform {
     use crate::application::windows_lab::provision::{
         self, DiskInspection, DiskInspectionRequest, FinalizeRequest, GUEST_SYSTEM_CONFIG,
-        GuestFile, GuestNetwork, GuestObservation, GuestObservationRequest, GuestPaths, HivePatch,
-        HivePatchEvidence, IsoBuilder, MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk,
+        GuestFile, GuestNetwork, GuestObservation, GuestObservationRequest, GuestPaths,
+        GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder, MAX_POLICY_BYTES,
+        MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk, ServiceRemoval, ServiceRemovalEvidence,
+        startup_command_lines,
     };
     use anyhow::{Context, Result, bail, ensure};
     use async_trait::async_trait;
@@ -353,6 +355,40 @@ mod platform {
             Ok(output.stdout_text())
         }
 
+        async fn list_entries(
+            &self,
+            disk_posix: &str,
+            guest: &str,
+            operation: &str,
+        ) -> Result<Vec<String>> {
+            let output = self
+                .guestfish(disk_posix, false, &format!("ls {guest}\n"))
+                .await?;
+            require_success(&output, operation)?;
+            Ok(parse_lines(&output.stdout_text())
+                .into_iter()
+                .filter(|name| name != "." && name != "..")
+                .collect())
+        }
+
+        async fn read_guest_bytes(
+            &self,
+            disk_posix: &str,
+            guest: &str,
+            limit: u64,
+            operation: &str,
+        ) -> Result<Vec<u8>> {
+            let output = self
+                .guestfish(disk_posix, false, &format!("cat {guest}\n"))
+                .await?;
+            require_success(&output, operation)?;
+            ensure!(
+                output.stdout.len() as u64 <= limit,
+                "{operation} exceeded the controller size budget"
+            );
+            Ok(output.stdout)
+        }
+
         async fn inspect_in(
             &self,
             staging: &str,
@@ -363,22 +399,95 @@ mod platform {
             let system_hive = guestfish_path(&request.system_hive)?;
             let program_data = guestfish_path(&request.program_data)?;
             let provision_root = guestfish_path(&request.provision_root)?;
+            let scripts_dir = guestfish_path(&request.scripts_dir)?;
+            let startup_dir = guestfish_path(&request.startup_dir)?;
+            let scripts_ini = guestfish_path(&request.scripts_ini)?;
+            let scripts_backup = guestfish_path(&request.scripts_ini_backup)?;
+            let gpt_ini = guestfish_path(&request.gpt_ini)?;
+            let gpt_backup = guestfish_path(&request.gpt_ini_backup)?;
+            let gpo_root = guestfish_path(&request.gpo_root)?;
             let probe = format!(
-                "is-dir {system_config}\nis-file {system_hive}\nis-dir {program_data}\nis-dir {provision_root}\n"
+                "is-dir {system_config}\nis-file {system_hive}\nis-dir {program_data}\nis-dir {provision_root}\nis-dir {scripts_dir}\nis-dir {startup_dir}\nis-file {scripts_ini}\nis-file {scripts_backup}\nis-file {gpt_ini}\nis-file {gpt_backup}\nis-dir {gpo_root}\n"
             );
             let output = self.guestfish(disk_posix, false, &probe).await?;
             require_success(&output, "libguestfs preflight")?;
-            let values = parse_booleans(&output.stdout_text(), 4)?;
-            let inspection = DiskInspection {
+            let values = parse_booleans(&output.stdout_text(), 11)?;
+            let mut inspection = DiskInspection {
                 windows_volume: values[0],
                 system_hive_present: values[1],
                 program_data_present: values[2],
                 control_set: None,
                 existing_service: None,
                 provision_root_entries: Vec::new(),
+                policy: GuestPolicyFiles::default(),
             };
             if !inspection.windows_volume || !inspection.system_hive_present {
                 return Ok(inspection);
+            }
+            if values[3] {
+                inspection.provision_root_entries = self
+                    .list_entries(disk_posix, &provision_root, "list guest provision root")
+                    .await?;
+            }
+            if values[4] {
+                inspection.policy.scripts_directory_entries = self
+                    .list_entries(disk_posix, &scripts_dir, "list guest scripts directory")
+                    .await?;
+            }
+            if values[5] {
+                inspection.policy.startup_directory_entries = self
+                    .list_entries(disk_posix, &startup_dir, "list guest startup directory")
+                    .await?;
+            }
+            if values[10] {
+                inspection.policy.group_policy_entries = self
+                    .list_entries(disk_posix, &gpo_root, "list guest Group Policy directory")
+                    .await?;
+            }
+            if values[6] {
+                let bytes = self
+                    .read_guest_bytes(
+                        disk_posix,
+                        &scripts_ini,
+                        MAX_POLICY_BYTES,
+                        "read guest scripts.ini",
+                    )
+                    .await?;
+                inspection.policy.startup_command_lines = startup_command_lines(&bytes)?;
+                inspection.policy.scripts_ini = Some(bytes);
+            }
+            if values[7] {
+                inspection.policy.scripts_ini_backup = Some(
+                    self.read_guest_bytes(
+                        disk_posix,
+                        &scripts_backup,
+                        MAX_POLICY_BYTES,
+                        "read guest scripts.ini backup",
+                    )
+                    .await?,
+                );
+            }
+            if values[8] {
+                inspection.policy.gpt_ini = Some(
+                    self.read_guest_bytes(
+                        disk_posix,
+                        &gpt_ini,
+                        MAX_POLICY_BYTES,
+                        "read guest gpt.ini",
+                    )
+                    .await?,
+                );
+            }
+            if values[9] {
+                inspection.policy.gpt_ini_backup = Some(
+                    self.read_guest_bytes(
+                        disk_posix,
+                        &gpt_backup,
+                        MAX_POLICY_BYTES,
+                        "read guest gpt.ini backup",
+                    )
+                    .await?,
+                );
             }
             let hive = format!("{staging}/SYSTEM");
             let script = guestfish_download_script(&system_hive, &hive);
@@ -398,21 +507,9 @@ mod platform {
             let existing_service = parse_lines(&services)
                 .into_iter()
                 .find(|name| name.starts_with(&request.service_prefix));
-            let mut provision_root_entries = Vec::new();
-            if values[3] {
-                let output = self
-                    .guestfish(disk_posix, false, &format!("ls {provision_root}\n"))
-                    .await?;
-                require_success(&output, "list guest provision root")?;
-                provision_root_entries = parse_lines(&output.stdout_text())
-                    .into_iter()
-                    .filter(|name| name != "." && name != "..")
-                    .collect();
-            }
             Ok(DiskInspection {
                 control_set: Some(control_set),
                 existing_service,
-                provision_root_entries,
                 ..inspection
             })
         }
@@ -423,9 +520,18 @@ mod platform {
             disk_posix: &str,
             files: &[GuestFile],
         ) -> Result<()> {
-            let root = parent_windows(&files[0].windows_path)?;
-            let root_guest = guestfish_path(&root)?;
-            let mut script = format!("mkdir-p {root_guest}\n");
+            ensure!(files.len() <= 16, "too many guest files were supplied");
+            let mut directories: Vec<String> = Vec::new();
+            for file in files {
+                let parent = parent_windows(&file.windows_path)?;
+                if !directories.contains(&parent) {
+                    directories.push(parent);
+                }
+            }
+            let mut script = String::new();
+            for directory in &directories {
+                script.push_str(&format!("mkdir-p {}\n", guestfish_path(directory)?));
+            }
             let mut local_paths = Vec::new();
             for (index, file) in files.iter().enumerate() {
                 let local = format!("{staging}/file{index}");
@@ -457,15 +563,16 @@ mod platform {
             Ok(())
         }
 
-        async fn patch_hive_in(
+        async fn remove_service_in(
             &self,
             staging: &str,
             disk_posix: &str,
-            patch: &HivePatch,
-        ) -> Result<HivePatchEvidence> {
-            let hive_guest = guestfish_path(&patch.system_hive)?;
+            removal: &ServiceRemoval,
+        ) -> Result<ServiceRemovalEvidence> {
+            provision::validate_service_name(&removal.service)?;
+            let hive_guest = guestfish_path(&removal.system_hive)?;
             let hive = format!("{staging}/SYSTEM");
-            let patched = format!("{staging}/SYSTEM.patched");
+            let removed = format!("{staging}/SYSTEM.removed");
             let output = self
                 .guestfish(
                     disk_posix,
@@ -474,99 +581,175 @@ mod platform {
                 )
                 .await?;
             require_success(&output, "download guest SYSTEM hive")?;
-            let before = self.sha256(&hive).await?;
-            if let Some(backup) = &patch.host_backup {
-                let backup_posix = self.wsl_path(backup).await?;
-                if let Some(parent) = backup_posix.rfind('/') {
-                    let directory = &backup_posix[..parent];
-                    let output = self
-                        .wsl_run(&["mkdir".into(), "-p".into(), directory.into()], None)
-                        .await?;
-                    require_success(&output, "create hive backup directory")?;
-                }
-                let output = self
-                    .wsl_run(&["cp".into(), hive.clone(), backup_posix], None)
-                    .await?;
-                require_success(&output, "back up guest SYSTEM hive")?;
+            let select = self
+                .hivexsh(&hive, "cd \\Select\nlsval Current\nquit\n", false)
+                .await?;
+            let control_set = parse_control_set(&select)?;
+            let list_script = format!("cd \\ControlSet{control_set:03}\\Services\nls\nquit\n");
+            let services = self.hivexsh(&hive, &list_script, false).await?;
+            let present = parse_lines(&services)
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&removal.service));
+            if !present {
+                return Ok(ServiceRemovalEvidence {
+                    service_present: false,
+                    removed: false,
+                });
             }
             let output = self
-                .wsl_run(&["cp".into(), hive.clone(), patched.clone()], None)
+                .wsl_run(&["cp".into(), hive.clone(), removed.clone()], None)
                 .await?;
             require_success(&output, "stage guest SYSTEM hive")?;
-            self.hivexsh(&patched, &patch.script, true).await?;
-            let verify_output = self.hivexsh(&patched, &patch.verify_script, false).await?;
-            let after = self.sha256(&patched).await?;
+            let script = provision::hive_remove_service_script(control_set, &removal.service)?;
+            self.hivexsh(&removed, &script, true).await?;
+            let verify = self.hivexsh(&removed, &list_script, false).await?;
+            ensure!(
+                !parse_lines(&verify)
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(&removal.service)),
+                "legacy one-shot service key was not removed"
+            );
+            let after = self.sha256(&removed).await?;
             let output = self
                 .guestfish(
                     disk_posix,
                     true,
-                    &format!("upload {patched} {hive_guest}\nsync\nchecksum sha256 {hive_guest}\n"),
+                    &format!("upload {removed} {hive_guest}\nsync\nchecksum sha256 {hive_guest}\n"),
                 )
                 .await?;
-            require_success(&output, "upload patched SYSTEM hive")?;
-            let uploaded = parse_digest(&output.stdout_text())?;
+            require_success(&output, "upload cleaned SYSTEM hive")?;
             ensure!(
-                uploaded == after,
+                parse_digest(&output.stdout_text())? == after,
                 "uploaded SYSTEM hive failed verification"
             );
-            Ok(HivePatchEvidence {
-                hive_sha256_before: before,
-                hive_sha256_after: after,
-                verify_output,
+            Ok(ServiceRemovalEvidence {
+                service_present: true,
+                removed: true,
             })
+        }
+
+        async fn remove_paths_in(
+            &self,
+            disk_posix: &str,
+            removal: &GuestRemoval,
+        ) -> Result<GuestRemovalEvidence> {
+            removal.validate()?;
+            let mut directories = Vec::new();
+            for directory in &removal.directories {
+                directories.push(guestfish_path(directory)?);
+            }
+            let mut files = Vec::new();
+            for file in &removal.files {
+                files.push(guestfish_path(file)?);
+            }
+            let mut probe = String::new();
+            for directory in &directories {
+                probe.push_str(&format!("is-dir {directory}\n"));
+            }
+            for file in &files {
+                probe.push_str(&format!("is-file {file}\n"));
+            }
+            let output = self.guestfish(disk_posix, false, &probe).await?;
+            require_success(&output, "inspect guest cleanup paths")?;
+            let values = parse_booleans(&output.stdout_text(), directories.len() + files.len())?;
+            let mut evidence = GuestRemovalEvidence::default();
+            let mut script = String::new();
+            for (index, directory) in directories.iter().enumerate() {
+                if values[index] {
+                    script.push_str(&format!("rm-rf {directory}\n"));
+                    evidence
+                        .removed_directories
+                        .push(removal.directories[index].clone());
+                } else {
+                    evidence.absent.push(removal.directories[index].clone());
+                }
+            }
+            for (index, file) in files.iter().enumerate() {
+                let value = values[directories.len() + index];
+                if value {
+                    script.push_str(&format!("rm {file}\n"));
+                    evidence.removed_files.push(removal.files[index].clone());
+                } else {
+                    evidence.absent.push(removal.files[index].clone());
+                }
+            }
+            if script.is_empty() {
+                return Ok(evidence);
+            }
+            script.push_str("sync\n");
+            let output = self.guestfish(disk_posix, true, &script).await?;
+            require_success(&output, "remove guest cleanup paths")?;
+            let mut verify = String::new();
+            for directory in &directories {
+                verify.push_str(&format!("is-dir {directory}\n"));
+            }
+            for file in &files {
+                verify.push_str(&format!("is-file {file}\n"));
+            }
+            let output = self.guestfish(disk_posix, false, &verify).await?;
+            require_success(&output, "verify guest cleanup paths")?;
+            let remaining = parse_booleans(&output.stdout_text(), directories.len() + files.len())?;
+            ensure!(
+                remaining.iter().all(|value| !*value),
+                "guest cleanup paths are still present after removal"
+            );
+            Ok(evidence)
         }
 
         async fn observe_in(
             &self,
-            staging: &str,
             disk_posix: &str,
             request: &GuestObservationRequest,
         ) -> Result<GuestObservation> {
-            let hive = format!("{staging}/SYSTEM.after");
-            let hive_guest = guestfish_path(&request.system_hive)?;
             let wrapper_guest = guestfish_path(&request.wrapper)?;
             let plan_guest = guestfish_path(&request.plan)?;
             let receipt_guest = guestfish_path(&request.receipt)?;
+            let startup_guest = guestfish_path(&request.startup_script)?;
+            let scripts_ini_guest = guestfish_path(&request.scripts_ini)?;
+            let scripts_backup_guest = guestfish_path(&request.scripts_ini_backup)?;
+            let gpt_backup_guest = guestfish_path(&request.gpt_ini_backup)?;
             let script = format!(
-                "is-file {wrapper_guest}\nis-file {plan_guest}\nis-file {receipt_guest}\ndownload {hive_guest} {hive}\n"
+                "is-file {wrapper_guest}\nis-file {plan_guest}\nis-file {receipt_guest}\nis-file {startup_guest}\nis-file {scripts_ini_guest}\nis-file {scripts_backup_guest}\nis-file {gpt_backup_guest}\n"
             );
             let output = self.guestfish(disk_posix, false, &script).await?;
             require_success(&output, "inspect provisioned guest")?;
-            let values = parse_booleans(&output.stdout_text(), 3)?;
-            let services = self
-                .hivexsh(
-                    &hive,
-                    &format!(
-                        "cd \\ControlSet{0:03}\\Services\nls\nquit\n",
-                        request.control_set
-                    ),
-                    false,
-                )
-                .await?;
-            let service_present = parse_lines(&services)
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case(&request.service_name));
+            let values = parse_booleans(&output.stdout_text(), 7)?;
+            let mut startup_entry_present = false;
+            if values[4] {
+                let bytes = self
+                    .read_guest_bytes(
+                        disk_posix,
+                        &scripts_ini_guest,
+                        MAX_POLICY_BYTES,
+                        "read guest scripts.ini after provisioning",
+                    )
+                    .await?;
+                startup_entry_present = startup_command_lines(&bytes)?
+                    .iter()
+                    .any(|line| line == &request.startup_entry);
+            }
             let mut receipt = None;
             if values[2] {
-                let output = self
-                    .guestfish(disk_posix, false, &format!("cat {receipt_guest}\n"))
+                let bytes = self
+                    .read_guest_bytes(
+                        disk_posix,
+                        &receipt_guest,
+                        MAX_RECEIPT_BYTES,
+                        "read guest provisioning receipt",
+                    )
                     .await?;
-                require_success(&output, "read guest provisioning receipt")?;
-                ensure!(
-                    output.stdout.len() as u64 <= MAX_RECEIPT_BYTES,
-                    "guest provisioning receipt exceeds the size budget"
-                );
-                ensure!(
-                    !output.stdout.is_empty(),
-                    "guest provisioning receipt is empty"
-                );
-                receipt = Some(output.stdout);
+                ensure!(!bytes.is_empty(), "guest provisioning receipt is empty");
+                receipt = Some(bytes);
             }
             Ok(GuestObservation {
                 receipt,
-                service_present,
                 wrapper_present: values[0],
                 plan_present: values[1],
+                startup_script_present: values[3],
+                scripts_ini_present: values[4],
+                startup_entry_present,
+                scripts_ini_backup_present: values[5],
+                gpt_ini_backup_present: values[6],
             })
         }
     }
@@ -596,17 +779,27 @@ mod platform {
             result
         }
 
-        async fn patch_system_hive(
+        async fn remove_service_key(
             &self,
             disk: &Path,
-            patch: &HivePatch,
-        ) -> Result<HivePatchEvidence> {
+            removal: &ServiceRemoval,
+        ) -> Result<ServiceRemovalEvidence> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
             let staging = self.temp_directory().await?;
-            let result = self.patch_hive_in(&staging, &disk_posix, patch).await;
+            let result = self.remove_service_in(&staging, &disk_posix, removal).await;
             self.remove_directory(&staging).await;
             result
+        }
+
+        async fn remove_guest_paths(
+            &self,
+            disk: &Path,
+            removal: &GuestRemoval,
+        ) -> Result<GuestRemovalEvidence> {
+            ensure!(disk.is_absolute(), "guest disk path must be absolute");
+            let disk_posix = self.wsl_path(disk).await?;
+            self.remove_paths_in(&disk_posix, removal).await
         }
 
         async fn observe_guest(
@@ -616,10 +809,7 @@ mod platform {
         ) -> Result<GuestObservation> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
-            let staging = self.temp_directory().await?;
-            let result = self.observe_in(&staging, &disk_posix, request).await;
-            self.remove_directory(&staging).await;
-            result
+            self.observe_in(&disk_posix, request).await
         }
     }
 
@@ -917,8 +1107,8 @@ mod platform {
 mod platform {
     use crate::application::windows_lab::provision::{
         DiskInspection, DiskInspectionRequest, FinalizeRequest, GuestFile, GuestNetwork,
-        GuestObservation, GuestObservationRequest, HivePatch, HivePatchEvidence, IsoBuilder,
-        OfflineDisk,
+        GuestObservation, GuestObservationRequest, GuestRemoval, GuestRemovalEvidence, IsoBuilder,
+        OfflineDisk, ServiceRemoval, ServiceRemovalEvidence,
     };
     use anyhow::{Result, bail};
     use async_trait::async_trait;
@@ -959,11 +1149,19 @@ mod platform {
             bail!(WINDOWS_ONLY)
         }
 
-        async fn patch_system_hive(
+        async fn remove_service_key(
             &self,
             _disk: &Path,
-            _patch: &HivePatch,
-        ) -> Result<HivePatchEvidence> {
+            _removal: &ServiceRemoval,
+        ) -> Result<ServiceRemovalEvidence> {
+            bail!(WINDOWS_ONLY)
+        }
+
+        async fn remove_guest_paths(
+            &self,
+            _disk: &Path,
+            _removal: &GuestRemoval,
+        ) -> Result<GuestRemovalEvidence> {
             bail!(WINDOWS_ONLY)
         }
 

@@ -1,13 +1,19 @@
 //! `lab provision` state-machine tests with fake host, offline disk and ISO
-//! adapters. No test executes vmrun, WSL, libguestfs or a real VM.
+//! adapters. No test executes vmrun, WSL, libguestfs or a real VM. The fake disk
+//! is a small in-memory guest filesystem so the machine policy injection, the
+//! wrapper's offline observation and the explicit guest cleanup can be exercised
+//! end to end without a guest.
 use super::*;
 use crate::application::windows_lab::MediaIdentity;
+use crate::application::windows_lab::provision;
 use crate::application::windows_lab::provision::GuestFile;
 use crate::application::windows_lab::provision::fixture;
 use crate::application::windows_lab::provision::{
-    DiskInspection, DiskInspectionRequest, FinalizeRequest, GuestNetwork, GuestObservation,
-    GuestObservationRequest, GuestPaths, HivePatch, HivePatchEvidence, IsoBuilder, MediaFinalizer,
-    OfflineDisk, ProvisionEnvironment, PublicConnection,
+    DiskInspection, DiskInspectionRequest, FinalizeRequest, GUEST_GPT_INI, GUEST_PROVISION_ROOT,
+    GUEST_SCRIPTS_INI, GUEST_STARTUP_DIR, GuestNetwork, GuestObservation, GuestObservationRequest,
+    GuestPaths, GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder, MediaFinalizer,
+    OfflineDisk, ProvisionEnvironment, PublicConnection, ServiceRemoval, ServiceRemovalEvidence,
+    startup_command_lines,
 };
 use crate::application::windows_lab::types::{
     LabPhase, LabProvision, LabState, OperationKind, PendingOperation, ProvisionSource,
@@ -18,6 +24,7 @@ use crate::config::WindowsLabVm;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -212,14 +219,21 @@ struct DiskState {
     written: Vec<GuestFile>,
     /// Guest paths converted exactly as the WSL adapter would convert them.
     guest_paths: Vec<String>,
-    inspection: Option<DiskInspection>,
+    /// Tiny in-memory guest filesystem keyed by canonical `C:\` path.
+    files: BTreeMap<String, Vec<u8>>,
+    /// Directories present on the guest disk (provision trees).
+    directories: BTreeSet<String>,
+    /// Legacy one-shot service key still present in the fake SYSTEM hive.
+    service: Option<String>,
     tamper: Option<Tampered>,
+    removals: Vec<GuestRemoval>,
+    service_removals: Vec<ServiceRemoval>,
 }
 
 #[derive(Clone, Copy)]
 enum Tampered {
     ReceiptInstallation,
-    ServiceLeftBehind,
+    StartupPolicyLeftBehind,
 }
 
 struct FakeDisk {
@@ -233,20 +247,16 @@ fn guest_path(windows: &str) -> Result<String> {
         .context("offline disk requests must carry absolute Windows guest paths")
 }
 
+fn under(windows: &str, directory: &str) -> bool {
+    windows
+        .rsplit_once('\\')
+        .is_some_and(|(parent, _)| parent == directory)
+}
+
 impl FakeDisk {
     fn new(connection: PublicConnection) -> Self {
         Self {
-            state: Mutex::new(DiskState {
-                inspection: Some(DiskInspection {
-                    windows_volume: true,
-                    system_hive_present: true,
-                    program_data_present: true,
-                    control_set: Some(1),
-                    existing_service: None,
-                    provision_root_entries: vec![],
-                }),
-                ..Default::default()
-            }),
+            state: Mutex::new(DiskState::default()),
             connection,
             events: None,
         }
@@ -282,6 +292,35 @@ impl FakeDisk {
             })
             .collect()
     }
+    fn file(&self, windows: &str) -> Option<Vec<u8>> {
+        self.state.lock().unwrap().files.get(windows).cloned()
+    }
+    fn set_file(&self, windows: &str, bytes: impl Into<Vec<u8>>) {
+        self.state
+            .lock()
+            .unwrap()
+            .files
+            .insert(windows.into(), bytes.into());
+    }
+    fn set_directories(&self, directories: impl IntoIterator<Item = String>) {
+        self.state.lock().unwrap().directories.extend(directories);
+    }
+    fn set_service(&self, service: Option<String>) {
+        self.state.lock().unwrap().service = service;
+    }
+    fn removals(&self) -> Vec<GuestRemoval> {
+        self.state.lock().unwrap().removals.clone()
+    }
+    fn service_removals(&self) -> Vec<ServiceRemoval> {
+        self.state.lock().unwrap().service_removals.clone()
+    }
+
+    /// Seed leftovers of one failed provisioning attempt on the fake guest.
+    fn seed_provision_leftover(&self, paths: &GuestPaths) {
+        let mut state = self.state.lock().unwrap();
+        state.directories.insert(paths.root.clone());
+        state.service = Some(paths.service.clone());
+    }
 }
 
 fn plan_json(written: &[GuestFile]) -> serde_json::Value {
@@ -290,14 +329,6 @@ fn plan_json(written: &[GuestFile]) -> serde_json::Value {
         .find(|file| file.windows_path.ends_with("provision-plan.json"))
         .expect("provision plan was injected");
     serde_json::from_slice(&plan.bytes).unwrap()
-}
-
-fn image_path_from_script(script: &str) -> String {
-    script
-        .lines()
-        .find_map(|line| line.strip_prefix("expandstring:"))
-        .expect("hive script has a service image path")
-        .to_owned()
 }
 
 #[async_trait]
@@ -314,11 +345,65 @@ impl OfflineDisk for FakeDisk {
             &request.system_hive,
             &request.program_data,
             &request.provision_root,
+            &request.scripts_dir,
+            &request.startup_dir,
+            &request.scripts_ini,
+            &request.scripts_ini_backup,
+            &request.gpt_ini,
+            &request.gpt_ini_backup,
         ] {
-            let guest = guest_path(windows)?;
-            state.guest_paths.push(guest);
+            state.guest_paths.push(guest_path(windows)?);
         }
-        Ok(state.inspection.clone().expect("inspection configured"))
+        let files = state.files.clone();
+        let scripts_ini = files.get(&request.scripts_ini).cloned();
+        let startup_command_lines = scripts_ini
+            .as_deref()
+            .map(startup_command_lines)
+            .transpose()?
+            .unwrap_or_default();
+        let mut policy = GuestPolicyFiles {
+            scripts_ini,
+            scripts_ini_backup: files.get(&request.scripts_ini_backup).cloned(),
+            gpt_ini: files.get(&request.gpt_ini).cloned(),
+            gpt_ini_backup: files.get(&request.gpt_ini_backup).cloned(),
+            startup_command_lines,
+            ..Default::default()
+        };
+        for windows in files.keys() {
+            if under(windows, &request.startup_dir) {
+                policy
+                    .startup_directory_entries
+                    .push(windows.rsplit('\\').next().unwrap_or_default().to_owned());
+            }
+            if under(windows, &request.scripts_dir) {
+                policy
+                    .scripts_directory_entries
+                    .push(windows.rsplit('\\').next().unwrap_or_default().to_owned());
+            }
+            if under(windows, &request.gpo_root) {
+                policy
+                    .group_policy_entries
+                    .push(windows.rsplit('\\').next().unwrap_or_default().to_owned());
+            }
+        }
+        let provision_root_entries = state
+            .directories
+            .iter()
+            .filter_map(|directory| {
+                directory.strip_prefix(&format!("{}\\", request.provision_root))
+            })
+            .filter(|name| !name.contains('\\'))
+            .map(str::to_owned)
+            .collect();
+        Ok(DiskInspection {
+            windows_volume: true,
+            system_hive_present: true,
+            program_data_present: true,
+            control_set: Some(1),
+            existing_service: state.service.clone(),
+            provision_root_entries,
+            policy,
+        })
     }
 
     async fn write_guest_files(&self, _disk: &Path, files: &[GuestFile]) -> Result<()> {
@@ -328,6 +413,9 @@ impl OfflineDisk for FakeDisk {
         for file in files {
             let guest = guest_path(&file.windows_path)?;
             state.guest_paths.push(guest);
+            state
+                .files
+                .insert(file.windows_path.clone(), file.bytes.clone());
         }
         state.written.extend(files.iter().map(|file| GuestFile {
             windows_path: file.windows_path.clone(),
@@ -337,25 +425,62 @@ impl OfflineDisk for FakeDisk {
         Ok(())
     }
 
-    async fn patch_system_hive(
+    async fn remove_service_key(
         &self,
         _disk: &Path,
-        patch: &HivePatch,
-    ) -> Result<HivePatchEvidence> {
-        self.record("patch");
+        removal: &ServiceRemoval,
+    ) -> Result<ServiceRemovalEvidence> {
+        self.record("remove-service");
         let mut state = self.state.lock().unwrap();
-        state.calls.push("patch".into());
-        state.guest_paths.push(guest_path(&patch.system_hive)?);
-        let image = image_path_from_script(&patch.script);
-        let output = format!(
-            "\"Type\"=dword:00000010\n\"Start\"=dword:00000002\n\"ErrorControl\"=dword:00000001\n\"ImagePath\"=str(2):\"{}\"\n\"ObjectName\"=\"LocalSystem\"\n",
-            image.replace('\\', "\\\\")
-        );
-        Ok(HivePatchEvidence {
-            hive_sha256_before: "a".repeat(64),
-            hive_sha256_after: "b".repeat(64),
-            verify_output: output,
+        state.calls.push("remove-service".into());
+        state.guest_paths.push(guest_path(&removal.system_hive)?);
+        state.service_removals.push(removal.clone());
+        let present = state.service.as_deref() == Some(removal.service.as_str());
+        if present {
+            state.service = None;
+        }
+        Ok(ServiceRemovalEvidence {
+            service_present: present,
+            removed: present,
         })
+    }
+
+    async fn remove_guest_paths(
+        &self,
+        _disk: &Path,
+        removal: &GuestRemoval,
+    ) -> Result<GuestRemovalEvidence> {
+        self.record("remove-paths");
+        let mut state = self.state.lock().unwrap();
+        state.calls.push("remove-paths".into());
+        state.removals.push(removal.clone());
+        let mut evidence = GuestRemovalEvidence::default();
+        for directory in &removal.directories {
+            state.guest_paths.push(guest_path(directory)?);
+            let prefix = format!("{directory}\\");
+            if state.directories.remove(directory)
+                || state
+                    .directories
+                    .iter()
+                    .any(|path| path.starts_with(&prefix))
+            {
+                state
+                    .directories
+                    .retain(|path| !path.starts_with(&prefix) && path != directory);
+                evidence.removed_directories.push(directory.clone());
+            } else {
+                evidence.absent.push(directory.clone());
+            }
+        }
+        for file in &removal.files {
+            state.guest_paths.push(guest_path(file)?);
+            if state.files.remove(file).is_some() {
+                evidence.removed_files.push(file.clone());
+            } else {
+                evidence.absent.push(file.clone());
+            }
+        }
+        Ok(evidence)
     }
 
     async fn observe_guest(
@@ -368,38 +493,71 @@ impl OfflineDisk for FakeDisk {
             let mut state = self.state.lock().unwrap();
             state.calls.push("observe".into());
             for windows in [
-                &request.system_hive,
                 &request.wrapper,
                 &request.plan,
                 &request.receipt,
+                &request.startup_script,
+                &request.scripts_ini,
+                &request.scripts_ini_backup,
+                &request.gpt_ini_backup,
             ] {
-                let guest = guest_path(windows)?;
-                state.guest_paths.push(guest);
+                state.guest_paths.push(guest_path(windows)?);
             }
         }
         let written = self.written();
         let plan = plan_json(&written);
+        let provision_id = plan["provision_id"].as_str().unwrap_or_default().to_owned();
         let mut connection = self.connection.clone();
         connection.installation_id = plan["installation_id"].as_str().unwrap().into();
         connection.environment_id = plan["environment_id"].as_str().unwrap().into();
         connection.generation = plan["generation"].as_u64().unwrap();
         connection.manifest_sha256 = plan["manifest_sha256"].as_str().unwrap().into();
         connection.ssh_port = u16::try_from(plan["ssh_port"].as_u64().unwrap()).unwrap();
-        if matches!(
-            self.state.lock().unwrap().tamper,
-            Some(Tampered::ReceiptInstallation)
-        ) {
+        let mut state = self.state.lock().unwrap();
+        if matches!(state.tamper, Some(Tampered::ReceiptInstallation)) {
             connection.installation_id = "0".repeat(32);
         }
-        let receipt = fixture::guest_receipt(plan["provision_id"].as_str().unwrap(), &connection);
+        // Emulate the wrapper's finally block: it writes the receipt, restores
+        // the machine startup policy (or leaves the injected entry on failure),
+        // and schedules deletion of the wrapper and plan.
+        state.files.insert(
+            request.receipt.clone(),
+            fixture::guest_receipt(&provision_id, &connection),
+        );
+        if !matches!(state.tamper, Some(Tampered::StartupPolicyLeftBehind)) {
+            if let Some(bytes) = state.files.get(&request.scripts_ini).cloned() {
+                match provision::remove_startup_script(&bytes, &request.startup_entry)? {
+                    Some(updated) => {
+                        state.files.insert(request.scripts_ini.clone(), updated);
+                    }
+                    None => {
+                        state.files.remove(&request.scripts_ini);
+                    }
+                }
+            }
+            state.files.remove(&request.scripts_ini_backup);
+            state.files.remove(&request.gpt_ini_backup);
+            state.files.remove(&request.startup_script);
+        }
+        state.files.remove(&request.wrapper);
+        state.files.remove(&request.plan);
+        let startup_entry_present = state
+            .files
+            .get(&request.scripts_ini)
+            .map(|bytes| startup_command_lines(bytes))
+            .transpose()?
+            .unwrap_or_default()
+            .iter()
+            .any(|line| line == &request.startup_entry);
         Ok(GuestObservation {
-            receipt: Some(receipt),
-            service_present: matches!(
-                self.state.lock().unwrap().tamper,
-                Some(Tampered::ServiceLeftBehind)
-            ),
-            wrapper_present: false,
-            plan_present: false,
+            receipt: state.files.get(&request.receipt).cloned(),
+            wrapper_present: state.files.contains_key(&request.wrapper),
+            plan_present: state.files.contains_key(&request.plan),
+            startup_script_present: state.files.contains_key(&request.startup_script),
+            scripts_ini_present: state.files.contains_key(&request.scripts_ini),
+            startup_entry_present,
+            scripts_ini_backup_present: state.files.contains_key(&request.scripts_ini_backup),
+            gpt_ini_backup_present: state.files.contains_key(&request.gpt_ini_backup),
         })
     }
 }
@@ -677,6 +835,77 @@ fn wired(deployment: &Deployment, disk: Arc<FakeDisk>, iso: Arc<FakeIso>) -> Win
         .with_guest_network(Arc::new(FakeNetwork))
 }
 
+/// Persist a failed provisioning record so the explicit guest cleanup accepts
+/// that operation identity as belonging to this VM.
+fn record_failed_provision(deployment: &Deployment, operation_id: &str) -> GuestPaths {
+    let paths = GuestPaths::for_provision(operation_id).unwrap();
+    let mut state = deployment.with_configuration(LabState::fresh("labvm", "baseline"));
+    state.phase = LabPhase::Failed;
+    state.generation = 1;
+    state.last_provision = Some(LabProvision {
+        provision_id: operation_id.into(),
+        operation_id: operation_id.into(),
+        generation: 1,
+        status: RunStatus::Failed,
+        source: deployment.media_source(),
+        media: deployment.fixture.identity.clone(),
+        iso_sha256: None,
+        iso_size: None,
+        vmx_sha256_before: None,
+        vmx_sha256_after: None,
+        hive_sha256_before: None,
+        hive_sha256_after: None,
+        scripts_ini_sha256: None,
+        gpt_ini_sha256: None,
+        identity_file: None,
+        guest_receipt: None,
+        connection: None,
+        environment_verified: None,
+        verification: None,
+        baseline_snapshot: None,
+        settled: true,
+        started_at: "2026-01-01T00:00:00Z".into(),
+        ended_at: None,
+        error: Some("operator recorded failure".into()),
+    });
+    deployment.store().save(&state).unwrap();
+    paths
+}
+
+fn written_file(disk: &FakeDisk, windows: &str) -> GuestFile {
+    disk.written()
+        .into_iter()
+        .find(|file| file.windows_path == windows)
+        .unwrap_or_else(|| panic!("{windows} was not written to the guest"))
+}
+
+/// Emulate the guest state a failed attempt left behind: injected startup
+/// policy, its launcher, the provision directory and the legacy service key.
+fn seed_leftovers(disk: &FakeDisk, paths: &GuestPaths, with_backup: bool) {
+    disk.seed_provision_leftover(paths);
+    disk.set_file(&paths.startup_script, b"@echo off\r\n");
+    disk.set_file(
+        &paths.scripts_ini,
+        format!(
+            "[Startup]\r\n0CmdLine=unrelated.cmd\r\n0Parameters=\r\n1CmdLine={}\r\n1Parameters=\r\n",
+            paths.startup_entry
+        )
+        .into_bytes(),
+    );
+    disk.set_file(&paths.plan, b"{\"schema\":2}\n");
+    if with_backup {
+        disk.set_file(
+            &paths.scripts_ini_backup,
+            b"[Startup]\r\n0CmdLine=unrelated.cmd\r\n0Parameters=\r\n".to_vec(),
+        );
+        disk.set_file(
+            &paths.gpt_ini_backup,
+            b"[General]\r\nVersion=65539\r\n".to_vec(),
+        );
+        disk.set_file(&paths.gpt_ini, b"[General]\r\nVersion=65540\r\n".to_vec());
+    }
+}
+
 #[tokio::test]
 async fn provision_injects_media_and_verifies_the_guest_receipt() {
     let deployment = deployment();
@@ -703,7 +932,12 @@ async fn provision_injects_media_and_verifies_the_guest_receipt() {
     let disk_calls = disk.calls();
     assert_eq!(
         disk_calls,
-        ["inspect", "write", "patch", "observe"].map(str::to_string)
+        ["inspect", "write", "observe"].map(str::to_string),
+        "provisioning never writes a SYSTEM service key"
+    );
+    assert!(
+        disk.service_removals().is_empty(),
+        "provisioning must not touch the legacy service hive path"
     );
     assert_eq!(
         fs::read(&deployment.vmx).unwrap(),
@@ -716,9 +950,27 @@ async fn provision_injects_media_and_verifies_the_guest_receipt() {
     assert!(!directories[0].join("vmx.bak").exists());
     assert!(directories[0].join("guest-receipt.json").is_file());
     assert!(directories[0].join("injected/provision.ps1").is_file());
+    assert!(directories[0].join("injected/scripts.ini").is_file());
+    assert!(directories[0].join("injected/gpt.ini").is_file());
+    assert!(
+        directories[0]
+            .join("injected")
+            .read_dir()
+            .unwrap()
+            .flatten()
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("wukong-provision-")),
+        "the machine startup launcher is retained as host evidence"
+    );
     let state = deployment.state();
     assert_eq!(state.phase, LabPhase::Idle);
-    assert_eq!(state.last_provision.unwrap().status, RunStatus::Completed);
+    let record = state.last_provision.unwrap();
+    assert_eq!(record.status, RunStatus::Completed);
+    assert!(record.scripts_ini_sha256.is_some());
+    assert!(record.gpt_ini_sha256.is_some());
+    assert!(record.hive_sha256_before.is_none());
 }
 
 #[tokio::test]
@@ -813,7 +1065,7 @@ async fn offline_disk_requests_use_canonical_windows_guest_paths() {
     );
     assert!(paths.contains(&"/ProgramData".to_string()), "{paths:?}");
     assert!(
-        paths.contains(&"/ProgramData/WukongLab".to_string()),
+        paths.contains(&"/ProgramData/WukongLab/provision".to_string()),
         "{paths:?}"
     );
     assert!(
@@ -828,6 +1080,25 @@ async fn offline_disk_requests_use_canonical_windows_guest_paths() {
     );
     assert!(
         paths.iter().any(|path| path.ends_with("/receipt.json")),
+        "{paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.contains("/Scripts/Startup/wukong-provision-")
+                && path.ends_with(".cmd")),
+        "the machine startup launcher path is fixed: {paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.ends_with("/Machine/Scripts/scripts.ini")),
+        "{paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|path| path.ends_with("/GroupPolicy/gpt.ini")),
         "{paths:?}"
     );
     // Requests carry Windows guest paths, so the adapter sees only the
@@ -1197,10 +1468,10 @@ async fn receipt_mismatch_requires_reconciliation_and_cleanup() {
 }
 
 #[tokio::test]
-async fn reconcile_completed_resolves_a_leftover_provisioning_service() {
+async fn reconcile_completed_resolves_a_leftover_startup_policy() {
     let deployment = deployment();
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
-    disk.tamper(Tampered::ServiceLeftBehind);
+    disk.tamper(Tampered::StartupPolicyLeftBehind);
     let iso = Arc::new(FakeIso::new());
     let lab = wired(&deployment, disk, iso);
     lab.provision(deployment.options(deployment.media_source()))
@@ -1230,10 +1501,10 @@ async fn reconcile_completed_resolves_a_leftover_provisioning_service() {
 }
 
 #[tokio::test]
-async fn service_left_behind_keeps_recovery_required() {
+async fn startup_policy_left_behind_keeps_recovery_required() {
     let deployment = deployment();
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
-    disk.tamper(Tampered::ServiceLeftBehind);
+    disk.tamper(Tampered::StartupPolicyLeftBehind);
     let iso = Arc::new(FakeIso::new());
     let lab = wired(&deployment, disk, iso);
     let error = lab
@@ -1241,10 +1512,299 @@ async fn service_left_behind_keeps_recovery_required() {
         .await
         .unwrap_err();
     assert!(
-        format!("{error:#}").contains("one-shot provisioning service"),
+        format!("{error:#}").contains("machine startup"),
         "{error:#}"
     );
     assert_eq!(deployment.state().phase, LabPhase::RecoveryRequired);
+}
+
+#[tokio::test]
+async fn provision_preserves_existing_machine_policy_in_per_operation_backups() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let lab = wired(&deployment, disk.clone(), iso.clone());
+    let paths = GuestPaths::for_provision(&"1".repeat(32)).unwrap();
+    // The recovered working layout carried an unrelated startup script; the
+    // existing local-GPO version must be preserved as a backup and bumped.
+    disk.set_file(
+        &paths.scripts_ini,
+        b"[Startup]\r\n0CmdLine=enable-admin.cmd\r\n0Parameters=\r\n\r\n[Shutdown]\r\n0CmdLine=cleanup.cmd\r\n0Parameters=\r\n".to_vec(),
+    );
+    disk.set_file(&paths.gpt_ini, b"[General]\r\nVersion=65539\r\n");
+    deployment.host.set_boot_polls(1);
+    lab.provision(deployment.options(deployment.media_source()))
+        .await
+        .unwrap();
+
+    // Provisioning uses its own fresh operation identity, so inspect the files
+    // that were actually written for the injected operation.
+    let written = disk.written();
+    let scripts = written_file(&disk, GUEST_SCRIPTS_INI);
+    let text = String::from_utf8(scripts.bytes.clone()).unwrap();
+    assert!(text.contains("0CmdLine=enable-admin.cmd"), "{text}");
+    assert!(text.contains("0CmdLine=cleanup.cmd"), "{text}");
+    assert!(
+        text.contains("wukong-provision-"),
+        "the operation startup entry is injected: {text}"
+    );
+    assert!(
+        written
+            .iter()
+            .any(|file| file.windows_path.ends_with(".bak")
+                && file.bytes.starts_with(b"[Startup]")),
+        "the previous scripts.ini bytes are backed up"
+    );
+    let gpt = written
+        .iter()
+        .find(|file| file.windows_path == GUEST_GPT_INI)
+        .expect("gpt.ini was bumped");
+    assert!(
+        String::from_utf8(gpt.bytes.clone())
+            .unwrap()
+            .contains("Version=65540"),
+        "the computer version half is bumped"
+    );
+    assert!(
+        written.iter().all(|file| !file
+            .bytes
+            .windows(11)
+            .any(|window| window == b"LocalSystem")),
+        "no LocalSystem service key is written through the guest files"
+    );
+}
+
+#[tokio::test]
+async fn stale_guest_leftovers_are_refused_with_the_cleanup_command() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let stale = "9".repeat(32);
+    let paths = GuestPaths::for_provision(&stale).unwrap();
+    seed_leftovers(&disk, &paths, false);
+    let lab = wired(&deployment, disk.clone(), iso.clone());
+    let error = lab
+        .provision(deployment.options(deployment.media_source()))
+        .await
+        .unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains(&format!(
+            "wukong lab clean-guest --vm labvm --operation {stale}"
+        )),
+        "{message}"
+    );
+    assert!(!deployment.host.calls().contains(&"start".to_string()));
+    assert!(iso.state.lock().unwrap().builds.is_empty());
+    assert!(deployment.provision_directories().is_empty());
+    assert!(deployment.state().last_provision.is_none());
+}
+
+#[tokio::test]
+async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "9".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    seed_leftovers(&disk, &paths, true);
+    // Unrelated content must survive: another operation's provision directory
+    // and an unrelated Group Policy file are never named by the cleanup plan.
+    let unrelated = format!("{GUEST_PROVISION_ROOT}\\{}", "8".repeat(32));
+    disk.set_directories([unrelated.clone()]);
+    disk.set_file(&format!("{GUEST_STARTUP_DIR}\\other.cmd"), b"@echo off\r\n");
+    let lab = wired(&deployment, disk.clone(), iso);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation.clone(),
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.operation_id, operation);
+    assert!(!outcome.dry_run);
+    assert_eq!(outcome.files_written, 2, "scripts.ini and gpt.ini restored");
+    assert!(outcome.files_removed.contains(&paths.startup_script));
+    assert!(outcome.files_removed.contains(&paths.scripts_ini_backup));
+    assert!(outcome.files_removed.contains(&paths.gpt_ini_backup));
+    assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
+    assert_eq!(outcome.service_key_removed, Some(paths.service.clone()));
+    // Restored policy keeps the unrelated startup entry and drops ours.
+    let restored = disk
+        .file(&paths.scripts_ini)
+        .expect("scripts.ini was restored");
+    let restored_text = String::from_utf8(restored).unwrap();
+    assert!(restored_text.contains("0CmdLine=unrelated.cmd"));
+    assert!(!restored_text.contains(&paths.startup_entry));
+    assert_eq!(
+        disk.file(&paths.gpt_ini).unwrap(),
+        b"[General]\r\nVersion=65539\r\n".to_vec()
+    );
+    assert!(disk.file(&paths.startup_script).is_none());
+    assert!(
+        disk.file(&format!("{GUEST_STARTUP_DIR}\\other.cmd"))
+            .is_some()
+    );
+    assert_eq!(
+        disk.removals().last().unwrap().directories,
+        vec![paths.root.clone()]
+    );
+    assert_eq!(disk.service_removals().len(), 1);
+    let calls = disk.calls();
+    assert_eq!(
+        calls,
+        ["inspect", "write", "remove-paths", "remove-service"].map(str::to_string)
+    );
+    // Verification/deletion calls the unrelated directory is not touched, and a
+    // second cleanup run is an idempotent no-op.
+    let again = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(again.files_written, 0);
+    assert!(again.files_removed.is_empty());
+    assert!(again.directories_removed.is_empty());
+    assert!(again.service_key_removed.is_none());
+    assert!(
+        again
+            .actions
+            .iter()
+            .any(|action| action.contains("no offline provisioning leftovers")),
+        "{:?}",
+        again.actions
+    );
+}
+
+#[tokio::test]
+async fn clean_guest_without_a_backup_removes_only_the_startup_entry() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "7".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    seed_leftovers(&disk, &paths, false);
+    let lab = wired(&deployment, disk.clone(), iso);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.files_written, 1);
+    let restored = disk.file(&paths.scripts_ini).expect("scripts.ini survives");
+    let text = String::from_utf8(restored).unwrap();
+    assert!(text.contains("0CmdLine=unrelated.cmd"), "{text}");
+    assert!(!text.contains(&paths.startup_entry), "{text}");
+    assert!(outcome.files_removed.contains(&paths.startup_script));
+    assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
+}
+
+#[tokio::test]
+async fn clean_guest_dry_run_is_read_only() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "6".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    seed_leftovers(&disk, &paths, false);
+    let lab = wired(&deployment, disk.clone(), iso);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: true,
+        })
+        .await
+        .unwrap();
+    assert!(outcome.dry_run);
+    assert_eq!(disk.calls(), vec!["inspect".to_string()]);
+    assert!(outcome.files_written == 0 && outcome.files_removed.is_empty());
+    assert!(!outcome.actions.is_empty());
+    assert!(disk.file(&paths.scripts_ini).is_some());
+    assert!(disk.file(&paths.startup_script).is_some());
+}
+
+#[tokio::test]
+async fn clean_guest_never_touches_an_unrelated_legacy_service() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "3".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    let unrelated = format!("WukongLabProvision-{}", "2".repeat(32));
+    disk.set_directories([paths.root.clone()]);
+    disk.set_service(Some(unrelated.clone()));
+    let lab = wired(&deployment, disk.clone(), iso);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
+    assert!(outcome.service_key_removed.is_none());
+    assert!(disk.service_removals().is_empty());
+    assert_eq!(
+        disk.state.lock().unwrap().service.as_deref(),
+        Some(unrelated.as_str())
+    );
+}
+
+#[tokio::test]
+async fn clean_guest_refuses_unknown_or_foreign_operations() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let lab = wired(&deployment, disk.clone(), iso);
+    let foreign = "5".repeat(32);
+    let error = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: foreign.clone(),
+            dry_run: false,
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("not a recorded offline provisioning"),
+        "{error:#}"
+    );
+    assert!(format!("{error:#}").contains(&foreign), "{error:#}");
+    let error = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: "short".into(),
+            dry_run: false,
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("offline provisioning operation"),
+        "{error:#}"
+    );
+    assert!(disk.calls().is_empty());
+}
+
+#[tokio::test]
+async fn clean_guest_requires_a_powered_off_vm() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "4".repeat(32);
+    record_failed_provision(&deployment, &operation);
+    deployment.host.set_running(true);
+    let lab = wired(&deployment, disk.clone(), iso);
+    let error = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("power off"), "{error:#}");
+    assert!(disk.calls().is_empty());
 }
 
 #[tokio::test]
@@ -1377,6 +1937,8 @@ async fn restart_recovery_covers_provisioning_intent() {
         vmx_sha256_after: None,
         hive_sha256_before: None,
         hive_sha256_after: None,
+        scripts_ini_sha256: None,
+        gpt_ini_sha256: None,
         identity_file: None,
         guest_receipt: None,
         connection: None,

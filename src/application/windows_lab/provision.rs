@@ -1,11 +1,14 @@
 //! Offline provisioning of the registered lab VM.
 //!
 //! The worker is installed while the guest is powered off: finalized media is
-//! re-verified, the guest SYSTEM hive gains one fixed LocalSystem one-shot
-//! service, the wrapper runs once at boot, then the controller restores the VMX
-//! and reads a guest receipt through libguestfs. Host tools are fixed, bounded
-//! and addressed only from operator configuration; model input never reaches
-//! this module.
+//! re-verified, a fixed local Group Policy machine-startup script is injected
+//! with a backup of the previous policy files, the guest boots once and runs the
+//! wrapper without a login, then the controller restores the VMX and reads the
+//! guest receipt through libguestfs. A Windows service cannot run PowerShell
+//! scripts (SCM requires `StartServiceCtrlDispatcher`), so the boot mechanism is
+//! the local-GPO startup script, the same layout used by the earlier manual
+//! provisioning. Host tools are fixed, bounded and addressed only from operator
+//! configuration; model input never reaches this module.
 use super::{MediaIdentity, ProvisionSource, ProvisioningSpec, SshKey};
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
@@ -32,11 +35,28 @@ pub const GUEST_PROVISION_ROOT: &str = r"C:\ProgramData\WukongLab\provision";
 pub const GUEST_SYSTEM_CONFIG: &str = r"C:\Windows\System32\config";
 pub const GUEST_SYSTEM_HIVE: &str = r"C:\Windows\System32\config\SYSTEM";
 pub const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+/// Local Group Policy locations. Windows runs machine startup scripts from
+/// `scripts.ini` under `Scripts\Startup` without a user login; this is the same
+/// layout the earlier hand-provisioned lab used and it replaces the broken
+/// PowerShell-as-a-service one-shot.
+pub const GUEST_GPO_ROOT: &str = r"C:\Windows\System32\GroupPolicy";
+pub const GUEST_SCRIPTS_DIR: &str = r"C:\Windows\System32\GroupPolicy\Machine\Scripts";
+pub const GUEST_SCRIPTS_INI: &str = r"C:\Windows\System32\GroupPolicy\Machine\Scripts\scripts.ini";
+pub const GUEST_STARTUP_DIR: &str = r"C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup";
+pub const GUEST_GPT_INI: &str = r"C:\Windows\System32\GroupPolicy\gpt.ini";
+/// Fixed prefix/suffix of the injected startup entry (`wukong-provision-<id>.cmd`).
+pub const STARTUP_ENTRY_PREFIX: &str = "wukong-provision-";
+pub const STARTUP_ENTRY_SUFFIX: &str = ".cmd";
+/// Fixed suffix of the per-operation policy backups written beside the originals.
+pub const POLICY_BACKUP_SUFFIX: &str = ".wukong-lab-";
 pub const MAX_MEDIA_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const MAX_RECEIPT_BYTES: u64 = 1024 * 1024;
 pub const MAX_INSTALLER_OUTPUT: usize = 64 * 1024;
 pub const MAX_MEDIA_ENTRIES: usize = 20_000;
+pub const MAX_POLICY_BYTES: u64 = 256 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
+const UTF16_LE_BOM: [u8; 2] = [0xff, 0xfe];
+const UTF8_BOM: [u8; 3] = [0xef, 0xbb, 0xbf];
 
 /// Fixed guest paths written before boot and inspected afterwards.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +66,18 @@ pub struct GuestPaths {
     pub wrapper: String,
     pub plan: String,
     pub receipt: String,
+    /// Command line injected under `[Startup]` in the machine `scripts.ini`.
+    pub startup_entry: String,
+    /// Fixed launcher run by the local Group Policy machine startup script.
+    pub startup_script: String,
+    pub scripts_ini: String,
+    /// Per-operation backup of the previous `scripts.ini` bytes.
+    pub scripts_ini_backup: String,
+    pub gpt_ini: String,
+    /// Per-operation backup of the previous `gpt.ini` bytes.
+    pub gpt_ini_backup: String,
+    /// Legacy one-shot service name written by earlier attempts. Provisioning
+    /// never writes it; guest cleanup may remove that exact key from an old disk.
     pub service: String,
 }
 
@@ -60,13 +92,32 @@ impl GuestPaths {
             "invalid provision identity"
         );
         let root = format!(r"{GUEST_PROVISION_ROOT}\{provision_id}");
+        let startup_entry = format!("{STARTUP_ENTRY_PREFIX}{provision_id}{STARTUP_ENTRY_SUFFIX}");
         Ok(Self {
             wrapper: format!(r"{root}\provision.ps1"),
             plan: format!(r"{root}\provision-plan.json"),
             receipt: format!(r"{root}\receipt.json"),
+            startup_script: format!(r"{GUEST_STARTUP_DIR}\{startup_entry}"),
+            startup_entry,
+            scripts_ini: GUEST_SCRIPTS_INI.into(),
+            scripts_ini_backup: format!(
+                r"{GUEST_SCRIPTS_DIR}\scripts.ini{POLICY_BACKUP_SUFFIX}{provision_id}.bak"
+            ),
+            gpt_ini: GUEST_GPT_INI.into(),
+            gpt_ini_backup: format!(
+                r"{GUEST_GPO_ROOT}\gpt.ini{POLICY_BACKUP_SUFFIX}{provision_id}.bak"
+            ),
             service: format!("WukongLabProvision-{provision_id}"),
             root,
         })
+    }
+
+    /// The validated 32 character operation identity of this directory.
+    pub fn provision_id(&self) -> &str {
+        self.root
+            .rsplit('\\')
+            .next()
+            .expect("provision root always ends with the operation identity")
     }
 
     /// Convert the canonical Windows guest path (`C:\...`) to the form used by
@@ -134,7 +185,7 @@ fn validate_guest_component(component: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GuestFile {
     pub windows_path: String,
     pub bytes: Vec<u8>,
@@ -149,10 +200,112 @@ pub struct DiskInspection {
     pub program_data_present: bool,
     /// Current control set from the hive `Select` key.
     pub control_set: Option<u32>,
-    /// Any leftover one-shot provisioning service.
+    /// Any leftover one-shot provisioning service written by an earlier attempt.
     pub existing_service: Option<String>,
     /// Entries left below the fixed provision root directory.
     pub provision_root_entries: Vec<String>,
+    /// Existing local Group Policy files and injected startup artifacts.
+    pub policy: GuestPolicyFiles,
+}
+
+impl DiskInspection {
+    /// Operation identities of every guest artifact that looks like an earlier
+    /// offline provisioning attempt. An empty list means the guest is pristine.
+    pub fn leftover_operation_ids(&self) -> Vec<String> {
+        let mut ids = self.policy.leftover_operation_ids();
+        if let Some(service) = &self.existing_service
+            && let Some(id) = marker_id(service, "WukongLabProvision-", "")
+        {
+            ids.push(id);
+        }
+        for entry in &self.provision_root_entries {
+            if entry.len() == 32
+                && entry
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            {
+                ids.push(entry.clone());
+            }
+        }
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+}
+
+/// Existing machine policy files read from the powered-off system volume. Text
+/// policy files are kept as exact bytes so the controller can preserve them in a
+/// per-operation backup and restore them afterwards.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GuestPolicyFiles {
+    pub scripts_ini: Option<Vec<u8>>,
+    /// Backup written by this operation (`scripts.ini.wukong-lab-<id>.bak`).
+    pub scripts_ini_backup: Option<Vec<u8>>,
+    pub gpt_ini: Option<Vec<u8>>,
+    /// Backup written by this operation (`gpt.ini.wukong-lab-<id>.bak`).
+    pub gpt_ini_backup: Option<Vec<u8>>,
+    /// Command lines of the existing `[Startup]` section.
+    pub startup_command_lines: Vec<String>,
+    /// File names inside `Scripts\Startup`.
+    pub startup_directory_entries: Vec<String>,
+    /// File names inside `Scripts` (backs up the existing `scripts.ini`).
+    pub scripts_directory_entries: Vec<String>,
+    /// File names inside the local Group Policy root (backs up `gpt.ini`).
+    pub group_policy_entries: Vec<String>,
+}
+
+impl GuestPolicyFiles {
+    /// Operation identities referenced by any injected startup script or policy
+    /// backup of a previous provisioning attempt on this disk.
+    pub fn leftover_operation_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        for line in &self.startup_command_lines {
+            if let Some(id) = marker_id(line, STARTUP_ENTRY_PREFIX, STARTUP_ENTRY_SUFFIX) {
+                ids.push(id);
+            }
+        }
+        for name in self
+            .startup_directory_entries
+            .iter()
+            .chain(self.scripts_directory_entries.iter())
+            .chain(self.group_policy_entries.iter())
+        {
+            for (prefix, suffix) in [
+                (STARTUP_ENTRY_PREFIX, STARTUP_ENTRY_SUFFIX),
+                ("scripts.ini", ".bak"),
+                ("gpt.ini", ".bak"),
+            ] {
+                if let Some(id) = backup_marker_id(name, prefix, suffix) {
+                    ids.push(id);
+                }
+            }
+        }
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+}
+
+fn marker_id(value: &str, prefix: &str, suffix: &str) -> Option<String> {
+    let id = value.trim().strip_prefix(prefix)?.strip_suffix(suffix)?;
+    (id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+    .then(|| id.to_owned())
+}
+
+/// `scripts.ini.wukong-lab-<id>.bak` and `gpt.ini.wukong-lab-<id>.bak`.
+fn backup_marker_id(name: &str, file: &str, suffix: &str) -> Option<String> {
+    let id = name
+        .strip_prefix(file)?
+        .strip_prefix(POLICY_BACKUP_SUFFIX)?
+        .strip_suffix(suffix)?;
+    (id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+    .then(|| id.to_owned())
 }
 
 /// Paths inspected on the powered-off system volume. Every field is an
@@ -163,61 +316,127 @@ pub struct DiskInspectionRequest {
     pub program_data: String,
     pub provision_root: String,
     pub service_prefix: String,
+    pub gpo_root: String,
+    pub scripts_dir: String,
+    pub startup_dir: String,
+    pub scripts_ini: String,
+    pub scripts_ini_backup: String,
+    pub gpt_ini: String,
+    pub gpt_ini_backup: String,
 }
 
 impl DiskInspectionRequest {
-    pub fn new() -> Self {
+    /// Probe exactly one operation's fixed paths so cleanup can read that
+    /// operation's backups while provisioning reads a fresh (absent) pair.
+    pub fn for_provision(paths: &GuestPaths) -> Self {
         Self {
             system_hive: GUEST_SYSTEM_HIVE.into(),
             program_data: GUEST_PROGRAM_DATA.into(),
-            provision_root: GUEST_PROVISION_BASE.into(),
+            provision_root: GUEST_PROVISION_ROOT.into(),
             service_prefix: "WukongLabProvision".into(),
+            gpo_root: GUEST_GPO_ROOT.into(),
+            scripts_dir: GUEST_SCRIPTS_DIR.into(),
+            startup_dir: GUEST_STARTUP_DIR.into(),
+            scripts_ini: paths.scripts_ini.clone(),
+            scripts_ini_backup: paths.scripts_ini_backup.clone(),
+            gpt_ini: paths.gpt_ini.clone(),
+            gpt_ini_backup: paths.gpt_ini_backup.clone(),
         }
     }
 }
 
-impl Default for DiskInspectionRequest {
-    fn default() -> Self {
-        Self::new()
+/// Removal of the legacy one-shot provisioning service from a powered-off
+/// SYSTEM hive. New provisioning never writes it; this only cleans artifacts of
+/// attempts made by the earlier service-based boot mechanism.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceRemoval {
+    /// Absolute Windows guest path of the SYSTEM hive inside the system volume.
+    pub system_hive: String,
+    pub service: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceRemovalEvidence {
+    pub service_present: bool,
+    pub removed: bool,
+}
+
+/// Files and directories removed from the powered-off guest by the explicit
+/// cleanup command. Paths are fixed by the provision identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GuestRemoval {
+    pub directories: Vec<String>,
+    pub files: Vec<String>,
+}
+
+impl GuestRemoval {
+    pub(crate) fn validate(&self) -> Result<()> {
+        ensure!(
+            self.directories.len() + self.files.len() <= 32,
+            "guest cleanup names too many paths"
+        );
+        for path in self.directories.iter().chain(self.files.iter()) {
+            GuestPaths::guestfish(path)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.directories.is_empty() && self.files.is_empty()
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HivePatch {
-    /// Absolute Windows guest path of the SYSTEM hive inside the system volume.
-    pub system_hive: String,
-    pub control_set: u32,
-    pub script: String,
-    pub verify_script: String,
-    /// Controller-side copy of the pre-patch hive for recovery evidence.
-    pub host_backup: Option<PathBuf>,
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GuestRemovalEvidence {
+    /// Files that were present and are gone afterwards.
+    pub removed_files: Vec<String>,
+    /// Directories that were present and are gone afterwards.
+    pub removed_directories: Vec<String>,
+    /// Paths that were already absent.
+    pub absent: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HivePatchEvidence {
-    pub hive_sha256_before: String,
-    pub hive_sha256_after: String,
-    pub verify_output: String,
-}
-
-/// Fixed guest artifacts read back after the one-shot service ran. Every path
-/// field is an absolute Windows guest path; adapters translate them once.
+/// Fixed guest artifacts read back after the one-shot startup script ran. Every
+/// path field is an absolute Windows guest path; adapters translate them once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GuestObservationRequest {
-    pub system_hive: String,
-    pub control_set: u32,
-    pub service_name: String,
     pub wrapper: String,
     pub plan: String,
     pub receipt: String,
+    pub startup_script: String,
+    pub startup_entry: String,
+    pub scripts_ini: String,
+    pub scripts_ini_backup: String,
+    pub gpt_ini_backup: String,
+}
+
+impl GuestObservationRequest {
+    pub fn for_provision(paths: &GuestPaths) -> Self {
+        Self {
+            wrapper: paths.wrapper.clone(),
+            plan: paths.plan.clone(),
+            receipt: paths.receipt.clone(),
+            startup_script: paths.startup_script.clone(),
+            startup_entry: paths.startup_entry.clone(),
+            scripts_ini: paths.scripts_ini.clone(),
+            scripts_ini_backup: paths.scripts_ini_backup.clone(),
+            gpt_ini_backup: paths.gpt_ini_backup.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GuestObservation {
     pub receipt: Option<Vec<u8>>,
-    pub service_present: bool,
     pub wrapper_present: bool,
     pub plan_present: bool,
+    /// The local-GPO startup launcher must be gone after the wrapper runs.
+    pub startup_script_present: bool,
+    pub scripts_ini_present: bool,
+    /// The injected `[Startup]` command line is still present in `scripts.ini`.
+    pub startup_entry_present: bool,
+    pub scripts_ini_backup_present: bool,
+    pub gpt_ini_backup_present: bool,
 }
 
 /// Host-side offline disk editing. Implementations execute fixed libguestfs and
@@ -228,7 +447,18 @@ pub trait OfflineDisk: Send + Sync {
     async fn inspect(&self, disk: &Path, request: &DiskInspectionRequest)
     -> Result<DiskInspection>;
     async fn write_guest_files(&self, disk: &Path, files: &[GuestFile]) -> Result<()>;
-    async fn patch_system_hive(&self, disk: &Path, patch: &HivePatch) -> Result<HivePatchEvidence>;
+    /// Delete the fixed legacy one-shot service key if it is present.
+    async fn remove_service_key(
+        &self,
+        disk: &Path,
+        removal: &ServiceRemoval,
+    ) -> Result<ServiceRemovalEvidence>;
+    /// Remove only the named startup launcher, backups and provision directory.
+    async fn remove_guest_paths(
+        &self,
+        disk: &Path,
+        removal: &GuestRemoval,
+    ) -> Result<GuestRemovalEvidence>;
     async fn observe_guest(
         &self,
         disk: &Path,
@@ -789,12 +1019,7 @@ fn unquote(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-/// Fixed one-shot service hive edit. `hivexsh -w` reads this from stdin.
-pub fn hive_patch_script(control_set: u32, service: &str, image_path: &str) -> Result<String> {
-    ensure!(
-        (1..=999).contains(&control_set),
-        "invalid Windows control set number"
-    );
+pub fn validate_service_name(service: &str) -> Result<()> {
     ensure!(
         !service.is_empty()
             && service.len() <= 128
@@ -803,69 +1028,512 @@ pub fn hive_patch_script(control_set: u32, service: &str, image_path: &str) -> R
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
         "invalid one-shot service name"
     );
-    ensure!(
-        !image_path.is_empty()
-            && image_path.len() <= 1024
-            && image_path.is_ascii()
-            && !image_path.contains(['\n', '\r', '\0', '\t', '"']),
-        "invalid one-shot service image path"
-    );
-    Ok(format!(
-        "cd \\ControlSet{control_set:03}\\Services\nadd {service}\ncd {service}\nsetval 6\nType\ndword:16\nStart\ndword:00000002\nErrorControl\ndword:00000001\nImagePath\nexpandstring:{image_path}\nObjectName\nstring:LocalSystem\nDescription\nstring:Wukong offline one-shot worker provisioning\ncommit\nquit\n"
-    ))
+    Ok(())
 }
 
-pub fn hive_verify_script(control_set: u32, service: &str) -> Result<String> {
+/// `hivexsh -w` script that deletes one fixed legacy service key. New
+/// provisioning never writes this key; the explicit guest cleanup command uses
+/// it to remove artifacts of the earlier service-based boot mechanism.
+pub fn hive_remove_service_script(control_set: u32, service: &str) -> Result<String> {
     ensure!(
         (1..=999).contains(&control_set),
         "invalid Windows control set number"
     );
-    ensure!(
-        !service.is_empty()
-            && service
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
-        "invalid one-shot service name"
-    );
+    validate_service_name(service)?;
     Ok(format!(
-        "cd \\ControlSet{control_set:03}\\Services\\{service}\nlsval\nquit\n"
+        "cd \\ControlSet{control_set:03}\\Services\ndel {service}\ncommit\nquit\n"
     ))
 }
 
-/// Verify the service values read back from the hive. Backslashes are escaped
-/// by hivexsh string output.
-pub fn verify_hive_output(output: &str, image_path: &str) -> Result<()> {
-    let values: Vec<&str> = output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
+/// One decoded INI document in its original text encoding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PolicyEncoding {
+    Utf8,
+    Utf16Le,
+}
+
+fn decode_policy_document(bytes: &[u8], what: &str) -> Result<(PolicyEncoding, String)> {
+    ensure!(
+        bytes.len() as u64 <= MAX_POLICY_BYTES,
+        "{what} exceeds the policy size budget"
+    );
+    if let Some(body) = bytes.strip_prefix(&UTF16_LE_BOM) {
+        ensure!(
+            body.len() % 2 == 0,
+            "{what} has an odd UTF-16LE byte length"
+        );
+        let units: Vec<u16> = body
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        let text =
+            String::from_utf16(&units).with_context(|| format!("{what} is not valid UTF-16LE"))?;
+        return Ok((PolicyEncoding::Utf16Le, text));
+    }
+    let body = bytes.strip_prefix(&UTF8_BOM).unwrap_or(bytes);
+    let text = std::str::from_utf8(body)
+        .with_context(|| format!("{what} is not valid UTF-16LE/UTF-8 text"))?;
+    ensure!(
+        !text.contains('\0'),
+        "{what} has no supported policy text encoding"
+    );
+    Ok((PolicyEncoding::Utf8, text.to_owned()))
+}
+
+fn encode_policy_document(encoding: PolicyEncoding, text: &str) -> Vec<u8> {
+    match encoding {
+        PolicyEncoding::Utf8 => text.as_bytes().to_vec(),
+        PolicyEncoding::Utf16Le => {
+            let mut bytes = UTF16_LE_BOM.to_vec();
+            bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+            bytes
+        }
+    }
+}
+
+fn policy_lines(text: &str) -> Vec<String> {
+    let mut lines: Vec<String> = text
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r').to_owned())
         .collect();
-    let contains = |expected: &str| values.contains(&expected);
+    if lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    lines
+}
+
+fn policy_newline(text: &str) -> &'static str {
+    if text.contains("\r\n") { "\r\n" } else { "\n" }
+}
+
+fn render_policy(lines: &[String], newline: &str) -> String {
+    let mut text = lines.join(newline);
+    if !lines.is_empty() {
+        text.push_str(newline);
+    }
+    text
+}
+
+/// Half-open line range of one `[Section]` body: `(header, end)`.
+fn section_bounds(lines: &[String], section: &str) -> Option<(usize, usize)> {
+    let mut start = None;
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.len() < 2 || !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+            continue;
+        }
+        if let Some(header) = start {
+            return Some((header, index));
+        }
+        if trimmed[1..trimmed.len() - 1]
+            .trim()
+            .eq_ignore_ascii_case(section)
+        {
+            start = Some(index);
+        }
+    }
+    start.map(|header| (header, lines.len()))
+}
+
+fn startup_entries_from_lines(lines: &[String]) -> Vec<String> {
+    let Some((header, end)) = section_bounds(lines, "Startup") else {
+        return Vec::new();
+    };
+    lines[header + 1..end]
+        .iter()
+        .filter_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            let key = key.trim();
+            let index = key.strip_suffix("CmdLine")?;
+            (!index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
+                .then(|| value.trim().to_owned())
+        })
+        .collect()
+}
+
+/// Parse the `[Startup]` command lines from existing `scripts.ini` bytes. An
+/// unreadable document is an error: the controller never guesses at policy
+/// content it cannot preserve.
+pub fn startup_command_lines(bytes: &[u8]) -> Result<Vec<String>> {
+    let (_, text) = decode_policy_document(bytes, "guest scripts.ini")?;
+    Ok(startup_entries_from_lines(&policy_lines(&text)))
+}
+
+fn validate_startup_entry(entry: &str) -> Result<()> {
     ensure!(
-        contains("\"Type\"=dword:00000010"),
-        "one-shot service type was not written"
+        entry.len() == STARTUP_ENTRY_PREFIX.len() + 32 + STARTUP_ENTRY_SUFFIX.len()
+            && entry.starts_with(STARTUP_ENTRY_PREFIX)
+            && entry.ends_with(STARTUP_ENTRY_SUFFIX),
+        "invalid machine startup entry"
     );
+    let id = &entry[STARTUP_ENTRY_PREFIX.len()..entry.len() - STARTUP_ENTRY_SUFFIX.len()];
     ensure!(
-        contains("\"Start\"=dword:00000002"),
-        "one-shot service start mode was not written"
-    );
-    ensure!(
-        contains("\"ErrorControl\"=dword:00000001"),
-        "one-shot service error control was not written"
-    );
-    ensure!(
-        contains("\"ObjectName\"=\"LocalSystem\""),
-        "one-shot service account was not written"
-    );
-    let expected = format!(
-        "\"ImagePath\"=str(2):\"{}\"",
-        image_path.replace('\\', "\\\\")
-    );
-    ensure!(
-        contains(&expected),
-        "one-shot service image path was not written"
+        id.len() == 32
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+        "invalid machine startup entry"
     );
     Ok(())
+}
+
+fn next_script_index(lines: &[String]) -> u32 {
+    lines
+        .iter()
+        .filter_map(|line| {
+            let (key, _) = line.split_once('=')?;
+            let key = key.trim();
+            let index = key
+                .strip_suffix("CmdLine")
+                .or_else(|| key.strip_suffix("Parameters"))?;
+            index.parse::<u32>().ok()
+        })
+        .max()
+        .map_or(0, |value| value.saturating_add(1))
+}
+
+/// Inject one `[Startup]` entry while preserving every existing section. The
+/// previous bytes are backed up by the caller before this rewritten document is
+/// published, and the wrapper restores that backup after it runs.
+pub fn inject_startup_script(original: Option<&[u8]>, entry: &str) -> Result<Vec<u8>> {
+    validate_startup_entry(entry)?;
+    let (encoding, text) = match original {
+        Some(bytes) => decode_policy_document(bytes, "guest scripts.ini")?,
+        None => (PolicyEncoding::Utf8, String::new()),
+    };
+    let newline = if text.is_empty() {
+        "\r\n"
+    } else {
+        policy_newline(&text)
+    };
+    let mut lines = policy_lines(&text);
+    ensure!(
+        startup_entries_from_lines(&lines)
+            .iter()
+            .all(|line| !line.starts_with(STARTUP_ENTRY_PREFIX)),
+        "guest scripts.ini already contains a provisioning startup entry"
+    );
+    match section_bounds(&lines, "Startup") {
+        Some((header, end)) => {
+            let next = next_script_index(&lines[header + 1..end]);
+            let mut insert = end;
+            while insert > header + 1 && lines[insert - 1].trim().is_empty() {
+                insert -= 1;
+            }
+            lines.insert(insert, format!("{next}Parameters="));
+            lines.insert(insert, format!("{next}CmdLine={entry}"));
+        }
+        None => {
+            if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
+                lines.push(String::new());
+            }
+            lines.push("[Startup]".into());
+            lines.push(format!("0CmdLine={entry}"));
+            lines.push("0Parameters=".into());
+        }
+    }
+    Ok(encode_policy_document(
+        encoding,
+        &render_policy(&lines, newline),
+    ))
+}
+
+/// Remove this operation's `[Startup]` entry (and its parameters line) while
+/// preserving unrelated sections. `None` means the document became empty and the
+/// injected `scripts.ini` itself should be deleted.
+pub fn remove_startup_script(original: &[u8], entry: &str) -> Result<Option<Vec<u8>>> {
+    validate_startup_entry(entry)?;
+    let (encoding, text) = decode_policy_document(original, "guest scripts.ini")?;
+    let newline = policy_newline(&text);
+    let mut lines = policy_lines(&text);
+    let Some((header, end)) = section_bounds(&lines, "Startup") else {
+        return Ok(Some(original.to_vec()));
+    };
+    let mut found = None;
+    for (line, content) in lines.iter().enumerate().take(end).skip(header + 1) {
+        let Some((key, value)) = content.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let Some(number) = key.strip_suffix("CmdLine") else {
+            continue;
+        };
+        if !number.is_empty()
+            && number.bytes().all(|byte| byte.is_ascii_digit())
+            && value.trim() == entry
+        {
+            found = Some((line, number.to_owned()));
+            break;
+        }
+    }
+    let Some((line, number)) = found else {
+        return Ok(Some(original.to_vec()));
+    };
+    let parameters = format!("{number}Parameters=");
+    let mut remove = vec![line];
+    if let Some(index) = (header + 1..end).find(|index| lines[*index].trim() == parameters) {
+        remove.push(index);
+    }
+    remove.sort_unstable();
+    remove.dedup();
+    for index in remove.into_iter().rev() {
+        lines.remove(index);
+    }
+    if let Some((header, end)) = section_bounds(&lines, "Startup")
+        && lines[header + 1..end]
+            .iter()
+            .all(|line| line.trim().is_empty())
+    {
+        lines.drain(header..end);
+    }
+    if lines.iter().all(|line| line.trim().is_empty()) {
+        return Ok(None);
+    }
+    Ok(Some(encode_policy_document(
+        encoding,
+        &render_policy(&lines, newline),
+    )))
+}
+
+fn parse_version_line(value: &str) -> Option<&str> {
+    let rest = value.trim().strip_prefix("Version")?;
+    rest.trim_start().strip_prefix('=').map(str::trim)
+}
+
+/// Bump the computer half of the local-GPO `Version` DWORD, creating a minimal
+/// `gpt.ini` when the guest has none. The original bytes are backed up by the
+/// caller and restored by the wrapper; the extension list is left untouched
+/// because machine startup scripts are a standard local-GPO extension and the
+/// recovered working layout only changed `scripts.ini` plus the startup folder.
+pub fn bump_gpt_version(original: Option<&[u8]>) -> Result<Vec<u8>> {
+    let (encoding, text) = match original {
+        Some(bytes) => decode_policy_document(bytes, "guest gpt.ini")?,
+        None => (PolicyEncoding::Utf8, String::new()),
+    };
+    let newline = if text.is_empty() {
+        "\r\n"
+    } else {
+        policy_newline(&text)
+    };
+    let mut lines = policy_lines(&text);
+    let mut bumped = false;
+    if let Some((header, end)) = section_bounds(&lines, "General") {
+        for content in lines.iter_mut().take(end).skip(header + 1) {
+            let Some(version) = parse_version_line(content) else {
+                continue;
+            };
+            ensure!(
+                !version.is_empty() && version.bytes().all(|byte| byte.is_ascii_digit()),
+                "guest gpt.ini Version is not a decimal number"
+            );
+            let current: u32 = version
+                .parse()
+                .with_context(|| format!("guest gpt.ini Version is out of range: {version}"))?;
+            let user = current & 0xffff_0000;
+            let computer = current & 0xffff;
+            let computer = if computer == 0xffff { 1 } else { computer + 1 };
+            *content = format!("Version={}", user | computer);
+            bumped = true;
+            break;
+        }
+        if !bumped {
+            let mut insert = end;
+            while insert > header + 1 && lines[insert - 1].trim().is_empty() {
+                insert -= 1;
+            }
+            lines.insert(insert, "Version=1".into());
+        }
+    } else {
+        if !lines.is_empty() && !lines.last().is_some_and(|line| line.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.push("[General]".into());
+        lines.push("Version=1".into());
+    }
+    Ok(encode_policy_document(
+        encoding,
+        &render_policy(&lines, newline),
+    ))
+}
+
+/// Local-GPO machine startup injection planned from the existing policy files.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StartupInjection {
+    /// Per-operation backups first, then the rewritten policy files.
+    pub files: Vec<GuestFile>,
+    pub scripts_ini_sha256: String,
+    pub gpt_ini_sha256: String,
+    pub scripts_ini_preexisting: bool,
+    pub gpt_ini_preexisting: bool,
+}
+
+/// Plan the policy backups and the injected startup entry. The launcher itself
+/// is part of the fixed provision intent and is written with the wrapper.
+pub fn plan_startup_injection(
+    paths: &GuestPaths,
+    policy: &GuestPolicyFiles,
+) -> Result<StartupInjection> {
+    ensure!(
+        policy.scripts_ini_backup.is_none() && policy.gpt_ini_backup.is_none(),
+        "guest already contains backups for this operation; clean the previous attempt before provisioning"
+    );
+    let scripts_preexisting = policy.scripts_ini.is_some();
+    let gpt_preexisting = policy.gpt_ini.is_some();
+    let mut files = Vec::new();
+    if let Some(original) = &policy.scripts_ini {
+        files.push(injected_file(&paths.scripts_ini_backup, original.clone()));
+    }
+    let scripts_ini = inject_startup_script(policy.scripts_ini.as_deref(), &paths.startup_entry)?;
+    files.push(injected_file(&paths.scripts_ini, scripts_ini.clone()));
+    if let Some(original) = &policy.gpt_ini {
+        files.push(injected_file(&paths.gpt_ini_backup, original.clone()));
+    }
+    let gpt_ini = bump_gpt_version(policy.gpt_ini.as_deref())?;
+    files.push(injected_file(&paths.gpt_ini, gpt_ini.clone()));
+    Ok(StartupInjection {
+        files,
+        scripts_ini_sha256: sha256(&scripts_ini),
+        gpt_ini_sha256: sha256(&gpt_ini),
+        scripts_ini_preexisting: scripts_preexisting,
+        gpt_ini_preexisting: gpt_preexisting,
+    })
+}
+
+/// Fixed `.cmd` launcher executed by the machine startup script. It starts the
+/// wrapper detached so the Group Policy startup phase is not held open for the
+/// whole worker installation; the wrapper powers the guest off when it finishes.
+pub fn startup_launcher(provision_id: &str, wrapper: &str) -> Result<Vec<u8>> {
+    let entry = format!("{STARTUP_ENTRY_PREFIX}{provision_id}{STARTUP_ENTRY_SUFFIX}");
+    validate_startup_entry(&entry)?;
+    ensure!(
+        wrapper.starts_with(r"C:\ProgramData\WukongLab\provision\")
+            && wrapper.is_ascii()
+            && !wrapper.contains(['\n', '\r', '\0', '"']),
+        "invalid guest wrapper path"
+    );
+    let launcher = format!(
+        "@echo off\r\nrem Wukong offline worker provisioning launcher. The controller removes this file after the wrapper runs.\r\nstart \"\" /b \"{POWERSHELL}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{wrapper}\"\r\n"
+    );
+    ensure!(
+        launcher.len() <= 4096,
+        "machine startup launcher exceeds the guest bound"
+    );
+    Ok(launcher.into_bytes())
+}
+
+/// One explicit cleanup action for the named operation's powered-off guest disk.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GuestCleanupPlan {
+    /// Restored policy files to write through the offline disk adapter.
+    pub files: Vec<GuestFile>,
+    /// Files removed after the restore (backups and the startup launcher).
+    pub files_to_remove: Vec<String>,
+    /// Directories removed recursively (only this operation's provision tree).
+    pub directories_to_remove: Vec<String>,
+    /// Legacy one-shot service key from an earlier attempt.
+    pub service_key: Option<String>,
+    /// Bounded human-readable action list shared by the command and its dry run.
+    pub actions: Vec<String>,
+}
+
+impl GuestCleanupPlan {
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+            && self.files_to_remove.is_empty()
+            && self.directories_to_remove.is_empty()
+            && self.service_key.is_none()
+    }
+}
+
+/// Plan removal of exactly one operation's guest leftovers: the startup
+/// launcher and policy entry, the per-operation policy backups, the legacy
+/// service key written by earlier attempts, and the provision directory. Other
+/// policy content, other operation directories and unrelated services are never
+/// named here.
+pub fn plan_guest_cleanup(
+    paths: &GuestPaths,
+    inspection: &DiskInspection,
+) -> Result<GuestCleanupPlan> {
+    ensure!(
+        inspection.windows_volume && inspection.system_hive_present,
+        "guest disk has no inspectable Windows system volume"
+    );
+    let mut plan = GuestCleanupPlan::default();
+    let policy = &inspection.policy;
+    let startup_present = policy
+        .startup_directory_entries
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(&paths.startup_entry));
+    if startup_present {
+        plan.files_to_remove.push(paths.startup_script.clone());
+        plan.actions.push(format!(
+            "delete the injected machine startup launcher {}",
+            paths.startup_script
+        ));
+    }
+    if let Some(backup) = &policy.scripts_ini_backup {
+        plan.files
+            .push(injected_file(&paths.scripts_ini, backup.clone()));
+        plan.files_to_remove.push(paths.scripts_ini_backup.clone());
+        plan.actions.push(format!(
+            "restore the previous machine scripts.ini bytes from {}",
+            paths.scripts_ini_backup
+        ));
+    } else if policy
+        .startup_command_lines
+        .iter()
+        .any(|line| line == &paths.startup_entry)
+    {
+        let original = policy
+            .scripts_ini
+            .as_ref()
+            .context("guest scripts.ini is missing while its startup entry is present")?;
+        match remove_startup_script(original, &paths.startup_entry)? {
+            Some(bytes) => {
+                plan.files.push(injected_file(&paths.scripts_ini, bytes));
+                plan.actions.push(format!(
+                    "remove the startup entry from {}",
+                    paths.scripts_ini
+                ));
+            }
+            None => {
+                plan.files_to_remove.push(paths.scripts_ini.clone());
+                plan.actions
+                    .push(format!("delete the injected {}", paths.scripts_ini));
+            }
+        }
+    }
+    if let Some(backup) = &policy.gpt_ini_backup {
+        plan.files
+            .push(injected_file(&paths.gpt_ini, backup.clone()));
+        plan.files_to_remove.push(paths.gpt_ini_backup.clone());
+        plan.actions.push(format!(
+            "restore the previous local Group Policy gpt.ini bytes from {}",
+            paths.gpt_ini_backup
+        ));
+    }
+    if inspection.existing_service.as_deref() == Some(paths.service.as_str()) {
+        plan.service_key = Some(paths.service.clone());
+        plan.actions.push(format!(
+            "delete the legacy one-shot service key {} from the SYSTEM hive",
+            paths.service
+        ));
+    }
+    if inspection
+        .provision_root_entries
+        .iter()
+        .any(|entry| entry == paths.provision_id())
+    {
+        plan.directories_to_remove.push(paths.root.clone());
+        plan.actions
+            .push(format!("delete the operation directory {}", paths.root));
+    }
+    let removal = GuestRemoval {
+        directories: plan.directories_to_remove.clone(),
+        files: plan.files_to_remove.clone(),
+    };
+    removal.validate()?;
+    Ok(plan)
 }
 
 /// JSON plan and the fixed PowerShell wrapper injected under the provision
@@ -877,7 +1545,7 @@ pub fn provision_plan(
     paths: &GuestPaths,
 ) -> Result<Vec<u8>> {
     let plan = serde_json::json!({
-        "schema": 1,
+        "schema": 2,
         "provision_id": provision_id,
         "installation_id": media.installation_id,
         "environment_id": media.environment_id,
@@ -889,7 +1557,11 @@ pub fn provision_plan(
         "controller_version": media.controller_version,
         "ssh_port": media.ssh_port,
         "media_label": MEDIA_LABEL,
-        "service_name": paths.service,
+        "startup_script": paths.startup_script,
+        "scripts_ini": paths.scripts_ini,
+        "scripts_ini_backup": paths.scripts_ini_backup,
+        "gpt_ini": paths.gpt_ini,
+        "gpt_ini_backup": paths.gpt_ini_backup,
     });
     let mut bytes = serde_json::to_vec_pretty(&plan)?;
     bytes.push(b'\n');
@@ -901,19 +1573,6 @@ pub fn provision_plan(
 }
 
 pub const PROVISION_WRAPPER: &str = include_str!("provision_wrapper.ps1");
-
-/// Fixed guest wrapper image path built from the validated provision identity.
-pub fn service_image_path(wrapper: &str) -> Result<String> {
-    ensure!(
-        wrapper.starts_with(r"C:\ProgramData\WukongLab\provision\")
-            && wrapper.is_ascii()
-            && !wrapper.contains(['\n', '\r', '\0', '"']),
-        "invalid guest wrapper path"
-    );
-    Ok(format!(
-        "{POWERSHELL} -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File {wrapper}"
-    ))
-}
 
 /// The guest receipt is the only evidence read back from the provisioned disk;
 /// it must bind the fixed wrapper plan, installer identity and cleanup result.
@@ -929,7 +1588,7 @@ pub fn verify_guest_receipt(
     let receipt: serde_json::Value =
         serde_json::from_slice(bytes).context("parse guest provisioning receipt")?;
     ensure!(
-        receipt["schema"] == 1 && receipt["provision_id"] == expectation.provision_id,
+        receipt["schema"] == 2 && receipt["provision_id"] == expectation.provision_id,
         "guest provisioning receipt identity mismatch"
     );
     ensure!(
@@ -943,8 +1602,16 @@ pub fn verify_guest_receipt(
         receipt["error"]
     );
     ensure!(
-        receipt["service_delete"] == "deleted",
-        "guest one-shot service was not deleted"
+        matches!(
+            receipt["startup_cleanup"].as_str(),
+            Some("restored" | "removed")
+        ),
+        "guest machine startup policy was not restored: {}",
+        receipt["startup_cleanup"]
+    );
+    ensure!(
+        receipt["startup_script_deleted"] == true,
+        "guest machine startup launcher was not deleted"
     );
     ensure!(
         receipt["cleanup_scheduled"] == true,

@@ -36,7 +36,9 @@ pub mod runner;
 pub mod service;
 use admin::{AdminFile, AdminRequest, LabAdmin};
 use provision::{GuestNetwork, IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment};
-pub use provision_service::{ProvisionOptions, ProvisionOutcome};
+pub use provision_service::{
+    CleanGuestOptions, CleanGuestOutcome, ProvisionOptions, ProvisionOutcome,
+};
 
 pub const STATE_SCHEMA: u32 = 2;
 
@@ -719,7 +721,7 @@ impl WindowsLab {
                 );
             }
             state.last_error = Some(
-                "controller restarted during offline provisioning; re-provision the VM with the same command and --replace-baseline if a baseline snapshot exists"
+                "controller restarted during offline provisioning; inspect the powered-off VM, remove guest leftovers with `wukong lab clean-guest --vm <alias> --operation <operation_id>` before retrying"
                     .into(),
             );
             self.store.save(state)?;

@@ -1,20 +1,24 @@
-# One-shot offline worker provisioning injected into a powered-off Windows guest.
+# One-shot offline worker provisioning wrapper injected into a powered-off
+# Windows guest and launched by a local Group Policy machine startup script.
 # This is a fixed controller asset: identities come from provision-plan.json
-# beside it and the receipt is written beside the plan. Never reinstall or repeat
-# a completed effect when the guest boots again.
+# beside it and the receipt is written beside the plan. The startup entry must
+# run exactly once: the finally block restores the previous machine policy files,
+# deletes the startup launcher, schedules removal of this script and plan, then
+# always powers the guest off.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSCommandPath
 $planPath = Join-Path $root 'provision-plan.json'
 $receiptPath = Join-Path $root 'receipt.json'
 $existingReceipt = Test-Path -LiteralPath $receiptPath
 $receipt = [ordered]@{
-    schema = 1
+    schema = 2
     provision_id = $null
     installed = $false
     already_installed = $false
     exit_code = $null
     connection = $null
-    service_delete = 'not_attempted'
+    startup_cleanup = 'not_attempted'
+    startup_script_deleted = $false
     cleanup_scheduled = $false
     error = $null
 }
@@ -26,6 +30,51 @@ function Save-Receipt {
         Move-Item -LiteralPath $temporary -Destination $receiptPath -Force
     } catch {
     }
+}
+# Restore the bytes we backed up and delete the per-operation backup file.
+function Restore-PolicyFile([string]$path, [string]$backup) {
+    if (-not $path) {
+        return 'skipped'
+    }
+    if ($backup -and (Test-Path -LiteralPath $backup)) {
+        Copy-Item -LiteralPath $backup -Destination $path -Force
+        Remove-Item -LiteralPath $backup -Force
+        return 'restored'
+    }
+    if (Test-Path -LiteralPath $path) {
+        Remove-Item -LiteralPath $path -Force
+    }
+    return 'removed'
+}
+# Fallback used only when the plan cannot be read: remove our startup command
+# lines from scripts.ini and delete the document if nothing else remains.
+function Remove-StartupEntry([string]$scriptsIni, [string]$entry) {
+    if (-not (Test-Path -LiteralPath $scriptsIni)) {
+        return 'removed'
+    }
+    $lines = @(Get-Content -LiteralPath $scriptsIni)
+    $kept = New-Object System.Collections.Generic.List[string]
+    $index = $null
+    foreach ($line in $lines) {
+        if ($line -match '^(\d+)CmdLine=(.*)$' -and $Matches[2].Trim() -eq $entry) {
+            $index = $Matches[1]
+            continue
+        }
+        $kept.Add($line)
+    }
+    if ($null -ne $index) {
+        $kept = @($kept | Where-Object { $_.Trim() -ne ($index + 'Parameters=') })
+    }
+    $content = @($kept | Where-Object { $_.Trim() -ne '' })
+    if ($content.Count -eq 0) {
+        Remove-Item -LiteralPath $scriptsIni -Force
+        return 'removed'
+    }
+    if ($null -ne $index) {
+        Set-Content -LiteralPath $scriptsIni -Value $kept -Encoding Unicode
+        return 'removed'
+    }
+    return 'removed'
 }
 $plan = $null
 try {
@@ -110,24 +159,70 @@ try {
 } catch {
     $receipt.error = [string]$_.Exception.Message
 } finally {
-    try {
-        $service = [string]$plan.service_name
-        if ($service) {
-            $deleteText = (& sc.exe delete $service 2>&1 | Out-String)
-            $deleteCode = $LASTEXITCODE
-            if ($deleteCode -eq 0 -or $deleteCode -eq 1072) {
-                $receipt.service_delete = 'deleted'
-            } else {
-                $receipt.service_delete = 'failed:' + $deleteCode
-            }
-        } else {
-            $receipt.service_delete = 'skipped'
-        }
-    } catch {
-        $receipt.service_delete = 'failed'
-    }
+    # Record the installation outcome before any cleanup so a crash below still
+    # leaves controller-readable evidence.
     if (-not $existingReceipt) {
         Save-Receipt
+    }
+    $startupScript = $null
+    $scriptsIni = $null
+    $scriptsIniBackup = $null
+    $gptIni = $null
+    $gptIniBackup = $null
+    $startupEntry = $null
+    if ($plan) {
+        $startupScript = [string]$plan.startup_script
+        $scriptsIni = [string]$plan.scripts_ini
+        $scriptsIniBackup = [string]$plan.scripts_ini_backup
+        $gptIni = [string]$plan.gpt_ini
+        $gptIniBackup = [string]$plan.gpt_ini_backup
+    }
+    $provisionId = Split-Path -Leaf $root
+    if ($provisionId -match '^[0-9a-f]{32}$') {
+        $machineScripts = Join-Path $env:SystemRoot 'System32\GroupPolicy\Machine\Scripts'
+        if (-not $startupScript) {
+            $startupScript = Join-Path $machineScripts ('Startup\wukong-provision-' + $provisionId + '.cmd')
+        }
+        if (-not $scriptsIni) {
+            $scriptsIni = Join-Path $machineScripts 'scripts.ini'
+        }
+        if (-not $scriptsIniBackup) {
+            $scriptsIniBackup = Join-Path $machineScripts ('scripts.ini.wukong-lab-' + $provisionId + '.bak')
+        }
+        if (-not $gptIni) {
+            $gptIni = Join-Path $env:SystemRoot 'System32\GroupPolicy\gpt.ini'
+        }
+        if (-not $gptIniBackup) {
+            $gptIniBackup = Join-Path $env:SystemRoot ('System32\GroupPolicy\gpt.ini.wukong-lab-' + $provisionId + '.bak')
+        }
+        $startupEntry = 'wukong-provision-' + $provisionId + '.cmd'
+    }
+    # Remove the machine startup injection before anything else so a later boot
+    # can never repeat the installation.
+    try {
+        $restored = $false
+        if ($scriptsIni) {
+            if (Test-Path -LiteralPath $scriptsIniBackup) {
+                Restore-PolicyFile $scriptsIni $scriptsIniBackup | Out-Null
+                $restored = $true
+            } elseif ($startupEntry) {
+                Remove-StartupEntry $scriptsIni $startupEntry | Out-Null
+            }
+        }
+        if ($gptIni -and (Test-Path -LiteralPath $gptIniBackup)) {
+            # Without a backup the wrapper leaves gpt.ini alone: it never deletes
+            # policy content it cannot restore, and an injected version value is
+            # harmless once the startup entry is gone.
+            Restore-PolicyFile $gptIni $gptIniBackup | Out-Null
+            $restored = $true
+        }
+        if ($startupScript -and (Test-Path -LiteralPath $startupScript)) {
+            Remove-Item -LiteralPath $startupScript -Force
+        }
+        $receipt.startup_script_deleted = [bool]$startupScript
+        $receipt.startup_cleanup = if ($restored) { 'restored' } else { 'removed' }
+    } catch {
+        $receipt.startup_cleanup = 'failed:' + [string]$_.Exception.Message
     }
     try {
         # The wrapper cannot delete the running script itself; a detached helper
@@ -136,14 +231,11 @@ try {
         $arguments = '/d /c choice /t 3 /d y >nul & del /f /q ' + $planPath + ' ' + $PSCommandPath
         Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -ArgumentList $arguments -WindowStyle Hidden | Out-Null
         $receipt.cleanup_scheduled = $true
-        if (-not $existingReceipt) {
-            Save-Receipt
-        }
     } catch {
         $receipt.cleanup_scheduled = $false
-        if (-not $existingReceipt) {
-            Save-Receipt
-        }
+    }
+    if (-not $existingReceipt) {
+        Save-Receipt
     }
     try {
         & shutdown.exe /s /t 10 /f | Out-Null
