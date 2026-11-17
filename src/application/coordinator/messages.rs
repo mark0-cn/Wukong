@@ -104,10 +104,7 @@ impl Coordinator {
         let run: RunRecord = tx.get_record(&target.run_id)?.context("run missing")?;
         ensure!(!run.status.terminal(), "assessment is terminal");
         let quota_failed_target = target.status == Status::Failed
-            && target
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains("budget"));
+            && target.failure_cause == Some(crate::domain::FailureCause::Budget);
         ensure!(
             !target.status.terminal()
                 || target.status == Status::Completed
@@ -185,10 +182,7 @@ impl Coordinator {
             tx.replace_envelope(&original)?;
         }
         let quota_failed = target.status == Status::Failed
-            && target
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains("budget"));
+            && target.failure_cause == Some(crate::domain::FailureCause::Budget);
         if options.kind == MessageKind::FollowUp
             && (target.status == Status::Completed || quota_failed)
         {
@@ -226,7 +220,11 @@ impl Coordinator {
                 agent.wait_for_predecessors.clear();
                 agent.predecessors_released = true;
                 agent.error = None;
+                agent.failure_cause = None;
                 agent.task_result = None;
+                // A reopen grants a fresh quota slice; the per-agent turn cap is part
+                // of that slice, so keep it in step with the new generation.
+                agent.turns = 0;
                 // Resuming the SAME agent must give it headroom: a fresh
                 // role-quota slice on top of what it already spent, so a
                 // quota-exhausted child continues instead of dying again on

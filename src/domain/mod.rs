@@ -1,6 +1,6 @@
 pub mod bundle;
 mod claims;
-pub(crate) use claims::flag_claims;
+pub(crate) use claims::{flag_claims, normalize};
 mod rules;
 pub use rules::{CompletionFacts, CompletionRules, DependencyRules, MessageRules, TaskGraph};
 mod progress;

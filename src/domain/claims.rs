@@ -3,6 +3,15 @@
 pub(crate) struct FlagClaims {
     pub placeholder: bool,
     pub concrete: bool,
+    /// Lowercased concrete tokens, used to bind a claim to a verifier's answer.
+    pub concrete_tokens: Vec<String>,
+}
+
+/// The normalization applied to a token body before classification. Claimed tokens
+/// and verifier answers must go through it together, otherwise `value_123` and
+/// `value123` would never match.
+pub(crate) fn normalize(text: &str) -> String {
+    text.chars().filter(|c| !matches!(c, '\\' | '_')).collect()
 }
 
 pub(crate) fn flag_claims(text: &str) -> FlagClaims {
@@ -13,10 +22,7 @@ pub(crate) fn flag_claims(text: &str) -> FlagClaims {
         let Some(close) = body.find('}') else {
             continue;
         };
-        let core: String = body[..close]
-            .chars()
-            .filter(|c| !matches!(c, '\\' | '_'))
-            .collect();
+        let core = normalize(&body[..close]);
         let placeholder = core.is_empty()
             || core
                 .chars()
@@ -27,8 +33,14 @@ pub(crate) fn flag_claims(text: &str) -> FlagClaims {
                     .chars()
                     .next()
                     .is_some_and(|first| core.chars().all(|c| c == first)));
-        claims.placeholder |= placeholder;
-        claims.concrete |= !placeholder;
+        if placeholder {
+            claims.placeholder = true;
+        } else {
+            claims.concrete = true;
+            if claims.concrete_tokens.len() < 8 && !claims.concrete_tokens.contains(&core) {
+                claims.concrete_tokens.push(core);
+            }
+        }
     }
     claims
 }
@@ -49,7 +61,8 @@ mod tests {
                 flag_claims(text),
                 FlagClaims {
                     placeholder: true,
-                    concrete: false
+                    concrete: false,
+                    concrete_tokens: vec![]
                 },
                 "{text}"
             );
@@ -58,14 +71,16 @@ mod tests {
             flag_claims("证据 flag{value_123}"),
             FlagClaims {
                 placeholder: false,
-                concrete: true
+                concrete: true,
+                concrete_tokens: vec!["value123".into()]
             }
         );
         assert_eq!(
             flag_claims("flag{...} then flag{value_123}"),
             FlagClaims {
                 placeholder: true,
-                concrete: true
+                concrete: true,
+                concrete_tokens: vec!["value123".into()]
             }
         );
         assert_eq!(

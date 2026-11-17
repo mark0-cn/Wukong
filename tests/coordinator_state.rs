@@ -191,10 +191,10 @@ fn quota_exhausted_scope_requires_followup_instead_of_respawn() {
         .create_child(&run.root_id, request("recon-scope"))
         .unwrap();
     assert!(child.created);
-    c.set_status(
+    c.fail_agent(
         &child.agent.id,
-        Status::Failed,
-        Some("agent model budget reached".into()),
+        "agent model budget reached".into(),
+        FailureCause::Budget,
     )
     .unwrap();
     let error = c

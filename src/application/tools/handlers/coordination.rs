@@ -37,7 +37,7 @@ pub(in crate::application::tools) fn handle_view_agent_graph<'a>(
                         .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
         }
         Ok(
-            json!({"caller_id":agent.id,"parent_id":agent.parent_id,"total":agents.len(),"next_offset":(offset+page.len()<agents.len()).then_some(offset+page.len()),"agents":page.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":brief(&a.name),"role":a.role,"scope":brief(&a.scope),"status":a.status,"generation":a.generation,"error":a.error.as_deref().map(brief),"can_follow_up":a.status==Status::Completed || (a.status==Status::Failed && a.error.as_deref().is_some_and(|e|e.contains("budget")))})).collect::<Vec<_>>(),"open_sessions":sessions}),
+            json!({"caller_id":agent.id,"parent_id":agent.parent_id,"total":agents.len(),"next_offset":(offset+page.len()<agents.len()).then_some(offset+page.len()),"agents":page.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":brief(&a.name),"role":a.role,"scope":brief(&a.scope),"status":a.status,"generation":a.generation,"error":a.error.as_deref().map(brief),"can_follow_up":a.status==Status::Completed || (a.status==Status::Failed && a.failure_cause==Some(crate::domain::FailureCause::Budget))})).collect::<Vec<_>>(),"open_sessions":sessions}),
         )
     })
 }

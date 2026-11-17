@@ -77,9 +77,7 @@ impl Coordinator {
                 && a.role == request.role
                 && a.environment_id == environment_id
                 && a.status.terminal()
-                && a.error
-                    .as_deref()
-                    .is_some_and(|error| error.contains("budget"))
+                && a.failure_cause == Some(crate::domain::FailureCause::Budget)
         }) {
             bail!(
                 "scope '{}' belongs to a quota-exhausted child ({}): resume it with follow_up_agent instead of spawning a replacement — its conversation and dossier are preserved",
