@@ -62,6 +62,8 @@ fn policy<T: Default>(
     flags: impl FnOnce(&T) -> Value,
 ) -> Value {
     let mut value = T::default();
+    // SAFETY: value is a zeroed stack T and size_of::<T>() is passed as its exact size; the
+    // only callers pair ProcessDEPPolicy/ASLR/CFG with the matching PROCESS_MITIGATION_* type.
     if unsafe {
         GetProcessMitigationPolicy(process, kind, (&mut value as *mut T).cast(), size_of::<T>())
     } == 0
@@ -75,6 +77,8 @@ fn policy<T: Default>(
 fn mapped_name(process: HANDLE, address: *mut core::ffi::c_void) -> Value {
     let mut path = [0u16; 4096];
     let count =
+        // SAFETY: path is a live 4096-element stack buffer and path.len() is passed as its u16
+        // capacity; the count >= path.len() branch rejects any overlong result before slicing.
         unsafe { K32GetMappedFileNameW(process, address, path.as_mut_ptr(), path.len() as u32) }
             as usize;
     if count == 0 {
@@ -93,6 +97,8 @@ pub(crate) fn observe(process: HANDLE, pid: u32) -> Result<Value> {
         FILETIME::default(),
         FILETIME::default(),
     );
+    // SAFETY: process is the caller-owned live process handle, created/exited/kernel/user
+    // are distinct stack FILETIME out-params, and check rejects failure before they are read.
     security::check(unsafe {
         GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user)
     })?;
@@ -108,6 +114,8 @@ pub(crate) fn observe(process: HANDLE, pid: u32) -> Result<Value> {
             break;
         }
         let mut region = MEMORY_BASIC_INFORMATION::default();
+        // SAFETY: process is the caller-owned live process handle, region is a stack
+        // MEMORY_BASIC_INFORMATION whose exact size is passed, queried at address.
         let read = unsafe {
             VirtualQueryEx(
                 process,
@@ -154,8 +162,14 @@ pub(crate) fn observe(process: HANDLE, pid: u32) -> Result<Value> {
         "maps":maps,"modules":modules,"complete_maps":complete,
         "complete_modules":complete && images.len() <= 64,"query_win32_error":query_error,
         "protections":{
+            // SAFETY: p points at the PROCESS_MITIGATION_DEP_POLICY the call above filled; its
+            // Anonymous union members are POD u32 flags, so reading Flags is always a valid u32.
             "dep":policy::<PROCESS_MITIGATION_DEP_POLICY>(process, ProcessDEPPolicy, |p| json!({"flags":unsafe {p.Anonymous.Flags},"permanent":p.Permanent})),
+            // SAFETY: p points at the PROCESS_MITIGATION_ASLR_POLICY the call above filled; its
+            // Anonymous union members are POD u32 flags, so reading Flags is always a valid u32.
             "aslr":policy::<PROCESS_MITIGATION_ASLR_POLICY>(process, ProcessASLRPolicy, |p| json!({"flags":unsafe {p.Anonymous.Flags}})),
+            // SAFETY: p points at the PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY the call above
+            // filled; its Anonymous union members are POD u32 flags, so Flags is a valid u32.
             "cfg":policy::<PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY>(process, ProcessControlFlowGuardPolicy, |p| json!({"flags":unsafe {p.Anonymous.Flags}}))},
         "limits":["Sequential live observations, not an atomic or suspended snapshot.",
             "Only committed regions are listed. Guard flags qualify page permissions.",
@@ -194,6 +208,8 @@ mod tests {
     fn observes_real_committed_memory_and_policies_without_reading_files() -> Result<()> {
         let allocation = vec![0x61u8; 8192];
         let address = allocation.as_ptr() as u64;
+        // SAFETY: GetCurrentProcess returns this process's pseudo-handle, which is always valid
+        // and must not be closed; observe only passes it to query APIs and never closes it.
         let observed = observe(unsafe { GetCurrentProcess() }, std::process::id())?;
         assert_eq!(observed["pid"], std::process::id());
         assert!(observed["created_filetime"].as_u64().unwrap() > 0);

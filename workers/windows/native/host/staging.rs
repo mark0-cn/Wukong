@@ -31,6 +31,8 @@ fn source_file(path: &Path) -> Result<fs::File> {
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)?;
     let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: `file` was opened above and is borrowed for this call, so its handle stays open,
+    // and `information` is a zeroed `BY_HANDLE_FILE_INFORMATION` out-param on this stack frame.
     crate::isolation::security::check(unsafe {
         GetFileInformationByHandle(file.as_raw_handle(), &mut information)
     })?;

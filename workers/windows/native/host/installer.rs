@@ -92,10 +92,14 @@ impl Plan {
 }
 pub fn elevated() -> Result<bool> {
     let mut token = null_mut();
+    // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no closing, and `token` is a
+    // null-initialized out-param; `check` proves success before `Handle` takes ownership.
     security::check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
     let token = security::Handle(token);
     let mut elevation = TOKEN_ELEVATION::default();
     let mut returned = 0;
+    // SAFETY: `token.0` is a live `Handle`, `elevation` is a live `TOKEN_ELEVATION` on this
+    // frame, and the call's declared length is exactly `size_of::<TOKEN_ELEVATION>()`.
     security::check(unsafe {
         GetTokenInformation(
             token.0,
@@ -176,6 +180,8 @@ fn fixed_command(
 struct Service(SC_HANDLE);
 impl Drop for Service {
     fn drop(&mut self) {
+        // SAFETY: `Service` owns the `SC_HANDLE` from `OpenSCManagerW`/`CreateServiceW`, and
+        // `Drop` runs once, so every non-null handle is closed exactly once.
         unsafe {
             CloseServiceHandle(self.0);
         }
@@ -186,6 +192,8 @@ fn register_service(
     deployment: &Deployment,
     manifest: &VerifiedManifest,
 ) -> Result<()> {
+    // SAFETY: Both arguments are null, which selects the local machine's default SCM database;
+    // the returned handle is `ensure!`d non-null before any service call uses it.
     let manager = Service(unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CREATE_SERVICE) });
     ensure!(
         !manager.0.is_null(),
@@ -206,6 +214,8 @@ fn register_service(
         deployment.installation_id.clone().into(),
         security::local_file_path(&root.join("metadata/deployment.json"))?.into_os_string(),
     ])?;
+    // SAFETY: `manager.0` is a non-null SCM handle from the `ensure!` above, and `name`/`command`
+    // are NUL-terminated wide buffers in locals that outlive this call; options are null.
     let handle = unsafe {
         CreateServiceW(
             manager.0,
@@ -231,11 +241,15 @@ fn register_service(
     let service = Service(handle);
     service_access::apply(service.0, &deployment.account(Role::Management)?.sid)
         .context("set owned service status-only relay access")?;
+    // SAFETY: `service.0` is the non-null service handle proven by the `ensure!` above, and a zero
+    // argument count with a null vector is the documented no-arguments form.
     security::check(unsafe { StartServiceW(service.0, 0, null()) })?;
     let deadline = Instant::now() + Duration::from_secs(240);
     loop {
         let mut status = SERVICE_STATUS_PROCESS::default();
         let mut returned = 0;
+        // SAFETY: `service.0` is a live handle created with SERVICE_QUERY_STATUS, and `status` is a
+        // live `SERVICE_STATUS_PROCESS` whose declared buffer size is exactly its own type.
         security::check(unsafe {
             QueryServiceStatusEx(
                 service.0,

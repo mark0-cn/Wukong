@@ -65,6 +65,8 @@ struct Observation {
 fn replace_own_dacl(handle: HANDLE, access: u32) -> Result<()> {
     let descriptor = SecurityDescriptor::from_sddl(&format!("D:P(A;;0x{access:08x};;;WD)"))?;
     let (mut present, mut defaulted, mut acl) = (0, 0, null_mut());
+    // SAFETY: descriptor is the live descriptor from from_sddl; present and defaulted are
+    // writable out parameters, and acl points into that descriptor only while it lives.
     security::check(unsafe {
         GetSecurityDescriptorDacl(
             descriptor.attributes().lpSecurityDescriptor,
@@ -77,6 +79,8 @@ fn replace_own_dacl(handle: HANDLE, access: u32) -> Result<()> {
         present != 0 && !acl.is_null(),
         "missing fixed self-DACL probe"
     );
+    // SAFETY: handle is the live self process/thread handle given by the caller; acl points
+    // into the live descriptor above, and only that object's DACL is replaced.
     let status = unsafe {
         SetSecurityInfo(
             handle,
@@ -106,6 +110,8 @@ fn replace_own_dacl(handle: HANDLE, access: u32) -> Result<()> {
 
 pub(super) fn check(process: u32, thread: u32) -> Result<Value> {
     let mut token = null_mut();
+    // SAFETY: GetCurrentProcess is this process's non-closable pseudo-handle; token is a
+    // writable out pointer, and the returned token handle is owned by Handle.
     security::check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
     let token = Handle(token);
     token_policy::verify_appcontainer_policy(token.0)?;
@@ -113,11 +119,17 @@ pub(super) fn check(process: u32, thread: u32) -> Result<Value> {
     ensure!(
         process > 0
             && thread > 0
+            // SAFETY: GetCurrentProcessId has no arguments or memory preconditions.
             && process != unsafe { GetCurrentProcessId() }
+            // SAFETY: GetCurrentThreadId has no arguments or memory preconditions.
             && thread != unsafe { GetCurrentThreadId() },
         "invalid fixed System host identity"
     );
+    // SAFETY: GetCurrentProcess returns this process's valid pseudo-handle; replace_own_dacl
+    // neither closes it nor retains it past the call.
     replace_own_dacl(unsafe { GetCurrentProcess() }, PROCESS_ALL_ACCESS)?;
+    // SAFETY: GetCurrentThread returns this thread's valid pseudo-handle; replace_own_dacl
+    // neither closes it nor retains it past the call.
     replace_own_dacl(unsafe { GetCurrentThread() }, THREAD_ALL_ACCESS)?;
     let mut result = Observation {
         source: "sdk_self_dacl_and_open_rights".into(),
@@ -130,6 +142,8 @@ pub(super) fn check(process: u32, thread: u32) -> Result<Value> {
     };
     for (rights, process_object) in [(PROCESS_RIGHTS, true), (THREAD_RIGHTS, false)] {
         for &(name, mask) in rights {
+            // SAFETY: process/thread differ from self, proven nonzero by the ensure! above;
+            // OpenProcess/OpenThread only return a handle; a null denial is checked.
             let handle = unsafe {
                 if process_object {
                     OpenProcess(mask, 0, process)

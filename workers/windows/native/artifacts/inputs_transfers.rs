@@ -174,6 +174,8 @@ impl Inputs {
                     self.check_blob(&partial, &declaration)?;
                     let from = security::wide(partial.as_os_str())?;
                     let to = security::wide(blob.as_os_str())?;
+                    // SAFETY: `from`/`to` are NUL-terminated wide buffers from `security::wide`,
+                    // which rejects embedded NULs, and both locals outlive this call.
                     security::check(unsafe {
                         MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH)
                     })?;
@@ -220,6 +222,8 @@ impl Inputs {
                     .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
                     .open(&path)?;
                 let mut info = BY_HANDLE_FILE_INFORMATION::default();
+                // SAFETY: `file` is the `File` just opened here, so its handle is live for the
+                // borrow, and `info` is a zeroed `BY_HANDLE_FILE_INFORMATION` out-param.
                 security::check(unsafe {
                     GetFileInformationByHandle(file.as_raw_handle(), &mut info)
                 })?;

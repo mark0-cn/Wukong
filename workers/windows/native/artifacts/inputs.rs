@@ -221,6 +221,8 @@ impl Inputs {
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)?;
         let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: `file` was just opened here, so its handle is live for the borrow, and
+        // `information` is a zeroed `BY_HANDLE_FILE_INFORMATION` out-param on this frame.
         security::check(unsafe {
             GetFileInformationByHandle(file.as_raw_handle(), &mut information)
         })?;

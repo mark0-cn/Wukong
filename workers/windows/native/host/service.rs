@@ -50,6 +50,8 @@ fn report(state: u32, error: u32) -> Result<()> {
         dwWaitHint: if pending { 120000 } else { 0 },
         ..Default::default()
     };
+    // SAFETY: status is a fully initialized stack SERVICE_STATUS; STATUS holds the handle
+    // from RegisterServiceCtrlHandlerExW, or 0, which only makes SetServiceStatus fail.
     security::check(unsafe {
         SetServiceStatus(
             STATUS.load(Ordering::Acquire) as SERVICE_STATUS_HANDLE,
@@ -78,6 +80,8 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
     else {
         return;
     };
+    // SAFETY: name is the NUL-terminated wide service name alive for the call; control has
+    // the required extern "system" callback signature, and a null context is allowed.
     let handle = unsafe { RegisterServiceCtrlHandlerExW(name.as_ptr(), Some(control), null()) };
     if handle.is_null() {
         return;
@@ -117,6 +121,8 @@ pub fn dispatch(installation: &str, configuration: &Path) -> Result<()> {
             lpServiceProc: None,
         },
     ];
+    // SAFETY: table is a live, null-terminated SERVICE_TABLE_ENTRYW array whose name pointer
+    // refers to live storage; the dispatcher only reads it until service_main returns.
     security::check(unsafe { StartServiceCtrlDispatcherW(table.as_ptr()) })
 }
 

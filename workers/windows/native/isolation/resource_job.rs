@@ -54,10 +54,16 @@ impl Job {
         security::require_system()?;
         let name = security::wide(OsStr::new(&name(installation, resource)?))?;
         let policy = descriptor()?;
+        // SAFETY: SetLastError only writes this thread's last-error slot; clearing it here makes
+        // the GetLastError after CreateJobObjectW report only that call, not stale state.
         unsafe {
             windows_sys::Win32::Foundation::SetLastError(0);
         }
+        // SAFETY: `policy.attributes()` is a temporary SECURITY_ATTRIBUTES that lives through
+        // this call and points into `policy`, which outlives it; `name` is NUL-terminated.
         let handle = unsafe { CreateJobObjectW(&policy.attributes(), name.as_ptr()) };
+        // SAFETY: GetLastError only reads this thread's last-error value, set by the
+        // CreateJobObjectW call immediately above; no pointer or handle is involved.
         let error = unsafe { GetLastError() };
         let handle = Handle(handle);
         ensure!(
@@ -75,8 +81,12 @@ impl Job {
 fn open(installation: &str, resource: &str, access: u32) -> Result<Option<Handle>> {
     security::require_system()?;
     let name = security::wide(OsStr::new(&name(installation, resource)?))?;
+    // SAFETY: `name` is a NUL-terminated wide string alive for the call, bInheritHandle is 0,
+    // and the returned handle is null-checked before `Handle` takes ownership of it.
     let raw = unsafe { OpenJobObjectW(access | READ_CONTROL, 0, name.as_ptr()) };
     if raw.is_null() {
+        // SAFETY: this reads the last-error value left by the failed OpenJobObjectW call above;
+        // it touches no pointer or handle and is compared before any handle is wrapped.
         let error = unsafe { GetLastError() };
         ensure!(
             error == ERROR_FILE_NOT_FOUND,
@@ -93,6 +103,8 @@ pub(crate) fn require_membership(installation: &str, resource: &str) -> Result<(
     let job = open(installation, resource, JOB_OBJECT_QUERY)?
         .context("native resource guardian Job is absent")?;
     let mut contained = 0;
+    // SAFETY: GetCurrentProcess() is an always-valid pseudo-handle for this process, `job` owns a
+    // non-null JOB_OBJECT_QUERY handle, and `contained` is a valid BOOL out-parameter.
     security::check(unsafe { IsProcessInJob(GetCurrentProcess(), job.0, &mut contained) })?;
     ensure!(
         contained != 0,
@@ -138,6 +150,8 @@ mod tests {
             serde_json::from_slice(&crate::artifacts::io::read_bytes(Path::new(&config), 4096)?)?;
         let wide = security::wide(OsStr::new(&name(&config.installation, &config.resource)?))?;
         let job =
+            // SAFETY: `wide` is a NUL-terminated wide name alive for the call; a null result is
+            // rejected by the ensure! below before `Handle` is used to close it.
             Handle(unsafe { OpenJobObjectW(JOB_OBJECT_QUERY | READ_CONTROL, 0, wide.as_ptr()) });
         ensure!(
             !job.0.is_null(),

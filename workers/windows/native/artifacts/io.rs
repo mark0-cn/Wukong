@@ -59,6 +59,8 @@ pub(crate) fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {
         drop(output);
         let from = security::wide(temporary.as_os_str())?;
         let to = security::wide(path.as_os_str())?;
+        // SAFETY: `security::wide` appended the terminating NUL to both buffers and rejected
+        // embedded NULs, and both locals outlive this call; no arguments are borrowed.
         security::check(unsafe {
             MoveFileExW(
                 from.as_ptr(),

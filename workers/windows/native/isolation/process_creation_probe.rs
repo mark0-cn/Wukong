@@ -102,6 +102,8 @@ fn control(
         without_privileges(persona.token())?
     } else {
         let mut token = null_mut();
+        // SAFETY: both process arguments are the current-process pseudo-handle, so the source
+        // token is valid here; the new handle is a valid out-param and `Handle` closes it.
         security::check(unsafe {
             DuplicateHandle(
                 GetCurrentProcess(),

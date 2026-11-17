@@ -96,6 +96,8 @@ fn contents(directory: &Dir, policy: &AclPolicy, budget: &mut Budget, depth: usi
             }
         };
         let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: `held` is a live `File` borrowed for this call, so its handle stays open, and
+        // `info` is a fully initialized `BY_HANDLE_FILE_INFORMATION` on this stack frame.
         security::check(unsafe { GetFileInformationByHandle(held.as_raw_handle(), &mut info) })?;
         let is_directory = info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
         if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
@@ -178,12 +180,16 @@ mod tests {
         struct View(MEMORY_MAPPED_VIEW_ADDRESS);
         impl Drop for View {
             fn drop(&mut self) {
+                // SAFETY: `View` owns the base address returned by the single `MapViewOfFile`
+                // below and `Drop` runs once, so a non-null view is unmapped once.
                 unsafe { UnmapViewOfFile(self.0) };
             }
         }
         // Map a copy of this trusted test executable as an image, without
         // executing it. Windows refuses deleting a live image section with 5.
         let file = fs::File::open(path)?;
+        // SAFETY: `file` is an open `File` borrowed here, and null name/size arguments request an
+        // anonymous image section sized from it; the result is `ensure!`d non-null below.
         let section = security::Handle(unsafe {
             CreateFileMappingW(
                 file.as_raw_handle(),
@@ -195,6 +201,8 @@ mod tests {
             )
         });
         ensure!(!section.0.is_null(), "cannot create trusted image mapping");
+        // SAFETY: `section.0` was `ensure!`d non-null above and stays open in its `Handle` for the
+        // whole call; FILE_MAP_READ matches PAGE_READONLY and 0 maps the entire section.
         let view = View(unsafe { MapViewOfFile(section.0, FILE_MAP_READ, 0, 0, 0) });
         ensure!(!view.0.Value.is_null(), "cannot map trusted image view");
         ready.send(())?;

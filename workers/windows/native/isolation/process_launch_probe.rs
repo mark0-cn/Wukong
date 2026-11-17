@@ -22,6 +22,8 @@ use windows_sys::Win32::{
 fn modules() -> Result<Vec<PathBuf>> {
     let mut handles: [HMODULE; 256] = [null_mut(); 256];
     let mut needed = 0;
+    // SAFETY: `handles` is a live HMODULE-aligned array of 256 entries whose byte size is the
+    // declared capacity; `needed` is a valid u32 out-parameter and is bounds-checked below.
     security::check(unsafe {
         K32EnumProcessModules(
             GetCurrentProcess(),
@@ -39,6 +41,8 @@ fn modules() -> Result<Vec<PathBuf>> {
         .iter()
         .map(|handle| {
             let mut path = vec![0u16; 32768];
+            // SAFETY: `handle` came from the module list just returned for this process, and
+            // `path` is a live 32768-u16 buffer whose length is passed as the capacity.
             let count = unsafe {
                 K32GetModuleFileNameExW(
                     GetCurrentProcess(),
@@ -63,6 +67,8 @@ fn access(path: &Path, directory: bool) -> Result<Option<i32>> {
     } else {
         FILE_READ_DATA | FILE_EXECUTE | FILE_READ_ATTRIBUTES | SYNCHRONIZE
     };
+    // SAFETY: `name` is a NUL-terminated wide path alive for the call, security attributes and
+    // template are null, and INVALID_HANDLE_VALUE is checked before `Handle` owns the handle.
     let handle = unsafe {
         CreateFileW(
             name.as_ptr(),
@@ -131,6 +137,8 @@ pub(super) fn inspect(
         "unbounded self-test startup access list"
     );
     let mut token = null_mut();
+    // SAFETY: `process` owns a live process handle for this borrow, so `.process.0` is valid; the
+    // token is a valid out-parameter, and `Handle` closes the result once the call succeeds.
     security::check(unsafe {
         OpenProcessToken(process.process.0, TOKEN_QUERY | TOKEN_DUPLICATE, &mut token)
     })?;

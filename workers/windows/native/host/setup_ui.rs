@@ -22,6 +22,8 @@ use wukong_worker_package::PublicKey;
 fn message(text: &str, flags: u32) -> Result<i32> {
     let title = security::wide(OsStr::new("Wukong offline Windows worker"))?;
     let body = security::wide(OsStr::new(text))?;
+    // SAFETY: body and title are NUL-terminated wide strings from security::wide and stay
+    // alive through the call; a null owner window is allowed for MessageBoxW.
     Ok(unsafe { MessageBoxW(std::ptr::null_mut(), body.as_ptr(), title.as_ptr(), flags) })
 }
 pub fn review() -> Result<()> {
@@ -69,8 +71,12 @@ pub fn review() -> Result<()> {
         nShow: SW_SHOWNORMAL,
         ..Default::default()
     };
+    // SAFETY: information is a fully initialized SHELLEXECUTEINFOW with cbSize set, and
+    // verb, file and parameters reference live locals for the duration of the call.
     security::check(unsafe { ShellExecuteExW(&mut information) })?;
     if !information.hProcess.is_null() {
+        // SAFETY: ShellExecuteExW succeeded with SEE_MASK_NOCLOSEPROCESS and hProcess is
+        // non-null here, so this closes the one process handle the API transferred to us.
         unsafe {
             CloseHandle(information.hProcess);
         }

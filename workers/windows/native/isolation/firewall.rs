@@ -9,6 +9,8 @@ use windows::{
 struct Com;
 impl Com {
     fn open() -> Result<Self> {
+        // SAFETY: CoInitializeEx only sets this thread's COM apartment and dereferences no
+        // caller pointer; the HRESULT is checked, and this guard's Drop calls CoUninitialize.
         unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).ok() }
             .context("initialize Windows firewall COM")?;
         Ok(Self)
@@ -16,6 +18,8 @@ impl Com {
 }
 impl Drop for Com {
     fn drop(&mut self) {
+        // SAFETY: this guard exists only after a successful CoInitializeEx on this thread, so the
+        // matching CoUninitialize runs on the same thread that initialized the apartment.
         unsafe {
             CoUninitialize();
         }
@@ -33,6 +37,8 @@ fn application_path(path: &Path) -> Result<String> {
 fn configure(installation: &str, sshd: &Path, port: u16, peer: IpAddr) -> Result<INetFwRule> {
     let name = BSTR::from(crate::rpc::pipe_transport::service_name(installation)?);
     let application = BSTR::from(application_path(sshd)?);
+    // SAFETY: the caller holds a live `Com` guard, so this thread's apartment is initialized;
+    // `NetFwRule` is a fixed in-proc CLSID and punkOuter is None, so no aggregation is used.
     unsafe {
         let rule: INetFwRule = CoCreateInstance(&NetFwRule, None, CLSCTX_INPROC_SERVER)
             .context("create unregistered SSH firewall rule")?;
@@ -63,6 +69,8 @@ fn configure(installation: &str, sshd: &Path, port: u16, peer: IpAddr) -> Result
 
 pub fn add(installation: &str, sshd: &Path, port: u16, peer: IpAddr) -> Result<()> {
     let _com = Com::open()?;
+    // SAFETY: `_com` keeps COM initialized on this thread for the whole function; `NetFwPolicy2`
+    // is a fixed registered in-proc CLSID and punkOuter is None, so no aggregation occurs.
     unsafe {
         let policy: INetFwPolicy2 = CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)
             .context("open Windows firewall policy")?;
@@ -113,6 +121,8 @@ mod tests {
         let installation = hex::encode(crate::host::accounts::random_bytes::<16>()?);
         let executable = std::env::current_exe()?;
         let rule = configure(&installation, &executable, 61248, "192.0.2.7".parse()?)?;
+        // SAFETY: `_com` initialized COM on this test thread and `rule` is an in-memory
+        // INetFwRule created by `configure` above, so these property reads are local COM calls.
         unsafe {
             assert_eq!(rule.Protocol()?, 6);
             assert_eq!(rule.LocalPorts()?.to_string(), "61248");
@@ -141,6 +151,8 @@ mod tests {
             61248,
             "192.0.2.7".parse()?,
         )?;
+        // SAFETY: same initialized-COM test context; `alternate` is a live in-memory INetFwRule
+        // held by this scope, so reading ApplicationName() marshals nothing across a process.
         assert_eq!(unsafe { alternate.ApplicationName()? }.to_string(), normal);
         assert_eq!(
             Path::new(&normal).canonicalize()?,

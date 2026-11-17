@@ -13,6 +13,8 @@ use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramData, SHGetKnownFolderPath};
 
 pub(crate) fn program_data() -> Result<PathBuf> {
     let mut path = null_mut();
+    // SAFETY: &FOLDERID_ProgramData is a const known-folder GUID valid for the call, path
+    // is a stack out-param, and the ensure! below requires success and a non-null string.
     let result = unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, 0, null_mut(), &mut path) };
     ensure!(
         result >= 0 && !path.is_null(),
@@ -22,6 +24,8 @@ pub(crate) fn program_data() -> Result<PathBuf> {
     struct Memory(*mut u16);
     impl Drop for Memory {
         fn drop(&mut self) {
+            // SAFETY: Memory owns the CoTaskMemAlloc'd path SHGetKnownFolderPath returned, which
+            // the ensure! above proved non-null; this Drop frees it once with CoTaskMemFree.
             unsafe {
                 windows::Win32::System::Com::CoTaskMemFree(Some(self.0.cast()));
             }
@@ -29,10 +33,14 @@ pub(crate) fn program_data() -> Result<PathBuf> {
     }
     let path = Memory(path);
     let mut length = 0;
+    // SAFETY: path.0 is non-null (ensure! above) and NUL-terminated per SHGetKnownFolderPath,
+    // so each u16 up to the terminator is in bounds; the 32768 bound stops an unterminated scan.
     while length < 32768 && unsafe { *path.0.add(length) } != 0 {
         length += 1;
     }
     ensure!(length < 32768, "invalid Windows ProgramData path");
+    // SAFETY: length counts u16 code units up to the NUL terminator found by the loop above,
+    // so the slice covers initialized elements of the live Memory buffer; from_utf16 copies it.
     let result = PathBuf::from(String::from_utf16(unsafe {
         std::slice::from_raw_parts(path.0, length)
     })?);
@@ -51,11 +59,15 @@ const ROLE_PATHS: [&str; 3] = ["APPDATA", "LOCALAPPDATA", "USERPROFILE"];
 pub(crate) fn role_paths(token: &security::Handle) -> Result<BTreeMap<String, OsString>> {
     use std::os::windows::ffi::OsStringExt;
     let mut block = null_mut();
+    // SAFETY: token.0 is the live token handle owned by the caller, block is a stack
+    // out-param, and check gates the Block wrapper that later frees the returned block.
     security::check(unsafe { CreateEnvironmentBlock(&mut block, token.0, 0) })
         .context("resolve owned role environment")?;
     struct Block(*mut std::ffi::c_void);
     impl Drop for Block {
         fn drop(&mut self) {
+            // SAFETY: Block owns the block CreateEnvironmentBlock wrote to the out-param, and this
+            // Drop passes it to DestroyEnvironmentBlock once; the ensure! below gates traversal.
             unsafe {
                 DestroyEnvironmentBlock(self.0);
             }
@@ -66,12 +78,16 @@ pub(crate) fn role_paths(token: &security::Handle) -> Result<BTreeMap<String, Os
     let mut values = BTreeMap::new();
     let mut start = 0;
     for end in 0..65536 {
+        // SAFETY: block.0 is non-null (ensure! above) and CreateEnvironmentBlock returns a
+        // double-NUL-terminated block, so the scan stops at the final empty entry; 65536 bounds it.
         if unsafe { *block.0.cast::<u16>().add(end) } != 0 {
             continue;
         }
         if end == start {
             return validate_role_paths(values);
         }
+        // SAFETY: start and end are u16 indices of consecutive NULs found in the live block, so
+        // the slice covers only initialized code units of one entry; from_wide copies them out.
         let entry = OsString::from_wide(unsafe {
             std::slice::from_raw_parts(block.0.cast::<u16>().add(start), end - start)
         });
@@ -221,6 +237,8 @@ mod tests {
             System::Threading::{GetCurrentProcess, OpenProcessToken},
         };
         let mut token = null_mut();
+        // SAFETY: GetCurrentProcess is a valid pseudo-handle, token is a stack out-param, and
+        // security::check rejects failure before Handle(token) takes ownership.
         security::check(unsafe {
             OpenProcessToken(
                 GetCurrentProcess(),

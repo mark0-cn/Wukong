@@ -33,6 +33,8 @@ pub(crate) struct Handle(pub(crate) HANDLE);
 impl Drop for Handle {
     fn drop(&mut self) {
         if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
+            // SAFETY: the guard skips the null/INVALID_HANDLE_VALUE cases seen when a caller
+            // wraps a failed API result; any non-null `Handle` owns its handle and closes it once.
             unsafe {
                 CloseHandle(self.0);
             }
@@ -49,6 +51,8 @@ impl SecurityDescriptor {
             Authorization::GetSecurityInfo, LABEL_SECURITY_INFORMATION,
         };
         let mut descriptor = null_mut();
+        // SAFETY: `handle` is a live caller-supplied object handle and the other outputs are
+        // null; `Local` owns and frees the LocalAlloc'd descriptor stored in `descriptor`.
         let status = unsafe {
             GetSecurityInfo(
                 handle,
@@ -76,6 +80,8 @@ impl SecurityDescriptor {
         );
         let encoded = wide(std::ffi::OsStr::new(sddl))?;
         let mut descriptor = null_mut();
+        // SAFETY: `encoded` is NUL-terminated by `wide`, and the SDK's LocalAlloc'd result is
+        // stored in `descriptor`, then adopted by `Local` in the returned value.
         check(unsafe {
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
                 encoded.as_ptr(),
@@ -101,6 +107,8 @@ pub(crate) fn validate_account_sid(sid: &str) -> Result<()> {
     );
     let encoded = wide(std::ffi::OsStr::new(sid))?;
     let mut decoded = null_mut();
+    // SAFETY: `encoded` is NUL-terminated by `wide`; the SID the SDK allocates is stored in
+    // `decoded` and freed by `Local` on the next line.
     check(unsafe { ConvertStringSidToSidW(encoded.as_ptr(), &mut decoded) })?;
     let _memory = Local(decoded);
     ensure!(sid_text(decoded)? == sid, "noncanonical native account SID");
@@ -124,6 +132,8 @@ pub(crate) fn validate_logon_sid(sid: &str) -> Result<()> {
 fn validate_sid_text(sid: &str) -> Result<()> {
     let encoded = wide(std::ffi::OsStr::new(sid))?;
     let mut decoded = null_mut();
+    // SAFETY: callers validated the SID text, `encoded` is NUL-terminated by `wide`, and the
+    // allocated SID in `decoded` is freed by `Local` on the next line.
     check(unsafe { ConvertStringSidToSidW(encoded.as_ptr(), &mut decoded) })?;
     let _memory = Local(decoded);
     ensure!(sid_text(decoded)? == sid, "noncanonical resource SID");
@@ -135,6 +145,8 @@ pub(crate) fn token_logon_sid(token: &Handle) -> Result<String> {
         System::SystemServices::SE_GROUP_LOGON_ID,
     };
     let mut size = 0;
+    // SAFETY: null/zero size probe writes only `size`; `token.0` is the caller's live token
+    // handle and the returned size is bounded by the `ensure!` below.
     unsafe {
         GetTokenInformation(token.0, TokenGroups, null_mut(), 0, &mut size);
     }
@@ -143,6 +155,8 @@ pub(crate) fn token_logon_sid(token: &Handle) -> Result<String> {
         "invalid resource logon groups"
     );
     let mut data = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    // SAFETY: `data` holds `size` writable `usize`-aligned bytes and `size` was bounded
+    // above; `token.0` stays live for this call.
     check(unsafe {
         GetTokenInformation(
             token.0,
@@ -152,6 +166,8 @@ pub(crate) fn token_logon_sid(token: &Handle) -> Result<String> {
             &mut size,
         )
     })?;
+    // SAFETY: the successful query wrote a TOKEN_GROUPS header into the `usize`-aligned
+    // buffer, whose size was ensured to exceed that header above.
     let groups = unsafe { &*data.as_ptr().cast::<TOKEN_GROUPS>() };
     ensure!(
         std::mem::offset_of!(TOKEN_GROUPS, Groups)
@@ -162,7 +178,11 @@ pub(crate) fn token_logon_sid(token: &Handle) -> Result<String> {
     );
     let mut found = None;
     for group in
-        unsafe { std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize) }
+        // SAFETY: the length check above proved `GroupCount` entries fit in the `size` bytes,
+        // and `Groups` points at the first SID_AND_ATTRIBUTES inside that buffer.
+        unsafe {
+            std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize)
+        }
     {
         if group.Attributes & SE_GROUP_LOGON_ID as u32 == SE_GROUP_LOGON_ID as u32 {
             ensure!(found.is_none(), "ambiguous resource logon identity");
@@ -212,16 +232,22 @@ pub fn no_links(path: &Path) -> Result<()> {
 }
 pub fn current_user_sid() -> Result<String> {
     let mut token = null_mut();
+    // SAFETY: `GetCurrentProcess` lends a pseudo-handle; `token` receives a real owned
+    // handle on success and `Handle` below closes it after `token_user_sid` returns.
     check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
     token_user_sid(&Handle(token))
 }
 pub(crate) fn token_user_sid(token: &Handle) -> Result<String> {
     let mut size = 0;
+    // SAFETY: null/zero size probe writes only `size`, which the `ensure!` below bounds; the
+    // `token` handle is owned by the caller for the duration of this call.
     unsafe {
         GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut size);
     }
     ensure!(size > 0 && size < 64 * 1024, "invalid native token size");
     let mut buffer = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    // SAFETY: `buffer` is `usize`-aligned and holds the bounded `size` bytes the probe
+    // requested, so the TOKEN_USER write stays inside it; `token` is live for the call.
     check(unsafe {
         GetTokenInformation(
             token.0,
@@ -231,6 +257,8 @@ pub(crate) fn token_user_sid(token: &Handle) -> Result<String> {
             &mut size,
         )
     })?;
+    // SAFETY: the successful `TokenUser` query initialized the TOKEN_USER header inside
+    // `buffer`, whose `User.Sid` points into it and outlives the `sid_text` call.
     sid_text(unsafe { (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid })
 }
 pub fn require_system() -> Result<()> {
@@ -245,6 +273,8 @@ pub(crate) fn require_plain_account_token(token: &Handle) -> Result<()> {
     let user = token_user_sid(token)?;
     validate_account_sid(&user)?;
     let mut size = 0;
+    // SAFETY: null/zero size probe; `token` is the caller's live token handle and only
+    // `size` is written before the `ensure!` below bounds it.
     unsafe {
         GetTokenInformation(token.0, TokenGroups, null_mut(), 0, &mut size);
     }
@@ -253,6 +283,8 @@ pub(crate) fn require_plain_account_token(token: &Handle) -> Result<()> {
         "invalid worker account group list"
     );
     let mut buffer = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    // SAFETY: `buffer` is `usize`-aligned with the bounded `size` bytes the probe requested,
+    // so the TOKEN_GROUPS write stays inside it; `token` is live for the call.
     check(unsafe {
         GetTokenInformation(
             token.0,
@@ -262,6 +294,8 @@ pub(crate) fn require_plain_account_token(token: &Handle) -> Result<()> {
             &mut size,
         )
     })?;
+    // SAFETY: the query above wrote a TOKEN_GROUPS header into `buffer`, whose `size` bytes
+    // were ensured to exceed that header before this borrow.
     let groups = unsafe { &*buffer.as_ptr().cast::<TOKEN_GROUPS>() };
     ensure!(
         std::mem::offset_of!(TOKEN_GROUPS, Groups)
@@ -270,7 +304,11 @@ pub(crate) fn require_plain_account_token(token: &Handle) -> Result<()> {
         "truncated worker account groups"
     );
     for group in
-        unsafe { std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize) }
+        // SAFETY: the length check above proved `GroupCount` SID_AND_ATTRIBUTES entries fit in
+        // the `size` bytes, and `Groups` points at the first of them.
+        unsafe {
+            std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize)
+        }
     {
         let sid = sid_text(group.Sid)?;
         ensure!(
@@ -299,10 +337,16 @@ impl AclPolicy {
         };
         let descriptor = self.descriptor(false)?;
         let (mut owner, mut dacl, mut present, mut defaulted) = (null_mut(), null_mut(), 0, 0);
+        // SAFETY: `descriptor.0` is the `Local`-owned descriptor from `from_sddl` above, and
+        // both out-parameters are valid `&mut`s for the duration of the call.
         check(unsafe { GetSecurityDescriptorOwner(descriptor.0, &mut owner, &mut defaulted) })?;
+        // SAFETY: same `Local`-owned descriptor as above; the returned `dacl` pointer stays
+        // valid because `descriptor` is alive until after `SetSecurityInfo` below.
         check(unsafe {
             GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted)
         })?;
+        // SAFETY: `file.as_raw_handle()` is a live handle the caller's `File` keeps open, and
+        // `owner`/`dacl` point into the `Local` descriptor that outlives this call.
         let status = unsafe {
             SetSecurityInfo(
                 file.as_raw_handle(),
@@ -343,6 +387,8 @@ impl AclPolicy {
         drop(file);
         let from = wide(temporary.as_os_str())?;
         let to = wide(path.as_os_str())?;
+        // SAFETY: `from` and `to` are NUL-terminated `wide` buffers that live until the call
+        // returns; `MoveFileExW` only reads them and reports failure through `check`.
         check(unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) })?;
         self.verify(path, false)
     }
@@ -439,6 +485,8 @@ impl AclPolicy {
             bInheritHandle: 0,
         };
         let encoded = wide(absolute_new_path(path)?.as_os_str())?;
+        // SAFETY: `encoded` is NUL-terminated by `wide`, and `attributes` references the
+        // `Local` descriptor that stays alive until `verify` has read back the DACL.
         check(unsafe { CreateDirectoryW(encoded.as_ptr(), &attributes) })?;
         self.verify(path, true)
     }
@@ -451,6 +499,8 @@ impl AclPolicy {
             bInheritHandle: 0,
         };
         let encoded = wide(absolute_new_path(path)?.as_os_str())?;
+        // SAFETY: `encoded` is NUL-terminated and `attributes` points at the live `Local`
+        // descriptor; on success `handle` is an owned `File` handle adopted below.
         let handle = unsafe {
             CreateFileW(
                 encoded.as_ptr(),
@@ -467,6 +517,8 @@ impl AclPolicy {
             "native secure file creation failed: {}",
             std::io::Error::last_os_error()
         );
+        // SAFETY: the `ensure!` above rejected `INVALID_HANDLE_VALUE`, so `handle` is a real
+        // CreateFileW handle; `File::from_raw_handle` takes sole ownership, closing it once.
         Ok(unsafe { fs::File::from_raw_handle(handle) })
     }
     /// Installer/service-private objects only, never target-writable trees.
@@ -474,6 +526,8 @@ impl AclPolicy {
         no_links(path)?;
         let descriptor = self.descriptor(directory)?;
         let encoded = wide(path.canonicalize()?.as_os_str())?;
+        // SAFETY: `encoded` is the NUL-terminated canonicalized path and `descriptor.0` is the
+        // `Local` descriptor, alive across the call; the API does not retain the pointer.
         check(unsafe {
             windows_sys::Win32::Security::SetFileSecurityW(
                 encoded.as_ptr(),
@@ -496,6 +550,8 @@ impl AclPolicy {
         let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
         let mut owner: PSID = null_mut();
         let mut acl: *mut ACL = null_mut();
+        // SAFETY: `encoded` is NUL-terminated, all non-requested out-parameters are null, and
+        // the allocated descriptor is adopted by `Local` right after the status check.
         let status = unsafe {
             GetNamedSecurityInfoW(
                 encoded.as_ptr(),
@@ -565,6 +621,8 @@ mod tests {
         // impersonation or machine policy are changed by this fixture.
         let encoded = wide(OsStr::new("S-1-5-32-545"))?;
         let mut users = null_mut();
+        // SAFETY: `encoded` is NUL-terminated by `wide`; the SID is stored in `users` and
+        // released by the `Local` guard on the next line.
         check(unsafe { ConvertStringSidToSidW(encoded.as_ptr(), &mut users) })?;
         let _users = Local(users);
         let restriction = SID_AND_ATTRIBUTES {
@@ -572,6 +630,8 @@ mod tests {
             Attributes: 0,
         };
         let mut original = null_mut();
+        // SAFETY: `GetCurrentProcess` is a pseudo-handle that is never closed; on success
+        // `original` is an owned token handle moved into `Handle` immediately below.
         check(unsafe {
             OpenProcessToken(
                 GetCurrentProcess(),
@@ -581,6 +641,8 @@ mod tests {
         })?;
         let original = Handle(original);
         let mut restricted = null_mut();
+        // SAFETY: `original.0` is the live token owned by the `Handle` above; `restriction`
+        // points at the `Local`-owned `users` SID that outlives the call.
         check(unsafe {
             CreateRestrictedToken(
                 original.0,
@@ -596,6 +658,8 @@ mod tests {
         })?;
         let restricted = Handle(restricted);
         let mut impersonation = null_mut();
+        // SAFETY: `restricted.0` is the live token owned by the `Handle` above, and the new
+        // impersonation token is moved into `Handle` on the next line.
         check(unsafe { DuplicateToken(restricted.0, SecurityImpersonation, &mut impersonation) })?;
         let impersonation = Handle(impersonation);
         let mapping = GENERIC_MAPPING {
@@ -616,6 +680,8 @@ mod tests {
                 let mut privileges = [0u64; 1024];
                 let mut bytes = std::mem::size_of_val(&privileges) as u32;
                 let (mut granted, mut allowed) = (0, 0);
+                // SAFETY: `descriptor` owns the live self-relative SD and `impersonation`
+                // owns the token; `privileges` is 1024 u64 entries sized by `bytes`.
                 check(unsafe {
                     AccessCheck(
                         descriptor.0.0,
