@@ -59,8 +59,15 @@ impl Workbench {
         // A debug companion cannot start before its service's PID namespace exists.
         running.sort_by_key(|name| namespace_dependents.contains(name));
         // Stop before snapshotting; even an idle bridge can mutate journals.
+        let mut stopped: Vec<String> = Vec::new();
         for name in running.iter().rev() {
-            self.docker.run(&["stop", name])?;
+            if let Err(error) = self.docker.run(&["stop", name]) {
+                for stopped_name in &stopped {
+                    let _ = self.docker.run(&["start", stopped_name]);
+                }
+                return Err(error);
+            }
+            stopped.push((*name).to_owned());
         }
         let result = self.export_stopped(destination);
         let mut restart_errors = vec![];
