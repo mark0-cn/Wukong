@@ -301,6 +301,16 @@ pub(crate) fn drive(
             // and business tool IO while this run is paused.
             app.update();
             app.update();
+            if let Some(error) = app.world_mut().resource_mut::<Fatal>().0.take() {
+                return Err(error);
+            }
+            if let Some(failure) = app
+                .world()
+                .resource::<rig_ecs::session_log::SessionLog>()
+                .failure()
+            {
+                anyhow::bail!("Rig journal write failed: {failure}");
+            }
             // Drop cancels in-flight futures. Leave Rig's saved turn open so
             // CarryOn can restore the exact pending effect on a later drive.
             runner.emit(
