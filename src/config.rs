@@ -355,6 +355,15 @@ impl AppConfig {
                 && self.budget.max_wall_seconds > 0,
             "run budgets must be positive"
         );
+        // Shares multiply the run token budget; a non-finite or out-of-range value
+        // would silently saturate `Budget::role_token_cap` (inf -> u64::MAX,
+        // NaN -> the 10k floor) instead of failing the configuration.
+        for (role, share) in &self.budget.role_token_shares {
+            ensure!(
+                share.is_finite() && *share > 0.0 && *share <= 1.0,
+                "budget.role_token_shares.{role:?} must be within (0, 1]"
+            );
+        }
         ensure!(
             self.tools.max_output_bytes >= 1024
                 && self.tools.max_evidence_read_bytes > 0
