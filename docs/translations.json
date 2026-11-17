@@ -18,8 +18,8 @@
       "zh-CN": "f3d70c02fab4d30f2b1ea9141eaf5ce0a02f053413629cf70d84e0af3ab7c9e4"
     },
     "docs/design/architecture.md": {
-      "en": "a4d39b49f32e9375d2c80f9dd0095bf5a847bcf376c4270b69a1e18d96c71b83",
-      "zh-CN": "49cdf25f123f1f775162f9b7349891b9d57f9d1dce4e0ec29d6f400970507088"
+      "en": "2d23cfa9ebb56fd79f817456e2122b18d6c9ba014133e1cd2a1c082ce9320ca1",
+      "zh-CN": "3547e59140379d69c762ad8b2d56a8f30981a6fb39b3216b5af2db827599b1c1"
     },
     "docs/design/cross-platform-environments.md": {
       "en": "05d2b32a6adfbdccfe7d50c11a995dac78af519797af5eeb443f43a5a1bd525e",
@@ -38,12 +38,12 @@
       "zh-CN": "be05ebe96a7f402f2d80df9f47292d1a216e6ae8ec39a4ffec52877a94323700"
     },
     "docs/development/desktop-updates.md": {
-      "en": "439da589c889954afb9a36f9dc6c11ad9d16564e538ec80dc9a1871bdaa091a9",
-      "zh-CN": "8eb152cb42c9b38efd81cef1fa37abe378ce643f15ef77a4ce33817d2c313703"
+      "en": "0a3e7a2ded047a906b00d0f8d4950b5f3977de2753c0782f978483e6b8a1abd9",
+      "zh-CN": "2d4d5ecb50cc648f4b9f0bf27d6f6664cfc2e557179c81e21cb611d5e23ed09f"
     },
     "docs/development/documentation.md": {
-      "en": "1c5a885e9fb60e19bc18e1b0d22367c2fc46d3d9a033e93670bb74873371c2a9",
-      "zh-CN": "2049a12c1f96e354f7f064a5fbbf79822af5e20f868da9da31308e9b4d0c90b6"
+      "en": "3cd9dbff5f96ff2dd52e709e3d8329a4c518caebb88ecd55982da1bcb7d1aa95",
+      "zh-CN": "3da10d659cf28810d091921e18f8a5a99ed988c623a60a673c6cc859bb6e64aa"
     },
     "docs/development/getting-started.md": {
       "en": "3235cf6c98808c6061eb434f0e46b130271476f3288ba39c7595ab22e3b631f8",
@@ -58,8 +58,8 @@
       "zh-CN": "fec3b5ffa7799de2a5c11f04e345a83f9e28f009d69f74804eb6b210a505e98e"
     },
     "docs/development/maintenance.md": {
-      "en": "abc04d6290d5dad9b9cde90eb4c71af2185636c026b6f40517306df5175dccf7",
-      "zh-CN": "6082b7528023d0f663591ae012278184db9fa7a5c298e151cf5443b379675e49"
+      "en": "39892670985cdad01954dbe8e8375fa6d284fd0ce85ba59344fa64e95e9d3d53",
+      "zh-CN": "4aa6d90511d24aa68571190528faa7458667f77a167b710a75dea09144bfeb66"
     },
     "docs/development/releases.md": {
       "en": "dac0dd35da874f75c80bda7df2863abf61d3e378e86fc0e30e67b6aa4a4d8f44",
@@ -110,12 +110,12 @@
       "zh-CN": "23406501c7614bdcd665a1a5d95b420d5b0054c574820a174bd197bcfca2ad88"
     },
     "docs/reference/skill-coverage.md": {
-      "en": "ffdcd9ef7c681550cdc36e100b25274b73aa761be50ac02b2b1bdfa01a083f73",
-      "zh-CN": "1edce24e862bbc1c082016383088c2703f2548180d9886c731594b0f71ab6e18"
+      "en": "dbe7107e31c32be695703bf9888fa7dce390fbd71687fdc5191489741078c683",
+      "zh-CN": "3f367c932c249f99948d96351774e84c8d904f1b5262976aaa11c9486e9e4e43"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "7676f45560d780feab7fab7983c40ab2c8380add311d47a3ceb53dc1a0d0c111",
-      "zh-CN": "3d21d8a96ae6c1f5d0c4b2855257a4eef6a4f00b13bb4b4bbac9c4888269175f"
+      "en": "b567961887be040c2cff769c3b0ad5ae9a8de6322d4fcf8255425cb1c514503c",
+      "zh-CN": "b2a62ceb80106b4707d4159f9e09031ebf9d33d31505761a84861ba60ce4fbf8"
     },
     "docs/user/languages.md": {
       "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",

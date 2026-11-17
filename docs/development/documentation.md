@@ -30,13 +30,13 @@ The review record stores normalized UTF-8 text hashes for each pair. A changed f
 
 ## Generated catalogs
 
-Tool and Skill catalogs are generated from registered metadata. English is reproducible by default, independent of OS locale; explicit `--locale zh-CN` selects Chinese Markdown. `--json` remains identical across languages. Neither command opens workspace configuration/state or connects to a model.
+Tool and Skill catalogs are generated from registered metadata by the developer-only example binary. English is reproducible by default, independent of OS locale; explicit `--locale zh-CN` selects Chinese Markdown. `--json` remains identical across languages. The example reads no workspace configuration/state and connects to no model.
 
 ```sh
-cargo run -- tool-catalog > docs/reference/tool-catalog.md
-cargo run -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
-cargo run -- skill-catalog > docs/reference/skill-coverage.md
-cargo run -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
+cargo run --example export_catalogs -- tool-catalog > docs/reference/tool-catalog.md
+cargo run --example export_catalogs -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
+cargo run --example export_catalogs -- skill-catalog > docs/reference/skill-coverage.md
+cargo run --example export_catalogs -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
 cargo test --test tool_catalog
 ```
 

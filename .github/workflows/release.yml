@@ -310,7 +310,7 @@ jobs:
           rm dist/installer-windows.json dist/installer-linux.json
           python -m scripts.release.release_notes --output release-content.md
           python -m scripts.release.desktop_manifest --directory dist --validation validation --content release-content.json
-          client/wukong verify-update --directory dist
+          python -m scripts.release.verify_update --directory dist
           cp validation/validation-summary.json validation/doctor.json dist/
           python -m scripts.release.cli checksums dist
           python -m scripts.release.release_report

@@ -43,13 +43,6 @@ pub enum Command {
         #[command(subcommand)]
         command: crate::interfaces::cli::cleanup::Command,
     },
-    /// Restore the last desktop installation without opening the webview.
-    RecoverUpdate,
-    /// Validate the signed desktop release and all installer files before publication.
-    VerifyUpdate {
-        #[arg(long)]
-        directory: PathBuf,
-    },
     /// Manage the portable tool environment on the Docker host.
     Env {
         #[command(subcommand)]
@@ -70,10 +63,6 @@ pub enum Command {
         #[arg(default_value = "wukong.toml")]
         path: PathBuf,
     },
-    /// Print the built-in tool catalog without opening state or connecting to a model.
-    ToolCatalog,
-    /// Print built-in skill provenance and mechanism coverage without opening state.
-    SkillCatalog,
     /// Inspect model settings and installed analysis capabilities without calling a model.
     Doctor,
     /// Parse a binary without running it or calling a model.
@@ -153,70 +142,13 @@ pub enum Command {
 
 pub async fn run(cli: Cli) -> Result<()> {
     let locale = cli.resolved_locale();
-    // Catalog files are reproducible English by default, independent of the OS.
-    let catalog_locale = if cli.locale == "zh-CN" {
-        crate::i18n::Locale::ZhCn
-    } else {
-        crate::i18n::Locale::EnUs
-    };
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
     if let Command::Cleanup { command } = command {
         return crate::interfaces::cli::cleanup::run(command, cli.json);
     }
-    if matches!(command, Command::RecoverUpdate) {
-        return crate::application::maintenance::updates::recovery::recover();
-    }
-    if let Command::VerifyUpdate { directory } = &command {
-        let manifest = crate::application::maintenance::updates::manifest::Manifest::parse(
-            &std::fs::read(directory.join("latest.json"))?,
-            &std::fs::read_to_string(directory.join("latest.json.sig"))?,
-        )?;
-        for artifact in manifest.platforms.values() {
-            let filename = artifact
-                .url
-                .rsplit('/')
-                .next()
-                .unwrap_or(artifact.url.as_str());
-            crate::application::maintenance::updates::manifest::verify_file(
-                &directory.join(filename),
-                artifact,
-            )?;
-        }
-        println!(
-            "{}",
-            crate::i18n::Message::new("cli-release-verified")
-                .arg("version", manifest.version)
-                .render(locale)
-        );
-        return Ok(());
-    }
     if let Command::Init { path } = &command {
         AppConfig::write_example(path)?;
         println!("{}", json!({"config":path}));
-        return Ok(());
-    }
-    if matches!(command, Command::SkillCatalog) {
-        if cli.json {
-            print_json(&crate::application::agents::skill_catalog(None)?)?;
-        } else {
-            print!(
-                "{}",
-                crate::application::agents::skill_coverage_markdown_for_locale(catalog_locale)?
-            );
-        }
-        return Ok(());
-    }
-    if matches!(command, Command::ToolCatalog) {
-        if cli.json {
-            print_json(&serde_json::to_value(
-                crate::application::tools::builtin_tool_definitions(),
-            )?)?;
-        } else {
-            print!(
-                "{}",
-                crate::application::tools::builtin_catalog_markdown_for_locale(catalog_locale)?
-            );
-        }
         return Ok(());
     }
     // Explicit/portable configurations remain supported. New desktop installs
@@ -267,13 +199,9 @@ pub async fn run(cli: Cli) -> Result<()> {
     let store = Store::open(&config.state_dir)?;
     let service = AssessmentService::new(config.clone(), store.clone());
     match command {
-        Command::VerifyUpdate { .. }
-        | Command::Cleanup { .. }
-        | Command::RecoverUpdate
+        Command::Cleanup { .. }
         | Command::Init { .. }
         | Command::Inspect { .. }
-        | Command::ToolCatalog
-        | Command::SkillCatalog
         | Command::Env { .. }
         | Command::Challenge { .. }
         | Command::Lab { .. } => unreachable!(),

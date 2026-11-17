@@ -2,7 +2,7 @@
 
 English · [简体中文](tool-catalog.zh-CN.md)
 
-Generated from the registry by `wukong tool-catalog`. Do not edit manually.
+Generated from the registry by `cargo run --example export_catalogs -- tool-catalog`. Do not edit manually.
 
 Rig provides the native `task` tool; typed messaging and waits use the business tools. MCP tools require the external group selection. This table lists business tools, role boundaries and backend requirements. Actual model selections are also filtered by environment preflight; execution checks target identity, evidence, session ownership and current backend capabilities. Translated descriptions are documentation only and do not change the model protocol.
 

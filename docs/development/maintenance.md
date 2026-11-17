@@ -52,16 +52,16 @@ Use neutral charcoal, gold for primary/selected actions, blue for running, green
 
 ## Tool documentation
 
-Definitions, parameter schemas, roles, model visibility and display message IDs share one registry; bilingual text uses Fluent. `Visibility::Internal` marks internal entries rather than name blacklists; internal transactions retain permission checks. Desktop aliases exist only for native Rig tools/legacy events. New builtins require catalog message IDs and both translated titles. Generate Markdown from the registry:
+Definitions, parameter schemas, roles, model visibility and display message IDs share one registry; bilingual text uses Fluent. `Visibility::Internal` marks internal entries rather than name blacklists; internal transactions retain permission checks. Desktop aliases exist only for native Rig tools/legacy events. New builtins require catalog message IDs and both translated titles. Generate Markdown from the registry with the developer-only example:
 
 ```sh
-cargo run -- tool-catalog > docs/reference/tool-catalog.md
-cargo run -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
-cargo run -- --json tool-catalog
+cargo run --example export_catalogs -- tool-catalog > docs/reference/tool-catalog.md
+cargo run --example export_catalogs -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
+cargo run --example export_catalogs -- --json tool-catalog
 cargo test --test tool_catalog
 ```
 
-Export needs no model credentials and opens neither configuration nor state. Tests compare generated output with committed documentation to catch stale catalogs.
+Export needs no model credentials and reads neither configuration nor state. Tests compare generated output with committed documentation to catch stale catalogs.
 
 <a id="skill-覆盖清单"></a>
 
@@ -70,9 +70,9 @@ Export needs no model credentials and opens neither configuration nor state. Tes
 `prompts/coverage.json` associates builtin methods with tools, sources and mechanism fixtures using `SkillManifest.related_tools`, `sources`, `fixtures`. Regenerate [coverage](../reference/skill-coverage.md):
 
 ```sh
-cargo run -- skill-catalog > docs/reference/skill-coverage.md
-cargo run -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
-cargo run -- --json skill-catalog
+cargo run --example export_catalogs -- skill-catalog > docs/reference/skill-coverage.md
+cargo run --example export_catalogs -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
+cargo run --example export_catalogs -- --json skill-catalog
 cargo test --test tool_catalog
 ```
 

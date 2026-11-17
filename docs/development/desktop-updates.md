@@ -40,7 +40,7 @@ Tasks/evidence use `state_dir`; UI switches reopen the workspace through configu
 
 ## Publication and validation
 
-`build-installer.yml` signs NSIS/AppImage using already-validated desktop Release binaries on both platforms. Linux desktop/build packaging uses Ubuntu 22.04; the acceptance CLI is separate. Native install/uninstall runs only on isolated runners; Linux starts real WebView through Xvfb. `desktop_manifest` combines image acceptance/installers; `wukong verify-update --directory dist` validates the whole set. Stable pointers advance only after official Release publication; manual rehearsals do not change the update channel.
+`build-installer.yml` signs NSIS/AppImage using already-validated desktop Release binaries on both platforms. Linux desktop/build packaging uses Ubuntu 22.04; the acceptance CLI is separate. Native install/uninstall runs only on isolated runners; Linux starts real WebView through Xvfb. `desktop_manifest` combines image acceptance/installers; `python -m scripts.release.verify_update --directory dist` validates the signed manifest and every installer. Stable pointers advance only after official Release publication; manual rehearsals do not change the update channel.
 
 Local checks cover real signature tamper rejection, maintenance exclusion, manifest origins, frontend controls/layout. Report Linux Docker acceptance separately from native package smoke checks; neither is complete Windows Docker Desktop cross-version acceptance.
 

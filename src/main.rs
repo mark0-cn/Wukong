@@ -1,6 +1,6 @@
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    let mut cli = wukong::interface::Cli::parse_localized();
+    let cli = wukong::interface::Cli::parse_localized();
     let locale = cli.resolved_locale();
     let recovery = std::env::var_os("APPIMAGE")
         .map(std::path::PathBuf::from)
@@ -10,17 +10,16 @@ async fn main() -> std::process::ExitCode {
                 .map(|name| name.to_string_lossy().to_string())
         })
         .is_some_and(|name| name == "Wukong-Recovery");
-    if recovery && cli.command.is_none() {
-        if !rfd::MessageDialog::new()
+    let recover = recovery && cli.command.is_none();
+    if recover
+        && !rfd::MessageDialog::new()
             .set_title(locale.text("cli-recovery-title"))
             .set_description(locale.text("cli-recovery-description"))
             .set_buttons(rfd::MessageButtons::OkCancel)
             .show()
             .eq(&rfd::MessageDialogResult::Ok)
-        {
-            return std::process::ExitCode::SUCCESS;
-        }
-        cli.command = Some(wukong::interface::Command::RecoverUpdate);
+    {
+        return std::process::ExitCode::SUCCESS;
     }
     let desktop = matches!(
         cli.command,
@@ -59,7 +58,12 @@ async fn main() -> std::process::ExitCode {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
         .init();
-    match wukong::interface::run(cli).await {
+    let result = if recover {
+        wukong::updates::recovery::recover()
+    } else {
+        wukong::interface::run(cli).await
+    };
+    match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
             let message = wukong::i18n::Message::from_error(error).render(locale);

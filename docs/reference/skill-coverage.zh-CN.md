@@ -2,7 +2,7 @@
 
 [English](skill-coverage.md) · 简体中文
 
-由 `wukong --locale zh-CN skill-catalog` 生成。关联是维护元数据，不授予权限或证明运行时可用。夹具只表示机制/对照覆盖，不代表原始 WP 复现或 Agent 准确率。未登记表示没有关联记录，不表示不支持该 Skill。
+由 `cargo run --example export_catalogs -- --locale zh-CN skill-catalog` 生成。关联是维护元数据，不授予权限或证明运行时可用。夹具只表示机制/对照覆盖，不代表原始 WP 复现或 Agent 准确率。未登记表示没有关联记录，不表示不支持该 Skill。
 
 | Skill | 相关工具 | 来源 | 机制夹具 |
 |---|---|---|---|

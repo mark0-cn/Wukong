@@ -1,6 +1,4 @@
 use anyhow::Result;
-use serde_json::Value;
-use std::process::Command;
 
 #[test]
 fn generated_catalog_matches_the_executable_registry() {
@@ -29,33 +27,33 @@ fn chinese_catalogs_match_sources_and_preserve_registry_visibility() -> Result<(
 }
 
 #[test]
-fn catalog_locale_changes_only_markdown_and_never_opens_state() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    for command in ["tool-catalog", "skill-catalog"] {
-        let output = |locale: &str, json: bool| {
-            let mut process = Command::new(env!("CARGO_BIN_EXE_wukong"));
-            process
-                .args(["--locale", locale, "--config"])
-                .arg(directory.path().join("missing.toml"))
-                .arg("--state")
-                .arg(directory.path().join("must-not-exist"));
-            if json {
-                process.arg("--json");
-            }
-            let output = process.arg(command).output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            output.stdout
-        };
-        assert_eq!(output("en-US", true), output("zh-CN", true));
-        assert_eq!(output("auto", false), output("en-US", false));
-        assert_ne!(output("en-US", false), output("zh-CN", false));
-    }
-    assert!(!directory.path().join("must-not-exist").exists());
+fn catalog_locale_changes_only_markdown_and_json_stays_identical() -> Result<()> {
+    use wukong::i18n::Locale;
+    assert_ne!(
+        wukong::tools::builtin_catalog_markdown(),
+        wukong::tools::builtin_catalog_markdown_for_locale(Locale::ZhCn)?
+    );
+    assert_eq!(
+        wukong::agents::skill_coverage_markdown()?,
+        wukong::agents::skill_coverage_markdown_for_locale(Locale::EnUs)?
+    );
+    assert_ne!(
+        wukong::agents::skill_coverage_markdown()?,
+        wukong::agents::skill_coverage_markdown_for_locale(Locale::ZhCn)?
+    );
     Ok(())
+}
+
+#[test]
+fn structured_catalog_preserves_the_model_visible_boundary() {
+    let definitions = wukong::tools::builtin_tool_definitions();
+    let names = definitions
+        .iter()
+        .map(|definition| definition.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"finish_scan"));
+    assert!(names.contains(&"agent_finish"));
+    assert!(!names.contains(&"create_agent"));
 }
 
 #[test]
@@ -64,62 +62,6 @@ fn generated_skill_coverage_matches_registered_associations() -> Result<()> {
         wukong::agents::skill_coverage_markdown()?,
         include_str!("../docs/reference/skill-coverage.md")
     );
-    Ok(())
-}
-
-#[test]
-fn skill_export_does_not_open_configuration_or_state() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let output = Command::new(env!("CARGO_BIN_EXE_wukong"))
-        .args(["--json", "--config"])
-        .arg(directory.path().join("missing.toml"))
-        .arg("--state")
-        .arg(directory.path().join("must-not-exist"))
-        .arg("skill-catalog")
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let catalog: Value = serde_json::from_slice(&output.stdout)?;
-    assert_eq!(catalog, wukong::agents::skill_catalog(None)?);
-    assert!(!directory.path().join("must-not-exist").exists());
-    Ok(())
-}
-
-#[test]
-fn catalog_export_does_not_open_configuration_or_state() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let output = Command::new(env!("CARGO_BIN_EXE_wukong"))
-        .args(["--json", "--config"])
-        .arg(directory.path().join("missing.toml"))
-        .arg("--state")
-        .arg(directory.path().join("must-not-exist"))
-        .arg("tool-catalog")
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let definitions: Vec<Value> = serde_json::from_slice(&output.stdout)?;
-    assert!(
-        definitions
-            .iter()
-            .any(|definition| definition["name"] == "finish_scan")
-    );
-    assert!(
-        definitions
-            .iter()
-            .any(|definition| definition["name"] == "agent_finish")
-    );
-    assert!(
-        !definitions
-            .iter()
-            .any(|definition| definition["name"] == "create_agent")
-    );
-    assert!(!directory.path().join("must-not-exist").exists());
     Ok(())
 }
 

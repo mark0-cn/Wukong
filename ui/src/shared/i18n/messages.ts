@@ -27,7 +27,6 @@ export interface Messages {
   'cli-arg-config': undefined;
   'cli-arg-correlation-id': undefined;
   'cli-arg-destination': undefined;
-  'cli-arg-directory': undefined;
   'cli-arg-error': undefined;
   'cli-arg-events': undefined;
   'cli-arg-evidence-ids': undefined;
@@ -88,16 +87,12 @@ export interface Messages {
   'cli-command-message': undefined;
   'cli-command-pause': undefined;
   'cli-command-reconcile': undefined;
-  'cli-command-recover-update': undefined;
   'cli-command-report': undefined;
   'cli-command-resume': undefined;
   'cli-command-runs': undefined;
-  'cli-command-skill-catalog': undefined;
   'cli-command-status': undefined;
   'cli-command-stop': undefined;
-  'cli-command-tool-catalog': undefined;
   'cli-command-verify-bundle': undefined;
-  'cli-command-verify-update': undefined;
   'cli-command-wukong': undefined;
   'cli-commands': undefined;
   'cli-default-task': undefined;
@@ -105,7 +100,6 @@ export interface Messages {
   'cli-options': undefined;
   'cli-recovery-description': undefined;
   'cli-recovery-title': undefined;
-  'cli-release-verified': { version: string | number };
   'cli-startup-failed': undefined;
   'cli-usage': undefined;
   'connection-add-another': undefined;
