@@ -132,9 +132,9 @@ class DirectoryTests(unittest.TestCase):
         (self.directory / "latest.json").write_bytes(json.dumps(self.manifest).encode())
         with patch.object(verify_update, "verify_signature"):
             verify_update.verify_directory(self.directory)
-        (self.directory / self.manifest["platforms"]["linux-x86_64"]["url"].rsplit("/", 1)[1]).write_bytes(
-            b"tampered"
-        )
+        (
+            self.directory / self.manifest["platforms"]["linux-x86_64"]["url"].rsplit("/", 1)[1]
+        ).write_bytes(b"tampered")
         with patch.object(verify_update, "verify_signature"):
             with self.assertRaises(verify_update.VerificationError):
                 verify_update.verify_directory(self.directory)

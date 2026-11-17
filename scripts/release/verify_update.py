@@ -189,9 +189,7 @@ def verify_directory(directory, *, public_key_path=PUBLIC_KEY, openssl="openssl"
             raise VerificationError(f"missing release artifact {path.name}")
         if path.stat().st_size != artifact["size"] or sha256(path) != artifact["sha256"]:
             raise VerificationError(f"release artifact checksum mismatch: {path.name}")
-        verify_signature(
-            path.read_bytes(), artifact["signature"], key, openssl=openssl
-        )
+        verify_signature(path.read_bytes(), artifact["signature"], key, openssl=openssl)
     return manifest
 
 
