@@ -21,6 +21,14 @@ impl Coordinator {
         } else {
             bail!("target is neither a file nor a directory");
         };
+        ensure!(!task.trim().is_empty(), "task must not be empty");
+        if let Some(environment) = config["default_environment"].as_str() {
+            crate::adapters::environments::validate_id(environment)?;
+            ensure!(
+                config["environments"].get(environment).is_some(),
+                "environment is outside this assessment's registered environments: {environment}"
+            );
+        }
         let run_id = id("run");
         let root_id = id("agent");
         let timestamp = now();
