@@ -192,6 +192,13 @@ mod platform {
         GuestPaths::guestfish(windows)
     }
 
+    /// guestfish ends a scripted session at EOF and has no `close` command
+    /// (1.46.2 rejects it before running any later line), so the script stops
+    /// after the download.
+    fn guestfish_download_script(guest: &str, host: &str) -> String {
+        format!("download {guest} {host}\n")
+    }
+
     fn parent_windows(windows: &str) -> Result<String> {
         let index = windows
             .rfind('\\')
@@ -374,7 +381,7 @@ mod platform {
                 return Ok(inspection);
             }
             let hive = format!("{staging}/SYSTEM");
-            let script = format!("download {system_hive} {hive}\nclose\n");
+            let script = guestfish_download_script(&system_hive, &hive);
             let output = self.guestfish(disk_posix, false, &script).await?;
             require_success(&output, "download guest SYSTEM hive")?;
             let select = self
@@ -858,6 +865,51 @@ mod platform {
             .to_str()
             .context("offline media path must be UTF-8")?
             .to_owned())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// guestfish 1.46.2 (WSL Ubuntu) knows only the verbs below; `close` is
+        /// not one of them, so a script that emits it aborts before the
+        /// download runs. The session ends at EOF.
+        const SUPPORTED: &[&str] = &[
+            "cat", "checksum", "download", "is-dir", "is-file", "ls", "mkdir-p", "sync", "upload",
+        ];
+
+        #[test]
+        fn guestfish_download_script_uses_only_supported_commands() {
+            let script = guestfish_download_script(
+                "/Windows/System32/config/SYSTEM",
+                "/tmp/wukong-lab-provision-0123456789abcdef/SYSTEM",
+            );
+            assert_eq!(
+                script,
+                "download /Windows/System32/config/SYSTEM /tmp/wukong-lab-provision-0123456789abcdef/SYSTEM\n",
+                "the download script must stop at EOF instead of ending with a close command"
+            );
+            let commands: Vec<&str> = script
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect();
+            assert_eq!(
+                commands.len(),
+                1,
+                "download script has unexpected lines: {script:?}"
+            );
+            for command in commands {
+                let verb = command
+                    .split_whitespace()
+                    .next()
+                    .expect("guestfish script contains an empty command line");
+                assert!(
+                    SUPPORTED.contains(&verb),
+                    "unsupported guestfish command {verb:?} in {script:?}"
+                );
+            }
+        }
     }
 }
 
