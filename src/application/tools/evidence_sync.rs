@@ -105,11 +105,15 @@ impl EvidenceSyncService {
                     .store
                     .verified_evidence_path(&job.run_id, evidence)
                 {
+                    // An unreadable file or a failed metadata call can heal; a missing
+                    // record, a cross-run link or a digest mismatch cannot. Freezing the
+                    // job on every error made a transient fault block completion forever.
+                    let permanent = error.downcast_ref::<std::io::Error>().is_none();
                     return self
                         .failed(
                             &mut job,
-                            true,
-                            format!("stored evidence integrity failed: {error}"),
+                            permanent,
+                            format!("stored evidence check failed: {error}"),
                         )
                         .await;
                 }
