@@ -177,7 +177,13 @@ impl Coordinator {
                     // Role caps follow the run budget: a resumed run with an
                     // enlarged budget rescales every surviving worker's quota.
                     // The root is governed by the run budget alone.
-                    a.token_cap = Some(run.budget.role_token_cap(a.role));
+                    // A follow-up grants headroom on top of what the agent spent;
+                    // resetting to the bare role slice would re-exhaust it on the next
+                    // request after every controller restart.
+                    a.token_cap = Some(
+                        a.total_tokens
+                            .saturating_add(run.budget.role_token_cap(a.role)),
+                    );
                     changed = true;
                 }
                 if matches!(a.status, Status::Running | Status::BudgetPaused) {
