@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -211,6 +212,48 @@ class TemplateTests(unittest.TestCase):
         result = media.pack(template, "1.0.0", self.root / "dist")
         self.assertEqual(Path(result["archive"]).name, "wukong-windows-worker-media-1.0.0.zip")
         self.assertTrue(Path(result["archive"]).is_file())
+
+    def test_publication_retries_transient_windows_file_locks(self):
+        source = self.root / "source"
+        source.mkdir()
+        (source / "payload").write_bytes(b"fixture")
+        target = self.root / "target"
+        real_replace = os.replace
+        calls = []
+
+        def replace(first, second):
+            calls.append((first, second))
+            if len(calls) == 1:
+                raise OSError(32, "The process cannot access the file")
+            return real_replace(first, second)
+
+        with (
+            patch.object(media.os, "replace", side_effect=replace),
+            patch.object(media.time, "sleep") as sleep,
+        ):
+            media._publish_directory(source, target)
+        self.assertEqual(len(calls), 2)
+        sleep.assert_called_once()
+        self.assertTrue((target / "payload").is_file())
+        self.assertFalse(source.exists())
+
+    def test_publication_fails_without_overwriting_after_real_errors(self):
+        source = self.root / "source"
+        source.mkdir()
+        (source / "payload").write_bytes(b"fixture")
+        target = self.root / "target"
+        with (
+            patch.object(
+                media.os,
+                "replace",
+                side_effect=OSError(32, "The process cannot access the file"),
+            ),
+            patch.object(media.time, "sleep"),
+        ):
+            with self.assertRaisesRegex(ValueError, "could not be published"):
+                media._publish_directory(source, target)
+        self.assertTrue(source.exists())
+        self.assertFalse(target.exists())
 
 
 class FinalizeTests(unittest.TestCase):

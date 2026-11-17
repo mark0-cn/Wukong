@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 import zipfile
 
@@ -143,6 +144,21 @@ def _load_template(directory):
         binaries=template / "binaries",
         payload=payload,
     )
+
+
+def _publish_directory(source, target):
+    # Windows antivirus/indexer handles can briefly block renaming a freshly
+    # written media tree. Retry a bounded number of times, but never overwrite.
+    for attempt in range(10):
+        try:
+            os.replace(source, target)
+            return
+        except OSError as error:
+            if target.exists() or attempt == 9:
+                raise ValueError(
+                    "Offline media output could not be published: " + str(error)
+                ) from error
+            time.sleep(0.5 * (attempt + 1))
 
 
 def _copy_tree(source, destination):
@@ -388,10 +404,7 @@ def template(cache, native, output, requested_version=None):
         (workspace / "media-template.json").write_text(
             json.dumps(record, indent=2) + "\n", encoding="utf-8"
         )
-        try:
-            os.replace(workspace, output)
-        except OSError as error:
-            raise ValueError("Offline media template output appeared while staging") from error
+        _publish_directory(workspace, output)
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
     return dict(
@@ -552,10 +565,7 @@ def finalize(
             expect_recovery=previous_package is not None,
             private=_private_names(keys, ssh_private),
         )
-        try:
-            os.replace(media, output)
-        except OSError as error:
-            raise ValueError("Offline media output appeared while finalizing") from error
+        _publish_directory(media, output)
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
     return record
