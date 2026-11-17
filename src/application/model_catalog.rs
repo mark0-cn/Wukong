@@ -9,36 +9,34 @@ use std::{collections::HashMap, sync::Arc};
 pub(crate) struct ModelCatalog {
     config: ModelConfig,
     engine: Arc<ModelEngine>,
-    role_engines: HashMap<String, Arc<ModelEngine>>,
+    role_engines: HashMap<Role, Arc<ModelEngine>>,
 }
 impl ModelCatalog {
     pub(crate) fn new(mut config: ModelConfig) -> Result<Self> {
         config.validate()?;
         let engine = Arc::new(ModelEngine::new(config.clone())?);
         config = engine.resolved_config().clone();
-        let mut explicit: HashMap<String, Option<u64>> = HashMap::new();
-        if let Some(map) = &config.role_models {
-            for spec in map.values() {
-                explicit.insert(spec.model.clone(), spec.max_tokens);
-            }
-        }
-        if let Some(name) = &config.role_model {
-            explicit.entry(name.clone()).or_insert(None);
-        }
+        // Resolve per role, not per model name: two roles may name the same model
+        // with different token limits, and keying engines by name alone kept only
+        // one of the two limits — whichever the map happened to yield last.
+        // Roles that resolve to the same model and limit share one engine.
+        let mut shared: HashMap<(String, u64), Arc<ModelEngine>> = HashMap::new();
         let mut role_engines = HashMap::new();
-        for (name, spec_max) in explicit {
-            if role_engines.contains_key(&name) {
+        for role in [Role::Analyst, Role::Verifier] {
+            if config.role_model_name(role).is_none() {
                 continue;
             }
-            let mut role = config.clone();
-            role.role_model = None;
-            role.role_models = None;
-            role.model = name.clone();
-            let max_tokens = spec_max.or(config.role_max_tokens);
-            if let Some(max_tokens) = max_tokens {
-                role.max_tokens = max_tokens;
-            }
-            role_engines.insert(name, Arc::new(ModelEngine::new(role)?));
+            let resolved = config.role_config_for(role);
+            let key = (resolved.model.clone(), resolved.max_tokens);
+            let role_engine = match shared.get(&key) {
+                Some(existing) => Arc::clone(existing),
+                None => {
+                    let created = Arc::new(ModelEngine::new(resolved)?);
+                    shared.insert(key, Arc::clone(&created));
+                    created
+                }
+            };
+            role_engines.insert(role, role_engine);
         }
         Ok(Self {
             config,
@@ -58,11 +56,6 @@ impl ModelCatalog {
         &self.config
     }
     pub(crate) fn engine_for(&self, role: Role) -> &ModelEngine {
-        if let Some(name) = self.config.role_model_name(role)
-            && let Some(engine) = self.role_engines.get(name)
-        {
-            return engine;
-        }
-        &self.engine
+        self.role_engines.get(&role).unwrap_or(&self.engine)
     }
 }
