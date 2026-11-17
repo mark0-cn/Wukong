@@ -12,8 +12,19 @@ impl ExecutionService {
         let run: RunRecord = self.store.load(&agent.run_id)?;
         let mut members: Vec<(String, String)> = Vec::new();
         let mut loader = None;
+        // The 32 MiB limit is a transfer budget: account for it before uploading so a
+        // huge target is rejected instead of being sent and only then refused.
+        let mut transfer_bytes = 0u64;
+        let mut account = |size: u64| -> Result<()> {
+            transfer_bytes = transfer_bytes
+                .checked_add(size)
+                .context("launch size overflow")?;
+            ensure!(transfer_bytes <= 32 * 1024 * 1024, "launch exceeds 32 MiB");
+            Ok(())
+        };
         let entry = match input.source {
             args::LaunchSource::Primary => {
+                account(fs::metadata(&run.target_path)?.len())?;
                 let staged = self
                     .files
                     .stage_target(agent, &format!("{call}:primary"))
@@ -44,6 +55,7 @@ impl ExecutionService {
                     bundle.members.iter().map(|m| m.path.as_str()),
                 )?;
                 for member in bundle.members {
+                    account(fs::metadata(bundle.root.join(&member.path))?.len())?;
                     let relative = format!("bundles/{policy}/{}", member.path);
                     let raw = self
                         .files
