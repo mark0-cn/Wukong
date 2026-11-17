@@ -90,7 +90,21 @@ impl LabService {
                 use std::io::Write;
                 let mut file = tempfile::NamedTempFile::new_in(&directory)?;
                 file.write_all(&bytes)?;
-                file.persist_noclobber(&path).map_err(|e| e.error)?;
+                match file.persist_noclobber(&path) {
+                    Ok(_) => {}
+                    // Another operation published the same content-addressed evidence
+                    // first; identical bytes are equivalent, anything else is a bug.
+                    Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        ensure!(
+                            crate::application::windows_lab::package::read_bounded(
+                                &path,
+                                crate::application::windows_lab::package::MAX_ARTIFACT_BYTES
+                            )? == bytes,
+                            "existing evidence copy differs"
+                        );
+                    }
+                    Err(error) => return Err(error.error.into()),
+                }
             }
             dependencies.push(Dependency {
                 name: dependency.name,
