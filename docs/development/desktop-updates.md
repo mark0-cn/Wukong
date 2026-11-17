@@ -8,6 +8,14 @@ Windows uses per-user NSIS EXE; Linux uses AppImage. Tauri merges platform confi
 
 New desktop installations place configuration/data under Windows `%LOCALAPPDATA%/WukongData` or Linux `$XDG_DATA_HOME/Wukong` (default `~/.local/share/Wukong`). Explicit/existing portable configuration retains priority. Uninstall does not delete analysis data/Docker resources by default. Linux support follows the desktop acceptance matrix; AppImage does not promise every distribution.
 
+<a id="bundled-worker-setup"></a>
+
+## Bundled worker setup
+
+Windows installer builds also ship the offline worker setup executable. The Windows packaging step in `build-installer.yml` builds it with `python -m scripts.worker.build_native` in an x64 MSVC environment, stages the resulting `wukong-worker.exe` bytes as `target/worker-setup/WukongWorkerSetup.exe`, records the SHA256 and size in the step summary, and adds it to the NSIS payload as `worker-setup/WukongWorkerSetup.exe` through the `--config` resource overlay. The overlay keeps `tauri.windows.conf.json` free of a build-time-only file, so unsigned acceptance bundles that reuse the shared configuration still build without it. Verified against Tauri CLI 2.12.4: resource targets are install-directory relative, so the installed file is `<install directory>\worker-setup\WukongWorkerSetup.exe` (default current-user installation: `%LOCALAPPDATA%\Wukong\worker-setup\WukongWorkerSetup.exe`). NSIS deletes it on uninstall and replaces it on upgrade, so `packaging/windows/uninstall-hooks.nsh` needs no extra cleanup.
+
+The installer ships only this executable. The offline media template (staged payload, binaries and dependencies, about 458 MB as the released archive) is not bundled; it is a separate signed release asset whose downloaded contents `wukong lab provision` verifies and finalizes with controller keys. The installed setup file runs `verify-enrollment` without elevation and `install-reviewed` with elevation next to prepared media on a dedicated disposable VM; see [native Windows worker components](../../workers/windows/README.md).
+
 <a id="信任与状态"></a>
 
 ## Trust and state
