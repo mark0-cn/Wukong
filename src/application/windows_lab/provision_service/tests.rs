@@ -762,6 +762,7 @@ impl GuestNetwork for FakeNetwork {
 #[derive(Default)]
 struct EnvironmentState {
     registrations: Vec<(String, PathBuf)>,
+    connections: Vec<PublicConnection>,
     doctors: usize,
 }
 
@@ -778,22 +779,25 @@ impl FakeEnvironment {
     fn registrations(&self) -> usize {
         self.state.lock().unwrap().registrations.len()
     }
+    fn connections(&self) -> Vec<PublicConnection> {
+        self.state.lock().unwrap().connections.clone()
+    }
 }
 
 #[async_trait]
 impl ProvisionEnvironment for FakeEnvironment {
     fn register(
         &self,
-        _connection: &PublicConnection,
+        connection: &PublicConnection,
         _media: &MediaIdentity,
         guest_ip: &str,
         identity_file: &Path,
     ) -> Result<serde_json::Value> {
-        self.state
-            .lock()
-            .unwrap()
+        let mut state = self.state.lock().unwrap();
+        state
             .registrations
             .push((guest_ip.into(), identity_file.to_path_buf()));
+        state.connections.push(connection.clone());
         Ok(serde_json::json!({"environment_id": "windows-vm"}))
     }
 
@@ -2252,6 +2256,26 @@ async fn template_provisioning_registers_and_powers_off() {
         Some(true)
     );
     assert_eq!(environment.registrations(), 1);
+    // Regression gate: a successful install reports the installer-generated
+    // sshd host key, which differs from the controller SSH client identity from
+    // the enrollment. Registration must receive that receipt key; the previous
+    // equality check against the media client key failed here.
+    let connections = environment.connections();
+    assert_eq!(connections.len(), 1);
+    let connection = &connections[0];
+    assert_eq!(connection.host_key, deployment.fixture.connection.host_key);
+    assert_ne!(
+        connection.host_key,
+        deployment.fixture.identity.ssh_public_key
+    );
+    assert_eq!(
+        connection.host_fingerprint,
+        connection.host_key.fingerprint().unwrap()
+    );
+    assert_eq!(
+        connection.host_fingerprint,
+        deployment.fixture.connection.host_fingerprint
+    );
     assert!(!deployment.host.state.lock().unwrap().running);
     let calls = deployment.host.calls();
     assert!(calls.contains(&"revert baseline".to_string()));

@@ -6,6 +6,7 @@
 use crate::adapters::environments::EnvironmentConfig;
 use crate::adapters::environments::registration::{self, WindowsConnection};
 use crate::application::windows_lab::MediaIdentity;
+use crate::application::windows_lab::SshKey;
 use crate::application::windows_lab::provision::{
     PublicConnection, known_hosts_path, validate_connection,
 };
@@ -78,6 +79,28 @@ pub fn prepare_environment(
     );
     let environment: EnvironmentConfig = serde_json::from_value(value)?;
     environment.validate()?;
+    // The registration adapter must pin exactly the installer-generated worker
+    // host key from the verified receipt, into the generated controller pin
+    // file, while the identity file stays the controller-managed client key.
+    // Check the outcome here so a future registration change cannot silently
+    // pin the enrollment client identity instead.
+    let ssh = environment
+        .runtime
+        .managed_ssh()
+        .context("registered environment is not a managed SSH environment")?;
+    ensure!(
+        SshKey::from_public(&ssh.host_key)? == connection.host_key,
+        "registered host pin is not the verified receipt worker host key"
+    );
+    ensure!(
+        ssh.known_hosts_file
+            == known_hosts_path(state_dir, &connection.installation_id, &connection.host_key)?,
+        "registered known-hosts file is not derived from the verified receipt host key"
+    );
+    ensure!(
+        ssh.identity_file.as_path() == identity_file,
+        "registered identity file is not the controller SSH client key"
+    );
     Ok(EnvRegistration {
         environment_id,
         environment,

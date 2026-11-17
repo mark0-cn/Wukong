@@ -102,8 +102,8 @@ timeout_seconds = 600
 
 只接受一种来源模式：
 
-- `--media DIR` —— 已最终的介质目录。部署在接触客体磁盘前重新校验：schema-1 `media.json` 回执、setup/enrollment/manifest 的 SHA-256、签名登记记录与载荷清单、`disposable_vm` 执行边界及介质 SSH 身份。目录包含 `WukongWorkerSetup.exe`、`setup.json`、密封的 `payload/`、`enrollment/{enrollment.json,enrollment.sig}`、可选 `recovery/` 和 `media.json`；链接、reparse 点、未知条目、超过 20,000 个条目或超过 4 GiB 都会被拒绝。该目录是只读输入，不会被修改或删除。
-- `--template DIR --keys DIR --spec FILE` —— 发布介质模板、绝对控制器签名密钥目录和 finalize 规格（schema 1：32 位小写十六进制 `installation_id`、`environment_id`、`generation`、规范化 IPv4 `management_peer`、`ssh_port`、仅允许 `disposable_vm` 边界、可选 `ssh_public_key`）。部署会把 finalize 输出到控制器状态目录下的本次部署目录，在规格省略 `ssh_public_key` 时生成控制器 SSH 身份，然后重新校验生成的介质并与规格交叉核对。密钥目录必须位于模板和输出之外；只有公开介质字节会被发布，成功或调和后最终介质会被删除。
+- `--media DIR` —— 已最终的介质目录。部署在接触客体磁盘前重新校验：schema-1 `media.json` 回执、setup/enrollment/manifest 的 SHA-256、签名登记记录与载荷清单、`disposable_vm` 执行边界及登记记录授权的介质 SSH 客户端身份。目录包含 `WukongWorkerSetup.exe`、`setup.json`、密封的 `payload/`、`enrollment/{enrollment.json,enrollment.sig}`、可选 `recovery/` 和 `media.json`；链接、reparse 点、未知条目、超过 20,000 个条目或超过 4 GiB 都会被拒绝。该目录是只读输入，不会被修改或删除。
+- `--template DIR --keys DIR --spec FILE` —— 发布介质模板、绝对控制器签名密钥目录和 finalize 规格（schema 1：32 位小写十六进制 `installation_id`、`environment_id`、`generation`、规范化 IPv4 `management_peer`、`ssh_port`、仅允许 `disposable_vm` 边界、可选 SSH 客户端 `ssh_public_key`）。部署会把 finalize 输出到控制器状态目录下的本次部署目录，在规格省略 `ssh_public_key` 时生成控制器 SSH 身份，然后重新校验生成的介质并与规格交叉核对。密钥目录必须位于模板和输出之外；只有公开介质字节会被发布，成功或调和后最终介质会被删除。
 
 发布附件 `wukong-windows-worker-media-<version>.zip` 是不含登记记录的未签名模板；操作者用控制器密钥在本地完成 finalize。附件说明见[离线 Windows Worker 介质](../development/releases.zh-CN.md#offline-windows-worker-media)，介质布局、规格字段与独立 `finalize`/`pack`/`iso` 命令见[原生 Windows Worker 组件](../../workers/windows/README.zh-CN.md)。桌面安装包内置 `worker-setup/WukongWorkerSetup.exe`（[内置 Worker 安装程序](../development/desktop-updates.zh-CN.md#bundled-worker-setup)），但不包含 Worker 介质；部署始终需要最终介质目录或发布模板。
 
@@ -119,9 +119,9 @@ timeout_seconds = 600
 
 ### 环境登记与 doctor
 
-`--register` 必须搭配 `--template` 模式。只有当 finalize 规格省略 `ssh_public_key` 时，finalize 才会在控制器状态目录的本次部署目录下生成控制器管理的 SSH 密钥对（`--generate-ssh-key`）；介质模式部署无法提供该身份，携带 `ssh_public_key` 的规格也不能登记。私钥保留在控制器状态目录，配置只引用其路径；它绝不会进入介质、回执或客体。
+`--register` 必须搭配 `--template` 模式。只有当 finalize 规格省略 `ssh_public_key` 时，finalize 才会在控制器状态目录的本次部署目录下生成控制器管理的 SSH 密钥对（`--generate-ssh-key`）；介质模式部署无法提供该身份，携带 `ssh_public_key` 的规格也不能登记。该登记密钥是控制器的 SSH **客户端** 身份：其公钥被授权写入 Worker 的 `authorized_keys`，私钥保留在控制器状态目录，配置只引用其路径；它绝不会进入介质、回执或客体。Windows Worker 安装程序会另外在客体上生成 sshd **主机** 密钥；控制器事先没有该密钥，只能从客体回执得知它。
 
-客体启动后，命令等待 `vmrun` 报告的客体 IPv4，写入 `[environments.<environment_id>]` 作为 managed-SSH Windows 环境（installation id、`wkgm...` 用户、SSH 端口、控制器身份文件路径、由已校验回执主机键推导的公开 known-hosts 固定项），先写出旧配置的时间戳备份，不带 `--force` 时拒绝替换不同的环境，在未设置时写入 `default_environment`，并在替换时撤回旧的主机固定项。`--verify-environment` 要求环境已配置（由 `--register` 或手工写入），并在启动后运行 `EnvironmentRegistry::doctor`，按截止时间重试；它对两种介质模式都有效，也可与 `--register` 组合。成功后 VM 会回滚到新基线。登记或 doctor 失败会单独报告：命令会尝试回滚 VM，基线保留，部署记录显示 `environment_verified: false`。
+客体启动后，命令等待 `vmrun` 报告的客体 IPv4，写入 `[environments.<environment_id>]` 作为 managed-SSH Windows 环境（installation id、`wkgm...` 用户、SSH 端口、控制器客户端身份文件路径，以及包含来自已校验回执的安装程序生成 Worker 主机密钥的公开 known-hosts 固定项；该项以控制器本地别名 `wukong-worker-<installation_id>` 为键，managed SSH 通过 `HostKeyAlias` 使用该别名），先写出旧配置的时间戳备份，不带 `--force` 时拒绝替换不同的环境，在未设置时写入 `default_environment`，并在替换时撤回旧的主机固定项。已校验回执必须携带规范的 Ed25519 主机公钥，且其上报指纹必须等于重新计算的 SHA-256 指纹；主机密钥为空、缺失或格式错误，或指纹不匹配，都会使部署失败且绝不会被登记。该固定项把控制器 SSH 的服务端认证绑定到安装程序生成的主机密钥（针对管理对端与端口）；登记介质中的客户端密钥不再与它比较。`--verify-environment` 要求环境已配置（由 `--register` 或手工写入），并在启动后运行 `EnvironmentRegistry::doctor`，按截止时间重试；它对两种介质模式都有效，也可与 `--register` 组合。成功后 VM 会回滚到新基线。登记或 doctor 失败会单独报告：命令会尝试回滚 VM，基线保留，部署记录显示 `environment_verified: false`。
 
 ### 试运行、失败与调和
 
@@ -133,9 +133,9 @@ timeout_seconds = 600
 
 ### 安全不变量
 
-- 控制器私钥保留在控制器：`--keys` 只被本地 finalize 步骤消费；只有已签名登记记录、密封载荷和 setup 可执行文件进入介质/ISO；模板和输出会被检查以排除密钥目录和私钥文件名；`--register` 只保存控制器侧身份路径。
+- 控制器私钥保留在控制器：`--keys` 只被本地 finalize 步骤消费；只有已签名登记记录、密封载荷和 setup 可执行文件进入介质/ISO；模板和输出会被检查以排除密钥目录和私钥文件名；`--register` 只保存控制器侧客户端身份路径与由回执推导的 Worker 主机固定项。
 - 不使用客体管理员密码，也不经过管理通道：离线路径注入固定计划任务文件及其 TaskCache 注册，并从 CD 安装；已配置的 admin 通道和密码环境变量只用于管理安装脚本。部署不写入服务：`hivexsh` 只为固定 TaskCache 键编辑客体 SOFTWARE 配置单元，旧版一次性服务键由只读 SYSTEM 配置单元探测与显式客体清理命令处理。不触碰任何本地组策略文件；包装脚本在关机前注销固定任务，失败尝试留下的任务由 `clean-guest` 移除。
-- 输入在端到端范围内按哈希固定：介质回执、签名登记记录和载荷清单会在 finalize 前后、启动前宿主侧以及客体包装脚本内分别校验；回读的客体回执绑定部署 id、安装 id、环境 id、代际、清单和 Worker 主机键。`production_isolation_verified` 始终为 false，因为客体回执不能证明 hypervisor 隔离。
+- 输入在端到端范围内按哈希固定：介质回执、签名登记记录和载荷清单会在 finalize 前后、启动前宿主侧以及客体包装脚本内分别校验；回读的客体回执绑定部署 id、安装 id、环境 id、代际、清单、安装程序生成的 Worker sshd 主机密钥及其重新计算的指纹。登记密钥只用于授权控制器作为 SSH 客户端；回执主机密钥会被独立校验并固定用于服务端认证。`production_isolation_verified` 始终为 false，因为客体回执不能证明 hypervisor 隔离。
 - VMX 总会被恢复：原始字节在 CD 编辑前保存，成功时在创建基线快照前恢复，失败时由调和恢复；VM 开机时调和会拒绝执行。
 - 路径与命令固定：只寻址 `C:\ProgramData\WukongLab\provision\<32 位小写十六进制>` 路径、固定 `C:\Windows\System32\Tasks\WukongLabProvision` 任务文件、固定 `{A861DA08-B3C7-44C1-8BAC-579B48F54859}` TaskCache 身份与 `D:P(A;;FA;;;BA)(A;;FA;;;SY)` 安全描述符、固定 `launch.ps1` 启动器与固定任务计划程序动作、按操作的 `provision.ps1`/`provision-plan.json`，以及（仅供清理）退役的 `wukong-provision-<id>.cmd`/`scripts.ini.wukong-lab-<id>.bak`/`gpt.ini.wukong-lab-<id>.bak` 路径与旧版 `WukongLabProvision-<id>` 服务名；宿主工具接收固定 argv 且不经过 shell；介质、模板、密钥、ISO 与 VM 路径校验为绝对路径；工具与部署等待均有界；模型或实验输入永不进入该模块。
 - 重跑受保护：遗留的固定计划任务注册/任务文件/启动器、部署目录、退役启动策略条目/备份或旧版一次性服务键会阻止部署并给出客体清理命令，已存在的客体回执会阻止重装，只允许替换配置的基线，其他快照永不被删除。

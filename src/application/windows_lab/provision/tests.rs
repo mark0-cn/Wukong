@@ -785,6 +785,67 @@ fn guest_receipt_binds_media_identity_and_scheduled_task_cleanup() {
 }
 
 #[test]
+fn guest_receipt_pins_the_installer_generated_host_key() {
+    let media = fixture::media();
+    // The enrollment/media key is the controller's SSH client identity. The
+    // worker installer generates its own sshd host key, so a successful install
+    // can never report the media key; the previous equality check rejected every
+    // correct guest receipt.
+    assert_ne!(media.connection.host_key, media.identity.ssh_public_key);
+    assert_eq!(
+        media.connection.host_fingerprint,
+        media.connection.host_key.fingerprint().unwrap()
+    );
+    let provision_id = "d".repeat(32);
+    let expectation = ReceiptExpectation {
+        provision_id: provision_id.clone(),
+        media: media.identity.clone(),
+    };
+    let receipt = fixture::guest_receipt(&provision_id, &media.connection);
+    let connection = verify_guest_receipt(&receipt, &expectation).unwrap();
+    assert_eq!(connection.host_key, media.connection.host_key);
+
+    let reject = |mutate: &dyn Fn(&mut serde_json::Value)| {
+        let mut value: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+        mutate(&mut value["connection"]);
+        let error =
+            verify_guest_receipt(&serde_json::to_vec(&value).unwrap(), &expectation).unwrap_err();
+        format!("{error:#}")
+    };
+
+    let error = reject(&|connection| {
+        connection["host_fingerprint"] = serde_json::json!("SHA256:wrong");
+    });
+    assert!(error.contains("fingerprint"), "{error}");
+
+    let error = reject(&|connection| {
+        connection["host_fingerprint"] = serde_json::json!("");
+    });
+    assert!(error.contains("fingerprint"), "{error}");
+
+    let error = reject(&|connection| {
+        connection["host_key"]["key"] = serde_json::json!("");
+    });
+    assert!(error.contains("host key"), "{error}");
+
+    let error = reject(&|connection| {
+        connection["host_key"]["algorithm"] = serde_json::json!("ssh-rsa");
+    });
+    assert!(
+        error.contains("Ed25519") || error.contains("public key"),
+        "{error}"
+    );
+
+    let error = reject(&|connection| {
+        connection.as_object_mut().unwrap().remove("host_key");
+    });
+    assert!(
+        error.contains("host_key") || error.contains("connection"),
+        "{error}"
+    );
+}
+
+#[test]
 fn provision_plan_exposes_only_verified_identities() {
     let media = fixture::media();
     let provision_id = "b".repeat(32);

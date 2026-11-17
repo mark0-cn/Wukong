@@ -2088,25 +2088,26 @@ pub(crate) fn validate_connection(
         connection.ssh_user == media.ssh_user && connection.ssh_port == media.ssh_port,
         "public worker connection SSH identity differs from the offline media"
     );
+    // The enrollment/media key is the controller's SSH *client* identity. The
+    // Windows worker installer generates its own sshd *host* key inside the
+    // guest, so the receipt is the only source of the public host pin: it can
+    // never equal the media client identity. Validate the reported canonical
+    // key and recompute its fingerprint instead of comparing keys.
+    ensure!(
+        !connection.host_key.algorithm.trim().is_empty()
+            && !connection.host_key.key.trim().is_empty(),
+        "guest receipt is missing the installer-generated worker host key"
+    );
     connection.host_key.validate()?;
     ensure!(
-        connection.host_key == media_ssh_key(media)?,
-        "worker host key is not the media SSH identity"
-    );
-    ensure!(
         connection.host_fingerprint == connection.host_key.fingerprint()?,
-        "worker host fingerprint does not match the public host key"
+        "worker host fingerprint does not match the installer-generated host key"
     );
     ensure!(
         !connection.production_isolation_verified,
         "guest receipts cannot certify hypervisor isolation"
     );
     Ok(())
-}
-
-fn media_ssh_key(media: &MediaIdentity) -> Result<SshKey> {
-    media.ssh_public_key.validate()?;
-    Ok(media.ssh_public_key.clone())
 }
 
 /// Controller-owned public host pin derived from the installation identity.

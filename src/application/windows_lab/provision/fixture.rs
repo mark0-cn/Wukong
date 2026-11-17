@@ -22,16 +22,29 @@ pub struct MediaFixture {
     _directory: tempfile::TempDir,
 }
 
-fn ssh_key() -> SshPublicKey {
+fn ssh_key(fill: u8) -> SshPublicKey {
     // Canonical Ed25519 public key bytes; the private half is not needed here.
     let mut blob = vec![0, 0, 0, 11];
     blob.extend_from_slice(b"ssh-ed25519");
     blob.extend_from_slice(&[0, 0, 0, 32]);
-    blob.extend_from_slice(&[7_u8; 32]);
+    blob.extend_from_slice(&[fill; 32]);
     SshPublicKey {
         algorithm: "ssh-ed25519".into(),
         key: base64::engine::general_purpose::STANDARD.encode(blob),
     }
+}
+
+/// The enrollment key is the controller's SSH **client** identity: it is
+/// authorized in the worker's `authorized_keys` and never becomes a host key.
+fn controller_ssh_key() -> SshPublicKey {
+    ssh_key(7)
+}
+
+/// The Windows worker installer generates its own sshd **host** key inside the
+/// guest. The controller only learns it from the guest receipt, so it must be
+/// a different key from the controller client identity.
+fn installer_host_key() -> SshPublicKey {
+    ssh_key(9)
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -180,7 +193,7 @@ pub fn media() -> MediaFixture {
         payload_manifest_sha256: manifest_sha256.clone(),
         management_peer: "192.168.199.1".parse().unwrap(),
         ssh_port: 22268,
-        ssh_public_key: ssh_key(),
+        ssh_public_key: controller_ssh_key(),
         execution_boundary: ExecutionBoundary::DisposableVm,
     };
     let (enrollment_bytes, enrollment_signature) = enrollment.sign(&signer).unwrap();
@@ -229,7 +242,7 @@ pub fn media() -> MediaFixture {
     fs::write(root.join("media.json"), &media_record_bytes).unwrap();
     let media_record_sha256 = digest(&media_record_bytes);
 
-    let ssh_public_key = SshKey::from_public(&ssh_key()).unwrap();
+    let ssh_public_key = SshKey::from_public(&controller_ssh_key()).unwrap();
     let identity = MediaIdentity {
         media_root: root.clone(),
         media_record_sha256,
@@ -246,7 +259,7 @@ pub fn media() -> MediaFixture {
         management_peer: "192.168.199.1".into(),
         ssh_public_key: ssh_public_key.clone(),
     };
-    let host_public = ssh_key();
+    let host_public = installer_host_key();
     let connection = PublicConnection {
         schema: 1,
         installed: true,

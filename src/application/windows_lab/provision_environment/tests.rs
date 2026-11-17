@@ -1,5 +1,6 @@
 //! Managed-SSH environment registration tests. They never connect to a guest.
 use super::*;
+use crate::application::windows_lab::SshKey;
 use crate::application::windows_lab::provision::fixture;
 use crate::config::AppConfig;
 
@@ -87,14 +88,59 @@ fn registration_writes_a_managed_ssh_environment_and_public_pin() {
     assert_eq!(ssh.port, fixture.media.ssh_port);
     assert_eq!(ssh.identity_file, fixture.identity_file);
     assert!(ssh.known_hosts_file.is_file());
+    let pinned = SshKey::from_public(&ssh.host_key).unwrap();
+    assert_eq!(pinned, fixture.connection.host_key);
     assert_eq!(
         std::fs::read_to_string(&ssh.known_hosts_file).unwrap(),
         ssh.known_hosts_record().unwrap()
+    );
+    // The pin line carries the installer-generated worker host key, not the
+    // controller SSH client identity from the enrollment.
+    assert_ne!(pinned, fixture.media.ssh_public_key);
+    let pin = std::fs::read_to_string(&ssh.known_hosts_file).unwrap();
+    assert_eq!(
+        pin,
+        format!(
+            "wukong-worker-{} {} {}\n",
+            fixture.media.installation_id,
+            fixture.connection.host_key.algorithm,
+            fixture.connection.host_key.key
+        )
+    );
+    assert!(!pin.contains(&fixture.media.ssh_public_key.key));
+    assert_eq!(
+        fixture.connection.host_fingerprint,
+        fixture.connection.host_key.fingerprint().unwrap()
     );
     assert_eq!(reloaded.default_environment.as_deref(), Some("windows-vm"));
     assert_eq!(
         fixture.directory.path().join("state").join("environments"),
         ssh.known_hosts_file.parent().unwrap()
+    );
+}
+
+#[test]
+fn registration_pins_the_installer_generated_host_key_and_keeps_the_client_identity() {
+    let fixture = registration_fixture();
+    let (registration, _) = fixture.register("192.168.199.129", false);
+    let ssh = registration.environment.runtime.managed_ssh().unwrap();
+    // The identity file is the controller-managed SSH *client* key; the host
+    // pin is the key the Windows worker installer generated inside the guest.
+    assert_eq!(ssh.identity_file, fixture.identity_file);
+    let pinned = SshKey::from_public(&ssh.host_key).unwrap();
+    assert_eq!(pinned, fixture.connection.host_key);
+    assert_ne!(pinned, fixture.media.ssh_public_key);
+    assert_eq!(
+        ssh.known_hosts_record().unwrap(),
+        format!(
+            "wukong-worker-{} {}\n",
+            fixture.media.installation_id,
+            fixture.connection.host_key.authorized_key().unwrap()
+        )
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ssh.known_hosts_file).unwrap(),
+        ssh.known_hosts_record().unwrap()
     );
 }
 
@@ -234,4 +280,8 @@ fn environment_blocks_never_embed_private_key_material() {
     assert!(placeholder.contains("<GUEST_IPV4>"));
     assert!(placeholder.contains("<ABSOLUTE_CONTROLLER_SSH_PRIVATE_KEY>"));
     assert!(placeholder.contains("[environments.windows-vm]"));
+    // The placeholder block pins the installer-generated worker host key, never
+    // the controller SSH client identity from the enrollment.
+    assert!(placeholder.contains(&fixture.connection.host_key.key));
+    assert!(!placeholder.contains(&fixture.media.ssh_public_key.key));
 }
