@@ -1,12 +1,12 @@
 use super::*;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Target {
     pub binary: Option<String>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ChallengeRuntime {
     pub kind: String,
@@ -34,7 +34,7 @@ impl Default for ChallengeRuntime {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Launch {
     pub argv: Vec<String>,
@@ -54,7 +54,7 @@ impl Default for Launch {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Network {
     pub mode: String,
@@ -70,7 +70,7 @@ impl Default for Network {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Challenge {
     pub schema_version: u32,

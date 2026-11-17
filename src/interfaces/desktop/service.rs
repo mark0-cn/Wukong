@@ -32,7 +32,7 @@ struct ContextState {
     state_override: Option<PathBuf>,
     selected: Option<String>,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ExecutionInfo {
     pub operation: String,
     pub run_id: Option<String>,
@@ -42,13 +42,13 @@ struct Active {
     info: ExecutionInfo,
     cancel: CancellationToken,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Notice {
     pub id: u64,
     pub error: bool,
     pub message: UiMessage,
 }
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct HostStatus {
     pub epoch: u64,
     pub initial_run: Option<String>,
@@ -65,7 +65,7 @@ pub struct WorkspaceEnvelope {
     pub host: HostStatus,
     pub workspace: WorkspaceResponse,
 }
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct EvidenceView {
     pub id: String,
     pub source: String,
