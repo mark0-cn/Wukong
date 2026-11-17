@@ -67,14 +67,17 @@ CLI `lab run` 等待结果，每 15 秒续期独立租约，只释放自己的�
 
 ## 离线 Worker 部署
 
-`wukong lab provision` 在已登记的一次性实验 VM 关机时一次性安装 Windows Worker。它是仅限操作者的 CLI 操作：任何 Agent 工具、实验规格或模型输出都不能提供其路径或命令。该命令重新校验最终 Worker 介质，通过 WSL `guestfish`/`hivexsh` 把固定的部署包装脚本与计划写入离线系统卷，把 `WUKONG_OFFLINE` ISO 挂到专用 SATA CD 设备并启动 VM，由一次性 LocalSystem 服务安装 Worker 并让客体关机。随后控制器恢复原始 VMX 字节、离线读取客体回执、创建配置的基线快照，并可登记和校验控制器管理的 SSH 环境。客体不会收到控制器密钥或管理员密码。该特性是对 schema-2 实验环境状态的追加：`provisioning` 阶段、`provision` 待定操作类型和 `last_provision` 记录；已有的 idle/failed 状态文件因新增记录默认缺失而可继续加载。
+`wukong lab provision` 在已登记的一次性实验 VM 关机时一次性安装 Windows Worker。它是仅限操作者的 CLI 操作：任何 Agent 工具、实验规格或模型输出都不能提供其路径或命令。该命令重新校验最终 Worker 介质，通过 WSL `guestfish`/`hivexsh` 把固定的部署包装脚本、计划与本地组策略机器启动脚本写入离线系统卷，把 `WUKONG_OFFLINE` ISO 挂到专用 SATA CD 设备并启动 VM，由本地组策略启动脚本在无需登录的情况下运行包装脚本：包装脚本安装 Worker、恢复原有机器策略文件并让客体关机。随后控制器恢复原始 VMX 字节、离线读取客体回执、创建配置的基线快照，并可登记和校验控制器管理的 SSH 环境。客体不会收到控制器密钥或管理员密码。该特性是对 schema-2 实验环境状态的追加：`provisioning` 阶段、`provision` 待定操作类型和 `last_provision` 记录；已有的 idle/failed 状态文件因新增记录默认缺失而可继续加载。
 
-当前验证只覆盖规划逻辑和 fake 宿主/磁盘/ISO/客体网络/环境适配器；CI 与本次特性的文档集成均未执行真实 WSL/libguestfs 注入、`mkisofs` 构建或 VM 启动。真实验收仍需操作者在专用 VM 上执行。
+启动机制是本地组策略机器启动脚本，而不是 Windows 服务。旧实现向 SYSTEM 配置单元写入补丁，由 SCM 以一次性服务启动 `powershell.exe -File provision.ps1`；Windows 服务进程必须调用 `StartServiceCtrlDispatcher`/`SetServiceStatus`，而 PowerShell 从不调用，因此 SCM 在 30 秒后以 7009/7000 事件终止它，包装脚本从未运行、从未写出回执、也从未让客体关机。替代实现复现了已恢复的、此前手工验证可行的布局：`C:\Windows\System32\GroupPolicy\Machine\Scripts\Startup` 下的一个 `wukong-provision-<id>.cmd` 启动器，由机器 `scripts.ini` 的 `[Startup]` 条目引用，启动器再以分离方式执行固定的 PowerShell 包装命令。已恢复的产物只添加了 `scripts.ini` 与启动文件（未修改 `gpt.ini`），说明该客体会在无需修改扩展列表的情况下应用机器启动扩展；命令仍会递增 `gpt.ini` 中本地 GPO `Version` 的计算机版本半段，作为文档规定的刷新触发条件，并在之后恢复原始字节。`gPCMachineExtensionNames` 永不被修改。
+
+当前验证只覆盖规划逻辑和 fake 宿主/磁盘/ISO/客体网络/环境适配器，包括机器启动策略注入/恢复、显式客体清理命令和遗留状态拒绝路径。真实 VM 验收运行证明了旧的基于服务的启动机制在 Windows 上根本无法工作（SCM 7009/7000，无回执）；本地 GPO 替代实现尚未由 CI 在真实 VM 上启动，本次修订也未由 CI 执行真实 WSL/libguestfs 注入、`mkisofs` 构建或 VM 启动。替代实现的真实验收仍需操作者在专用 VM 上执行。
 
 ### 前置条件
 
 - Windows 控制器；其他平台会以明确错误失败关闭。WSL 命令以该发行版的 `root` 用户运行。
 - `[windows_lab.vms.<alias>.offline]`：`wsl_executable` 与 `mkisofs` 为绝对 Windows 路径，`wsl_distribution` 指定一个已注册 WSL 发行版，`guestfish`/`hivexsh` 为该发行版内的绝对 POSIX 路径，`timeout_seconds`（60–1800）限制单条工具命令。发行版必须提供 libguestfs `guestfish`、`hivexsh`、`wslpath`、`sha256sum`、`tee` 与 coreutils，并能通过 `wslpath` 访问 VM 的 VMDK。缺少该配置段会得到可操作的错误；控制器从不假设宿主工具布局。
+- 一台未禁用本地组策略机器启动处理的常规 Windows 10/11 客体。部署需要在关机磁盘上读写 `C:\Windows\System32\GroupPolicy` 与 `C:\ProgramData\WukongLab`。它不使用 Windows 服务、客体管理员密码或管理通道。
 - `python` 在 `PATH` 中，且使用 `--template` 时在 wukong 检出目录中执行命令，因为部署过程会自行调用 `python -m scripts.worker.media finalize`。`--media` 部署不使用 Python。
 - 控制器 `state_dir`（以及最终介质输出目录）应保持足够短：Windows `MAX_PATH` 同样约束暂存的离线介质，其载荷包含 131 个字符的相对路径。finalize 会在较短的临时工作区暂存，并在配置目录过深时以明确错误指出越界路径；应把该目录移到更短的绝对路径，而不是依赖长路径开关。
 - 已登记且关机的实验 VM，且不存在快照链。只允许存在配置的 `baseline_snapshot`，并且仅当传入 `--replace-baseline`；任何其他快照都会拒绝命令且永不被删除。不存在快照时，`--replace-baseline` 是明确记录的空操作。启动盘必须是 VMX 目录内的完整本地 VMDK，位于 `nvme0:0`、`scsi0:0` 或 `sata0:0`；差异盘、链接盘与外部盘会被拒绝。VMX 必须启用 SATA 控制器并有空闲 CD 槽位。
@@ -106,9 +109,9 @@ timeout_seconds = 600
 
 ### 部署顺序与基线
 
-在任何变更之前，命令校验来源介质/模板与规格、VM 电源状态、快照规则以及 VMX CD 设备规划。无快照的原始 VM 还会在持久化任何内容之前预检关机系统卷（Windows 卷、SYSTEM 注册表配置单元、当前 control set、无遗留一次性服务或部署目录）。传入 `--replace-baseline` 时，关机的 VM 仍指向基线快照的差异盘，因此只有在删除该快照之后才能解析和预检客体磁盘：命令会先备份 VMX 并持久化意图，然后只删除配置的基线并校验提交后的磁盘。意图持久化之后的每次失败都可恢复而不会被重放。
+在任何变更之前，命令校验来源介质/模板与规格、VM 电源状态、快照规则以及 VMX CD 设备规划。无快照的原始 VM 还会在持久化任何内容之前预检关机系统卷（Windows 卷、SYSTEM 注册表配置单元、当前 control set、机器 `scripts.ini`/启动目录/`gpt.ini`，且无遗留启动策略条目或启动器、无部署目录、无旧版一次性服务键）。检测到遗留状态会以精确的显式清理命令（`wukong lab clean-guest --vm <alias> --operation <id>`）拒绝命令，而不是静默在其上重试。传入 `--replace-baseline` 时，关机的 VM 仍指向基线快照的差异盘，因此只有在删除该快照之后才能解析和预检客体磁盘：命令会先备份 VMX 并持久化意图，然后只删除配置的基线并校验提交后的磁盘。意图持久化之后的每次失败都可恢复而不会被重放。
 
-变更顺序固定：在任何 VM 或客体变更之前备份原始 VMX 字节并持久化意图；传入 `--replace-baseline` 时，先删除配置的基线快照，随后才解析并预检提交后的客体磁盘；用 `-V WUKONG_OFFLINE` 构建 ISO；把 ISO 挂到空闲 SATA CD 设备；把包装脚本和计划写入固定客体路径；把 `ControlSetNNN\Services\WukongLabProvision-<id>` 补丁为一次性 LocalSystem 服务并校验取值；启动 VM 并在 `--timeout` 内等待客体关机（60–7200 秒，默认 1800；单条工具命令改用 `offline.timeout_seconds`）。客体包装脚本按卷标找到 CD，重新校验 setup/enrollment/manifest 哈希与签名登记记录，运行无需提权的 `verify-enrollment`，再执行经审阅的安装，写入回执，删除自身服务，安排删除自身文件并关闭客体。控制器恢复 VMX，离线确认服务、包装脚本和计划已被删除，重新校验回执身份，创建基线快照并保持 VM 关机。
+变更顺序固定：在任何 VM 或客体变更之前备份原始 VMX 字节并持久化意图；传入 `--replace-baseline` 时，先删除配置的基线快照，随后才解析并预检提交后的客体磁盘；用 `-V WUKONG_OFFLINE` 构建 ISO；把 ISO 挂到空闲 SATA CD 设备；把包装脚本、计划和固定启动器写入固定客体路径；把原有 `scripts.ini`/`gpt.ini` 字节保存为按操作命名的备份，向机器 `scripts.ini` 注入一个 `[Startup]` 条目，并递增 `gpt.ini` 中本地 GPO `Version` 的计算机版本半段；启动 VM 并在 `--timeout` 内等待客体关机（60–7200 秒，默认 1800；单条工具命令改用 `offline.timeout_seconds`）。本地组策略客户端在无需登录的情况下运行启动器，启动器再以分离方式启动包装脚本，因此机器启动阶段不会被整个安装过程占住。包装脚本按卷标找到 CD，重新校验 setup/enrollment/manifest 哈希与签名登记记录，运行无需提权的 `verify-enrollment`，再执行经审阅的安装，并在 `finally` 块中从备份恢复原有机器策略文件（或移除注入的条目与启动器）、安排删除包装脚本和计划、写入回执并始终让客体关机。控制器恢复 VMX，离线确认启动器、`[Startup]` 条目和策略备份均已消失且回执身份匹配，创建基线快照并保持 VM 关机。该路径不写入任何 SYSTEM 配置单元服务键或服务取值。
 
 部署完成后 VM 在新基线上关机。之后通常依次执行 `lab prepare`（为该实验代际从基线创建快照）和 `lab run`（通过已登记的 managed-SSH Worker 运行打包测试程序），`lab restore` 返回基线。`last_provision` 处于 running 或 unknown 时 `lab prepare` 会拒绝。`--register` 只写入 `[environments.<id>]`，不会修改 `[windows_lab.vms.<alias>]`；在运行打包测试程序前，需要把该 VM 的 `environment` 设为登记的环境 id。
 
@@ -122,18 +125,20 @@ timeout_seconds = 600
 
 ### 试运行、失败与调和
 
-`--dry-run` 执行相同的只读前置校验并打印精确的宿主机/客体计划动作（重新校验介质、ISO 路径、VMX 备份与 CD 设备、固定客体文件、注册表服务补丁、启动/关机、VMX 恢复、基线创建、回执路径），但不 finalize 模板介质、不构建 ISO、不编辑 VMX、不写客体文件、不创建快照，也不发布部署状态或回执。VM 仍需关机且离线工具必须已配置；无快照计划会只读检查磁盘。传入 `--replace-baseline` 且基线已存在时，只读计划止步于客体磁盘之前：关机的 VM 仍指向快照差异盘，因此计划会报告 VMX 备份、意图持久化和基线删除，并说明磁盘只在删除后才校验；它不会检查客体系统卷。`--iso-tool` 仅对本次命令覆盖配置的 `mkisofs` 可执行文件（必须是绝对路径，配置不变）；`--force` 只能与 `--register` 一起使用。
+`--dry-run` 执行相同的只读前置校验并打印精确的宿主机/客体计划动作（重新校验介质、ISO 路径、VMX 备份与 CD 设备、固定客体文件、`scripts.ini` 备份/注入与 `gpt.ini` 版本递增、启动/关机、VMX 恢复、基线创建、回执路径），但不 finalize 模板介质、不构建 ISO、不编辑 VMX、不写客体文件、不创建快照，也不发布部署状态或回执。VM 仍需关机且离线工具必须已配置；无快照计划会只读检查磁盘。传入 `--replace-baseline` 且基线已存在时，只读计划止步于客体磁盘之前：关机的 VM 仍指向快照差异盘，因此计划会报告 VMX 备份、意图持久化和基线删除，并说明磁盘只在删除后才校验；它不会检查客体系统卷。`--iso-tool` 仅对本次命令覆盖配置的 `mkisofs` 可执行文件（必须是绝对路径，配置不变）；`--force` 只能与 `--register` 一起使用。
 
 意图持久化之前的失败不会改动 VM、客体或快照，也不会创建部署记录；模板 finalize 可能在本次部署目录下留下未发布的中间文件。持久化之后的任何失败都会把 VM 置为 `recovery_required`，保留待定 `provision` 操作并写入状态为 unknown 的 `last_provision` 记录；错误会携带操作 id 与回执（`lab_provision_unknown`）。VMX 可能仍引用生成的 ISO，客体也可能残留部分部署状态，因此操作者必须先检查 VM 并在关机后执行 `wukong lab reconcile --vm <alias> --operation <operation_id> --outcome completed|failed|unknown`。`completed` 与 `failed` 会在解决操作前恢复原始 VMX 字节并删除生成的 ISO 和最终介质；`unknown` 保持未解决。调和绝不会重跑客体安装，也不会伪造通过的回执。控制器重启后，下一条会加载状态的 lab 变更命令会把未完成的待定部署操作转为 `recovery_required`；不会自动重放任何操作。
+
+调和不会编辑客体磁盘。重试部署前，使用 `wukong lab clean-guest --vm <alias> --operation <operation_id>` 清除失败尝试留下的客体遗留状态。该命令要求 VM 关机且离线工具已配置；`--dry-run` 只打印计划移除内容而不写入。它只移除该操作的 `C:\ProgramData\WukongLab\provision\<id>` 树、`wukong-provision-<id>.cmd` 启动器及其 `[Startup]` 条目、归其所有的按操作 `scripts.ini`/`gpt.ini` 备份（存在备份时恢复备份字节并保留无关策略内容），以及更早尝试写入的旧版 `WukongLabProvision-<id>` 服务键。它拒绝未知或外部操作 id，绝不删除其他操作目录或无关的策略/注册表内容，是幂等的，并受配置的离线工具超时限制。新部署预检检测到的遗留状态会以该精确命令拒绝，而不是静默重试。
 
 ### 安全不变量
 
 - 控制器私钥保留在控制器：`--keys` 只被本地 finalize 步骤消费；只有已签名登记记录、密封载荷和 setup 可执行文件进入介质/ISO；模板和输出会被检查以排除密钥目录和私钥文件名；`--register` 只保存控制器侧身份路径。
-- 不使用客体管理员密码，也不经过管理通道：离线路径编辑关机 SYSTEM 配置单元、运行一个固定的一次性 LocalSystem 服务并从 CD 安装；已配置的 admin 通道和密码环境变量只用于管理安装脚本。
+- 不使用客体管理员密码，也不经过管理通道：离线路径注入固定的本地组策略机器启动脚本、备份并恢复原有策略字节，并从 CD 安装；已配置的 admin 通道和密码环境变量只用于管理安装脚本。部署不写入 SYSTEM 配置单元：`hivexsh` 仅用于只读检测更早尝试遗留的一次性服务键，以及由显式客体清理命令删除该键。
 - 输入在端到端范围内按哈希固定：介质回执、签名登记记录和载荷清单会在 finalize 前后、启动前宿主侧以及客体包装脚本内分别校验；回读的客体回执绑定部署 id、安装 id、环境 id、代际、清单和 Worker 主机键。`production_isolation_verified` 始终为 false，因为客体回执不能证明 hypervisor 隔离。
 - VMX 总会被恢复：原始字节在 CD 编辑前保存，成功时在创建基线快照前恢复，失败时由调和恢复；VM 开机时调和会拒绝执行。
-- 路径与命令固定：只写入 `C:\ProgramData\WukongLab\provision\<32 位小写十六进制>` 路径、`WukongLabProvision-<id>` 服务名和固定 PowerShell 镜像路径；宿主工具通过固定参数、不经 shell 调用；介质、模板、密钥、ISO 与 VM 路径会校验为绝对路径；工具与部署等待都有时限；模型或实验输入永远不会进入该模块。
-- 重跑受保护：遗留的一次性服务或部署目录会阻止部署，已存在的客体回执会阻止重装，只允许替换配置的基线，其他快照永不被删除。
+- 路径与命令固定：只写入 `C:\ProgramData\WukongLab\provision\<32 位小写十六进制>` 路径、`wukong-provision-<id>.cmd` 机器启动启动器/条目、按操作命名的 `scripts.ini.wukong-lab-<id>.bak`/`gpt.ini.wukong-lab-<id>.bak` 备份以及固定的 PowerShell 启动命令；旧版 `WukongLabProvision-<id>` 服务名只会在预检检测时读取，或由显式客体清理命令删除；宿主工具通过固定参数、不经 shell 调用；介质、模板、密钥、ISO 与 VM 路径会校验为绝对路径；工具与部署等待都有时限；模型或实验输入永远不会进入该模块。
+- 重跑受保护：遗留的机器启动策略条目/启动器、部署目录或旧版一次性服务键会阻止部署并给出客体清理命令，已存在的客体回执会阻止重装，只允许替换配置的基线，其他快照永不被删除。
 
 ### CLI 示例
 
@@ -153,6 +158,11 @@ wukong --config wukong.toml lab provision --vm lab --media D:/media/windows-work
 
 # 检查关机 VM 后解决失败的部署意图。
 wukong --config wukong.toml lab reconcile --vm lab --operation <operation_id> --outcome failed
+
+# 只清除该操作在关机客体磁盘上的遗留状态，然后重试。
+wukong --config wukong.toml lab clean-guest --vm lab --operation <operation_id> --dry-run
+wukong --config wukong.toml lab clean-guest --vm lab --operation <operation_id>
+wukong --config wukong.toml lab provision --vm lab --media D:/media/windows-worker
 ```
 
 ## 驱动安装、测试签名与 Verifier
@@ -209,7 +219,7 @@ Ghidra 只探测和绑定选定的静态环境；普通执行/状态/清理只�
 
 当前回归覆盖过期/失败恢复、调用者/配置约束、包篡改、接口 schema 和原生/Python 源码准入。最终提交仍需重新进行真实 VMware 客体安装及重启验收。驱动覆盖不含 PnP/设备 I/O、生产签名或 PatchGuard 绕过。原生安装器测试应在隔离 runner 上运行，不能覆盖用户安装。
 
-离线 Worker 部署由使用 fake 宿主、磁盘、ISO、客体网络和环境适配器的单元与规划测试覆盖，包括 VMX CD/磁盘规划、注册表配置单元与包装脚本生成、回执校验、介质/模板校验、部署状态恢复以及登记/配置写入。CI 和本特性的文档集成均未执行真实 WSL/libguestfs 注入、`mkisofs` 构建、VMware 启动、客体服务执行或 managed-SSH `doctor`；专用 VM 上的真实验收仍需操作者执行。
+离线 Worker 部署由使用 fake 宿主、磁盘、ISO、客体网络和环境适配器的单元与规划测试覆盖，包括 VMX CD/磁盘规划、机器启动策略注入/备份/恢复、包装脚本回执约定、显式客体清理命令（幂等、支持 dry-run、拒绝外部 id）、遗留状态拒绝、介质/模板校验、部署状态恢复以及登记/配置写入。部署路径没有任何测试写入 SYSTEM 服务键。一次真实 VM 验收运行执行了旧的基于服务的启动机制，并证明它无法在 Windows 上工作（SCM 7009/7000、无回执、无关机）；本地 GPO 替代实现尚未由 CI 执行真实 WSL/libguestfs 注入、`mkisofs` 构建、VMware 启动、客体启动脚本执行或 managed-SSH `doctor`。专用 VM 上的真实验收仍需操作者执行。
 
 ## CLI
 
@@ -218,6 +228,7 @@ wukong --config wukong.toml lab status --vm lab
 wukong --config wukong.toml lab prepare --vm lab --owner analyst --purpose parser --spec spec.json
 wukong --config wukong.toml lab restore --vm lab --lab <lab_id> --generation <n>
 wukong --config wukong.toml lab reconcile --vm lab --operation <operation_id> --outcome completed
+wukong --config wukong.toml lab clean-guest --vm lab --operation <operation_id> [--dry-run]
 ```
 
 VMware 命令应从正常完整性目录执行，Low 完整性的构建目录可能导致 VMware 无法启动。`start_after_restore` 应符合宿主实际的关机/运行快照行为。
