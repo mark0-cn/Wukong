@@ -115,7 +115,10 @@ pub(in crate::application::tools) fn handle_stop_agent<'a>(
             target.id.clone()
         };
         tools.effect(agent, call_id, |tx| {
-            Ok(json!({"stopped":Coordinator::tx_stop(tx, &target_id, text(&args, "reason")?)?}))
+            let stopped = Coordinator::tx_stop(tx, &target_id, text(&args, "reason")?)?;
+            Ok(
+                json!({"stopped":stopped,"already_terminal":!stopped.iter().any(|id| id == &target_id)}),
+            )
         })
     })
 }
