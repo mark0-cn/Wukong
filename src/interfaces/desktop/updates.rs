@@ -414,7 +414,11 @@ impl Controller {
             let current_epoch = service.status().epoch;
             let (config, _, _operation) = service.maintenance_context(current_epoch)?;
             let snapshot = tokio::task::spawn_blocking(move || {
-                super::update_health::check_workbench(&config, false, current_epoch)
+                super::update_health::check_workbench(
+                    &config,
+                    super::update_health::HealthScope::Quick,
+                    current_epoch,
+                )
             })
             .await??;
             self.observe_tool_action(snapshot);
@@ -425,7 +429,15 @@ impl Controller {
         if matches!(action, Action::Health | Action::Doctor) {
             self.phase("health", UiMessage::new("system-checking-tool-health"));
             let snapshot = tokio::task::spawn_blocking(move || {
-                super::update_health::check(&config, matches!(action, Action::Doctor), epoch)
+                super::update_health::check(
+                    &config,
+                    if matches!(action, Action::Doctor) {
+                        super::update_health::HealthScope::Full
+                    } else {
+                        super::update_health::HealthScope::Quick
+                    },
+                    epoch,
+                )
             })
             .await??;
             self.edit().diagnosis = snapshot
@@ -452,7 +464,7 @@ impl Controller {
             return Ok(());
         }
         if matches!(action, Action::CleanCache | Action::CleanImages) {
-            let _lock = maintenance::lock(&recovery::root()?, true)?;
+            let _lock = maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
             ensure!(
                 recovery::pending()?.is_none(),
                 UiMessage::new("system-finish-or-recover-the-pending-update-first")
@@ -481,52 +493,22 @@ impl Controller {
             );
             let directory =
                 crate::application::maintenance::updates::storage::cache_root()?.join("releases");
-            if directory.exists() {
-                for entry in std::fs::read_dir(&directory)? {
-                    let entry = entry?;
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if !entry.file_type()?.is_dir()
-                        || semver::Version::parse(&name).is_err()
-                        || name == env!("CARGO_PKG_VERSION")
-                        || prepared.as_ref() == Some(&name)
-                        || previous.as_ref().is_some_and(|p| p.from == name)
-                    {
-                        continue;
-                    }
-                    let path = std::fs::canonicalize(entry.path())?;
-                    ensure!(
-                        path.starts_with(std::fs::canonicalize(&directory)?),
-                        "cache path escaped its directory"
-                    );
-                    let manifest = recovery::cached(&name)?;
-                    if matches!(action, Action::CleanImages) {
-                        if protected_images.contains(&manifest.image) {
-                            continue;
-                        }
-                        if docker.inspect("image", &manifest.image)?.is_some()
-                            && docker
-                                .run(&[
-                                    "ps",
-                                    "-aq",
-                                    "--filter",
-                                    &format!("ancestor={}", manifest.image),
-                                ])?
-                                .is_empty()
-                        {
-                            docker.run(&["image", "rm", &manifest.image])?;
-                        }
-                    } else {
-                        let payload = recovery::payload(&manifest)?;
-                        if payload.exists() {
-                            ensure!(
-                                std::fs::canonicalize(&payload)?.parent() == Some(path.as_path()),
-                                "payload escaped cache directory"
-                            );
-                            std::fs::remove_file(payload)?;
-                        }
-                    }
-                }
-            }
+            // Walking the cache directory and driving the Docker CLI blocks for
+            // seconds; keep it off the async worker like the neighbouring phases.
+            let clean_images = matches!(action, Action::CleanImages);
+            tokio::task::spawn_blocking(move || {
+                clean_cached_releases(
+                    &directory,
+                    clean_images,
+                    &prepared,
+                    &previous,
+                    &protected_images,
+                    &docker,
+                )
+            })
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|result| result)?;
             self.phase(
                 "idle",
                 UiMessage::new(
@@ -569,7 +551,7 @@ impl Controller {
                 manifest.can_upgrade(env!("CARGO_PKG_VERSION"))?,
                 UiMessage::new("system-this-is-not-a-newer-version")
             );
-            let _lock = maintenance::lock(&recovery::root()?, true)?;
+            let _lock = maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
             ensure!(
                 recovery::pending()?.is_none(),
                 UiMessage::new("system-an-update-already-needs-recovery")
@@ -688,7 +670,8 @@ impl Controller {
             );
             let image = manifest.image;
             tokio::task::spawn_blocking(move || {
-                let _lock = maintenance::lock(&recovery::root()?, true)?;
+                let _lock =
+                    maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
                 environment::activate(&config_path, &image)
             })
             .await??;
@@ -712,6 +695,67 @@ impl Controller {
         }
         Ok(())
     }
+}
+
+/// Delete cached releases that no pending switch, previous journal or the running
+/// build still references, and optionally the container images built from them.
+/// Runs on the blocking pool: it walks the cache directory and drives the Docker CLI.
+fn clean_cached_releases(
+    directory: &std::path::Path,
+    clean_images: bool,
+    prepared: &Option<String>,
+    previous: &Option<recovery::Journal>,
+    protected_images: &[String],
+    docker: &crate::application::maintenance::workbench::Docker,
+) -> Result<()> {
+    if !directory.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !entry.file_type()?.is_dir()
+            || semver::Version::parse(&name).is_err()
+            || name == env!("CARGO_PKG_VERSION")
+            || prepared.as_ref() == Some(&name)
+            || previous.as_ref().is_some_and(|p| p.from == name)
+        {
+            continue;
+        }
+        let path = std::fs::canonicalize(entry.path())?;
+        ensure!(
+            path.starts_with(std::fs::canonicalize(directory)?),
+            "cache path escaped its directory"
+        );
+        let manifest = recovery::cached(&name)?;
+        if clean_images {
+            if protected_images.contains(&manifest.image) {
+                continue;
+            }
+            if docker.inspect("image", &manifest.image)?.is_some()
+                && docker
+                    .run(&[
+                        "ps",
+                        "-aq",
+                        "--filter",
+                        &format!("ancestor={}", manifest.image),
+                    ])?
+                    .is_empty()
+            {
+                docker.run(&["image", "rm", &manifest.image])?;
+            }
+        } else {
+            let payload = recovery::payload(&manifest)?;
+            if payload.exists() {
+                ensure!(
+                    std::fs::canonicalize(&payload)?.parent() == Some(path.as_path()),
+                    "payload escaped cache directory"
+                );
+                std::fs::remove_file(payload)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

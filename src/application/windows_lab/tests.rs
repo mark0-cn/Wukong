@@ -771,7 +771,11 @@ async fn assessment_connection_blocks_vm_mutations_but_not_status() {
     let lease = lab.prepare("owner", "purpose", spec()).await.unwrap();
     let guard_path =
         crate::adapters::environments::lab_guard::path(&config(dir.path()).vmx).unwrap();
-    let _worker = crate::adapters::environments::lab_guard::acquire(&guard_path, false).unwrap();
+    let _worker = crate::adapters::environments::lab_guard::acquire(
+        &guard_path,
+        crate::adapters::environments::lab_guard::LockMode::Shared,
+    )
+    .unwrap();
     assert!(lab.restore(&lease.lab_id, lease.generation).await.is_err());
     assert_eq!(lab.status().await.unwrap()["state"]["phase"], "ready");
     assert!(!host.calls().iter().any(|call| call.starts_with("revert")));

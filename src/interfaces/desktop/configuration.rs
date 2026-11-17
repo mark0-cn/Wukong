@@ -122,7 +122,7 @@ impl ConfigDocument {
     ) -> Result<(AppConfig, Store)> {
         let _maintenance = crate::application::maintenance::updates::maintenance::lock(
             &home.join("updates"),
-            true,
+            crate::application::maintenance::updates::maintenance::LockMode::Exclusive,
         )?;
         let form: AppConfig = toml::from_str(&self.source)
             .context(UiMessage::new("system-invalid-toml-configuration"))?;

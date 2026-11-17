@@ -234,7 +234,7 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
-            true,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         self.mark_restart_recovery(&mut state)?;
@@ -326,7 +326,7 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
-            true,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         let active = state
@@ -464,7 +464,7 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
-            true,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let state = self.store.load(&self.vm_id, &self.baseline)?;
         ensure!(
@@ -518,7 +518,7 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
-            true,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         let pending = state

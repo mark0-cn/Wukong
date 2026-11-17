@@ -57,7 +57,7 @@ pub(crate) fn cache_lock_at(root: &Path, exclusive: bool) -> Result<FileLock> {
 
 pub fn set_cache(destination: &Path) -> Result<PathBuf> {
     let _cache = cache_lock(true)?;
-    let _maintenance = maintenance::lock(&recovery::root()?, true)?;
+    let _maintenance = maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
     ensure!(
         recovery::pending()?.is_none(),
         UiMessage::new("system-finish-the-pending-update-or-recovery-before-changing")

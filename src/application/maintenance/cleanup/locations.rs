@@ -98,8 +98,10 @@ impl Registry {
 }
 pub fn register_configuration(config: &AppConfig, path: Option<&Path>) -> Result<()> {
     let home = crate::adapters::files::paths::home()?;
-    let _lock =
-        crate::application::maintenance::updates::maintenance::lock(&home.join("updates"), false)?;
+    let _lock = crate::application::maintenance::updates::maintenance::lock(
+        &home.join("updates"),
+        crate::application::maintenance::updates::maintenance::LockMode::Shared,
+    )?;
     register_configuration_at_locked(&home, config, path)
 }
 pub(crate) fn register_configuration_at_locked(

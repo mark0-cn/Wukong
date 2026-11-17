@@ -34,7 +34,16 @@ impl Health {
         }
     }
 }
-pub fn check(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
+/// How much of the tool environment a health check observes. A named type keeps
+/// `check(config, false, epoch)` from reading as an unlabelled flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HealthScope {
+    /// Configuration and platform only.
+    Quick,
+    /// Also probe the runtime and verify the tools inside it.
+    Full,
+}
+pub fn check(config: &AppConfig, scope: HealthScope, epoch: u64) -> Result<Health> {
     let configured = config
         .default_environment
         .as_ref()
@@ -57,7 +66,7 @@ pub fn check(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
             checked_at: Some(chrono::Utc::now().to_rfc3339()),
             ..Default::default()
         };
-        if full {
+        if scope == HealthScope::Full {
             let result = (|| -> Result<serde_json::Value> {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -92,11 +101,15 @@ pub fn check(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
         }
         return Ok(health);
     }
-    check_workbench(config, full, epoch)
+    check_workbench(config, scope, epoch)
 }
 
 /// Observe the explicitly managed Linux tools even before it is selected for new tasks.
-pub(super) fn check_workbench(config: &AppConfig, full: bool, epoch: u64) -> Result<Health> {
+pub(super) fn check_workbench(
+    config: &AppConfig,
+    scope: HealthScope,
+    epoch: u64,
+) -> Result<Health> {
     let workbench = Workbench::open(config)?;
     let _lock = workbench.lock()?;
     let environment = workbench.environment().ok();
@@ -131,7 +144,7 @@ pub(super) fn check_workbench(config: &AppConfig, full: bool, epoch: u64) -> Res
                     "tool container image differs from its environment record"
                 );
             }
-            if full {
+            if scope == HealthScope::Full {
                 ensure!(
                     health.running == Some(true),
                     Message::new("system-tool-container-stopped")
@@ -186,7 +199,7 @@ mod tests {
                 },
             },
         );
-        let health = check(&config, false, 1)?;
+        let health = check(&config, HealthScope::Quick, 1)?;
         assert!(health.configured);
         assert_eq!(health.docker, None);
         assert_eq!(health.tools, None);
@@ -228,7 +241,7 @@ mod tests {
                 "network": workbench.name("offline"), "volume": workbench.name("state")
             }),
         )?;
-        let health = check(&config, true, 1)?;
+        let health = check(&config, HealthScope::Full, 1)?;
         assert!(health.configured);
         assert_eq!(health.docker, Some(false));
         assert_eq!(health.tools, None);

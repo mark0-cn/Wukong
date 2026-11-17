@@ -144,14 +144,14 @@ fn deferred_uninstall_blocks_new_work_and_requires_the_matching_review_to_finish
     assert!(
         crate::application::maintenance::updates::maintenance::lock(
             &cleanup.home.join("updates"),
-            false
+            crate::application::maintenance::updates::maintenance::LockMode::Shared
         )
         .is_err()
     );
     assert!(
         crate::application::maintenance::updates::maintenance::lock(
             &cleanup.home.join("updates"),
-            true
+            crate::application::maintenance::updates::maintenance::LockMode::Exclusive
         )
         .is_err()
     );
@@ -167,7 +167,7 @@ fn deferred_uninstall_blocks_new_work_and_requires_the_matching_review_to_finish
     assert!(
         crate::application::maintenance::updates::maintenance::lock(
             &cleanup.home.join("updates"),
-            false
+            crate::application::maintenance::updates::maintenance::LockMode::Shared
         )
         .is_ok()
     );
@@ -310,7 +310,7 @@ fn changed_inventory_and_active_maintenance_are_rejected_before_deleting() -> Re
     })?;
     let _task = crate::application::maintenance::updates::maintenance::lock(
         &cleanup.home.join("updates"),
-        false,
+        crate::application::maintenance::updates::maintenance::LockMode::Shared,
     )?;
     assert!(cleanup.execute(&plan).is_err());
     assert!(cleanup.home.join("preferences.json").exists());
