@@ -329,6 +329,7 @@ pub(super) fn gate_models(
                             &agent.id,
                             "agent model budget reached".into(),
                             None,
+                            crate::domain::FailureCause::Budget,
                         )?;
                         commands.trigger(StopTurn::new(from.0));
                     } else {

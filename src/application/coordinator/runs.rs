@@ -79,6 +79,7 @@ impl Coordinator {
                     .then(|| run.budget.role_token_cap(Role::Root)), // root is governed by the run budget alone unless an explicit root share is configured
                 summary: None,
                 error: None,
+                failure_cause: None,
                 created_at: timestamp,
                 updated_at: timestamp,
             },

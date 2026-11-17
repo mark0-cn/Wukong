@@ -59,6 +59,7 @@ fn fixture(root: &Path) -> (Store, String, String) {
             token_cap: None,
             summary: Some("done".into()),
             error: None,
+            failure_cause: None,
             created_at: now(),
             updated_at: now(),
         },

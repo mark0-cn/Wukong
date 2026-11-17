@@ -297,6 +297,7 @@ impl KernelHost {
         agent_id: &str,
         reason: String,
         summary: Option<String>,
+        cause: FailureCause,
     ) -> Result<()> {
         let run_id = self.store.write(|tx| {
             let mut target: AgentMetadata = tx
@@ -307,6 +308,7 @@ impl KernelHost {
             }
             target.status = Status::Failed;
             target.error = Some(reason.clone());
+            target.failure_cause = Some(cause);
             if let Some(summary) = &summary {
                 target.summary = Some(summary.clone());
             }

@@ -170,6 +170,7 @@ impl Coordinator {
                 token_cap: Some(run.budget.role_token_cap(request.role)),
                 summary: None,
                 error: None,
+                failure_cause: None,
                 created_at: timestamp,
                 updated_at: timestamp,
             },

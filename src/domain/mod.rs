@@ -63,6 +63,18 @@ impl fmt::Display for Status {
     }
 }
 
+/// Why an agent stopped before finishing. Lifecycle decisions (whether a
+/// follow-up can resume it with a fresh slice) read this field instead of
+/// matching the wording of [`AgentMetadata::error`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureCause {
+    /// The agent exhausted its role token quota and can be resumed.
+    Budget,
+    /// Any other failure.
+    Error,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -213,6 +225,9 @@ pub struct AgentMetadata {
     pub token_cap: Option<u64>,
     pub summary: Option<String>,
     pub error: Option<String>,
+    /// Typed companion to `error`; absent on records written before it existed.
+    #[serde(default)]
+    pub failure_cause: Option<FailureCause>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

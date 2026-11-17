@@ -378,6 +378,7 @@ pub(super) fn enforce_completion(
                                 TurnOutcome::Answered(message) => message.final_answer(),
                                 _ => None,
                             },
+                            crate::domain::FailureCause::Error,
                         )?;
                         *outcome = TurnOutcome::Failed("task result not accepted".into());
                     } else {
@@ -412,7 +413,12 @@ pub(super) fn record_turn_end(
                 if !record.status.terminal()
                     && let TurnOutcome::Failed(reason) = outcome
                 {
-                    application.runner.fail_agent(&id.0, reason.clone(), None)?;
+                    application.runner.fail_agent(
+                        &id.0,
+                        reason.clone(),
+                        None,
+                        crate::domain::FailureCause::Error,
+                    )?;
                 }
                 Ok(())
             })(),
