@@ -3,6 +3,9 @@ use super::WindowsLab;
 use crate::adapters::environments::EnvironmentRegistry;
 use crate::adapters::windows_lab::VmwareVm;
 use crate::adapters::windows_lab_admin::VmwareAdmin;
+use crate::adapters::windows_lab_offline::{
+    MkisofsIsoBuilder, PythonMediaFinalizer, VmrunGuestNetwork, WslOfflineDisk,
+};
 use crate::adapters::windows_lab_worker::WindowsWorker;
 use crate::config::AppConfig;
 use anyhow::{Context, Result};
@@ -51,6 +54,22 @@ pub fn open_configured(
         )?
     {
         lab = lab.with_admin(Arc::new(channel));
+    }
+    if let Some(offline) = &vm.offline {
+        let timeout = Duration::from_secs(offline.timeout_seconds);
+        lab = lab
+            .with_offline(Arc::new(WslOfflineDisk::new(
+                &offline.wsl_executable,
+                &offline.wsl_distribution,
+                &offline.guestfish,
+                &offline.hivexsh,
+                timeout,
+            )?))
+            .with_iso_builder(Arc::new(MkisofsIsoBuilder::new(&offline.mkisofs, timeout)?))
+            .with_guest_network(Arc::new(VmrunGuestNetwork::new(
+                &vm.vmrun, &vm.vmx, timeout,
+            )?))
+            .with_media_finalizer(Arc::new(PythonMediaFinalizer::new()?));
     }
     Ok(lab)
 }

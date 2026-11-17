@@ -30,9 +30,13 @@ pub mod install;
 pub mod media;
 pub mod package;
 pub mod provision;
+pub mod provision_environment;
+mod provision_service;
 pub mod runner;
 pub mod service;
 use admin::{AdminFile, AdminRequest, LabAdmin};
+use provision::{GuestNetwork, IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment};
+pub use provision_service::{ProvisionOptions, ProvisionOutcome};
 
 pub const STATE_SCHEMA: u32 = 2;
 
@@ -86,6 +90,11 @@ pub struct WindowsLab {
     host: Arc<dyn VmHost>,
     worker: Option<Arc<dyn LabWorker>>,
     admin: Option<Arc<dyn LabAdmin>>,
+    offline: Option<Arc<dyn OfflineDisk>>,
+    iso_builder: Option<Arc<dyn IsoBuilder>>,
+    guest_network: Option<Arc<dyn GuestNetwork>>,
+    media_finalizer: Option<Arc<dyn MediaFinalizer>>,
+    environment_registrar: Option<Arc<dyn ProvisionEnvironment>>,
     gate: Mutex<()>,
     vmx: PathBuf,
     caller: Option<String>,
@@ -131,6 +140,11 @@ impl WindowsLab {
             host,
             worker: None,
             admin: None,
+            offline: None,
+            iso_builder: None,
+            guest_network: None,
+            media_finalizer: None,
+            environment_registrar: None,
             gate: Mutex::new(()),
             vmx: config.vmx.clone(),
             caller: None,
@@ -181,6 +195,37 @@ impl WindowsLab {
     /// Attach the administrative channel used only for installation media.
     pub fn with_admin(mut self, admin: Arc<dyn LabAdmin>) -> Self {
         self.admin = Some(admin);
+        self
+    }
+
+    /// Attach the offline disk-injection adapter for `lab provision`.
+    pub fn with_offline(mut self, offline: Arc<dyn OfflineDisk>) -> Self {
+        self.offline = Some(offline);
+        self
+    }
+
+    /// Attach the ISO builder used by `lab provision`.
+    pub fn with_iso_builder(mut self, builder: Arc<dyn IsoBuilder>) -> Self {
+        self.iso_builder = Some(builder);
+        self
+    }
+
+    /// Attach hypervisor guest-address discovery used for environment registration.
+    pub fn with_guest_network(mut self, network: Arc<dyn GuestNetwork>) -> Self {
+        self.guest_network = Some(network);
+        self
+    }
+
+    /// Attach the repository media finalize entry point.
+    pub fn with_media_finalizer(mut self, finalizer: Arc<dyn MediaFinalizer>) -> Self {
+        self.media_finalizer = Some(finalizer);
+        self
+    }
+
+    /// Attach the controller environment registration/doctor hook. The CLI
+    /// supplies it only for `--register`/`--verify-environment`.
+    pub fn with_environment_registrar(mut self, registrar: Arc<dyn ProvisionEnvironment>) -> Self {
+        self.environment_registrar = Some(registrar);
         self
     }
 
@@ -244,6 +289,16 @@ impl WindowsLab {
             "lab VM {} is {:?}; restore or reconcile the previous experiment first",
             self.vm_id,
             state.phase
+        );
+        ensure!(
+            state
+                .last_provision
+                .as_ref()
+                .is_none_or(|provision| !matches!(
+                    provision.status,
+                    RunStatus::Running | RunStatus::Unknown
+                )),
+            "offline provisioning state is uncertain; re-provision the VM and reconcile it before preparing an experiment"
         );
         let maintenance = if let Some(worker) = &self.worker
             && self.host.running().await?
@@ -562,6 +617,7 @@ impl WindowsLab {
                     state.last_error = None;
                 }
                 OperationKind::Provision => {
+                    self.cleanup_provision_artifacts(&pending).await?;
                     state.phase = LabPhase::Idle;
                     state.active = None;
                     state.pending = None;
@@ -569,12 +625,17 @@ impl WindowsLab {
                     if let Some(record) = state.last_provision.as_mut() {
                         record.status = RunStatus::Completed;
                         record.settled = true;
-                        record.ended_at = Some(now());
+                        record.ended_at = record.ended_at.clone().or_else(|| Some(now()));
                         record.error = None;
                     }
                 }
             },
             ReconcileOutcome::Failed => {
+                if pending.kind == OperationKind::Provision {
+                    self.cleanup_provision_artifacts(&pending).await.context(
+                        "restore the VMX and remove the generated ISO before recording failure",
+                    )?;
+                }
                 state.phase = LabPhase::Failed;
                 state.active = None;
                 state.pending = None;
@@ -631,11 +692,34 @@ impl WindowsLab {
     /// A controller restart must not silently re-issue an unfinished effect.
     fn mark_restart_recovery(&self, state: &mut LabState) -> Result<()> {
         if state.pending.is_some()
-            && matches!(state.phase, LabPhase::Preparing | LabPhase::Restoring)
+            && matches!(
+                state.phase,
+                LabPhase::Preparing | LabPhase::Restoring | LabPhase::Provisioning
+            )
         {
             state.phase = LabPhase::RecoveryRequired;
             state.last_error = Some(
                 "controller restarted while a host operation was pending; inspect the VM and reconcile with its operation id"
+                    .into(),
+            );
+            self.store.save(state)?;
+        }
+        if state
+            .last_provision
+            .as_ref()
+            .is_some_and(|provision| provision.status == RunStatus::Running)
+            && state.pending.is_none()
+        {
+            if let Some(provision) = state.last_provision.as_mut() {
+                provision.status = RunStatus::Unknown;
+                provision.ended_at = Some(now());
+                provision.error = Some(
+                    "controller restarted during offline provisioning; re-provision the VM before reuse"
+                        .into(),
+                );
+            }
+            state.last_error = Some(
+                "controller restarted during offline provisioning; re-provision the VM with the same command and --replace-baseline if a baseline snapshot exists"
                     .into(),
             );
             self.store.save(state)?;
@@ -810,7 +894,10 @@ pub(crate) fn check_execution_admission(
             state.pending.is_none()
                 && !matches!(
                     state.phase,
-                    LabPhase::Preparing | LabPhase::Restoring | LabPhase::RecoveryRequired
+                    LabPhase::Preparing
+                        | LabPhase::Restoring
+                        | LabPhase::Provisioning
+                        | LabPhase::RecoveryRequired
                 )
                 && state
                     .last_run
@@ -819,7 +906,14 @@ pub(crate) fn check_execution_admission(
                 && state.last_install.as_ref().is_none_or(|install| !matches!(
                     install.status,
                     RunStatus::Running | RunStatus::Unknown
-                )),
+                ))
+                && state
+                    .last_provision
+                    .as_ref()
+                    .is_none_or(|provision| !matches!(
+                        provision.status,
+                        RunStatus::Running | RunStatus::Unknown
+                    )),
             "lab VM has an unresolved maintenance/execution effect; observe and reconcile it before starting new work"
         );
     }

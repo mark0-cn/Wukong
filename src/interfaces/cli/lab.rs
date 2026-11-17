@@ -1,11 +1,21 @@
 //! Operator entry point for the registered Windows experiment VM.
 use crate::adapters::environments::EnvironmentRegistry;
-use crate::application::windows_lab::ReconcileOutcome;
+use crate::application::windows_lab::provision::PublicConnection;
+use crate::application::windows_lab::provision_environment::{
+    pin_environment, prepare_environment, write_configuration,
+};
+use crate::application::windows_lab::{
+    MediaIdentity, ProvisionOptions, ProvisionOutcome, ProvisionSource, ReconcileOutcome,
+};
 use crate::config::AppConfig;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
+use async_trait::async_trait;
 use clap::Subcommand;
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -21,6 +31,44 @@ pub enum Command {
         /// Experiment description JSON with the dependency list.
         #[arg(long)]
         spec: PathBuf,
+    },
+    /// Provision the worker into the powered-off lab VM from finalized media.
+    Provision {
+        #[arg(long)]
+        vm: String,
+        /// Finalized offline worker media directory.
+        #[arg(long, conflicts_with_all = ["template", "keys", "spec"])]
+        media: Option<PathBuf>,
+        /// Released offline media template directory (requires --keys and --spec).
+        #[arg(long, requires_all = ["keys", "spec"])]
+        template: Option<PathBuf>,
+        /// Absolute controller signing key directory used by media finalize.
+        #[arg(long, requires = "template")]
+        keys: Option<PathBuf>,
+        /// Finalize enrollment spec JSON (scripts.worker.media schema 1).
+        #[arg(long, requires = "template")]
+        spec: Option<PathBuf>,
+        /// One-command override for the configured mkisofs executable.
+        #[arg(long)]
+        iso_tool: Option<PathBuf>,
+        /// Delete and recreate the configured baseline snapshot.
+        #[arg(long)]
+        replace_baseline: bool,
+        /// Write the managed-SSH environment into the active configuration.
+        #[arg(long)]
+        register: bool,
+        /// Require the registered environment doctor to pass after boot.
+        #[arg(long)]
+        verify_environment: bool,
+        /// Validate and print the planned host/guest actions without mutating.
+        #[arg(long)]
+        dry_run: bool,
+        /// Replace an existing different environment on --register.
+        #[arg(long)]
+        force: bool,
+        /// End-to-end provisioning deadline in seconds.
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
     },
     /// Create the baseline (if needed) and one immutable experiment snapshot.
     Prepare {
@@ -119,6 +167,68 @@ async fn run_with_registry(
                 None => Ok(json!({"vm_id": vm, "package": null})),
             }
         }
+        Command::Provision {
+            vm,
+            media,
+            template,
+            keys,
+            spec,
+            iso_tool,
+            replace_baseline,
+            register,
+            verify_environment,
+            dry_run,
+            force,
+            timeout,
+        } => {
+            ensure_registered(config, &vm)?;
+            ensure!(!force || register, "--force is only valid with --register");
+            let source = match (media, template, keys, spec) {
+                (Some(directory), None, None, None) => ProvisionSource::Media {
+                    directory: absolute(&directory)?,
+                },
+                (None, Some(template), Some(keys), Some(spec)) => ProvisionSource::Template {
+                    template: absolute(&template)?,
+                    keys: absolute(&keys)?,
+                    spec: absolute(&spec)?,
+                },
+                _ => anyhow::bail!(
+                    "provide either --media DIR or --template DIR --keys DIR --spec FILE"
+                ),
+            };
+            let configuration = (register || verify_environment)
+                .then(selected_configuration_path)
+                .flatten()
+                .map(|path| absolute(&path))
+                .transpose()?;
+            let mut lab = open(&vm)?;
+            if register || verify_environment {
+                if register {
+                    ensure!(
+                        configuration.is_some(),
+                        "--register cannot determine the active configuration file; pass the global --config option or run where wukong.toml is discoverable"
+                    );
+                }
+                let registrar = CliEnvironment::new(config, configuration.clone(), force);
+                lab = lab.with_environment_registrar(Arc::new(registrar));
+            }
+            let outcome: ProvisionOutcome = lab
+                .provision(ProvisionOptions {
+                    source,
+                    iso_tool: iso_tool.map(|path| absolute(&path)).transpose()?,
+                    replace_baseline,
+                    register,
+                    verify_environment,
+                    dry_run,
+                    timeout_seconds: timeout,
+                })
+                .await?;
+            let mut value = serde_json::to_value(&outcome)?;
+            if let Some(object) = value.as_object_mut() {
+                object.insert("vm_id".into(), json!(vm));
+            }
+            Ok(value)
+        }
         Command::Prepare {
             vm,
             owner,
@@ -196,4 +306,184 @@ fn read_spec(path: &Path) -> Result<crate::application::windows_lab::ExperimentS
     let spec = serde_json::from_slice(&bytes)
         .with_context(|| format!("parse experiment spec {}", path.display()))?;
     Ok(spec)
+}
+
+fn absolute(path: &Path) -> Result<PathBuf> {
+    std::path::absolute(path).with_context(|| format!("resolve {}", path.display()))
+}
+
+/// Environment registration and doctor hook for `--register`/`--verify-environment`.
+///
+/// Registration writes only the verified managed-SSH entry into the operator
+/// configuration; it never imports or rewrites private key material.
+struct CliEnvironment {
+    config: AppConfig,
+    state_dir: PathBuf,
+    configuration: Option<PathBuf>,
+    force: bool,
+    registry: Mutex<Option<EnvironmentRegistry>>,
+}
+
+impl CliEnvironment {
+    fn new(config: &AppConfig, configuration: Option<PathBuf>, force: bool) -> Self {
+        Self {
+            config: config.clone(),
+            state_dir: config.state_dir.clone(),
+            configuration,
+            force,
+            registry: Mutex::new(None),
+        }
+    }
+
+    fn cached_registry(&self) -> Result<Option<EnvironmentRegistry>> {
+        match self.registry.lock() {
+            Ok(guard) => Ok(guard.clone()),
+            Err(poisoned) => Ok(poisoned.into_inner().clone()),
+        }
+    }
+
+    fn store_registry(&self, registry: &EnvironmentRegistry) {
+        match self.registry.lock() {
+            Ok(mut guard) => *guard = Some(registry.clone()),
+            Err(poisoned) => *poisoned.into_inner() = Some(registry.clone()),
+        }
+    }
+
+    fn registry(&self) -> Result<EnvironmentRegistry> {
+        if let Some(registry) = self.cached_registry()? {
+            return Ok(registry);
+        }
+        EnvironmentRegistry::new(self.config.environments.clone())
+    }
+}
+
+#[async_trait]
+impl crate::application::windows_lab::provision::ProvisionEnvironment for CliEnvironment {
+    fn register(
+        &self,
+        connection: &PublicConnection,
+        media: &MediaIdentity,
+        guest_ip: &str,
+        identity_file: &Path,
+    ) -> Result<Value> {
+        let configuration = self
+            .configuration
+            .as_deref()
+            .context("--register requires the active configuration file")?;
+        let registration = prepare_environment(
+            &self.config,
+            &self.state_dir,
+            media,
+            connection,
+            guest_ip,
+            identity_file,
+            self.force,
+        )?;
+        let written =
+            write_configuration(configuration, &registration, &self.state_dir, self.force)?;
+        let pins = pin_environment(&self.state_dir, &registration)?;
+        let reloaded = AppConfig::load(Some(configuration))
+            .context("reload the configuration after environment registration")?;
+        let registry = EnvironmentRegistry::new(reloaded.environments.clone())?;
+        let registration = registration.environment_id.clone();
+        self.store_registry(&registry);
+        Ok(json!({
+            "environment_id": registration,
+            "configuration": written.configuration,
+            "backup": written.backup,
+            "replaced": written.replaced,
+            "public_pins": pins,
+        }))
+    }
+
+    async fn verify(&self, environment_id: &str) -> Result<Value> {
+        let registry = self.registry()?;
+        registry.config(environment_id)?;
+        registry.doctor(environment_id).await
+    }
+}
+
+/// Resolve the configuration file the running process loaded. The global
+/// `--config` option is not visible to the lab subcommand module, so the
+/// explicit argument is recovered from argv and the standard discovery order is
+/// mirrored when it is absent.
+fn selected_configuration_path() -> Option<PathBuf> {
+    let arguments: Vec<String> = std::env::args_os()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    let cwd = std::env::current_dir().ok()?;
+    let executable = std::env::current_exe().ok();
+    resolve_configuration_path(&arguments, &cwd, executable.as_deref())
+}
+
+fn resolve_configuration_path(
+    arguments: &[String],
+    cwd: &Path,
+    executable: Option<&Path>,
+) -> Option<PathBuf> {
+    let mut arguments = arguments.iter().skip(1);
+    while let Some(argument) = arguments.next() {
+        if argument == "--config" {
+            return arguments.next().map(PathBuf::from).map(|path| {
+                if path.is_relative() {
+                    cwd.join(path)
+                } else {
+                    path
+                }
+            });
+        }
+        if let Some(value) = argument.strip_prefix("--config=") {
+            let path = PathBuf::from(value);
+            return Some(if path.is_relative() {
+                cwd.join(path)
+            } else {
+                path
+            });
+        }
+    }
+    let local = cwd.join("wukong.toml");
+    if local.is_file() {
+        return Some(local);
+    }
+    let portable = executable?.parent()?.join("wukong.toml");
+    portable.is_file().then_some(portable)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_configuration_argument_wins_over_discovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let discovered = directory.path().join("wukong.toml");
+        std::fs::write(&discovered, "").unwrap();
+        let arguments = vec![
+            "wukong".to_string(),
+            "--config".to_string(),
+            "custom.toml".to_string(),
+            "lab".to_string(),
+        ];
+        assert_eq!(
+            resolve_configuration_path(&arguments, directory.path(), None),
+            Some(directory.path().join("custom.toml"))
+        );
+    }
+
+    #[test]
+    fn configuration_discovery_mirrors_the_cli_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("wukong.toml");
+        std::fs::write(&local, "").unwrap();
+        let arguments = vec!["wukong".to_string(), "lab".to_string()];
+        assert_eq!(
+            resolve_configuration_path(&arguments, directory.path(), None),
+            Some(local)
+        );
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_configuration_path(&arguments, empty.path(), None),
+            None
+        );
+    }
 }
