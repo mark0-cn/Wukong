@@ -177,18 +177,28 @@ pub(super) fn observe(store: &Store, job: &JobRecord) -> Result<()> {
         return Ok(());
     }
     let result = job.status.result.as_ref();
-    let report_evidence = job
+    // The candidate script runs in the same tree, so it can create its own
+    // validation-report.json. Accept the report only when exactly one exists, which is
+    // only true for the trusted driver output; anything ambiguous counts as not passed.
+    let reports: Vec<&Value> = job
         .imported_artifacts
         .as_ref()
         .and_then(|v| v["artifacts"].as_array())
-        .and_then(|items| {
-            items.iter().find(|v| {
-                v["artifact"]["path"]
-                    .as_str()
-                    .is_some_and(|path| path.ends_with("/validation-report.json"))
-            })
+        .map(|items| {
+            items
+                .iter()
+                .filter(|v| {
+                    v["artifact"]["path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with("/validation-report.json"))
+                })
+                .collect()
         })
-        .and_then(|v| v["evidence_id"].as_str());
+        .unwrap_or_default();
+    let report_evidence = match reports.as_slice() {
+        [report] => report["evidence_id"].as_str(),
+        _ => None,
+    };
     let report = report_evidence
         .map(|id| store.read_evidence(&job.run_id, id))
         .transpose()?
