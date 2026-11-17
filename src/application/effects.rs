@@ -140,6 +140,14 @@ impl<'a> DurableEffects<'a> {
                     return Ok(Decision::Finish(existing.clone(), raw, true, CallState::Uncertain));
                 }
             }
+            if let Some(existing) = &existing
+                && existing.side_effecting
+                && existing.state == CallState::Uncertain
+            {
+                anyhow::bail!(
+                    "call {call} has an uncertain side effect; reconcile the worker receipt before retrying"
+                );
+            }
             let mut record = existing.unwrap_or(ToolCallRecord {
                 id: call.into(),
                 run_id: agent.run_id.clone(),
