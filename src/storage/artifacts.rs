@@ -20,7 +20,10 @@ impl Store {
         Ok(path)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters are the artifact row written by one INSERT; a builder would only move the same fields"
+    )]
     pub fn artifact_file(
         &self,
         run: &str,

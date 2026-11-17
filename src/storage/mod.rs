@@ -400,7 +400,10 @@ impl Store {
             Self::tx_enqueue_message(tx, run_id, sender, recipient, content, key, &envelope)?;
         Ok(inserted)
     }
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the message columns inserted by one statement"
+    )]
     pub(crate) fn tx_enqueue_message(
         tx: &Connection,
         run_id: &str,
@@ -457,7 +460,10 @@ impl Store {
         })
     }
     // The provenance tuple and payload deliberately stay explicit at call sites.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the artifact columns inserted by one statement"
+    )]
     pub fn artifact(
         &self,
         run_id: &str,
