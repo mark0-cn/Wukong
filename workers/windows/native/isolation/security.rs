@@ -541,12 +541,16 @@ impl AclPolicy {
     }
     pub fn verify(&self, path: &Path, directory: bool) -> Result<()> {
         no_links(path)?;
-        let metadata = fs::symlink_metadata(path)?;
+        // Canonicalize first and check the same path twice: reading the entry type from the
+        // caller's path and the ACL from a canonicalized one lets a concurrent rename or
+        // junction swap make the two checks describe different objects.
+        let canonical = path.canonicalize()?;
+        let metadata = fs::symlink_metadata(&canonical)?;
         ensure!(
             metadata.is_dir() == directory && (directory || metadata.is_file()),
             "invalid native protected entry type"
         );
-        let encoded = wide(path.canonicalize()?.as_os_str())?;
+        let encoded = wide(canonical.as_os_str())?;
         let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
         let mut owner: PSID = null_mut();
         let mut acl: *mut ACL = null_mut();

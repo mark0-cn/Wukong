@@ -193,13 +193,14 @@ fn register_service(
     manifest: &VerifiedManifest,
 ) -> Result<()> {
     // SAFETY: Both arguments are null, which selects the local machine's default SCM database;
-    // the returned handle is `ensure!`d non-null before any service call uses it.
-    let manager = Service(unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CREATE_SERVICE) });
+    // the returned handle is checked before `Service` adopts it, because that Drop closes it.
+    let manager = unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CREATE_SERVICE) };
     ensure!(
-        !manager.0.is_null(),
+        !manager.is_null(),
         "cannot open SCM for offline worker installation: {}",
         std::io::Error::last_os_error()
     );
+    let manager = Service(manager);
     let name = security::wide(OsStr::new(&pipe_transport::service_name(
         &deployment.installation_id,
     )?))?;

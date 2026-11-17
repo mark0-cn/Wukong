@@ -95,9 +95,7 @@ fn access(path: &Path, directory: bool) -> Result<Option<i32>> {
 
 fn label(handle: HANDLE) -> Value {
     let result = SecurityDescriptor::from_object(handle, SE_WINDOW_OBJECT).and_then(|descriptor| {
-        crate::isolation::process_access::verify_integrity_label(
-            descriptor.attributes().lpSecurityDescriptor,
-        )
+        crate::isolation::process_access::verify_integrity_label(&descriptor)
     });
     match result {
         Ok(()) => json!({"low_no_write_up":true}),

@@ -15,8 +15,8 @@ use windows_sys::Win32::{
     Security::{
         ACE_HEADER,
         Authorization::{SE_KERNEL_OBJECT, SetSecurityInfo},
-        GetAce, GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-        SECURITY_ATTRIBUTES, SID, SYSTEM_MANDATORY_LABEL_ACE,
+        GetAce, GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES, SID,
+        SYSTEM_MANDATORY_LABEL_ACE,
     },
     System::Threading::PROCESS_ALL_ACCESS,
 };
@@ -63,11 +63,7 @@ pub(crate) fn seal_low_integrity(handle: HANDLE) -> Result<()> {
         status == 0,
         "cannot seal owned suspended object label: {status}"
     );
-    verify_integrity_label(
-        SecurityDescriptor::from_object(handle, SE_KERNEL_OBJECT)?
-            .attributes()
-            .lpSecurityDescriptor,
-    )
+    verify_integrity_label(&SecurityDescriptor::from_object(handle, SE_KERNEL_OBJECT)?)
 }
 impl Policy {
     pub fn owned(persona: &Persona, debugger: Option<&Persona>) -> Result<Self> {
@@ -108,18 +104,14 @@ impl Policy {
         let descriptor =
             SecurityDescriptor::from_sddl(&format!("O:SYG:SYD:P{entries}S:(ML;;NW;;;LW)"))?;
         let result = Self { descriptor, grants };
-        result.verify_descriptor(result.attributes().lpSecurityDescriptor)?;
+        result.verify_descriptor(&result.descriptor)?;
         Ok(result)
     }
     pub fn attributes(&self) -> SECURITY_ATTRIBUTES {
         self.descriptor.attributes()
     }
     pub fn verify(&self, handle: HANDLE) -> Result<()> {
-        self.verify_descriptor(
-            SecurityDescriptor::from_object(handle, SE_KERNEL_OBJECT)?
-                .attributes()
-                .lpSecurityDescriptor,
-        )
+        self.verify_descriptor(&SecurityDescriptor::from_object(handle, SE_KERNEL_OBJECT)?)
     }
     pub fn seal(&self, handle: HANDLE) -> Result<()> {
         security::verify_descriptor(
@@ -133,18 +125,25 @@ impl Policy {
         seal_low_integrity(handle)?;
         self.verify(handle)
     }
-    fn verify_descriptor(&self, descriptor: PSECURITY_DESCRIPTOR) -> Result<()> {
-        security::verify_descriptor(descriptor, "S-1-5-18", &self.grants, false)?;
+    fn verify_descriptor(&self, descriptor: &SecurityDescriptor) -> Result<()> {
+        security::verify_descriptor(
+            descriptor.attributes().lpSecurityDescriptor,
+            "S-1-5-18",
+            &self.grants,
+            false,
+        )?;
         verify_integrity_label(descriptor)
     }
 }
 
-pub(crate) fn verify_integrity_label(descriptor: PSECURITY_DESCRIPTOR) -> Result<()> {
+pub(crate) fn verify_integrity_label(descriptor: &SecurityDescriptor) -> Result<()> {
+    // The reference keeps the owning Local allocation alive for the whole call.
+    let raw = descriptor.attributes().lpSecurityDescriptor;
     let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
     // SAFETY: every caller passes a descriptor owned by a live SecurityDescriptor/Local, so
     // the pointer is valid for the call; present, sacl and defaulted are stack out-params.
     security::check(unsafe {
-        GetSecurityDescriptorSacl(descriptor, &mut present, &mut sacl, &mut defaulted)
+        GetSecurityDescriptorSacl(raw, &mut present, &mut sacl, &mut defaulted)
     })
     .context("inspect resource object DACL/label")?;
     ensure!(
@@ -252,11 +251,7 @@ mod tests {
             format!("O:SYG:SYD:P{entries}S:(ML;;NW;;;ME)"),
         ] {
             let descriptor = SecurityDescriptor::from_sddl(&sddl)?;
-            assert!(
-                policy
-                    .verify_descriptor(descriptor.attributes().lpSecurityDescriptor)
-                    .is_err()
-            );
+            assert!(policy.verify_descriptor(&descriptor).is_err());
         }
         Ok(())
     }

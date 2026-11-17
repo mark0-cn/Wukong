@@ -16,22 +16,24 @@ pub(crate) fn program_data() -> Result<PathBuf> {
     // SAFETY: &FOLDERID_ProgramData is a const known-folder GUID valid for the call, path
     // is a stack out-param, and the ensure! below requires success and a non-null string.
     let result = unsafe { SHGetKnownFolderPath(&FOLDERID_ProgramData, 0, null_mut(), &mut path) };
-    ensure!(
-        result >= 0 && !path.is_null(),
-        "cannot resolve Windows ProgramData (HRESULT 0x{:08x})",
-        result as u32
-    );
     struct Memory(*mut u16);
     impl Drop for Memory {
         fn drop(&mut self) {
-            // SAFETY: Memory owns the CoTaskMemAlloc'd path SHGetKnownFolderPath returned, which
-            // the ensure! above proved non-null; this Drop frees it once with CoTaskMemFree.
+            // SAFETY: Memory owns the CoTaskMemAlloc'd path SHGetKnownFolderPath returned, and
+            // CoTaskMemFree treats a null pointer as a no-op, so every path is freed once.
             unsafe {
                 windows::Win32::System::Com::CoTaskMemFree(Some(self.0.cast()));
             }
         }
     }
+    // Adopt the pointer before validating: a failed call can still hand back an allocation,
+    // which the Drop above then frees instead of leaking it.
     let path = Memory(path);
+    ensure!(
+        result >= 0 && !path.0.is_null(),
+        "cannot resolve Windows ProgramData (HRESULT 0x{:08x})",
+        result as u32
+    );
     let mut length = 0;
     // SAFETY: path.0 is non-null (ensure! above) and NUL-terminated per SHGetKnownFolderPath,
     // so each u16 up to the terminator is in bounds; the 32768 bound stops an unterminated scan.
