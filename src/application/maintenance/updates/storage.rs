@@ -144,7 +144,11 @@ fn copy_releases(source: &Path, destination: &Path) -> Result<()> {
             fs::copy(path.join(file), output.join(file))?;
         }
         let artifact = manifest.artifact()?;
-        let filename = artifact.url.rsplit('/').next().unwrap();
+        let filename = artifact
+            .url
+            .rsplit('/')
+            .next()
+            .unwrap_or(artifact.url.as_str());
         let payload = path.join(filename);
         if payload.exists() {
             ensure!(

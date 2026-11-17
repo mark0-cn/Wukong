@@ -279,7 +279,12 @@ impl SessionsService {
                     None
                 };
                 let worker_call = if cleanup_actor.is_some() {
-                    session.cleanup_intent.as_ref().unwrap().call_id.as_str()
+                    session
+                        .cleanup_intent
+                        .as_ref()
+                        .expect("cleanup intent is present when a cleanup actor exists")
+                        .call_id
+                        .as_str()
                 } else {
                     call_id
                 };
@@ -463,7 +468,12 @@ impl SessionsService {
                     None
                 };
                 let worker_call = if cleanup_actor.is_some() {
-                    session.cleanup_intent.as_ref().unwrap().call_id.as_str()
+                    session
+                        .cleanup_intent
+                        .as_ref()
+                        .expect("cleanup intent is present when a cleanup actor exists")
+                        .call_id
+                        .as_str()
                 } else {
                     call_id
                 };

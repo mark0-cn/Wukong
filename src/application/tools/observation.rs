@@ -86,7 +86,10 @@ impl FairObserver {
             };
             if let Some(candidate) = candidate {
                 self.sequence += 1;
-                let entry = self.entries.get_mut(&candidate.key).unwrap();
+                let entry = self
+                    .entries
+                    .get_mut(&candidate.key)
+                    .expect("the selected candidate was read from entries above");
                 entry.running = true;
                 entry.last = self.sequence;
                 active += 1;

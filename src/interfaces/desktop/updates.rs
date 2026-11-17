@@ -290,11 +290,14 @@ impl Controller {
     async fn download(&self, manifest: &Manifest) -> Result<()> {
         let artifact = manifest.artifact()?;
         let path = recovery::payload(manifest)?;
+        let parent = path
+            .parent()
+            .context("cached artifact path needs a parent directory")?;
         if path.exists() && manifest::verify_file(&path, artifact).is_ok() {
             return Ok(());
         }
         ensure!(
-            fs2::available_space(path.parent().unwrap())? > artifact.size * 3 + 512 * 1024 * 1024,
+            fs2::available_space(parent)? > artifact.size * 3 + 512 * 1024 * 1024,
             UiMessage::new("system-insufficient-space-on-the-client-disk")
         );
         self.phase(
@@ -310,7 +313,7 @@ impl Controller {
             .cancellable(async { Ok(client.get(&artifact.url).send().await?) })
             .await?
             .error_for_status()?;
-        let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+        let mut file = tempfile::NamedTempFile::new_in(parent)?;
         let mut downloaded = 0;
         use std::io::Write;
         while let Some(chunk) = self

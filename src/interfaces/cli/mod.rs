@@ -172,7 +172,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             &std::fs::read_to_string(directory.join("latest.json.sig"))?,
         )?;
         for artifact in manifest.platforms.values() {
-            let filename = artifact.url.rsplit('/').next().unwrap();
+            let filename = artifact
+                .url
+                .rsplit('/')
+                .next()
+                .unwrap_or(artifact.url.as_str());
             crate::application::maintenance::updates::manifest::verify_file(
                 &directory.join(filename),
                 artifact,

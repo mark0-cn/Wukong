@@ -262,7 +262,11 @@ impl Workbench {
             "python3",
             &env.image_id,
             "/opt/wukong/runtime/wukong_worker/workbench/relay.py",
-            challenge.network.host.as_deref().unwrap(),
+            challenge
+                .network
+                .host
+                .as_deref()
+                .expect("local_service challenges declare a host"),
             &challenge.network.port.to_string(),
         ])?;
         self.docker.run(&[

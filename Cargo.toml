@@ -91,3 +91,6 @@ dbg_macro = "warn"
 todo = "warn"
 # A suppression without a reason is an unexplained contract change.
 allow_attributes_without_reason = "warn"
+# Prefer `?` where a caller can act on the failure; an intentional panic uses
+# `expect` with the invariant that makes it impossible. Tests are exempt.
+unwrap_used = "warn"

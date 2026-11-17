@@ -337,8 +337,12 @@ pub(crate) fn drive(
 fn task_schema() -> Value {
     let mut schema = crate::application::tools::child_schema();
     let properties = schema["properties"].as_object_mut().expect("typed object");
-    let name = properties.remove("name").unwrap();
-    let task = properties.remove("task").unwrap();
+    let name = properties
+        .remove("name")
+        .expect("child_schema declares a name field");
+    let task = properties
+        .remove("task")
+        .expect("child_schema declares a task field");
     properties.insert("description".into(), name);
     properties.insert("prompt".into(), task);
     schema["required"] = json!(["description", "prompt", "role", "scope"]);

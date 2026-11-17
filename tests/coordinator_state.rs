@@ -1,3 +1,7 @@
+#![allow(
+    clippy::unwrap_used,
+    reason = "a fixture that cannot be built should fail the test immediately"
+)]
 use serde_json::json;
 use std::{fs, sync::Arc};
 use wukong::{

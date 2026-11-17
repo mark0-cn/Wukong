@@ -288,7 +288,10 @@ pub(super) fn gate_models(
                             agent
                                 .task_result
                                 .as_ref()
-                                .map(|result| serde_json::to_string(result).unwrap())
+                                .map(|result| {
+                                    serde_json::to_string(result)
+                                        .expect("serializing a JSON value cannot fail")
+                                })
                                 .or(agent.summary)
                                 .unwrap_or_default(),
                         )],

@@ -52,7 +52,9 @@ pub(crate) fn markdown_for_locale(locale: crate::i18n::Locale) -> anyhow::Result
             .join(", ");
         output.push_str(&format!(
             "| `{}` | {} | {} | {} |\n",
-            entry["name"].as_str().unwrap(),
+            entry["name"]
+                .as_str()
+                .expect("skill catalog entries carry a name"),
             if tools.is_empty() {
                 unregistered
             } else {

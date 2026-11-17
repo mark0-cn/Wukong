@@ -66,7 +66,7 @@ impl ConfigDocument {
                 item.is_table_like(),
                 UiMessage::new("system-the-configuration-path-is-not-a-table")
             );
-            let key = edit.path.last().unwrap();
+            let key = edit.path.last().context("config edit needs a path")?;
             if edit.value.is_null() {
                 if let Some(table) = item.as_table_like_mut() {
                     table.remove(key);

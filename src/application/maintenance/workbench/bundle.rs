@@ -271,7 +271,10 @@ impl Workbench {
             "unsupported bundle version/platform"
         );
         let mut actual = inventory(&source)?;
-        actual.as_object_mut().unwrap().remove("bundle.json");
+        actual
+            .as_object_mut()
+            .context("bundle inventory is not an object")?
+            .remove("bundle.json");
         ensure!(
             actual == manifest["files"],
             "bundle hash/inventory mismatch"

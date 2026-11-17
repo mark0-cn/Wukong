@@ -1,4 +1,8 @@
 //! Exercises the real CLI, scheduler, SQLite and Rig over a local HTTP wire.
+#![allow(
+    clippy::unwrap_used,
+    reason = "a fixture that cannot be built should fail the test immediately"
+)]
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};

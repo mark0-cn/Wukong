@@ -67,21 +67,25 @@ pub fn check(config: &AppConfig, scope: HealthScope, epoch: u64) -> Result<Healt
             ..Default::default()
         };
         if scope == HealthScope::Full {
-            let result = (|| -> Result<serde_json::Value> {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()?;
-                runtime.block_on(async {
-                    let registry = crate::adapters::environments::EnvironmentRegistry::new(
-                        config.environments.clone(),
-                    )?;
-                    let result = registry
-                        .doctor(config.default_environment.as_deref().unwrap())
-                        .await;
-                    registry.close().await;
-                    result
-                })
-            })();
+            let result =
+                (|| -> Result<serde_json::Value> {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()?;
+                    runtime.block_on(async {
+                        let registry = crate::adapters::environments::EnvironmentRegistry::new(
+                            config.environments.clone(),
+                        )?;
+                        let result =
+                            registry
+                                .doctor(config.default_environment.as_deref().expect(
+                                    "a configured environment implies a default environment",
+                                ))
+                                .await;
+                        registry.close().await;
+                        result
+                    })
+                })();
             match result {
                 Ok(value) => {
                     health.running = Some(true);

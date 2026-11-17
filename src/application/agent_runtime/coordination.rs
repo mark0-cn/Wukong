@@ -18,7 +18,8 @@ pub(super) fn project_conversations(
                 &mut fatal,
                 application.runner.checkpoint_and_ack(
                     &id.0,
-                    serde_json::to_value(&conversation.0).unwrap(),
+                    serde_json::to_value(&conversation.0)
+                        .expect("conversation data is serializable"),
                     &[],
                 ),
             );
