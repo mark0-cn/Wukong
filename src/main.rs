@@ -38,15 +38,22 @@ async fn main() -> std::process::ExitCode {
         unsafe extern "system" {
             fn FreeConsole() -> i32;
         }
+        // SAFETY: `FreeConsole` takes no arguments and only detaches this process
+        // from its console; a failure returns zero and has no other effect.
         unsafe {
             FreeConsole();
         }
     }
     std::panic::set_hook(Box::new(|info| {
-        // Keep diagnostics available when launched from the desktop.
+        // Keep diagnostics available when launched from the desktop: the working
+        // directory is arbitrary and may be read-only, so use the OS temp directory
+        // and say where the report went.
         let message = format!("wukong: internal error: {info}");
-        let _ = std::fs::write("wukong-panic.log", &message);
-        eprintln!("{message}");
+        let path = std::env::temp_dir().join("wukong-panic.log");
+        match std::fs::write(&path, &message) {
+            Ok(()) => eprintln!("{message} (report: {})", path.display()),
+            Err(_) => eprintln!("{message}"),
+        }
     }));
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
