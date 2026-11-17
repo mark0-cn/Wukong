@@ -438,8 +438,16 @@ impl Controller {
         }
 
         if matches!(action, Action::Integrate) {
-            let path = recovery::integrate_linux()?;
-            std::process::Command::new(path).spawn()?;
+            // The installer handoff is process and filesystem work; keep it off
+            // the async worker like the neighbouring phases do.
+            tokio::task::spawn_blocking(|| -> Result<()> {
+                let path = recovery::integrate_linux()?;
+                std::process::Command::new(path).spawn()?;
+                Ok(())
+            })
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|result| result)?;
             app.exit(0);
             return Ok(());
         }
