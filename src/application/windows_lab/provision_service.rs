@@ -1412,26 +1412,35 @@ impl WindowsLab {
             }
             return Ok(outcome);
         }
+        // Mutations run least-destructive first: the legacy SYSTEM-hive service
+        // key, then the restored machine startup policy, then the operation's
+        // leftover files, and only last its provision directory. The hive key
+        // used to be removed last, so a hivexsh failure left the directory
+        // already deleted while the key survived: the failure report did not
+        // match what had actually changed on the disk, and provisioning stayed
+        // blocked until another cleanup round. Every step is idempotent, so a
+        // partial failure stops before later removals and a retry only repeats
+        // the reported pending steps.
+        let service_step = "remove the legacy one-shot provisioning service key";
+        let policy_step = "restore the machine startup policy";
+        let files_step = "remove the operation's leftover guest files";
+        let directory_step = "remove the operation's provision directory";
+        let mut pending: Vec<&'static str> = Vec::new();
+        if plan.service_key.is_some() {
+            pending.push(service_step);
+        }
         if !plan.files.is_empty() {
-            offline
-                .write_guest_files(&guest_disk.path, &plan.files)
-                .await
-                .context("restore the machine startup policy through libguestfs")?;
-            outcome.files_written = plan.files.len();
+            pending.push(policy_step);
         }
-        let removal = GuestRemoval {
-            directories: plan.directories_to_remove.clone(),
-            files: plan.files_to_remove.clone(),
-        };
-        if !removal.is_empty() {
-            let evidence = offline
-                .remove_guest_paths(&guest_disk.path, &removal)
-                .await
-                .context("remove guest provisioning leftovers")?;
-            outcome.files_removed = evidence.removed_files;
-            outcome.directories_removed = evidence.removed_directories;
+        if !plan.files_to_remove.is_empty() {
+            pending.push(files_step);
         }
+        if !plan.directories_to_remove.is_empty() {
+            pending.push(directory_step);
+        }
+        let mut completed: Vec<&'static str> = Vec::new();
         if let Some(service) = &plan.service_key {
+            let step = pending.remove(0);
             let evidence = offline
                 .remove_service_key(
                     &guest_disk.path,
@@ -1441,11 +1450,48 @@ impl WindowsLab {
                     },
                 )
                 .await
-                .context("remove the legacy one-shot provisioning service key")?;
+                .with_context(|| cleanup_failure(step, &completed, &pending))?;
             if evidence.removed {
                 outcome.service_key_removed = Some(service.clone());
             }
+            completed.push(step);
         }
+        if !plan.files.is_empty() {
+            let step = pending.remove(0);
+            offline
+                .write_guest_files(&guest_disk.path, &plan.files)
+                .await
+                .with_context(|| cleanup_failure(step, &completed, &pending))?;
+            outcome.files_written = plan.files.len();
+            completed.push(step);
+        }
+        let leftover_files = GuestRemoval {
+            directories: Vec::new(),
+            files: plan.files_to_remove.clone(),
+        };
+        if !leftover_files.is_empty() {
+            let step = pending.remove(0);
+            let evidence = offline
+                .remove_guest_paths(&guest_disk.path, &leftover_files)
+                .await
+                .with_context(|| cleanup_failure(step, &completed, &pending))?;
+            outcome.files_removed = evidence.removed_files;
+            completed.push(step);
+        }
+        let provision_directories = GuestRemoval {
+            directories: plan.directories_to_remove.clone(),
+            files: Vec::new(),
+        };
+        if !provision_directories.is_empty() {
+            let step = pending.remove(0);
+            let evidence = offline
+                .remove_guest_paths(&guest_disk.path, &provision_directories)
+                .await
+                .with_context(|| cleanup_failure(step, &completed, &pending))?;
+            outcome.directories_removed = evidence.removed_directories;
+            completed.push(step);
+        }
+        debug_assert!(pending.is_empty(), "every planned cleanup step ran");
         tracing::info!(
             vm = %self.vm_id,
             operation = %options.operation_id,
@@ -1530,6 +1576,25 @@ impl WindowsLab {
         }
         Ok(())
     }
+}
+
+/// Guest cleanup cannot roll back disk mutations, so a partial failure reports
+/// the failed step, the steps that already completed and those it deliberately
+/// skipped. The ordering is least-destructive first and every step is
+/// idempotent, which makes retrying only the reported pending steps safe.
+fn cleanup_failure(step: &str, completed: &[&str], not_attempted: &[&str]) -> String {
+    let format_steps = |steps: &[&str]| {
+        if steps.is_empty() {
+            "none".to_owned()
+        } else {
+            steps.join(", ")
+        }
+    };
+    format!(
+        "failed to {step}; completed: [{}]; not attempted: [{}]",
+        format_steps(completed),
+        format_steps(not_attempted)
+    )
 }
 
 fn planned_actions(plan: &PlannedProvision) -> Vec<String> {

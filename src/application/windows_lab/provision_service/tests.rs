@@ -228,6 +228,10 @@ struct DiskState {
     tamper: Option<Tampered>,
     removals: Vec<GuestRemoval>,
     service_removals: Vec<ServiceRemoval>,
+    /// Test-only fault injection for the legacy service-key removal.
+    fail_service_removal: bool,
+    /// Test-only fault injection for leftover-file removal.
+    fail_file_removal: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -313,6 +317,15 @@ impl FakeDisk {
     }
     fn service_removals(&self) -> Vec<ServiceRemoval> {
         self.state.lock().unwrap().service_removals.clone()
+    }
+    fn fail_service_removal(&self, fail: bool) {
+        self.state.lock().unwrap().fail_service_removal = fail;
+    }
+    fn fail_file_removal(&self, fail: bool) {
+        self.state.lock().unwrap().fail_file_removal = fail;
+    }
+    fn directories(&self) -> BTreeSet<String> {
+        self.state.lock().unwrap().directories.clone()
     }
 
     /// Seed leftovers of one failed provisioning attempt on the fake guest.
@@ -435,6 +448,9 @@ impl OfflineDisk for FakeDisk {
         state.calls.push("remove-service".into());
         state.guest_paths.push(guest_path(&removal.system_hive)?);
         state.service_removals.push(removal.clone());
+        if state.fail_service_removal {
+            bail!("hivexsh failed: hivexsh: 'del' command should not be given arguments");
+        }
         let present = state.service.as_deref() == Some(removal.service.as_str());
         if present {
             state.service = None;
@@ -454,6 +470,9 @@ impl OfflineDisk for FakeDisk {
         let mut state = self.state.lock().unwrap();
         state.calls.push("remove-paths".into());
         state.removals.push(removal.clone());
+        if state.fail_file_removal && !removal.files.is_empty() {
+            bail!("guestfish failed: simulated leftover-file removal failure");
+        }
         let mut evidence = GuestRemovalEvidence::default();
         for directory in &removal.directories {
             state.guest_paths.push(guest_path(directory)?);
@@ -1645,15 +1664,32 @@ async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
         disk.file(&format!("{GUEST_STARTUP_DIR}\\other.cmd"))
             .is_some()
     );
+    let removals = disk.removals();
+    assert_eq!(removals.len(), 2, "leftover files and the directory");
+    assert!(removals[0].directories.is_empty());
     assert_eq!(
-        disk.removals().last().unwrap().directories,
-        vec![paths.root.clone()]
+        removals[0].files,
+        vec![
+            paths.startup_script.clone(),
+            paths.scripts_ini_backup.clone(),
+            paths.gpt_ini_backup.clone(),
+        ]
     );
+    assert!(removals[1].files.is_empty());
+    assert_eq!(removals[1].directories, vec![paths.root.clone()]);
     assert_eq!(disk.service_removals().len(), 1);
     let calls = disk.calls();
     assert_eq!(
         calls,
-        ["inspect", "write", "remove-paths", "remove-service"].map(str::to_string)
+        [
+            "inspect",
+            "remove-service",
+            "write",
+            "remove-paths",
+            "remove-paths"
+        ]
+        .map(str::to_string),
+        "the legacy hive key is removed before any guest path; the provision directory is removed last"
     );
     // Verification/deletion calls the unrelated directory is not touched, and a
     // second cleanup run is an idempotent no-op.
@@ -1676,6 +1712,162 @@ async fn clean_guest_removes_exactly_the_recorded_operation_artifacts() {
         "{:?}",
         again.actions
     );
+}
+
+#[tokio::test]
+async fn clean_guest_hive_failure_stops_before_removing_anything_else() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "b".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    seed_leftovers(&disk, &paths, true);
+    disk.fail_service_removal(true);
+    let lab = wired(&deployment, disk.clone(), iso);
+    let error = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation.clone(),
+            dry_run: false,
+        })
+        .await
+        .unwrap_err();
+    let message = format!("{error:#}");
+    // The failure names the exact step, its underlying hivexsh cause and what
+    // was deliberately not attempted; nothing after the hive deletion ran.
+    assert!(
+        message.contains("remove the legacy one-shot provisioning service key"),
+        "{message}"
+    );
+    assert!(
+        message.contains("hivexsh: 'del' command should not be given arguments"),
+        "{message}"
+    );
+    assert!(message.contains("completed: [none]"), "{message}");
+    for step in [
+        "restore the machine startup policy",
+        "remove the operation's leftover guest files",
+        "remove the operation's provision directory",
+    ] {
+        assert!(
+            message.contains(step),
+            "not-attempted step {step:?} is reported: {message}"
+        );
+    }
+    assert_eq!(
+        disk.calls(),
+        ["inspect", "remove-service"].map(str::to_string)
+    );
+    assert!(disk.directories().contains(&paths.root));
+    assert!(disk.file(&paths.startup_script).is_some());
+    assert!(
+        !disk
+            .removals()
+            .iter()
+            .any(|removal| removal.directories.contains(&paths.root)),
+        "the provision directory must survive a hive failure"
+    );
+    // The ordering makes the retry safe: clear the transient hive failure and
+    // the same command finishes the job without recreating anything.
+    disk.fail_service_removal(false);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.service_key_removed, Some(paths.service.clone()));
+    assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
+    assert!(disk.directories().is_empty());
+}
+
+#[tokio::test]
+async fn clean_guest_file_failure_keeps_the_provision_directory() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "a".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    seed_leftovers(&disk, &paths, true);
+    disk.fail_file_removal(true);
+    let lab = wired(&deployment, disk.clone(), iso);
+    let error = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation.clone(),
+            dry_run: false,
+        })
+        .await
+        .unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("remove the operation's leftover guest files"),
+        "{message}"
+    );
+    assert!(
+        message.contains("not attempted: [remove the operation's provision directory]"),
+        "{message}"
+    );
+    assert_eq!(
+        disk.calls(),
+        ["inspect", "remove-service", "write", "remove-paths"].map(str::to_string)
+    );
+    assert!(disk.directories().contains(&paths.root));
+    // The retry only repeats the pending file and directory removals.
+    disk.fail_file_removal(false);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
+    assert!(outcome.service_key_removed.is_none());
+}
+
+#[tokio::test]
+async fn clean_guest_without_a_legacy_service_key_is_idempotent() {
+    let deployment = deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let iso = Arc::new(FakeIso::new());
+    let operation = "c".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    seed_leftovers(&disk, &paths, true);
+    disk.set_service(None);
+    let lab = wired(&deployment, disk.clone(), iso);
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation.clone(),
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert!(
+        disk.service_removals().is_empty(),
+        "a missing legacy key must not open the SYSTEM hive"
+    );
+    assert!(outcome.service_key_removed.is_none());
+    assert_eq!(outcome.directories_removed, vec![paths.root.clone()]);
+    assert_eq!(
+        disk.calls(),
+        ["inspect", "write", "remove-paths", "remove-paths"].map(str::to_string)
+    );
+    let again = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert!(
+        again
+            .actions
+            .iter()
+            .any(|action| action.contains("no offline provisioning leftovers")),
+        "{:?}",
+        again.actions
+    );
+    assert!(disk.service_removals().is_empty());
 }
 
 #[tokio::test]

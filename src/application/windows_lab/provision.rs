@@ -1034,6 +1034,11 @@ pub fn validate_service_name(service: &str) -> Result<()> {
 /// `hivexsh -w` script that deletes one fixed legacy service key. New
 /// provisioning never writes this key; the explicit guest cleanup command uses
 /// it to remove artifacts of the earlier service-based boot mechanism.
+///
+/// `hivexsh`'s `del` deletes the current node and rejects arguments
+/// (`'del' command should not be given arguments`), so the script navigates
+/// into the exact service key before the bare `del`. The control set still
+/// comes from the hive `Select\Current` discovery done by the caller.
 pub fn hive_remove_service_script(control_set: u32, service: &str) -> Result<String> {
     ensure!(
         (1..=999).contains(&control_set),
@@ -1041,7 +1046,7 @@ pub fn hive_remove_service_script(control_set: u32, service: &str) -> Result<Str
     );
     validate_service_name(service)?;
     Ok(format!(
-        "cd \\ControlSet{control_set:03}\\Services\ndel {service}\ncommit\nquit\n"
+        "cd \\ControlSet{control_set:03}\\Services\\{service}\ndel\ncommit\nquit\n"
     ))
 }
 

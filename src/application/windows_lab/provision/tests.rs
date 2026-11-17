@@ -328,12 +328,44 @@ fn local_gpo_version_bump_preserves_the_user_half() {
     assert!(bump_gpt_version(Some(b"[General]\r\nVersion=nope\r\n")).is_err());
 }
 
+/// The `hivexsh` command subset the service-key script must stay inside:
+/// exactly `cd <service key>`, a bare `del` (hivexsh rejects arguments), then
+/// `commit` and `quit`. Returns the key the script deletes.
+fn hivexsh_deleted_key(script: &str) -> Option<&str> {
+    let lines: Vec<&str> = script.lines().collect();
+    let [cd, del, commit, quit] = lines.as_slice() else {
+        return None;
+    };
+    let service_key = cd.strip_prefix("cd ")?;
+    (*del == "del" && *commit == "commit" && *quit == "quit").then_some(service_key)
+}
+
 #[test]
-fn legacy_service_removal_is_fixed_and_validated() {
-    let script = hive_remove_service_script(1, "WukongLabProvision-abc").unwrap();
+fn legacy_service_removal_uses_the_bare_hivexsh_del_form() {
+    let service = "WukongLabProvision-abc";
+    let expected_key = "\\ControlSet001\\Services\\WukongLabProvision-abc";
+    let script = hive_remove_service_script(1, service).unwrap();
+    // hivexsh `del` takes no arguments and deletes the current node, so the
+    // script must navigate into the exact service key first.
     assert_eq!(
         script,
-        "cd \\ControlSet001\\Services\ndel WukongLabProvision-abc\ncommit\nquit\n"
+        format!("cd {expected_key}\ndel\ncommit\nquit\n"),
+        "the emitted script must use hivexsh's argument-free del form"
+    );
+    assert_eq!(hivexsh_deleted_key(&script), Some(expected_key));
+    assert_eq!(
+        hivexsh_deleted_key(&hive_remove_service_script(12, "svc-1").unwrap()),
+        Some("\\ControlSet012\\Services\\svc-1"),
+        "the control set is still formatted from the discovered value"
+    );
+    // The previous `cd Services` + `del <service>` form is rejected by hivexsh
+    // 1.46.2/1.48.2 before it deletes anything, so the script grammar must
+    // reject it instead of silently regressing.
+    let old_form = "cd \\ControlSet001\\Services\ndel WukongLabProvision-abc\ncommit\nquit\n";
+    assert_eq!(
+        hivexsh_deleted_key(old_form),
+        None,
+        "a del argument (the broken form) must fail the script grammar"
     );
     assert!(hive_remove_service_script(0, "x").is_err());
     assert!(hive_remove_service_script(1, "bad/name").is_err());
