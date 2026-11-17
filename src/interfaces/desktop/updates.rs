@@ -143,7 +143,11 @@ impl Controller {
         }
     }
     fn edit(&self) -> StatusEdit<'_> {
-        StatusEdit(self.status.lock().unwrap())
+        StatusEdit(
+            self.status
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
     fn begin(&self, action: Option<Action>) {
         let mut state = self.edit();
@@ -216,7 +220,10 @@ impl Controller {
     }
 
     pub fn status(&self) -> Status {
-        self.status.lock().unwrap().clone()
+        self.status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn initialization(&self, config: &AppConfig) {

@@ -48,7 +48,10 @@ async fn cleanup_preview(session: State<'_, Session>, selection: Selection) -> R
         retained: plan.retained.iter().take(200).cloned().collect(),
         errors: plan.errors.clone(),
     };
-    let mut current = session.plan.lock().unwrap();
+    let mut current = session
+        .plan
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if revision != session.revision.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("outdated cleanup preview".into());
     }
@@ -61,7 +64,10 @@ fn cleanup_confirm(
     fingerprint: String,
     app: tauri::AppHandle,
 ) -> Reply<()> {
-    let guard = session.plan.lock().unwrap();
+    let guard = session
+        .plan
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let plan = guard.as_ref().ok_or("review the cleanup scope first")?;
     if plan.fingerprint != fingerprint || !plan.errors.is_empty() {
         return Err("cleanup preview changed or contains errors; refresh the review".into());
