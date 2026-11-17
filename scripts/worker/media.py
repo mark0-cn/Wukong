@@ -12,6 +12,7 @@ directory. No command installs anything.
 
 import argparse
 import base64
+import errno
 import ipaddress
 import json
 import os
@@ -53,6 +54,36 @@ SPEC_FIELDS = frozenset(
     }
 )
 SSH_ED25519_PREFIX = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20"
+
+# Windows MAX_PATH is 260 characters including the terminating NUL, so an
+# accessible path has at most 259 characters unless LongPathsEnabled=1. The
+# offline payload nests up to two payload copies below one staging workspace:
+#   <base>/<workspace>/media/payload/<relative member>
+# so the workspace base and the final output need explicit length budgets.
+WINDOWS_PATH_LIMIT = 259
+# Deepest essential payload member: 131 characters under
+# runtime/sdk/Windows Kits/10/Debuggers/... (debugger samples); 132 rounds up
+# the OS separator that joins it to its parent directory.
+PAYLOAD_LONGEST_RELATIVE = 132
+# Conservative ceiling for a staged path. The shipped payload needs
+# 179 characters after the base (separators, workspace name, media/payload
+# and the longest member), which leaves 41 characters for the base itself and
+# keeps ~39 characters of headroom below MAX_PATH for indexers, antivirus
+# handles and temporary files.
+STAGED_PATH_BUDGET = 220
+WORKSPACE_RANDOM = 8
+WORKSPACE_FINALIZE_PREFIX = ".worker-media-finalize-"
+WORKSPACE_TEMPLATE_PREFIX = ".worker-media-template-"
+WORKSPACE_CHECK_PREFIX = ".worker-media-check-"
+MEDIA_PAYLOAD_RELATIVE = os.path.join("media", "payload")
+WORKSPACE_MARGIN = (
+    len(os.sep)
+    + len(WORKSPACE_FINALIZE_PREFIX)
+    + WORKSPACE_RANDOM
+    + len(os.sep + MEDIA_PAYLOAD_RELATIVE)
+    + len(os.sep)
+    + PAYLOAD_LONGEST_RELATIVE
+)
 
 
 def _hash(value):
@@ -149,16 +180,119 @@ def _load_template(directory):
 def _publish_directory(source, target):
     # Windows antivirus/indexer handles can briefly block renaming a freshly
     # written media tree. Retry a bounded number of times, but never overwrite.
+    # A short TEMP staging workspace may live on another volume than the output,
+    # where os.replace fails with EXDEV; copy the finished tree instead.
     for attempt in range(10):
         try:
             os.replace(source, target)
             return
         except OSError as error:
-            if target.exists() or attempt == 9:
+            last = attempt == 9
+            if target.exists():
                 raise ValueError(
                     "Offline media output could not be published: " + str(error)
                 ) from error
-            time.sleep(0.5 * (attempt + 1))
+            if error.errno != errno.EXDEV:
+                if last:
+                    raise ValueError(
+                        "Offline media output could not be published: " + str(error)
+                    ) from error
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            try:
+                _copy_tree(source, target)
+            except (OSError, ValueError) as copy_error:
+                shutil.rmtree(target, ignore_errors=True)
+                if last:
+                    raise ValueError(
+                        "Offline media output could not be published: " + str(copy_error)
+                    ) from copy_error
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            shutil.rmtree(source, ignore_errors=True)
+            return
+
+
+def _workspace_candidates(output_parent):
+    candidates = []
+    for variable in ("TEMP", "TMP"):
+        value = os.environ.get(variable)
+        if value:
+            candidates.append((variable, Path(value)))
+    candidates.append(("system temporary directory", Path(tempfile.gettempdir())))
+    if output_parent is not None:
+        candidates.append(("output parent", Path(output_parent)))
+    return candidates
+
+
+def _workspace_base(output_parent):
+    """Pick an absolute existing base whose staged payload path fits Windows.
+
+    TEMP/TMP wins over the system temporary directory, and both win over the
+    output parent, which can sit under a deep operator state directory. Every
+    candidate must leave WORKSPACE_MARGIN characters for the workspace name,
+    the media/payload copies and the deepest payload member.
+    """
+    rejected = []
+    for label, candidate in _workspace_candidates(output_parent):
+        if not candidate.is_absolute():
+            rejected.append(f"{label} {candidate} is not absolute")
+            continue
+        candidate = Path(os.path.abspath(candidate))
+        required = len(str(candidate)) + WORKSPACE_MARGIN
+        if required > STAGED_PATH_BUDGET:
+            rejected.append(f"{label} {candidate} needs {required} characters")
+            continue
+        if not candidate.is_dir():
+            rejected.append(f"{label} {candidate} is not an existing directory")
+            continue
+        return candidate
+    raise ValueError(
+        "Offline media staging needs a shorter absolute workspace directory: "
+        + "; ".join(rejected)
+        + f". A workspace base may be at most {STAGED_PATH_BUDGET - WORKSPACE_MARGIN} "
+        "characters and must already exist; move the controller state_dir (and finalized "
+        "media output) to a shorter absolute path, for example C:\\state or D:\\state, or "
+        "point TEMP/TMP at a short absolute directory."
+    )
+
+
+def _workspace(output_parent, prefix):
+    return Path(tempfile.mkdtemp(dir=_workspace_base(output_parent), prefix=prefix))
+
+
+def _discard_workspace(workspace):
+    """Remove a staging workspace, retrying transient Windows file locks."""
+    for attempt in range(5):
+        shutil.rmtree(workspace, ignore_errors=True)
+        if not workspace.exists():
+            return
+        time.sleep(0.5 * (attempt + 1))
+
+
+def _longest_member(manifest):
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, dict) or not files:
+        raise ValueError("Offline media template manifest lists no payload members")
+    return max(files, key=len)
+
+
+def _check_output_length(output, longest, member=None):
+    """Reject a too-deep final media output before anything is copied there."""
+    required = len(str(output)) + len(os.sep) + len("payload") + len(os.sep) + longest
+    if required <= WINDOWS_PATH_LIMIT:
+        return
+    offending = Path(output) / "payload"
+    if member is not None:
+        offending /= member
+    room = WINDOWS_PATH_LIMIT - (len(os.sep) + len("payload") + len(os.sep) + longest)
+    raise ValueError(
+        "Offline media output path is too long for Windows MAX_PATH: "
+        f"{required} characters are needed for the deepest payload member "
+        f"(limit {WINDOWS_PATH_LIMIT}); the destination {offending} cannot hold the "
+        f"payload. The output directory may be at most {room} characters; move the "
+        "controller state_dir (or finalized media output) to a shorter absolute path."
+    )
 
 
 def _copy_tree(source, destination):
@@ -374,11 +508,12 @@ def template(cache, native, output, requested_version=None):
     output = no_links(output)
     if output.exists():
         raise ValueError("Offline media template output already exists")
+    _check_output_length(output, PAYLOAD_LONGEST_RELATIVE)
     expected = version()
     if requested_version is not None and requested_version != expected:
         raise ValueError("Requested media version differs from the repository version")
     output.parent.mkdir(parents=True, exist_ok=True)
-    workspace = Path(tempfile.mkdtemp(dir=output.parent, prefix=".worker-media-template-"))
+    workspace = _workspace(output.parent, WORKSPACE_TEMPLATE_PREFIX)
     try:
         staged = stage(cache, workspace / "payload", native)
         payload = workspace / "payload"
@@ -406,7 +541,7 @@ def template(cache, native, output, requested_version=None):
         )
         _publish_directory(workspace, output)
     finally:
-        shutil.rmtree(workspace, ignore_errors=True)
+        _discard_workspace(workspace)
     return dict(
         prepared=True,
         scope="unsigned_offline_media_template",
@@ -436,6 +571,8 @@ def finalize(
     output = no_links(output)
     if output.exists():
         raise ValueError("Offline media output already exists")
+    longest = _longest_member(template["manifest"])
+    _check_output_length(output, len(longest), longest)
     _outside(keys, [template["path"], output], "Controller key storage")
     if not keys.exists() and not keys.parent.is_dir():
         raise ValueError("Controller key directory parent is missing")
@@ -464,7 +601,7 @@ def finalize(
         raise ValueError("Enrollment spec must include ssh_public_key or --generate-ssh-key")
     previous_package, previous_enrollment_dir = _previous(previous_template, previous_enrollment)
     output.parent.mkdir(parents=True, exist_ok=True)
-    workspace = Path(tempfile.mkdtemp(dir=output.parent, prefix=".worker-media-finalize-"))
+    workspace = _workspace(output.parent, WORKSPACE_FINALIZE_PREFIX)
     try:
         package = workspace / "payload"
         _copy_tree(template["payload"], package)
@@ -567,14 +704,14 @@ def finalize(
         )
         _publish_directory(media, output)
     finally:
-        shutil.rmtree(workspace, ignore_errors=True)
+        _discard_workspace(workspace)
     return record
 
 
 def check(template_dir, report):
     template = _load_template(template_dir)
     media_version = template["record"]["version"]
-    scratch = Path(tempfile.mkdtemp(prefix=".worker-media-check-"))
+    scratch = _workspace(None, WORKSPACE_CHECK_PREFIX)
     try:
         keys = scratch / "keys"
         generated = scratch / "ssh/management-ed25519"
@@ -645,7 +782,7 @@ def check(template_dir, report):
         _write_report(report, report_value)
         return report_value
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        _discard_workspace(scratch)
 
 
 def pack(template_dir, media_version, output):

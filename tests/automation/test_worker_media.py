@@ -1,6 +1,7 @@
 """Exercise reproducible offline worker media staging, finalization and checks."""
 
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -23,6 +24,14 @@ PUBLIC_KEY = "c" * 64
 KEY_SHA256 = "d" * 64
 SSH_BLOB = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"k" * 32
 SSH_PUBLIC = dict(algorithm="ssh-ed25519", key=base64.b64encode(SSH_BLOB).decode("ascii"))
+# Mirrors the deepest shipped payload member (131 characters) from the Windows
+# Kits debugger samples; a POSIX test filesystem accepts the real path, so the
+# Windows MAX_PATH failure is emulated explicitly in the deep-output test.
+LONG_MEMBER = (
+    "runtime/sdk/Windows Kits/10/Debuggers/x64/sdk/samples/exdi/"
+    "ExdiGdbSrvSample/GdbSrvControllerLib/GdbSrvControllerLib.vcxproj.filters"
+)
+LONG_BYTES = b"long payload fixture"
 SPEC = dict(
     schema=1,
     installation_id="b" * 32,
@@ -50,7 +59,16 @@ def native_metadata():
     )
 
 
-def manifest_draft(native_bytes, lock):
+def manifest_draft(native_bytes, lock, long_member=False):
+    files = {
+        "native-build.json": dict(sha256=digest(native_bytes), size=len(native_bytes), kind="data"),
+        "runtime/native/wukong-worker.exe": dict(
+            sha256=digest(WORKER), size=len(WORKER), kind="runtime"
+        ),
+        "toolchain.lock.json": dict(sha256=digest(lock), size=len(lock), kind="data"),
+    }
+    if long_member:
+        files[LONG_MEMBER] = dict(sha256=digest(LONG_BYTES), size=len(LONG_BYTES), kind="runtime")
     return dict(
         schema=2,
         platform="windows-amd64",
@@ -58,19 +76,11 @@ def manifest_draft(native_bytes, lock):
         source_revision=REVISION,
         toolchain_lock_sha256=digest(lock),
         toolchain_lock_path="toolchain.lock.json",
-        files={
-            "native-build.json": dict(
-                sha256=digest(native_bytes), size=len(native_bytes), kind="data"
-            ),
-            "runtime/native/wukong-worker.exe": dict(
-                sha256=digest(WORKER), size=len(WORKER), kind="runtime"
-            ),
-            "toolchain.lock.json": dict(sha256=digest(lock), size=len(lock), kind="data"),
-        },
+        files=files,
     )
 
 
-def build_template(root):
+def build_template(root, long_member=False):
     root = Path(root)
     payload = root / "payload"
     (payload / "runtime/native").mkdir(parents=True)
@@ -80,12 +90,15 @@ def build_template(root):
     (payload / "toolchain.lock.json").write_bytes(lock)
     (payload / "native-build.json").write_bytes(native_bytes)
     (payload / "runtime/native/wukong-worker.exe").write_bytes(WORKER)
+    if long_member:
+        (payload / LONG_MEMBER).parent.mkdir(parents=True)
+        (payload / LONG_MEMBER).write_bytes(LONG_BYTES)
     (root / "native-build.json").write_bytes(native_bytes)
     binaries = root / "binaries"
     binaries.mkdir()
     (binaries / "wukong-worker.exe").write_bytes(WORKER)
     (binaries / "wukong-package.exe").write_bytes(PACKAGE)
-    manifest = manifest_draft(native_bytes, lock)
+    manifest = manifest_draft(native_bytes, lock, long_member)
     (root / "manifest-draft.json").write_text(json.dumps(manifest), encoding="utf-8")
     record = dict(
         schema=1,
@@ -104,7 +117,7 @@ def build_template(root):
     return root
 
 
-def build_payload(output, binaries):
+def build_payload(output, binaries, long_member=False):
     output = Path(output)
     (output / "runtime/native").mkdir(parents=True)
     lock = b"toolchain lock fixture"
@@ -113,19 +126,45 @@ def build_payload(output, binaries):
     (output / "toolchain.lock.json").write_bytes(lock)
     (output / "native-build.json").write_bytes(native_bytes)
     (output / "runtime/native/wukong-worker.exe").write_bytes(WORKER)
+    if long_member:
+        (output / LONG_MEMBER).parent.mkdir(parents=True)
+        (output / LONG_MEMBER).write_bytes(LONG_BYTES)
     binaries.mkdir(parents=True)
     (binaries / "wukong-worker.exe").write_bytes(WORKER)
     (binaries / "wukong-package.exe").write_bytes(PACKAGE)
-    return manifest_draft(native_bytes, lock), native
+    return manifest_draft(native_bytes, lock, long_member), native
+
+
+def deep_output(parent, length=100):
+    """Return a media output whose parent path is exactly ``length`` characters.
+
+    With a 100-character parent the old output-parent workspace would stage the
+    131-character payload member beyond Windows' 259-character limit, while the
+    final media output itself still fits.
+    """
+    parent = Path(parent)
+    remaining = length - len(str(parent)) - 1
+    if remaining < 1:
+        raise AssertionError("temporary root is already too deep for this fixture")
+    return parent / ("d" * remaining) / "media"
 
 
 class TemplateTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
+        # Keep workspace selection deterministic on hosts whose TEMP path is
+        # longer than the production budget; WorkspaceTests covers that budget.
+        self.workspace_budget = patch.object(media, "STAGED_PATH_BUDGET", 10_000)
+        self.workspace_budget.start()
+        self.addCleanup(self.workspace_budget.stop)
+        self.workspace_root = Path(tempfile.gettempdir())
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def assert_no_workspace_leak(self):
+        self.assertEqual(list(self.workspace_root.glob(".worker-media-template-*")), [])
 
     def test_template_failure_leaves_no_output_or_staging(self):
         output = self.root / "template"
@@ -138,7 +177,7 @@ class TemplateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "synthetic failure"):
                 media.template(self.root / "cache", self.root / "native", output)
         self.assertFalse(output.exists())
-        self.assertEqual(list(self.root.glob(".worker-media-template-*")), [])
+        self.assert_no_workspace_leak()
 
     def test_template_stages_unsigned_payload_binaries_and_record(self):
         output = self.root / "template"
@@ -173,7 +212,7 @@ class TemplateTests(unittest.TestCase):
                 "payload",
             ],
         )
-        self.assertEqual(list(self.root.glob(".worker-media-template-*")), [])
+        self.assert_no_workspace_leak()
         with (
             patch.object(media.platform, "system", return_value="Windows"),
             patch.object(media.platform, "machine", return_value="AMD64"),
@@ -181,6 +220,20 @@ class TemplateTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "already exists"):
                 media.template(self.root / "cache", self.root / "native", output)
+
+    def test_template_rejects_too_deep_output_before_staging(self):
+        output = self.root / ("t" * 150)
+        with (
+            patch.object(media.platform, "system", return_value="Windows"),
+            patch.object(media.platform, "machine", return_value="AMD64"),
+            patch.object(media, "version", return_value="1.0.0"),
+            patch.object(media, "stage") as stage,
+        ):
+            with self.assertRaisesRegex(ValueError, "too long for Windows MAX_PATH"):
+                media.template(self.root / "cache", self.root / "native", output)
+        stage.assert_not_called()
+        self.assertFalse(output.exists())
+        self.assert_no_workspace_leak()
 
     def test_pack_is_deterministic_and_refuses_overwrite(self):
         template = build_template(self.root / "template")
@@ -255,11 +308,48 @@ class TemplateTests(unittest.TestCase):
         self.assertTrue(source.exists())
         self.assertFalse(target.exists())
 
+    def test_publication_copies_between_volumes(self):
+        source = self.root / "source"
+        (source / "payload").mkdir(parents=True)
+        (source / "payload" / "data.bin").write_bytes(b"fixture")
+        target = self.root / "target"
+        with patch.object(media.os, "replace", side_effect=OSError(errno.EXDEV, "cross-volume")):
+            media._publish_directory(source, target)
+        self.assertEqual((target / "payload" / "data.bin").read_bytes(), b"fixture")
+        self.assertFalse(source.exists())
+
+    def test_publication_removes_partial_cross_volume_copy_on_failure(self):
+        source = self.root / "source"
+        source.mkdir()
+        (source / "payload").write_bytes(b"fixture")
+        target = self.root / "target"
+
+        def partial_copy(from_path, to_path):
+            Path(to_path).mkdir()
+            (Path(to_path) / "partial.bin").write_bytes(b"partial")
+            raise OSError(13, "locked fixture")
+
+        with (
+            patch.object(media.os, "replace", side_effect=OSError(errno.EXDEV, "cross-volume")),
+            patch.object(media, "_copy_tree", side_effect=partial_copy),
+            patch.object(media.time, "sleep"),
+        ):
+            with self.assertRaisesRegex(ValueError, "could not be published"):
+                media._publish_directory(source, target)
+        self.assertTrue(source.exists())
+        self.assertFalse(target.exists())
+
 
 class FinalizeTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
+        # Keep workspace selection deterministic on hosts whose TEMP path is
+        # longer than the production budget; WorkspaceTests covers that budget.
+        self.workspace_budget = patch.object(media, "STAGED_PATH_BUDGET", 10_000)
+        self.workspace_budget.start()
+        self.addCleanup(self.workspace_budget.stop)
+        self.workspace_root = Path(tempfile.gettempdir())
         self.template = build_template(self.root / "template")
         self.keys = self.root / "keys"
         self.keys.mkdir()
@@ -271,6 +361,9 @@ class FinalizeTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def assert_no_workspace_leak(self):
+        self.assertEqual(list(self.workspace_root.glob(".worker-media-finalize-*")), [])
 
     def fake_run(self, command, **kwargs):
         self.commands.append([str(item) for item in command])
@@ -402,6 +495,67 @@ class FinalizeTests(unittest.TestCase):
                 previous_template=self.template,
             )
 
+    def emulated_max_path_copy(self, real_copy_tree):
+        """Fail like Windows when a copy destination passes MAX_PATH.
+
+        POSIX test filesystems accept arbitrarily long paths, so the copy tool
+        is wrapped to reproduce the real Windows failure deterministically.
+        """
+
+        def copy(source, destination):
+            source, destination = Path(source), Path(destination)
+            for current, directories, files in os.walk(source):
+                relative = Path(current).relative_to(source)
+                for name in [*directories, *files]:
+                    candidate = destination / relative / name
+                    if len(str(candidate)) > media.WINDOWS_PATH_LIMIT:
+                        raise OSError(2, "No such file or directory", str(candidate))
+            return real_copy_tree(source, destination)
+
+        return copy
+
+    def test_finalize_uses_short_workspace_for_deep_output(self):
+        # Regression: the old finalize staged below the deep output parent, so
+        # the 131-character payload member crossed MAX_PATH during copying.
+        template = build_template(self.root / "long-template", long_member=True)
+        output = deep_output(self.root)
+        deep_parent = output.parent
+        real_copy_tree = media._copy_tree
+        with (
+            patch.object(media.subprocess, "run", side_effect=self.fake_run),
+            patch.object(media, "prepare_bundle", side_effect=self.fake_prepare),
+            patch.object(
+                media, "_copy_tree", side_effect=self.emulated_max_path_copy(real_copy_tree)
+            ),
+        ):
+            with patch.object(media, "_workspace_base", return_value=deep_parent):
+                with self.assertRaises(OSError):
+                    media.finalize(template, self.keys, self.spec, output)
+            self.assertFalse(output.exists())
+            self.assertEqual(list(deep_parent.glob(".worker-media-finalize-*")), [])
+            self.assert_no_workspace_leak()
+            record = media.finalize(template, self.keys, self.spec, output)
+        self.assertEqual(json.loads((output / "media.json").read_text(encoding="utf-8")), record)
+        self.assertEqual((output / "payload" / LONG_MEMBER).read_bytes(), LONG_BYTES)
+        self.assert_no_workspace_leak()
+
+    def test_finalize_rejects_too_deep_output_before_copying(self):
+        template = build_template(self.root / "long-template", long_member=True)
+        output = deep_output(self.root, length=150)
+        with (
+            patch.object(media.subprocess, "run") as run,
+            patch.object(media, "_copy_tree") as copy_tree,
+        ):
+            with self.assertRaisesRegex(ValueError, "too long for Windows MAX_PATH") as raised:
+                media.finalize(template, self.keys, self.spec, output)
+        message = str(raised.exception)
+        self.assertIn("state_dir", message)
+        self.assertIn("may be at most", message)
+        run.assert_not_called()
+        copy_tree.assert_not_called()
+        self.assertFalse(output.exists())
+        self.assert_no_workspace_leak()
+
 
 class SpecTests(unittest.TestCase):
     def setUp(self):
@@ -470,10 +624,108 @@ class SpecTests(unittest.TestCase):
             media.read_spec(path)
 
 
+class WorkspaceTests(unittest.TestCase):
+    """Workspace base selection keeps staged media paths inside Windows limits."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name).resolve()
+        self.output_parent = self.root / "output-parent"
+        self.output_parent.mkdir()
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def directory(self, name):
+        path = self.root / name
+        path.mkdir()
+        return path
+
+    def test_prefers_temp_over_tmp_system_temp_and_output_parent(self):
+        spec = patch.object(media, "STAGED_PATH_BUDGET", 10_000)
+        temp = self.directory("temp")
+        tmp = self.directory("tmp")
+        with (
+            patch.dict(media.os.environ, {"TEMP": str(temp), "TMP": str(tmp)}, clear=True),
+            patch.object(media.tempfile, "gettempdir", return_value=str(tmp)),
+            spec,
+        ):
+            self.assertEqual(media._workspace_base(self.output_parent), temp)
+
+    def test_falls_back_to_system_temp_and_output_parent(self):
+        spec = patch.object(media, "STAGED_PATH_BUDGET", 10_000)
+        system_temp = self.directory("system-temp")
+        missing = self.root / "missing-temp"
+        with (
+            patch.dict(media.os.environ, {"TEMP": str(missing)}, clear=True),
+            patch.object(media.tempfile, "gettempdir", return_value=str(system_temp)),
+            spec,
+        ):
+            self.assertEqual(media._workspace_base(self.output_parent), system_temp)
+            with patch.object(media.tempfile, "gettempdir", return_value=str(missing)):
+                self.assertEqual(media._workspace_base(self.output_parent), self.output_parent)
+
+    def test_rejects_too_long_candidates_with_actionable_error(self):
+        too_long = str(self.root / ("x" * 200))
+        with (
+            patch.dict(media.os.environ, {"TEMP": too_long, "TMP": too_long}, clear=True),
+            patch.object(media.tempfile, "gettempdir", return_value=too_long),
+        ):
+            with self.assertRaisesRegex(ValueError, "needs a shorter") as raised:
+                media._workspace_base(Path(too_long))
+        message = str(raised.exception)
+        self.assertIn("state_dir", message)
+        self.assertIn("shorter", message)
+        self.assertIn("at most 41", message)
+
+    def test_workspace_creates_and_removes_a_named_directory(self):
+        temp = self.directory("temp")
+        with (
+            patch.dict(media.os.environ, {"TEMP": str(temp)}, clear=True),
+            patch.object(media, "STAGED_PATH_BUDGET", 10_000),
+        ):
+            workspace = media._workspace(self.output_parent, ".worker-media-test-")
+            try:
+                self.assertTrue(workspace.is_dir())
+                self.assertEqual(workspace.parent, temp)
+                self.assertTrue(workspace.name.startswith(".worker-media-test-"))
+            finally:
+                workspace.rmdir()
+        self.assertEqual(list(temp.glob(".worker-media-test-*")), [])
+
+    def test_workspace_cleanup_retries_transient_file_locks(self):
+        workspace = self.directory("workspace")
+        (workspace / "payload").write_bytes(b"fixture")
+        real_rmtree = shutil.rmtree
+        calls = []
+
+        def rmtree(path, ignore_errors=False):
+            calls.append(path)
+            if len(calls) < 3:
+                (Path(path) / "payload").unlink(missing_ok=True)
+                (Path(path) / "payload").write_bytes(b"locked fixture")
+                return
+            return real_rmtree(path, ignore_errors=ignore_errors)
+
+        with (
+            patch.object(media.shutil, "rmtree", side_effect=rmtree),
+            patch.object(media.time, "sleep") as sleep,
+        ):
+            media._discard_workspace(workspace)
+        self.assertEqual(len(calls), 3)
+        self.assertFalse(workspace.exists())
+        self.assertEqual(sleep.call_count, 2)
+
+
 class CheckTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
+        # Keep workspace selection deterministic on hosts whose TEMP path is
+        # longer than the production budget; WorkspaceTests covers that budget.
+        self.workspace_budget = patch.object(media, "STAGED_PATH_BUDGET", 10_000)
+        self.workspace_budget.start()
+        self.addCleanup(self.workspace_budget.stop)
         self.template = self.root / "template"
         binaries = self.template / "binaries"
         binaries.mkdir(parents=True)
