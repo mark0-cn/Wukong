@@ -162,6 +162,12 @@ impl Cleanup {
                 .context("another workbench operation is active")?;
             workbench_locks.push((root, lock));
         }
+        // Stop local workers first: their shutdown rewrites the very files the plan
+        // inventories, which would fail the per-file identity check and leave a
+        // nondeterministic partial removal.
+        if reviewed.selection.data {
+            admission::stop_workers(&self.home)?;
+        }
         let current = self.plan(reviewed.selection)?;
         ensure!(
             current.errors.is_empty(),
@@ -172,9 +178,6 @@ impl Cleanup {
             current.fingerprint == reviewed.fingerprint,
             "cleanup contents changed; review a fresh plan"
         );
-        if reviewed.selection.data {
-            admission::stop_workers(&self.home)?;
-        }
         crate::application::maintenance::workbench::write_json(
             &self.home.join("updates/cleanup-in-progress.json"),
             &reviewed.fingerprint,
