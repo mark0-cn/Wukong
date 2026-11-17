@@ -1,8 +1,9 @@
 //! Operator entry point for the registered Windows experiment VM.
 use crate::adapters::environments::EnvironmentRegistry;
-use crate::application::windows_lab::provision::PublicConnection;
+use crate::application::windows_lab::provision::{PublicConnection, RegisteredEnvironment};
 use crate::application::windows_lab::provision_environment::{
-    pin_environment, prepare_environment, write_configuration,
+    pin_environment, prepare_environment, restore_configuration, retract_replaced_pin,
+    write_configuration,
 };
 use crate::application::windows_lab::{
     CleanGuestOptions, MediaIdentity, ProvisionOptions, ProvisionOutcome, ProvisionSource,
@@ -395,7 +396,7 @@ impl crate::application::windows_lab::provision::ProvisionEnvironment for CliEnv
         media: &MediaIdentity,
         guest_ip: &str,
         identity_file: &Path,
-    ) -> Result<Value> {
+    ) -> Result<RegisteredEnvironment> {
         let configuration = self
             .configuration
             .as_deref()
@@ -409,21 +410,54 @@ impl crate::application::windows_lab::provision::ProvisionEnvironment for CliEnv
             identity_file,
             self.force,
         )?;
-        let written =
-            write_configuration(configuration, &registration, &self.state_dir, self.force)?;
-        let pins = pin_environment(&self.state_dir, &registration)?;
-        let reloaded = AppConfig::load(Some(configuration))
-            .context("reload the configuration after environment registration")?;
-        let registry = EnvironmentRegistry::new(reloaded.environments.clone())?;
-        let registration = registration.environment_id.clone();
-        self.store_registry(&registry);
-        Ok(json!({
-            "environment_id": registration,
-            "configuration": written.configuration,
-            "backup": written.backup,
-            "replaced": written.replaced,
-            "public_pins": pins,
-        }))
+        let written = write_configuration(configuration, &registration, self.force)?;
+        // Everything after the configuration rewrite is fallible. If any step
+        // fails, restore the backup so the previous `[environments.*]` mapping
+        // stays in force together with the lab configuration hash persisted for
+        // it; only then is the old public pin retracted.
+        let committed = (|| -> Result<RegisteredEnvironment> {
+            let pins = pin_environment(&self.state_dir, &registration)?;
+            let reloaded = AppConfig::load(Some(configuration))
+                .context("reload the configuration after environment registration")?;
+            let registry = EnvironmentRegistry::new(reloaded.environments.clone())?;
+            // The lab persists this value as its configuration identity, so read
+            // it back from the rewritten file: the next command computes the
+            // guard hash from exactly that value, not the pre-write draft.
+            let environment = reloaded
+                .environments
+                .get(&registration.environment_id)
+                .cloned()
+                .with_context(|| {
+                    format!(
+                        "registered environment {} is missing from the rewritten configuration",
+                        registration.environment_id
+                    )
+                })?;
+            let report = json!({
+                "environment_id": registration.environment_id,
+                "configuration": written.configuration,
+                "backup": written.backup,
+                "replaced": written.replaced,
+                "public_pins": pins,
+            });
+            retract_replaced_pin(&self.state_dir, &written, &pins)?;
+            self.store_registry(&registry);
+            Ok(RegisteredEnvironment {
+                environment_id: registration.environment_id,
+                environment,
+                report,
+            })
+        })();
+        match committed {
+            Ok(registered) => Ok(registered),
+            Err(error) => match restore_configuration(&written) {
+                Ok(()) => Err(error),
+                Err(restore) => Err(error.context(format!(
+                    "restore the configuration backup {} after the failed registration: {restore:#}",
+                    written.backup.display()
+                ))),
+            },
+        }
     }
 
     async fn verify(&self, environment_id: &str) -> Result<Value> {

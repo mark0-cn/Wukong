@@ -53,9 +53,7 @@ impl RegistrationFixture {
             force,
         )
         .unwrap();
-        let written =
-            write_configuration(&self.configuration, &registration, &self.state_dir, force)
-                .unwrap();
+        let written = write_configuration(&self.configuration, &registration, force).unwrap();
         pin_environment(&self.state_dir, &registration).unwrap();
         (registration, written)
     }
@@ -244,8 +242,7 @@ fn registration_blocks_invalid_hosts_and_missing_configuration() {
     }
     let (registration, _) = fixture.register("192.168.199.129", false);
     let missing = fixture.directory.path().join("missing.toml");
-    let error =
-        write_configuration(&missing, &registration, &fixture.state_dir, false).unwrap_err();
+    let error = write_configuration(&missing, &registration, false).unwrap_err();
     assert!(
         format!("{error:#}").contains("absolute") || format!("{error:#}").contains("existing"),
         "{error:#}"
@@ -284,4 +281,76 @@ fn environment_blocks_never_embed_private_key_material() {
     // the controller SSH client identity from the enrollment.
     assert!(placeholder.contains(&fixture.connection.host_key.key));
     assert!(!placeholder.contains(&fixture.media.ssh_public_key.key));
+}
+
+#[test]
+fn failed_registration_restores_the_previous_configuration_and_pin() {
+    let fixture = registration_fixture();
+    fixture.register("192.168.199.129", false);
+    let committed = std::fs::read(&fixture.configuration).unwrap();
+    let pinned = fixture
+        .config()
+        .environments
+        .get("windows-vm")
+        .unwrap()
+        .runtime
+        .managed_ssh()
+        .unwrap()
+        .known_hosts_file
+        .clone();
+    assert!(pinned.is_file());
+
+    // A replacement attempt that fails after the rewrite restores the exact
+    // previous bytes, so the lab configuration hash persisted for that
+    // configuration keeps matching and the previous public pin stays valid.
+    let config = fixture.config();
+    let replacement = prepare_environment(
+        &config,
+        &fixture.state_dir,
+        &fixture.media,
+        &fixture.connection,
+        "192.168.199.130",
+        &fixture.identity_file,
+        true,
+    )
+    .unwrap();
+    let written = write_configuration(&fixture.configuration, &replacement, true).unwrap();
+    assert!(written.replaced);
+    assert_ne!(std::fs::read(&fixture.configuration).unwrap(), committed);
+    restore_configuration(&written).unwrap();
+    assert_eq!(std::fs::read(&fixture.configuration).unwrap(), committed);
+    assert!(pinned.is_file());
+}
+
+#[test]
+fn replaced_public_pin_is_retracted_only_after_it_is_republished() {
+    let fixture = registration_fixture();
+    let (_, written) = fixture.register("192.168.199.129", false);
+    let old_pin = fixture
+        .state_dir
+        .join("environments")
+        .join("old.known_hosts");
+    std::fs::write(&old_pin, "old pin\n").unwrap();
+    let mut value =
+        serde_json::to_value(fixture.config().environments["windows-vm"].clone()).unwrap();
+    value["runtime"]["managed_ssh"]["known_hosts_file"] = serde_json::json!(old_pin);
+    let previous: EnvironmentConfig = serde_json::from_value(value).unwrap();
+    let mut written = written;
+    written.replaced = true;
+    written.previous = Some(previous);
+
+    // Reused as the newly published pin: it belongs to the new environment too.
+    retract_replaced_pin(&fixture.state_dir, &written, std::slice::from_ref(&old_pin)).unwrap();
+    assert!(old_pin.is_file());
+    // Otherwise the replaced pin is cleaned up after the successful publish.
+    retract_replaced_pin(&fixture.state_dir, &written, &[]).unwrap();
+    assert!(!old_pin.exists());
+    // A pin outside the controller environment directory is never deleted.
+    let external = fixture.directory.path().join("external.known_hosts");
+    std::fs::write(&external, "external pin\n").unwrap();
+    let mut value = serde_json::to_value(written.previous.clone()).unwrap();
+    value["runtime"]["managed_ssh"]["known_hosts_file"] = serde_json::json!(external);
+    written.previous = Some(serde_json::from_value(value).unwrap());
+    retract_replaced_pin(&fixture.state_dir, &written, &[]).unwrap();
+    assert!(external.is_file());
 }

@@ -20,6 +20,7 @@
 //! earlier attempts. Host tools are fixed, bounded and addressed only from
 //! operator configuration; model input never reaches this module.
 use super::{MediaIdentity, ProvisionSource, ProvisioningSpec, SshKey};
+use crate::adapters::environments::EnvironmentConfig;
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -1038,15 +1039,31 @@ pub struct FinalizeRequest {
 #[async_trait]
 pub trait ProvisionEnvironment: Send + Sync {
     /// Persist the verified connection as a managed-SSH environment.
+    ///
+    /// The lab adopts the returned `environment` value as its persisted
+    /// configuration identity, so after a successful rewrite it must be exactly
+    /// the entry a later configuration load reports (the CLI reads it back from
+    /// the rewritten file). A failure must leave the configuration file
+    /// unchanged: the lab keeps the identity it already persisted, and `open`
+    /// keeps refusing any foreign change.
     fn register(
         &self,
         connection: &PublicConnection,
         media: &MediaIdentity,
         guest_ip: &str,
         identity_file: &Path,
-    ) -> Result<serde_json::Value>;
+    ) -> Result<RegisteredEnvironment>;
     /// Connect to the installed worker once the VM is reachable.
     async fn verify(&self, environment_id: &str) -> Result<serde_json::Value>;
+}
+
+/// Environment written by a successful `lab provision --register`.
+pub struct RegisteredEnvironment {
+    pub environment_id: String,
+    /// Configuration entry read back from the rewritten file.
+    pub environment: EnvironmentConfig,
+    /// Operator-facing registration outcome for the CLI result.
+    pub report: serde_json::Value,
 }
 
 /// Public worker connection receipt emitted by the offline installer.

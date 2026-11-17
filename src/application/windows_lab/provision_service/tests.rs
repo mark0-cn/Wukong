@@ -4,6 +4,7 @@
 //! wrapper's offline observation and the explicit guest cleanup can be exercised
 //! end to end without a guest.
 use super::*;
+use crate::adapters::environments::EnvironmentConfig;
 use crate::application::windows_lab::MediaIdentity;
 use crate::application::windows_lab::provision;
 use crate::application::windows_lab::provision::GuestFile;
@@ -15,8 +16,8 @@ use crate::application::windows_lab::provision::{
     GUEST_PROVISION_ROOT, GUEST_STARTUP_DIR, GuestNetwork, GuestObservation,
     GuestObservationRequest, GuestPaths, GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence,
     IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment, PublicConnection,
-    ServiceRemoval, ServiceRemovalEvidence, boot_launcher, boot_task_injection,
-    startup_command_lines,
+    RegisteredEnvironment, ServiceRemoval, ServiceRemovalEvidence, boot_launcher,
+    boot_task_injection, startup_command_lines,
 };
 use crate::application::windows_lab::types::{
     LabPhase, LabProvision, LabState, OperationKind, PendingOperation, ProvisionSource,
@@ -764,17 +765,38 @@ struct EnvironmentState {
     registrations: Vec<(String, PathBuf)>,
     connections: Vec<PublicConnection>,
     doctors: usize,
+    /// Environment entry returned by the last successful registration, i.e. the
+    /// value the lab adopted as its configuration identity.
+    registered: Option<EnvironmentConfig>,
+    /// Persisted lab configuration hash read when `register` was called, so a
+    /// test can prove adoption happens only after the rewrite succeeds.
+    hash_when_registered: Option<String>,
 }
 
 struct FakeEnvironment {
     state: Mutex<EnvironmentState>,
+    /// State directory observed during registration (none for noise-free fakes).
+    state_dir: Option<PathBuf>,
+    /// Simulated registration failure; nothing is written and no environment is
+    /// returned, matching the `ProvisionEnvironment` contract.
+    failure: Option<String>,
 }
 
 impl FakeEnvironment {
     fn new() -> Self {
         Self {
             state: Mutex::new(EnvironmentState::default()),
+            state_dir: None,
+            failure: None,
         }
+    }
+    fn failing(mut self, message: &str) -> Self {
+        self.failure = Some(message.into());
+        self
+    }
+    fn observing(mut self, state_dir: &Path) -> Self {
+        self.state_dir = Some(state_dir.to_path_buf());
+        self
     }
     fn registrations(&self) -> usize {
         self.state.lock().unwrap().registrations.len()
@@ -782,6 +804,41 @@ impl FakeEnvironment {
     fn connections(&self) -> Vec<PublicConnection> {
         self.state.lock().unwrap().connections.clone()
     }
+    fn registered(&self) -> Option<EnvironmentConfig> {
+        self.state.lock().unwrap().registered.clone()
+    }
+    fn hash_when_registered(&self) -> Option<String> {
+        self.state.lock().unwrap().hash_when_registered.clone()
+    }
+}
+
+/// The entry a real registration read back from the rewritten configuration:
+/// the verified connection bound to the guest address and controller identity.
+fn registered_environment(
+    connection: &PublicConnection,
+    media: &MediaIdentity,
+    guest_ip: &str,
+    identity_file: &Path,
+) -> EnvironmentConfig {
+    serde_json::from_value(serde_json::json!({
+        "name": format!("Windows worker {}", media.environment_id),
+        "platform": "windows",
+        "installation_id": media.installation_id,
+        "runtime": {
+            "backend": "managed_ssh",
+            "ssh_host": guest_ip,
+            "request_timeout_secs": 300,
+            "managed_ssh": {
+                "installation_id": media.installation_id,
+                "user": media.ssh_user,
+                "port": media.ssh_port,
+                "identity_file": identity_file,
+                "known_hosts_file": identity_file.with_extension("known_hosts"),
+                "host_key": connection.host_key,
+            }
+        }
+    }))
+    .expect("fake registered environment configuration")
 }
 
 #[async_trait]
@@ -789,16 +846,31 @@ impl ProvisionEnvironment for FakeEnvironment {
     fn register(
         &self,
         connection: &PublicConnection,
-        _media: &MediaIdentity,
+        media: &MediaIdentity,
         guest_ip: &str,
         identity_file: &Path,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<RegisteredEnvironment> {
         let mut state = self.state.lock().unwrap();
         state
             .registrations
             .push((guest_ip.into(), identity_file.to_path_buf()));
         state.connections.push(connection.clone());
-        Ok(serde_json::json!({"environment_id": "windows-vm"}))
+        if let Some(directory) = &self.state_dir {
+            state.hash_when_registered = fs::read(directory.join("windows-lab/labvm.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .and_then(|value| value["configuration_sha256"].as_str().map(str::to_owned));
+        }
+        if let Some(message) = &self.failure {
+            bail!("{message}");
+        }
+        let environment = registered_environment(connection, media, guest_ip, identity_file);
+        state.registered = Some(environment.clone());
+        Ok(RegisteredEnvironment {
+            environment_id: media.environment_id.clone(),
+            environment,
+            report: serde_json::json!({"environment_id": media.environment_id}),
+        })
     }
 
     async fn verify(&self, environment_id: &str) -> Result<serde_json::Value> {
@@ -902,6 +974,31 @@ impl Deployment {
         WindowsLab::open(&self.state_dir, "labvm", &self.config(), self.host.clone()).unwrap()
     }
 
+    /// Configuration identity the mapped environment contributes to the guard.
+    fn environment(&self, guest_ip: &str) -> EnvironmentConfig {
+        registered_environment(
+            &self.fixture.connection,
+            &self.fixture.identity,
+            guest_ip,
+            &self.directory.path().join("management_ed25519"),
+        )
+    }
+
+    /// Lab opened the way a configured VM that maps an environment opens, so a
+    /// `--register` rewrite changes its configuration identity.
+    fn lab_mapping(&self, environment: &EnvironmentConfig) -> WindowsLab {
+        let mut config = self.config();
+        config.environment = Some(self.fixture.identity.environment_id.clone());
+        WindowsLab::open_with_environment(
+            &self.state_dir,
+            "labvm",
+            &config,
+            Some(environment),
+            self.host.clone(),
+        )
+        .unwrap()
+    }
+
     fn media_source(&self) -> ProvisionSource {
         ProvisionSource::Media {
             directory: self.fixture.root.clone(),
@@ -936,9 +1033,16 @@ impl Deployment {
 }
 
 fn wired(deployment: &Deployment, disk: Arc<FakeDisk>, iso: Arc<FakeIso>) -> WindowsLab {
-    deployment
-        .lab()
-        .with_offline(disk)
+    wired_with(deployment, disk, iso, deployment.lab())
+}
+
+fn wired_with(
+    deployment: &Deployment,
+    disk: Arc<FakeDisk>,
+    iso: Arc<FakeIso>,
+    lab: WindowsLab,
+) -> WindowsLab {
+    lab.with_offline(disk)
         .with_iso_builder(iso)
         .with_media_finalizer(Arc::new(FakeFinalizer {
             source_root: deployment.fixture.root.clone(),
@@ -946,6 +1050,69 @@ fn wired(deployment: &Deployment, disk: Arc<FakeDisk>, iso: Arc<FakeIso>) -> Win
             identity_key: deployment.fixture.identity.ssh_public_key.key.clone(),
         }))
         .with_guest_network(Arc::new(FakeNetwork))
+}
+
+/// Template-mode options: `--register` requires finalized media that can carry
+/// the controller-managed SSH identity, which media mode does not generate.
+fn template_options(deployment: &Deployment) -> ProvisionOptions {
+    let directory = deployment.directory.path();
+    let template = directory.join("template");
+    fs::create_dir_all(&template).unwrap();
+    let keys = directory.join("keys");
+    fs::create_dir_all(&keys).unwrap();
+    let spec = directory.join("spec.json");
+    fs::write(
+        &spec,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 1,
+            "installation_id": deployment.fixture.identity.installation_id,
+            "environment_id": deployment.fixture.identity.environment_id,
+            "generation": 64,
+            "management_peer": "192.168.199.1",
+            "ssh_port": 22268,
+            "execution_boundary": "disposable_vm",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    deployment.options(ProvisionSource::Template {
+        template,
+        keys,
+        spec,
+    })
+}
+
+/// Open the lab like the next CLI command after a registration: from the
+/// configured VM and the environment entry the rewritten configuration reports.
+fn reopened(deployment: &Deployment, environment: &EnvironmentConfig) -> Result<WindowsLab> {
+    let mut config = deployment.config();
+    config.environment = Some(deployment.fixture.identity.environment_id.clone());
+    WindowsLab::open_with_environment(
+        &deployment.state_dir,
+        "labvm",
+        &config,
+        Some(environment),
+        deployment.host.clone(),
+    )
+}
+
+/// Rendered error of an open the guard must refuse (`WindowsLab` is not
+/// `Debug`, so the tests read the error chain instead of using `unwrap_err`).
+fn reopen_error(deployment: &Deployment, environment: &EnvironmentConfig) -> String {
+    format!(
+        "{:#}",
+        reopened(deployment, environment)
+            .err()
+            .expect("lab must refuse the changed configuration")
+    )
+}
+
+fn persisted_configuration_hash(deployment: &Deployment) -> String {
+    deployment.state().configuration_sha256
+}
+
+fn vm_physical_identity(deployment: &Deployment) -> String {
+    crate::adapters::environments::lab_guard::physical_identity(&deployment.vmx).unwrap()
 }
 
 /// Persist a failed provisioning record so the explicit guest cleanup accepts
@@ -2290,6 +2457,229 @@ async fn template_provisioning_registers_and_powers_off() {
             .1
             .is_file()
     );
+}
+
+/// Defect #9 regression: `--register` rewrites the mapped `[environments.*]`
+/// entry, so the persisted lab configuration identity must move with it. A
+/// successful registration whose configuration hash stayed stale made every
+/// following command fail at open with the configuration-change guard.
+#[tokio::test]
+async fn successful_registration_rebinds_the_persisted_configuration_identity() {
+    let deployment = deployment();
+    let old_environment = deployment.environment("192.168.199.128");
+    let pre_registration_hash = deployment
+        .lab_mapping(&old_environment)
+        .store
+        .configuration_sha256
+        .clone()
+        .expect("lab configuration hash");
+    let environment = Arc::new(FakeEnvironment::new().observing(&deployment.state_dir));
+    let lab = wired_with(
+        &deployment,
+        Arc::new(FakeDisk::new(deployment.fixture.connection.clone())),
+        Arc::new(FakeIso::new()),
+        deployment.lab_mapping(&old_environment),
+    )
+    .with_environment_registrar(environment.clone());
+    let mut options = template_options(&deployment);
+    options.register = true;
+    options.verify_environment = true;
+    lab.provision(options).await.unwrap();
+
+    // The rewrite is durable when the registrar returns; only after that may
+    // the state carry the new identity.
+    assert_eq!(
+        environment.hash_when_registered().as_deref(),
+        Some(pre_registration_hash.as_str())
+    );
+    let registered = environment
+        .registered()
+        .expect("registration returns the rewritten environment entry");
+    let configuration_sha256 = persisted_configuration_hash(&deployment);
+    assert_ne!(configuration_sha256, pre_registration_hash);
+
+    // The physical-VM identity is part of admission (`LabStore::lock`), so it
+    // must move with the state or the next mutating command would be refused.
+    let identity_path = deployment.state_dir.join("windows-lab").join(format!(
+        "{}.identity.json",
+        vm_physical_identity(&deployment)
+    ));
+    let identity: serde_json::Value =
+        serde_json::from_slice(&fs::read(&identity_path).unwrap()).unwrap();
+    assert_eq!(
+        identity["configuration_sha256"],
+        serde_json::json!(configuration_sha256)
+    );
+    assert_eq!(identity["vm_id"], serde_json::json!("labvm"));
+
+    // Subsequent commands open cleanly: status and the replace-baseline dry
+    // run that the real acceptance could not execute after `--register`.
+    let status = reopened(&deployment, &registered)
+        .unwrap()
+        .status()
+        .await
+        .unwrap();
+    assert_eq!(status["vm_id"], "labvm");
+    let dry_run_lab = wired_with(
+        &deployment,
+        Arc::new(FakeDisk::new(deployment.fixture.connection.clone())),
+        Arc::new(FakeIso::new()),
+        reopened(&deployment, &registered).unwrap(),
+    );
+    let mut dry_run = deployment.options(deployment.media_source());
+    dry_run.dry_run = true;
+    dry_run.replace_baseline = true;
+    let planned = dry_run_lab.provision(dry_run).await.unwrap();
+    assert!(planned.dry_run);
+    assert!(
+        planned
+            .planned_actions
+            .iter()
+            .any(|action| action.contains("delete the configured baseline snapshot"))
+    );
+}
+
+/// The guard still refuses a mapped environment or unrelated configuration
+/// changed outside the registration that adopted the rewrite.
+#[tokio::test]
+async fn foreign_configuration_changes_are_still_refused_after_registration() {
+    let deployment = deployment();
+    let old_environment = deployment.environment("192.168.199.128");
+    let environment = Arc::new(FakeEnvironment::new());
+    let lab = wired_with(
+        &deployment,
+        Arc::new(FakeDisk::new(deployment.fixture.connection.clone())),
+        Arc::new(FakeIso::new()),
+        deployment.lab_mapping(&old_environment),
+    )
+    .with_environment_registrar(environment.clone());
+    let mut options = template_options(&deployment);
+    options.register = true;
+    lab.provision(options).await.unwrap();
+    let registered = environment.registered().unwrap();
+
+    // A manually edited mapped environment entry is not accepted.
+    let mut edited = registered.clone();
+    let mut runtime = serde_json::to_value(&edited.runtime).unwrap();
+    runtime["ssh_host"] = serde_json::json!("192.168.199.130");
+    edited.runtime = serde_json::from_value(runtime).unwrap();
+    let error = reopen_error(&deployment, &edited);
+    assert!(error.contains("configuration changed"), "{error}");
+
+    // Neither is the pre-registration environment the operation replaced.
+    let error = reopen_error(&deployment, &old_environment);
+    assert!(error.contains("configuration changed"), "{error}");
+
+    // An unrelated `[windows_lab.vms.<alias>]` edit keeps being refused.
+    let mut foreign_config = deployment.config();
+    foreign_config.environment = Some(deployment.fixture.identity.environment_id.clone());
+    foreign_config.vmrun = deployment.directory.path().join("other-vmrun.exe");
+    let error = format!(
+        "{:#}",
+        WindowsLab::open_with_environment(
+            &deployment.state_dir,
+            "labvm",
+            &foreign_config,
+            Some(&registered),
+            deployment.host.clone(),
+        )
+        .err()
+        .expect("lab must refuse an unrelated configuration change")
+    );
+    assert!(error.contains("configuration changed"), "{error}");
+}
+
+/// A failed registration writes no configuration entry and returns no
+/// environment, so the persisted identity must stay exactly as it was and the
+/// guard must keep refusing the entry a failed attempt would have written.
+#[tokio::test]
+async fn failed_registration_keeps_the_previous_configuration_identity() {
+    let deployment = deployment();
+    let old_environment = deployment.environment("192.168.199.128");
+    let pre_registration_hash = deployment
+        .lab_mapping(&old_environment)
+        .store
+        .configuration_sha256
+        .clone()
+        .expect("lab configuration hash");
+    let environment = Arc::new(
+        FakeEnvironment::new()
+            .failing("simulated configuration rewrite failure")
+            .observing(&deployment.state_dir),
+    );
+    let lab = wired_with(
+        &deployment,
+        Arc::new(FakeDisk::new(deployment.fixture.connection.clone())),
+        Arc::new(FakeIso::new()),
+        deployment.lab_mapping(&old_environment),
+    )
+    .with_environment_registrar(environment.clone());
+    let mut options = template_options(&deployment);
+    options.register = true;
+    let error = lab.provision(options).await.unwrap_err();
+    assert!(
+        format!("{error:#}").contains("simulated configuration rewrite failure"),
+        "{error:#}"
+    );
+
+    assert_eq!(
+        environment.hash_when_registered().as_deref(),
+        Some(pre_registration_hash.as_str())
+    );
+    assert_eq!(
+        persisted_configuration_hash(&deployment),
+        pre_registration_hash
+    );
+    // The unchanged identity still opens the lab...
+    reopened(&deployment, &old_environment)
+        .unwrap()
+        .status()
+        .await
+        .unwrap();
+    // ...while the entry the failed rewrite would have written is not accepted:
+    // no false assumption that the failed operation changed the configuration.
+    let error = reopen_error(&deployment, &deployment.environment("192.168.199.129"));
+    assert!(error.contains("configuration changed"), "{error}");
+}
+
+/// Registration is the only step allowed to move the identity: the rewrite it
+/// commits is adopted even when a later step of the same command (here the
+/// baseline revert) fails, because the configuration file is already changed.
+#[tokio::test]
+async fn registration_is_adopted_when_a_later_step_of_the_command_fails() {
+    let deployment = deployment();
+    let old_environment = deployment.environment("192.168.199.128");
+    let pre_registration_hash = deployment
+        .lab_mapping(&old_environment)
+        .store
+        .configuration_sha256
+        .clone()
+        .expect("lab configuration hash");
+    let environment = Arc::new(FakeEnvironment::new());
+    let lab = wired_with(
+        &deployment,
+        Arc::new(FakeDisk::new(deployment.fixture.connection.clone())),
+        Arc::new(FakeIso::new()),
+        deployment.lab_mapping(&old_environment),
+    )
+    .with_environment_registrar(environment.clone());
+    let mut options = template_options(&deployment);
+    options.register = true;
+    deployment.host.state.lock().unwrap().fail_revert = true;
+    let error = lab.provision(options).await.unwrap_err();
+    assert!(format!("{error:#}").contains("revert"), "{error:#}");
+    let registered = environment
+        .registered()
+        .expect("the configuration rewrite succeeded before the revert failed");
+    assert_ne!(
+        persisted_configuration_hash(&deployment),
+        pre_registration_hash
+    );
+    reopened(&deployment, &registered)
+        .unwrap()
+        .status()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

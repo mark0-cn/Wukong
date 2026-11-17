@@ -138,4 +138,84 @@ impl LabStore {
         File::open(&self.root)?.sync_all()?;
         Ok(())
     }
+
+    /// Rebind the persisted state and the physical-VM identity to the
+    /// configuration identity a successful operation rewrote. `load` validates
+    /// the state hash and `lock` validates the identity, so both records must
+    /// move together; a stale copy would block every later command. Only
+    /// `lab provision --register` reaches this, and only with the hash
+    /// recomputed from the environment value read back from the configuration
+    /// file; any other configuration change is still refused.
+    pub(super) fn adopt_configuration(
+        &self,
+        state: &mut LabState,
+        configuration_sha256: &str,
+    ) -> Result<()> {
+        let previous = std::mem::replace(
+            &mut state.configuration_sha256,
+            configuration_sha256.to_owned(),
+        );
+        let moved_identity = match &self.physical_id {
+            Some(physical) => {
+                let path = self.root.join(format!("{physical}.identity.json"));
+                // The operation opened the lab with the previous configuration,
+                // so a different identity file means the physical VM/alias was
+                // changed outside this operation and must not be overwritten.
+                if path.exists() {
+                    let existing = serde_json::from_slice::<serde_json::Value>(&fs::read(&path)?)
+                        .with_context(|| {
+                        format!("parse physical VM identity {}", path.display())
+                    })?;
+                    ensure!(
+                        existing
+                            == serde_json::json!({
+                                "vm_id": state.vm_id,
+                                "configuration_sha256": previous,
+                            }),
+                        "physical VM is already registered under another alias or configuration"
+                    );
+                }
+                Some((
+                    path,
+                    serde_json::json!({
+                        "vm_id": state.vm_id,
+                        "configuration_sha256": configuration_sha256,
+                    }),
+                ))
+            }
+            None => None,
+        };
+        if let Err(error) = self.save(state) {
+            state.configuration_sha256 = previous;
+            return Err(error.context("persist the registered lab configuration hash"));
+        }
+        if let Some((path, identity)) = moved_identity
+            && let Err(error) = publish_identity(&path, &identity)
+        {
+            // Restore the state binding so the next command keeps reporting the
+            // same configuration mismatch instead of trusting a half-published
+            // identity.
+            state.configuration_sha256 = previous;
+            let _ = self.save(state);
+            return Err(error.context("publish the registered physical-VM identity"));
+        }
+        Ok(())
+    }
+}
+
+/// Publish a physical-VM identity record. The caller holds the lab operation
+/// lock, so replacement is only ever the move this operation is authorized to
+/// make.
+fn publish_identity(path: &Path, identity: &serde_json::Value) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("physical VM identity path has no parent directory")?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+    staged.write_all(&serde_json::to_vec(identity)?)?;
+    staged.as_file().sync_all()?;
+    staged
+        .persist(path)
+        .map_err(|error| error.error)
+        .context("publish physical VM identity")?;
+    Ok(())
 }

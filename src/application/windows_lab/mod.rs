@@ -7,6 +7,7 @@
 //! input never supplies a VMX path or a VMware command. An interrupted or
 //! timed-out operation stays `recovery_required` until an operator reconciles
 //! it, and no state transition re-issues an uncertain host effect.
+use crate::adapters::environments::EnvironmentConfig;
 use crate::config::WindowsLabVm;
 use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
@@ -35,7 +36,10 @@ mod provision_service;
 pub mod runner;
 pub mod service;
 use admin::{AdminFile, AdminRequest, LabAdmin};
-use provision::{GuestNetwork, IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment};
+use provision::{
+    GuestNetwork, IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment,
+    RegisteredEnvironment,
+};
 pub use provision_service::{
     CleanGuestOptions, CleanGuestOutcome, ProvisionOptions, ProvisionOutcome,
 };
@@ -82,6 +86,27 @@ fn valid_label(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.len() <= max && !value.contains(['\n', '\r', '\0'])
 }
 
+/// Canonical configuration identity of one registered lab: the physical VM, the
+/// operator `[windows_lab.vms.<alias>]` entry and the mapped
+/// `[environments.<id>]` entry. `open` refuses a persisted state that records a
+/// different identity, so only the operation that legitimately rewrites the
+/// mapped environment (`lab provision --register`) may persist a recomputed
+/// hash. Both hash creators share this function so the adoption writes exactly
+/// the value the next command computes.
+fn configuration_sha256(
+    physical_id: &str,
+    config: &WindowsLabVm,
+    environment: Option<&EnvironmentConfig>,
+) -> Result<String> {
+    Ok(hex::encode(Sha256::digest(serde_json::to_vec(
+        &serde_json::json!({
+            "physical_vm": physical_id,
+            "config": config,
+            "environment": environment,
+        }),
+    )?)))
+}
+
 pub struct WindowsLab {
     vm_id: String,
     baseline: String,
@@ -100,6 +125,10 @@ pub struct WindowsLab {
     gate: Mutex<()>,
     vmx: PathBuf,
     caller: Option<String>,
+    /// Operator configuration this lab was opened with, retained verbatim so a
+    /// successful `--register` can persist the guard hash the next command
+    /// recomputes from the rewritten configuration file.
+    vm_config: WindowsLabVm,
 }
 
 impl WindowsLab {
@@ -116,7 +145,7 @@ impl WindowsLab {
         state_dir: &Path,
         vm_id: &str,
         config: &WindowsLabVm,
-        environment: Option<&crate::adapters::environments::EnvironmentConfig>,
+        environment: Option<&EnvironmentConfig>,
         host: Arc<dyn VmHost>,
     ) -> Result<Self> {
         crate::adapters::environments::validate_id(vm_id)?;
@@ -127,9 +156,7 @@ impl WindowsLab {
         let physical_id = physical_identity(&config.vmx)?;
         let mut store = LabStore::new(state_dir);
         store.physical_id = Some(physical_id.clone());
-        store.configuration_sha256 = Some(hex::encode(Sha256::digest(serde_json::to_vec(
-            &serde_json::json!({"physical_vm":physical_id,"config":config,"environment":environment}),
-        )?)));
+        store.configuration_sha256 = Some(configuration_sha256(&physical_id, config, environment)?);
         // Read validates the persisted configuration before opening any capability.
         store.load(vm_id, &config.baseline_snapshot)?;
         Ok(Self {
@@ -150,6 +177,7 @@ impl WindowsLab {
             gate: Mutex::new(()),
             vmx: config.vmx.clone(),
             caller: None,
+            vm_config: config.clone(),
         })
     }
 
@@ -229,6 +257,34 @@ impl WindowsLab {
     pub fn with_environment_registrar(mut self, registrar: Arc<dyn ProvisionEnvironment>) -> Self {
         self.environment_registrar = Some(registrar);
         self
+    }
+
+    /// Adopt the configuration identity written by this operation's successful
+    /// environment registration. Registration rewrites the mapped
+    /// `[environments.<id>]` entry, which changes the guard hash `open` compares
+    /// against, so the persisted state and physical-VM identity must be rebound
+    /// in the same commit. Only the mapped entry may move: a registration that
+    /// writes an environment this lab does not map leaves the guard untouched,
+    /// and any change this operation did not write keeps being refused by
+    /// `LabStore::load`/`lock`.
+    pub(super) fn adopt_registered_configuration(
+        &self,
+        state: &mut LabState,
+        registered: &RegisteredEnvironment,
+    ) -> Result<()> {
+        if self.vm_config.environment.as_deref() != Some(registered.environment_id.as_str()) {
+            return Ok(());
+        }
+        let physical_id = self
+            .store
+            .physical_id
+            .as_deref()
+            .context("registered lab VM has no physical identity")?;
+        let configuration_sha256 =
+            configuration_sha256(physical_id, &self.vm_config, Some(&registered.environment))?;
+        self.store
+            .adopt_configuration(state, &configuration_sha256)
+            .context("adopt the registered lab environment")
     }
 
     pub async fn status(&self) -> Result<serde_json::Value> {

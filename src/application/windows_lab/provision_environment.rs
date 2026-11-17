@@ -32,6 +32,9 @@ pub struct ConfigWrite {
     pub configuration: PathBuf,
     pub backup: PathBuf,
     pub replaced: bool,
+    /// Environment entry the rewrite replaced, retained so the caller can
+    /// retract its public host pin only after the new mapping is published.
+    pub previous: Option<EnvironmentConfig>,
 }
 
 /// Build the managed-SSH environment from the verified public receipt. The
@@ -121,12 +124,13 @@ pub fn pin_environment(state_dir: &Path, registration: &EnvRegistration) -> Resu
 }
 
 /// Write the environment table into the operator configuration, preserving
-/// comments and unrelated settings. A timestamped backup is written first and
-/// an existing different environment is refused without `--force`.
+/// comments and unrelated settings. A timestamped backup is written first, so a
+/// caller whose later publishing step fails can restore it; an existing
+/// different environment is refused without `--force`. The replaced public host
+/// pin is retracted only after the caller publishes the new mapping.
 pub fn write_configuration(
     configuration: &Path,
     registration: &EnvRegistration,
-    state_dir: &Path,
     force: bool,
 ) -> Result<ConfigWrite> {
     ensure!(
@@ -190,14 +194,52 @@ pub fn write_configuration(
         .map_err(|error| error.error)
         .context("write configuration backup")?;
     write_synced(configuration, updated.as_bytes())?;
-    if replaced {
-        retract_pin(state_dir, previous.as_ref())?;
-    }
     Ok(ConfigWrite {
         configuration: configuration.to_path_buf(),
         backup,
         replaced,
+        previous,
     })
+}
+
+/// Restore the configuration a failed registration attempt replaced, using the
+/// timestamped backup the rewrite wrote first. A failed `--register` must leave
+/// the previous mapping in force: the lab configuration hash persisted before
+/// this command still matches it, so later commands keep opening.
+pub fn restore_configuration(written: &ConfigWrite) -> Result<()> {
+    let previous = fs::read(&written.backup)
+        .with_context(|| format!("read configuration backup {}", written.backup.display()))?;
+    write_synced(&written.configuration, &previous)
+}
+
+/// Retract the public host pin of an environment this registration replaced.
+/// The caller runs this only after the rewritten configuration and its new pin
+/// are published; the pin is skipped when the replacement reuses the same pin
+/// file for its own environment.
+pub fn retract_replaced_pin(
+    state_dir: &Path,
+    written: &ConfigWrite,
+    published_pins: &[PathBuf],
+) -> Result<()> {
+    let Some(previous) = written.previous.as_ref().filter(|_| written.replaced) else {
+        return Ok(());
+    };
+    let Some(ssh) = previous.runtime.managed_ssh() else {
+        return Ok(());
+    };
+    if published_pins.contains(&ssh.known_hosts_file) {
+        return Ok(());
+    }
+    let home = state_dir.join("environments");
+    if ssh.known_hosts_file.starts_with(&home) && ssh.known_hosts_file.is_file() {
+        fs::remove_file(&ssh.known_hosts_file).with_context(|| {
+            format!(
+                "remove replaced public host pin {}",
+                ssh.known_hosts_file.display()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// Known-hosts pins live under the configuration's state directory. The caller
@@ -253,25 +295,6 @@ pub fn placeholder_block(
         toml_string(&connection.host_key.algorithm),
         toml_string(&connection.host_key.key),
     ))
-}
-
-fn retract_pin(state_dir: &Path, previous: Option<&EnvironmentConfig>) -> Result<()> {
-    let Some(previous) = previous else {
-        return Ok(());
-    };
-    let Some(ssh) = previous.runtime.managed_ssh() else {
-        return Ok(());
-    };
-    let home = state_dir.join("environments");
-    if ssh.known_hosts_file.starts_with(&home) && ssh.known_hosts_file.is_file() {
-        fs::remove_file(&ssh.known_hosts_file).with_context(|| {
-            format!(
-                "remove replaced public host pin {}",
-                ssh.known_hosts_file.display()
-            )
-        })?;
-    }
-    Ok(())
 }
 
 /// Allocate a never-existing timestamped backup beside the configuration.

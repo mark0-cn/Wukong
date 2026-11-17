@@ -12,11 +12,11 @@ use super::provision::{
     BOOT_TASK_NAME, BootTaskInjection, BootTaskRemoval, DiskInspectionRequest, FinalizeRequest,
     GUEST_SYSTEM_HIVE, GuestDisk, GuestFile, GuestNetwork, GuestObservationRequest, GuestPaths,
     GuestRemoval, IsoBuilder, MediaFinalizer, OfflineDisk, PROVISION_WRAPPER, ProvisionEnvironment,
-    PublicConnection, ReceiptExpectation, ServiceRemoval, SnapshotPlan, VmxEdit,
-    attach_offline_iso, boot_launcher, boot_task_injection, injected_file, plan_guest_cleanup,
-    plan_snapshot, provision_paths, provision_plan, provisioning_spec, read_finalize_spec,
-    require_relative_path, resolve_guest_disk, sha256, sha256_file, verify_guest_receipt,
-    verify_media,
+    PublicConnection, ReceiptExpectation, RegisteredEnvironment, ServiceRemoval, SnapshotPlan,
+    VmxEdit, attach_offline_iso, boot_launcher, boot_task_injection, injected_file,
+    plan_guest_cleanup, plan_snapshot, provision_paths, provision_plan, provisioning_spec,
+    read_finalize_spec, require_relative_path, resolve_guest_disk, sha256, sha256_file,
+    verify_guest_receipt, verify_media,
 };
 use super::*;
 use crate::application::windows_lab::provision::ProvisionArtifactPaths;
@@ -170,6 +170,18 @@ struct EnvironmentFinish {
     register: bool,
     verify: bool,
     timeout: Duration,
+}
+
+/// Outcome of the registration/verification phase. `registered` is set as soon
+/// as the configuration rewrite succeeded, even if the doctor or the baseline
+/// revert then fail: the lab must adopt the rewritten configuration identity, or
+/// those later failures would strand every command on a stale hash. `failure`
+/// is the error the caller reports after restoring the baseline.
+struct EnvironmentFinished {
+    registration: Option<Value>,
+    verification: Option<Value>,
+    registered: Option<RegisteredEnvironment>,
+    failure: Option<anyhow::Error>,
 }
 
 impl WindowsLab {
@@ -382,33 +394,43 @@ impl WindowsLab {
             let guest_network = guest_network.context(
                 "guest address discovery requires the vmrun adapter; configure [windows_lab.vms.<alias>.offline]",
             )?;
-            match self
+            let finished = self
                 .finish_environment(&finish, &plan.media, &plan.baseline, guest_network)
-                .await
-            {
-                Ok((registered, verified)) => {
-                    registration = registered;
-                    verification = verified;
-                    record.verification = verification.clone();
-                    record.environment_verified =
-                        Some(options.verify_environment && verification.is_some());
-                    state.last_provision = Some(record.clone());
-                    self.store.save(&state)?;
-                }
-                Err(error) => {
-                    let _ = self.step(self.host.revert(&plan.baseline)).await;
-                    record.environment_verified = Some(false);
-                    record.error = Some(format!("{error:#}"));
-                    record.ended_at = Some(now());
-                    state.last_provision = Some(record.clone());
-                    state.last_error = Some(format!("{error:#}"));
-                    self.store.save(&state)?;
-                    let _ = self.write_provision_receipt(&record);
-                    return Err(error.context(
-                        "the worker was installed but environment registration/verification failed; the baseline snapshot was retained",
-                    ));
-                }
+                .await;
+            // A successful registration rewrote the mapped `[environments.*]`
+            // entry, so the persisted configuration identity must move with it
+            // in the same commit. Doing this before any later doctor/revert
+            // failure keeps every following command usable even though the
+            // command itself fails; a failed registration writes nothing and the
+            // previous identity (and the guard that binds it) stays in force.
+            let adoption = match &finished.registered {
+                Some(registered) => self.adopt_registered_configuration(&mut state, registered),
+                None => Ok(()),
+            };
+            let failure = match (finished.failure, adoption) {
+                (Some(error), _) | (None, Err(error)) => Some(error),
+                (None, Ok(())) => None,
+            };
+            if let Some(error) = failure {
+                let _ = self.step(self.host.revert(&plan.baseline)).await;
+                record.environment_verified = Some(false);
+                record.error = Some(format!("{error:#}"));
+                record.ended_at = Some(now());
+                state.last_provision = Some(record.clone());
+                state.last_error = Some(format!("{error:#}"));
+                self.store.save(&state)?;
+                let _ = self.write_provision_receipt(&record);
+                return Err(error.context(
+                    "the worker was installed but environment registration/verification failed; the baseline snapshot was retained",
+                ));
             }
+            registration = finished.registration;
+            verification = finished.verification;
+            record.verification = verification.clone();
+            record.environment_verified =
+                Some(options.verify_environment && verification.is_some());
+            state.last_provision = Some(record.clone());
+            self.store.save(&state)?;
         }
         let receipt = self.write_provision_receipt(&record)?;
         Ok(ProvisionOutcome {
@@ -1232,57 +1254,76 @@ impl WindowsLab {
             .unwrap_or_else(|_| Err(anyhow::anyhow!("VM status probe timed out")))
     }
 
+    /// Boot the VM, write and verify the mapped environment, then restore the
+    /// baseline. The returned outcome keeps the written environment even when a
+    /// later step fails, so the caller can adopt its configuration identity
+    /// exactly once the rewrite is durable.
     async fn finish_environment(
         &self,
         finish: &EnvironmentFinish,
         media: &MediaIdentity,
         baseline: &str,
         guest_network: Arc<dyn GuestNetwork>,
-    ) -> Result<(Option<Value>, Option<Value>)> {
-        ensure!(
-            finish.register || finish.verify,
-            "no environment registration or verification was requested"
-        );
-        if !self.host_running().await? {
-            self.step(self.host.start()).await.map_err(step_error)?;
-        }
+    ) -> EnvironmentFinished {
+        let mut finished = EnvironmentFinished {
+            registration: None,
+            verification: None,
+            registered: None,
+            failure: None,
+        };
         let deadline = Instant::now() + finish.timeout;
-        let mut registration = None;
-        if finish.register {
-            let identity = finish.identity_file.as_deref().context(
-                "registered environment requires the controller-managed SSH identity key",
-            )?;
-            let guest_ip = self.wait_guest_ip(guest_network.as_ref(), deadline).await?;
-            registration = Some(
-                finish
+        let result: Result<()> = async {
+            ensure!(
+                finish.register || finish.verify,
+                "no environment registration or verification was requested"
+            );
+            if !self.host_running().await? {
+                self.step(self.host.start()).await.map_err(step_error)?;
+            }
+            if finish.register {
+                let identity = finish.identity_file.as_deref().context(
+                    "registered environment requires the controller-managed SSH identity key",
+                )?;
+                let guest_ip = self.wait_guest_ip(guest_network.as_ref(), deadline).await?;
+                let registered = finish
                     .registrar
                     .register(&finish.connection, media, &guest_ip, identity)
-                    .context("register the provisioned environment")?,
-            );
-        }
-        let mut verification = None;
-        if finish.verify {
-            loop {
-                match finish.registrar.verify(&finish.environment_id).await {
-                    Ok(value) => {
-                        verification = Some(value);
-                        break;
-                    }
-                    Err(error) => {
-                        if Instant::now() >= deadline {
-                            bail!(
-                                "registered environment doctor did not pass before the provisioning deadline: {error:#}"
-                            );
+                    .context("register the provisioned environment")?;
+                // The configuration rewrite is durable at this point; retain
+                // the entry even if the doctor or the baseline revert below
+                // fails, or those failures would leave the persisted lab hash
+                // stale with no CLI repair path.
+                finished.registration = Some(registered.report.clone());
+                finished.registered = Some(registered);
+            }
+            if finish.verify {
+                loop {
+                    match finish.registrar.verify(&finish.environment_id).await {
+                        Ok(value) => {
+                            finished.verification = Some(value);
+                            break;
                         }
-                        tokio::time::sleep(Duration::from_secs(3)).await;
+                        Err(error) => {
+                            if Instant::now() >= deadline {
+                                bail!(
+                                    "registered environment doctor did not pass before the provisioning deadline: {error:#}"
+                                );
+                            }
+                            tokio::time::sleep(Duration::from_secs(3)).await;
+                        }
                     }
                 }
             }
+            self.step(self.host.revert(baseline))
+                .await
+                .map_err(step_error)?;
+            Ok(())
         }
-        self.step(self.host.revert(baseline))
-            .await
-            .map_err(step_error)?;
-        Ok((registration, verification))
+        .await;
+        if let Err(error) = result {
+            finished.failure = Some(error);
+        }
+        finished
     }
 
     async fn wait_guest_ip(
