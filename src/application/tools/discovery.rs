@@ -65,12 +65,14 @@ impl ToolService {
                     .map(|definition| definition.name.to_string()),
             );
         }
-        let _ = self.store.put(
+        if let Err(error) = self.store.put(
             "tool_availability",
             &agent.id,
             &agent.run_id,
             &json!({"available":names,"observed_at":now()}),
-        );
+        ) {
+            tracing::warn!(%error, agent = %agent.id, "tool availability record not persisted");
+        }
         ToolSelection {
             names,
             environment: json!({"environment_id":agent.environment_id,"unavailable_tools":unavailable}),
