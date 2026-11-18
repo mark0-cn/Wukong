@@ -259,23 +259,11 @@ class WritableTemporaryTests(unittest.TestCase):
             self.stack.enter_context(tempfile.TemporaryDirectory(prefix="worker temp "))
         )
         self.stack.enter_context(patch.object(worker_setup, "ROOT", self.root))
-        self.system_temp = self.root / "system-temp"
-        self.system_temp.mkdir()
 
-    def test_unwritable_system_temp_falls_back_to_workspace(self):
+    def test_windows_builds_use_a_workspace_temporary(self):
         with (
             patch.object(worker_setup.os, "name", "nt"),
-            patch.object(
-                worker_setup.tempfile,
-                "gettempdir",
-                return_value=str(self.system_temp),
-            ),
-            patch.object(
-                worker_setup.tempfile,
-                "NamedTemporaryFile",
-                side_effect=OSError("denied"),
-            ),
-            patch.dict(os.environ, {"TMP": "old", "TEMP": "old"}),
+            patch.dict(os.environ, {"TMP": "C:/short/TEMP", "TEMP": "C:/short/TEMP"}),
         ):
             worker_setup.ensure_writable_temporary()
             expected = str(self.root / "target/tmp")
@@ -283,15 +271,9 @@ class WritableTemporaryTests(unittest.TestCase):
             self.assertEqual(os.environ["TEMP"], expected)
             self.assertTrue((self.root / "target/tmp").is_dir())
 
-    def test_writable_system_temp_is_kept(self):
+    def test_non_windows_keeps_the_inherited_temporary(self):
         with (
-            patch.object(worker_setup.os, "name", "nt"),
-            patch.object(
-                worker_setup.tempfile,
-                "gettempdir",
-                return_value=str(self.system_temp),
-            ),
-            patch.object(worker_setup.tempfile, "NamedTemporaryFile"),
+            patch.object(worker_setup.os, "name", "posix"),
             patch.dict(os.environ, {"TMP": "keep", "TEMP": "keep"}),
         ):
             worker_setup.ensure_writable_temporary()

@@ -7,7 +7,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 
 from scripts._lib.checksums import sha256
 from scripts._lib.repository import ROOT
@@ -30,24 +29,21 @@ def resolve(path):
 
 
 def ensure_writable_temporary():
-    """Give MSVC and Cargo a workspace temp directory when the inherited one is unusable.
+    """Route Windows tool-chain temporary files into the repository workspace.
 
-    Windows tool chains create their temporary linker and compiler files through
-    %%TMP%%/%%TEMP%%. A short-path or ACL-restricted system temp directory makes those
-    children fail with LNK1104 even though the current process can still create files
-    elsewhere, so fall back to the repository's own target directory.
+    Compilers and linkers create their temporary files through %%TMP%%/%%TEMP%%
+    inherited from the packaging process. The system value can be an 8.3 short path
+    whose target is not writable for child processes, which fails the link with
+    LNK1104 even though the packaging process itself can create files. The workspace
+    directory keeps the native build reproducible regardless of the host temp layout.
     """
 
     if os.name != "nt":
         return
-    try:
-        with tempfile.NamedTemporaryFile(dir=tempfile.gettempdir()):
-            return
-    except OSError:
-        temporary = ROOT / "target/tmp"
-        temporary.mkdir(parents=True, exist_ok=True)
-        os.environ["TMP"] = str(temporary)
-        os.environ["TEMP"] = str(temporary)
+    temporary = ROOT / "target/tmp"
+    temporary.mkdir(parents=True, exist_ok=True)
+    os.environ["TMP"] = str(temporary)
+    os.environ["TEMP"] = str(temporary)
 
 
 def build_environment():
