@@ -7,8 +7,12 @@ import { Modal } from '../../shared/ui/Modal';
 import { StorageLocations, type StorageDraft } from '../maintenance/StorageLocations';
 import { LanguageSettings } from './LanguageSettings';
 import { WindowsConnection, emptyWindowsConnection, type WindowsConnectionDraft } from './WindowsConnection';
+import { WindowsWorker } from './WindowsWorker';
 import type { WindowsConnectionInput } from '../../shared/api/commands';
 import { editedForm, transportEdit } from './transport';
+
+/** The Windows Worker setup commands only exist on a Windows desktop host. */
+const windowsHost = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
 
 type Field = { path: string; label: string; kind?: 'number' | 'checkbox' | 'provider' | 'backend' | 'environment'; help?: string; options?: string[] };
 const groups = (form: Record<string, Json>): { title: string; fields: Field[] }[] => [
@@ -80,6 +84,18 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
       .catch(error => { if (alive) setError(errorValue(error)); }).finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; };
   }, [open, document, host.epoch]);
+  // A successful Windows Worker import saves configuration outside this form and
+  // bumps the workspace epoch. Reload the document when no local draft would be
+  // discarded so the environment list and the card use the new epoch.
+  useEffect(() => {
+    if (!open || !document || loadedEpoch === host.epoch || dirty) return;
+    let alive = true;
+    void api('config_read', { epoch: host.epoch }).then(value => {
+      if (!alive) return;
+      setDocument(value); setEdits({}); setLoadedEpoch(host.epoch);
+    }).catch(error => { if (alive) setError(errorValue(error)); });
+    return () => { alive = false; };
+  }, [open, document, loadedEpoch, host.epoch, dirty]);
   const patch = (): ConfigEdit[] => Object.entries(edits).map(([path, value]) => ({ path: path.split('.'), value }));
   const addWindowsConnection = async (input: WindowsConnectionInput) => {
     if (!document) return;
@@ -144,6 +160,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
       {document && section === 'connections' && <div>
         <section className="settings-group"><h3>{t('connection-registered')}</h3><ul>{Object.entries(environmentMap(document.form)).map(([id, environment]) => <li key={id}>{String(environment.name ?? id)} · {String(environment.platform)}{document.form.default_environment === id ? ` · ${t('connection-default')}` : ''}</li>)}</ul>{!Object.keys(environmentMap(document.form)).length && <p className="muted">{t('connection-none')}</p>}</section>
         <WindowsConnection disabled={busy || loadedEpoch !== host.epoch} hasEnvironments={Boolean(Object.keys(environmentMap(document.form)).length)} draft={connectionDraft} onDraft={setConnectionDraft} onAdd={addWindowsConnection} />
+        {windowsHost && <WindowsWorker epoch={host.epoch} disabled={busy || dirty || connectionDirty || loadedEpoch !== host.epoch || Boolean(host.execution) || host.pending_operations > 0} onRegistered={onSaved} />}
       </div>}
       {!document ? <p className="muted">{busy ? t('settings-loading-configuration') : t('settings-could-not-load-configuration-please-reload')}</p> : raw && section === 'advanced' ?
       <textarea className="toml-editor" aria-label={t('settings-toml-configuration-source')} spellCheck={false} value={document.source} disabled={busy}
