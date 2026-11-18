@@ -1,0 +1,3 @@
+kind = "feature"
+en = "The Windows worker connection receipt is now version 2 and lists the guest's non-loopback IPv4 candidate addresses (private ranges first, de-duplicated, capped). Setup can export the install result through a Windows save dialog with a Desktop/Public fallback, and restarting setup on an already installed guest no longer reinstalls but offers a refreshed export after an address change."
+zh_CN = "Windows Worker 连接回执升级为版本 2，并列出客体的非环回候选 IPv4 地址（私有网段优先、去重且有上限）。安装程序可通过 Windows 保存对话框导出安装结果，失败时回退到桌面或公用目录；在已安装客体上重新启动安装程序不再重装，而是提供地址变化后的刷新导出。"

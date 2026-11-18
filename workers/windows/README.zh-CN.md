@@ -87,6 +87,14 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 
 任意 Windows 主机都可在不提权的情况下预检最终公开介质：`WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`。安装使用提权的 `WukongWorkerSetup.exe install-reviewed setup.json <controller-key-hex> <sha256-of-enrollment.json>`，且只应在专用可丢弃 VM 上执行。
 
+### 安装回执与重新保存
+
+离线安装成功后，会在受保护的 `C:\ProgramData\WukongWorkers\<installation_id>\connection.json` 写入公开回执（schema 1，`receipt_version: 2`）。内容包括安装/环境身份、SSH 用户与端口、SSH 主机公钥及其指纹，以及 `candidate_addresses`：本客体非环回 IPv4 地址，RFC 1918 私有地址优先，各组内按数值升序，去重后最多 8 个。地址枚举是尽力而为的：即使无法读取网卡，安装也会以空列表完成。ProgramData 中的受保护记录仍是权威来源；导出的文件只是公开连接提示，不证明可达性或 hypervisor 隔离。
+
+安装成功后，安装程序提供“保存安装结果 / Save install result”，并以默认文件名 `wukong-worker-<installation_id>.json` 打开 Windows 保存对话框。若对话框无法打开，或所选路径无法写入，同一字节内容会被复制到 `%USERPROFILE%\Desktop\wukong-worker-<installation_id>.json`（当用户配置不可用或没有桌面目录时改用 `%PUBLIC%` 或其桌面目录），并显示实际路径。保存不会改变安装成功状态：ProgramData 中的受保护记录此时已经完整。
+
+在已存在有效安装的客体上以无参数方式再次启动安装程序不会重装；它会显示简短的“已安装”对话框，并询问是否保存刷新后的结果：重新枚举当前网卡地址，只改变 `receipt_version` 与 `candidate_addresses`，安装 ID、SSH 与主机密钥字段保持完全一致。客体地址变化后应使用此导出，而不是重置 worker。安装和修复仍必须使用离线介质及经过审查的 `install-*`/`verify-enrollment` 路径；刷新流程不会执行安装、服务或防火墙变更。
+
 原生构建身份包含共用协议 crate、原生/Python 源码、锁定输入和构建脚本。组装时验证该身份并保留依赖许可证。登记绑定控制器签名者和安装身份；SSH 独立绑定 Worker 主机密钥。连接与任务绑定见[跨平台环境指南](../../docs/design/cross-platform-environments.zh-CN.md)，实际安装后的进程/调试器/恢复用例见[Worker 验收指南](../tests/README.zh-CN.md)。
 
 单元测试验证契约和所有权不变量，不能证明 VM 隔离或真实模型效果。安装验收必须匹配准确的签名源码/包，并包含正常 Wukong 工具发现与分发路径。[2026-11-15 v3 验收记录](../../docs/history/validation/2026-11-15-execution-contract-v3.zh-CN.md)将新安装实例、x64/x86 执行与调试、重启恢复及完整 Wukong 流程绑定到准确源码/包和原始证据。较早的[历史记录](VALIDATION-HISTORY.zh-CN.md)保留各自的提交、失败和限制，包括未完成的维护及对抗性验收；正常路径验收不会取代这些限制。内核调试、自动创建 VM/快照和 GUI 目标交互仍不属于此 Worker 契约。

@@ -4,6 +4,7 @@ use crate::{
     host::accounts::{self, Role},
     host::authority::{Authority, SignedEnrollment},
     host::deployment::{self, Deployment},
+    host::network,
     host::service_access,
     host::staging,
     isolation::environment,
@@ -34,6 +35,10 @@ use windows_sys::Win32::{
 use wukong_worker_package::{
     Compatibility, PublicKey, SshPublicKey, VerifiedEnrollment, VerifiedManifest, verify_package,
 };
+
+/// Written receipt format version; version 2 adds guest address candidates.
+pub const RECEIPT_VERSION: u64 = 2;
+const RECEIPT_BYTES_LIMIT: u64 = 64 * 1024;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,6 +115,112 @@ pub fn elevated() -> Result<bool> {
         )
     })?;
     Ok(elevation.TokenIsElevated != 0)
+}
+/// One complete installation receipt found below the protected installation base.
+pub struct InstalledReceipt {
+    pub installation_id: String,
+    pub receipt: Value,
+}
+/// Protected installation base directory; every installation owns one child directory.
+pub fn install_base() -> Result<PathBuf> {
+    Ok(environment::program_data()?.join("WukongWorkers"))
+}
+/// Public receipt path of one installation. The installation ID is revalidated so
+/// no caller can turn this into an arbitrary path.
+pub fn installation_receipt_path(base: &Path, installation_id: &str) -> Result<PathBuf> {
+    pipe_transport::service_name(installation_id)?;
+    Ok(base.join(installation_id).join("connection.json"))
+}
+/// List every installation below `base` that has a complete receipt. A directory
+/// without one is a failed or foreign entry, not an existing installation.
+pub fn installed_receipts(base: &Path) -> Result<Vec<InstalledReceipt>> {
+    let entries = match std::fs::read_dir(base) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut receipts = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if pipe_transport::service_name(&name).is_err() || !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path().join("connection.json");
+        // A receipt that cannot be read or validated is not treated as installed, so
+        // the media path may still repair an interrupted installation below `base`.
+        let Ok(bytes) = crate::artifacts::io::read_bytes(&path, RECEIPT_BYTES_LIMIT) else {
+            continue;
+        };
+        let Ok(receipt) = installed_receipt(&bytes, &name) else {
+            continue;
+        };
+        receipts.push(InstalledReceipt {
+            installation_id: name,
+            receipt,
+        });
+    }
+    receipts.sort_by(|left, right| left.installation_id.cmp(&right.installation_id));
+    Ok(receipts)
+}
+/// Parse and validate one stored `connection.json` against the installation
+/// directory that owns it. Older version-1 receipts remain valid for re-export.
+pub fn installed_receipt(bytes: &[u8], installation_id: &str) -> Result<Value> {
+    pipe_transport::service_name(installation_id)?;
+    let receipt: Value =
+        serde_json::from_slice(bytes).context("installed receipt is not valid JSON")?;
+    let fields = receipt
+        .as_object()
+        .context("installed receipt is not a JSON object")?;
+    ensure!(
+        fields.get("schema").and_then(Value::as_u64) == Some(1),
+        "unsupported installed receipt schema"
+    );
+    ensure!(
+        fields.get("installed").and_then(Value::as_bool) == Some(true),
+        "installation is not complete"
+    );
+    ensure!(
+        fields.get("installation_id").and_then(Value::as_str) == Some(installation_id),
+        "installed receipt belongs to another installation"
+    );
+    for name in [
+        "environment_id",
+        "manifest_sha256",
+        "ssh_user",
+        "host_key",
+        "host_fingerprint",
+    ] {
+        ensure!(
+            fields.contains_key(name),
+            "installed receipt lacks required field {name}"
+        );
+    }
+    Ok(receipt)
+}
+/// Refresh only the guest-dependent part of a stored receipt. Installation,
+/// controller, SSH and host-key identity are copied unchanged; only the receipt
+/// version and the re-enumerated address candidates change.
+pub fn refreshed_receipt(receipt: &Value, candidates: Vec<String>) -> Result<Value> {
+    let mut fields = receipt
+        .as_object()
+        .context("installed receipt is not a JSON object")?
+        .clone();
+    ensure!(
+        fields.get("schema").and_then(Value::as_u64) == Some(1)
+            && fields.get("installed").and_then(Value::as_bool) == Some(true),
+        "cannot refresh an incomplete installed receipt"
+    );
+    let installation_id = fields
+        .get("installation_id")
+        .and_then(Value::as_str)
+        .context("installed receipt has no installation identity")?;
+    pipe_transport::service_name(installation_id)?;
+    fields.insert("receipt_version".into(), json!(RECEIPT_VERSION));
+    fields.insert("candidate_addresses".into(), json!(candidates));
+    Ok(Value::Object(fields))
 }
 fn copy_new(source: &Path, target: &Path, policy: &AclPolicy, maximum: u64) -> Result<()> {
     let bytes = crate::artifacts::io::read_bytes(source, maximum)?;
@@ -479,7 +590,14 @@ pub fn install(plan: Plan) -> Result<Value> {
             .unwrap_or_else(|_| "current bounded diagnostic unavailable".into())
         )
     })?;
-    let result = json!({"schema":1,"installed":true,"installation_id":deployment.installation_id,"environment_id":enrollment.environment_id,"generation":enrollment.generation,"manifest_sha256":plan.manifest.sha256(),"ssh_user":management.name,"ssh_port":enrollment.ssh_port,"host_key":host_public,"host_fingerprint":fingerprint,"production_isolation_verified":false});
+    // Candidate addresses are captured after the guest network state is final for
+    // this install attempt; enumeration is best effort and never fails the install.
+    let candidates = network::receipt_candidates(&network::SystemAdapters);
+    let result = json!({"schema":1,"receipt_version":RECEIPT_VERSION,"installed":true,"installation_id":deployment.installation_id,"environment_id":enrollment.environment_id,"generation":enrollment.generation,"manifest_sha256":plan.manifest.sha256(),"ssh_user":management.name,"ssh_port":enrollment.ssh_port,"host_key":host_public,"host_fingerprint":fingerprint,"candidate_addresses":candidates,"production_isolation_verified":false});
     crate::artifacts::io::write_new_json(&root.join("connection.json"), &result, &code)?;
     Ok(result)
 }
+
+#[cfg(test)]
+#[path = "installer_tests.rs"]
+mod tests;

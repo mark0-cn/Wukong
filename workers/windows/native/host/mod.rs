@@ -4,6 +4,7 @@ pub(crate) mod authority;
 pub(crate) mod context;
 pub mod deployment;
 pub mod installer;
+pub(crate) mod network;
 pub mod recovery;
 pub mod resource_host;
 pub mod service;
