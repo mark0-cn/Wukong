@@ -7,9 +7,10 @@ optional absolute path of a locally built Windows worker media template. This
 module computes that descriptor from the current checkout and the host's Docker
 state; it never embeds the image itself, a private key or a registry credential.
 
-The workbench image is resolved from an explicit `WUKONG_LOCAL_IMAGE`, an
-already present `wukong:local`, the CI-built Docker Hub workbench image for this
-client version (pulled, verified as linux/amd64 and tagged locally), or a local
+The workbench image is resolved from an explicit `WUKONG_LOCAL_IMAGE`, the
+CI-built Docker Hub workbench image for this client version (pulled, verified as
+linux/amd64 and tagged locally, replacing any stale local tag), an already
+present `wukong:local` tag only when that pull is impossible, or a local
 `docker buildx bake` fallback. The registry repository is intentionally separate
 from the official release image, so packaging can never pull a release tag by
 mistake.
@@ -235,12 +236,26 @@ def _warn_pull_fallback(reference, reason, detail, image_name):
     )
 
 
+def _warn_existing_image(image_name):
+    """Warn that the pull failed and an older local tag is used instead."""
+
+    reference = workbench_image()
+    print(
+        f"warning: falling back to the existing local Docker image {image_name}, which "
+        f"may be an older build than the CI image {reference}; remove it with "
+        f"`docker image rm {image_name}` and re-run to force the pull",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def pull_workbench_image(image_name):
     """Pull the CI-built image for this version, verify it and tag it locally.
 
     Returns `True` when the local tag now exists. Missing-image, authorization
-    and network failures only warn because the local Bake path still produces a
-    usable image; a non-linux/amd64 image is refused instead of silently used.
+    and network failures only warn because the caller can still fall back to an
+    existing local tag or the local Bake path; a non-linux/amd64 image is refused
+    instead of silently used.
     """
 
     reference = workbench_image()
@@ -306,9 +321,20 @@ def _bake_image(image_name):
 
 
 def _ensure_image(image_name):
-    if _image_field(image_name, "{{.Id}}") is not None:
+    """Resolve the image in the documented priority.
+
+    Raises `DockerUnavailable` when neither the pull nor the local check can
+    reach the daemon, so `ensure_image` can defer verification to onboarding.
+    """
+
+    if _explicit_image():
+        if _image_field(image_name, "{{.Id}}") is None:
+            _bake_image(image_name)
         return
-    if not _explicit_image() and pull_workbench_image(image_name):
+    if pull_workbench_image(image_name):
+        return
+    if _image_field(image_name, "{{.Id}}") is not None:
+        _warn_existing_image(image_name)
         return
     _bake_image(image_name)
 
@@ -316,13 +342,15 @@ def _ensure_image(image_name):
 def ensure_image(image_name):
     """Require the local image, preferring the CI-built workbench image.
 
-    Resolution order: an explicit `WUKONG_LOCAL_IMAGE`, the local tag when it
-    already exists, the CI-built Docker Hub image for this client version
-    (`WUKONG_LOCAL_IMAGE_REGISTRY`, default `hlmark0/wukong-workbench`, tag
-    `local-<version>`) pulled and tagged as `wukong:local`, then the documented
-    Bake target. When the packaging process cannot reach Docker, verification is
-    deferred to onboarding instead of failing the build; onboarding requires the
-    image and reads its real size before preparing the environment.
+    Resolution order: an explicit `WUKONG_LOCAL_IMAGE`; the CI-built Docker Hub
+    image for this client version (`WUKONG_LOCAL_IMAGE_REGISTRY`, default
+    `hlmark0/wukong-workbench`, tag `local-<version>`) pulled, verified as
+    linux/amd64 and tagged as `wukong:local`, which replaces an older local tag;
+    an already present `wukong:local` tag, only when that pull is impossible;
+    and finally the documented Bake target. When the packaging process cannot
+    reach Docker, verification is deferred to onboarding instead of failing the
+    build; onboarding requires the image and reads its real size before
+    preparing the environment.
     """
 
     try:
