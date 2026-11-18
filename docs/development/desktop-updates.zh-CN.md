@@ -26,7 +26,7 @@ Windows 安装包构建还会附带离线 Worker 安装程序。`build-installer
 
 `updates/manifest.rs` 验证清单和文件签名、版本、大小、SHA256、固定镜像 digest、运行协议与数据 schema。
 发布目录中的 `latest.json` 同时供 Tauri 和环境管理使用；应用先验证其独立签名，再将同一份内容传给 Tauri `restore_update`，避免两次查询得到不同版本。
-清单仅允许当前项目对应版本的 HTTPS 附件和公开 `hlmark0/wukong` digest。签名密钥不是模型密钥，也不进入镜像。
+清单仅允许当前项目对应版本的 HTTPS 附件和公开 `hlmark0/wukong` digest。签名密钥不是模型密钥，也不进入镜像。开发用 `cargo package-local` 构建属于本地发布安装包：只有首次引导读取内置的未签名 `local-release.json` 描述文件，所有在线更新路径仍使用签名目录（[本地发布构建](local-builds.zh-CN.md)）。
 
 `interfaces/desktop/updates.rs` 处理检查、下载、独立候选自检、安装和 GUI 进度。准备阶段不替换现用 worker。
 安装前缓存并验证当前版本安装文件，原子保存恢复助手与 `updates/pending.json`。新进程只有在版本匹配且配套环境 doctor 通过后才将记录转为 `previous.json`。

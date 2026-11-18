@@ -77,6 +77,10 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 default = ["desktop"]
 desktop = ["dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-build", "dep:tauri-plugin-updater"]
 custom-protocol = ["desktop", "tauri/custom-protocol"]
+# Local development packaging only (`cargo package-local`). A build with this
+# feature bundles `local-release.json` and completes first-run onboarding against
+# a locally built Docker image; CI release builds must never enable it.
+local-release = ["desktop"]
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }

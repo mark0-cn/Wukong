@@ -24,6 +24,7 @@ English · [简体中文](README.zh-CN.md)
 - [Maintenance](development/maintenance.md): boundaries, generated catalogs and checks.
 - [Documentation maintenance](development/documentation.md) and [localization](development/localization.md): paired guides and product translations.
 - [Desktop updates](development/desktop-updates.md): installation trust, progress, storage and recovery.
+- [Local-release builds](development/local-builds.md): installers whose first-run onboarding uses a locally built Docker image.
 - [Releases](development/releases.md) and [GitHub maintenance](development/github-maintenance.md): versions, CI, caches and rehearsals.
 - [Automation](../scripts/README.md), [worker tests](../workers/tests/README.md), [evaluations](../evals/README.md): responsibilities and entry points.
 

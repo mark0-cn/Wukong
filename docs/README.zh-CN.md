@@ -24,6 +24,7 @@
 - [维护约定](development/maintenance.zh-CN.md)：边界、生成目录及检查。
 - [文档维护](development/documentation.zh-CN.md)和[多语言维护](development/localization.zh-CN.md)：配对文档与产品翻译。
 - [桌面更新](development/desktop-updates.zh-CN.md)：安装信任、进度、存储及恢复。
+- [本地发布构建](development/local-builds.zh-CN.md)：首次引导使用本地 Docker 镜像的安装包。
 - [发布流程](development/releases.zh-CN.md)和[GitHub 维护](development/github-maintenance.zh-CN.md)：版本、CI、缓存、演练。
 - [提交信息与发布描述](development/commits.zh-CN.md)：提交规范、CI 检查与双语用户说明。
 

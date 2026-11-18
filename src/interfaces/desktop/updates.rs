@@ -1,7 +1,7 @@
 //! Desktop update orchestration. Network preparation never switches the live worker.
 use super::service::Service;
 use crate::application::maintenance::updates::{
-    environment, maintenance,
+    OnboardingRelease, environment, maintenance,
     manifest::{self, Manifest},
     recovery,
 };
@@ -44,6 +44,9 @@ pub struct Status {
         Option<crate::application::maintenance::workbench::pull_progress::PullProgress>,
     pub image_version: Option<String>,
     pub pending: bool,
+    /// True for `cargo package-local` builds; the UI may later show a local/dev
+    /// marker. Environment onboarding then uses the bundled local descriptor.
+    pub local_build: bool,
     pub health: super::update_health::Health,
 }
 pub struct Controller {
@@ -93,6 +96,7 @@ impl Default for Controller {
             status: Mutex::new(Status {
                 version: env!("CARGO_PKG_VERSION").into(),
                 phase: "idle".into(),
+                local_build: cfg!(feature = "local-release"),
                 ..Default::default()
             }),
             operation: tokio::sync::Mutex::new(()),
@@ -619,14 +623,11 @@ impl Controller {
                 UiMessage::new("system-preparing-update")
             },
         );
-        let manifest = self
-            .remember(if setup {
-                Some(env!("CARGO_PKG_VERSION"))
-            } else {
-                None
-            })
-            .await?;
-        if !setup {
+        let release = if setup {
+            // Onboarding only. Update checks keep resolving the online catalog.
+            self.setup_release(&config).await?
+        } else {
+            let manifest = self.remember(None).await?;
             ensure!(
                 manifest.can_upgrade(env!("CARGO_PKG_VERSION"))?,
                 UiMessage::new("system-no-newer-version-is-available-to-install")
@@ -634,16 +635,31 @@ impl Controller {
             self.download(&manifest).await?;
             let previous = self.remember(Some(env!("CARGO_PKG_VERSION"))).await?;
             self.download(&previous).await?;
-        }
-        self.edit().image_version = Some(manifest.version.clone());
+            OnboardingRelease {
+                version: manifest.version,
+                image: manifest.image,
+                image_size: manifest.image_size,
+                local_build: false,
+            }
+        };
+        tracing::info!(
+            version = %release.version,
+            image = %release.image,
+            image_size = release.image_size,
+            local_build = release.local_build,
+            "resolved the onboarding tool image"
+        );
+        self.edit().image_version = Some(release.version.clone());
         let controller = self.clone();
-        let image = manifest.image.clone();
+        let image = release.image.clone();
+        let local_build = release.local_build;
         let probe_config = config.clone();
         let cancel = self.status().cancel;
         tokio::task::spawn_blocking(move || {
             environment::prepare(
                 &probe_config,
                 &image,
+                local_build,
                 cancel,
                 |log| {
                     let mut state = controller.edit();
@@ -671,7 +687,7 @@ impl Controller {
                 "activating",
                 UiMessage::new("system-activating-tool-environment"),
             );
-            let image = manifest.image;
+            let image = release.image;
             tokio::task::spawn_blocking(move || {
                 let _lock =
                     maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
@@ -690,7 +706,7 @@ impl Controller {
                 UiMessage::new("system-tool-environment-prepared-validation-passed"),
             );
         } else {
-            self.edit().prepared = Some(manifest.version);
+            self.edit().prepared = Some(release.version);
             self.phase(
                 "ready",
                 UiMessage::new("system-download-and-environment-checks-completed-ready-to-install"),
@@ -698,6 +714,65 @@ impl Controller {
         }
         Ok(())
     }
+
+    /// Environment identity for first-run setup.
+    ///
+    /// `local-release` builds resolve it from the bundled descriptor and a local
+    /// Docker image; every other build keeps the signed-catalog acquisition.
+    async fn setup_release(&self, _config: &AppConfig) -> Result<OnboardingRelease> {
+        #[cfg(feature = "local-release")]
+        {
+            let config = _config.clone();
+            let release = tokio::task::spawn_blocking(move || local_setup_release(&config))
+                .await
+                .map_err(anyhow::Error::from)??;
+            Ok(release)
+        }
+        #[cfg(not(feature = "local-release"))]
+        {
+            let manifest = self.remember(Some(env!("CARGO_PKG_VERSION"))).await?;
+            Ok(OnboardingRelease {
+                version: manifest.version,
+                image: manifest.image,
+                image_size: manifest.image_size,
+                local_build: false,
+            })
+        }
+    }
+}
+
+/// Resolve the environment of a `cargo package-local` build.
+///
+/// The bundled descriptor names a local image tag; require the image to exist on
+/// this Docker host before the preparation pipeline starts so the operator sees
+/// the build command instead of a registry pull failure.
+#[cfg(feature = "local-release")]
+fn local_setup_release(config: &AppConfig) -> Result<OnboardingRelease> {
+    let descriptor = crate::application::maintenance::updates::local_release::read()?;
+    ensure!(
+        descriptor.version == env!("CARGO_PKG_VERSION"),
+        "local-release.json was built for client version {} but this executable is {}; rebuild this package with `cargo package-local`",
+        descriptor.version,
+        env!("CARGO_PKG_VERSION")
+    );
+    let docker = crate::application::maintenance::workbench::Docker::new(
+        &config.workbench.docker_executable,
+    );
+    let image_size = environment::require_local_image(&docker, &descriptor.image)?;
+    if image_size != descriptor.image_size {
+        tracing::warn!(
+            image = %descriptor.image,
+            packaged = descriptor.image_size,
+            actual = image_size,
+            "the local-release Docker image was rebuilt after packaging; using its current size"
+        );
+    }
+    Ok(OnboardingRelease {
+        version: descriptor.version,
+        image: descriptor.image,
+        image_size,
+        local_build: true,
+    })
 }
 
 /// Delete cached releases that no pending switch, previous journal or the running

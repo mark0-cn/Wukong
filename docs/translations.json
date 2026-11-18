@@ -14,8 +14,8 @@
       "zh-CN": "b013f93ed0f491692066a7e91f887adf97d239912fb993c421ff07c7a90a1d5a"
     },
     "docs/README.md": {
-      "en": "919681abe9e0504b0836701a8a7ae87ff8309f5041b818cfe1e21dec8b046b55",
-      "zh-CN": "0f2c3ea30f55df53ce5579d0a04e4b4f4918bc50761744278708f1aeb01c9d31"
+      "en": "22e6a41430f5fc21a5c9b0ced4666abf5192206673e2e29ca761ec9f7f83b306",
+      "zh-CN": "93b889c62e96d46fe75562f1a939200dc1ebf76fa13da777f1487a9b5838e497"
     },
     "docs/design/architecture.md": {
       "en": "53df30fcd5a04578311a05a5c7aeac32c51e5ea6b5c6b6c1df72d504ed59c341",
@@ -38,8 +38,8 @@
       "zh-CN": "be05ebe96a7f402f2d80df9f47292d1a216e6ae8ec39a4ffec52877a94323700"
     },
     "docs/development/desktop-updates.md": {
-      "en": "61c9a0ddc477658ce557452abea14256bf66bae4be24074a550d2557edf75794",
-      "zh-CN": "bd89f25ae622e3ecaecd71ef72f339e78679a9689050afa20ab6db8404cef710"
+      "en": "48eb8ae5c35cfe2e014cef72e3982723904768ea6fc357b4d60a074b3868da1a",
+      "zh-CN": "24d92643b1c2c37ba6cb5c8c369aad0475aee0c17c533a50e0a26f18e4d61b08"
     },
     "docs/development/documentation.md": {
       "en": "3cd9dbff5f96ff2dd52e709e3d8329a4c518caebb88ecd55982da1bcb7d1aa95",
@@ -53,6 +53,10 @@
       "en": "eddd0fd0ae5d6fb6a94f4955ed3fbb54a4ea3da46410800d03051c83820938f9",
       "zh-CN": "85639e26609e196d724a8f9995eccd97779d6c5ef134c0c2d302d05a46979f3f"
     },
+    "docs/development/local-builds.md": {
+      "en": "e30d513d7f72c31e810b757081a24c720bb190ac5749e81323cc96c33fa858c0",
+      "zh-CN": "13b93823d7e11d60e9bfbb9ce980e36006e0d4dca6cb0e6a3f2c3d18c470bc97"
+    },
     "docs/development/localization.md": {
       "en": "c4c4556a74b2c895f9378d202e139da062fa1a86507b81554eb1132d22b3e472",
       "zh-CN": "fec3b5ffa7799de2a5c11f04e345a83f9e28f009d69f74804eb6b210a505e98e"
@@ -62,8 +66,8 @@
       "zh-CN": "4aa6d90511d24aa68571190528faa7458667f77a167b710a75dea09144bfeb66"
     },
     "docs/development/releases.md": {
-      "en": "c66575185f275910fb74a1fdfecc7c51b706de833a1b3d933d20297ead1ba991",
-      "zh-CN": "42f4b696d8e0dc6c7bbcd794dc0f2de5f5aed5ac4406e21f954a6400b80bc465"
+      "en": "30275419bdc56cba70945e1234c9839ad7da6cf075b5613e8fa1f635046b342b",
+      "zh-CN": "776a251be0b9a587f825058086b38e4ab2dbe44725862e995d26690565374fa9"
     },
     "docs/history/README.md": {
       "en": "dc9906830ecbb0c106b647ef4513032bef03e89f8dc0daa3eddc1e4762299500",

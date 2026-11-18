@@ -6,7 +6,11 @@
 //! `latest.json.sig` before parsing, and the template bytes are accepted only
 //! after their exact size and SHA-256 match the signed entry. Local templates
 //! chosen by the operator bypass the download but go through the same template
-//! validation inside the shared media generator.
+//! validation inside the shared media generator. A `local-release` build may
+//! instead name the absolute path of a template built from this checkout; that
+//! path has no online signature, so the same shared template validation remains
+//! its only trust boundary and the GUI still offers local file picking when the
+//! descriptor omits it.
 use crate::application::maintenance::updates::manifest::{self, Manifest};
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -165,6 +169,13 @@ pub async fn resolve_downloaded(
     worker_media_root: &Path,
     controller_version: &str,
 ) -> Result<ResolvedTemplate> {
+    // A local-release package may bundle the template path of this checkout. It
+    // has no online signature, so the shared media generator's identity checks
+    // remain the trust boundary; only the signed-catalog download is skipped.
+    #[cfg(feature = "local-release")]
+    if let Some(resolved) = local_template(controller_version)? {
+        return Ok(resolved);
+    }
     // Trust boundary: this verifies latest.json.sig before parsing the catalog.
     let (catalog, _bytes, _signature) = manifest::fetch(Some(controller_version))
         .await
@@ -186,6 +197,52 @@ pub async fn resolve_downloaded(
         version: Some(expected.version),
         sha256: Some(expected.sha256),
     })
+}
+
+/// Resolve the template a local-release descriptor names, if this build packages one.
+#[cfg(feature = "local-release")]
+fn local_template(controller_version: &str) -> Result<Option<ResolvedTemplate>> {
+    let release = crate::application::maintenance::updates::local_release::read()?;
+    let Some(template) = release.template() else {
+        // The GUI keys local template picking on this wording.
+        anyhow::bail!(
+            "this release does not publish a Windows worker media template; choose a local template file"
+        );
+    };
+    ensure!(
+        release.version == controller_version,
+        "the local-release worker media template is built for client version {} but this controller is {controller_version}; rebuild this package with `cargo package-local`",
+        release.version
+    );
+    let path = std::path::absolute(template).with_context(|| {
+        format!(
+            "resolve the local-release worker media template {}",
+            template.display()
+        )
+    })?;
+    let metadata = fs::symlink_metadata(&path).with_context(|| {
+        format!(
+            "the local-release worker media template is missing: {}; rebuild the template or rerun `cargo package-local` without it",
+            path.display()
+        )
+    })?;
+    ensure!(
+        metadata.is_file(),
+        "the local-release worker media template is not a regular file: {}",
+        path.display()
+    );
+    ensure!(
+        metadata.len() > 0 && metadata.len() <= MAX_TEMPLATE_BYTES,
+        "the local-release worker media template size is invalid: {}",
+        path.display()
+    );
+    ensure_template_archive(&path)?;
+    Ok(Some(ResolvedTemplate {
+        path,
+        source: TemplateSource::Local,
+        version: Some(release.version),
+        sha256: None,
+    }))
 }
 
 /// Download one catalog-named template into the cache and verify it before use.

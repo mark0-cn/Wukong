@@ -4,9 +4,41 @@ use crate::{application::maintenance::workbench::Workbench, config::AppConfig};
 use anyhow::{Context, Result, ensure};
 use std::path::Path;
 
+/// Require the Docker image named by a local-release package to exist on this
+/// host and report its size.
+///
+/// `cargo package-local` embeds a local tag instead of a registry digest; pulling
+/// it would target a repository that does not exist. The operator builds the tag
+/// from this checkout, so a missing image is an actionable local setup error.
+pub fn require_local_image(
+    docker: &crate::application::maintenance::workbench::Docker,
+    image: &str,
+) -> Result<u64> {
+    let inspection = docker.inspect("image", image)?.with_context(|| {
+        format!(
+            "the local-release Docker image `{image}` is not available on this Docker host; build it from this checkout with `docker buildx bake --load --set workbench.tags={image}` (or set WUKONG_LOCAL_IMAGE before `cargo package-local`) and retry"
+        )
+    })?;
+    ensure!(
+        inspection["Os"] == "linux" && inspection["Architecture"] == "amd64",
+        "the local-release Docker image `{image}` must be a linux/amd64 image"
+    );
+    let size = inspection["Size"]
+        .as_u64()
+        .context("the local-release Docker image records no size")?;
+    ensure!(
+        size > 0,
+        "the local-release Docker image records an empty size"
+    );
+    Ok(size)
+}
+
+/// `local_build` selects the local-release pipeline: the image must already
+/// exist as a local tag and is never pulled from a registry.
 pub fn prepare(
     config: &AppConfig,
     image: &str,
+    local_build: bool,
     cancel: tokio_util::sync::CancellationToken,
     diagnostics: impl Fn(&Path),
     progress: impl Fn(UiMessage),
@@ -22,16 +54,17 @@ pub fn prepare(
     let mut workbench = Workbench::open(&probe)?;
     workbench.docker.cancellation = Some(cancel.clone());
     progress(UiMessage::new("system-checking-docker-host"));
-    workbench.docker.preflight(image)?;
+    if local_build {
+        workbench.docker.preflight_host()?;
+        require_local_image(&workbench.docker, image)?;
+    } else {
+        workbench.docker.preflight(image)?;
+    }
     let result = (|| {
-        progress(UiMessage::new(
-            "system-pulling-the-tool-image-docker-will-reuse-downloaded",
-        ));
-        if workbench.docker.inspect("image", image)?.is_none() {
-            workbench
-                .docker
-                .pull_observed(image, &root.join("logs/pull.log"), &pull)?;
-        } else {
+        if local_build {
+            // Re-inspect after the host check so a concurrently removed image
+            // still produces the actionable local-build diagnosis.
+            require_local_image(&workbench.docker, image)?;
             pull(
                 crate::application::maintenance::workbench::pull_progress::PullProgress {
                     cached: true,
@@ -39,8 +72,32 @@ pub fn prepare(
                     ..Default::default()
                 },
             );
+        } else {
+            progress(UiMessage::new(
+                "system-pulling-the-tool-image-docker-will-reuse-downloaded",
+            ));
+            if workbench.docker.inspect("image", image)?.is_none() {
+                workbench
+                    .docker
+                    .pull_observed(image, &root.join("logs/pull.log"), &pull)?;
+            } else {
+                pull(
+                    crate::application::maintenance::workbench::pull_progress::PullProgress {
+                        cached: true,
+                        finished: true,
+                        ..Default::default()
+                    },
+                );
+            }
         }
-        workbench.up(Some(image))?;
+        if local_build {
+            workbench.ensure_up(
+                Some(image),
+                crate::application::maintenance::workbench::environment::ImageAcquisition::LocalOnly,
+            )?;
+        } else {
+            workbench.up(Some(image))?;
+        }
         progress(UiMessage::new(
             "system-checking-the-candidate-tool-environment",
         ));

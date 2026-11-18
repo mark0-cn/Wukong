@@ -418,6 +418,12 @@ pub fn run(
             }
         })
         .setup(move |app| {
+            // A local-release build keeps its onboarding descriptor beside the
+            // executable; resolve it before any environment operation can run.
+            #[cfg(feature = "local-release")]
+            crate::application::maintenance::updates::local_release::initialize(
+                &app.path().resource_dir()?,
+            );
             let confirmation_service = updates.clone();
             tauri::async_runtime::spawn(async move {
                 controller.confirm(confirmation_service).await;
