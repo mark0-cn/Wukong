@@ -5,6 +5,7 @@ import platform
 from pathlib import Path
 import shutil
 from scripts._lib.versioning import ROOT
+from scripts.release import worker_setup
 from scripts.release.local_package import checkout_identity
 from scripts.release.build_installer import build
 
@@ -19,6 +20,15 @@ def package(output, *, signed=False, check=False):
     if not shutil.which("cargo") or not shutil.which("npm.cmd" if system == "Windows" else "npm"):
         raise ValueError("Cargo and Node.js/npm must be on PATH.")
     if check:
+        if system == "Windows":
+            worker = worker_setup.check()
+            toolchain = worker["toolchain"]
+            print(
+                "Windows worker setup: MSVC x64 found; offline toolchain "
+                + ("ready" if toolchain["available"] else "downloaded on first build")
+                + "; native worker source present.",
+                flush=True,
+            )
         print(
             "Source and tool entry points checked. System libraries and installer tools are checked during build."
         )

@@ -1,9 +1,23 @@
-"""Build one native desktop distribution; tool images are downloaded on first use."""
+"""Build one native desktop distribution; Windows bundles the offline worker setup."""
 
 import argparse
+import json
 import os
 import subprocess
 from scripts._lib.versioning import ROOT
+from scripts.release import worker_setup
+
+WORKER_SETUP_SOURCE = (worker_setup.DEFAULT_OUTPUT / worker_setup.SETUP_NAME).as_posix()
+WORKER_SETUP_RESOURCE = "worker-setup/" + worker_setup.SETUP_NAME
+
+
+def configuration(platform, signed=False):
+    """Compose the Tauri config overlay for one platform."""
+
+    bundle = {"createUpdaterArtifacts": signed}
+    if platform == "windows":
+        bundle["resources"] = {WORKER_SETUP_SOURCE: WORKER_SETUP_RESOURCE}
+    return json.dumps({"bundle": bundle}, separators=(",", ":"))
 
 
 def build(platform, signed=False):
@@ -11,6 +25,8 @@ def build(platform, signed=False):
         raise ValueError("unsupported desktop platform")
     if signed and not os.environ.get("TAURI_SIGNING_PRIVATE_KEY"):
         raise ValueError("TAURI_SIGNING_PRIVATE_KEY is required for signed installers")
+    if platform == "windows":
+        worker_setup.build_and_stage(ROOT / "target/worker-setup")
     npm = "npm.cmd" if os.name == "nt" else "npm"
     npx = "npx.cmd" if os.name == "nt" else "npx"
     subprocess.run([npm, "ci"], cwd=ROOT, check=True)
@@ -22,7 +38,7 @@ def build(platform, signed=False):
             "build",
             "--ci",
             "--config",
-            '{"bundle":{"createUpdaterArtifacts":' + str(signed).lower() + "}}",
+            configuration(platform, signed),
             "--",
             "--locked",
         ],

@@ -60,34 +60,8 @@ jobs:
         shell: pwsh
         timeout-minutes: 40
         run: |
-          $ErrorActionPreference = 'Stop'
-          python -m scripts.worker.toolchain --cache target/windows-offline-cache --component windbg_mcp --download
+          python -m scripts.release.worker_setup --output target/worker-setup --cache target/windows-offline-cache
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $locator = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $installation = & $locator -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -or -not $installation) { throw 'MSVC x64 build tools are unavailable' }
-          $setup = Join-Path $installation 'Common7/Tools/VsDevCmd.bat'
-          $command = '"{0}" -no_logo -arch=x64 -host_arch=x64 >nul && set' -f $setup
-          & cmd.exe /d /c $command | ForEach-Object {
-            if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process') }
-          }
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python -m scripts.worker.build_native
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $source = 'target/windows-worker-native/x86_64-pc-windows-msvc/release/wukong-worker.exe'
-          $destination = 'target/worker-setup/WukongWorkerSetup.exe'
-          New-Item -ItemType Directory -Force (Split-Path -LiteralPath $destination) | Out-Null
-          Copy-Item -LiteralPath $source -Destination $destination -Force
-          $sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
-          $bytes = (Get-Item -LiteralPath $destination).Length
-          Write-Output "WukongWorkerSetup.exe: $bytes bytes, SHA256 $sha256"
-          if ($env:GITHUB_STEP_SUMMARY) {
-            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "WukongWorkerSetup.exe staged in target/worker-setup: $bytes bytes, SHA256 $sha256."
-          }
-          if ($env:GITHUB_OUTPUT) {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "sha256=$sha256"
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "size=$bytes"
-          }
       - name: Bundle verified Windows client without recompilation
         if: inputs.target == 'windows' && inputs.installer_artifact_id == ''
         shell: pwsh

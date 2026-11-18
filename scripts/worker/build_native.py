@@ -16,7 +16,7 @@ from scripts.worker.build_probes import build as build_probes
 from scripts.worker.build_debugger import build as build_debugger
 
 
-def build(output, check_only=False):
+def build(output, check_only=False, cache=ROOT / "target/windows-offline-cache"):
     if platform.system() != "Windows" or platform.machine().lower() not in {"amd64", "x86_64"}:
         raise ValueError("Native Windows worker builds require Windows x64")
     cargo = shutil.which("cargo")
@@ -56,7 +56,7 @@ def build(output, check_only=False):
             "imported_libraries": require_static_crt(binary, inspector=inspector),
         }
     probes = build_probes(output, inspector=inspector)
-    debugger = build_debugger(ROOT / "target/windows-offline-cache", output)
+    debugger = build_debugger(cache, output)
     if source_identity != identity():
         raise ValueError("Worker source changed during native build")
     metadata = {
@@ -75,10 +75,16 @@ def build(output, check_only=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "target/windows-worker-native")
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=ROOT / "target/windows-offline-cache",
+        help="Offline toolchain cache (default: %(default)s)",
+    )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     try:
-        result = build(args.output.resolve(), args.check)
+        result = build(args.output.resolve(), args.check, args.cache.resolve())
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Windows worker build failed: {error}\n")
     import json

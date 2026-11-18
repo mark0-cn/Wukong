@@ -31,3 +31,23 @@ class NativePackageTests(unittest.TestCase):
             native_package.package(output, check=True)
             build.assert_not_called()
             self.assertFalse(output.exists())
+
+    def test_windows_preflight_checks_the_worker_setup_without_building(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(native_package.platform, "system", return_value="Windows"),
+            patch.object(native_package.platform, "machine", return_value="AMD64"),
+            patch.object(native_package, "checkout_identity", return_value="a" * 40),
+            patch.object(native_package.shutil, "which", return_value="C:/tool.exe"),
+            patch.object(
+                native_package.worker_setup,
+                "check",
+                return_value={"toolchain": {"available": False}},
+            ) as check,
+            patch.object(native_package, "build") as build,
+        ):
+            output = Path(tmp) / "output"
+            native_package.package(output, check=True)
+            check.assert_called_once_with()
+            build.assert_not_called()
+            self.assertFalse(output.exists())

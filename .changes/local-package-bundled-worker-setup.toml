@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Bundle the offline Windows worker setup executable into installers produced by cargo package-local by default, using the same worker-setup/WukongWorkerSetup.exe resource overlay as release builds. Local Windows packaging now discovers x64 MSVC build tools and may download missing pinned toolchain assets on first run."
+zh_CN = "cargo package-local 生成的 Windows 安装包默认内置离线 Worker 安装程序，使用与正式构建相同的 worker-setup/WukongWorkerSetup.exe 资源覆盖。本地 Windows 打包现在会自动发现 x64 MSVC 生成工具，并可能在首次运行时下载缺失的锁定工具链资源。"

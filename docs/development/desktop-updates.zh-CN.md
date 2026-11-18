@@ -16,7 +16,7 @@ Linux 支持范围以桌面安装验收矩阵为准，AppImage 不承诺兼容�
 
 ## 内置 Worker 安装程序
 
-Windows 安装包构建还会附带离线 Worker 安装程序。`build-installer.yml` 的 Windows 打包步骤在 x64 MSVC 环境中用 `python -m scripts.worker.build_native` 构建它，把生成的 `wukong-worker.exe` 暂存为 `target/worker-setup/WukongWorkerSetup.exe`，在步骤摘要中记录 SHA256 与大小，并通过 `--config` 资源覆盖以 `worker-setup/WukongWorkerSetup.exe` 加入 NSIS 载荷。该覆盖使 `tauri.windows.conf.json` 不包含仅构建期存在的文件，复用共享配置的未签名验收安装包仍可在没有它的情况下完成构建。已按 Tauri CLI 2.12.4 验证：资源目标路径相对于安装目录，因此安装后的文件位于 `<安装目录>\worker-setup\WukongWorkerSetup.exe`（默认当前用户安装为 `%LOCALAPPDATA%\Wukong\worker-setup\WukongWorkerSetup.exe`）。NSIS 卸载会删除该文件、升级会替换它，因此 `packaging/windows/uninstall-hooks.nsh` 无需额外清理。
+Windows 安装包构建还会附带离线 Worker 安装程序。`build-installer.yml` 的 Windows 打包步骤在 x64 MSVC 环境中用 `python -m scripts.worker.build_native` 构建它，把生成的 `wukong-worker.exe` 暂存为 `target/worker-setup/WukongWorkerSetup.exe`，在步骤摘要中记录 SHA256 与大小，并通过 `--config` 资源覆盖以 `worker-setup/WukongWorkerSetup.exe` 加入 NSIS 载荷。该覆盖使 `tauri.windows.conf.json` 不包含仅构建期存在的文件，复用共享配置的未签名验收安装包仍可在没有它的情况下完成构建。本地 Windows 打包默认使用同一覆盖：`cargo package-local` 在打包前运行 `python -m scripts.release.worker_setup --output target/worker-setup`，因此其安装包同样包含 `worker-setup/WukongWorkerSetup.exe`，并需要自动发现的 x64 MSVC 生成工具。已按 Tauri CLI 2.12.4 验证：资源目标路径相对于安装目录，因此安装后的文件位于 `<安装目录>\worker-setup\WukongWorkerSetup.exe`（默认当前用户安装为 `%LOCALAPPDATA%\Wukong\worker-setup\WukongWorkerSetup.exe`）。NSIS 卸载会删除该文件、升级会替换它，因此 `packaging/windows/uninstall-hooks.nsh` 无需额外清理。
 
 安装包只包含这个可执行文件。离线介质模板（已暂存的载荷、二进制与依赖，发布归档约 458 MB）不随安装包分发，而是独立的签名发布附件；`wukong lab provision` 校验已下载的介质模板并使用控制端密钥 finalize。安装后的安装程序可在不提权时执行 `verify-enrollment`，提权后配合准备好的介质在专用可丢弃 VM 上执行 `install-reviewed`；参见[原生 Windows Worker 组件](../../workers/windows/README.zh-CN.md)。
 

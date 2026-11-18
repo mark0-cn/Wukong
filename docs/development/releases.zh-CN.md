@@ -45,7 +45,9 @@ App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发
 
 在 Windows x64 或 Linux x64 的源码目录执行 `cargo package-local`。
 入口检查源码已提交、工作区干净和构建工具，再调用 Tauri 生成当前平台的 NSIS EXE 或 AppImage，输出到 `target/local-installers/`。
-不下载工具镜像、不发布版本。首次运行客户端时从对应正式 Release 获取签名环境清单，所以未发布版本的本地构建不能通过在线向导获取该版本环境。
+不发布版本。Windows 安装包默认内置离线 Worker 安装程序，安装后位于 `<安装目录>\worker-setup\WukongWorkerSetup.exe`：命令在自动发现的 x64 MSVC 环境中用 `python -m scripts.worker.build_native` 构建它，暂存为 `target/worker-setup/WukongWorkerSetup.exe`，与 CI 一样通过 Tauri `--config` 资源覆盖加入安装包（[内置 Worker 安装程序](desktop-updates.zh-CN.md#bundled-worker-setup)）。
+这要求 Windows x64 与 Visual Studio C++ 生成工具，首次运行可能下载缺失的锁定工具链资源；安装包约增大 2–4 MB。
+首次运行客户端时从对应正式 Release 获取签名环境清单，所以未发布版本的本地构建不能通过在线向导获取该版本环境。
 
 ```sh
 cargo package-local --check
@@ -53,9 +55,9 @@ cargo package-local --output target/installers/build-1
 cargo package-local --signed
 ```
 
-已有输出目录拒绝覆盖。`--check` 检查源码和工具入口，系统库及安装器工具由实际构建验证。
+已有输出目录拒绝覆盖。`--check` 检查源码和工具入口，包括 Windows Worker 安装程序所需的 x64 MSVC 环境、离线工具链可用性和原生 Worker 源码；系统库及安装器工具由实际构建验证。
 `--signed` 需要 `TAURI_SIGNING_PRIVATE_KEY`；普通本地构建无需发布密钥。
-Windows 需要 MSVC、Rust、Node.js/npm、Python；Linux 还需要 Tauri WebKitGTK、GTK、AppIndicator、patchelf 等构建依赖。
+Windows 需要 MSVC（Worker 安装程序自动发现）、Rust、Node.js/npm、Python；Linux 还需要 Tauri WebKitGTK、GTK、AppIndicator、patchelf 等构建依赖。
 Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检查，不承诺覆盖所有发行版。
 旧 ZIP 包脚本保留用于开发夹具，正式流水线及 `cargo package-local` 不再以 ZIP 为用户安装入口。
 
