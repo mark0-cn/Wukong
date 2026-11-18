@@ -16,14 +16,47 @@ from scripts.release.local_package import checkout_identity
 from scripts.release.build_installer import build
 
 
+ARTIFACT_SUFFIXES = ("-setup.exe", ".AppImage", ".sig")
+
+
+def prepare_output(output):
+    """Reject unsafe output paths and allow replacing a previous package output.
+
+    Re-running the packaging command is common during local development, so an
+    existing directory that only holds installers written by this command is
+    replaced after a successful build. Directories with unrelated content are
+    never deleted; they must be cleared by the developer explicitly.
+    """
+
+    if output.is_symlink():
+        raise ValueError("Output must not be a symbolic link.")
+    if not output.exists():
+        return
+    if not output.is_dir():
+        raise ValueError("Output exists and is not a directory.")
+    if any(not entry.is_file() for entry in output.iterdir()):
+        raise ValueError("Output contains subdirectories; choose another directory.")
+    if any(not entry.name.endswith(ARTIFACT_SUFFIXES) for entry in output.iterdir()):
+        raise ValueError(
+            "Output contains files not created by package-local; choose another directory."
+        )
+
+
+def replace_output(output):
+    """Replace a validated previous output directory with the new package."""
+
+    if output.exists():
+        shutil.rmtree(output)
+    output.mkdir(parents=True)
+
+
 def package(output, *, signed=False, check=False, local_release=True):
     system = platform.system()
     if system not in ("Windows", "Linux") or platform.machine().lower() not in ("amd64", "x86_64"):
         raise ValueError("Native packages support Windows x64 and Linux x64.")
     revision = checkout_identity()
     worker_setup.ensure_writable_temporary()
-    if output.exists():
-        raise ValueError("Output already exists; choose a new --output directory.")
+    prepare_output(output)
     if not shutil.which("cargo") or not shutil.which("npm.cmd" if system == "Windows" else "npm"):
         raise ValueError("Cargo and Node.js/npm must be on PATH.")
     if check:
@@ -47,8 +80,8 @@ def package(output, *, signed=False, check=False, local_release=True):
     installers = list((ROOT / "target/release/bundle").glob(pattern))
     if len(installers) != 1:
         raise ValueError("Expected one installer; remove stale build outputs before retrying.")
-    output.mkdir(parents=True)
     installer = installers[0]
+    replace_output(output)
     shutil.copy2(installer, output / installer.name)
     if signed:
         signature = installer.with_name(installer.name + ".sig")
