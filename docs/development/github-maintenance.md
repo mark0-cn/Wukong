@@ -27,7 +27,7 @@ After either path, verify `merged=true`, record the actual `master` commit and f
 
 ## Actions entry points
 
-The repository maintains eight workflows: five operator entry points and three internal workflows. GitHub-managed Dependabot Updates and Dependency Graph remain enabled; historical runs are retained.
+The repository maintains nine workflows: six operator entry points and three internal workflows. GitHub-managed Dependabot Updates and Dependency Graph remain enabled; historical runs are retained.
 
 | Entry | File | Responsibility and trigger |
 | --- | --- | --- |
@@ -35,10 +35,13 @@ The repository maintains eight workflows: five operator entry points and three i
 | Acceptance | `acceptance.yml` | Manual `all`, `apt`, `uninstall`, `windows-worker` suites; Checks reuses selected APT/uninstall jobs |
 | Version | `prepare-release.yml` | Preview with default `dry_run=true`; uncheck to create the five-file version PR |
 | Release | `release.yml` | Default `rehearse`, read-only `inspect`, approved version-merge `tag`, accepted-publication `recover`; tag pushes publish |
+| Workbench image | `workbench-image.yml` | Manual version-pinned build of the separate `<namespace>/wukong-workbench` tool image used by `cargo package-local`; pushes `local-<version>` only |
 | Maintenance | `maintenance.yml` | Separate `cleanup`, `cache`, `toolchain` tasks; only cache deletion has Actions write permission |
 | Internal / Policy | `commit-policy.yml` | PR title/body edits rerun policy/previews only; required `commit-policy` gate |
 | Internal / Client | `build-client.yml` | Callable client build |
 | Internal / Installer | `build-installer.yml` | Callable installer packaging/acceptance |
+
+The Workbench image workflow reuses the Release Docker Hub namespace/username variables and `DOCKERHUB_TOKEN`, pushes only the separate `wukong-workbench` repository and never the official `wukong` image or its `latest` tag. It has no actor allowlist, environment reviewer or administrator requirement: a maintainer dispatches it with the client version (which must equal the checkout's `Cargo.toml` version) and an optional ref, and the run summary records actor, source revision, digest and size. Creating the `wukong-workbench` repository once is the only manual Docker Hub setup; see [local-release builds](local-builds.md#ci-built-workbench-image).
 
 `Acceptance/all` runs all three specialized suites; it does not replace full component Checks or Release/rehearse container/package acceptance. Native installation/uninstallation runs only on disposable hosted runners. Internal workflows can still appear in Actions, distinguished by name. Ordinary PRs have only Checks and Policy as top-level runs; selected acceptance jobs report through Checks. Ordinary master changes do not start Release.
 

@@ -29,14 +29,28 @@ CI 发布打包不使用此模式：`scripts/release/build_installer.py` 默认�
 
 ## Docker 镜像要求
 
-打包主机必须已有可供工作台使用的 linux/amd64 镜像。默认标签为 `wukong:local`；可用 `WUKONG_LOCAL_IMAGE` 指定其他标签（例如源码上手文档中的开发标签 `wukong:0.1`）。标签不存在时，打包会依据 `docker-bake.hcl` 构建：
+打包主机必须已有可供工作台使用的 linux/amd64 镜像。`cargo package-local` 按以下顺序解析：
 
-```sh
-python -m scripts.toolchain.fetch_worker_deps
-docker buildx bake --load --set workbench.tags=wukong:local
-```
+1. 设置了 `WUKONG_LOCAL_IMAGE` 时：精确打包该标签；标签不存在时依据 `docker-bake.hcl` 构建。这仍是显式覆盖手段。
+2. 本机已存在的 `wukong:local` 标签。
+3. 从 Docker Hub 拉取 CI 构建的 `<namespace>/wukong-workbench:local-<version>`，校验为 linux/amd64 后标记为 `wukong:local`（见下一节）。
+4. 本地执行 `workbench` 目标的 `docker buildx bake`。
 
-引导过程会在 Docker 主机上再次检查镜像、读取其真实大小，并在镜像缺失或不是 linux/amd64 时给出包含构建命令的错误。镜像永远不会从仓库拉取，安装包也不会内嵌镜像、仓库凭据或签名私钥。打包后重新构建镜像没有问题，引导只会提示记录的镜像大小已过期。如果打包终端本身无法连接 Docker（例如受限的沙箱终端），打包会记录 `image_size: 0`，把存在性、平台和大小检查推迟到引导阶段；可设置 `WUKONG_LOCAL_IMAGE_SIZE` 显式记录已知大小，镜像尚不存在时请在能访问 Docker 的终端中构建。
+`WUKONG_LOCAL_IMAGE_REGISTRY` 可覆盖工作台仓库，默认是 `hlmark0/wukong-workbench`。该仓库刻意不同于正式发布镜像 `hlmark0/wukong`，因此本地打包绝不会拉取发布标签或可移动的 `latest` 标签；正式仓库路径会被拒绝。拉取的标签是 `local-<version>`，由当前 `Cargo.toml` 版本生成，因此请从相同版本的检出拉取。仅当 Docker Hub 仓库为私有才需要 `docker login`；公开仓库可匿名拉取。若本机已存在 `wukong:local` 标签，它会优先于拉取，需要删除（`docker image rm wukong:local`）才能强制重新拉取。
+
+引导过程会在 Docker 主机上再次检查镜像、读取其真实大小，并在镜像缺失或不是 linux/amd64 时给出包含构建命令的错误。安装包不会内嵌镜像、仓库凭据或签名私钥。打包后重新构建镜像没有问题，引导只会提示记录的镜像大小已过期。如果打包终端本身无法连接 Docker（例如受限的沙箱终端），打包会记录 `image_size: 0`，把存在性、平台和大小检查推迟到引导阶段；可设置 `WUKONG_LOCAL_IMAGE_SIZE` 显式记录已知大小，镜像尚不存在时请在能访问 Docker 的终端中构建。
+
+<a id="ci-built-workbench-image"></a>
+
+## CI 构建的工作台镜像
+
+本地构建工作台镜像需要编译庞大的工具镜像，因此维护者按客户端版本用**Actions → Workbench image** 手动工作流发布一次，而不是让每个构建者分别编译：
+
+1. 把 `version` 设为所选 ref 的 `Cargo.toml` 已声明的客户端 MAJOR.MINOR.PATCH 版本；输入与检出不一致时工作流会失败。
+2. 可选地把 `ref` 设为要构建的分支、标签或提交；默认是启动运行时所选的 ref。
+3. 运行。工作流会校验锁定的构建输入，构建与本地相同的 `workbench` Bake 目标，检查载入镜像为 linux/amd64 且工具导入可用，然后推送 `<DOCKERHUB_NAMESPACE>/wukong-workbench:local-<version>`。运行摘要记录操作者、源码 ref、提交、digest 和大小。它绝不会推送正式的 `<namespace>/wukong` 镜像，也不会创建或移动 `latest` 标签；它不是正式发布。
+
+构建者随后只需运行 `cargo package-local`；`wukong:local` 不存在时，打包会拉取匹配的 `local-<version>` 标签并使用。不兼容的变更通过递增客户端版本处理：`runtime_protocol`/`data_schema` 变化需要新版本，也就需要新的不可变 `local-<version>` 标签（工作流拒绝覆盖已存在的版本标签）。如果拉取失败——标签缺失、私有仓库未登录或网络不可达——打包会打印维护者工作流和本地 Bake 命令，然后回退到本地构建。一次性 Docker Hub 配置是在发布账号下创建独立的 `wukong-workbench` 仓库；复用已有的 `DOCKERHUB_NAMESPACE`/`DOCKERHUB_USERNAME` 变量和具备写权限的 `DOCKERHUB_TOKEN` secret，运行不需要 environment 审核人或操作者白名单。
 
 <a id="windows-worker-media-template"></a>
 

@@ -6,6 +6,13 @@ data schema, the local Docker image tag, its size, the source revision and an
 optional absolute path of a locally built Windows worker media template. This
 module computes that descriptor from the current checkout and the host's Docker
 state; it never embeds the image itself, a private key or a registry credential.
+
+The workbench image is resolved from an explicit `WUKONG_LOCAL_IMAGE`, an
+already present `wukong:local`, the CI-built Docker Hub workbench image for this
+client version (pulled, verified as linux/amd64 and tagged locally), or a local
+`docker buildx bake` fallback. The registry repository is intentionally separate
+from the official release image, so packaging can never pull a release tag by
+mistake.
 """
 
 import argparse
@@ -38,8 +45,12 @@ class DockerUnavailable(ValueError):
 
 TEMPLATE_ENV = "WUKONG_LOCAL_TEMPLATE"
 IMAGE_ENV = "WUKONG_LOCAL_IMAGE"
+REGISTRY_ENV = "WUKONG_LOCAL_IMAGE_REGISTRY"
+DEFAULT_REGISTRY = "hlmark0/wukong-workbench"
+OFFICIAL_IMAGE_NAME = "wukong"
 REVISION = re.compile(r"[0-9a-f]{40}")
 IMAGE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:@+-]{0,511}")
+REGISTRY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(?::[0-9]+)?(?:/[A-Za-z0-9][A-Za-z0-9._-]*)+")
 
 
 def _constant(path, name):
@@ -73,7 +84,11 @@ def source_revision():
 
 
 def image():
-    """Local Docker image tag; `WUKONG_LOCAL_IMAGE` overrides the default."""
+    """Local Docker image tag; `WUKONG_LOCAL_IMAGE` overrides the default.
+
+    An explicit override also wins over the registry pull: `ensure_image` builds
+    that tag from the documented Bake target instead of pulling and retagging.
+    """
 
     value = os.environ.get(IMAGE_ENV) or DEFAULT_IMAGE
     value = value.strip()
@@ -141,27 +156,134 @@ def _bake_command(image_name):
     ]
 
 
-def ensure_image(image_name):
-    """Require the local image, building the documented Bake target when absent.
+def registry():
+    """Docker Hub repository of the CI-built workbench image.
 
-    When the packaging process cannot reach Docker, verification is deferred to
-    onboarding instead of failing the build; onboarding requires the image and
-    reads its real size before preparing the environment.
+    It is deliberately separate from the official release image repository: a
+    local package may pull a workbench image, but never an official release tag.
     """
 
-    try:
-        present = _image_field(image_name, "{{.Id}}") is not None
-    except DockerUnavailable as error:
-        print(
-            f"warning: Docker is not reachable from this packaging process; "
-            f"recording {image_name} without a size and deferring verification to "
-            f"onboarding ({error})",
-            file=sys.stderr,
-            flush=True,
+    value = (os.environ.get(REGISTRY_ENV) or DEFAULT_REGISTRY).strip()
+    if not REGISTRY.fullmatch(value):
+        raise ValueError(
+            f"Invalid {REGISTRY_ENV} {value!r}; set it to a Docker Hub repository "
+            f"such as {DEFAULT_REGISTRY}"
         )
-        return
-    if present:
-        return
+    if value.rsplit("/", 1)[-1] == OFFICIAL_IMAGE_NAME:
+        raise ValueError(
+            f"{REGISTRY_ENV} must name a separate workbench repository, not the "
+            f"official release image repository {value!r}"
+        )
+    return value
+
+
+def workbench_image():
+    """Immutable CI-built image reference for this client version."""
+
+    return f"{registry()}:local-{version()}"
+
+
+def _pull_failure(stderr):
+    """Classify a pull failure that a local image build can still recover from.
+
+    Authorization, missing-image and network failures fall back to the Bake
+    path. Other failures (for example a published image without an amd64
+    manifest) keep their error so a broken publication is never hidden.
+    """
+
+    text = (stderr or "").lower()
+    if any(
+        marker in text for marker in ("manifest unknown", "not found", "repository does not exist")
+    ):
+        return "not found"
+    if any(
+        marker in text
+        for marker in (
+            "unauthorized",
+            "authentication required",
+            "no basic auth",
+            "pull access denied",
+            "denied",
+        )
+    ):
+        return "not authorized"
+    if any(
+        marker in text
+        for marker in (
+            "connection",
+            "timed out",
+            "timeout",
+            "no such host",
+            "network",
+            "tls",
+            "eof",
+        )
+    ):
+        return "network"
+    return None
+
+
+def _warn_pull_fallback(reference, reason, detail, image_name):
+    command = subprocess.list2cmdline(_bake_command(image_name))
+    print(
+        f"warning: cannot pull the workbench image {reference} ({reason}: {detail}); "
+        "ask a maintainer to run the Workbench image workflow for this version "
+        "(Actions -> Workbench image -> Run workflow), or build it locally with "
+        f"`{command}`; if the Docker Hub repository is private, run `docker login` first",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def pull_workbench_image(image_name):
+    """Pull the CI-built image for this version, verify it and tag it locally.
+
+    Returns `True` when the local tag now exists. Missing-image, authorization
+    and network failures only warn because the local Bake path still produces a
+    usable image; a non-linux/amd64 image is refused instead of silently used.
+    """
+
+    reference = workbench_image()
+    completed = _docker("pull", "--platform", "linux/amd64", reference)
+    if completed.returncode != 0:
+        detail = " ".join(completed.stderr.split())[-500:]
+        if _docker_unavailable(completed.stderr):
+            raise DockerUnavailable(detail)
+        reason = _pull_failure(completed.stderr)
+        if reason is None:
+            raise ValueError(
+                f"Cannot pull the CI-built workbench image {reference}: {detail}; "
+                "ensure the Docker daemon can reach Docker Hub, the version tag is "
+                "published and the host has free disk space, then retry"
+            )
+        _warn_pull_fallback(reference, reason, detail, image_name)
+        return False
+    platform = _image_field(reference, "{{.Os}}/{{.Architecture}}")
+    if platform != "linux/amd64":
+        raise ValueError(
+            f"The CI-built workbench image {reference} is {platform}; "
+            "the desktop requires linux/amd64"
+        )
+    completed = _docker("tag", reference, image_name)
+    if completed.returncode != 0:
+        detail = " ".join(completed.stderr.split())[-500:]
+        raise ValueError(f"Cannot tag {reference} as {image_name}: {detail}")
+    if _image_field(image_name, "{{.Id}}") is None:
+        raise ValueError(f"Tagging {reference} as {image_name} produced no image")
+    print(
+        f"Using the CI-built workbench image {reference} (linux/amd64) as {image_name}",
+        flush=True,
+    )
+    return True
+
+
+def _explicit_image():
+    """Whether `WUKONG_LOCAL_IMAGE` names the image explicitly."""
+
+    return bool((os.environ.get(IMAGE_ENV) or "").strip())
+
+
+def _bake_image(image_name):
     command = _bake_command(image_name)
     printable = subprocess.list2cmdline(command)
     print(
@@ -181,6 +303,38 @@ def ensure_image(image_name):
         ) from error
     if _image_field(image_name, "{{.Id}}") is None:
         raise ValueError(f"The local Docker image build produced no image; {hint}")
+
+
+def _ensure_image(image_name):
+    if _image_field(image_name, "{{.Id}}") is not None:
+        return
+    if not _explicit_image() and pull_workbench_image(image_name):
+        return
+    _bake_image(image_name)
+
+
+def ensure_image(image_name):
+    """Require the local image, preferring the CI-built workbench image.
+
+    Resolution order: an explicit `WUKONG_LOCAL_IMAGE`, the local tag when it
+    already exists, the CI-built Docker Hub image for this client version
+    (`WUKONG_LOCAL_IMAGE_REGISTRY`, default `hlmark0/wukong-workbench`, tag
+    `local-<version>`) pulled and tagged as `wukong:local`, then the documented
+    Bake target. When the packaging process cannot reach Docker, verification is
+    deferred to onboarding instead of failing the build; onboarding requires the
+    image and reads its real size before preparing the environment.
+    """
+
+    try:
+        _ensure_image(image_name)
+    except DockerUnavailable as error:
+        print(
+            f"warning: Docker is not reachable from this packaging process; "
+            f"recording {image_name} without a size and deferring verification to "
+            f"onboarding ({error})",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def image_identity(image_name):

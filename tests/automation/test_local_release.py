@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -10,10 +12,30 @@ from unittest.mock import patch
 from scripts._lib.versioning import ROOT, version
 from scripts.release import local_release
 
+DEFAULT_REGISTRY = "hlmark0/wukong-workbench"
+
 
 def source_constant(path, name):
     text = (ROOT / path).read_text(encoding="utf-8")
     return int(re.search(rf"pub const {name}: u32 = ([0-9]+);", text).group(1))
+
+
+@contextlib.contextmanager
+def environment(**values):
+    """Clear packaging overrides so the developer's shell cannot steer a test."""
+
+    cleared = {
+        local_release.IMAGE_ENV: "",
+        local_release.REGISTRY_ENV: "",
+        local_release.SIZE_ENV: "",
+    }
+    cleared.update(values)
+    with patch.dict(os.environ, cleared, clear=False):
+        yield
+
+
+def result(returncode=0, stdout="", stderr=""):
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
 
 class DescriptorTests(unittest.TestCase):
@@ -59,10 +81,11 @@ class DescriptorTests(unittest.TestCase):
                 local_release.image()
 
     def test_missing_image_is_built_from_the_bake_target(self):
-        completed = subprocess.CompletedProcess([], 0, "", "")
         with (
+            environment(),
+            patch.object(local_release, "pull_workbench_image", return_value=False),
             patch.object(local_release, "_image_field", side_effect=[None, "sha256:abc"]) as field,
-            patch.object(local_release.subprocess, "run", return_value=completed) as run,
+            patch.object(local_release.subprocess, "run", return_value=result()) as run,
         ):
             local_release.ensure_image("wukong:local")
         field.assert_any_call("wukong:local", "{{.Id}}")
@@ -72,6 +95,8 @@ class DescriptorTests(unittest.TestCase):
 
     def test_a_failed_bake_reports_the_actionable_command(self):
         with (
+            environment(),
+            patch.object(local_release, "pull_workbench_image", return_value=False),
             patch.object(local_release, "_image_field", return_value=None),
             patch.object(
                 local_release.subprocess,
@@ -171,6 +196,174 @@ class DescriptorTests(unittest.TestCase):
             patch.object(local_release, "template", return_value=None),
         ):
             self.assertNotEqual(local_release.descriptor()["version"], "development")
+
+
+class ImageSourceTests(unittest.TestCase):
+    def test_ci_image_tag_uses_the_client_version_and_a_separate_repository(self):
+        with environment(), patch.object(local_release, "version", return_value="2.3.4"):
+            self.assertEqual(
+                local_release.workbench_image(), "hlmark0/wukong-workbench:local-2.3.4"
+            )
+            self.assertEqual(local_release.registry(), DEFAULT_REGISTRY)
+            # The official release image is <namespace>/wukong; this repository is not it.
+            self.assertNotEqual(local_release.registry().rsplit("/", 1)[-1], "wukong")
+
+    def test_ci_image_tag_uses_the_same_version_helper_as_the_descriptor(self):
+        with environment():
+            self.assertEqual(
+                local_release.workbench_image(), f"{DEFAULT_REGISTRY}:local-{version()}"
+            )
+
+    def test_registry_can_be_overridden(self):
+        override = "registry.example.com:5000/team/wukong-workbench"
+        with (
+            environment(**{local_release.REGISTRY_ENV: override}),
+            patch.object(local_release, "version", return_value="2.3.4"),
+        ):
+            self.assertEqual(local_release.workbench_image(), override + ":local-2.3.4")
+
+    def test_the_official_release_repository_is_refused(self):
+        with environment(**{local_release.REGISTRY_ENV: "hlmark0/wukong"}):
+            with self.assertRaisesRegex(ValueError, "separate workbench repository"):
+                local_release.workbench_image()
+
+    def test_an_already_present_local_image_is_never_pulled(self):
+        with (
+            environment(),
+            patch.object(local_release, "_image_field", return_value="sha256:id") as field,
+            patch.object(local_release, "pull_workbench_image") as pull,
+            patch.object(local_release.subprocess, "run") as run,
+        ):
+            local_release.ensure_image("wukong:local")
+        field.assert_called_once_with("wukong:local", "{{.Id}}")
+        pull.assert_not_called()
+        run.assert_not_called()
+
+    def test_an_explicit_override_wins_and_bakes_that_tag(self):
+        with (
+            environment(**{local_release.IMAGE_ENV: "wukong:dev"}),
+            patch.object(local_release, "_image_field", side_effect=[None, "sha256:built"]),
+            patch.object(local_release, "pull_workbench_image") as pull,
+            patch.object(local_release.subprocess, "run") as run,
+        ):
+            local_release.ensure_image("wukong:dev")
+        pull.assert_not_called()
+        self.assertIn("workbench.tags=wukong:dev", run.call_args.args[0])
+
+    def test_a_ci_built_image_is_pulled_verified_and_tagged_before_use(self):
+        events = []
+
+        def docker(*arguments):
+            events.append(arguments)
+            return result()
+
+        fields = iter([None, "linux/amd64", "sha256:tagged"])
+
+        def image_field(image_name, template):
+            events.append(("inspect", image_name, template))
+            return next(fields)
+
+        with (
+            environment(),
+            patch.object(local_release, "version", return_value="2.3.4"),
+            patch.object(local_release, "_docker", side_effect=docker),
+            patch.object(local_release, "_image_field", side_effect=image_field),
+        ):
+            local_release.ensure_image("wukong:local")
+
+        reference = "hlmark0/wukong-workbench:local-2.3.4"
+        self.assertEqual(
+            events,
+            [
+                ("inspect", "wukong:local", "{{.Id}}"),
+                ("pull", "--platform", "linux/amd64", reference),
+                ("inspect", reference, "{{.Os}}/{{.Architecture}}"),
+                ("tag", reference, "wukong:local"),
+                ("inspect", "wukong:local", "{{.Id}}"),
+            ],
+        )
+
+    def test_image_identity_reads_the_pulled_image_platform_and_size(self):
+        fields = iter([None, "linux/amd64", "sha256:tagged", "linux/amd64", "1048576"])
+        with (
+            environment(),
+            patch.object(local_release, "version", return_value="2.3.4"),
+            patch.object(local_release, "_docker", return_value=result()),
+            patch.object(local_release, "_image_field", side_effect=lambda *args: next(fields)),
+        ):
+            size, platform = local_release.image_identity("wukong:local")
+        self.assertEqual((size, platform), (1048576, "linux/amd64"))
+
+    def test_a_published_image_without_an_amd64_manifest_is_refused(self):
+        with (
+            environment(),
+            patch.object(local_release, "version", return_value="2.3.4"),
+            patch.object(local_release, "_docker", return_value=result()) as docker,
+            patch.object(local_release, "_image_field", side_effect=[None, "linux/arm64"]),
+        ):
+            with self.assertRaisesRegex(ValueError, "linux/amd64"):
+                local_release.ensure_image("wukong:local")
+        self.assertNotIn(("tag",), [call.args for call in docker.call_args_list])
+
+    def test_missing_auth_and_network_pull_failures_warn_then_bake(self):
+        cases = [
+            ("Error response from daemon: manifest unknown", "not found"),
+            (
+                "Error response from daemon: unauthorized: authentication required",
+                "not authorized",
+            ),
+            ('Get "https://registry-1.docker.io/v2/": dial tcp: no such host', "network"),
+        ]
+        for stderr, reason in cases:
+            with self.subTest(reason=reason), environment():
+                events = []
+
+                def docker(*arguments):
+                    events.append(arguments)
+                    return result(returncode=1, stderr=stderr)
+
+                errors = io.StringIO()
+                with (
+                    patch.object(local_release, "_docker", side_effect=docker),
+                    patch.object(local_release, "_image_field", side_effect=[None, "sha256:built"]),
+                    patch.object(local_release.subprocess, "run") as run,
+                    contextlib.redirect_stderr(errors),
+                ):
+                    local_release.ensure_image("wukong:local")
+                self.assertEqual(events[0][:1], ("pull",))
+                self.assertIn("workbench.tags=wukong:local", run.call_args.args[0])
+                warning = errors.getvalue()
+                self.assertIn(reason, warning)
+                self.assertIn("maintainer", warning)
+                self.assertIn("Workbench image", warning)
+                self.assertIn("docker buildx bake", warning)
+
+    def test_an_unexpected_pull_failure_is_reported_instead_of_hidden(self):
+        with (
+            environment(),
+            patch.object(
+                local_release,
+                "_docker",
+                return_value=result(returncode=1, stderr="invalid reference format"),
+            ),
+            patch.object(local_release, "_image_field", return_value=None),
+        ):
+            with self.assertRaisesRegex(ValueError, "Cannot pull"):
+                local_release.ensure_image("wukong:local")
+
+    def test_an_unreachable_daemon_defers_instead_of_baking(self):
+        errors = io.StringIO()
+        daemon = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock"
+        with (
+            environment(),
+            patch.object(local_release, "_docker", return_value=result(1, stderr=daemon)),
+            patch.object(local_release, "_image_field", return_value=None),
+            patch.object(local_release.subprocess, "run") as run,
+            contextlib.redirect_stderr(errors),
+        ):
+            local_release.ensure_image("wukong:local")
+        run.assert_not_called()
+        self.assertIn("Docker is not reachable", errors.getvalue())
 
 
 if __name__ == "__main__":

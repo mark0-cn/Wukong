@@ -27,7 +27,7 @@ GitHub 自动合并会等待合入条件满足；排队并不等于完成。如�
 
 ## Actions 入口
 
-仓库维护八份工作流：五个操作入口和三个内部工作流。GitHub 自带的 Dependabot Updates、Dependency Graph 保持启用；旧运行历史保留。
+仓库维护九份工作流：六个操作入口和三个内部工作流。GitHub 自带的 Dependabot Updates、Dependency Graph 保持启用；旧运行历史保留。
 
 | 入口 | 文件 | 职责与触发 |
 | --- | --- | --- |
@@ -35,10 +35,13 @@ GitHub 自动合并会等待合入条件满足；排队并不等于完成。如�
 | Acceptance | `acceptance.yml` | 手动 `all`、`apt`、`uninstall`、`windows-worker` 专项验收；Checks 复用选中的 APT/卸载验收 |
 | Version | `prepare-release.yml` | 默认 `dry_run=true` 预览；取消勾选后创建五文件版本 PR |
 | Release | `release.yml` | `rehearse` 默认演练、`inspect` 只读检查、`tag` 已授权版本合并打标签、`recover` 恢复；tag push 正式发布 |
+| Workbench image | `workbench-image.yml` | 手动按客户端版本构建 `cargo package-local` 使用的独立 `<namespace>/wukong-workbench` 工具镜像；仅推送 `local-<version>` |
 | Maintenance | `maintenance.yml` | `cleanup`、`cache`、`toolchain` 分任务运行；仅缓存删除 job 有 Actions 写权限 |
 | Internal / Policy | `commit-policy.yml` | PR 标题/正文编辑只重新检查规范与发布说明；必需 `commit-policy` 门禁 |
 | Internal / Client | `build-client.yml` | 仅供调用的客户端构建 |
 | Internal / Installer | `build-installer.yml` | 仅供调用的安装器打包/验收 |
+
+Workbench image 工作流复用 Release 的 Docker Hub 命名空间/用户名变量与 `DOCKERHUB_TOKEN`，只推送独立的 `wukong-workbench` 仓库，绝不推送正式 `wukong` 镜像或其 `latest` 标签。它不要求操作者白名单、environment 审核人或管理员权限：维护者传入客户端版本（必须等于检出的 `Cargo.toml` 版本）和可选 ref 即可运行，运行摘要记录操作者、源码提交、digest 和大小。唯一的手动 Docker Hub 配置是一次性创建 `wukong-workbench` 仓库；参见[本地发布构建](local-builds.zh-CN.md#ci-built-workbench-image)。
 
 `Acceptance/all` 运行三个专项验收，不替代 `Checks` 的全量组件检查或 `Release/rehearse` 的容器/发布包验收。原生安装卸载只在可丢弃的托管 runner 执行。内部工作流仍可能显示在 Actions 列表，通过名称区分。普通 PR 只有 Checks 与 Policy 两个顶层运行；专项验收作为 Checks 子任务汇总。普通 master 提交不启动 Release。
 
