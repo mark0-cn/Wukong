@@ -4,6 +4,8 @@ pub mod cleanup;
 pub mod configuration;
 #[cfg(feature = "desktop")]
 pub mod host;
+#[cfg(all(feature = "desktop", windows))]
+pub mod worker_media;
 pub use crate::adapters::files::paths;
 #[cfg(feature = "desktop")]
 pub(crate) mod cleanup_review;

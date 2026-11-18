@@ -35,7 +35,7 @@ async fn preferences_save(
     }
     Ok(saved)
 }
-async fn blocking<T: Send + 'static>(
+pub(super) async fn blocking<T: Send + 'static>(
     service: Arc<Service>,
     work: impl FnOnce(&Service) -> anyhow::Result<T> + Send + 'static,
 ) -> Reply<T> {
@@ -335,31 +335,12 @@ async fn shutdown_workspace(service: State<'_, Arc<Service>>, app: tauri::AppHan
 struct CloseRequest {
     busy: bool,
 }
-pub fn run(
-    config: AppConfig,
-    store: Store,
-    selected: Option<String>,
-    path: Option<PathBuf>,
-    state_override: Option<PathBuf>,
-) -> anyhow::Result<()> {
-    if let Some(id) = &selected {
-        store.require::<RunRecord>("run", id)?;
-    }
-    tauri::async_runtime::set(tokio::runtime::Handle::current());
-    let controller = Arc::new(super::updates::Controller::default());
-    controller.initialization(&config);
-    let service = Service::new(config, store, selected, path, state_override);
-    let updates = service.clone();
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(
-            tauri_plugin_updater::Builder::new()
-                .pubkey(crate::application::maintenance::updates::manifest::PUBLIC_KEY.trim())
-                .build(),
-        )
-        .manage(controller.clone())
-        .manage(service)
-        .invoke_handler(tauri::generate_handler![
+/// Build the invoke handler from the shared command list plus the Windows-only
+/// worker media setup commands. The macro keeps the two platform lists from
+/// drifting while letting the Windows workflow module stay `cfg(windows)`.
+macro_rules! handler {
+    ($($worker:path),* $(,)?) => {
+        tauri::generate_handler![
             preferences_read,
             preferences_save,
             workspace_read,
@@ -389,7 +370,53 @@ pub fn run(
             evidence_preview,
             tool_details,
             shutdown_workspace
-        ])
+            $(, $worker)*
+        ]
+    };
+}
+pub fn run(
+    config: AppConfig,
+    store: Store,
+    selected: Option<String>,
+    path: Option<PathBuf>,
+    state_override: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    if let Some(id) = &selected {
+        store.require::<RunRecord>("run", id)?;
+    }
+    tauri::async_runtime::set(tokio::runtime::Handle::current());
+    let controller = Arc::new(super::updates::Controller::default());
+    controller.initialization(&config);
+    let service = Service::new(config, store, selected, path, state_override);
+    let updates = service.clone();
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .pubkey(crate::application::maintenance::updates::manifest::PUBLIC_KEY.trim())
+                .build(),
+        )
+        .manage(controller.clone())
+        .manage(service)
+        .invoke_handler({
+            #[cfg(windows)]
+            {
+                handler!(
+                    super::worker_media::worker_media_status,
+                    super::worker_media::worker_media_networks,
+                    super::worker_media::worker_media_generate,
+                    super::worker_media::worker_media_import,
+                    super::worker_media::worker_media_retry,
+                    super::worker_media::pick_worker_template,
+                    super::worker_media::pick_worker_output,
+                    super::worker_media::pick_worker_receipt
+                )
+            }
+            #[cfg(not(windows))]
+            {
+                handler!()
+            }
+        })
         .setup(move |app| {
             let confirmation_service = updates.clone();
             tauri::async_runtime::spawn(async move {
