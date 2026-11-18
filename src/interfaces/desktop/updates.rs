@@ -759,7 +759,7 @@ fn local_setup_release(config: &AppConfig) -> Result<OnboardingRelease> {
         &config.workbench.docker_executable,
     );
     let image_size = environment::require_local_image(&docker, &descriptor.image)?;
-    if image_size != descriptor.image_size {
+    if descriptor.image_size > 0 && image_size != descriptor.image_size {
         tracing::warn!(
             image = %descriptor.image,
             packaged = descriptor.image_size,

@@ -36,7 +36,7 @@ python -m scripts.toolchain.fetch_worker_deps
 docker buildx bake --load --set workbench.tags=wukong:local
 ```
 
-引导过程会在 Docker 主机上再次检查镜像、读取其真实大小，并在镜像缺失或不是 linux/amd64 时给出包含构建命令的错误。镜像永远不会从仓库拉取，安装包也不会内嵌镜像、仓库凭据或签名私钥。打包后重新构建镜像没有问题，引导只会提示记录的镜像大小已过期。
+引导过程会在 Docker 主机上再次检查镜像、读取其真实大小，并在镜像缺失或不是 linux/amd64 时给出包含构建命令的错误。镜像永远不会从仓库拉取，安装包也不会内嵌镜像、仓库凭据或签名私钥。打包后重新构建镜像没有问题，引导只会提示记录的镜像大小已过期。如果打包终端本身无法连接 Docker（例如受限的沙箱终端），打包会记录 `image_size: 0`，把存在性、平台和大小检查推迟到引导阶段；可设置 `WUKONG_LOCAL_IMAGE_SIZE` 显式记录已知大小，镜像尚不存在时请在能访问 Docker 的终端中构建。
 
 <a id="windows-worker-media-template"></a>
 

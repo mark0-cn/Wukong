@@ -100,6 +100,40 @@ class DescriptorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "reports no size"):
                 local_release.image_identity("wukong:local")
 
+    def test_unreachable_docker_records_unknown_size(self):
+        with (
+            patch.object(
+                local_release,
+                "_image_field",
+                side_effect=local_release.DockerUnavailable("permission denied"),
+            ),
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            size, platform = local_release.image_identity("wukong:local")
+        self.assertEqual(size, 0)
+        self.assertEqual(platform, "unknown")
+
+    def test_unreachable_docker_honours_the_size_override(self):
+        with (
+            patch.object(
+                local_release,
+                "_image_field",
+                side_effect=local_release.DockerUnavailable("permission denied"),
+            ),
+            patch.dict(os.environ, {local_release.SIZE_ENV: "2048"}, clear=False),
+        ):
+            size, platform = local_release.image_identity("wukong:local")
+        self.assertEqual(size, 2048)
+        self.assertEqual(platform, "linux/amd64")
+
+    def test_descriptor_can_record_an_unverified_size(self):
+        with (
+            patch.object(local_release, "image_identity", return_value=(0, "unknown")),
+            patch.object(local_release, "template", return_value=None),
+        ):
+            payload = local_release.descriptor()
+        self.assertEqual(payload["image_size"], 0)
+
     def test_template_environment_must_name_an_existing_zip(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "missing.zip"

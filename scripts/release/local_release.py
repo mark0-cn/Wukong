@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import zipfile
 
 from scripts._lib.repository import ROOT
@@ -28,6 +29,13 @@ DEFAULT_TEMPLATE = Path("target/worker-media-template-gui.zip")
 PROTOCOL_LIB = Path("workers/protocol/src/lib.rs")
 DATA_SCHEMA_MANIFEST = Path("src/application/maintenance/updates/manifest.rs")
 BAKE_TARGET = "workbench"
+SIZE_ENV = "WUKONG_LOCAL_IMAGE_SIZE"
+
+
+class DockerUnavailable(ValueError):
+    """The packaging process cannot reach the Docker daemon."""
+
+
 TEMPLATE_ENV = "WUKONG_LOCAL_TEMPLATE"
 IMAGE_ENV = "WUKONG_LOCAL_IMAGE"
 REVISION = re.compile(r"[0-9a-f]{40}")
@@ -87,12 +95,34 @@ def _docker(*arguments):
     return completed
 
 
+def _docker_unavailable(stderr):
+    """Whether a Docker CLI failure means the daemon is unreachable, not that the
+    requested object is missing. Sandboxed shells and missing user permissions
+    surface this as a named-pipe or API connection denial; the package can still
+    be built when onboarding verifies the image on the real Docker host."""
+
+    text = (stderr or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "permission denied",
+            "cannot connect",
+            "error during connect",
+            "is the docker daemon running",
+            "dockerdesktoplinuxengine",
+            "npipe:",
+        )
+    )
+
+
 def _image_field(image_name, template):
     completed = _docker("image", "inspect", "--format", template, image_name)
     if completed.returncode != 0:
         if "No such image" in completed.stderr:
             return None
         detail = " ".join(completed.stderr.split())[-500:]
+        if _docker_unavailable(completed.stderr):
+            raise DockerUnavailable(detail)
         raise ValueError(
             f"Cannot inspect the Docker image {image_name}: {detail}; "
             "ensure the Docker daemon is running and retry"
@@ -112,9 +142,25 @@ def _bake_command(image_name):
 
 
 def ensure_image(image_name):
-    """Require the local image, building the documented Bake target when absent."""
+    """Require the local image, building the documented Bake target when absent.
 
-    if _image_field(image_name, "{{.Id}}") is not None:
+    When the packaging process cannot reach Docker, verification is deferred to
+    onboarding instead of failing the build; onboarding requires the image and
+    reads its real size before preparing the environment.
+    """
+
+    try:
+        present = _image_field(image_name, "{{.Id}}") is not None
+    except DockerUnavailable as error:
+        print(
+            f"warning: Docker is not reachable from this packaging process; "
+            f"recording {image_name} without a size and deferring verification to "
+            f"onboarding ({error})",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    if present:
         return
     command = _bake_command(image_name)
     printable = subprocess.list2cmdline(command)
@@ -138,15 +184,46 @@ def ensure_image(image_name):
 
 
 def image_identity(image_name):
-    """Return `(size, platform)` of an existing local image."""
+    """Return `(size, platform)` of an existing local image.
 
-    ensure_image(image_name)
-    platform = _image_field(image_name, "{{.Os}}/{{.Architecture}}")
-    if platform != "linux/amd64":
-        raise ValueError(
-            f"The local Docker image {image_name} is {platform}; the desktop requires linux/amd64"
+    A packaging process without Docker access records size 0 ("unknown") and
+    defers the check to onboarding; `WUKONG_LOCAL_IMAGE_SIZE` records it
+    explicitly when the image is known to be built already.
+    """
+
+    try:
+        ensure_image(image_name)
+        platform = _image_field(image_name, "{{.Os}}/{{.Architecture}}")
+        if platform != "linux/amd64":
+            raise ValueError(
+                f"The local Docker image {image_name} is {platform}; the desktop requires linux/amd64"
+            )
+        raw = _image_field(image_name, "{{.Size}}")
+    except DockerUnavailable:
+        configured = os.environ.get(SIZE_ENV)
+        if configured:
+            try:
+                size = int(configured)
+            except ValueError as error:
+                raise ValueError(
+                    f"{SIZE_ENV} must be a positive integer: {configured!r}"
+                ) from error
+            if size <= 0:
+                raise ValueError(f"{SIZE_ENV} must be a positive integer: {configured!r}")
+            print(
+                f"warning: Docker is not reachable; recording {SIZE_ENV}={size} "
+                f"for {image_name} and deferring platform verification to onboarding",
+                file=sys.stderr,
+                flush=True,
+            )
+            return size, "linux/amd64"
+        print(
+            f"warning: Docker is not reachable; recording {image_name} without a "
+            "size; onboarding verifies the image on the Docker host",
+            file=sys.stderr,
+            flush=True,
         )
-    raw = _image_field(image_name, "{{.Size}}")
+        return 0, "unknown"
     try:
         size = int(raw)
     except (TypeError, ValueError) as error:

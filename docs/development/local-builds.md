@@ -36,7 +36,7 @@ python -m scripts.toolchain.fetch_worker_deps
 docker buildx bake --load --set workbench.tags=wukong:local
 ```
 
-Onboarding re-checks the image on the Docker host, reads its real size and refuses a missing or non-linux/amd64 image with the build command in the error. The image is never pulled from a registry and the installer never embeds the image, registry credentials or signing keys. Rebuilding the image after packaging is fine; onboarding only warns that the recorded size is stale.
+Onboarding re-checks the image on the Docker host, reads its real size and refuses a missing or non-linux/amd64 image with the build command in the error. The image is never pulled from a registry and the installer never embeds the image, registry credentials or signing keys. Rebuilding the image after packaging is fine; onboarding only warns that the recorded size is stale. When the packaging shell itself cannot reach Docker (for example a sandboxed terminal), packaging records `image_size: 0` and defers the presence, platform and size checks to onboarding; set `WUKONG_LOCAL_IMAGE_SIZE` to record a known size explicitly, and build the image from a shell with Docker access when it does not exist yet.
 
 <a id="windows-worker-媒体模板"></a>
 

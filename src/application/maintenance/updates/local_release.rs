@@ -138,10 +138,8 @@ impl LocalRelease {
             DATA_SCHEMA
         );
         local_image(&self.image)?;
-        ensure!(
-            self.image_size > 0,
-            "local-release.json records an invalid Docker image size"
-        );
+        // A packaging process without Docker access records no size; onboarding
+        // requires the image and reads its real size before preparing.
         ensure!(
             self.source_revision.len() == 40
                 && self
@@ -240,6 +238,15 @@ mod tests {
     }
 
     #[test]
+    fn an_unrecorded_image_size_is_accepted_for_deferred_verification() -> Result<()> {
+        let mut document = descriptor();
+        document["image_size"] = serde_json::json!(0);
+        let release = parse_for_tests(document)?;
+        assert_eq!(release.image_size, 0);
+        Ok(())
+    }
+
+    #[test]
     fn corrupt_identity_fields_are_refused() {
         for (field, value) in [
             ("schema", serde_json::json!(2)),
@@ -247,7 +254,6 @@ mod tests {
             ("version", serde_json::json!("not-a-version")),
             ("image", serde_json::json!("")),
             ("image", serde_json::json!("-bad tag")),
-            ("image_size", serde_json::json!(0)),
             ("source_revision", serde_json::json!("ABC")),
             ("built_at", serde_json::json!("not a time")),
             ("template_path", serde_json::json!("relative/template.zip")),
