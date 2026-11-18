@@ -51,3 +51,20 @@ class NativePackageTests(unittest.TestCase):
             check.assert_called_once_with()
             build.assert_not_called()
             self.assertFalse(output.exists())
+
+
+class WritableTemporaryNativePackageTests(unittest.TestCase):
+    def test_windows_package_prepares_a_writable_temporary(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(native_package.platform, "system", return_value="Windows"),
+            patch.object(native_package.platform, "machine", return_value="AMD64"),
+            patch.object(native_package, "checkout_identity", return_value="a" * 40),
+            patch.object(native_package.shutil, "which", return_value="C:/tool.exe"),
+            patch.object(native_package, "build"),
+            patch.object(native_package.Path, "glob", return_value=[]),
+            patch.object(native_package.worker_setup, "ensure_writable_temporary") as temporary,
+        ):
+            with self.assertRaisesRegex(ValueError, "Expected one installer"):
+                native_package.package(Path(tmp) / "output")
+        temporary.assert_called_once()

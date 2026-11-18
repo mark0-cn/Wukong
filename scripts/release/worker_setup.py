@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 from scripts._lib.checksums import sha256
 from scripts._lib.repository import ROOT
@@ -26,6 +27,27 @@ EXECUTABLES = {"cargo", "cl.exe", "link.exe"}
 def resolve(path):
     path = Path(path)
     return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
+
+
+def ensure_writable_temporary():
+    """Give MSVC and Cargo a workspace temp directory when the inherited one is unusable.
+
+    Windows tool chains create their temporary linker and compiler files through
+    %%TMP%%/%%TEMP%%. A short-path or ACL-restricted system temp directory makes those
+    children fail with LNK1104 even though the current process can still create files
+    elsewhere, so fall back to the repository's own target directory.
+    """
+
+    if os.name != "nt":
+        return
+    try:
+        with tempfile.NamedTemporaryFile(dir=tempfile.gettempdir()):
+            return
+    except OSError:
+        temporary = ROOT / "target/tmp"
+        temporary.mkdir(parents=True, exist_ok=True)
+        os.environ["TMP"] = str(temporary)
+        os.environ["TEMP"] = str(temporary)
 
 
 def build_environment():
@@ -90,6 +112,7 @@ def run(command, environment=None):
 def build_and_stage(output, cache=DEFAULT_CACHE):
     """Build the native worker, stage its bytes and return the staged identity."""
 
+    ensure_writable_temporary()
     environment = build_environment()
     cache = resolve(cache)
     toolchain_result = acquire_toolchain(cache)

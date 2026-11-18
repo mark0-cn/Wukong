@@ -15,6 +15,7 @@ def package(output, *, signed=False, check=False):
     if system not in ("Windows", "Linux") or platform.machine().lower() not in ("amd64", "x86_64"):
         raise ValueError("Native packages support Windows x64 and Linux x64.")
     revision = checkout_identity()
+    worker_setup.ensure_writable_temporary()
     if output.exists():
         raise ValueError("Output already exists; choose a new --output directory.")
     if not shutil.which("cargo") or not shutil.which("npm.cmd" if system == "Windows" else "npm"):
