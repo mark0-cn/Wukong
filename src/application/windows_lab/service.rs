@@ -4,7 +4,7 @@ use crate::adapters::environments::EnvironmentRegistry;
 use crate::adapters::windows_lab::VmwareVm;
 use crate::adapters::windows_lab_admin::VmwareAdmin;
 use crate::adapters::windows_lab_offline::{
-    MkisofsIsoBuilder, PythonMediaFinalizer, VmrunGuestNetwork, WslOfflineDisk,
+    MkisofsIsoBuilder, RustMediaFinalizer, VmrunGuestNetwork, WslOfflineDisk,
 };
 use crate::adapters::windows_lab_worker::WindowsWorker;
 use crate::config::AppConfig;
@@ -69,7 +69,7 @@ pub fn open_configured(
             .with_guest_network(Arc::new(VmrunGuestNetwork::new(
                 &vm.vmrun, &vm.vmx, timeout,
             )?))
-            .with_media_finalizer(Arc::new(PythonMediaFinalizer::new()?));
+            .with_media_finalizer(Arc::new(RustMediaFinalizer::new()?));
     }
     Ok(lab)
 }

@@ -3,10 +3,10 @@
 //! `WslOfflineDisk` reads and edits the powered-off guest disk through
 //! operator-configured WSL `guestfish`/`hivexsh`; `MkisofsIsoBuilder` builds the
 //! `WUKONG_OFFLINE` ISO; `VmrunGuestNetwork` reports the guest IPv4 from
-//! `vmrun`; and `PythonMediaFinalizer` invokes the repository's media finalize
-//! module. Every tool path is operator configuration, every argv is fixed and no
-//! shell is involved. The feature is Windows-only: other hosts get inert stubs
-//! so the crate stays portable.
+//! `vmrun`; and `RustMediaFinalizer` runs the built-in Rust finalizer shared with
+//! the GUI and CLI. Every tool path is operator configuration, every argv is
+//! fixed and no shell is involved. The feature is Windows-only: other hosts get
+//! inert stubs so the crate stays portable.
 #[cfg(windows)]
 mod platform {
     use crate::application::windows_lab::provision::{
@@ -1234,93 +1234,59 @@ mod platform {
         }
     }
 
-    pub struct PythonMediaFinalizer {
-        working_directory: PathBuf,
-        timeout: Duration,
-    }
+    pub struct RustMediaFinalizer;
 
-    impl PythonMediaFinalizer {
+    impl RustMediaFinalizer {
         pub fn new() -> Result<Self> {
-            let working_directory = std::env::current_dir()
-                .context("the controller working directory is unavailable")?;
-            Ok(Self {
-                working_directory,
-                timeout: Duration::from_secs(1800),
-            })
+            Ok(Self)
         }
     }
 
     #[async_trait]
-    impl provision::MediaFinalizer for PythonMediaFinalizer {
+    impl provision::MediaFinalizer for RustMediaFinalizer {
         async fn finalize(&self, request: &FinalizeRequest) -> Result<serde_json::Value> {
-            ensure!(
-                self.working_directory
-                    .join("scripts/worker/media.py")
-                    .is_file(),
-                "offline media finalize requires the repository scripts package; run lab provision from the wukong checkout"
-            );
-            for (label, path) in [
-                ("template", &request.template),
-                ("key directory", &request.keys),
-                ("finalize spec", &request.spec),
-                ("media output", &request.output),
-            ] {
-                ensure!(
-                    path.is_absolute(),
-                    "offline media {label} path must be absolute"
-                );
-            }
-            ensure!(
-                request.template.is_dir(),
-                "offline media template directory is missing"
-            );
-            ensure!(request.keys.is_dir(), "controller key directory is missing");
-            ensure!(request.spec.is_file(), "finalize spec is missing");
-            ensure!(
-                !request.output.exists(),
-                "offline media output already exists"
-            );
-            let mut arguments = vec![
-                "-m".to_owned(),
-                "scripts.worker.media".to_owned(),
-                "finalize".to_owned(),
-                "--template".to_owned(),
-                path_text(&request.template)?,
-                "--keys".to_owned(),
-                path_text(&request.keys)?,
-                "--spec".to_owned(),
-                path_text(&request.spec)?,
-                "--output".to_owned(),
-                path_text(&request.output)?,
-            ];
-            if let Some(key) = &request.generate_ssh_key {
-                ensure!(
-                    key.is_absolute() && !key.exists(),
-                    "generated SSH identity output must be a new absolute path"
-                );
-                arguments.push("--generate-ssh-key".into());
-                arguments.push(path_text(key)?);
-            }
-            let output = run_bounded(
-                Path::new("python"),
-                &arguments,
-                None,
-                self.timeout,
-                Some(&self.working_directory),
-            )
-            .await
-            .context("run python -m scripts.worker.media finalize; Python must be on PATH")?;
-            require_success(&output, "offline media finalize")?;
-            let text = output.stdout_text();
-            serde_json::from_str(text.trim()).context("parse offline media finalize output")
+            let request = request.clone();
+            let record = tokio::task::spawn_blocking(move || finalize_offline_media(&request))
+                .await
+                .context("offline media finalize worker stopped unexpectedly")??;
+            Ok(serde_json::to_value(record)?)
         }
     }
 
-    fn path_text(path: &Path) -> Result<String> {
-        Ok(path
-            .to_str()
-            .context("offline media path must be UTF-8")?
-            .to_owned())
+    /// Run the shared Rust finalizer outside the async runtime. This replaces the
+    /// former `python -m scripts.worker.media finalize` subprocess: no Python
+    /// interpreter or source checkout is needed.
+    fn finalize_offline_media(
+        request: &FinalizeRequest,
+    ) -> Result<crate::application::worker_media::MediaRecord> {
+        let spec = provision::read_finalize_spec(&request.spec)?;
+        let management_peer = spec
+            .management_peer
+            .parse()
+            .context("finalize spec management peer must be a canonical IPv4 address")?;
+        let ssh_public_key = spec
+            .ssh_public_key
+            .map(|key| wukong_worker_package::SshPublicKey {
+                algorithm: key.algorithm,
+                key: key.key,
+            });
+        let finalized = crate::application::worker_media::finalize_media(
+            &crate::application::worker_media::FinalizeMediaRequest {
+                template: request.template.clone(),
+                keys: request.keys.clone(),
+                output: request.output.clone(),
+                installation_id: spec.installation_id,
+                environment_id: spec.environment_id,
+                generation: spec.generation,
+                management_peer,
+                ssh_port: spec.ssh_port,
+                ssh_public_key,
+                generate_ssh_key: request.generate_ssh_key.clone(),
+                controller_version: None,
+            },
+        )
+        .context("finalize offline worker media")?;
+        Ok(finalized.record)
     }
 
     #[cfg(test)]
@@ -1378,11 +1344,7 @@ mod platform {
     };
     use anyhow::{Result, bail};
     use async_trait::async_trait;
-    use std::{
-        path::{Path, PathBuf},
-        sync::Arc,
-        time::Duration,
-    };
+    use std::{path::Path, sync::Arc, time::Duration};
 
     const WINDOWS_ONLY: &str =
         "offline lab VM provisioning requires a Windows controller with WSL libguestfs";
@@ -1474,20 +1436,20 @@ mod platform {
         }
     }
 
-    pub struct PythonMediaFinalizer;
+    pub struct RustMediaFinalizer;
 
-    impl PythonMediaFinalizer {
+    impl RustMediaFinalizer {
         pub fn new() -> Result<Self> {
             Ok(Self)
         }
     }
 
     #[async_trait]
-    impl crate::application::windows_lab::provision::MediaFinalizer for PythonMediaFinalizer {
+    impl crate::application::windows_lab::provision::MediaFinalizer for RustMediaFinalizer {
         async fn finalize(&self, _request: &FinalizeRequest) -> Result<serde_json::Value> {
             bail!(WINDOWS_ONLY)
         }
     }
 }
 
-pub use platform::{MkisofsIsoBuilder, PythonMediaFinalizer, VmrunGuestNetwork, WslOfflineDisk};
+pub use platform::{MkisofsIsoBuilder, RustMediaFinalizer, VmrunGuestNetwork, WslOfflineDisk};

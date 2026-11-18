@@ -1018,8 +1018,8 @@ pub trait GuestNetwork: Send + Sync {
     async fn guest_ip(&self) -> Result<String>;
 }
 
-/// Builds finalized media from a released template by invoking the repository's
-/// `python -m scripts.worker.media finalize` module.
+/// Builds finalized media from a released template with the shared built-in Rust
+/// finalizer (no Python interpreter or source checkout required).
 #[async_trait]
 pub trait MediaFinalizer: Send + Sync {
     async fn finalize(&self, request: &FinalizeRequest) -> Result<serde_json::Value>;

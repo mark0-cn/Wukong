@@ -768,7 +768,7 @@ impl WindowsLab {
                     "--register requires a controller-generated SSH identity; omit ssh_public_key from the finalize spec"
                 );
                 let finalizer = finalizer.context(
-                    "the offline media finalizer is unavailable; run lab provision from the wukong checkout",
+                    "the offline media finalizer is unavailable; run lab provision on a Windows controller",
                 )?;
                 let request = FinalizeRequest {
                     template: template.clone(),
