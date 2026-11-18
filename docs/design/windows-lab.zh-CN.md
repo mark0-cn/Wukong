@@ -78,7 +78,7 @@ CLI `lab run` 等待结果，每 15 秒续期独立租约，只释放自己的�
 - Windows 控制器；其他平台会以明确错误失败关闭。WSL 命令以该发行版的 `root` 用户运行。
 - `[windows_lab.vms.<alias>.offline]`：`wsl_executable` 与 `mkisofs` 为绝对 Windows 路径，`wsl_distribution` 指定一个已注册 WSL 发行版，`guestfish`/`hivexsh` 为该发行版内的绝对 POSIX 路径，`timeout_seconds`（60–1800）限制单条工具命令。发行版必须提供 libguestfs `guestfish`、`hivexsh`、`wslpath`、`sha256sum`、`tee` 与 coreutils，并能通过 `wslpath` 访问 VM 的 VMDK。缺少该配置段会得到可操作的错误；控制器从不假设宿主工具布局。
 - 一台启用了任务计划程序服务、且可读取任务计划程序缓存的常规 Windows 10/11 客体。部署需要在关机磁盘上读写 `C:\Windows\System32\Tasks`、`C:\Windows\System32\config\SOFTWARE` 与 `C:\ProgramData\WukongLab`。它不使用 Windows 服务、客体管理员密码或管理通道。
-- `python` 在 `PATH` 中，且使用 `--template` 时在 wukong 检出目录中执行命令，因为部署过程会自行调用 `python -m scripts.worker.media finalize`。`--media` 部署不使用 Python。
+- `--template` 模式不需要 Python 解释器或源码检出：Windows 上由控制器内置的 Rust finalizer 用控制器密钥目录密封模板、调用模板载荷内打包的 `ssh-keygen.exe` 生成控制器管理的 SSH 身份并装配介质。`python -m scripts.worker.media finalize` 模块仍可用于脚本工作流；`--media` 部署不使用 finalizer。
 - 控制器 `state_dir`（以及最终介质输出目录）应保持足够短：Windows `MAX_PATH` 同样约束暂存的离线介质，其载荷包含 131 个字符的相对路径。finalize 会在较短的临时工作区暂存，并在配置目录过深时以明确错误指出越界路径；应把该目录移到更短的绝对路径，而不是依赖长路径开关。
 - 已登记且关机的实验 VM，且不存在快照链。只允许存在配置的 `baseline_snapshot`，并且仅当传入 `--replace-baseline`；任何其他快照都会拒绝命令且永不被删除。不存在快照时，`--replace-baseline` 是明确记录的空操作。启动盘必须是 VMX 目录内的完整本地 VMDK，位于 `nvme0:0`、`scsi0:0` 或 `sata0:0`；差异盘、链接盘与外部盘会被拒绝。VMX 必须启用 SATA 控制器并有空闲 CD 槽位。
 - 请求 `--register` 时需要 VMware Tools：控制器在写入环境前用 `vmrun getGuestIPAddress` 发现客体 IPv4。
@@ -105,7 +105,7 @@ timeout_seconds = 600
 - `--media DIR` —— 已最终的介质目录。部署在接触客体磁盘前重新校验：schema-1 `media.json` 回执、setup/enrollment/manifest 的 SHA-256、签名登记记录与载荷清单、`disposable_vm` 执行边界及登记记录授权的介质 SSH 客户端身份。目录包含 `WukongWorkerSetup.exe`、`setup.json`、密封的 `payload/`、`enrollment/{enrollment.json,enrollment.sig}`、可选 `recovery/` 和 `media.json`；链接、reparse 点、未知条目、超过 20,000 个条目或超过 4 GiB 都会被拒绝。该目录是只读输入，不会被修改或删除。
 - `--template DIR --keys DIR --spec FILE` —— 发布介质模板、绝对控制器签名密钥目录和 finalize 规格（schema 1：32 位小写十六进制 `installation_id`、`environment_id`、`generation`、规范化 IPv4 `management_peer`、`ssh_port`、仅允许 `disposable_vm` 边界、可选 SSH 客户端 `ssh_public_key`）。部署会把 finalize 输出到控制器状态目录下的本次部署目录，在规格省略 `ssh_public_key` 时生成控制器 SSH 身份，然后重新校验生成的介质并与规格交叉核对。密钥目录必须位于模板和输出之外；只有公开介质字节会被发布，成功或调和后最终介质会被删除。
 
-发布附件 `wukong-windows-worker-media-<version>.zip` 是不含登记记录的未签名模板；操作者用控制器密钥在本地完成 finalize。附件说明见[离线 Windows Worker 介质](../development/releases.zh-CN.md#offline-windows-worker-media)，介质布局、规格字段与独立 `finalize`/`pack`/`iso` 命令见[原生 Windows Worker 组件](../../workers/windows/README.zh-CN.md)。桌面安装包内置 `worker-setup/WukongWorkerSetup.exe`（[内置 Worker 安装程序](../development/desktop-updates.zh-CN.md#bundled-worker-setup)），但不包含 Worker 介质；部署始终需要最终介质目录或发布模板。
+发布附件 `wukong-windows-worker-media-<version>.zip` 是不含登记记录的未签名模板；操作者用控制器密钥在本地完成 finalize。附件说明见[离线 Windows Worker 介质](../development/releases.zh-CN.md#offline-windows-worker-media)，介质布局、规格字段与独立 `finalize`/`pack`/`iso` 命令见[原生 Windows Worker 组件](../../workers/windows/README.zh-CN.md)。桌面安装包内置 `worker-setup/WukongWorkerSetup.exe`（[内置 Worker 安装程序](../development/desktop-updates.zh-CN.md#bundled-worker-setup)），但不包含 Worker 介质；部署始终需要最终介质目录或发布模板。同一内置 Rust finalizer 也可在 lab 配置之外通过 `wukong worker media generate --template <zip|dir> --output <zip> --registry <dir> --keys <dir>` 使用：它写入最终介质目录、不含控制端凭据的确定性 ZIP 以及 registry 目录下的 schema-1 生成记录，桌面应用使用它替代 Python。
 
 ### 部署顺序与基线
 

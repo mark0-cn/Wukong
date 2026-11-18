@@ -6,7 +6,7 @@ pub use enrollment::{
 };
 pub use files::verify_package;
 mod keys;
-pub use keys::load_controller_signer;
+pub use keys::{create_controller_signer, load_controller_signer};
 mod seal;
 pub use seal::seal_package;
 mod manifest;

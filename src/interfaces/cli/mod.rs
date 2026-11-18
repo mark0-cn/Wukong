@@ -1,6 +1,7 @@
 pub mod cleanup;
 pub mod lab;
 pub mod workbench;
+pub mod worker;
 use crate::{
     adapters::binary,
     application::assessment::{AssessmentService, PreparedAssessment},
@@ -57,6 +58,11 @@ pub enum Command {
     Lab {
         #[command(subcommand)]
         command: crate::interfaces::cli::lab::Command,
+    },
+    /// Generate finalized offline Windows worker media with the built-in Rust finalizer.
+    Worker {
+        #[command(subcommand)]
+        command: crate::interfaces::cli::worker::Command,
     },
     /// Write a configuration without overwriting an existing file.
     Init {
@@ -121,6 +127,10 @@ pub async fn run(cli: Cli) -> Result<()> {
     if let Command::Cleanup { command } = command {
         return crate::interfaces::cli::cleanup::run(command, cli.json);
     }
+    if let Command::Worker { command } = command {
+        print_json(&crate::interfaces::cli::worker::run(command)?)?;
+        return Ok(());
+    }
     if let Command::Init { path } = &command {
         AppConfig::write_example(path)?;
         println!("{}", json!({"config":path}));
@@ -179,7 +189,8 @@ pub async fn run(cli: Cli) -> Result<()> {
         | Command::Inspect { .. }
         | Command::Env { .. }
         | Command::Challenge { .. }
-        | Command::Lab { .. } => unreachable!(),
+        | Command::Lab { .. }
+        | Command::Worker { .. } => unreachable!(),
         Command::Doctor => {
             let registry = crate::adapters::environments::EnvironmentRegistry::new(
                 config.environments.clone(),
