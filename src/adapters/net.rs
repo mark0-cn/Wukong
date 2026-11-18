@@ -79,13 +79,15 @@ pub fn management_networks(source: &dyn AdapterSource) -> Result<Vec<ManagementN
 /// Eligible addresses are every live, non-loopback, non-link-local (APIPA),
 /// unicast IPv4 address. The result is ordered by recommendation rank and then
 /// by numeric address so the GUI and the automatic single-network selection are
-/// deterministic. Exactly one RFC 1918 network is marked `recommended`: a
-/// virtual-machine adapter address when there is one, otherwise the lowest
-/// private address.
+/// deterministic. Exactly one RFC 1918 network is marked `recommended`: the best
+/// virtual-machine host-only adapter when there is one, then another hypervisor
+/// adapter (Hyper-V's shared Default Switch ranks below dedicated VM networks),
+/// otherwise the lowest private address.
 pub(crate) fn project(adapters: &[HostAdapter]) -> Vec<ManagementNetwork> {
     let mut networks = Vec::new();
     for adapter in adapters.iter().filter(|adapter| adapter.up) {
-        let virtual_adapter = virtual_hint(&adapter.name, &adapter.description);
+        let tier = adapter_tier(&adapter.name, &adapter.description);
+        let virtual_adapter = tier < PHYSICAL_TIER;
         let name = if adapter.name.trim().is_empty() {
             if adapter.description.trim().is_empty() {
                 adapter.id.clone()
@@ -109,24 +111,28 @@ pub(crate) fn project(adapters: &[HostAdapter]) -> Vec<ManagementNetwork> {
                 virtual_adapter,
                 recommended: false,
             };
-            if !networks.iter().any(|existing: &ManagementNetwork| {
-                existing.id == network.id && existing.ipv4 == network.ipv4
-            }) {
-                networks.push(network);
+            if !networks
+                .iter()
+                .any(|(existing, _): &(ManagementNetwork, u8)| {
+                    existing.id == network.id && existing.ipv4 == network.ipv4
+                })
+            {
+                networks.push((network, tier));
             }
         }
     }
-    networks.sort_by_key(|network| {
+    networks.sort_by_key(|(network, tier)| {
         (
             recommendation_rank(network.rfc1918, network.virtual_adapter),
+            *tier,
             u32::from(network.ipv4),
         )
     });
-    let recommended = networks
-        .iter()
-        .position(|network| network.rfc1918 && network.virtual_adapter)
-        .or_else(|| networks.iter().position(|network| network.rfc1918));
-    if let Some(index) = recommended {
+    let mut networks: Vec<ManagementNetwork> =
+        networks.into_iter().map(|(network, _)| network).collect();
+    // The sort already puts every RFC 1918 entry before public ones, so the first
+    // private entry is the best-ranked management network.
+    if let Some(index) = networks.iter().position(|network| network.rfc1918) {
         networks[index].recommended = true;
     }
     networks
@@ -149,19 +155,32 @@ fn recommendation_rank(rfc1918: bool, virtual_adapter: bool) -> u8 {
     }
 }
 
-/// Adapter names/descriptions that identify a hypervisor host-only network.
-fn virtual_hint(name: &str, description: &str) -> bool {
+/// Tier of an adapter as a VM management-network candidate; lower is better.
+const PHYSICAL_TIER: u8 = 3;
+
+/// Adapter names/descriptions are classified so dedicated VM host-only networks
+/// outrank Hyper-V's shared Default Switch, which is frequently a NAT network a
+/// manually installed VM cannot be reached through.
+fn adapter_tier(name: &str, description: &str) -> u8 {
     let text = format!("{name} {description}").to_ascii_lowercase();
-    [
-        "vmware",
-        "virtualbox",
-        "hyper-v",
-        "vethernet",
-        "vmnet",
-        "host-only",
-    ]
-    .iter()
-    .any(|hint| text.contains(hint))
+    if ["vmnet", "host-only", "hostonly"]
+        .iter()
+        .any(|hint| text.contains(hint))
+    {
+        0
+    } else if ["vmware", "virtualbox"]
+        .iter()
+        .any(|hint| text.contains(hint))
+    {
+        1
+    } else if ["hyper-v", "vethernet"]
+        .iter()
+        .any(|hint| text.contains(hint))
+    {
+        2
+    } else {
+        PHYSICAL_TIER
+    }
 }
 
 #[cfg(windows)]
@@ -452,7 +471,7 @@ mod tests {
                 .iter()
                 .map(|network| network.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["hyperv", "vmnet", "wifi", "public"]
+            vec!["vmnet", "hyperv", "wifi", "public"]
         );
         assert!(networks[0].recommended);
         assert!(networks[1].virtual_adapter);
