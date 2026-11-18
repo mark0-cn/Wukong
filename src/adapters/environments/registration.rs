@@ -20,6 +20,11 @@ mod tests;
 #[serde(deny_unknown_fields)]
 struct Receipt {
     schema: u32,
+    /// Version 1 receipts predate the explicit field; version 2 receipts add the
+    /// guest's address hint list. Both remain importable: the candidates are only
+    /// hints for the desktop setup flow and never grant trust.
+    #[serde(default = "default_receipt_version")]
+    receipt_version: u64,
     installed: bool,
     installation_id: String,
     environment_id: String,
@@ -29,11 +34,17 @@ struct Receipt {
     ssh_port: u16,
     host_key: SshPublicKey,
     host_fingerprint: String,
+    #[serde(default)]
+    candidate_addresses: Vec<String>,
     #[serde(rename = "production_isolation_verified")]
     _production_isolation_verified: bool,
 }
 
-#[derive(Deserialize)]
+fn default_receipt_version() -> u64 {
+    1
+}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WindowsConnection {
     pub connection_json: String,
@@ -66,6 +77,18 @@ pub fn prepare(
     ensure!(
         receipt.schema == 1 && receipt.installed && receipt.generation > 0,
         "connection receipt does not describe an installed worker"
+    );
+    ensure!(
+        (1..=2).contains(&receipt.receipt_version),
+        "unsupported connection receipt version"
+    );
+    ensure!(
+        receipt.candidate_addresses.len() <= 8
+            && receipt
+                .candidate_addresses
+                .iter()
+                .all(|candidate| candidate.parse::<std::net::Ipv4Addr>().is_ok()),
+        "invalid connection receipt address candidates"
     );
     validate_id(&receipt.environment_id)?;
     ensure!(
