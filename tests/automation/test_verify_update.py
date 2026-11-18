@@ -37,9 +37,42 @@ def manifest(**changes):
     return value
 
 
+def worker_media(**changes):
+    value = {
+        "version": "0.2.0",
+        "name": "wukong-windows-worker-media-0.2.0.zip",
+        "size": 7,
+        "sha256": "e" * 64,
+        "url": f"{verify_update.RELEASES}/download/v0.2.0/wukong-windows-worker-media-0.2.0.zip",
+    }
+    value.update(changes)
+    return value
+
+
 class ManifestTests(unittest.TestCase):
     def test_accepts_the_published_contract(self):
         verify_update.validate_manifest(manifest())
+
+    def test_accepts_the_optional_worker_media_entry(self):
+        verify_update.validate_manifest(manifest(worker_media=worker_media()))
+
+    def test_rejects_invalid_worker_media_contracts(self):
+        for media in (
+            "",
+            worker_media(version="0.2.1"),
+            worker_media(name="wukong-windows-worker-media-0.2.0.exe"),
+            worker_media(name="Wukong_0.2.0_x64-setup.exe"),
+            worker_media(
+                url=f"{verify_update.RELEASES}/download/v0.2.1/wukong-windows-worker-media-0.2.0.zip"
+            ),
+            worker_media(url="https://example.test/wukong-windows-worker-media-0.2.0.zip"),
+            worker_media(sha256="e" * 63),
+            worker_media(size=0),
+            worker_media(size="7"),
+        ):
+            with self.subTest(media=media):
+                with self.assertRaises(verify_update.VerificationError):
+                    verify_update.validate_manifest(manifest(worker_media=media))
 
     def test_rejects_invalid_release_contracts(self):
         platform = verify_update.PLATFORMS[0]
@@ -119,10 +152,7 @@ class DirectoryTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def test_rejects_missing_or_modified_artifacts(self):
-        with patch.object(verify_update, "verify_signature"):
-            with self.assertRaises(verify_update.VerificationError):
-                verify_update.verify_directory(self.directory)
+    def accept_installers(self):
         for platform in verify_update.PLATFORMS:
             artifact = self.manifest["platforms"][platform]
             path = self.directory / artifact["url"].rsplit("/", 1)[1]
@@ -130,6 +160,12 @@ class DirectoryTests(unittest.TestCase):
             artifact["sha256"] = verify_update.sha256(path)
             artifact["size"] = path.stat().st_size
         (self.directory / "latest.json").write_bytes(json.dumps(self.manifest).encode())
+
+    def test_rejects_missing_or_modified_artifacts(self):
+        with patch.object(verify_update, "verify_signature"):
+            with self.assertRaises(verify_update.VerificationError):
+                verify_update.verify_directory(self.directory)
+        self.accept_installers()
         with patch.object(verify_update, "verify_signature"):
             verify_update.verify_directory(self.directory)
         (
@@ -137,6 +173,23 @@ class DirectoryTests(unittest.TestCase):
         ).write_bytes(b"tampered")
         with patch.object(verify_update, "verify_signature"):
             with self.assertRaises(verify_update.VerificationError):
+                verify_update.verify_directory(self.directory)
+
+    def test_worker_media_entry_is_verified_against_local_bytes(self):
+        self.accept_installers()
+        self.manifest["worker_media"] = worker_media()
+        media = self.directory / self.manifest["worker_media"]["name"]
+        media.write_bytes(b"worker media")
+        self.manifest["worker_media"]["size"] = media.stat().st_size
+        self.manifest["worker_media"]["sha256"] = verify_update.sha256(media)
+        (self.directory / "latest.json").write_bytes(json.dumps(self.manifest).encode())
+        with patch.object(verify_update, "verify_signature"):
+            verify_update.verify_directory(self.directory)
+            media.unlink()
+            with self.assertRaisesRegex(verify_update.VerificationError, "missing worker media"):
+                verify_update.verify_directory(self.directory)
+            media.write_bytes(b"tampered")
+            with self.assertRaisesRegex(verify_update.VerificationError, "worker media checksum"):
                 verify_update.verify_directory(self.directory)
 
 

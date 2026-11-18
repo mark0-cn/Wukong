@@ -1,11 +1,15 @@
 import hashlib
 import io
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
+from scripts._lib.checksums import sha256
 from scripts.release import release_metadata
+from scripts.worker.media import ARCHIVE_ROOT
 
 
 class ReleaseMetadataTests(unittest.TestCase):
@@ -131,6 +135,71 @@ class ReleaseMetadataTests(unittest.TestCase):
             release_metadata.HttpsRedirect().redirect_request(
                 None, None, 302, "Found", {}, "http://example.com/asset"
             )
+
+
+class WorkerMediaTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.directory = Path(self.temporary.name)
+        self.number = "1.2.3"
+        self.name = f"wukong-windows-worker-media-{self.number}.zip"
+
+    def stage(self, content=b"worker template", name=None):
+        path = self.directory / (name or self.name)
+        path.write_bytes(content)
+        return path
+
+    def test_entry_names_the_version_pinned_release_asset(self):
+        path = self.stage()
+        self.assertEqual(
+            release_metadata.worker_media(self.directory, self.number),
+            dict(
+                version=self.number,
+                name=self.name,
+                size=path.stat().st_size,
+                sha256=sha256(path),
+                url=f"https://github.com/mark0-cn/Wukong/releases/download/v{self.number}/"
+                + self.name,
+            ),
+        )
+
+    def test_archive_name_is_owned_by_the_worker_packager(self):
+        self.assertEqual(release_metadata.WORKER_MEDIA_PREFIX, ARCHIVE_ROOT + "-")
+
+    def test_rehearsal_without_the_template_omits_the_entry(self):
+        self.assertIsNone(release_metadata.worker_media(self.directory, self.number))
+
+    def test_stale_or_ambiguous_templates_are_rejected(self):
+        for name in (
+            "wukong-windows-worker-media-9.9.9.zip",
+            "wukong-windows-worker-media-" + self.number + "-copy.zip",
+        ):
+            with self.subTest(name=name):
+                for path in self.directory.iterdir():
+                    path.unlink()
+                self.stage(name=name)
+                with self.assertRaisesRegex(ValueError, "exactly"):
+                    release_metadata.worker_media(self.directory, self.number)
+
+    def test_duplicate_templates_are_rejected(self):
+        self.stage()
+        self.stage(name=self.name.removesuffix(".zip") + "-copy.zip")
+        with self.assertRaisesRegex(ValueError, "exactly"):
+            release_metadata.worker_media(self.directory, self.number)
+
+    def test_asset_identity_is_validated_before_use(self):
+        for number, name, repository in (
+            ("1.2", self.name, release_metadata.DEFAULT_REPOSITORY),
+            ("01.2.3", self.name, release_metadata.DEFAULT_REPOSITORY),
+            (self.number, "worker/../escape.zip", release_metadata.DEFAULT_REPOSITORY),
+            (self.number, self.name, "https://example.com"),
+        ):
+            with (
+                self.subTest(number=number, name=name, repository=repository),
+                self.assertRaises(ValueError),
+            ):
+                release_metadata.release_asset_url(number, name, repository)
 
 
 if __name__ == "__main__":

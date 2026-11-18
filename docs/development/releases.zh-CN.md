@@ -108,7 +108,7 @@ tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `mas
 2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
 3. 新 runner 按 digest 拉取候选，运行网络隔离、固定目标转发、LaunchSpec、归档测试，以及 host CLI 的 doctor、题目导入/构建/提取/启动/连接、GDB 附加、更新回滚。
 4. Windows/Linux 均使用已校验桌面客户端直接打包 NSIS EXE/AppImage，不重复编译；Linux 验收 CLI 单独复用；签名并执行原生安装/启动检查。汇总两个平台文件，生成签名 `latest.json`、`release.json`、SHA256SUMS 与验收报告，再用 Rust 验证全部安装文件签名与哈希。
-5. 在 `windows-2025` 上构建离线 Windows Worker 介质模板（不接触控制器密钥），用临时密钥执行检查，打包确定性 zip 并加入发布附件。
+5. 在 `windows-2025` 上构建离线 Windows Worker 介质模板（不接触控制器密钥），用临时密钥执行检查，打包确定性 zip 并加入发布附件；签名桌面目录会记录该附件供桌面下载。
 6. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
 7. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
 
@@ -153,7 +153,9 @@ Actions → **Release** → Run workflow，选择 master 和 `operation=inspect`
 
 ## 离线 Windows Worker 介质
 
-发布构建还会在 `windows-2025` 的 `windows-worker` job 中发布 `wukong-windows-worker-media-<version>.zip`。该 job 运行共用的 Windows Worker 检查，在没有任何控制器私钥的情况下暂存未签名载荷和已校验的原生二进制文件，用临时密钥执行一次 finalize 检查，并打包确定性归档。归档根目录 `wukong-windows-worker-media-<version>/` 包含 `payload/`、`binaries/`、`manifest-draft.json`、`native-build.json` 与 `media-template.json`。它是独立发布附件，不属于桌面更新清单：`latest.json`/`release.json` 仍只列出 Windows NSIS EXE 与 Linux AppImage，更新器不会引用该 zip。
+发布构建还会在 `windows-2025` 的 `windows-worker` job 中发布 `wukong-windows-worker-media-<version>.zip`。该 job 运行共用的 Windows Worker 检查，在没有任何控制器私钥的情况下暂存未签名载荷和已校验的原生二进制文件，用临时密钥执行一次 finalize 检查，并打包确定性归档。归档根目录 `wukong-windows-worker-media-<version>/` 包含 `payload/`、`binaries/`、`manifest-draft.json`、`native-build.json` 与 `media-template.json`。该 zip 是独立发布附件，不是应用安装程序或更新目标：它不在 `platforms` 条目中，没有更新签名，桌面更新器不会下载它。
+
+打包任务根据已验收产物生成签名桌面目录（`latest.json`，签名为 `latest.json.sig`），并把暂存的 zip 记录为可选 `worker_media` 条目：`version`、`name`、`size`、`sha256` 与固定到对应 `v<version>` Release 附件的 `url`。`release.json` 为发布工具镜像同一份条目。桌面先校验目录签名，再只用固定版本的 URL 和已签名的 `size`/`sha256` 下载并核对匹配的离线 Worker 模板。未暂存模板的演练会省略 `worker_media`；该字段可选，旧客户端与旧目录仍然有效。
 
 操作员下载附件、按 `SHA256SUMS` 校验并解包后，运行 `python -m scripts.worker.media finalize --template <解包后的模板> --keys <绝对控制器密钥目录> --spec <登记规格> --output <新的介质目录>`，以密封载荷、签署登记并生成离线 `WukongWorkerSetup.exe` 介质。控制器密钥目录和 SSH 私钥必须位于模板和输出之外。安装前，任意 Windows 主机都可在不提权的情况下运行 `WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`；安装需要提权，且只应在专用可丢弃 VM 上执行。完整命令与规格字段见[原生 Windows Worker 组件](../../workers/windows/README.zh-CN.md)。
 
@@ -169,8 +171,7 @@ Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改�
 
 ## 应用内更新信任与恢复
 
-客户端读取正式 Release 的 `latest.json` 和 `latest.json.sig`，先验证清单签名，再读取版本、平台、镜像 digest 与兼容性。
-下载 EXE/AppImage 后再次验证文件签名、SHA256 与大小；不使用 Docker `latest` 决定运行环境。
+客户端读取正式 Release 的 `latest.json` 和 `latest.json.sig`，先验证清单签名，再读取版本、平台、镜像 digest 与兼容性。可选 `worker_media` 条目是离线 Windows Worker 模板的配置元数据，不是应用更新产物；不使用它的客户端会忽略该字段。下载 EXE/AppImage 后再次验证文件签名、SHA256 与大小；不使用 Docker `latest` 决定运行环境。
 公钥位于 `src/interfaces/desktop/update-public.key` 和 Tauri 配置，必须保持一致。私钥存于 Actions Secret，并由管理员在仓库外备份；丢失密钥不能通过重新生成密钥为已有客户端无缝更新。
 更新签名不替代 Windows Authenticode；当前安装文件没有系统代码签名。
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from scripts._lib.checksums import sha256
 from scripts._lib.repository import ROOT
 from scripts._lib.versioning import DIGEST, VERSION
+from scripts.release.release_metadata import WORKER_MEDIA_PREFIX
 
 PUBLIC_KEY = ROOT / "src/interfaces/desktop/update-public.key"
 RELEASES = "https://github.com/mark0-cn/Wukong/releases"
@@ -164,10 +165,26 @@ def validate_manifest(manifest):
             raise VerificationError("invalid artifact size")
         if not isinstance(artifact.get("signature"), str) or not artifact["signature"]:
             raise VerificationError("unsigned release artifact")
+    worker_media = manifest.get("worker_media")
+    if worker_media is not None:
+        if not isinstance(worker_media, dict):
+            raise VerificationError("invalid worker media metadata")
+        if worker_media.get("version") != version:
+            raise VerificationError("worker media must match the release version")
+        expected_name = f"{WORKER_MEDIA_PREFIX}{version}.zip"
+        if worker_media.get("name") != expected_name:
+            raise VerificationError("invalid worker media asset")
+        if _artifact_name(version, worker_media) != expected_name:
+            raise VerificationError("worker media must belong to this release")
+        if not _hexadecimal(worker_media.get("sha256"), 64):
+            raise VerificationError("invalid worker media checksum")
+        size = worker_media.get("size")
+        if not isinstance(size, int) or not 0 < size <= MAX_ARTIFACT_SIZE:
+            raise VerificationError("invalid worker media size")
 
 
 def verify_directory(directory, *, public_key_path=PUBLIC_KEY, openssl="openssl"):
-    """Verify latest.json and every declared installer in *directory*."""
+    """Verify latest.json, every declared installer and the optional worker media asset."""
     directory = Path(directory)
     key = Path(public_key_path).read_text(encoding="utf-8")
     manifest_bytes = (directory / "latest.json").read_bytes()
@@ -190,6 +207,14 @@ def verify_directory(directory, *, public_key_path=PUBLIC_KEY, openssl="openssl"
         if path.stat().st_size != artifact["size"] or sha256(path) != artifact["sha256"]:
             raise VerificationError(f"release artifact checksum mismatch: {path.name}")
         verify_signature(path.read_bytes(), artifact["signature"], key, openssl=openssl)
+    worker_media = manifest.get("worker_media")
+    if worker_media is not None:
+        # The optional worker template is a release asset, never a signed installer.
+        path = directory / worker_media["name"]
+        if not path.is_file():
+            raise VerificationError(f"missing worker media asset {path.name}")
+        if path.stat().st_size != worker_media["size"] or sha256(path) != worker_media["sha256"]:
+            raise VerificationError(f"worker media checksum mismatch: {path.name}")
     return manifest
 
 
