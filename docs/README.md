@@ -12,6 +12,7 @@ English · [简体中文](README.zh-CN.md)
 - [Online installation and updates](user/online-install.md): Windows/Linux installers and in-app updates.
 - [Language settings](user/languages.md): interface and task output languages.
 - [Pwn workbench](user/pwn-workbench.md): tools, challenge environments and migration.
+- [Windows Worker setup](user/windows-worker.md): offline installer package generation, install result import and worker verification.
 
 <a id="设计与开发"></a>
 

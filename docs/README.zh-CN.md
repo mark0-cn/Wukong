@@ -12,6 +12,7 @@
 - [在线安装与更新](user/online-install.zh-CN.md)：Windows/Linux 安装器和应用内更新。
 - [语言设置](user/languages.zh-CN.md)：界面与任务输出语言。
 - [Pwn 工作环境](user/pwn-workbench.zh-CN.md)：工具、题目环境和迁移。
+- [Windows Worker 安装](user/windows-worker.zh-CN.md)：离线安装包生成、安装结果导入与 Worker 校验。
 
 <a id="design-and-development"></a>
 
