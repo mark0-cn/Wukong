@@ -64,3 +64,25 @@ for line in sys.stdin:
     assert_eq!(fs::read_to_string(state.join("writes"))?, "fixture-write\n");
     Ok(())
 }
+
+#[tokio::test]
+#[ignore = "requires dedicated Linux Docker and SSH relay configurations"]
+async fn linux_docker_and_ssh_relays_reconnect() -> Result<()> {
+    let path = std::env::var_os("WUKONG_LINUX_RELAY_FIXTURE")
+        .context("WUKONG_LINUX_RELAY_FIXTURE must point to the relay fixture configuration")?;
+    let [docker, ssh]: [RuntimeConfig; 2] = serde_json::from_slice(&fs::read(path)?)?;
+    assert_eq!(docker.backend(), RuntimeBackend::Docker);
+    assert_eq!(ssh.backend(), RuntimeBackend::Ssh);
+    for config in [docker, ssh] {
+        let client = RuntimeClient::connect(config).await?;
+        let identity = client.identity().clone();
+        let ping = client.call("ping", json!({})).await?;
+        assert_eq!(ping["identity"], serde_json::to_value(&identity)?);
+        assert_eq!(client.doctor().await?["os"], "linux");
+        client.close().await?;
+        assert_eq!(client.doctor().await?["os"], "linux");
+        assert_eq!(client.identity(), &identity);
+        client.close().await?;
+    }
+    Ok(())
+}
