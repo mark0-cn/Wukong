@@ -6,13 +6,12 @@
 //! is what the desktop application and later provisioning steps consume; private
 //! keys stay in the generation directory and never enter the media or the ZIP.
 use super::finalize::{
-    FinalizeMediaRequest, SshKeygen, TemplateSshKeygen, choose_ssh_port,
-    finalize_media_with_keygen, host_port_available,
+    SshKeygen, TemplateSshKeygen, choose_ssh_port, finalize_media_with_keygen, host_port_available,
 };
 use super::template::{APP_VERSION, canonical_semver, lowercase_hex};
 use super::{
-    MEDIA_RECORD, overlaps, read_bounded, reject_link, sha256_file, validate_absolute_path,
-    write_directory_zip,
+    FinalizeMediaRequest, MEDIA_RECORD, overlaps, read_bounded, reject_link, sha256_file,
+    validate_absolute_path, write_directory_zip,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
