@@ -25,8 +25,8 @@ for line in sys.stdin:
     elif request["method"] == "doctor":
         result = {"ready": True}
     elif request["method"] == "file.put":
-        with (root / "writes").open("a") as effects:
-            effects.write(request["params"]["request_id"] + "\n")
+        with (root / "writes").open("ab") as effects:
+            effects.write(request["params"]["request_id"].encode("utf-8") + b"\n")
         Event().wait()
     else:
         raise AssertionError(request["method"])
