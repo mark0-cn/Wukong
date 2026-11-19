@@ -104,6 +104,21 @@ impl Docker {
     ) -> Result<()> {
         self.logged_internal(&["pull", image], log, Some(&mut report))
     }
+    /// Pull one explicit platform with the same credential check, bounded log and
+    /// cancellation handling as [`Docker::pull_observed`].
+    pub fn pull_observed_platform(
+        &self,
+        image: &str,
+        platform: &str,
+        log: &Path,
+        mut report: impl FnMut(super::pull_progress::PullProgress),
+    ) -> Result<()> {
+        self.logged_internal(
+            &["pull", "--platform", platform, image],
+            log,
+            Some(&mut report),
+        )
+    }
     fn logged_internal(
         &self,
         args: &[&str],
@@ -111,8 +126,10 @@ impl Docker {
         report: Option<&mut dyn FnMut(super::pull_progress::PullProgress)>,
     ) -> Result<()> {
         if args.first() == Some(&"pull")
-            && let Some(image) = args.get(1)
+            && let Some(image) = args.last()
         {
+            // The image reference is the last argument; options such as
+            // `--platform` precede it.
             self.check_credentials(image)?;
         }
         fs::create_dir_all(log.parent().context("log needs parent")?)?;

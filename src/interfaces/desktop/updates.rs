@@ -717,15 +717,35 @@ impl Controller {
 
     /// Environment identity for first-run setup.
     ///
-    /// `local-release` builds resolve it from the bundled descriptor and a local
-    /// Docker image; every other build keeps the signed-catalog acquisition.
-    async fn setup_release(&self, _config: &AppConfig) -> Result<OnboardingRelease> {
+    /// `local-release` builds resolve it from the bundled descriptor; a missing
+    /// local image is pulled from the version-pinned CI workbench repository
+    /// during onboarding. Every other build keeps the signed-catalog acquisition.
+    async fn setup_release(self: &Arc<Self>, _config: &AppConfig) -> Result<OnboardingRelease> {
         #[cfg(feature = "local-release")]
         {
             let config = _config.clone();
-            let release = tokio::task::spawn_blocking(move || local_setup_release(&config))
-                .await
-                .map_err(anyhow::Error::from)??;
+            let controller = self.clone();
+            let version = env!("CARGO_PKG_VERSION").to_string();
+            let cancel = self.status().cancel;
+            let release = tokio::task::spawn_blocking(move || {
+                controller.edit().image_version = Some(version);
+                local_setup_release(&config, cancel, |progress| {
+                    let mut state = controller.edit();
+                    state.image_progress = Some(progress);
+                    let started = state.phase != "pulling";
+                    drop(state);
+                    if started {
+                        controller.phase(
+                            "pulling",
+                            UiMessage::new(
+                                "system-pulling-the-tool-image-docker-will-reuse-downloaded",
+                            ),
+                        );
+                    }
+                })
+            })
+            .await
+            .map_err(anyhow::Error::from)??;
             Ok(release)
         }
         #[cfg(not(feature = "local-release"))]
@@ -743,11 +763,17 @@ impl Controller {
 
 /// Resolve the environment of a `cargo package-local` build.
 ///
-/// The bundled descriptor names a local image tag; require the image to exist on
-/// this Docker host before the preparation pipeline starts so the operator sees
-/// the build command instead of a registry pull failure.
+/// The bundled descriptor names a local image tag and, for packages built by the
+/// current tooling, the version-pinned CI-built workbench image. Onboarding uses
+/// the local tag when it already exists, otherwise it pulls and tags the CI image
+/// so an installer built on another machine still prepares its environment. A
+/// pull failure surfaces both the registry commands and the local build command.
 #[cfg(feature = "local-release")]
-fn local_setup_release(config: &AppConfig) -> Result<OnboardingRelease> {
+fn local_setup_release(
+    config: &AppConfig,
+    cancel: tokio_util::sync::CancellationToken,
+    report: impl FnMut(crate::application::maintenance::workbench::pull_progress::PullProgress),
+) -> Result<OnboardingRelease> {
     let descriptor = crate::application::maintenance::updates::local_release::read()?;
     ensure!(
         descriptor.version == env!("CARGO_PKG_VERSION"),
@@ -755,10 +781,13 @@ fn local_setup_release(config: &AppConfig) -> Result<OnboardingRelease> {
         descriptor.version,
         env!("CARGO_PKG_VERSION")
     );
-    let docker = crate::application::maintenance::workbench::Docker::new(
+    let mut docker = crate::application::maintenance::workbench::Docker::new(
         &config.workbench.docker_executable,
     );
-    let image_size = environment::require_local_image(&docker, &descriptor.image)?;
+    // A multi-gigabyte pull must honor the preparation cancel action.
+    docker.cancellation = Some(cancel);
+    let image_size =
+        environment::require_or_pull_local_image_observed(&docker, &descriptor, report)?;
     if descriptor.image_size > 0 && image_size != descriptor.image_size {
         tracing::warn!(
             image = %descriptor.image,

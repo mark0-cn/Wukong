@@ -4,9 +4,11 @@
 //! as a Tauri resource. That descriptor names the locally built Docker image (a
 //! plain local tag, not a registry digest), the current client version and the
 //! worker protocol/data schema it was built for, plus the optional absolute path
-//! of a local Windows worker media template. First-run onboarding reads it
-//! instead of the online signed `latest.json` catalog, so an unpublished build
-//! can prepare its environment from an image that already exists on this host.
+//! of a local Windows worker media template and an optional version-pinned
+//! CI-built workbench image that first-run onboarding may pull when the local
+//! tag is absent. First-run onboarding reads it instead of the online signed
+//! `latest.json` catalog, so an unpublished build can prepare its environment
+//! even when the packaged image only exists in the CI registry.
 //!
 //! The feature is off in release builds: CI installers always resolve their
 //! runtime image through the signed catalog. The descriptor carries no
@@ -33,6 +35,12 @@ pub const DESCRIPTOR_OVERRIDE: &str = "WUKONG_LOCAL_RELEASE_JSON";
 
 /// Version the packaging tool uses when it is not overridden.
 pub const DEFAULT_IMAGE: &str = "wukong:local";
+/// Default CI workbench repository recorded by `cargo package-local`.
+pub const DEFAULT_REGISTRY: &str = "hlmark0/wukong-workbench";
+/// Official signed release image repository (`<namespace>/wukong`).
+pub const OFFICIAL_IMAGE_REPOSITORY: &str = "hlmark0/wukong";
+/// Final path component of the official signed release image.
+const OFFICIAL_IMAGE_NAME: &str = "wukong";
 
 static RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -95,6 +103,11 @@ pub struct LocalRelease {
     pub image: String,
     /// Image size recorded by the packaging host, in bytes.
     pub image_size: u64,
+    /// Optional version-pinned CI-built workbench image onboarding pulls when
+    /// the local `image` tag is absent, e.g.
+    /// `hlmark0/wukong-workbench:local-1.0.0`. Older descriptors omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_registry: Option<String>,
     /// Optional absolute path of a local Windows worker media template archive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template_path: Option<String>,
@@ -138,6 +151,9 @@ impl LocalRelease {
             DATA_SCHEMA
         );
         local_image(&self.image)?;
+        if let Some(reference) = &self.image_registry {
+            registry_image(reference)?;
+        }
         // A packaging process without Docker access records no size; onboarding
         // requires the image and reads its real size before preparing.
         ensure!(
@@ -187,6 +203,45 @@ fn local_image(image: &str) -> Result<()> {
     Ok(())
 }
 
+/// A recorded CI image reference is pulled by first-run onboarding, so it must be
+/// a safe argv token and never resolve to the official signed release image.
+fn registry_image(reference: &str) -> Result<()> {
+    local_image(reference)?;
+    ensure!(
+        !official_release_image(reference),
+        "local-release.json must not pull the official release image repository; record the separate CI workbench image `<registry>/wukong-workbench:local-<version>` instead"
+    );
+    Ok(())
+}
+
+/// Repository path of a Docker image reference without its tag or digest.
+fn repository(reference: &str) -> &str {
+    let reference = reference.split('@').next().unwrap_or(reference);
+    match reference.rsplit_once(':') {
+        // A colon before the last slash belongs to a registry port, not a tag.
+        Some((path, tag)) if !tag.contains('/') => path,
+        _ => reference,
+    }
+}
+
+/// Whether a registry reference would pull the official signed release image.
+///
+/// Docker image names are compared without their tag/digest and after removing
+/// the canonical Docker Hub registry prefixes, so `docker.io/hlmark0/wukong:local-1.0.0`
+/// is refused exactly like `hlmark0/wukong`. The separate CI workbench repository
+/// deliberately ends in `wukong-workbench` and is accepted.
+pub(crate) fn official_release_image(reference: &str) -> bool {
+    let path = repository(reference).to_ascii_lowercase();
+    let path = path
+        .strip_prefix("docker.io/")
+        .or_else(|| path.strip_prefix("index.docker.io/"))
+        .or_else(|| path.strip_prefix("registry-1.docker.io/"))
+        .unwrap_or(&path);
+    path == OFFICIAL_IMAGE_REPOSITORY
+        || path.ends_with(&format!("/{OFFICIAL_IMAGE_REPOSITORY}"))
+        || path.rsplit('/').next() == Some(OFFICIAL_IMAGE_NAME)
+}
+
 /// Parse a descriptor without a Tauri resource directory.
 ///
 /// Only tests use this entry point directly; the application reads the bundled
@@ -210,6 +265,7 @@ mod tests {
             "data_schema": DATA_SCHEMA,
             "image": DEFAULT_IMAGE,
             "image_size": 10_254_615_327u64,
+            "image_registry": format!("{DEFAULT_REGISTRY}:local-{}", env!("CARGO_PKG_VERSION")),
             "built_at": "2026-11-18T06:00:00Z",
             "source_revision": REVISION,
         })
@@ -220,9 +276,82 @@ mod tests {
         let release = parse_for_tests(descriptor())?;
         assert_eq!(release.image, DEFAULT_IMAGE);
         assert_eq!(release.image_size, 10_254_615_327);
+        assert_eq!(
+            release.image_registry,
+            Some(format!(
+                "{DEFAULT_REGISTRY}:local-{}",
+                env!("CARGO_PKG_VERSION")
+            ))
+        );
         assert_eq!(release.template(), None);
         assert!(release.version == env!("CARGO_PKG_VERSION"));
         Ok(())
+    }
+
+    #[test]
+    fn an_older_descriptor_without_an_image_registry_is_accepted() -> Result<()> {
+        let mut document = descriptor();
+        document.as_object_mut().unwrap().remove("image_registry");
+        let release = parse_for_tests(document)?;
+        assert_eq!(release.image_registry, None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_recorded_workbench_registry_is_kept_for_onboarding_pulls() -> Result<()> {
+        let mut document = descriptor();
+        document["image_registry"] =
+            serde_json::json!("registry.example.com:5000/team/wukong-workbench:local-1.0.0");
+        let release = parse_for_tests(document)?;
+        assert_eq!(
+            release.image_registry.as_deref(),
+            Some("registry.example.com:5000/team/wukong-workbench:local-1.0.0")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn official_release_image_references_are_refused() {
+        for reference in [
+            "hlmark0/wukong",
+            "hlmark0/wukong:local-1.0.0",
+            "hlmark0/wukong@sha256:deadbeef",
+            "docker.io/hlmark0/wukong:local-1.0.0",
+            "index.docker.io/hlmark0/wukong",
+            "evil.example/hlmark0/wukong:local-1.0.0",
+            "mirror/wukong:latest",
+        ] {
+            let mut document = descriptor();
+            document["image_registry"] = serde_json::json!(reference);
+            let error = parse_for_tests(document).unwrap_err();
+            assert!(
+                format!("{error:#}").contains("must not pull the official release image"),
+                "{reference} must be refused: {error:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn official_image_detection_ignores_tags_digests_and_hub_prefixes() {
+        for reference in [
+            "hlmark0/wukong",
+            "hlmark0/wukong:1.0.0",
+            "hlmark0/wukong@sha256:deadbeef",
+            "docker.io/hlmark0/wukong:local-1.0.0",
+            "index.docker.io/hlmark0/wukong@sha256:deadbeef",
+            "registry-1.docker.io/hlmark0/wukong",
+            "evil.example/hlmark0/wukong:local-1.0.0",
+        ] {
+            assert!(official_release_image(reference), "{reference}");
+        }
+        for reference in [
+            "hlmark0/wukong-workbench:local-1.0.0",
+            "localhost:5000/team/wukong-workbench:local-1.0.0",
+            "wukong-workbench:local-1.0.0",
+            "registry.example.com:5000/team/wukong-workbench@sha256:deadbeef",
+        ] {
+            assert!(!official_release_image(reference), "{reference}");
+        }
     }
 
     #[test]
@@ -254,6 +383,17 @@ mod tests {
             ("version", serde_json::json!("not-a-version")),
             ("image", serde_json::json!("")),
             ("image", serde_json::json!("-bad tag")),
+            ("image_registry", serde_json::json!("")),
+            ("image_registry", serde_json::json!("-bad tag")),
+            (
+                "image_registry",
+                serde_json::json!("hlmark0/wukong:local-1.0.0"),
+            ),
+            (
+                "image_registry",
+                serde_json::json!("docker.io/hlmark0/wukong@sha256:deadbeef"),
+            ),
+            ("image_registry", serde_json::json!("a\nb")),
             ("source_revision", serde_json::json!("ABC")),
             ("built_at", serde_json::json!("not a time")),
             ("template_path", serde_json::json!("relative/template.zip")),
