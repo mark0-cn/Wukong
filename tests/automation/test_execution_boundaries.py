@@ -171,7 +171,12 @@ class ExecutionBoundaries(unittest.TestCase):
 
     def test_native_installation_does_not_depend_on_setup_ui(self):
         root = ROOT / "workers/windows/native/host"
-        for name in ["installer.rs", "install_service.rs", "install_ssh.rs", "installation_receipt.rs"]:
+        for name in [
+            "installer.rs",
+            "install_service.rs",
+            "install_ssh.rs",
+            "installation_receipt.rs",
+        ]:
             source = (root / name).read_text(encoding="utf-8")
             self.assertNotRegex(source, r"\b(?:setup_ui|MessageBoxW|GetSaveFileNameW)\b", name)
 
