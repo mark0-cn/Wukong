@@ -13,7 +13,7 @@ async fn reconnect_keeps_identity_and_never_replays_a_timed_out_request() -> Res
 import json
 from pathlib import Path
 import sys
-import time
+from threading import Event
 
 root = Path(sys.argv[sys.argv.index("--state") + 1])
 for line in sys.stdin:
@@ -27,8 +27,7 @@ for line in sys.stdin:
     elif request["method"] == "file.put":
         with (root / "writes").open("a") as effects:
             effects.write(request["params"]["request_id"] + "\n")
-        time.sleep(30)
-        result = {}
+        Event().wait()
     else:
         raise AssertionError(request["method"])
     print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
@@ -42,7 +41,8 @@ for line in sys.stdin:
             bridge_path: bridge,
             ..Default::default()
         }),
-        request_timeout_secs: 2,
+        // Include interpreter startup on the shared Windows runner.
+        request_timeout_secs: 20,
     })
     .await?;
     let failure = client
