@@ -4,23 +4,24 @@
 //! client being dropped, and a lost transport is replaced transparently on the
 //! next call; reconnect uses the same worker state directory.
 use anyhow::{Context, Result, anyhow, bail};
-use futures::{SinkExt, StreamExt};
-use jsonrpsee_core::client::{
-    Client, ClientBuilder, ClientT, Error as RpcError, ReceivedMessage, TransportReceiverT,
-    TransportSenderT,
-};
+use jsonrpsee_core::client::{ClientT, Error as RpcError};
 use serde_json::{Value, json};
-use std::{path::PathBuf, process::Stdio, sync::Arc, time::Duration};
-use tokio::{
-    process::{Child, ChildStdin, ChildStdout, Command},
-    sync::Mutex,
-};
-use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
+#[cfg(windows)]
+use std::path::PathBuf;
+use std::{sync::Arc, time::Duration};
+use stdio::StdioChannel;
+use tokio::sync::Mutex;
+
+mod launch;
 pub mod protocol;
 pub mod ssh;
+mod stdio;
 
 mod config;
 pub use config::*;
+
+#[cfg(test)]
+mod tests;
 
 pub(crate) fn default_docker_executable() -> String {
     #[cfg(windows)]
@@ -36,24 +37,19 @@ pub(crate) fn default_docker_executable() -> String {
     "docker".into()
 }
 
-struct Transport {
-    child: Child,
-    client: Client,
+struct Session {
+    channel: StdioChannel,
     poisoned: bool,
-    stderr: crate::adapters::process_io::StderrCapture,
-    identity: Option<protocol::WorkerIdentity>,
+    identity: protocol::WorkerIdentity,
 }
+
 #[derive(Clone)]
 pub struct RuntimeClient {
-    transport: Arc<Mutex<Transport>>,
+    session: Arc<Mutex<Session>>,
     start_admission: Arc<Mutex<()>>,
     config: RuntimeConfig,
     identity: protocol::WorkerIdentity,
     lease: Option<protocol::EnvironmentLease>,
-}
-
-fn remote_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 impl RuntimeClient {
@@ -61,181 +57,17 @@ impl RuntimeClient {
         if let TransportConfig::TrustedLocal(local) = &config.transport {
             crate::adapters::files::owned::create_owned_directory(&local.state_dir)?;
         }
-        if config.backend() == RuntimeBackend::Disabled {
-            bail!(
-                "Execution worker is disabled. Configure Docker/SSH, or trusted_local for trusted fixtures."
-            );
-        }
-        let transport = Self::spawn_transport(&config)
+        let session = Session::connect(&config)
             .await
             .context("start runtime bridge transport")?;
-        let identity = transport
-            .identity
-            .clone()
-            .context("missing worker identity")?;
+        let identity = session.identity.clone();
         Ok(Self {
-            transport: Arc::new(Mutex::new(transport)),
+            session: Arc::new(Mutex::new(session)),
             start_admission: Arc::new(Mutex::new(())),
             config,
             identity,
             lease: None,
         })
-    }
-
-    /// Build, spawn and handshake one stdio transport. The bridge daemon,
-    /// job supervisors and debugger sessions live in the shared state
-    /// directory, so a fresh transport observes the same jobs and sessions
-    /// as the one it replaces.
-    async fn spawn_transport(config: &RuntimeConfig) -> Result<Transport> {
-        let mut cmd = match &config.transport {
-            TransportConfig::Disabled => unreachable!(),
-            TransportConfig::TrustedLocal(config) => {
-                let mut c = Command::new(&config.python);
-                c.arg(&config.bridge_path)
-                    .arg("--state")
-                    .arg(&config.state_dir)
-                    .arg("--stdio")
-                    .arg("--trusted-local");
-                c
-            }
-            TransportConfig::Docker(config) => {
-                let container = &config.docker_container;
-                if container.starts_with('-') {
-                    bail!("invalid docker container");
-                }
-                let mut c = Command::new(&config.docker_executable);
-                c.args([
-                    "exec",
-                    "-i",
-                    container,
-                    "python3",
-                    &config.remote_bridge_path,
-                    "--state",
-                    &config.remote_state_dir,
-                    "--stdio",
-                ]);
-                c
-            }
-            TransportConfig::ManagedSsh(config) => config
-                .managed_ssh
-                .command(&config.ssh_executable, &config.ssh_host)?,
-            TransportConfig::Ssh(config) => {
-                let host = &config.ssh_host;
-
-                if host.starts_with('-') || host.contains(['\n', '\r']) {
-                    bail!("invalid ssh host");
-                }
-                let mut c = Command::new(&config.ssh_executable);
-                c.args([
-                    "-T",
-                    "-a",
-                    "-x",
-                    "-o",
-                    "BatchMode=yes",
-                    "-o",
-                    "StrictHostKeyChecking=yes",
-                    "-o",
-                    "ClearAllForwardings=yes",
-                    "-o",
-                    "PermitLocalCommand=no",
-                    "--",
-                    host,
-                ]);
-                // OpenSSH passes a remote command through a shell; quote each path.
-                c.arg(format!(
-                    "python3 {} --state {} --stdio",
-                    remote_quote(&config.remote_bridge_path),
-                    remote_quote(&config.remote_state_dir)
-                ));
-                c
-            }
-        };
-        // Never forward model/provider secrets into an analysis worker.
-        let allowed = [
-            "PATH",
-            "SystemRoot",
-            "WINDIR",
-            "TEMP",
-            "TMP",
-            "PATHEXT",
-            "COMSPEC",
-            "USERPROFILE",
-            "HOME",
-            "APPDATA",
-            "LOCALAPPDATA",
-            "PROGRAMDATA",
-            "SSH_AUTH_SOCK",
-            "DOCKER_HOST",
-            "DOCKER_CONTEXT",
-            "DOCKER_CONFIG",
-        ];
-        let env: Vec<_> = allowed
-            .iter()
-            .filter_map(|k| std::env::var_os(k).map(|v| (*k, v)))
-            .collect();
-        cmd.env_clear().envs(env).env("PYTHONUNBUFFERED", "1");
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            cmd.creation_flags(0x08000000);
-        }
-        let mut child = cmd.spawn().context("spawn runtime bridge")?;
-        let stderr = crate::adapters::process_io::StderrCapture::new(
-            child.stderr.take().context("worker stderr unavailable")?,
-        );
-        let input = child.stdin.take().context("worker stdin unavailable")?;
-        let output = child.stdout.take().context("worker stdout unavailable")?;
-        let client = ClientBuilder::default()
-            .request_timeout(Duration::from_secs(
-                config.request_timeout_secs.clamp(1, 3600),
-            ))
-            .max_concurrent_requests(1)
-            .build_with_tokio(
-                StdioSender(FramedWrite::new(
-                    input,
-                    LinesCodec::new_with_max_length(MAX_RPC),
-                )),
-                StdioReceiver(FramedRead::new(
-                    output,
-                    LinesCodec::new_with_max_length(MAX_RPC),
-                )),
-            );
-        let mut transport = Transport {
-            child,
-            client,
-            poisoned: false,
-            stderr,
-            identity: None,
-        };
-        match request(&mut transport, "ping", json!({})).await {
-            Ok(reply) => {
-                let identity: protocol::WorkerIdentity =
-                    serde_json::from_value(reply["identity"].clone())
-                        .context("worker handshake did not establish its identity")?;
-                identity.validate()?;
-                if let Some(managed) = config.managed_ssh() {
-                    anyhow::ensure!(
-                        identity.installation_id == managed.installation_id,
-                        "SSH worker installation differs from its enrolled native identity"
-                    );
-                }
-                transport.identity = Some(identity);
-                Ok(transport)
-            }
-            Err(RequestFailure::Worker(error)) => {
-                let _ = transport.child.kill().await;
-                transport.stderr.finish().await;
-                Err(error).context(transport.stderr.context("runtime handshake"))
-            }
-            Err(RequestFailure::Transport { error, .. }) => {
-                let _ = transport.child.kill().await;
-                transport.stderr.finish().await;
-                Err(error).context(transport.stderr.context("runtime handshake"))
-            }
-        }
     }
 
     pub fn config(&self) -> &RuntimeConfig {
@@ -308,39 +140,34 @@ impl RuntimeClient {
                 params["_lease"] = serde_json::to_value(lease)?;
             }
         }
-        let mut transport = self.transport.lock().await;
-        if transport.poisoned {
-            *transport = Self::spawn_transport(&self.config)
+        let mut session = self.session.lock().await;
+        if session.poisoned {
+            *session = Session::connect(&self.config)
                 .await
                 .context("runtime transport lost and reconnect failed")?;
         }
-        if transport.identity.as_ref() != Some(&self.identity) {
-            let _ = transport.child.kill().await;
-            transport.poisoned = true;
+        if session.identity != self.identity {
+            let _ = session.channel.close().await;
+            session.poisoned = true;
             bail!(
                 "worker installation, boot or package identity changed; refusing execution in the previous binding"
             );
         }
-        match request(&mut transport, method, params).await {
+        match request(&session.channel, method, params).await {
             Ok(result) => Ok(result),
             Err(RequestFailure::Worker(error)) => Err(error),
             Err(RequestFailure::Transport { timed_out, error }) => {
-                transport.poisoned = true;
-                let _ = transport.child.kill().await;
-                transport.stderr.finish().await;
-                if timed_out {
-                    return Err(protocol::TransportFailure { timed_out:true, message:"runtime request timed out; the worker may have executed it — reconcile the durable call before retrying (the next call reconnects automatically)".into() }.into());
-                }
-                Err(protocol::TransportFailure {
-                    timed_out: false,
-                    message: format!(
-                        "{}: {error:#}",
-                        transport.stderr.context(
-                            "runtime transport failed; the next call reconnects automatically"
-                        )
-                    ),
-                }
-                .into())
+                session.poisoned = true;
+                session.channel.close_after_failure().await;
+                let message = if timed_out {
+                    "runtime request timed out; the worker may have executed it — reconcile the durable call before retrying (the next call reconnects automatically)".to_owned()
+                } else {
+                    let diagnostic = session.channel.diagnostic(
+                        "runtime transport failed; the next call reconnects automatically",
+                    );
+                    format!("{diagnostic}: {error:#}")
+                };
+                Err(protocol::TransportFailure { timed_out, message }.into())
             }
         }
     }
@@ -355,13 +182,44 @@ impl RuntimeClient {
 
     /// Closes only the transport. To stop work, call job.cancel/debug.close first.
     pub async fn close(&self) -> Result<()> {
-        let mut transport = self.transport.lock().await;
-        transport.poisoned = true;
-        transport
-            .child
-            .kill()
+        let mut session = self.session.lock().await;
+        session.poisoned = true;
+        session
+            .channel
+            .close()
             .await
             .context("close runtime transport")
+    }
+}
+
+impl Session {
+    /// Each fresh channel handshakes before any business request can be sent.
+    async fn connect(config: &RuntimeConfig) -> Result<Self> {
+        let mut channel = StdioChannel::spawn(
+            launch::command(&config.transport)?,
+            config.request_timeout_secs,
+        )?;
+        let reply = match request(&channel, "ping", json!({})).await {
+            Ok(reply) => reply,
+            Err(RequestFailure::Worker(error) | RequestFailure::Transport { error, .. }) => {
+                channel.close_after_failure().await;
+                return Err(error).context(channel.diagnostic("runtime handshake"));
+            }
+        };
+        let identity: protocol::WorkerIdentity = serde_json::from_value(reply["identity"].clone())
+            .context("worker handshake did not establish its identity")?;
+        identity.validate()?;
+        if let Some(managed) = config.managed_ssh() {
+            anyhow::ensure!(
+                identity.installation_id == managed.installation_id,
+                "SSH worker installation differs from its enrolled native identity"
+            );
+        }
+        Ok(Self {
+            channel,
+            identity,
+            poisoned: false,
+        })
     }
 }
 
@@ -375,46 +233,8 @@ enum RequestFailure {
     },
 }
 
-const MAX_RPC: usize = 48 * 1024 * 1024;
-
-struct StdioSender(FramedWrite<ChildStdin, LinesCodec>);
-impl TransportSenderT for StdioSender {
-    type Error = std::io::Error;
-    async fn send(&mut self, message: String) -> std::io::Result<()> {
-        if message.len() > MAX_RPC {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "runtime request exceeds 48 MiB",
-            ));
-        }
-        self.0.send(message).await.map_err(std::io::Error::other)
-    }
-    async fn close(&mut self) -> std::io::Result<()> {
-        SinkExt::<String>::close(&mut self.0)
-            .await
-            .map_err(std::io::Error::other)
-    }
-}
-
-struct StdioReceiver(FramedRead<ChildStdout, LinesCodec>);
-impl TransportReceiverT for StdioReceiver {
-    type Error = std::io::Error;
-    async fn receive(&mut self) -> std::io::Result<ReceivedMessage> {
-        match self.0.next().await {
-            Some(Ok(message)) => Ok(ReceivedMessage::Text(message)),
-            // A codec error terminates this RPC connection immediately. Never
-            // keep discarding an unbounded overlong line from a broken worker.
-            Some(Err(error)) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
-            None => Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "runtime bridge closed the transport",
-            )),
-        }
-    }
-}
-
 async fn request(
-    transport: &mut Transport,
+    channel: &StdioChannel,
     method: &str,
     params: Value,
 ) -> Result<Value, RequestFailure> {
@@ -422,7 +242,7 @@ async fn request(
         .as_object()
         .cloned()
         .ok_or_else(|| RequestFailure::Worker(anyhow!("runtime params must be an object")))?;
-    match transport.client.request(method, params).await {
+    match channel.client.request(method, params).await {
         Ok(result) => Ok(result),
         Err(RpcError::Call(error)) => Err(RequestFailure::Worker(
             protocol::WorkerError::from_rpc(
