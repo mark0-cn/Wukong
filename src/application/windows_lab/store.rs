@@ -35,6 +35,15 @@ impl LabStore {
 
     /// Cross-process exclusion for one VM. The guard lives for the operation.
     pub(super) fn lock(&self, vm_id: &str) -> Result<File> {
+        self.lock_with_identity(vm_id, true)
+    }
+
+    /// Serialize a preview and validate any identity already on disk.
+    pub(super) fn lock_preview(&self, vm_id: &str) -> Result<File> {
+        self.lock_with_identity(vm_id, false)
+    }
+
+    fn lock_with_identity(&self, vm_id: &str, publish_identity: bool) -> Result<File> {
         self.ensure_root()?;
         let path = self.root.join(format!(
             "{}.lock",
@@ -59,7 +68,7 @@ impl LabStore {
                         == identity,
                     "physical VM is already registered under another alias or configuration"
                 );
-            } else {
+            } else if publish_identity {
                 let mut staged = tempfile::NamedTempFile::new_in(&self.root)?;
                 staged.write_all(&serde_json::to_vec(&identity)?)?;
                 staged.as_file().sync_all()?;

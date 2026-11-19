@@ -358,7 +358,7 @@ impl WindowsLab {
                     finalize_spec.ssh_port
                 ));
                 actions.push(format!(
-                    "run python -m scripts.worker.media finalize --template {} --keys {} --spec {} --output {}{}",
+                    "run the built-in Rust media finalizer for template {} --keys {} --spec {} --output {}{}",
                     template.display(),
                     keys.display(),
                     spec.display(),
@@ -498,7 +498,7 @@ impl WindowsLab {
                     finalize_spec.ssh_port
                 ));
                 actions.push(format!(
-                    "run python -m scripts.worker.media finalize --template {} --keys {} --spec {} --output {}{}",
+                    "run the built-in Rust media finalizer for template {} --keys {} --spec {} --output {}{}",
                     template.display(),
                     keys.display(),
                     spec.display(),

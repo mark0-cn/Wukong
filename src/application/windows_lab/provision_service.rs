@@ -214,7 +214,11 @@ impl WindowsLab {
         let guest_network = self.guest_network.clone();
         let finalizer = self.media_finalizer.clone();
         let _gate = self.gate.lock().await;
-        let _lock = self.store.lock(&self.vm_id)?;
+        let _lock = if options.dry_run {
+            self.store.lock_preview(&self.vm_id)?
+        } else {
+            self.store.lock(&self.vm_id)?
+        };
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
             crate::adapters::environments::lab_guard::LockMode::Exclusive,

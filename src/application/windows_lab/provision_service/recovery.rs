@@ -79,7 +79,11 @@ impl WindowsLab {
             "offline provisioning tooling is not configured; add [windows_lab.vms.<alias>.offline] with wsl_executable, wsl_distribution, guestfish, hivexsh, mkisofs and timeout_seconds",
         )?;
         let _gate = self.gate.lock().await;
-        let _lock = self.store.lock(&self.vm_id)?;
+        let _lock = if options.dry_run {
+            self.store.lock_preview(&self.vm_id)?
+        } else {
+            self.store.lock(&self.vm_id)?
+        };
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
             crate::adapters::environments::lab_guard::LockMode::Exclusive,

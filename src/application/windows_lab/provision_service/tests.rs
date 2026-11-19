@@ -1684,6 +1684,15 @@ async fn dry_run_plans_without_mutating() {
     assert_eq!(fs::read(&deployment.vmx).unwrap(), deployment.vmx_initial);
     assert!(deployment.provision_directories().is_empty());
     assert!(deployment.state().last_provision.is_none());
+    let physical =
+        crate::adapters::environments::lab_guard::physical_identity(&deployment.vmx).unwrap();
+    assert!(
+        !deployment
+            .store()
+            .root()
+            .join(format!("{physical}.identity.json"))
+            .exists()
+    );
     assert_eq!(disk.calls(), vec!["inspect".to_string()]);
     assert!(iso.state.lock().unwrap().builds.is_empty());
 }
@@ -1721,7 +1730,7 @@ async fn template_dry_run_validates_without_finalizing_media() {
     let outcome = lab.provision(options).await.unwrap();
     assert!(outcome.dry_run);
     let planned = outcome.planned_actions.join("\n");
-    assert!(planned.contains("scripts.worker.media finalize"));
+    assert!(planned.contains("built-in Rust media finalizer"));
     assert!(planned.contains("--generate-ssh-key"));
     assert!(planned.contains("WUKONG_OFFLINE"));
     assert!(planned.contains("provision.ps1"));
