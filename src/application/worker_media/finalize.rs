@@ -16,13 +16,7 @@ use super::{
 };
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeSet,
-    fs,
-    net::Ipv4Addr,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{collections::BTreeSet, fs, net::Ipv4Addr, path::Path, process::Command};
 use wukong_worker_package::{
     Compatibility, Enrollment, ExecutionBoundary, SignatureRecord, Signer, SshPublicKey,
     VerifiedEnrollment, load_controller_signer, seal_package, verify_package, write_enrollment,
@@ -610,6 +604,7 @@ mod tests {
     use super::*;
     use crate::application::worker_media::fixture::{self, FixedKeygen};
     use crate::application::worker_media::template::APP_VERSION;
+    use std::path::PathBuf;
 
     fn synthetic_template(temporary: &Path) -> PathBuf {
         let root = temporary.join("template");
