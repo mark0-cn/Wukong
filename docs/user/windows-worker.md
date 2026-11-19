@@ -47,7 +47,7 @@ A generated installation reports its package path, SSH port, management network 
 
 ## Import and verify the install result
 
-1. Select **Import install result** and choose the saved `connection.json`.
+1. Select **Import install result** and choose the saved `connection.json` with `receipt_version: 2`. For an installation that only produced a v1 result, use current media in a fresh disposable Windows VM and import the new result.
 2. The card shows the SSH host fingerprint contained in the file. Compare it with the fingerprint displayed in the VM setup window and enter the VM fingerprint into the confirmation field. The import button stays disabled until it matches exactly; the file alone is not an independent confirmation.
 3. Optionally change the environment name. An empty name keeps the name used when the package was generated.
 4. Select **Import and verify**. The controller verifies only the saved candidate addresses through the same managed SSH transport and strict host-key pin used for analysis, then registers the environment. The card turns available (green) and shows the registered environment and address.

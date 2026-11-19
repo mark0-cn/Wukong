@@ -3,7 +3,7 @@
 //! The helper builds a schema-1 finalized media directory exactly as the public
 //! media contract describes, using the shared worker package signing types. It
 //! never touches a VM, a key store or the network.
-use super::{MediaIdentity, PublicConnection, SshKey};
+use super::{MediaIdentity, SshKey};
 use base64::Engine;
 use std::collections::BTreeMap;
 use std::fs;
@@ -12,13 +12,14 @@ use wukong_worker_package::{
     Component, Enrollment, EntryPoints, ExecutionBoundary, FileEntry, Manifest, PayloadKind,
     PublicKey, Signer, SshPublicKey, VerifiedEnrollment,
 };
+use wukong_worker_package::{ConnectionReceipt, RECEIPT_VERSION};
 
 pub const CONTROLLER_VERSION: &str = "1.0.0";
 
 pub struct MediaFixture {
     pub root: PathBuf,
     pub identity: MediaIdentity,
-    pub connection: PublicConnection,
+    pub connection: ConnectionReceipt,
     _directory: tempfile::TempDir,
 }
 
@@ -260,8 +261,9 @@ pub fn media() -> MediaFixture {
         ssh_public_key: ssh_public_key.clone(),
     };
     let host_public = installer_host_key();
-    let connection = PublicConnection {
+    let connection = ConnectionReceipt {
         schema: 1,
+        receipt_version: RECEIPT_VERSION,
         installed: true,
         installation_id: identity.installation_id.clone(),
         environment_id: identity.environment_id.clone(),
@@ -269,8 +271,9 @@ pub fn media() -> MediaFixture {
         manifest_sha256: identity.manifest_sha256.clone(),
         ssh_user: identity.ssh_user.clone(),
         ssh_port: identity.ssh_port,
-        host_key: SshKey::from_public(&host_public).unwrap(),
         host_fingerprint: host_public.fingerprint().unwrap(),
+        host_key: host_public,
+        candidate_addresses: vec!["192.168.199.40".into()],
         production_isolation_verified: false,
     };
     MediaFixture {
@@ -282,7 +285,7 @@ pub fn media() -> MediaFixture {
 }
 
 /// A valid guest provisioning receipt for the fixture, pre-cleanup.
-pub fn guest_receipt(provision_id: &str, connection: &PublicConnection) -> Vec<u8> {
+pub fn guest_receipt(provision_id: &str, connection: &ConnectionReceipt) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({
         "schema": 3,
         "provision_id": provision_id,

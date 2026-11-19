@@ -17,7 +17,6 @@ pub(crate) mod usage;
 pub mod windows_lab;
 #[cfg(windows)]
 pub mod windows_worker_setup;
-#[cfg(windows)]
 pub mod worker_media;
 // Preserve the original assessment service entry points.
 pub use assessment::{AssessmentService, PreparedAssessment};

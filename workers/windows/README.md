@@ -65,6 +65,8 @@ The current offline package does not ship pwntools, pyelftools or Unicorn, so cy
 
 ## Offline delivery and validation
 
+The native installer runs the reviewed installation for both setup UI and unattended provisioning. The installer coordinates protected state, SSH configuration, Service Control Manager activation and publication of the public connection receipt. The UI handles confirmation and receipt export.
+
 Build in an x64 MSVC environment. Keep model credentials and signing private keys on the controller. Install/uninstall acceptance belongs only on dedicated VMs or isolated runners, never over a developer's installation.
 
 CI stages the exact payload and native binaries without controller keys; the operator finalizes the downloadable template with the controller key directory:
@@ -93,7 +95,7 @@ Successful offline setup writes the public `C:\ProgramData\WukongWorkers\<instal
 
 After success, setup offers **保存安装结果 / Save install result** and opens the Windows save dialog with the default name `wukong-worker-<installation_id>.json`. If the dialog cannot open or the selected path cannot be written, the same bytes are copied to `%USERPROFILE%\Desktop\wukong-worker-<installation_id>.json` (or `%PUBLIC%` or its Desktop when the profile is unavailable or has no Desktop) and setup reports the actual path. Saving never changes installation success: the protected record in ProgramData is already complete.
 
-Starting setup with no arguments on a guest that already has a valid installation does not reinstall it. It shows a short "already installed" dialog and offers to save a refreshed result: the current adapter addresses are re-enumerated and only `receipt_version` and `candidate_addresses` change, while the installation ID, SSH and host-key fields stay identical. Use this export after a guest address change instead of resetting the worker. Installation and repair still require the offline media and the reviewed `install-*`/`verify-enrollment` paths; the refresh flow performs no installation, service or firewall change.
+Starting setup with no arguments on a guest that already has a valid installation does not reinstall it. It shows a short "already installed" dialog and offers to save a refreshed result: the current adapter addresses are re-enumerated and only `candidate_addresses` changes, while the installation ID, SSH and host-key fields stay identical. Use this export after a guest address change instead of resetting the worker. Installation and repair still require the offline media and the reviewed `install-*`/`verify-enrollment` paths; the refresh flow performs no installation, service or firewall change.
 
 Native build identity includes the shared protocol crate, native/Python sources, locked inputs and build scripts. Assembly verifies this identity and preserves dependency licenses. Enrollment pins the controller signer and installation; SSH independently pins the worker host key. Use the [cross-platform environment guide](../../docs/design/cross-platform-environments.md) for connection and task binding, and [worker acceptance guide](../tests/README.md) for installed process/debugger/recovery fixtures.
 

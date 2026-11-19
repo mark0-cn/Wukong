@@ -11,13 +11,13 @@
 mod platform {
     use crate::application::windows_lab::provision::{
         self, BootTaskEvidence, BootTaskInjection, BootTaskRegistry, BootTaskRemoval,
-        BootTaskRemovalEvidence, DiskInspection, DiskInspectionRequest, FinalizeRequest,
-        GUEST_SYSTEM_CONFIG, GuestFile, GuestNetwork, GuestObservation, GuestObservationRequest,
-        GuestPaths, GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder,
-        MAX_POLICY_BYTES, MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk, ServiceRemoval,
-        ServiceRemovalEvidence, boot_task_cache_state, startup_command_lines,
-        verify_boot_task_values,
+        BootTaskRemovalEvidence, DiskInspection, DiskInspectionRequest, GUEST_SYSTEM_CONFIG,
+        GuestFile, GuestNetwork, GuestObservation, GuestObservationRequest, GuestPaths,
+        GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder, MAX_POLICY_BYTES,
+        MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk, ServiceRemoval, ServiceRemovalEvidence,
+        boot_task_cache_state, startup_command_lines, verify_boot_task_values,
     };
+    use crate::application::worker_media::{FinalizeMediaRequest, FinalizedMedia, finalize_media};
     use anyhow::{Context, Result, bail, ensure};
     use async_trait::async_trait;
     use std::{
@@ -1244,49 +1244,12 @@ mod platform {
 
     #[async_trait]
     impl provision::MediaFinalizer for RustMediaFinalizer {
-        async fn finalize(&self, request: &FinalizeRequest) -> Result<serde_json::Value> {
+        async fn finalize(&self, request: &FinalizeMediaRequest) -> Result<FinalizedMedia> {
             let request = request.clone();
-            let record = tokio::task::spawn_blocking(move || finalize_offline_media(&request))
+            tokio::task::spawn_blocking(move || finalize_media(&request))
                 .await
-                .context("offline media finalize worker stopped unexpectedly")??;
-            Ok(serde_json::to_value(record)?)
+                .context("offline media finalize worker stopped unexpectedly")?
         }
-    }
-
-    /// Run the shared Rust finalizer outside the async runtime. This replaces the
-    /// former `python -m scripts.worker.media finalize` subprocess: no Python
-    /// interpreter or source checkout is needed.
-    fn finalize_offline_media(
-        request: &FinalizeRequest,
-    ) -> Result<crate::application::worker_media::MediaRecord> {
-        let spec = provision::read_finalize_spec(&request.spec)?;
-        let management_peer = spec
-            .management_peer
-            .parse()
-            .context("finalize spec management peer must be a canonical IPv4 address")?;
-        let ssh_public_key = spec
-            .ssh_public_key
-            .map(|key| wukong_worker_package::SshPublicKey {
-                algorithm: key.algorithm,
-                key: key.key,
-            });
-        let finalized = crate::application::worker_media::finalize_media(
-            &crate::application::worker_media::FinalizeMediaRequest {
-                template: request.template.clone(),
-                keys: request.keys.clone(),
-                output: request.output.clone(),
-                installation_id: spec.installation_id,
-                environment_id: spec.environment_id,
-                generation: spec.generation,
-                management_peer,
-                ssh_port: spec.ssh_port,
-                ssh_public_key,
-                generate_ssh_key: request.generate_ssh_key.clone(),
-                controller_version: None,
-            },
-        )
-        .context("finalize offline worker media")?;
-        Ok(finalized.record)
     }
 
     #[cfg(test)]
@@ -1338,10 +1301,12 @@ mod platform {
 #[cfg(not(windows))]
 mod platform {
     use crate::application::windows_lab::provision::{
-        DiskInspection, DiskInspectionRequest, FinalizeRequest, GuestFile, GuestNetwork,
-        GuestObservation, GuestObservationRequest, GuestRemoval, GuestRemovalEvidence, IsoBuilder,
-        OfflineDisk, ServiceRemoval, ServiceRemovalEvidence,
+        BootTaskEvidence, BootTaskInjection, BootTaskRemoval, BootTaskRemovalEvidence,
+        DiskInspection, DiskInspectionRequest, GuestFile, GuestNetwork, GuestObservation,
+        GuestObservationRequest, GuestRemoval, GuestRemovalEvidence, IsoBuilder, OfflineDisk,
+        ServiceRemoval, ServiceRemovalEvidence,
     };
+    use crate::application::worker_media::{FinalizeMediaRequest, FinalizedMedia};
     use anyhow::{Result, bail};
     use async_trait::async_trait;
     use std::{path::Path, sync::Arc, time::Duration};
@@ -1374,6 +1339,22 @@ mod platform {
         }
 
         async fn write_guest_files(&self, _disk: &Path, _files: &[GuestFile]) -> Result<()> {
+            bail!(WINDOWS_ONLY)
+        }
+
+        async fn inject_boot_task(
+            &self,
+            _disk: &Path,
+            _injection: &BootTaskInjection,
+        ) -> Result<BootTaskEvidence> {
+            bail!(WINDOWS_ONLY)
+        }
+
+        async fn remove_boot_task(
+            &self,
+            _disk: &Path,
+            _removal: &BootTaskRemoval,
+        ) -> Result<BootTaskRemovalEvidence> {
             bail!(WINDOWS_ONLY)
         }
 
@@ -1446,7 +1427,7 @@ mod platform {
 
     #[async_trait]
     impl crate::application::windows_lab::provision::MediaFinalizer for RustMediaFinalizer {
-        async fn finalize(&self, _request: &FinalizeRequest) -> Result<serde_json::Value> {
+        async fn finalize(&self, _request: &FinalizeMediaRequest) -> Result<FinalizedMedia> {
             bail!(WINDOWS_ONLY)
         }
     }

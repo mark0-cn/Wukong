@@ -12,18 +12,18 @@ use crate::application::windows_lab::provision::fixture;
 use crate::application::windows_lab::provision::{
     BOOT_LAUNCHER, BOOT_TASK_FILE, BOOT_TASK_GUID, BOOT_TASK_NAME, BOOT_TASK_XML,
     BOOT_TASK_XML_SHA256, BootTaskCacheState, BootTaskEvidence, BootTaskInjection, BootTaskRemoval,
-    BootTaskRemovalEvidence, DiskInspection, DiskInspectionRequest, FinalizeRequest,
-    GUEST_PROVISION_ROOT, GUEST_STARTUP_DIR, GuestNetwork, GuestObservation,
-    GuestObservationRequest, GuestPaths, GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence,
-    IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment, PublicConnection,
-    RegisteredEnvironment, ServiceRemoval, ServiceRemovalEvidence, boot_launcher,
-    boot_task_injection, startup_command_lines,
+    BootTaskRemovalEvidence, DiskInspection, DiskInspectionRequest, GUEST_PROVISION_ROOT,
+    GUEST_STARTUP_DIR, GuestNetwork, GuestObservation, GuestObservationRequest, GuestPaths,
+    GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder, MediaFinalizer, OfflineDisk,
+    ProvisionEnvironment, RegisteredEnvironment, ServiceRemoval, ServiceRemovalEvidence,
+    boot_launcher, boot_task_injection, startup_command_lines, verify_media,
 };
 use crate::application::windows_lab::types::{
     LabPhase, LabProvision, LabState, OperationKind, PendingOperation, ProvisionSource,
     ProvisioningSpec, RunStatus,
 };
-use crate::application::windows_lab::{LabStore, VmHost};
+use crate::application::windows_lab::{LabError, LabStore, ReconcileOutcome, VmHost};
+use crate::application::worker_media::{FinalizeMediaRequest, FinalizedMedia};
 use crate::config::WindowsLabVm;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -253,7 +253,7 @@ enum Tampered {
 }
 struct FakeDisk {
     state: Mutex<DiskState>,
-    connection: PublicConnection,
+    connection: ConnectionReceipt,
     events: Option<Events>,
 }
 
@@ -269,7 +269,7 @@ fn under(windows: &str, directory: &str) -> bool {
 }
 
 impl FakeDisk {
-    fn new(connection: PublicConnection) -> Self {
+    fn new(connection: ConnectionReceipt) -> Self {
         Self {
             state: Mutex::new(DiskState::default()),
             connection,
@@ -721,7 +721,7 @@ struct FakeFinalizer {
 
 #[async_trait]
 impl MediaFinalizer for FakeFinalizer {
-    async fn finalize(&self, request: &FinalizeRequest) -> Result<serde_json::Value> {
+    async fn finalize(&self, request: &FinalizeMediaRequest) -> Result<FinalizedMedia> {
         copy_tree(&self.source_root, &request.output)?;
         if let Some(key) = &request.generate_ssh_key {
             fs::write(key, "CONTROLLED-PRIVATE-KEY-FIXTURE")?;
@@ -733,7 +733,15 @@ impl MediaFinalizer for FakeFinalizer {
                 ),
             )?;
         }
-        Ok(serde_json::json!({"record": true}))
+        let record = serde_json::from_slice(&fs::read(request.output.join("media.json"))?)?;
+        let media = verify_media(&request.output)?;
+        Ok(FinalizedMedia {
+            record,
+            media_path: request.output.clone(),
+            template_sha256: "d".repeat(64),
+            ssh_public_key: media.ssh_public_key.public()?,
+            ssh_identity_file: request.generate_ssh_key.clone(),
+        })
     }
 }
 
@@ -763,7 +771,7 @@ impl GuestNetwork for FakeNetwork {
 #[derive(Default)]
 struct EnvironmentState {
     registrations: Vec<(String, PathBuf)>,
-    connections: Vec<PublicConnection>,
+    connections: Vec<ConnectionReceipt>,
     doctors: usize,
     /// Environment entry returned by the last successful registration, i.e. the
     /// value the lab adopted as its configuration identity.
@@ -801,7 +809,7 @@ impl FakeEnvironment {
     fn registrations(&self) -> usize {
         self.state.lock().unwrap().registrations.len()
     }
-    fn connections(&self) -> Vec<PublicConnection> {
+    fn connections(&self) -> Vec<ConnectionReceipt> {
         self.state.lock().unwrap().connections.clone()
     }
     fn registered(&self) -> Option<EnvironmentConfig> {
@@ -815,7 +823,7 @@ impl FakeEnvironment {
 /// The entry a real registration read back from the rewritten configuration:
 /// the verified connection bound to the guest address and controller identity.
 fn registered_environment(
-    connection: &PublicConnection,
+    connection: &ConnectionReceipt,
     media: &MediaIdentity,
     guest_ip: &str,
     identity_file: &Path,
@@ -845,7 +853,7 @@ fn registered_environment(
 impl ProvisionEnvironment for FakeEnvironment {
     fn register(
         &self,
-        connection: &PublicConnection,
+        connection: &ConnectionReceipt,
         media: &MediaIdentity,
         guest_ip: &str,
         identity_file: &Path,
@@ -2433,7 +2441,7 @@ async fn template_provisioning_registers_and_powers_off() {
     assert_eq!(connection.host_key, deployment.fixture.connection.host_key);
     assert_ne!(
         connection.host_key,
-        deployment.fixture.identity.ssh_public_key
+        deployment.fixture.identity.ssh_public_key.public().unwrap()
     );
     assert_eq!(
         connection.host_fingerprint,
@@ -2762,6 +2770,13 @@ async fn restart_recovery_covers_provisioning_intent() {
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
     let iso = Arc::new(FakeIso::new());
     let lab = wired(&deployment, disk, iso);
+    let state_path = deployment.store().state_path("labvm");
+    let before = fs::read(&state_path).unwrap();
+    let mut dry_run = deployment.options(deployment.media_source());
+    dry_run.dry_run = true;
+    assert!(lab.provision(dry_run).await.is_err());
+    assert_eq!(fs::read(&state_path).unwrap(), before);
+
     let error = lab
         .provision(deployment.options(deployment.media_source()))
         .await
@@ -2785,36 +2800,4 @@ async fn scheme_two_state_without_provision_fields_still_loads() {
     let status = lab.status().await.unwrap();
     assert_eq!(status["state"]["last_provision"], serde_json::Value::Null);
     assert_eq!(status["state"]["schema"], 2);
-}
-
-#[test]
-fn transient_file_removal_failures_are_retried_with_a_bound() {
-    let mut attempts = 0;
-    retry_bounded(|| {
-        attempts += 1;
-        if attempts < 3 {
-            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
-        } else {
-            Ok(())
-        }
-    })
-    .unwrap();
-    assert_eq!(attempts, 3, "a transient failure is retried");
-
-    let mut attempts = 0;
-    let error = retry_bounded(|| {
-        attempts += 1;
-        Err::<(), _>(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
-    })
-    .unwrap_err();
-    assert_eq!(attempts, 5, "retries are bounded");
-    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
-
-    let mut attempts = 0;
-    retry_bounded(|| {
-        attempts += 1;
-        Ok(())
-    })
-    .unwrap();
-    assert_eq!(attempts, 1, "a success is not retried");
 }

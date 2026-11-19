@@ -1,6 +1,5 @@
 //! Managed-SSH environment registration tests. They never connect to a guest.
 use super::*;
-use crate::application::windows_lab::SshKey;
 use crate::application::windows_lab::provision::fixture;
 use crate::config::AppConfig;
 
@@ -10,7 +9,7 @@ struct RegistrationFixture {
     configuration: PathBuf,
     identity_file: PathBuf,
     media: MediaIdentity,
-    connection: PublicConnection,
+    connection: ConnectionReceipt,
 }
 
 fn registration_fixture() -> RegistrationFixture {
@@ -86,15 +85,15 @@ fn registration_writes_a_managed_ssh_environment_and_public_pin() {
     assert_eq!(ssh.port, fixture.media.ssh_port);
     assert_eq!(ssh.identity_file, fixture.identity_file);
     assert!(ssh.known_hosts_file.is_file());
-    let pinned = SshKey::from_public(&ssh.host_key).unwrap();
-    assert_eq!(pinned, fixture.connection.host_key);
+    let pinned = &ssh.host_key;
+    assert_eq!(pinned, &fixture.connection.host_key);
     assert_eq!(
         std::fs::read_to_string(&ssh.known_hosts_file).unwrap(),
         ssh.known_hosts_record().unwrap()
     );
     // The pin line carries the installer-generated worker host key, not the
     // controller SSH client identity from the enrollment.
-    assert_ne!(pinned, fixture.media.ssh_public_key);
+    assert_ne!(pinned, &fixture.media.ssh_public_key.public().unwrap());
     let pin = std::fs::read_to_string(&ssh.known_hosts_file).unwrap();
     assert_eq!(
         pin,
@@ -125,9 +124,9 @@ fn registration_pins_the_installer_generated_host_key_and_keeps_the_client_ident
     // The identity file is the controller-managed SSH *client* key; the host
     // pin is the key the Windows worker installer generated inside the guest.
     assert_eq!(ssh.identity_file, fixture.identity_file);
-    let pinned = SshKey::from_public(&ssh.host_key).unwrap();
-    assert_eq!(pinned, fixture.connection.host_key);
-    assert_ne!(pinned, fixture.media.ssh_public_key);
+    let pinned = &ssh.host_key;
+    assert_eq!(pinned, &fixture.connection.host_key);
+    assert_ne!(pinned, &fixture.media.ssh_public_key.public().unwrap());
     assert_eq!(
         ssh.known_hosts_record().unwrap(),
         format!(

@@ -36,6 +36,7 @@ pub struct ToolService {
     static_environment: Option<String>,
     windows_lab: crate::config::WindowsLabConfig,
     lab_operations: lab_operations::Operations,
+    open_lab: lab::LabFactory,
     default_environment: Option<String>,
     sync_limits: evidence_sync::SyncLimits,
 }
@@ -120,6 +121,7 @@ impl ToolService {
         config: AppConfig,
         store: Store,
         mcp: McpRegistry,
+        open_lab: lab::LabFactory,
     ) -> Result<Self> {
         let environments =
             crate::adapters::environments::EnvironmentRegistry::new(config.environments.clone())?
@@ -139,6 +141,7 @@ impl ToolService {
             static_environment,
             windows_lab,
             lab_operations: Default::default(),
+            open_lab,
             default_environment: config.default_environment,
             sync_limits: Default::default(),
         })

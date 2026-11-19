@@ -34,7 +34,6 @@ pub mod provision;
 pub mod provision_environment;
 mod provision_service;
 pub mod runner;
-pub mod service;
 use admin::{AdminFile, AdminRequest, LabAdmin};
 use provision::{
     GuestNetwork, IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment,

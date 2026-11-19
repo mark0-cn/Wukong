@@ -75,3 +75,17 @@ pub(crate) fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     result
 }
+
+pub(crate) fn copy_new(
+    source: &Path,
+    target: &Path,
+    policy: &AclPolicy,
+    maximum: u64,
+) -> Result<()> {
+    let bytes = read_bytes(source, maximum)?;
+    let mut output = policy.create_file(target)?;
+    output.write_all(&bytes)?;
+    output.sync_all()?;
+    drop(output);
+    policy.verify(target, false)
+}

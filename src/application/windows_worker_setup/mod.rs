@@ -749,7 +749,6 @@ fn import_for_record(
     let outcome = runtime.block_on(probe::verify_management_address(
         &paths.home,
         &receipt,
-        &receipt_json,
         record,
         &addresses,
         &target.environment_name,

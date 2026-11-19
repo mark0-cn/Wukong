@@ -13,7 +13,7 @@ use std::{fs, io::Write, net::IpAddr, path::Path};
 const DOMAIN: &[u8] = b"Wukong/Windows-worker-enrollment/v1\0";
 const MAX_BYTES: usize = 16 * 1024;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SshPublicKey {
     pub algorithm: String,

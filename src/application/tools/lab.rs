@@ -4,9 +4,12 @@ use crate::adapters::environments::EnvironmentRegistry;
 use crate::application::windows_lab::WindowsLab;
 use crate::config::{AppConfig, WindowsLabConfig};
 
+pub(crate) type LabFactory = fn(&AppConfig, &EnvironmentRegistry, &str) -> Result<WindowsLab>;
+
 #[derive(Clone)]
 pub(crate) struct LabService {
     pub(super) operations: lab_operations::Operations,
+    pub(super) open_lab: LabFactory,
     pub(super) output_limit: usize,
     pub(super) store: Store,
     pub(super) execution: ExecutionService,
@@ -207,12 +210,8 @@ impl LabService {
             windows_lab: self.config.clone(),
             ..Default::default()
         };
-        crate::application::windows_lab::service::open_configured(
-            &config,
-            &self.environments,
-            vm_id,
-        )
-        .map(|lab| lab.with_caller(self.owner(agent)))
+        (self.open_lab)(&config, &self.environments, vm_id)
+            .map(|lab| lab.with_caller(self.owner(agent)))
     }
 }
 

@@ -2,13 +2,14 @@
 //! process verifies the exact reviewed enrollment; no shell interpreter or downloaded
 //! script is used. Saving the public result copy never changes installation success.
 use crate::{
+    host::installation_receipt,
     host::installer::{self, Plan, Setup},
     host::network,
     isolation::processes,
     isolation::security,
 };
 use anyhow::{Context, Result, ensure};
-use serde_json::Value;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     ffi::{OsStr, OsString},
@@ -33,7 +34,7 @@ use windows_sys::Win32::{
         },
     },
 };
-use wukong_worker_package::PublicKey;
+use wukong_worker_package::{ConnectionReceipt, PublicKey};
 
 const SAVE_DIALOG_TITLE: &str = "Save Wukong installation result";
 const SAVE_DIALOG_FILTER: &str = "JSON (*.json)\u{0}*.json\u{0}All files (*.*)\u{0}*.*\u{0}";
@@ -192,7 +193,7 @@ fn fallback_export_path_from_environment(name: &str) -> Option<PathBuf> {
     let public = std::env::var_os("PUBLIC").map(PathBuf::from);
     fallback_export_path(user_profile.as_deref(), public.as_deref(), name)
 }
-fn serialize_receipt(receipt: &Value) -> Result<Vec<u8>> {
+fn serialize_receipt(receipt: &impl Serialize) -> Result<Vec<u8>> {
     let mut bytes =
         serde_json::to_vec(receipt).context("cannot serialize the installation result")?;
     bytes.push(b'\n');
@@ -200,15 +201,15 @@ fn serialize_receipt(receipt: &Value) -> Result<Vec<u8>> {
 }
 /// Read the stored receipt verbatim so a copy always matches `connection.json`.
 fn stored_receipt_bytes(base: &Path, installation_id: &str) -> Result<Option<Vec<u8>>> {
-    let path = installer::installation_receipt_path(base, installation_id)?;
+    let path = installation_receipt::installation_receipt_path(base, installation_id)?;
     match crate::artifacts::io::read_bytes(&path, EXPORT_BYTES_LIMIT) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(_) => Ok(None),
     }
 }
-fn receipt_bytes(installation_id: &str, receipt: &Value) -> Result<Vec<u8>> {
-    let stored =
-        installer::install_base().and_then(|base| stored_receipt_bytes(&base, installation_id));
+fn receipt_bytes(installation_id: &str, receipt: &ConnectionReceipt) -> Result<Vec<u8>> {
+    let stored = installation_receipt::install_base()
+        .and_then(|base| stored_receipt_bytes(&base, installation_id));
     match stored {
         Ok(Some(bytes)) => Ok(bytes),
         _ => serialize_receipt(receipt),
@@ -219,7 +220,7 @@ fn export_bytes(bytes: &[u8], installation_id: &str) -> Result<ExportResult> {
     let fallback = fallback_export_path_from_environment(&name);
     Ok(save_export_with(&SystemSaveDialog, bytes, &name, fallback))
 }
-fn save_install_result(installation_id: &str, receipt: &Value) -> Result<ExportResult> {
+fn save_install_result(installation_id: &str, receipt: &ConnectionReceipt) -> Result<ExportResult> {
     let bytes = receipt_bytes(installation_id, receipt)?;
     export_bytes(&bytes, installation_id)
 }
@@ -256,7 +257,7 @@ fn report_export(outcome: ExportResult) -> Result<()> {
 }
 /// Re-started setup on an already installed guest. Never reinstalls; optionally
 /// exports a refreshed public result with the current guest address candidates.
-fn review_existing(installed: &[installer::InstalledReceipt]) -> Result<()> {
+fn review_existing(installed: &[ConnectionReceipt]) -> Result<()> {
     if installed.len() > 1 {
         let installations = installed
             .iter()
@@ -274,27 +275,27 @@ fn review_existing(installed: &[installer::InstalledReceipt]) -> Result<()> {
     let found = installed
         .first()
         .context("installed receipt disappeared during review")?;
-    let receipt = &found.receipt;
     let summary = format!(
         "Wukong Windows worker is already installed; this setup will not reinstall it.\n\nInstallation: {}\nEnvironment: {}\nSSH user: {}\nSSH port: {}\nHost fingerprint:\n{}\n\nSave a refreshed installation result with the current guest IPv4 addresses (保存刷新后的安装结果)?",
         found.installation_id,
-        receipt["environment_id"].as_str().unwrap_or(""),
-        receipt["ssh_user"].as_str().unwrap_or(""),
-        receipt["ssh_port"],
-        receipt["host_fingerprint"].as_str().unwrap_or("")
+        found.environment_id,
+        found.ssh_user,
+        found.ssh_port,
+        found.host_fingerprint
     );
     if message(&summary, MB_YESNO | MB_ICONINFORMATION)? != IDYES {
         return Ok(());
     }
     let candidates = network::receipt_candidates(&network::SystemAdapters);
-    let refreshed = installer::refreshed_receipt(receipt, candidates)?;
+    let refreshed = installation_receipt::refreshed_receipt(found, candidates)?;
     let bytes = serialize_receipt(&refreshed)?;
     report_export(export_bytes(&bytes, &found.installation_id)?)
 }
 pub fn review() -> Result<()> {
     // A no-argument start must never reinstall. An existing complete installation
     // only offers a refreshed public export; repair stays on the reviewed media path.
-    let installed = installer::installed_receipts(&installer::install_base()?)?;
+    let installed =
+        installation_receipt::installed_receipts(&installation_receipt::install_base()?)?;
     if !installed.is_empty() {
         return review_existing(&installed);
     }
@@ -354,35 +355,13 @@ pub fn review() -> Result<()> {
     }
     Ok(())
 }
-/// Already-elevated dedicated-VM automation uses the same independently pinned
-/// key and exact reviewed enrollment as the GUI. This never elevates itself.
-pub fn install_reviewed(
-    configuration: &Path,
-    key: &PublicKey,
-    enrollment_hash: &str,
-) -> Result<serde_json::Value> {
-    ensure!(
-        installer::elevated()?,
-        "administrator elevation is required for VM installation"
-    );
-    let plan = Plan::read(configuration, key)?;
-    ensure!(
-        hex::encode(Sha256::digest(
-            plan.enrollment.enrollment().canonical_bytes()?
-        )) == enrollment_hash,
-        "offline enrollment changed after setup review"
-    );
-    installer::install(plan)
-}
 pub fn elevated(configuration: &Path, key: &PublicKey, enrollment_hash: &str) -> Result<()> {
-    let result = install_reviewed(configuration, key, enrollment_hash);
+    let result = installer::install_reviewed(configuration, key, enrollment_hash);
     match result {
         Ok(value) => {
             let summary = format!(
                 "Worker service started and offline dependency checks passed.\n\nSSH user: {}\nSSH port: {}\nHost fingerprint:\n{}\n\nImport connection.json from the installation into the controller and independently compare this host fingerprint. The execution boundary is the disposable VM. Hypervisor isolation is externally configured and has not been verified by this worker.\n\nSave a copy of the installation result (保存安装结果)?",
-                value["ssh_user"].as_str().unwrap_or(""),
-                value["ssh_port"],
-                value["host_fingerprint"].as_str().unwrap_or("")
+                value.ssh_user, value.ssh_port, value.host_fingerprint
             );
             // Post-install dialogs and the public copy are best effort: a save failure
             // must never turn a completed installation into a failed setup run.
@@ -390,14 +369,8 @@ pub fn elevated(configuration: &Path, key: &PublicKey, enrollment_hash: &str) ->
                 .map(|answer| answer == IDYES)
                 .unwrap_or(false);
             if save {
-                let export = match value["installation_id"].as_str() {
-                    Some(installation_id) => {
-                        save_install_result(installation_id, &value).and_then(report_export)
-                    }
-                    None => Err(anyhow::anyhow!(
-                        "the installation result has no installation identity"
-                    )),
-                };
+                let export =
+                    save_install_result(&value.installation_id, &value).and_then(report_export);
                 if let Err(error) = export {
                     let _ = message(
                         &format!(

@@ -7,12 +7,12 @@
 //! directory only after verification succeeded.
 use super::template::{Template, canonical_semver, lowercase_hex};
 use super::{
-    ENROLLMENT_DIR, ENROLLMENT_RECORD, ENROLLMENT_SIGNATURE, MANIFEST_RECORD, MAX_MEDIA_BYTES,
-    MAX_MEDIA_ENTRIES, MEDIA_ALLOWLIST, MEDIA_RECORD, MEDIA_SCHEMA, PAYLOAD_DIR, RUNTIME_PROTOCOL,
-    SETUP_EXECUTABLE, SETUP_RECORD, Workspace, copy_tree, copy_verified_file,
-    ensure_output_path_fits, ensure_staged_path_fits, overlaps, public_key_path, publish_directory,
-    read_bounded, relative_path, sha256_bytes, sha256_file, validate_absolute_path,
-    write_pretty_json,
+    ENROLLMENT_DIR, ENROLLMENT_RECORD, ENROLLMENT_SIGNATURE, FinalizeMediaRequest, FinalizedMedia,
+    MANIFEST_RECORD, MAX_MEDIA_BYTES, MAX_MEDIA_ENTRIES, MEDIA_ALLOWLIST, MEDIA_RECORD,
+    MEDIA_SCHEMA, MediaRecord, PAYLOAD_DIR, RUNTIME_PROTOCOL, SETUP_EXECUTABLE, SETUP_RECORD,
+    Workspace, copy_tree, copy_verified_file, ensure_output_path_fits, ensure_staged_path_fits,
+    overlaps, public_key_path, publish_directory, read_bounded, relative_path, sha256_bytes,
+    sha256_file, validate_absolute_path, write_pretty_json,
 };
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
@@ -28,24 +28,6 @@ use wukong_worker_package::{
     VerifiedEnrollment, load_controller_signer, seal_package, verify_package, write_enrollment,
 };
 
-/// Schema-1 finalized-media receipt written as `media.json`. The field set and
-/// order match the Python finalize output the offline provisioning consumer
-/// accepts.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MediaRecord {
-    pub schema: u32,
-    pub version: String,
-    pub controller_public_key: String,
-    pub manifest_sha256: String,
-    pub setup_sha256: String,
-    pub enrollment_sha256: String,
-    pub installation_id: String,
-    pub environment_id: String,
-    pub generation: u64,
-    pub source_revision: String,
-}
-
 #[derive(Serialize)]
 struct SetupRecordWrite<'a> {
     schema: u32,
@@ -59,40 +41,6 @@ struct SetupRecordFile {
     schema: u32,
     controller_public_key: String,
     controller_version: String,
-}
-
-/// Parameters for one finalize operation. Paths must be absolute; `output` must
-/// not exist yet.
-#[derive(Clone, Debug)]
-pub struct FinalizeMediaRequest {
-    /// Released template ZIP archive or unpacked template directory.
-    pub template: PathBuf,
-    /// Absolute controller signing key directory (outside template and output).
-    pub keys: PathBuf,
-    /// New finalized media directory.
-    pub output: PathBuf,
-    pub installation_id: String,
-    pub environment_id: String,
-    pub generation: u64,
-    pub management_peer: Ipv4Addr,
-    pub ssh_port: u16,
-    /// Existing controller-managed SSH client public key.
-    pub ssh_public_key: Option<SshPublicKey>,
-    /// New private identity path for a controller-managed SSH keypair.
-    pub generate_ssh_key: Option<PathBuf>,
-    /// Media/controller version; defaults to the template version.
-    pub controller_version: Option<String>,
-}
-
-/// Result of one successful finalize.
-#[derive(Debug)]
-pub struct FinalizedMedia {
-    pub record: MediaRecord,
-    pub media_path: PathBuf,
-    /// SHA-256 of the template identity (`media-template.json`).
-    pub template_sha256: String,
-    pub ssh_public_key: SshPublicKey,
-    pub ssh_identity_file: Option<PathBuf>,
 }
 
 /// Generates the controller-managed SSH client identity from the template.

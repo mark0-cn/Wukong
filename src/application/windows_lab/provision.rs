@@ -21,6 +21,7 @@
 //! operator configuration; model input never reaches this module.
 use super::{MediaIdentity, ProvisionSource, ProvisioningSpec, SshKey};
 use crate::adapters::environments::EnvironmentConfig;
+use crate::application::worker_media::{FinalizeMediaRequest, FinalizedMedia, MediaRecord};
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,7 @@ use std::{
     path::{Component, Path, PathBuf},
     sync::Arc,
 };
+use wukong_worker_package::{ConnectionReceipt, SshPublicKey};
 
 pub const MEDIA_LABEL: &str = "WUKONG_OFFLINE";
 pub const MEDIA_RECORD: &str = "media.json";
@@ -1022,16 +1024,7 @@ pub trait GuestNetwork: Send + Sync {
 /// finalizer (no Python interpreter or source checkout required).
 #[async_trait]
 pub trait MediaFinalizer: Send + Sync {
-    async fn finalize(&self, request: &FinalizeRequest) -> Result<serde_json::Value>;
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FinalizeRequest {
-    pub template: PathBuf,
-    pub keys: PathBuf,
-    pub spec: PathBuf,
-    pub output: PathBuf,
-    pub generate_ssh_key: Option<PathBuf>,
+    async fn finalize(&self, request: &FinalizeMediaRequest) -> Result<FinalizedMedia>;
 }
 
 /// Controller-side environment registration and doctor entry used only by
@@ -1048,7 +1041,7 @@ pub trait ProvisionEnvironment: Send + Sync {
     /// keeps refusing any foreign change.
     fn register(
         &self,
-        connection: &PublicConnection,
+        connection: &ConnectionReceipt,
         media: &MediaIdentity,
         guest_ip: &str,
         identity_file: &Path,
@@ -1064,23 +1057,6 @@ pub struct RegisteredEnvironment {
     pub environment: EnvironmentConfig,
     /// Operator-facing registration outcome for the CLI result.
     pub report: serde_json::Value,
-}
-
-/// Public worker connection receipt emitted by the offline installer.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct PublicConnection {
-    pub schema: u32,
-    pub installed: bool,
-    pub installation_id: String,
-    pub environment_id: String,
-    pub generation: u64,
-    pub manifest_sha256: String,
-    pub ssh_user: String,
-    pub ssh_port: u16,
-    pub host_key: SshKey,
-    pub host_fingerprint: String,
-    pub production_isolation_verified: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1352,21 +1328,6 @@ impl MediaIdentity {
         }
         Ok(())
     }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MediaRecord {
-    schema: u32,
-    version: String,
-    controller_public_key: String,
-    manifest_sha256: String,
-    setup_sha256: String,
-    enrollment_sha256: String,
-    installation_id: String,
-    environment_id: String,
-    generation: u64,
-    source_revision: String,
 }
 
 #[derive(Deserialize)]
@@ -2041,7 +2002,7 @@ pub const PROVISION_WRAPPER: &str = include_str!("provision_wrapper.ps1");
 pub fn verify_guest_receipt(
     bytes: &[u8],
     expectation: &ReceiptExpectation,
-) -> Result<PublicConnection> {
+) -> Result<ConnectionReceipt> {
     ensure!(
         bytes.len() as u64 <= MAX_RECEIPT_BYTES,
         "guest provisioning receipt exceeds the size budget"
@@ -2075,7 +2036,7 @@ pub fn verify_guest_receipt(
         receipt["cleanup_scheduled"] == true,
         "guest wrapper did not schedule its own cleanup"
     );
-    let connection: PublicConnection = serde_json::from_value(
+    let connection: ConnectionReceipt = serde_json::from_value(
         receipt
             .get("connection")
             .cloned()
@@ -2087,13 +2048,10 @@ pub fn verify_guest_receipt(
 }
 
 pub(crate) fn validate_connection(
-    connection: &PublicConnection,
+    connection: &ConnectionReceipt,
     media: &MediaIdentity,
 ) -> Result<()> {
-    ensure!(
-        connection.schema == 1 && connection.installed,
-        "public worker connection does not describe an installed worker"
-    );
+    connection.validate()?;
     ensure!(
         connection.installation_id == media.installation_id
             && connection.environment_id == media.environment_id
@@ -2104,21 +2062,6 @@ pub(crate) fn validate_connection(
     ensure!(
         connection.ssh_user == media.ssh_user && connection.ssh_port == media.ssh_port,
         "public worker connection SSH identity differs from the offline media"
-    );
-    // The enrollment/media key is the controller's SSH *client* identity. The
-    // Windows worker installer generates its own sshd *host* key inside the
-    // guest, so the receipt is the only source of the public host pin: it can
-    // never equal the media client identity. Validate the reported canonical
-    // key and recompute its fingerprint instead of comparing keys.
-    ensure!(
-        !connection.host_key.algorithm.trim().is_empty()
-            && !connection.host_key.key.trim().is_empty(),
-        "guest receipt is missing the installer-generated worker host key"
-    );
-    connection.host_key.validate()?;
-    ensure!(
-        connection.host_fingerprint == connection.host_key.fingerprint()?,
-        "worker host fingerprint does not match the installer-generated host key"
     );
     ensure!(
         !connection.production_isolation_verified,
@@ -2131,21 +2074,13 @@ pub(crate) fn validate_connection(
 pub fn known_hosts_path(
     state_dir: &Path,
     installation_id: &str,
-    host_key: &SshKey,
+    host_key: &SshPublicKey,
 ) -> Result<PathBuf> {
-    ensure!(
-        lowercase_hex(installation_id, 32),
-        "invalid installation identity for the public host pin"
-    );
-    host_key.validate()?;
-    let record = format!(
-        "wukong-worker-{installation_id} {}\n",
-        host_key.authorized_key()?
-    );
-    Ok(state_dir.join("environments").join(format!(
-        "ssh-host-{}.known_hosts",
-        sha256(record.as_bytes())
-    )))
+    crate::adapters::environments::registration::pin_path(
+        &state_dir.join("environments"),
+        installation_id,
+        host_key,
+    )
 }
 
 impl SshKey {

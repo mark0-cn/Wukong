@@ -103,7 +103,7 @@ impl ConfigDocument {
         )?;
         let mut additions = vec![ConfigEdit {
             path: vec!["environments".into(), id.clone()],
-            value: environment,
+            value: serde_json::to_value(environment)?,
         }];
         if input.make_default || pending.form.default_environment.is_none() {
             additions.push(ConfigEdit {
@@ -228,7 +228,7 @@ mod tests {
         let fingerprint = key.fingerprint()?;
         let mut input = WindowsConnection { name:"Windows VM".into(), host:"192.0.2.1".into(), identity_file:identity.clone(),
             confirmed_fingerprint:String::new(), make_default:false,
-            connection_json:serde_json::json!({"schema":1,"installed":true,"installation_id":"a".repeat(32),"environment_id":"windows",
+            connection_json:serde_json::json!({"schema":1,"receipt_version":2,"candidate_addresses":[],"installed":true,"installation_id":"a".repeat(32),"environment_id":"windows",
                 "generation":1,"manifest_sha256":"b".repeat(64),"ssh_user":format!("wkgm{}","a".repeat(16)),"ssh_port":22,
                 "host_key":key,"host_fingerprint":fingerprint,"production_isolation_verified":false}).to_string() };
         let mut document = ConfigDocument::open(path)?;

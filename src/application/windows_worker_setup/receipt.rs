@@ -6,44 +6,12 @@
 //! confirms it. Every check here is pure so the validation matrix is testable
 //! without a VM.
 use super::state::InstallationState;
-use crate::adapters::environments::validate_id;
 use crate::application::worker_media::GenerationRecord;
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
 use std::{fs, io::Read, path::Path};
 use wukong_worker_package::SshPublicKey;
 
-/// Bound on a public `connection.json` document.
-pub const MAX_RECEIPT_BYTES: usize = 16 * 1024;
-/// Bound on guest address hints, matching the exporter.
-pub const MAX_CANDIDATE_ADDRESSES: usize = 8;
-/// Highest receipt schema revision this controller understands.
-pub const SUPPORTED_RECEIPT_VERSION: u64 = 2;
-
-/// Public worker connection receipt emitted by the offline Windows setup.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConnectionReceipt {
-    pub schema: u32,
-    #[serde(default = "default_receipt_version")]
-    pub receipt_version: u64,
-    pub installed: bool,
-    pub installation_id: String,
-    pub environment_id: String,
-    pub generation: u64,
-    pub manifest_sha256: String,
-    pub ssh_user: String,
-    pub ssh_port: u16,
-    pub host_key: SshPublicKey,
-    pub host_fingerprint: String,
-    #[serde(default)]
-    pub candidate_addresses: Vec<String>,
-    pub production_isolation_verified: bool,
-}
-
-fn default_receipt_version() -> u64 {
-    1
-}
+pub use wukong_worker_package::{ConnectionReceipt, MAX_CANDIDATE_ADDRESSES, MAX_RECEIPT_BYTES};
 
 /// Read a receipt supplied either as the JSON document itself or as a file path.
 pub fn read_input(input: &str) -> Result<Vec<u8>> {
@@ -84,80 +52,8 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Parse and validate one public receipt document.
-pub fn parse(bytes: &[u8]) -> Result<ConnectionReceipt> {
-    ensure!(
-        bytes.len() <= MAX_RECEIPT_BYTES,
-        "the public connection receipt exceeds 16 KiB"
-    );
-    let receipt: ConnectionReceipt =
-        serde_json::from_slice(bytes).context("invalid public Windows connection receipt")?;
-    receipt.validate()?;
-    Ok(receipt)
-}
-
-impl ConnectionReceipt {
-    fn validate(&self) -> Result<()> {
-        ensure!(
-            self.schema == 1 && self.installed && self.generation >= 1,
-            "the connection receipt does not describe a completed worker installation"
-        );
-        ensure!(
-            (1..=SUPPORTED_RECEIPT_VERSION).contains(&self.receipt_version),
-            "unsupported connection receipt version; export the install result from the matching Windows setup"
-        );
-        ensure!(
-            self.installation_id.len() == 32
-                && self
-                    .installation_id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-            "the connection receipt installation identity is invalid"
-        );
-        validate_id(&self.environment_id)?;
-        ensure!(
-            self.manifest_sha256.len() == 64
-                && self
-                    .manifest_sha256
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-            "the connection receipt payload identity is invalid"
-        );
-        ensure!(
-            self.ssh_user == format!("wkgm{}", &self.installation_id[..16]),
-            "the connection receipt management account differs from its installation identity"
-        );
-        ensure!(
-            self.ssh_port > 0,
-            "the connection receipt has no management SSH port"
-        );
-        let fingerprint = self
-            .host_key
-            .fingerprint()
-            .context("the connection receipt worker host key is invalid")?;
-        ensure!(
-            self.host_fingerprint == fingerprint,
-            "the connection receipt host fingerprint does not match its host key"
-        );
-        ensure!(
-            self.candidate_addresses.len() <= MAX_CANDIDATE_ADDRESSES
-                && self
-                    .candidate_addresses
-                    .iter()
-                    .all(|candidate| candidate.parse::<std::net::Ipv4Addr>().is_ok()),
-            "the connection receipt address candidates are invalid; export a refreshed install result"
-        );
-        Ok(())
-    }
-
-    /// The operator must confirm the fingerprint independently before any pin.
-    pub fn confirm(&self, confirmed_fingerprint: &str) -> Result<()> {
-        ensure!(
-            confirmed_fingerprint.trim() == self.host_fingerprint,
-            "the independently confirmed SSH fingerprint does not match the receipt host key"
-        );
-        Ok(())
-    }
+pub(super) fn parse(bytes: &[u8]) -> Result<ConnectionReceipt> {
+    ConnectionReceipt::parse(bytes)
 }
 
 /// Match the receipt to the generation this controller produced.
@@ -286,18 +182,16 @@ mod tests {
     }
 
     #[test]
-    fn version_one_receipts_remain_importable_without_address_hints() -> Result<()> {
+    fn only_current_receipts_with_explicit_candidates_are_accepted() -> Result<()> {
         let mut value = serde_json::to_value(receipt())?;
         value["receipt_version"] = serde_json::json!(1);
+        assert!(parse(&serde_json::to_vec(&value)?).is_err());
+        value = serde_json::to_value(receipt())?;
         value
             .as_object_mut()
             .expect("object")
             .remove("candidate_addresses");
-        let parsed = parse(&serde_json::to_vec(&value)?)?;
-        assert!(parsed.candidate_addresses.is_empty());
-        let mut unsupported = serde_json::to_value(receipt())?;
-        unsupported["receipt_version"] = serde_json::json!(3);
-        assert!(parse(&serde_json::to_vec(&unsupported)?).is_err());
+        assert!(parse(&serde_json::to_vec(&value)?).is_err());
         Ok(())
     }
 

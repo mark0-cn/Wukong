@@ -7,6 +7,8 @@ use crate::{
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+
+pub(crate) mod windows_lab;
 pub(crate) async fn build_runner(mut config: AppConfig, store: Store) -> Result<AssessmentRunner> {
     let maintenance =
         Arc::new(crate::application::maintenance::updates::maintenance::assessment_guard()?);
@@ -29,7 +31,7 @@ pub(crate) async fn build_runner(mut config: AppConfig, store: Store) -> Result<
 pub(crate) async fn build_tools(config: AppConfig, store: Store) -> Result<ToolService> {
     config.validate()?;
     let mcp = crate::adapters::mcp::McpRegistry::connect(&config.mcp).await?;
-    ToolService::from_dependencies(config, store, mcp)
+    ToolService::from_dependencies(config, store, mcp, windows_lab::open_configured)
 }
 
 // Keep the public constructors at the composition boundary. Application use cases

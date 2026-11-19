@@ -607,8 +607,8 @@ mod tests {
 
     fn offline_vm(offline: Option<WindowsLabOffline>) -> WindowsLabVm {
         WindowsLabVm {
-            vmx: PathBuf::from(r"D:\vm\lab\lab.vmx"),
-            vmrun: PathBuf::from(r"D:\VMware\vmrun.exe"),
+            vmx: std::path::absolute("lab.vmx").unwrap(),
+            vmrun: std::path::absolute("vmrun.exe").unwrap(),
             offline,
             ..Default::default()
         }
@@ -616,11 +616,11 @@ mod tests {
 
     fn offline_tooling() -> WindowsLabOffline {
         WindowsLabOffline {
-            wsl_executable: PathBuf::from(r"C:\Windows\System32\wsl.exe"),
+            wsl_executable: std::path::absolute("wsl.exe").unwrap(),
             wsl_distribution: "Ubuntu".into(),
             guestfish: "/usr/bin/guestfish".into(),
             hivexsh: "/usr/bin/hivexsh".into(),
-            mkisofs: PathBuf::from(r"D:\VMware\VMware Workstation\mkisofs.exe"),
+            mkisofs: std::path::absolute("mkisofs.exe").unwrap(),
             timeout_seconds: 600,
         }
     }

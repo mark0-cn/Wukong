@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use std::net::Ipv4Addr;
 
 /// Maximum number of guest addresses retained in `connection.json`.
-pub(crate) const MAX_CANDIDATE_ADDRESSES: usize = 8;
+use wukong_worker_package::MAX_CANDIDATE_ADDRESSES;
 const MAXIMUM_TABLE_BYTES: u32 = 4 * 1024 * 1024;
 const MAXIMUM_ADAPTERS: usize = 4096;
 const MAXIMUM_LIST_ENTRIES: usize = 4096;

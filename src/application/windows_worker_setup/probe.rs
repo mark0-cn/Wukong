@@ -7,7 +7,7 @@
 //! platform/doctor observation all match. Every attempt is bounded so a stopped
 //! VM cannot stall the GUI command.
 use super::receipt::ConnectionReceipt;
-use crate::adapters::environments::registration::{self, WindowsConnection};
+use crate::adapters::environments::registration::{self, ConnectionTarget};
 use crate::adapters::environments::{EnvironmentConfig, EnvironmentRegistry};
 use crate::application::worker_media::GenerationRecord;
 use anyhow::{Context, Result, bail, ensure};
@@ -34,7 +34,6 @@ pub struct ProbeOutcome {
 pub async fn verify_management_address(
     home: &Path,
     receipt: &ConnectionReceipt,
-    receipt_json: &str,
     record: &GenerationRecord,
     candidates: &[Ipv4Addr],
     name: &str,
@@ -51,7 +50,7 @@ pub async fn verify_management_address(
         if remaining.is_zero() {
             break;
         }
-        let attempt = probe_address(home, receipt, receipt_json, record, address, name, existing);
+        let attempt = probe_address(home, receipt, record, address, name, existing);
         let limit = deadline.min(Instant::now() + PER_CANDIDATE);
         match timeout_at(limit, attempt).await {
             Ok(Ok(())) => {
@@ -74,7 +73,6 @@ pub async fn verify_management_address(
 async fn probe_address(
     home: &Path,
     receipt: &ConnectionReceipt,
-    receipt_json: &str,
     record: &GenerationRecord,
     address: Ipv4Addr,
     name: &str,
@@ -82,21 +80,18 @@ async fn probe_address(
 ) -> Result<()> {
     let probe = tempfile::tempdir().context("create a temporary SSH host-pin directory")?;
     let pin = probe.path().join("known_hosts");
-    let input = WindowsConnection {
-        connection_json: receipt_json.to_owned(),
-        name: name.to_owned(),
-        host: address.to_string(),
-        identity_file: record.ssh_identity_file.clone(),
-        confirmed_fingerprint: receipt.host_fingerprint.clone(),
-        make_default: false,
-    };
-    let (environment_id, value) = registration::prepare(home, &input, existing)?;
-    ensure!(
-        environment_id == receipt.environment_id,
-        "the registration adapter produced a different environment identity"
-    );
-    let mut environment: EnvironmentConfig = serde_json::from_value(value)
-        .context("the registration adapter produced an invalid environment")?;
+    let environment_id = receipt.environment_id.clone();
+    let mut environment = registration::prepare_config(
+        home,
+        receipt,
+        ConnectionTarget {
+            name,
+            host: &address.to_string(),
+            identity_file: &record.ssh_identity_file,
+            confirmed_fingerprint: &receipt.host_fingerprint,
+        },
+        existing,
+    )?;
     let ssh = environment
         .runtime
         .managed_ssh_mut()

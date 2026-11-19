@@ -633,14 +633,15 @@ fn guest_disk_is_resolved_from_the_registered_vmx() {
 
 #[test]
 fn iso_attachment_uses_a_dedicated_cd_device() {
-    let iso = Path::new(r"D:\vm\lab\offline.iso");
+    let directory = tempfile::tempdir().unwrap();
+    let iso = &directory.path().join("offline.iso");
     let vmx = "config.version = \"8\"\nsata0.present = \"TRUE\"\nsata0:0.fileName = \"disk.vmdk\"\nsata0:1.deviceType = \"cdrom-image\"\nsata0:1.present = \"FALSE\"\nsata0:1.fileName = \"\"\n";
     let edit = attach_offline_iso(vmx, iso).unwrap();
     assert_eq!(edit.device, "sata0:1");
     assert!(edit.text.contains("sata0:1.present = \"TRUE\""));
     assert!(
         edit.text
-            .contains("sata0:1.fileName = \"D:\\vm\\lab\\offline.iso\"")
+            .contains(&format!("sata0:1.fileName = \"{}\"", iso.display()))
     );
     assert!(edit.text.contains("sata0:1.deviceType = \"cdrom-image\""));
     assert!(edit.text.contains("sata0:1.startConnected = \"TRUE\""));
@@ -758,6 +759,13 @@ fn guest_receipt_binds_media_identity_and_scheduled_task_cleanup() {
     let connection = verify_guest_receipt(&receipt, &expectation).unwrap();
     assert_eq!(connection, media.connection);
 
+    let mut current: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+    current["connection"]["candidate_addresses"] = serde_json::json!(["invalid"]);
+    assert!(verify_guest_receipt(&serde_json::to_vec(&current).unwrap(), &expectation).is_err());
+    let mut old: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+    old["connection"]["receipt_version"] = serde_json::json!(1);
+    assert!(verify_guest_receipt(&serde_json::to_vec(&old).unwrap(), &expectation).is_err());
+
     for field in ["boot_task_removed", "launcher_deleted", "cleanup_scheduled"] {
         let mut value: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
         value[field] = serde_json::json!(false);
@@ -791,7 +799,10 @@ fn guest_receipt_pins_the_installer_generated_host_key() {
     // worker installer generates its own sshd host key, so a successful install
     // can never report the media key; the previous equality check rejected every
     // correct guest receipt.
-    assert_ne!(media.connection.host_key, media.identity.ssh_public_key);
+    assert_ne!(
+        media.connection.host_key,
+        media.identity.ssh_public_key.public().unwrap()
+    );
     assert_eq!(
         media.connection.host_fingerprint,
         media.connection.host_key.fingerprint().unwrap()

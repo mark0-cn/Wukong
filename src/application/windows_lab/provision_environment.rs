@@ -4,12 +4,9 @@
 //! The private identity key stays under the controller state directory; only the
 //! public host pin is derived here from the independently verified receipt.
 use crate::adapters::environments::EnvironmentConfig;
-use crate::adapters::environments::registration::{self, WindowsConnection};
+use crate::adapters::environments::registration::{self, ConnectionTarget};
 use crate::application::windows_lab::MediaIdentity;
-use crate::application::windows_lab::SshKey;
-use crate::application::windows_lab::provision::{
-    PublicConnection, known_hosts_path, validate_connection,
-};
+use crate::application::windows_lab::provision::{known_hosts_path, validate_connection};
 use crate::config::AppConfig;
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
@@ -20,6 +17,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use toml_edit::Item;
+use wukong_worker_package::ConnectionReceipt;
 
 #[derive(Debug)]
 pub struct EnvRegistration {
@@ -43,7 +41,7 @@ pub fn prepare_environment(
     config: &AppConfig,
     state_dir: &Path,
     media: &MediaIdentity,
-    connection: &PublicConnection,
+    connection: &ConnectionReceipt,
     guest_ip: &str,
     identity_file: &Path,
     force: bool,
@@ -62,26 +60,24 @@ pub fn prepare_environment(
     if force {
         existing.remove(&media.environment_id);
     }
-    let input = WindowsConnection {
-        connection_json: serde_json::to_string(connection)?,
-        name: format!("Windows worker {}", media.environment_id),
-        host: guest_ip.trim().to_owned(),
-        identity_file: identity_file.to_path_buf(),
-        confirmed_fingerprint: connection.host_fingerprint.clone(),
-        make_default: false,
-    };
-    let (environment_id, value) = registration::prepare(&home, &input, &existing).with_context(|| {
+    let name = format!("Windows worker {}", media.environment_id);
+    let environment = registration::prepare_config(
+        &home,
+        connection,
+        ConnectionTarget {
+            name: &name,
+            host: guest_ip,
+            identity_file,
+            confirmed_fingerprint: &connection.host_fingerprint,
+        },
+        &existing,
+    )
+    .with_context(|| {
         format!(
             "environment {} cannot be registered; pass --force to replace an existing environment",
             media.environment_id
         )
     })?;
-    ensure!(
-        environment_id == media.environment_id,
-        "registered environment differs from the provisioned media identity"
-    );
-    let environment: EnvironmentConfig = serde_json::from_value(value)?;
-    environment.validate()?;
     // The registration adapter must pin exactly the installer-generated worker
     // host key from the verified receipt, into the generated controller pin
     // file, while the identity file stays the controller-managed client key.
@@ -92,7 +88,7 @@ pub fn prepare_environment(
         .managed_ssh()
         .context("registered environment is not a managed SSH environment")?;
     ensure!(
-        SshKey::from_public(&ssh.host_key)? == connection.host_key,
+        ssh.host_key == connection.host_key,
         "registered host pin is not the verified receipt worker host key"
     );
     ensure!(
@@ -105,7 +101,7 @@ pub fn prepare_environment(
         "registered identity file is not the controller SSH client key"
     );
     Ok(EnvRegistration {
-        environment_id,
+        environment_id: media.environment_id.clone(),
         environment,
     })
 }
@@ -274,7 +270,7 @@ pub fn environment_snippet(registration: &EnvRegistration, guest_ip: &str) -> Re
 /// `--register` was not requested. Unknown values stay explicit placeholders.
 pub fn placeholder_block(
     media: &MediaIdentity,
-    connection: &PublicConnection,
+    connection: &ConnectionReceipt,
     state_dir: &Path,
     identity_file: Option<&Path>,
 ) -> Result<String> {

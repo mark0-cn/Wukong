@@ -1,5 +1,4 @@
 //! Shared construction of a registered Windows lab from application config.
-use super::WindowsLab;
 use crate::adapters::environments::EnvironmentRegistry;
 use crate::adapters::windows_lab::VmwareVm;
 use crate::adapters::windows_lab_admin::VmwareAdmin;
@@ -7,12 +6,13 @@ use crate::adapters::windows_lab_offline::{
     MkisofsIsoBuilder, RustMediaFinalizer, VmrunGuestNetwork, WslOfflineDisk,
 };
 use crate::adapters::windows_lab_worker::WindowsWorker;
+use crate::application::windows_lab::WindowsLab;
 use crate::config::AppConfig;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use std::time::Duration;
 
-pub fn open_configured(
+pub(crate) fn open_configured(
     config: &AppConfig,
     environments: &EnvironmentRegistry,
     vm_id: &str,

@@ -1,4 +1,8 @@
 //! Signed offline worker package format, shared by the controller and native installer.
+mod connection;
+pub use connection::{
+    ConnectionReceipt, MAX_CANDIDATE_ADDRESSES, MAX_RECEIPT_BYTES, RECEIPT_VERSION,
+};
 mod enrollment;
 mod files;
 pub use enrollment::{

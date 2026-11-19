@@ -1,5 +1,6 @@
 use super::*;
 use base64::Engine;
+use serde_json::json;
 
 fn input(root: &Path) -> Result<WindowsConnection> {
     let mut blob = vec![0, 0, 0, 11];
@@ -14,12 +15,13 @@ fn input(root: &Path) -> Result<WindowsConnection> {
     let identity = root.join("existing-identity");
     fs::write(&identity, "CONTROLLED-PRIVATE-CANARY-NOT-AN-SSH-KEY")?;
     Ok(WindowsConnection {
-        connection_json: json!({"schema":1,"installed":true,
+        connection_json:
+            json!({"schema":1,"receipt_version":2,"candidate_addresses":[],"installed":true,
         "installation_id":"a".repeat(32),"environment_id":"windows","generation":1,
         "manifest_sha256":"b".repeat(64),"ssh_user":format!("wkgm{}", "a".repeat(16)),
         "ssh_port":22,"host_key":key,"host_fingerprint":fingerprint,
         "production_isolation_verified":true})
-        .to_string(),
+            .to_string(),
         name: "Windows VM".into(),
         host: "192.0.2.1".into(),
         identity_file: identity,
@@ -36,6 +38,7 @@ fn registration_is_lazy_and_imports_only_a_public_pin_without_reading_the_privat
     let home = root.path().join("profile");
     fs::create_dir(&home)?;
     let (id, value) = prepare(&home, &input, &BTreeMap::new())?;
+    let value = serde_json::to_value(value)?;
     assert_eq!(id, "windows");
     assert!(!value.to_string().contains("CONTROLLED-PRIVATE-CANARY"));
     assert!(value.pointer("/production_isolation_verified").is_none());
@@ -70,6 +73,7 @@ fn registration_refuses_unconfirmed_keys_malformed_receipts_and_replacement_ids(
     assert!(prepare(root.path(), &input, &BTreeMap::new()).is_err());
     input.confirmed_fingerprint = original;
     let (id, value) = prepare(root.path(), &input, &BTreeMap::new())?;
+    let value = serde_json::to_value(value)?;
     let existing = BTreeMap::from([(id, serde_json::from_value(value)?)]);
     assert!(prepare(root.path(), &input, &existing).is_err());
     input.host = "user@host -oProxyCommand=untrusted".into();
@@ -93,6 +97,7 @@ fn only_generated_host_pin_paths_are_prepared() -> Result<()> {
     let root = tempfile::tempdir()?;
     let input = input(root.path())?;
     let (id, value) = prepare(root.path(), &input, &BTreeMap::new())?;
+    let value = serde_json::to_value(value)?;
     let mut environment: EnvironmentConfig = serde_json::from_value(value)?;
     let external = root.path().join("user-selected-known-hosts");
     environment

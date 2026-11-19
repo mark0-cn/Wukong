@@ -156,9 +156,24 @@ class ExecutionBoundaries(unittest.TestCase):
             "application/assessment/mod.rs",
             "application/assessment/runner.rs",
             "application/tools/mod.rs",
+            "application/tools/lab.rs",
+            "application/windows_lab/provision_service.rs",
         ]:
             source = (ROOT / "src" / name).read_text(encoding="utf-8")
             self.assertNotRegex(source, r"\bbootstrap\s*::", name)
+
+    def test_worker_relay_adapters_keep_platform_and_rpc_responsibilities_separate(self):
+        root = ROOT / "src/adapters/worker"
+        launch = (root / "launch.rs").read_text(encoding="utf-8")
+        channel = (root / "stdio.rs").read_text(encoding="utf-8")
+        self.assertNotRegex(launch, r"\b(?:jsonrpsee_core|WorkerIdentity|EnvironmentLease)\b")
+        self.assertNotRegex(channel, r"\b(?:TransportConfig|WorkerIdentity|EnvironmentLease)\b")
+
+    def test_native_installation_does_not_depend_on_setup_ui(self):
+        root = ROOT / "workers/windows/native/host"
+        for name in ["installer.rs", "install_service.rs", "install_ssh.rs", "installation_receipt.rs"]:
+            source = (root / name).read_text(encoding="utf-8")
+            self.assertNotRegex(source, r"\b(?:setup_ui|MessageBoxW|GetSaveFileNameW)\b", name)
 
     def test_domain_depends_on_protocol_without_host_adapters(self):
         for path in (ROOT / "src/domain").rglob("*.rs"):

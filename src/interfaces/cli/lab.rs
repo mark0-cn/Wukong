@@ -1,6 +1,6 @@
 //! Operator entry point for the registered Windows experiment VM.
 use crate::adapters::environments::EnvironmentRegistry;
-use crate::application::windows_lab::provision::{PublicConnection, RegisteredEnvironment};
+use crate::application::windows_lab::provision::RegisteredEnvironment;
 use crate::application::windows_lab::provision_environment::{
     pin_environment, prepare_environment, restore_configuration, retract_replaced_pin,
     write_configuration,
@@ -18,6 +18,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
+use wukong_worker_package::ConnectionReceipt;
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -163,8 +164,7 @@ async fn run_with_registry(
     command: Command,
     registry: &EnvironmentRegistry,
 ) -> Result<Value> {
-    let open =
-        |vm: &str| crate::application::windows_lab::service::open_configured(config, registry, vm);
+    let open = |vm: &str| crate::bootstrap::windows_lab::open_configured(config, registry, vm);
     match command {
         Command::Status { vm } => open(&vm)?.status().await,
         Command::Package { vm, spec } => {
@@ -392,7 +392,7 @@ impl CliEnvironment {
 impl crate::application::windows_lab::provision::ProvisionEnvironment for CliEnvironment {
     fn register(
         &self,
-        connection: &PublicConnection,
+        connection: &ConnectionReceipt,
         media: &MediaIdentity,
         guest_ip: &str,
         identity_file: &Path,

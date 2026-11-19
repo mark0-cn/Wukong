@@ -65,6 +65,8 @@ RPC 在调用管理器前，将已注册处理器解析为资源操作；资源�
 
 ## 离线交付与验证
 
+安装界面和无人值守部署都由原生安装器执行经审核的安装。安装器编排受保护状态、SSH 配置、服务控制管理器激活和公开连接回执发布。界面负责确认与回执导出。
+
 在 x64 MSVC 环境构建。模型凭据和签名私钥只保留在控制器。安装/卸载验收只在专用 VM 或隔离 runner 上执行，不覆盖开发者安装。
 
 CI 在没有控制器密钥的情况下暂存准确的载荷和原生二进制文件；操作员使用控制器密钥目录对可下载模板执行 finalize：
@@ -93,7 +95,7 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 
 安装成功后，安装程序提供“保存安装结果 / Save install result”，并以默认文件名 `wukong-worker-<installation_id>.json` 打开 Windows 保存对话框。若对话框无法打开，或所选路径无法写入，同一字节内容会被复制到 `%USERPROFILE%\Desktop\wukong-worker-<installation_id>.json`（当用户配置不可用或没有桌面目录时改用 `%PUBLIC%` 或其桌面目录），并显示实际路径。保存不会改变安装成功状态：ProgramData 中的受保护记录此时已经完整。
 
-在已存在有效安装的客体上以无参数方式再次启动安装程序不会重装；它会显示简短的“已安装”对话框，并询问是否保存刷新后的结果：重新枚举当前网卡地址，只改变 `receipt_version` 与 `candidate_addresses`，安装 ID、SSH 与主机密钥字段保持完全一致。客体地址变化后应使用此导出，而不是重置 worker。安装和修复仍必须使用离线介质及经过审查的 `install-*`/`verify-enrollment` 路径；刷新流程不会执行安装、服务或防火墙变更。
+在已存在有效安装的客体上以无参数方式再次启动安装程序不会重装；它会显示简短的“已安装”对话框，并询问是否保存刷新后的结果：重新枚举当前网卡地址，只改变 `candidate_addresses`，安装 ID、SSH 与主机密钥字段保持完全一致。客体地址变化后应使用此导出，而不是重置 worker。安装和修复仍必须使用离线介质及经过审查的 `install-*`/`verify-enrollment` 路径；刷新流程不会执行安装、服务或防火墙变更。
 
 原生构建身份包含共用协议 crate、原生/Python 源码、锁定输入和构建脚本。组装时验证该身份并保留依赖许可证。登记绑定控制器签名者和安装身份；SSH 独立绑定 Worker 主机密钥。连接与任务绑定见[跨平台环境指南](../../docs/design/cross-platform-environments.zh-CN.md)，实际安装后的进程/调试器/恢复用例见[Worker 验收指南](../tests/README.zh-CN.md)。
 

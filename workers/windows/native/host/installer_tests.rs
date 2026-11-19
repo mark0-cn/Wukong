@@ -1,15 +1,23 @@
-use super::{
-    RECEIPT_VERSION, installation_receipt_path, installed_receipt, installed_receipts,
-    refreshed_receipt,
-};
+use super::{installation_receipt_path, installed_receipt, installed_receipts, refreshed_receipt};
 use anyhow::Result;
+use base64::Engine;
 use serde_json::{Value, json};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
+use wukong_worker_package::{ConnectionReceipt, RECEIPT_VERSION, SshPublicKey};
 
 fn fixture_receipt(installation_id: &str) -> Value {
+    let mut blob = vec![0, 0, 0, 11];
+    blob.extend_from_slice(b"ssh-ed25519");
+    blob.extend_from_slice(&[0, 0, 0, 32]);
+    blob.extend_from_slice(&[7; 32]);
+    let host_key = SshPublicKey {
+        algorithm: "ssh-ed25519".into(),
+        key: base64::engine::general_purpose::STANDARD.encode(blob),
+    };
+    let fingerprint = host_key.fingerprint().expect("fixture key");
     json!({
         "schema": 1,
         "receipt_version": RECEIPT_VERSION,
@@ -18,10 +26,10 @@ fn fixture_receipt(installation_id: &str) -> Value {
         "environment_id": "fixture_environment",
         "generation": 1,
         "manifest_sha256": "a".repeat(64),
-        "ssh_user": "fixture_worker",
+        "ssh_user": format!("wkgm{}", &installation_id[..16]),
         "ssh_port": 2222,
-        "host_key": {"algorithm": "ssh-ed25519", "key": "AAAAC3NzaC1lZDI1NTE5AAAAIFixture"},
-        "host_fingerprint": "SHA256:fixture",
+        "host_key": host_key,
+        "host_fingerprint": fingerprint,
         "candidate_addresses": ["192.168.1.10"],
         "production_isolation_verified": false
     })
@@ -57,7 +65,10 @@ fn installed_receipts_accept_only_complete_matching_receipts() -> Result<()> {
     let receipts = installed_receipts(&base)?;
     assert_eq!(receipts.len(), 1);
     assert_eq!(receipts[0].installation_id, valid);
-    assert_eq!(receipts[0].receipt["host_fingerprint"], "SHA256:fixture");
+    assert_eq!(
+        receipts[0].host_fingerprint,
+        fixture_receipt(&valid)["host_fingerprint"]
+    );
     Ok(())
 }
 
@@ -83,7 +94,7 @@ fn installed_receipt_rejects_schema_identity_and_shape_changes() -> Result<()> {
     let installation_id = "a".repeat(32);
     let valid = serde_json::to_vec(&fixture_receipt(&installation_id))?;
     assert_eq!(
-        installed_receipt(&valid, &installation_id)?["installation_id"],
+        installed_receipt(&valid, &installation_id)?.installation_id,
         installation_id
     );
     assert!(installed_receipt(b"[]", &installation_id).is_err());
@@ -104,10 +115,14 @@ fn installed_receipt_rejects_schema_identity_and_shape_changes() -> Result<()> {
 }
 
 #[test]
-fn refresh_updates_only_the_receipt_version_and_address_candidates() -> Result<()> {
+fn refresh_updates_only_the_address_candidates() -> Result<()> {
     let installation_id = "a".repeat(32);
     let original = fixture_receipt(&installation_id);
-    let refreshed = refreshed_receipt(&original, vec!["10.1.2.3".into(), "192.168.1.10".into()])?;
+    let parsed: ConnectionReceipt = serde_json::from_value(original.clone())?;
+    let refreshed = serde_json::to_value(refreshed_receipt(
+        &parsed,
+        vec!["10.1.2.3".into(), "192.168.1.10".into()],
+    )?)?;
     assert_eq!(refreshed["receipt_version"], RECEIPT_VERSION);
     assert_eq!(
         refreshed["candidate_addresses"],
@@ -128,28 +143,11 @@ fn refresh_updates_only_the_receipt_version_and_address_candidates() -> Result<(
 }
 
 #[test]
-fn refresh_upgrades_a_version_one_receipt() -> Result<()> {
+fn installed_receipt_requires_the_current_version() -> Result<()> {
     let installation_id = "a".repeat(32);
-    let mut original = fixture_receipt(&installation_id);
-    let fields = original.as_object_mut().expect("fixture object");
-    fields.remove("receipt_version");
-    fields.remove("candidate_addresses");
-    let refreshed = refreshed_receipt(&original, vec!["192.168.1.10".into()])?;
-    assert_eq!(refreshed["receipt_version"], RECEIPT_VERSION);
-    assert_eq!(
-        refreshed["candidate_addresses"],
-        json!(["192.168.1.10"]),
-        "refreshed export must replace older candidates"
-    );
-    Ok(())
-}
-
-#[test]
-fn refresh_rejects_incomplete_receipts() -> Result<()> {
-    assert!(refreshed_receipt(&json!({"schema": 1}), Vec::new()).is_err());
-    let mut invalid_identity = fixture_receipt(&"a".repeat(32));
-    invalid_identity["installation_id"] = json!("not-an-installation");
-    assert!(refreshed_receipt(&invalid_identity, Vec::new()).is_err());
+    let mut previous = fixture_receipt(&installation_id);
+    previous["receipt_version"] = json!(1);
+    assert!(installed_receipt(&serde_json::to_vec(&previous)?, &installation_id).is_err());
     Ok(())
 }
 
