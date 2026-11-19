@@ -182,6 +182,28 @@ impl ConfigDocument {
 mod tests {
     use super::*;
     #[test]
+    fn saving_under_an_exclusive_maintenance_guard_is_reentrant() -> Result<()> {
+        use crate::application::maintenance::updates::maintenance::{LockMode, lock};
+        let root = tempfile::tempdir()?;
+        let home = root.path().join("profile");
+        let path = root.path().join("config.toml");
+        std::fs::write(&path, "# onboarding save\nstate_dir='state'\n")?;
+        let mut document = ConfigDocument::open(path)?;
+        document.patch(&[ConfigEdit {
+            path: vec!["model".into(), "model".into()],
+            value: "nested".into(),
+        }])?;
+        // Onboarding holds this same exclusive admission across
+        // environment::activate, which reaches save_in through bind().
+        let outer = lock(&home.join("updates"), LockMode::Exclusive)?;
+        let (config, _store) = document.save_in(&home, None)?;
+        assert_eq!(config.model.model, "nested");
+        drop(outer);
+        // The outermost guard released its OS lock and registry entry.
+        drop(lock(&home.join("updates"), LockMode::Exclusive)?);
+        Ok(())
+    }
+    #[test]
     fn importing_a_connection_preserves_drafts_and_tracks_only_the_public_pin_on_save() -> Result<()>
     {
         use crate::adapters::environments::registration::WindowsConnection;
