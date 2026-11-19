@@ -2,10 +2,12 @@
 
 A local-release desktop package instead of the online signed release catalog
 carries a `local-release.json` resource: the client version, worker protocol and
-data schema, the local Docker image tag, its size, the source revision and an
-optional absolute path of a locally built Windows worker media template. This
-module computes that descriptor from the current checkout and the host's Docker
-state; it never embeds the image itself, a private key or a registry credential.
+data schema, the local Docker image tag, the version-pinned CI workbench image
+first-run onboarding may pull when that tag is absent, the local image size, the
+source revision and an optional absolute path of a locally built Windows worker
+media template. This module computes that descriptor from the current checkout
+and the host's Docker state; it never embeds the image itself, a private key or a
+registry credential.
 
 The workbench image is resolved from an explicit `WUKONG_LOCAL_IMAGE`, the
 CI-built Docker Hub workbench image for this client version (pulled, verified as
@@ -13,7 +15,9 @@ linux/amd64 and tagged locally, replacing any stale local tag), an already
 present `wukong:local` tag only when that pull is impossible, or a local
 `docker buildx bake` fallback. The registry repository is intentionally separate
 from the official release image, so packaging can never pull a release tag by
-mistake.
+mistake. The CI image reference is recorded in the descriptor unconditionally,
+even when the packaging host cannot reach Docker, so a packaged installer can
+obtain it during first-run onboarding on another machine.
 """
 
 import argparse
@@ -445,6 +449,9 @@ def descriptor():
         "data_schema": data_schema(),
         "image": image_name,
         "image_size": image_size,
+        # Recorded even when the packaging host cannot reach Docker: onboarding
+        # on another machine pulls and tags it when the local image is absent.
+        "image_registry": workbench_image(),
         "built_at": datetime.datetime.now(datetime.timezone.utc)
         .replace(microsecond=0)
         .isoformat()
@@ -467,7 +474,8 @@ def prepare(destination=DEFAULT_OUTPUT):
     write_json(target, payload)
     print(
         f"Local-release descriptor: {target} "
-        f"(image {payload['image']}, size {payload['image_size']}, "
+        f"(image {payload['image']}, registry {payload['image_registry']}, "
+        f"size {payload['image_size']}, "
         f"protocol {payload['runtime_protocol']}, data schema {payload['data_schema']})",
         flush=True,
     )

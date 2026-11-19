@@ -41,7 +41,7 @@ def result(returncode=0, stdout="", stderr=""):
 class DescriptorTests(unittest.TestCase):
     def test_descriptor_records_the_current_sources(self):
         with (
-            patch.dict(os.environ, {}, clear=False),
+            environment(),
             patch.object(local_release, "image_identity", return_value=(1024, "linux/amd64")),
             patch.object(local_release, "template", return_value=None),
         ):
@@ -57,10 +57,44 @@ class DescriptorTests(unittest.TestCase):
             source_constant(local_release.DATA_SCHEMA_MANIFEST, "DATA_SCHEMA"),
         )
         self.assertEqual(payload["image"], local_release.DEFAULT_IMAGE)
+        self.assertEqual(payload["image_registry"], f"{DEFAULT_REGISTRY}:local-{version()}")
         self.assertEqual(payload["image_size"], 1024)
         self.assertRegex(payload["source_revision"], r"^[0-9a-f]{40}$")
         self.assertRegex(payload["built_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
         self.assertNotIn("template_path", payload)
+
+    def test_descriptor_records_the_version_pinned_ci_image_for_onboarding(self):
+        with (
+            environment(),
+            patch.object(local_release, "version", return_value="2.3.4"),
+            patch.object(local_release, "image_identity", return_value=(1024, "linux/amd64")),
+            patch.object(local_release, "template", return_value=None),
+        ):
+            payload = local_release.descriptor()
+            # The recorded reference must match the CI tag packaging itself would pull.
+            expected = local_release.workbench_image()
+        self.assertEqual(payload["image_registry"], "hlmark0/wukong-workbench:local-2.3.4")
+        self.assertEqual(payload["image_registry"], expected)
+
+    def test_descriptor_registry_can_be_overridden(self):
+        override = "registry.example.com:5000/team/wukong-workbench"
+        with (
+            environment(**{local_release.REGISTRY_ENV: override}),
+            patch.object(local_release, "version", return_value="2.3.4"),
+            patch.object(local_release, "image_identity", return_value=(1024, "linux/amd64")),
+            patch.object(local_release, "template", return_value=None),
+        ):
+            payload = local_release.descriptor()
+        self.assertEqual(payload["image_registry"], override + ":local-2.3.4")
+
+    def test_descriptor_refuses_the_official_release_repository(self):
+        with (
+            environment(**{local_release.REGISTRY_ENV: "hlmark0/wukong"}),
+            patch.object(local_release, "image_identity", return_value=(1024, "linux/amd64")),
+            patch.object(local_release, "template", return_value=None),
+        ):
+            with self.assertRaisesRegex(ValueError, "separate workbench repository"):
+                local_release.descriptor()
 
     def test_a_packaged_template_is_recorded_as_an_absolute_path(self):
         with (
@@ -147,11 +181,14 @@ class DescriptorTests(unittest.TestCase):
 
     def test_descriptor_can_record_an_unverified_size(self):
         with (
+            environment(),
             patch.object(local_release, "image_identity", return_value=(0, "unknown")),
             patch.object(local_release, "template", return_value=None),
         ):
             payload = local_release.descriptor()
         self.assertEqual(payload["image_size"], 0)
+        # Docker was unreachable at packaging time; onboarding can still pull this.
+        self.assertEqual(payload["image_registry"], f"{DEFAULT_REGISTRY}:local-{version()}")
 
     def test_template_environment_must_name_an_existing_zip(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,6 +210,7 @@ class DescriptorTests(unittest.TestCase):
             "data_schema": 5,
             "image": "wukong:local",
             "image_size": 1024,
+            "image_registry": "hlmark0/wukong-workbench:local-1.0.0",
             "built_at": "2026-11-18T00:00:00Z",
             "source_revision": "a" * 40,
         }
