@@ -20,3 +20,8 @@ mod update_health;
 #[cfg(feature = "desktop")]
 pub mod updates;
 pub mod workspace;
+
+#[cfg(feature = "desktop")]
+fn context() -> tauri::Context<tauri::Wry> {
+    tauri::generate_context!()
+}

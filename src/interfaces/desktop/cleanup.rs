@@ -137,7 +137,7 @@ pub fn window(output: PathBuf, initial_data: bool, browser: PathBuf) -> Result<(
                 .build()?;
             Ok(())
         })
-        .build(tauri::generate_context!())?
+        .build(super::context())?
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested {
                 code: None, api, ..

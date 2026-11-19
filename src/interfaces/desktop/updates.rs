@@ -602,6 +602,7 @@ impl Controller {
             update.install(bytes)?;
             #[cfg(not(windows))]
             app.restart();
+            #[cfg(windows)]
             return Ok(());
         }
         ensure!(

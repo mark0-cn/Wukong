@@ -459,7 +459,7 @@ pub fn run(
                 let _ = window.emit("close-requested", CloseRequest { busy });
             }
         })
-        .build(tauri::generate_context!())?;
+        .build(super::context())?;
     app.run(|app, event| {
         // OS Quit / Cmd+Q follows the same save boundary as closing the window.
         // An explicit shutdown command exits with Some(0) after awaiting cleanup.
