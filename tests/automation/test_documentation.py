@@ -1,8 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import unquote
 
-from scripts.ci.check_docs import check, text_hash
+from scripts.ci.check_docs import anchors, check, headings, links, slug, text_hash
 
 
 class DocumentationChecks(unittest.TestCase):
@@ -70,6 +71,84 @@ class DocumentationChecks(unittest.TestCase):
         errors, _ = check(self.root, self.files + ["docs/other.md", "docs/other.zh-CN.md"])
         self.assertTrue(any("cross-language" in error for error in errors))
         self.assertTrue(any("leaves repository" in error for error in errors))
+
+    def test_commonmark_link_destinations_and_code_exclusion(self):
+        text = """\
+[nested](docs/a_(b).md)
+[angle](<docs/a b.md>)
+[reference][target] [collapsed][] [shortcut]
+![image](assets/pic.png)
+
+[target]: docs/reference.md
+[collapsed]: docs/collapsed.md
+[shortcut]: docs/shortcut.md
+`[inline code](missing-inline.md)`
+```md
+[fenced](missing-fenced.md)
+```
+~~~~md
+[long fence](missing-long-fence.md)
+~~~~
+    [indented code](missing-indented.md)
+[unterminated](missing-unterminated.md
+\\[escaped](missing-escaped.md)
+<a href="docs/html.md">HTML</a>
+<img src='assets/html.png'>
+"""
+        self.assertEqual(
+            [
+                "docs/a_(b).md",
+                "docs/a b.md",
+                "docs/reference.md",
+                "docs/collapsed.md",
+                "docs/shortcut.md",
+                "assets/pic.png",
+                "docs/html.md",
+                "assets/html.png",
+            ],
+            [unquote(link) for link in links(text)],
+        )
+
+    def test_atx_headings_duplicate_slugs_html_and_setext(self):
+        text = """\
+# Title
+# Title #
+## 中文 标题
+### Hello <em>world</em>
+#### `code`
+Setext
+ =======
+#5 not a heading
+<a name="explicit"></a>
+`<a id="code-anchor"></a>`
+```md
+# Fenced
+```
+"""
+        self.assertEqual(
+            [
+                ("#", "Title"),
+                ("#", "Title"),
+                ("##", "中文 标题"),
+                ("###", "Hello <em>world</em>"),
+                ("####", "`code`"),
+            ],
+            headings(text),
+        )
+        self.assertEqual("hello-world", slug("Hello <em>world</em>"))
+        self.assertEqual(
+            {"title", "title-1", "中文-标题", "hello-world", "code", "explicit"},
+            anchors(text),
+        )
+
+    def test_reference_and_angle_links_retain_target_diagnostics(self):
+        with (self.root / "README.md").open("a", encoding="utf-8") as stream:
+            stream.write(
+                "[missing][target] [angle](<absent file.md>)\n\n[target]: missing-reference.md\n"
+            )
+        errors, _ = check(self.root, self.files)
+        self.assertTrue(any("missing-reference.md" in error for error in errors))
+        self.assertTrue(any("absent%20file.md" in error for error in errors))
 
 
 if __name__ == "__main__":

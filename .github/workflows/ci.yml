@@ -45,6 +45,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      - name: Install documentation automation dependencies
+        run: python -m pip install --disable-pip-version-check -r scripts/ci/requirements.txt
       - name: Select checks from the complete PR or master change range
         id: scope
         env:
@@ -112,6 +114,8 @@ jobs:
       - name: Version and release tooling tests
         if: needs.changes.outputs.rust == 'true'
         run: |
+          python -m pip install --disable-pip-version-check -r scripts/ci/requirements.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m scripts.release.cli check
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python -m unittest discover -s tests/automation -p 'test_*.py' -v
@@ -217,7 +221,7 @@ jobs:
           python -m scripts.ci.install_apt "${packages[@]}"
       - name: Python runtime and release tests
         run: |
-          python -m pip install -e workers/analysis -r workers/runtime/requirements.txt pyelftools
+          python -m pip install -e workers/analysis -r workers/runtime/requirements.txt -r scripts/ci/requirements.txt pyelftools
           python -m compileall -q workers/runtime scripts
           python -m unittest discover -s tests/automation -p 'test_*.py' -v
           python workers/tests/run.py unit -p 'test_*.py' -v
