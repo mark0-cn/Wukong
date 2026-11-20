@@ -1,54 +1,60 @@
-//! Authoritative Windows worker: public routing and resource observation.
-use crate::host::context;
+//! Authoritative Windows worker: public routing and resource-layer handles.
+//!
+//! The host builds the verified runtime context and the shared resource
+//! manager before service readiness; this entry only holds handles to the
+//! resource layer for admission, dispatch, status queries and cancellation.
 use crate::{
     artifacts::inputs::Inputs,
-    host::deployment,
     isolation::security::AclPolicy,
     resources::manager::ResourceManager,
     rpc::worker_leases::{Leases, require},
 };
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 pub use wukong_worker_protocol::WorkerIdentity as Identity;
 
 pub(crate) struct Worker {
     identity: Identity,
     daemon_id: String,
     leases: Leases,
-    inputs: std::sync::Arc<tokio::sync::Mutex<Inputs>>,
-    resources: ResourceManager,
-    qualified: std::sync::atomic::AtomicBool,
+    inputs: Arc<tokio::sync::Mutex<Inputs>>,
+    resources: Arc<ResourceManager>,
+    qualified: AtomicBool,
 }
 impl Worker {
-    pub fn open(identity: Identity, metadata: &Path) -> Result<Self> {
-        Self::with_policy(identity, metadata, AclPolicy::private_vm())
+    pub(crate) fn open(
+        identity: Identity,
+        metadata: &Path,
+        resources: Arc<ResourceManager>,
+    ) -> Result<Self> {
+        Self::with_policy(identity, metadata, AclPolicy::private_vm(), resources)
     }
-    fn with_policy(identity: Identity, metadata: &Path, policy: AclPolicy) -> Result<Self> {
+    fn with_policy(
+        identity: Identity,
+        metadata: &Path,
+        policy: AclPolicy,
+        resources: Arc<ResourceManager>,
+    ) -> Result<Self> {
         Ok(Self {
             identity: identity.clone(),
             daemon_id: hex::encode(crate::host::accounts::random_bytes::<16>()?),
             leases: Leases::open(identity.clone(), metadata, policy.clone())?,
-            resources: ResourceManager::open(metadata, identity, policy.clone())?,
-            inputs: std::sync::Arc::new(tokio::sync::Mutex::new(Inputs::open(metadata, policy)?)),
-            qualified: std::sync::atomic::AtomicBool::new(false),
+            resources,
+            inputs: Arc::new(tokio::sync::Mutex::new(Inputs::open(metadata, policy)?)),
+            qualified: AtomicBool::new(false),
         })
     }
-    pub(crate) fn open_resources(
-        &self,
-        root: &Path,
-        deployment: &deployment::Deployment,
-        manifest: &wukong_worker_package::VerifiedManifest,
-    ) -> Result<()> {
-        self.resources.initialize(context::RuntimeContext::verified(
-            root, deployment, manifest,
-        )?)
-    }
-    pub(crate) fn poll_resources(&self) -> Result<bool> {
-        self.resources.poll(self.leases.expired())
-    }
-    pub(crate) async fn cancel_resources(&self) -> Result<()> {
-        self.resources.cancel().await
+    /// The host's keep-alive loop owns the run fence input for resource
+    /// cancellation; lease state itself never lives in the resource layer.
+    pub(crate) fn lease_expired(&self) -> bool {
+        self.leases.expired()
     }
     fn resources_idle(&self) -> Result<bool> {
         self.resources.idle()
@@ -64,10 +70,7 @@ impl Worker {
                 json!({"protocol":self.identity.protocol,"identity":self.identity,
                     "daemon_id":self.daemon_id,"daemon_pid":std::process::id()})
             } else {
-                crate::rpc::catalog::doctor(
-                    &self.identity,
-                    self.qualified.load(std::sync::atomic::Ordering::Acquire),
-                )
+                crate::rpc::catalog::doctor(&self.identity, self.qualified.load(Ordering::Acquire))
             };
             return Ok(result);
         }
@@ -138,8 +141,7 @@ impl Worker {
         }
     }
     pub(crate) fn qualify(&self) {
-        self.qualified
-            .store(true, std::sync::atomic::Ordering::Release);
+        self.qualified.store(true, Ordering::Release);
     }
 }
 

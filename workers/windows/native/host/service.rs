@@ -1,9 +1,12 @@
-//! SCM lifetime and authenticated SSH transport. Worker dispatch and state live in worker.rs.
+//! SCM lifetime and authenticated SSH transport. The host owns the resource
+//! layer lifecycle; RPC dispatch and resource handles live in worker.rs.
 use crate::{
     host::accounts::Role,
+    host::context,
     host::deployment::{self, Deployment},
     isolation::processes::{OwnedProcess, Spawn},
     isolation::security::{self, AclPolicy},
+    resources::manager::ResourceManager,
     rpc::pipe_transport,
     rpc::worker::Worker,
 };
@@ -312,10 +315,23 @@ async fn run_stages(context: &ContextState, diagnostic: &mut super::startup::Rep
     diagnostic.bind(manifest.sha256(), &identity.boot_id)?;
     diagnostic.succeed()?;
     diagnostic.begin(Stage::ResourceRecovery)?;
-    let worker = Arc::new(Worker::open(identity.clone(), &root.join("metadata"))?);
-    worker.open_resources(&root, &deployment, &manifest)?;
+    // The host owns the verified context and the shared resource manager; the
+    // RPC entry only receives a handle to the same resource state.
+    let metadata = root.join("metadata");
+    let resources = Arc::new(ResourceManager::open(
+        &metadata,
+        identity.clone(),
+        AclPolicy::private_vm(),
+    )?);
+    let worker = Arc::new(Worker::open(
+        identity.clone(),
+        &metadata,
+        Arc::clone(&resources),
+    )?);
+    let runtime = context::RuntimeContext::verified(&root, &deployment, &manifest)?;
+    resources.initialize(runtime)?;
     let recovery_deadline = tokio::time::Instant::now() + Duration::from_secs(120);
-    while !worker.poll_resources()? {
+    while !resources.poll(worker.lease_expired())? {
         ensure!(
             !STOP.load(Ordering::Acquire) && tokio::time::Instant::now() < recovery_deadline,
             "native startup resource recovery did not finish"
@@ -366,7 +382,7 @@ async fn run_stages(context: &ContextState, diagnostic: &mut super::startup::Rep
                 tasks.spawn(serve_client(accepted,sid.clone(),worker.clone(),permit));
             },
             _=tokio::time::sleep(Duration::from_millis(250))=>{
-                worker.poll_resources()?;
+                resources.poll(worker.lease_expired())?;
                 if STOP.load(Ordering::Acquire) {break;}
                 ensure!(!ssh.exited(),"packaged SSH daemon exited");
             },
@@ -375,15 +391,12 @@ async fn run_stages(context: &ContextState, diagnostic: &mut super::startup::Rep
     }
     tasks.abort_all();
     while tasks.join_next().await.is_some() {}
-    worker.cancel_resources().await?;
-    let resource_deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    while !worker.poll_resources()? {
-        ensure!(
-            tokio::time::Instant::now() < resource_deadline,
-            "native resource cleanup remains pending during service stop"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    resources
+        .shutdown(
+            tokio::time::Instant::now() + Duration::from_secs(15),
+            || worker.lease_expired(),
+        )
+        .await?;
     ssh.stop(Duration::from_secs(10))?;
     report(SERVICE_STOP_PENDING, 0)?;
     drop(ssh);

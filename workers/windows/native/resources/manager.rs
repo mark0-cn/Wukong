@@ -1,4 +1,12 @@
 //! Serializes reservations and commits; external waits never retain the state/input locks.
+//!
+//! This manager is the resource-layer boundary shared by the host and the RPC
+//! entry: the host builds the verified runtime context, initializes this
+//! manager, polls it during startup, and asks it to settle owned work during
+//! shutdown; the RPC entry only holds a handle for admission and dispatch.
+//! Startup, process draining and recovery waits run in owned tasks outside the
+//! state lock, so a slow external wait never blocks status queries, renewal or
+//! cancellation. A failed or unconfirmed cleanup keeps its journal blocker.
 use crate::{
     artifacts::inputs::Inputs,
     core::Owner,
@@ -7,7 +15,7 @@ use crate::{
     resources::journal::Journal,
     resources::state::{Dispatch, ResourceState},
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Map, Value};
 use std::{path::Path, time::Duration};
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -37,6 +45,8 @@ impl ResourceManager {
             )?)),
         })
     }
+    /// Host-only boundary: the host hands in the context it verified after
+    /// deployment identity, platform and protected-directory checks.
     pub(crate) fn initialize(&self, context: RuntimeContext) -> Result<()> {
         self.state
             .try_lock()
@@ -46,12 +56,18 @@ impl ResourceManager {
     pub(crate) async fn initialized(&self) -> bool {
         self.state.lock().await.initialized()
     }
+    /// Admission barrier, shared with the host's shutdown verification: the
+    /// journal must have no unfinished resource or effect. Never waits for an
+    /// external operation while another owner holds the state lock.
     pub(crate) fn idle(&self) -> Result<bool> {
         match self.state.try_lock() {
             Ok(state) => state.idle(),
             Err(_) => Ok(false),
         }
     }
+    /// Status polling: advance owned work and report whether the journal is
+    /// settled. Host startup, the service keep-alive and RPC queries all
+    /// observe this same state; a blocked observation keeps the blocker.
     pub(crate) fn poll(&self, expired: bool) -> Result<bool> {
         let Ok(mut state) = self.state.try_lock() else {
             return Ok(false);
@@ -64,8 +80,28 @@ impl ResourceManager {
         }
         state.idle()
     }
+    /// Cancellation entry: request the stop of every owned resource without
+    /// releasing its journal blocker; confirmed cleanup still commits later.
     pub(crate) async fn cancel(&self) -> Result<()> {
         self.state.lock().await.cancel_active()
+    }
+    /// Host shutdown use case: cancel owned work, then verify leftover cleanup
+    /// within the host's deadline. Unconfirmed cleanup raises the existing
+    /// refusal and leaves its resource blocker for a later recovery attempt.
+    pub(crate) async fn shutdown(
+        &self,
+        deadline: tokio::time::Instant,
+        expired: impl Fn() -> bool,
+    ) -> Result<()> {
+        self.cancel().await?;
+        while !self.poll(expired())? {
+            ensure!(
+                tokio::time::Instant::now() < deadline,
+                "native resource cleanup remains pending during service stop"
+            );
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(())
     }
     pub(crate) async fn execute(
         &self,
