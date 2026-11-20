@@ -70,7 +70,8 @@ def compiler_environment(architecture="x64"):
 def workspace_temporary(root=ROOT):
     """Create the task-owned temporary directory used by compiler children."""
 
-    temporary = Path(root) / "target/tmp"
+    root = root if isinstance(root, Path) else Path(root)
+    temporary = root / "target/tmp"
     temporary.mkdir(parents=True, exist_ok=True)
     return temporary.resolve()
 
