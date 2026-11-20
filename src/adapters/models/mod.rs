@@ -5,12 +5,11 @@ use crate::domain::Role;
 use anyhow::{Context, Result, bail, ensure};
 use rig::{
     DynModel,
-    completion::Usage,
     operation::Completion,
     providers::{anthropic::AnthropicConfig, ollama::OllamaConfig, openai::OpenAIConfig},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 pub const RIG_VERSION: &str = "0.46.0";
@@ -386,7 +385,6 @@ impl rig_core::serve::Serve for ModelDelivery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     #[test]
     fn configurations_reject_embedded_credentials() {
         assert!(
@@ -399,7 +397,9 @@ mod tests {
         );
         assert!(
             ModelConfig {
-                additional_params: Some(json!({"headers":{"authorization":"credential"}})),
+                additional_params: Some(
+                    serde_json::json!({"headers":{"authorization":"credential"}})
+                ),
                 ..Default::default()
             }
             .validate()

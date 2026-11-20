@@ -108,7 +108,6 @@ impl Serve for BusinessTool {
                     serde_json::from_str(&args)?,
                 )
                 .await?;
-            let value = ToolOutput::json(output.value); // effect belongs to Rig, so its cancellation drops this future.
             let mut changes = application.runner.subscribe_changes();
             while application.runner.agent(&agent_id)?.status == Status::Waiting {
                 changes.changed().await?;
