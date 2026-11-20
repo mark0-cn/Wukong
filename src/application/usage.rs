@@ -18,12 +18,7 @@ impl UsageService {
             ..self.clone()
         }
     }
-    pub(crate) fn account_usage(
-        &self,
-        agent_id: &str,
-        usage: Usage,
-        model_turn: bool,
-    ) -> Result<()> {
+    pub(crate) fn account_usage(&self, agent_id: &str, usage: Usage) -> Result<()> {
         let tokens = usage.total_tokens.or_else(|| {
             usage
                 .input_tokens
@@ -51,25 +46,21 @@ impl UsageService {
         self.store.write(|tx| {
             let mut agent: AgentMetadata = tx.get_record::<AgentMetadata>(agent_id)?.context("agent missing")?;
             let mut run: RunRecord = tx.get_record(&agent.run_id)?.context("run missing")?;
-            agent.turns += usize::from(model_turn);
+            agent.turns += 1;
             agent.total_tokens = agent.total_tokens.saturating_add(tokens.unwrap_or(0));
             run.total_tokens = run.total_tokens.saturating_add(tokens.unwrap_or(0));
             if cost_known { agent.cost_usd += cost; run.cost_usd += cost; }
             agent.updated_at = now(); run.updated_at = now();
             tx.save_record(&agent)?;
             tx.save_record(&run)?;
-            tx.event(&run.id,Some(agent_id),if model_turn {"model.usage"} else {"model.usage_aux"},json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
+            tx.event(&run.id,Some(agent_id),"model.usage",json!({"usage":usage,"cost_estimate_usd":cost_known.then_some(cost),"tokens_reported":tokens.is_some()}))?;
             Ok(())
         })?;
-        // A MAIN model response without usage cannot be costed when pricing
-        // rates are configured: pause exactly then, keeping cost accounting
-        // exact. Auxiliary calls (the summarizer) never pause the run: their
-        // cost is a bounded fraction of a turn, rig's hook does not reliably
-        // surface their usage, and the event above records the omission.
-        // With flat zero pricing the cost is complete ($0) and only the
-        // token count drifts; the kernel budget gate keeps enforcing on
-        // reported usage.
-        if model_turn && !cost_known {
+        // A model response without usage cannot be costed when pricing rates
+        // are configured: pause exactly then, keeping cost accounting exact.
+        // With flat zero pricing the cost is complete ($0) and only the token
+        // count drifts; the kernel budget gate keeps enforcing reported usage.
+        if !cost_known {
             let agent: AgentMetadata = self.store.load::<AgentMetadata>(agent_id)?;
             Coordinator::new(self.store.clone()).pause_budget(
                 &agent.run_id,

@@ -1239,10 +1239,7 @@ async fn reported_token_totals_do_not_hide_unknown_costs() {
     runner.usage = UsageService::new(runner.store.clone(), runner.config.pricing.clone());
     let mut usage = Usage::default();
     usage.total_tokens = Some(12);
-    runner
-        .usage
-        .account_usage(&run.root_id, usage, true)
-        .unwrap();
+    runner.usage.account_usage(&run.root_id, usage).unwrap();
     let paused: RunRecord = runner.store.require("run", &run.id).unwrap();
     assert_eq!(paused.status, Status::BudgetPaused);
     assert_eq!(paused.total_tokens, 12);
@@ -1265,7 +1262,7 @@ async fn missing_usage_with_flat_pricing_does_not_pause() {
     // the whole assessment.
     runner
         .usage
-        .account_usage(&run.root_id, Usage::default(), true)
+        .account_usage(&run.root_id, Usage::default())
         .unwrap();
     let after: RunRecord = runner.store.require("run", &run.id).unwrap();
     assert_ne!(after.status, Status::BudgetPaused);

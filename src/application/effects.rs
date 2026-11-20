@@ -199,21 +199,6 @@ impl<'a> DurableEffects<'a> {
             Ok(value)
         })
     }
-    pub(crate) fn replace_result(&self, call: &str, value: &Value, is_error: bool) -> Result<()> {
-        self.store.write(|tx| {
-            let mut record: ToolCallRecord = tx.get_record(call)?.context("tool call missing")?;
-            ensure!(
-                matches!(record.state, CallState::Completed | CallState::Failed),
-                "only settled call results may be replaced"
-            );
-            record.result = Some(serde_json::to_value(EffectOutcome {
-                value: value.clone(),
-                is_error,
-            })?);
-            record.updated_at = now();
-            tx.save_record(&record)
-        })
-    }
     pub(crate) fn worker_reply(
         &self,
         agent: &AgentMetadata,

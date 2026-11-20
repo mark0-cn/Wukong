@@ -264,7 +264,6 @@ export interface Messages {
   'settings-ssh-host': undefined;
   'settings-storage-locations': undefined;
   'settings-stream-model-responses': undefined;
-  'settings-summarize-large-tool-outputs-in-model-context': undefined;
   'settings-switch-to-the-selected-task-and-evidence': undefined;
   'settings-task-and-evidence-directory': undefined;
   'settings-task-budget': undefined;

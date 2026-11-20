@@ -294,7 +294,7 @@ pub(super) fn account_replies(
                     )?;
                     application
                         .runner
-                        .account_usage(&agent_id, response.usage, true)?;
+                        .account_usage(&agent_id, response.usage)?;
                     Ok(())
                 })(),
             );
