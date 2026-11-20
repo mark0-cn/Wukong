@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import subprocess
+from scripts._lib import msvc
 from scripts._lib.versioning import ROOT
 from scripts.release import worker_setup
 from scripts.release.local_release import RESOURCE as LOCAL_RELEASE_RESOURCE
@@ -44,8 +45,11 @@ def build(platform, signed=False, local_release=False):
         # Resolve the local Docker image, its size and the optional local worker
         # template before the long native build; the descriptor becomes a Tauri resource.
         prepare_local_release()
+    environment = None
     if platform == "windows":
-        worker_setup.build_and_stage(ROOT / "target/worker-setup")
+        environment = worker_setup.build_environment()
+        msvc.preflight(environment, ROOT)
+        worker_setup.build_and_stage(ROOT / "target/worker-setup", environment=environment)
     npm = "npm.cmd" if os.name == "nt" else "npm"
     npx = "npx.cmd" if os.name == "nt" else "npx"
     command = [npx, "--no-install", "tauri", "build", "--ci"]
@@ -54,8 +58,8 @@ def build(platform, signed=False, local_release=False):
         # against the local descriptor.
         command += ["--features", "custom-protocol,local-release"]
     command += ["--config", configuration(platform, signed, local_release), "--", "--locked"]
-    subprocess.run([npm, "ci"], cwd=ROOT, check=True)
-    subprocess.run(command, cwd=ROOT, check=True)
+    subprocess.run([npm, "ci"], cwd=ROOT, env=environment, check=True)
+    subprocess.run(command, cwd=ROOT, env=environment, check=True)
 
 
 if __name__ == "__main__":

@@ -1,50 +1,13 @@
 """Build known, static-CRT self-test fixtures; the offline VM needs no compiler."""
 
-import os
 from pathlib import Path
 import subprocess
 
 from scripts._lib.checksums import sha256
+from scripts._lib.msvc import compiler_environment
 from scripts._lib.repository import ROOT
 from scripts.worker.paths import no_links, regular
 from scripts.worker.pe import require_static_crt
-
-
-def compiler_environment(architecture):
-    if architecture not in {"x64", "x86"}:
-        raise ValueError("Unsupported self-test architecture")
-    installation = os.environ.get("VSINSTALLDIR")
-    if not installation:
-        locator = (
-            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
-            / "Microsoft Visual Studio/Installer/vswhere.exe"
-        )
-        installation = subprocess.check_output(
-            [
-                str(regular(locator)),
-                "-latest",
-                "-products",
-                "*",
-                "-requires",
-                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                "-property",
-                "installationPath",
-            ],
-            text=True,
-        ).strip()
-    setup = regular(Path(installation) / "Common7/Tools/VsDevCmd.bat")
-    if any(value in str(setup) for value in ['"', "%", "\n", "\r"]):
-        raise ValueError("Ambiguous MSVC setup path")
-    command = f'cmd.exe /u /d /v:off /s /c ""{setup}" -no_logo -host_arch=x64 -arch={architecture} >nul && set"'
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode:
-        raise ValueError("MSVC self-test toolchain initialization failed")
-    environment = {key.upper(): value for key, value in os.environ.items()}
-    for line in result.stdout.decode("utf-16-le").splitlines():
-        if "=" in line and not line.startswith("="):
-            key, value = line.split("=", 1)
-            environment[key.upper()] = value
-    return environment
 
 
 def build(output, inspector=None):

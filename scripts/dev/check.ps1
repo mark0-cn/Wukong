@@ -9,9 +9,9 @@ try {
     # checks instead; each failing step throws an explicit message.
     & cargo fmt --all -- --check 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Rust formatting check failed.' }
-    & cargo clippy --all-targets -- -D warnings 2>&1
+    & python -m scripts.dev.msvc_cargo -- clippy --all-targets -- -D warnings 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Rust lint check failed.' }
-    & cargo test --all-targets 2>&1
+    & python -m scripts.dev.msvc_cargo -- test --all-targets 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
     & python -m compileall -q workers/runtime 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Worker module syntax check failed.' }
@@ -39,7 +39,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Linux worker acceptance failed.' }
     }
     if ($Release) {
-        & cargo build --release 2>&1
+        & python -m scripts.dev.msvc_cargo -- build --release 2>&1
         if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
     }
 } finally {

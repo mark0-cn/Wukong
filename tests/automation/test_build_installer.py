@@ -65,22 +65,31 @@ class BuildTests(unittest.TestCase):
     def test_windows_build_stages_the_setup_before_bundling(self):
         events = []
 
-        def stage(output):
-            events.append(("stage", output))
+        environment = {"PATH": "C:/msvc", "TMP": "D:/work/target/tmp"}
+
+        def stage(output, environment):
+            events.append(("stage", output, environment))
 
         def run(command, **kwargs):
-            events.append(("run", command))
+            events.append(("run", command, kwargs))
 
         with (
             patch.object(build_installer.worker_setup, "build_and_stage", side_effect=stage),
+            patch.object(
+                build_installer.worker_setup, "build_environment", return_value=environment
+            ),
+            patch.object(build_installer.msvc, "preflight") as preflight,
             patch.object(build_installer.subprocess, "run", side_effect=run),
             patch.object(build_installer, "prepare_local_release") as prepare,
         ):
             build_installer.build("windows")
         prepare.assert_not_called()
-        self.assertEqual(events[0], ("stage", ROOT / "target/worker-setup"))
+        preflight.assert_called_once_with(environment, ROOT)
+        self.assertEqual(events[0], ("stage", ROOT / "target/worker-setup", environment))
         self.assertEqual(events[1][1][1:], ["ci"])
+        self.assertEqual(events[1][2]["env"], environment)
         tauri = events[2][1]
+        self.assertEqual(events[2][2]["env"], environment)
         configuration = json.loads(tauri[tauri.index("--config") + 1])
         self.assertEqual(
             configuration["bundle"]["resources"],
@@ -98,6 +107,10 @@ class BuildTests(unittest.TestCase):
 
         with (
             patch.object(build_installer.worker_setup, "build_and_stage"),
+            patch.object(
+                build_installer.worker_setup, "build_environment", return_value={"PATH": "C:/msvc"}
+            ),
+            patch.object(build_installer.msvc, "preflight"),
             patch.object(build_installer.subprocess, "run", side_effect=run),
             patch.object(
                 build_installer, "prepare_local_release", return_value=(ROOT / "x", {})

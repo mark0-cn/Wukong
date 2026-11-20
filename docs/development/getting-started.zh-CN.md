@@ -18,6 +18,10 @@
 
 开发和测试 profile 会关闭 `aws-lc-sys`、`ring`、`libsqlite3-sys` 这三个 FFI 包的调试信息，避免 Cargo build script 进程链中的 MSVC `D8050` 调试记录失败，同时保留 Wukong 自身的调试信息。该包级折衷也适用于 Linux，release profile 不变；它不能替代必需的 MSVC/SDK 安装。
 
+Windows 上使用 `python -m scripts.dev.msvc_cargo --check` 自动发现 x64 Visual Studio C++ 工具和 Windows SDK，把 `TMP`/`TEMP` 指向 `target/tmp`，并通过真实子进程编译、归档和链接一个包含 `<stdint.h>` 的小程序。Cargo 命令前加 `python -m scripts.dev.msvc_cargo --`，例如 `python -m scripts.dev.msvc_cargo -- test --locked --all-targets`。该入口只报告工具链路径/版本，保留并显示显式的 `CC`/`CXX` 覆盖，不会静默替换。`D8050` 表示原生调试记录失败（上述包级 profile 避免其 `/Z7` 触发条件）；标准头文件出现 `C1083` 表示 MSVC/SDK 缺失或环境不完整；临时文件/输出写入出现 `LNK1104` 时应检查报告的可写 temp 路径。不要把过滤编译器参数的 shim 作为项目默认方案。
+
+`python -m scripts.dev.msvc_cargo --native-preflight` 还会在全新目标目录冷构建上述三个原生包，不受恢复的 Rust 缓存影响。预检失败时仅保留其任务自有目标目录供 build script 诊断。AWS-LC 的单个特性探测失败可能是上游正常回退，应依据最终 build script/Cargo 结果，而不是孤立探测的退出码。
+
 当前发布流水线不提供 macOS 正式桌面安装包。首个动态后端面向 Linux x86_64 ELF，原生 DbgEng/LLDB 后端尚未实现。
 
 <a id="clone-and-build-the-client"></a>

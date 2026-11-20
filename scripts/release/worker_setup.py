@@ -8,10 +8,10 @@ import shutil
 import subprocess
 import sys
 
+from scripts._lib import msvc
 from scripts._lib.checksums import sha256
 from scripts._lib.repository import ROOT
 from scripts.worker import toolchain
-from scripts.worker.build_probes import compiler_environment
 
 SETUP_NAME = "WukongWorkerSetup.exe"
 DEFAULT_OUTPUT = Path("target/worker-setup")
@@ -20,7 +20,7 @@ DEFAULT_CACHE = Path("target/windows-offline-cache")
 # offline components belong to worker media, not to the local native build.
 TOOLCHAIN_COMPONENTS = ("windbg_mcp",)
 
-EXECUTABLES = {"cargo", "cl.exe", "link.exe"}
+EXECUTABLES = set(msvc.EXECUTABLES)
 
 
 def resolve(path):
@@ -40,17 +40,16 @@ def ensure_writable_temporary():
 
     if os.name != "nt":
         return
-    temporary = ROOT / "target/tmp"
-    temporary.mkdir(parents=True, exist_ok=True)
+    temporary = msvc.workspace_temporary(ROOT)
     os.environ["TMP"] = str(temporary)
     os.environ["TEMP"] = str(temporary)
 
 
 def build_environment():
-    """Return the x64 MSVC environment used for native worker child processes."""
+    """Return the x64 MSVC/temp environment shared by all native child processes."""
 
     try:
-        return compiler_environment("x64")
+        return msvc.build_environment(ROOT)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise ValueError(
             "MSVC x64 build tools are unavailable; install Visual Studio C++ build tools "
@@ -84,7 +83,7 @@ def toolchain_status(cache):
 
 
 def check(cache=DEFAULT_CACHE):
-    """Validate MSVC, toolchain and native worker source without building anything."""
+    """Validate real MSVC/SDK child processes, toolchain and native worker source."""
 
     environment = build_environment()
     missing = sorted(
@@ -92,6 +91,7 @@ def check(cache=DEFAULT_CACHE):
     )
     if missing:
         raise ValueError("The x64 MSVC environment does not provide: " + ", ".join(missing))
+    msvc.preflight(environment, ROOT)
     return {
         "platform": "windows-amd64",
         "msvc_installation": environment.get("VSINSTALLDIR"),
@@ -105,11 +105,12 @@ def run(command, environment=None):
     subprocess.run(command, cwd=ROOT, env=environment, check=True)
 
 
-def build_and_stage(output, cache=DEFAULT_CACHE):
+def build_and_stage(output, cache=DEFAULT_CACHE, environment=None):
     """Build the native worker, stage its bytes and return the staged identity."""
 
-    ensure_writable_temporary()
-    environment = build_environment()
+    if environment is None:
+        ensure_writable_temporary()
+        environment = build_environment()
     cache = resolve(cache)
     toolchain_result = acquire_toolchain(cache)
     run(

@@ -91,6 +91,24 @@ jobs:
         with:
           shared-key: windows-checks-v2
           save-if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
+      - name: Cold native dependency preflight
+        id: native_preflight
+        if: needs.changes.outputs.rust == 'true'
+        run: python -m scripts.dev.msvc_cargo --native-preflight --preflight-target "$env:RUNNER_TEMP/wukong-native-preflight"
+      - name: Preserve bounded native build-script diagnostics
+        if: failure() && steps.native_preflight.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-native-build-diagnostics
+          path: |
+            ${{ runner.temp }}/wukong-native-preflight/debug/build/aws-lc-sys-*/output
+            ${{ runner.temp }}/wukong-native-preflight/debug/build/aws-lc-sys-*/stderr
+            ${{ runner.temp }}/wukong-native-preflight/debug/build/ring-*/output
+            ${{ runner.temp }}/wukong-native-preflight/debug/build/ring-*/stderr
+            ${{ runner.temp }}/wukong-native-preflight/debug/build/libsqlite3-sys-*/output
+            ${{ runner.temp }}/wukong-native-preflight/debug/build/libsqlite3-sys-*/stderr
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Version and release tooling tests
         if: needs.changes.outputs.rust == 'true'
         run: |
@@ -136,12 +154,12 @@ jobs:
       - name: Rust Clippy
         if: needs.changes.outputs.rust == 'true'
         run: |
-          cargo clippy --locked --all-targets -- -D warnings
+          python -m scripts.dev.msvc_cargo -- clippy --locked --all-targets -- -D warnings
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Rust tests
         if: needs.changes.outputs.rust == 'true'
         run: |
-          cargo test --locked --all-targets
+          python -m scripts.dev.msvc_cargo -- test --locked --all-targets
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Standalone Windows worker bootstrap

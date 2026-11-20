@@ -70,7 +70,7 @@ def package(output, *, signed=False, check=False, local_release=True):
                 flush=True,
             )
         print(
-            "Source and tool entry points checked. System libraries, Docker access and installer tools are checked during build."
+            "Source and tool entry points checked. Windows preflight also compiles, archives and links an SDK probe; other system libraries, Docker access and installer tools are checked during build."
         )
         return
     build("windows" if system == "Windows" else "linux", signed, local_release=local_release)

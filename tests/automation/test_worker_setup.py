@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from scripts._lib import msvc
 from scripts._lib.checksums import sha256
 from scripts.release import worker_setup
 
@@ -83,7 +84,8 @@ class WorkerSetupTests(unittest.TestCase):
             return {"assets": 1, "bytes": 2}
 
         with (
-            patch.object(worker_setup.subprocess, "check_output", side_effect=check_output),
+            patch.object(msvc.subprocess, "check_output", side_effect=check_output),
+            patch.object(msvc.subprocess, "run", side_effect=run),
             patch.object(worker_setup.subprocess, "run", side_effect=run),
             patch.object(worker_setup, "acquire_toolchain", side_effect=toolchain),
         ):
@@ -111,7 +113,7 @@ class WorkerSetupTests(unittest.TestCase):
 
     def test_missing_vswhere_reports_msvc_unavailable(self):
         self.vswhere.unlink()
-        with patch.object(worker_setup.subprocess, "run") as run:
+        with patch.object(msvc.subprocess, "run") as run:
             with self.assertRaisesRegex(ValueError, "MSVC x64 build tools are unavailable"):
                 worker_setup.build_and_stage(self.output, self.cache)
         run.assert_not_called()
@@ -119,10 +121,8 @@ class WorkerSetupTests(unittest.TestCase):
     def test_missing_dev_command_prompt_reports_msvc_unavailable(self):
         self.setup.unlink()
         with (
-            patch.object(
-                worker_setup.subprocess, "check_output", return_value=str(self.installation)
-            ),
-            patch.object(worker_setup.subprocess, "run") as run,
+            patch.object(msvc.subprocess, "check_output", return_value=str(self.installation)),
+            patch.object(msvc.subprocess, "run") as run,
         ):
             with self.assertRaisesRegex(ValueError, "MSVC x64 build tools are unavailable"):
                 worker_setup.build_and_stage(self.output, self.cache)
@@ -132,7 +132,8 @@ class WorkerSetupTests(unittest.TestCase):
         events = []
         check_output, run = self.staging_subprocess(events)
         with (
-            patch.object(worker_setup.subprocess, "check_output", side_effect=check_output),
+            patch.object(msvc.subprocess, "check_output", side_effect=check_output),
+            patch.object(msvc.subprocess, "run", side_effect=run),
             patch.object(worker_setup.subprocess, "run", side_effect=run),
             patch.object(
                 worker_setup,
@@ -204,9 +205,11 @@ class WorkerSetupTests(unittest.TestCase):
                 worker_setup.shutil, "which", side_effect=lambda name, path=None: name
             ) as which,
             patch.object(worker_setup.toolchain, "load_lock", return_value=lock),
+            patch.object(msvc, "preflight") as preflight,
             patch.object(worker_setup.subprocess, "run") as run,
         ):
             details = worker_setup.check(self.cache)
+        preflight.assert_called_once_with(environment, self.root)
         self.assertEqual(which.call_count, len(worker_setup.EXECUTABLES))
         run.assert_not_called()
         self.assertEqual(details["msvc_installation"], str(self.installation))
@@ -266,7 +269,7 @@ class WritableTemporaryTests(unittest.TestCase):
             patch.dict(os.environ, {"TMP": "C:/short/TEMP", "TEMP": "C:/short/TEMP"}),
         ):
             worker_setup.ensure_writable_temporary()
-            expected = str(self.root / "target/tmp")
+            expected = str((self.root / "target/tmp").resolve())
             self.assertEqual(os.environ["TMP"], expected)
             self.assertEqual(os.environ["TEMP"], expected)
             self.assertTrue((self.root / "target/tmp").is_dir())
