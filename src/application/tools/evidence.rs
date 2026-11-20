@@ -90,7 +90,7 @@ impl EvidenceService {
             tx.save_record(&coverage)?;
             for mut duplicate in matching {
                 duplicate.outcome = coverage.outcome.clone();
-                duplicate.updated_at = coverage.updated_at.clone();
+                duplicate.updated_at = coverage.updated_at;
                 tx.save_record(&duplicate)?;
             }
             Ok(serde_json::to_value(coverage)?)
