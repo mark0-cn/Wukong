@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Align evidence_read UTF-8 pages to character boundaries instead of returning base64 for split multibyte characters. Responses report requested and actual offsets when adjusted, preserve gap-free continuation, and keep base64 for genuinely invalid UTF-8; original evidence bytes and hashes are unchanged."
+zh_CN = "evidence_read 的 UTF-8 页面现在按字符边界对齐，不再因多字节字符被分页切开而返回 base64。发生调整时响应会报告请求和实际偏移，连续读取不会遗漏内容；真正无效的 UTF-8 仍使用 base64，原始证据字节和哈希保持不变。"

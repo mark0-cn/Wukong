@@ -104,8 +104,8 @@
     "text": "列出已登记的分析环境，不建立连接；配置存在不代表环境已就绪。"
   },
   "evidence_read": {
-    "source": "Read a bounded byte range from an integrity-checked evidence artifact. Non-UTF8 is base64.",
-    "text": "读取完整性已核对证据的有界字节范围；非 UTF-8 使用 base64。"
+    "source": "Read a bounded byte range from an integrity-checked evidence artifact. UTF-8 pages align to character boundaries and report requested/actual offsets; invalid UTF-8 is base64.",
+    "text": "读取完整性已核对证据的有界字节范围；UTF-8 页面按字符边界对齐并报告请求/实际偏移，无效 UTF-8 使用 base64。"
   },
   "evidence_search": {
     "source": "Find same-run evidence metadata by producer, target hash, content hash, job, media type or source. Bounded stable ID pages; follow next_cursor using after. Read content with evidence_read.",

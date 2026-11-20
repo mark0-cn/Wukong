@@ -1409,6 +1409,79 @@ async fn large_outputs_remain_original_and_can_be_read_in_ranges() -> Result<()>
 }
 
 #[tokio::test]
+async fn evidence_read_aligns_utf8_pages_without_changing_original_bytes() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let original = "a界b".as_bytes();
+    let evidence = store.artifact(
+        &run.id,
+        &agent.id,
+        "utf8-fixture",
+        "fixture",
+        original,
+        "application/octet-stream",
+        json!({}),
+    )?;
+    for (index, offset, length, expected_offset, expected, next_offset) in [
+        (0, 0, 2, 0, "a", Some(1)),
+        (1, 1, 1, 1, "界", Some(4)),
+        (2, 4, 1, 4, "b", None),
+        (3, 2, 1, 4, "b", None),
+    ] {
+        let output = service
+            .execute(
+                &agent.id,
+                &format!("utf8-read-{index}"),
+                "evidence_read",
+                json!({"evidence_id":evidence.id,"offset":offset,"length":length}),
+            )
+            .await?;
+        assert!(!output.is_error);
+        let page = result(&output);
+        assert_eq!(page["content"]["encoding"], "utf8");
+        assert_eq!(page["content"]["data"], expected);
+        assert_eq!(page["offset"], expected_offset);
+        assert_eq!(page["length"], expected.len());
+        assert_eq!(page["next_offset"], json!(next_offset));
+        if offset != expected_offset || length != expected.len() {
+            assert_eq!(page["boundary_adjusted"], true);
+            assert_eq!(page["requested_offset"], offset);
+            assert_eq!(page["requested_length"], length);
+        }
+    }
+    assert_eq!(store.read_evidence(&run.id, &evidence.id)?, original);
+
+    for (index, bytes) in [b"\x80a".as_slice(), b"a\xe7\x95".as_slice()]
+        .into_iter()
+        .enumerate()
+    {
+        let binary = store.artifact(
+            &run.id,
+            &agent.id,
+            &format!("binary-fixture-{index}"),
+            "fixture",
+            bytes,
+            "application/octet-stream",
+            json!({}),
+        )?;
+        let output = service
+            .execute(
+                &agent.id,
+                &format!("binary-read-{index}"),
+                "evidence_read",
+                json!({"evidence_id":binary.id,"offset":0,"length":bytes.len()}),
+            )
+            .await?;
+        assert_eq!(result(&output)["content"]["encoding"], "base64");
+        assert_eq!(result(&output)["offset"], 0);
+        assert_eq!(result(&output)["length"], bytes.len());
+    }
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn model_boolean_or_fake_verification_cannot_promote_a_finding() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, coordinator, run, producer) = fixture(temp.path())?;

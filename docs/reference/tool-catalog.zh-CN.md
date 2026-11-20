@@ -34,7 +34,7 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `emulate_run` | analyst / verifier | 否 | emu.run | 从起始地址用 Unicorn 有界模拟暂存目标：映射 ELF 段和栈，运行到 count 条指令或 PC 到 until 地址，返回寄存器及所需内存 data_base64。目标不原生执行；可用于 VM/手工代码（解释器循环、x87/FPU）而无需自写 Unicorn harness。init_regs 设置前提寄存器，memory 注入字节；watchdog 限制失控循环，未知指令错误包含地址。 |
 | `environment_doctor` | 全部 | 否 | explicit probe | 探测已登记环境的实际平台和工具；子任务只能探测分配给自己的环境。 |
 | `environment_list` | 全部 | 否 | controller | 列出已登记的分析环境，不建立连接；配置存在不代表环境已就绪。 |
-| `evidence_read` | 全部 | 否 | controller | 读取完整性已核对证据的有界字节范围；非 UTF-8 使用 base64。 |
+| `evidence_read` | 全部 | 否 | controller | 读取完整性已核对证据的有界字节范围；UTF-8 页面按字符边界对齐并报告请求/实际偏移，无效 UTF-8 使用 base64。 |
 | `evidence_search` | 全部 | 否 | controller | 按产出 agent、目标哈希、内容哈希、作业、媒体类型或来源检索本次运行的证据元数据。按稳定 ID 分页，通过 after 继续 next_cursor；使用 evidence_read 读取内容。 |
 | `exec_command` | analyst / verifier | 是 | exec.run | 在 worker 同步执行一条有界 shell 命令，返回 stdout/stderr/退出码。每次使用新临时目录；target 接收 stage_target 路径，并通过 $TARGET 暴露解析后文件（例如 "printf '<payload>' \| $TARGET"）。适合快速检查和 stdin PoC；长任务用 job_start 并重定向日志。files/... 只在直接 argv 项解析，不在 shell 字符串中解析；状态根使用 $WUKONG_STATE_DIR。 |
 | `file_get` | analyst / verifier | 否 | file.stat + file.read | 取回同 run 已声明的 worker 文件，并将原始字节保存为证据。 |

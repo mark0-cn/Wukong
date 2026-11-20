@@ -624,7 +624,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::EvidenceReadArgs>(
             "evidence_read",
             "tool-evidence-read",
-            "Read a bounded byte range from an integrity-checked evidence artifact. Non-UTF8 is base64.",
+            "Read a bounded byte range from an integrity-checked evidence artifact. UTF-8 pages align to character boundaries and report requested/actual offsets; invalid UTF-8 is base64.",
             ReplayPolicy::ReadOnly,
             false,
             |services, agent, call, name, args| {
