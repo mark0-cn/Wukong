@@ -386,14 +386,40 @@ pub fn read_record(path: &Path) -> Result<GenerationRecord> {
     Ok(record)
 }
 
-/// Read every generation record in one registry directory, sorted by identity.
-pub fn read_generation_records(registry: &Path) -> Result<Vec<GenerationRecord>> {
+/// One recorded generation that exists but cannot be read or validated.
+#[derive(Clone, Debug, Serialize)]
+pub struct UnreadableGenerationRecord {
+    pub path: PathBuf,
+    /// Installation identity from the record file name, when it is valid.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installation_id: Option<String>,
+    pub error: String,
+}
+
+/// Read-only inventory of one registry directory.
+///
+/// A corrupt record never hides the readable ones. Import and provisioning keep
+/// using [`read_generation_records`], which stays strict.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct GenerationRecordScan {
+    pub registry_present: bool,
+    pub records: Vec<GenerationRecord>,
+    pub unreadable: Vec<UnreadableGenerationRecord>,
+}
+
+/// Enumerate the registry for read-only diagnostics without failing on one
+/// corrupt record.
+pub fn scan_generation_records(registry: &Path) -> Result<GenerationRecordScan> {
     validate_absolute_path(registry, "registry")?;
+    let mut scan = GenerationRecordScan::default();
+    if !registry.try_exists()? {
+        return Ok(scan);
+    }
     ensure!(
-        registry.is_dir(),
-        "offline worker media registry is missing: {}",
-        registry.display()
+        reject_link(registry)?.is_dir(),
+        "offline worker media registry must be a directory"
     );
+    scan.registry_present = true;
     let mut paths = Vec::new();
     for entry in fs::read_dir(registry)? {
         let entry = entry?;
@@ -408,7 +434,43 @@ pub fn read_generation_records(registry: &Path) -> Result<Vec<GenerationRecord>>
         }
     }
     paths.sort();
-    paths.iter().map(|path| read_record(path)).collect()
+    for path in paths {
+        match read_record(&path) {
+            Ok(record) => scan.records.push(record),
+            Err(error) => {
+                let installation_id = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .filter(|stem| lowercase_hex(stem, 32))
+                    .map(str::to_owned);
+                scan.unreadable.push(UnreadableGenerationRecord {
+                    path,
+                    installation_id,
+                    error: format!("{error:#}"),
+                });
+            }
+        }
+    }
+    Ok(scan)
+}
+
+/// Read every generation record in one registry directory, sorted by identity.
+pub fn read_generation_records(registry: &Path) -> Result<Vec<GenerationRecord>> {
+    validate_absolute_path(registry, "registry")?;
+    ensure!(
+        registry.is_dir(),
+        "offline worker media registry is missing: {}",
+        registry.display()
+    );
+    let scan = scan_generation_records(registry)?;
+    if let Some(unreadable) = scan.unreadable.into_iter().next() {
+        return Err(anyhow::anyhow!(
+            "unreadable offline worker media generation record {}: {}",
+            unreadable.path.display(),
+            unreadable.error
+        ));
+    }
+    Ok(scan.records)
 }
 
 fn random_hex(characters: usize) -> String {
@@ -488,6 +550,32 @@ mod tests {
         invalid = record;
         invalid.media_path = PathBuf::from("relative/media");
         assert!(invalid.validate().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn scan_preserves_readable_records_and_reports_corrupt_ones() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let registry = temporary.path().join("windows-worker-media");
+        // A missing registry is an empty inventory, not a corrupt one.
+        let scan = scan_generation_records(&registry)?;
+        assert!(!scan.registry_present);
+        assert!(scan.records.is_empty() && scan.unreadable.is_empty());
+        let record = record_fixture(temporary.path());
+        write_record(&registry, &record)?;
+        let unusable = format!("{}.json", "f".repeat(32));
+        fs::write(registry.join(&unusable), b"{not-json")?;
+        let scan = scan_generation_records(&registry)?;
+        assert!(scan.registry_present);
+        assert_eq!(scan.records, vec![record]);
+        assert_eq!(scan.unreadable.len(), 1);
+        assert_eq!(
+            scan.unreadable[0].installation_id.as_deref(),
+            Some("ffffffffffffffffffffffffffffffff")
+        );
+        assert!(scan.unreadable[0].error.contains("parse"));
+        // Import/provisioning reads stay strict and refuse the corrupt registry.
+        assert!(read_generation_records(&registry).is_err());
         Ok(())
     }
 

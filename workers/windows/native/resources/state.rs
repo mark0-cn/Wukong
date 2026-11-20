@@ -74,7 +74,8 @@ impl crate::executors::plan::Response {
 }
 struct Recovering {
     request: crate::resources::resource_recovery::Request,
-    observation: super::observation::Observation<Vec<u8>>,
+    observation:
+        super::observation::Observation<crate::resources::resource_recovery::ProtectedReceipt>,
 }
 struct Finishing {
     request: Request,
@@ -945,25 +946,13 @@ impl ResourceState {
         let ActiveResource::Recovering(recovery) = &mut self.active else {
             anyhow::bail!("native recovery host vanished")
         };
-        let Some(bytes) = recovery.observation.poll()? else {
+        let Some(receipt) = recovery.observation.poll()?.cloned() else {
             return Ok(());
         };
-        let bytes = bytes.clone();
         let record = recovery.request.resource.clone();
         let artifact = format!("recovery-{}", recovery.request.attempt);
-        let result: Value = serde_json::from_slice(&bytes)?;
-        ensure!(
-            result["schema"] == crate::executors::resource_process::SCHEMA
-                && result["scope"] == "owned_resource_recovery"
-                && result["attempt"] == recovery.request.attempt
-                && result["resource_id"] == record.id
-                && result["owner"] == serde_json::to_value(&record.owner)?
-                && result["record_sha256"] == crate::artifacts::inputs::digest(&record)?
-                && result["jobs_empty"] == true
-                && result["profiles_removed"] == true
-                && result["scratch_removed"] == true,
-            "native recovery proof binding or cleanup differs"
-        );
+        // Observation check only: the owned host cannot mutate the ledger.
+        recovery.request.verify_cleanup(&receipt)?;
         if record.kind == ResourceKind::Process
             && self
                 .host()?
@@ -997,7 +986,7 @@ impl ResourceState {
             );
             self.finish_result(&request)?;
         } else {
-            self.finish_unknown(&record, &artifact, &bytes)?;
+            self.finish_unknown(&record, &artifact, receipt.bytes())?;
         }
         self.active = ActiveResource::Idle;
         Ok(())

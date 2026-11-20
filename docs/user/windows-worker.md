@@ -66,6 +66,8 @@ The environment name can be changed later in **Workspace settings → Advanced**
 
 If the VM address changed, start the setup again in the VM without arguments. It does not reinstall the worker; it re-enumerates the current adapter addresses and saves a refreshed install result. Import that file again instead of resetting the worker. If the certificate-like host key of a previously registered worker changed, import fails and the existing connection is not replaced.
 
+Each installation also lists read-only deployment diagnostics: whether its generation record, recovery record, imported install receipt and environment registration are recorded, missing or corrupt, and whether connection verification is not started, incomplete, verified or unavailable. Corrupt records are reported but never deleted or silently ignored, and a corrupt or missing record is never displayed as verified. One unreadable generation record does not hide the readable installations or overwrite anything; repair or remove the damaged record before importing or provisioning.
+
 Other failures show the backend detail plus an actionable hint:
 
 - Host-key mismatch or a receipt generated for another controller/installation: import is refused and nothing is overwritten. Recreate the media on this controller and install that media in the VM.

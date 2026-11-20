@@ -2,14 +2,14 @@
 use crate::{
     host::context::RuntimeContext,
     isolation::{processes::Spawn, security::AclPolicy},
-    resources::resource_recovery::Request,
+    resources::resource_recovery::{ProtectedReceipt, Request},
 };
 use anyhow::{Result, ensure};
 use std::{
     fs,
     time::{Duration, Instant},
 };
-pub(super) fn observe(context: RuntimeContext, request: Request) -> Result<Vec<u8>> {
+pub(super) fn observe(context: RuntimeContext, request: Request) -> Result<ProtectedReceipt> {
     let suffix = format!("recovery-{}", request.attempt);
     let path = context
         .artifacts
@@ -55,5 +55,7 @@ pub(super) fn observe(context: RuntimeContext, request: Request) -> Result<Vec<u
         .artifacts
         .result_path(&request.resource.id, &format!("{suffix}.json"))?;
     policy.verify(&path, false)?;
-    crate::artifacts::io::read_bytes(&path, 65536)
+    Ok(ProtectedReceipt::new(crate::artifacts::io::read_bytes(
+        &path, 65536,
+    )?))
 }

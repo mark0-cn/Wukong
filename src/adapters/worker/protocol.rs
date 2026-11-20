@@ -4,7 +4,8 @@ use serde_json::Value;
 pub use wukong_worker_protocol::{EnvironmentLease, PROTOCOL, WorkerCapacity, WorkerIdentity};
 
 pub use wukong_worker_protocol::{
-    JobResult, JobState, JobStatus, SessionHandle, SessionObservation, SessionState,
+    CleanupState, JobResult, JobState, JobStatus, OutcomeCertainty, SessionHandle,
+    SessionObservation, SessionState,
 };
 
 pub use wukong_worker_protocol::WorkerErrorKind;

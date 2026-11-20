@@ -16,11 +16,9 @@ from wukong_worker.platform.environment import safe_env
 
 
 def idle(root):
-    from wukong_worker.resources.jobs import JobManager
-
     from wukong_worker.resources.inventory import pending_resources
 
-    active = pending_resources(root, JobManager(root, False, True))
+    active = pending_resources(root)
     return {"idle": not active, "active": active}
 
 

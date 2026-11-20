@@ -20,7 +20,10 @@ mod receipt;
 mod state;
 mod template;
 
-pub use inventory::{InstallationView, RegisteredEnvironmentView, StatusReport, status};
+pub use inventory::{
+    DeploymentDiagnostics, DeploymentRecordIssue, InstallationDiagnostics, InstallationView,
+    RecordState, RegisteredEnvironmentView, StatusReport, VerificationState, status,
+};
 pub use receipt::{ConnectionReceipt, MAX_RECEIPT_BYTES};
 pub use state::InstallationStatus;
 pub use template::TemplateSource;
@@ -988,6 +991,91 @@ mod tests {
             InstallationStatus::InstalledPending
         );
         assert!(report.installations[0].warning.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn status_distinguishes_missing_corrupt_and_unverified_deployments() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let paths = SetupPaths::discover(root.path());
+        let config = AppConfig::default();
+        // No registry yet: an empty inventory, not an unreadable one.
+        let report = status(root.path(), &config)?;
+        assert_eq!(report.diagnostics.inventory, RecordState::Missing);
+        assert!(report.diagnostics.unreadable_generation_records.is_empty());
+        assert!(report.installations.is_empty());
+
+        let record = record(root.path(), INSTALLATION_ID);
+        write_record(root.path(), &record)?;
+        let report = status(root.path(), &config)?;
+        assert_eq!(report.diagnostics.inventory, RecordState::Present);
+        let view = &report.installations[0];
+        assert_eq!(view.diagnostics.generation_record, RecordState::Present);
+        assert_eq!(view.diagnostics.recovery_record, RecordState::Missing);
+        assert_eq!(view.diagnostics.receipt, RecordState::Missing);
+        assert_eq!(view.diagnostics.registration, RecordState::Missing);
+        assert_eq!(view.diagnostics.verification, VerificationState::NotStarted);
+        assert!(view.diagnostics.detail.is_none());
+
+        // Corruption is distinct from absence and never hides the generation record.
+        let sidecar = state::state_path(&paths.root, INSTALLATION_ID);
+        fs::create_dir_all(sidecar.parent().expect("sidecar directory"))?;
+        fs::write(&sidecar, b"{not-json")?;
+        let report = status(root.path(), &config)?;
+        let view = &report.installations[0];
+        assert_eq!(view.diagnostics.recovery_record, RecordState::Corrupt);
+        assert_eq!(view.diagnostics.receipt, RecordState::Unknown);
+        assert_eq!(view.diagnostics.verification, VerificationState::Unknown);
+        assert!(view.diagnostics.detail.is_some());
+        assert!(view.warning.is_some());
+        fs::remove_file(&sidecar)?;
+
+        // An imported receipt without a matching registration is unverified.
+        state::generated(&paths.root, &record, "Windows Worker 01234567")?;
+        state::remember_receipt(
+            &paths.root,
+            &record,
+            "Windows Worker 01234567",
+            &receipt(&record),
+        )?;
+        let report = status(root.path(), &config)?;
+        let view = &report.installations[0];
+        assert_eq!(view.diagnostics.recovery_record, RecordState::Present);
+        assert_eq!(view.diagnostics.receipt, RecordState::Present);
+        assert_eq!(view.diagnostics.registration, RecordState::Missing);
+        assert_eq!(view.diagnostics.verification, VerificationState::Incomplete);
+        assert!(view.diagnostics.detail.is_none());
+
+        // A matching registered environment completes verification.
+        state::mark_available(&paths.root, &record.installation_id, "192.168.199.40")?;
+        let mut config = AppConfig::default();
+        config.environments.insert(
+            record.environment_id.clone(),
+            environment(&record, "192.168.199.40"),
+        );
+        config.default_environment = Some(record.environment_id.clone());
+        let report = status(root.path(), &config)?;
+        let view = &report.installations[0];
+        assert_eq!(view.diagnostics.registration, RecordState::Present);
+        assert_eq!(view.diagnostics.verification, VerificationState::Verified);
+
+        // One corrupt generation record is listed without hiding the readable one.
+        let unreadable = paths.registry.join(format!("{}.json", "f".repeat(32)));
+        fs::write(&unreadable, b"not-json")?;
+        let report = status(root.path(), &config)?;
+        assert_eq!(report.diagnostics.inventory, RecordState::Present);
+        assert_eq!(report.diagnostics.unreadable_generation_records.len(), 1);
+        assert_eq!(
+            report.diagnostics.unreadable_generation_records[0]
+                .installation_id
+                .as_deref(),
+            Some("ffffffffffffffffffffffffffffffff")
+        );
+        assert_eq!(report.installations.len(), 1);
+        assert_eq!(
+            report.installations[0].diagnostics.verification,
+            VerificationState::Verified
+        );
         Ok(())
     }
 

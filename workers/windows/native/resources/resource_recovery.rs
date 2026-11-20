@@ -18,6 +18,19 @@ pub(crate) struct Request {
     pub attempt: String,
     pub resource: ResourceRecord,
 }
+/// A protected cleanup receipt returned by the owned recovery host. It records
+/// only observations (cleanup and ownership facts); verifying it against the
+/// journal and committing the final state belongs to the resource manager.
+#[derive(Clone)]
+pub(crate) struct ProtectedReceipt(Vec<u8>);
+impl ProtectedReceipt {
+    pub(super) fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+    pub(super) fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
 impl Request {
     pub(crate) fn validate(&self) -> Result<()> {
         let record = &self.resource;
@@ -102,6 +115,29 @@ fn owned_personas(record: &ResourceRecord) -> Result<Vec<(Role, String)>> {
         ));
     }
     Ok(personas)
+}
+impl Request {
+    /// Check a protected cleanup receipt against this exact attempt and its
+    /// original journal intent. Missing fields, a foreign owner, a different
+    /// resource or an unconfirmed cleanup all keep the original blocker; this
+    /// observation never writes the ledger.
+    pub(super) fn verify_cleanup(&self, receipt: &ProtectedReceipt) -> Result<Value> {
+        let record = &self.resource;
+        let result: Value = serde_json::from_slice(receipt.bytes())?;
+        ensure!(
+            result["schema"] == resource_process::SCHEMA
+                && result["scope"] == "owned_resource_recovery"
+                && result["attempt"] == self.attempt
+                && result["resource_id"] == record.id
+                && result["owner"] == serde_json::to_value(&record.owner)?
+                && result["record_sha256"] == digest(record)?
+                && result["jobs_empty"] == true
+                && result["profiles_removed"] == true
+                && result["scratch_removed"] == true,
+            "native recovery proof binding or cleanup differs"
+        );
+        Ok(result)
+    }
 }
 pub fn run(installation: &str, configuration: &Path, request_path: &Path) -> Result<Value> {
     security::require_system()?;

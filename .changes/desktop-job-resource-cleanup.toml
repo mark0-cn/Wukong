@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Desktop job rows now show the recorded execution result, the worker resource-cleanup status and the reason a finished job is still blocked as separate facts, linking the evidence IDs already referenced by the job record. A finished execution with pending cleanup survives a refresh and is no longer presented as complete."
+zh_CN = "桌面任务行现在分别显示记录的执行结果、Worker 资源清理状态，以及任务已结束但仍被阻塞的原因，并关联任务记录中已有的证据 ID。执行结束但清理仍待确认的状态会在刷新后保留，不再显示为已完成。"

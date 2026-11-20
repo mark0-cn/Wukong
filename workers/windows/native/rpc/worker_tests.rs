@@ -15,11 +15,32 @@ fn identity() -> Identity {
     }
 }
 fn fixture() -> Result<(tempfile::TempDir, Arc<Worker>)> {
+    let (root, worker, _resources) = fixture_state()?;
+    Ok((root, worker))
+}
+fn fixture_state() -> Result<(tempfile::TempDir, Arc<Worker>, Arc<ResourceManager>)> {
     let temp = tempfile::tempdir()?;
     let policy = AclPolicy::current_user()?;
     policy.apply(temp.path(), true)?;
-    let worker = Worker::with_policy(identity(), temp.path(), policy)?;
-    Ok((temp, Arc::new(worker)))
+    let resources = Arc::new(ResourceManager::open(
+        temp.path(),
+        identity(),
+        policy.clone(),
+    )?);
+    let worker = Worker::with_policy(identity(), temp.path(), policy, Arc::clone(&resources))?;
+    Ok((temp, Arc::new(worker), resources))
+}
+/// Reopen the RPC entry over an existing installation after a simulated
+/// service restart; the host would hand in a freshly opened manager.
+fn reopen(root: &std::path::Path) -> Result<Arc<Worker>> {
+    let policy = AclPolicy::current_user()?;
+    let resources = Arc::new(ResourceManager::open(root, identity(), policy.clone())?);
+    Ok(Arc::new(Worker::with_policy(
+        identity(),
+        root,
+        policy,
+        resources,
+    )?))
 }
 fn request(method: &str, params: Value) -> Value {
     json!({"jsonrpc":"2.0","id":1,"method":method,"params":params})
@@ -164,7 +185,7 @@ async fn busy_native_resources_do_not_block_renewal_or_allow_idle_transitions() 
     tokio::pin!(pending);
     assert!(futures_util::poll!(&mut pending).is_pending());
     assert_eq!(worker.leases.state.lock().unwrap().inflight, 4);
-    assert!(!worker.poll_resources()?);
+    assert!(!worker.resources.poll(false)?);
     let active = worker.clone();
     let expected_epoch = first["epoch"].clone();
     let operations = tokio::spawn(async move {
@@ -228,11 +249,7 @@ async fn persisted_native_resource_state_still_blocks_takeover_after_worker_reop
         )?;
     }
     drop(worker);
-    let worker = Arc::new(Worker::with_policy(
-        identity(),
-        root.path(),
-        AclPolicy::current_user()?,
-    )?);
+    let worker = reopen(root.path())?;
     assert_eq!(
         call(&worker, &acquire("next", "successor")).await?["error"]["data"]["kind"],
         "conflict"
@@ -298,11 +315,7 @@ async fn one_authority_owns_handshake_fencing_and_files() -> Result<()> {
         "lease_lost"
     );
     drop(worker);
-    let worker = Arc::new(Worker::with_policy(
-        identity(),
-        root.path(),
-        AclPolicy::current_user()?,
-    )?);
+    let worker = reopen(root.path())?;
     let successor = call(&worker, &acquire("next", "controller")).await?["result"].clone();
     assert!(successor["epoch"].as_u64().unwrap() > lease["epoch"].as_u64().unwrap());
     assert_eq!(
@@ -395,7 +408,142 @@ async fn corrupt_epoch_records_are_never_repaired_or_reused() -> Result<()> {
         .path()
         .join("lease-epochs/epoch-00000000000000000001.json");
     std::fs::write(&epoch, b"corrupt")?;
-    assert!(Worker::with_policy(identity(), root.path(), AclPolicy::current_user()?).is_err());
+    assert!(reopen(root.path()).is_err());
     assert_eq!(std::fs::read(epoch)?, b"corrupt");
+    Ok(())
+}
+
+#[tokio::test]
+async fn rpc_status_cancel_and_host_shutdown_share_the_initialized_resource_state() -> Result<()> {
+    use crate::resources::journal::{Cleanup, Reservation};
+    let (root, worker, resources) = fixture_state()?;
+    // The host and the RPC entry must hold the same resource state, not copies.
+    assert!(Arc::ptr_eq(&worker.resources, &resources));
+    resources.initialize(crate::resources::state::tests::context(root.path()))?;
+    let private = AclPolicy::private_vm();
+    for name in [
+        "metadata",
+        "metadata/resource-requests",
+        "metadata/resource-results",
+    ] {
+        private.create_directory(&root.path().join(name))?;
+    }
+    let lease = call(&worker, &acquire("run", "controller")).await?["result"].clone();
+    let owner = Owner {
+        identity: identity(),
+        run_id: "run".into(),
+        owner_id: "controller".into(),
+        epoch: lease["epoch"].as_u64().unwrap(),
+    };
+    // A process-kind record without the native process contract makes the
+    // automatic recovery intent refusable, so status polling reports the
+    // unchanged journal blocker instead of spawning an owned cleanup host.
+    let specification = json!({"trailing_fixture": true});
+    let resource = {
+        let mut state = resources.test_state().await;
+        match state.test_journal().reserve_start(
+            &owner,
+            "status-once",
+            ResourceKind::Process,
+            &specification,
+        )? {
+            Reservation::Reserved {
+                effect, resource, ..
+            } => {
+                state.test_journal().begin(&effect)?;
+                resource
+            }
+            _ => anyhow::bail!("missing native status reservation"),
+        }
+    };
+    // The host admission/shutdown check and RPC status observe one blocker.
+    assert!(!resources.idle()?);
+    assert!(resources.poll(false).is_err());
+    let status = call(
+        &worker,
+        &request(
+            "job.status",
+            json!({"job_id":resource,"_lease":lease,"_binding":identity()}),
+        ),
+    )
+    .await?;
+    assert_eq!(status["result"]["job_id"], resource);
+    assert_eq!(status["result"]["state"], "lost");
+    assert_eq!(status["result"]["cleanup_pending"], true);
+    // RPC cancellation requests the same owned resource without clearing it.
+    let cancelled = call(
+        &worker,
+        &request(
+            "job.cancel",
+            json!({"job_id":resource,"_lease":lease,"_binding":identity()}),
+        ),
+    )
+    .await?;
+    assert!(cancelled.get("error").is_none(), "{cancelled}");
+    assert!(
+        root.path()
+            .join("metadata/resource-requests")
+            .join(format!("{resource}.cancel"))
+            .exists()
+    );
+    resources.cancel().await?;
+    assert!(!resources.idle()?);
+
+    // The resource layer commits the final state under the original ticket.
+    let status_document = {
+        let mut state = resources.test_state().await;
+        let record = state.test_journal().resource(&owner, &resource)?;
+        json!({"job_id":resource,"kind":"process","state":"lost","native_owner":record.owner,
+            "cleanup_pending":false,
+            "result":{"outcome":"unknown","jobs_empty":true,"profiles_removed":true,
+                "scratch_removed":true,"recovery_artifact":format!("recovery-{}", "a".repeat(32)),
+                "recovery_receipt_sha256":"b".repeat(64)},
+            "isolation":"appcontainer"})
+    };
+    let status_path = root
+        .path()
+        .join("metadata/resource-results")
+        .join(format!("{resource}.status.json"));
+    crate::artifacts::io::publish_json(&status_path, &status_document, &private)?;
+    {
+        let mut state = resources.test_state().await;
+        state.test_journal().start_closing(&resource)?;
+        state.test_journal().close(
+            &resource,
+            Cleanup {
+                jobs_empty: true,
+                profiles_removed: true,
+                scratch_removed: true,
+            },
+        )?;
+    }
+    // RPC status and the host's leftover-cleanup verification now agree.
+    assert!(resources.idle()?);
+    assert!(resources.poll(false)?);
+    resources
+        .shutdown(
+            tokio::time::Instant::now() + std::time::Duration::from_secs(1),
+            || false,
+        )
+        .await?;
+    let terminal = call(
+        &worker,
+        &request(
+            "job.status",
+            json!({"job_id":resource,"_lease":lease,"_binding":identity()}),
+        ),
+    )
+    .await?;
+    assert_eq!(terminal["result"], status_document);
+    assert_eq!(terminal["result"]["cleanup_pending"], false);
+    // Releasing the lease uses the same manager state; the successor starts a
+    // new epoch only after the blocker is settled.
+    let released = call(&worker, &release(&lease)).await?;
+    assert_eq!(released["result"]["released"], true);
+    let successor = call(&worker, &acquire("next", "controller")).await?["result"].clone();
+    assert!(
+        successor["epoch"].as_u64().unwrap() > lease["epoch"].as_u64().unwrap(),
+        "{successor}"
+    );
     Ok(())
 }

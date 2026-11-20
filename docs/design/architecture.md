@@ -35,7 +35,7 @@ flowchart TB
     PROTO <--> WIN
 ```
 
-The application query facades supply neutral snapshots. Desktop health commands delegate observation to `application/maintenance/updates/health`, and the Windows setup page reads its inventory through `application/windows_worker_setup/inventory`. `interfaces/report/bundle` owns the file manifest and offline integrity checks for exported reports.
+The application query facades supply neutral snapshots. Desktop health commands delegate observation to `application/maintenance/updates/health`, and the Windows setup page reads its inventory through `application/windows_worker_setup/inventory`. `interfaces/report/bundle` owns the file manifest and offline integrity checks for exported reports. Desktop job presentation keeps the recorded execution result, resource-cleanup confirmation and blocking reason separate, linking only the evidence references already stored on the job; it never treats a finished execution as cleanup confirmation. The Windows deployment diagnostics likewise read generation records, the installation recovery record, the imported receipt and the current registration in their owning modules, keeping missing, corrupt and unverified states distinct; the desktop only projects the result.
 
 Public execution uses JSON-RPC protocol v3 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
 
@@ -70,6 +70,108 @@ Windows has one native worker authority. The controller owns business tasks/evid
 | `adapters/mcp` | rmcp protocol, Rig definitions, namespaces, timeouts, environment and message-size limits |
 | `interfaces/report`, `interfaces/cli` | Export, CLI, operator queries/intervention |
 | `interfaces/desktop`, `ui/src` | Tauri commands/workspace services, presentation adapters and React lifecycle |
+
+<a id="worker-resource-boundaries"></a>
+
+### Worker resource boundaries
+
+Workers keep one dependency direction: the RPC entry admits and dispatches requests, the resource lifecycle owns durable resources and their ledger, and platform adapters perform the bounded OS operations. The controller reads resources through RPC status methods or the direct read-only inventory used by maintenance and shutdown; it never writes a worker ledger. `tests/automation/test_execution_boundaries.py` guards these edges and reports the offending file plus the forbidden dependency; annotation-only (`TYPE_CHECKING`) imports and test-only references are excluded, and the documented exceptions below are allowlisted.
+
+```mermaid
+flowchart TB
+    subgraph ENTRY["Linux RPC entry"]
+        TRANSPORT["rpc/transport.py · rpc/server.py<br/>daemon endpoint, framing, admission"]
+        RUNTIME["host/runtime.py<br/>assembly, dispatch, shutdown"]
+        REGISTRY["rpc/catalog.py<br/>handler registration"]
+    end
+    subgraph LIFECYCLE["Resource lifecycle"]
+        JOBS["resources/jobs.py · supervisor.py<br/>reservation and supervision"]
+        SESSIONS["resources/sessions.py<br/>debugger and interactive owners"]
+        INVENTORY["resources/lifecycle.py · inventory.py<br/>shutdown and read-only inventory"]
+        EFFECTS["resources/operations.py<br/>request/effect ledger"]
+        JOBLEDGER["resources/job_ledger.py<br/>job ledger writer"]
+    end
+    subgraph PLATFORM["Platform adapters"]
+        ENVIRONMENT["platform/environment.py"]
+        ISOLATION["platform/isolation.py"]
+        PROCESS["platform/process_control.py"]
+        JOURNAL["platform/process_journal.py · process_owner.py"]
+    end
+    ARTIFACTS["artifacts primitives<br/>confined paths · atomic metadata"]
+    CONTROLLER["Controller<br/>job/session RPC reads"]
+    MAINTENANCE["Host maintenance and shutdown<br/>direct read-only inventory"]
+    CONTROLLER --> TRANSPORT
+    MAINTENANCE --> INVENTORY
+    TRANSPORT --> RUNTIME
+    REGISTRY -. registration .-> RUNTIME
+    RUNTIME --> JOBS
+    RUNTIME --> SESSIONS
+    RUNTIME --> INVENTORY
+    RUNTIME <--> EFFECTS
+    JOBS <--> JOBLEDGER
+    JOBS --> ENVIRONMENT
+    JOBS --> ISOLATION
+    SESSIONS --> JOURNAL
+    INVENTORY --> JOBLEDGER
+    JOBLEDGER --> PROCESS
+    ENVIRONMENT --> ARTIFACTS
+    ISOLATION --> ARTIFACTS
+```
+
+```mermaid
+flowchart TB
+    subgraph ENTRY["Windows RPC entry"]
+        WORKER["rpc/worker.rs<br/>public routing and resource handles"]
+        REGISTRY["rpc/catalog.rs<br/>method registration"]
+        SERVICE["host/service.rs<br/>SCM lifetime, startup, shutdown"]
+    end
+    subgraph LIFECYCLE["Resource lifecycle"]
+        MANAGER["resources/manager.rs<br/>ResourceManager: admission and serialization"]
+        STATE["resources/state.rs<br/>ResourceState: prepare, poll, commit"]
+        SESSION["resources/session.rs · operation.rs<br/>owned session and tool operations"]
+        RECOVERY["resources/resource_recovery.rs<br/>request validation and receipt checks"]
+        OBSERVER["resources/recovery_observer.rs<br/>external cleanup observer"]
+    end
+    LEDGER["resources/journal.rs<br/>SQLite resource ledger · schema 2"]
+    subgraph ADAPTERS["Platform and owned-execution adapters"]
+        ISOLATION["isolation/<br/>tokens · AppContainer · Jobs · ACL"]
+        CONTEXT["host/context.rs<br/>verified runtime context"]
+        EXECUTORS["executors/<br/>plans and owned observations"]
+        ARTIFACTS["artifacts/<br/>protected inputs and outputs"]
+    end
+    CONTROLLER["Controller<br/>job/session RPC reads"]
+    CONTROLLER --> WORKER
+    SERVICE --> MANAGER
+    SERVICE -. initializes with verified context .-> MANAGER
+    WORKER --> MANAGER
+    REGISTRY -. registration .-> WORKER
+    MANAGER --> STATE
+    STATE <--> LEDGER
+    STATE --> SESSION
+    SESSION --> LEDGER
+    STATE --> OBSERVER
+    OBSERVER --> RECOVERY
+    STATE --> RECOVERY
+    MANAGER --> CONTEXT
+    MANAGER --> ISOLATION
+    STATE --> ISOLATION
+    STATE --> EXECUTORS
+    STATE --> ARTIFACTS
+```
+
+| Responsibility | Linux worker (Python) | Windows worker (native Rust) |
+|---|---|---|
+| RPC entry (implemented) | `rpc/transport.py`/`rpc/server.py` own the daemon endpoint and framing; `rpc/catalog.py` registers callable handlers; `host/runtime.py` assembles services, admits requests and dispatches them through the request ledger, then delegates shutdown to `resources/lifecycle.py`. | `rpc/worker.rs` routes registered methods and holds the resource handle; `rpc/catalog.rs` registers methods; `host/service.rs` owns SCM lifetime, startup, recovery and shutdown and initializes the manager from a verified `host/context.rs`. |
+| Resource lifecycle (implemented) | `resources/jobs.py`/`supervisor.py` reserve, start and supervise jobs; `resources/sessions.py` owns debugger and interactive sessions; `resources/operations.py` reserves and reconciles external effects; `resources/lifecycle.py` and the read-only `resources/inventory.py` serve shutdown and maintenance. | `resources/manager.rs` serializes admission, reservation and ticket-checked completion; `resources/state.rs` advances explicit active-resource states; `resources/session.rs`/`operation.rs` own session and tool operations; `resources/resource_recovery.rs` validates recovery requests and receipts. |
+| Platform and owned adapters (implemented) | `platform/environment.py`, `isolation.py`, `process_control.py`, `process_journal.py` and `process_owner.py` provide bounded environment, Linux confinement and process identity/journal primitives; `windows_identity.py`/`windows_paths.py` serve trusted Windows fixtures. They may use artifact primitives, never resource services or RPC. | `isolation/` owns tokens, AppContainers, Jobs, ACLs and process launch; `artifacts/` owns protected IO; `executors/` owns plans and owned execution observations; resources depend on these adapters, while executors never write the ledger. |
+| Ledger and single writer | Job status is written only by `resources/job_ledger.py`, external effect records only by `resources/operations.py`, and session receipts only by `resources/sessions.py`, with process ownership in `platform/process_journal.py`. `resources/inventory.py` only reads. | `resources/journal.rs` is the only SQLite resource ledger (schema 2); every mutation is serialized by `ResourceManager` through `ResourceState`. `resources/recovery_observer.rs` returns only a `ProtectedReceipt` and names no ledger type; `resource_recovery.rs` verifies the receipt without committing it. |
+| Ownership evidence | Durable job records, session receipts and `processes.json` carry boot/namespace and process-creation identity; `inventory.py` treats a resource as settled only when the lifecycle observation and the journal's durable `closed` observation agree, and still discovers a session left with only `processes.json` after an interrupted publication. | Owner identity binds installation, boot, run, owner and epoch; capacity one is enforced by the journal; reservation tickets reject stale completion; cleanup `Cleanup` flags are business preconditions checked alongside OS observations, and recovery accepts only a System-owned receipt bound to the attempt, resource, owner, record digest and cleanup facts. |
+| Controller read path | RPC read methods route through `host/runtime.py` to resource-service status queries; host maintenance and shutdown probe `workbench/control.py` → `resources/inventory.py` directly. The controller never writes these records. | RPC status/list queries route through `rpc/worker.rs` to `ResourceManager`/`ResourceState` reads over the journal; host startup and keep-alive poll the same state. The controller never opens the native ledger or resource files. |
+| Manual verification required | Changing shutdown ordering, session ownership or the inventory judgement requires `python workers/tests/run.py unit -p 'test_*.py'` plus the affected Linux acceptance; adding or moving a guard exception needs an explicit direction review. | Changing the journal, manager, recovery observer or receipt verification requires Rust checks and native acceptance on a disposable VM or hosted runner; static guards cannot prove OS cleanup, crash recovery or receipt authenticity. |
+| Implemented now | RPC entry → resource lifecycle → platform adapters → artifacts; `resources/**` imports no RPC/transport entry module and `platform/**` imports only artifact primitives. | RPC entry → `ResourceManager` → `ResourceState`/`Journal`; resource lifecycle → isolation/artifacts/executors/host context; the cleanup observer cannot name ledger types. |
+| Remaining exceptions | None in the guarded production graph. Worker tests under `workers/tests/` may import any layer as fixtures, and `rpc/catalog.py` keeps a `TYPE_CHECKING`-only reference to `host/runtime.py`. | `resources/journal.rs` calls `crate::rpc::worker_identity::validate` and `crate::rpc::pipe_transport::service_name` before opening the journal; these are binding/transport identity helpers rather than the dispatch entry and are the guard's only allowlisted symbols. Test-only `crate::rpc` references in `resources/session.rs` and `resources/state_tests.rs` are not production dependencies. |
+
+The guards are static: they prove imports and symbol references, not runtime ownership, cleanup or receipt authenticity. The mermaid diagrams are illustrative; the guard test and production code are authoritative. Adding a genuinely required cross-layer edge means updating the guard's documented exception list and this matrix in both languages during review.
 
 <a id="一次任务如何运行"></a>
 

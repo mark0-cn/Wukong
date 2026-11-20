@@ -380,3 +380,362 @@ fn interrupted_launch_retry_never_reopens_a_new_owners_manifest_or_input() -> Re
     assert!(!runtime.journal.idle()?);
     Ok(())
 }
+
+fn recovery_specification() -> Value {
+    json!({
+        "native_process_schema": crate::executors::resource_process::SCHEMA,
+        "process": {"argv": ["files/fixture.exe"], "timeout_secs": 30},
+    })
+}
+
+fn protected_directories(root: &std::path::Path) -> Result<()> {
+    let policy = AclPolicy::private_vm();
+    let metadata = root.join("metadata");
+    if !metadata.try_exists()? {
+        policy.create_directory(&metadata)?;
+    }
+    for name in ["resource-requests", "resource-results"] {
+        let path = metadata.join(name);
+        if !path.try_exists()? {
+            policy.create_directory(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn interrupted_process(
+    journal: &mut Journal,
+    request_id: &str,
+) -> Result<(String, String, ResourceRecord)> {
+    let Reservation::Reserved {
+        effect, resource, ..
+    } = journal.reserve_start(
+        &owner(),
+        request_id,
+        ResourceKind::Process,
+        &recovery_specification(),
+    )?
+    else {
+        anyhow::bail!("missing interrupted process reservation");
+    };
+    let _ticket = journal.begin(&effect)?;
+    let record = journal.resource(&owner(), &resource)?;
+    Ok((effect, resource, record))
+}
+
+fn recovery_request(
+    record: ResourceRecord,
+    attempt: &str,
+) -> crate::resources::resource_recovery::Request {
+    crate::resources::resource_recovery::Request {
+        schema: crate::executors::resource_process::SCHEMA,
+        attempt: attempt.into(),
+        resource: record,
+    }
+}
+
+fn cleanup_receipt(request: &crate::resources::resource_recovery::Request) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(&json!({
+        "schema": crate::executors::resource_process::SCHEMA,
+        "scope": "owned_resource_recovery",
+        "attempt": request.attempt,
+        "resource_id": request.resource.id,
+        "record_sha256": crate::artifacts::inputs::digest(&request.resource)?,
+        "owner": request.resource.owner,
+        "guardian_found": false,
+        "jobs_empty": true,
+        "profiles_removed": true,
+        "scratch_removed": true,
+        "isolation": "appcontainer",
+    }))?)
+}
+
+fn observe_recovery(
+    state: &mut ResourceState,
+    request: crate::resources::resource_recovery::Request,
+    receipt: Vec<u8>,
+) {
+    state.active = ActiveResource::Recovering(Box::new(Recovering {
+        request,
+        observation: super::super::observation::Observation::Complete(
+            crate::resources::resource_recovery::ProtectedReceipt::new(receipt),
+        ),
+    }));
+}
+
+#[test]
+fn mismatched_cleanup_receipts_keep_the_existing_recovery_blocker() -> Result<()> {
+    let (root, _inputs, mut state) = fixture()?;
+    protected_directories(root.path())?;
+    let (effect, resource, record) = interrupted_process(&mut state.journal, "interrupted")?;
+    let request = recovery_request(record, &"a".repeat(32));
+    request.validate()?;
+    let original = cleanup_receipt(&request)?;
+    let status_path = state
+        .host()?
+        .artifacts
+        .result_path(&resource, "status.json")?;
+    let base: Value = serde_json::from_slice(&original)?;
+    let mut rejected = vec![b"not a receipt".to_vec()];
+    for (field, value) in [
+        ("attempt", json!("b".repeat(32))),
+        ("resource_id", json!("0".repeat(32))),
+        ("record_sha256", json!("f".repeat(64))),
+        ("scope", json!("owned_resource_cleanup")),
+        ("jobs_empty", json!(false)),
+    ] {
+        let mut changed = base.clone();
+        changed[field] = value;
+        rejected.push(serde_json::to_vec(&changed)?);
+    }
+    let mut foreign_owner = base.clone();
+    foreign_owner["owner"]["epoch"] = json!(9);
+    rejected.push(serde_json::to_vec(&foreign_owner)?);
+    let mut missing = base.clone();
+    missing.as_object_mut().unwrap().remove("scratch_removed");
+    rejected.push(serde_json::to_vec(&missing)?);
+    for receipt in rejected {
+        observe_recovery(&mut state, request.clone(), receipt);
+        assert!(state.poll_recovery().is_err());
+        assert!(matches!(state.active, ActiveResource::Recovering(_)));
+        assert!(!state.idle()?);
+        assert_eq!(
+            state.journal.resource(&owner(), &resource)?.phase,
+            Phase::Preparing
+        );
+        assert!(!status_path.try_exists()?);
+    }
+    observe_recovery(&mut state, request.clone(), original.clone());
+    state.poll_recovery()?;
+    assert!(matches!(state.active, ActiveResource::Idle));
+    assert!(state.idle()?);
+    let status: Value =
+        serde_json::from_slice(&crate::artifacts::io::read_bytes(&status_path, 65536)?)?;
+    assert_eq!(status["job_id"], resource);
+    assert_eq!(status["state"], "lost");
+    assert_eq!(status["cleanup_pending"], false);
+    assert_eq!(status["result"]["outcome"], "unknown");
+    assert_eq!(status["result"]["jobs_empty"], true);
+    assert_eq!(status["result"]["profiles_removed"], true);
+    assert_eq!(status["result"]["scratch_removed"], true);
+    assert_eq!(
+        status["result"]["recovery_artifact"],
+        format!("recovery-{}", request.attempt)
+    );
+    assert_eq!(
+        status["result"]["recovery_receipt_sha256"],
+        hex::encode(Sha256::digest(&original))
+    );
+    match state.journal.lookup_start(
+        &owner(),
+        "interrupted",
+        ResourceKind::Process,
+        &recovery_specification(),
+    )? {
+        Some(Reservation::Completed {
+            effect: seen,
+            resource: seen_resource,
+            phase: Phase::Closed,
+            outcome: Outcome::UncertainClosed,
+        }) => {
+            assert_eq!(seen, effect);
+            assert_eq!(seen_resource, resource);
+        }
+        other => anyhow::bail!("cleanup observation must commit against its ticket: {other:?}"),
+    }
+    Ok(())
+}
+
+#[test]
+fn restart_keeps_unknown_result_and_cleanup_confirmation_separate_and_rejects_late_results()
+-> Result<()> {
+    let root = tempfile::tempdir()?;
+    let policy = AclPolicy::current_user()?;
+    policy.apply(root.path(), true)?;
+    let mut journal = Journal::with_policy(root.path(), owner().identity, policy.clone())?;
+    let (_effect, resource, record) = interrupted_process(&mut journal, "interrupted")?;
+    let restart_request = recovery_request(record, &"a".repeat(32));
+    restart_request.validate()?;
+    let restart_receipt = cleanup_receipt(&restart_request)?;
+    drop(journal);
+
+    // After the service restart, the resource layer concludes the interrupted
+    // attempt from its protected cleanup receipt.
+    protected_directories(root.path())?;
+    let journal = Journal::with_policy(root.path(), owner().identity, policy.clone())?;
+    let mut state = self::state(journal, root.path());
+    let receipt_path = state
+        .host()?
+        .artifacts
+        .result_path(&resource, &format!("recovery-{}", restart_request.attempt))?;
+    state
+        .host()?
+        .artifacts
+        .retain(&receipt_path, &restart_receipt)?;
+    observe_recovery(&mut state, restart_request.clone(), restart_receipt.clone());
+    state.poll_recovery()?;
+    assert!(state.idle()?);
+    let status_path = state
+        .host()?
+        .artifacts
+        .result_path(&resource, "status.json")?;
+    let status_bytes = std::fs::read(&status_path)?;
+    let status: Value = serde_json::from_slice(&status_bytes)?;
+    assert_eq!(status["job_id"], resource);
+    assert_eq!(status["state"], "lost");
+    assert_eq!(status["cleanup_pending"], false);
+    assert_eq!(status["result"]["outcome"], "unknown");
+    assert_eq!(status["result"]["jobs_empty"], true);
+    assert_eq!(status["result"]["profiles_removed"], true);
+    assert_eq!(status["result"]["scratch_removed"], true);
+    assert_eq!(
+        status["result"]["recovery_artifact"],
+        format!("recovery-{}", restart_request.attempt)
+    );
+    assert_eq!(
+        status["result"]["recovery_receipt_sha256"],
+        hex::encode(Sha256::digest(&restart_receipt))
+    );
+    // The cleanup conclusion stays a separate protected receipt.
+    assert_eq!(std::fs::read(&receipt_path)?, restart_receipt);
+    match state.journal.lookup_start(
+        &owner(),
+        "interrupted",
+        ResourceKind::Process,
+        &recovery_specification(),
+    )? {
+        Some(Reservation::Completed {
+            outcome: Outcome::UncertainClosed,
+            phase: Phase::Closed,
+            ..
+        }) => {}
+        other => anyhow::bail!("restart changed the uncertain outcome record: {other:?}"),
+    }
+    drop(state);
+
+    // A second restart sees the same terminal record. A stale recovery result
+    // for the finished attempt must neither rewrite it nor settle a newer
+    // resource's blocker.
+    let journal = Journal::with_policy(root.path(), owner().identity, policy)?;
+    let mut state = self::state(journal, root.path());
+    assert_eq!(state.status(&owner(), &resource)?, status);
+    let mut stale: Value = serde_json::from_slice(&restart_receipt)?;
+    stale["guardian_found"] = json!(true);
+    let stale = serde_json::to_vec(&stale)?;
+    let (_, later, later_record) = interrupted_process(&mut state.journal, "later")?;
+    observe_recovery(&mut state, restart_request.clone(), stale);
+    assert!(state.poll_recovery().is_err());
+    assert!(!state.idle()?);
+    assert_eq!(
+        state.journal.resource(&owner(), &later)?.phase,
+        Phase::Preparing
+    );
+    assert_eq!(
+        std::fs::read(&status_path)?,
+        status_bytes,
+        "a stale receipt must not overwrite the existing result"
+    );
+
+    // Only the newer attempt's own confirmed cleanup settles its blocker.
+    let later_request = recovery_request(later_record, &"b".repeat(32));
+    later_request.validate()?;
+    let later_receipt = cleanup_receipt(&later_request)?;
+    observe_recovery(&mut state, later_request, later_receipt.clone());
+    state.poll_recovery()?;
+    assert!(state.idle()?);
+    let later_status_path = state.host()?.artifacts.result_path(&later, "status.json")?;
+    let later_status: Value = serde_json::from_slice(&crate::artifacts::io::read_bytes(
+        &later_status_path,
+        65536,
+    )?)?;
+    assert_eq!(later_status["result"]["outcome"], "unknown");
+    assert_eq!(
+        later_status["result"]["recovery_receipt_sha256"],
+        hex::encode(Sha256::digest(&later_receipt))
+    );
+    assert_eq!(std::fs::read(&status_path)?, status_bytes);
+    Ok(())
+}
+
+#[tokio::test]
+async fn host_shutdown_keeps_unconfirmed_cleanup_blocked_until_owned_work_settles() -> Result<()> {
+    let idle_root = tempfile::tempdir()?;
+    let policy = AclPolicy::current_user()?;
+    policy.apply(idle_root.path(), true)?;
+    let idle = crate::resources::manager::ResourceManager::open(
+        idle_root.path(),
+        owner().identity,
+        policy.clone(),
+    )?;
+    idle.initialize(context(idle_root.path()))?;
+    idle.shutdown(
+        tokio::time::Instant::now() + std::time::Duration::from_secs(1),
+        || false,
+    )
+    .await?;
+    assert!(idle.idle()?);
+
+    let root = tempfile::tempdir()?;
+    policy.apply(root.path(), true)?;
+    let resources =
+        crate::resources::manager::ResourceManager::open(root.path(), owner().identity, policy)?;
+    resources.initialize(context(root.path()))?;
+    protected_directories(root.path())?;
+    let (release, wait) = tokio::sync::oneshot::channel::<()>();
+    let resource = {
+        let mut state = resources.test_state().await;
+        let Reservation::Reserved {
+            effect, resource, ..
+        } = state.test_journal().reserve_start(
+            &owner(),
+            "pending",
+            ResourceKind::Debugger,
+            &json!({"trusted_fixture": true}),
+        )?
+        else {
+            anyhow::bail!("missing pending fixture reservation");
+        };
+        let ticket = state.test_journal().begin(&effect)?;
+        state.active = ActiveResource::Starting(Box::new(Starting {
+            resource: resource.clone(),
+            request_id: "pending".into(),
+            ticket,
+            task: tokio::spawn(async move {
+                let _ = wait.await;
+                anyhow::bail!("fixture startup interrupted");
+            }),
+        }));
+        resource
+    };
+    assert!(!resources.idle()?);
+    let error = resources
+        .shutdown(
+            tokio::time::Instant::now() + std::time::Duration::from_millis(150),
+            || false,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("native resource cleanup remains pending during service stop"),
+        "{error:#}"
+    );
+    // The refused shutdown leaves the original blocker for a later attempt.
+    assert!(!resources.idle()?);
+    assert_eq!(
+        resources
+            .test_state()
+            .await
+            .test_journal()
+            .resource(&owner(), &resource)?
+            .phase,
+        Phase::Preparing
+    );
+    assert!(!resources.poll(false)?);
+    release.send(()).unwrap();
+    tokio::task::yield_now().await;
+    // The interrupted launch still owns its journal blocker.
+    assert!(!resources.idle()?);
+    Ok(())
+}

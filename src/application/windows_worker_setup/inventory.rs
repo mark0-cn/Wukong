@@ -1,10 +1,18 @@
-//! Read-only inventory of recorded worker media and registered environments.
+//! Read-only inventory of recorded worker media, registered environments and
+//! deployment diagnostics.
+//!
+//! Each record is read by its owning module: the media registry owns immutable
+//! generation records, [`super::state`] owns the controller-side recovery
+//! record with the imported receipt, and the configuration owns the current
+//! environment registration. This module only projects those results for the
+//! desktop; it never executes the import/verification workflow.
 use super::{
-    SetupPaths, default_environment_name, environment_claims, read_records,
+    SetupPaths, default_environment_name, environment_claims,
     state::{self, InstallationStatus},
 };
 use crate::{
-    adapters::environments::EnvironmentConfig, application::worker_media::GenerationRecord,
+    adapters::environments::EnvironmentConfig,
+    application::worker_media::{GenerationRecord, scan_generation_records},
     config::AppConfig,
 };
 use anyhow::Result;
@@ -13,6 +21,72 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
 };
+
+/// Read-only state of one deployment record or inventory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordState {
+    /// The owning module read and validated the record.
+    Present,
+    /// No such record exists yet.
+    Missing,
+    /// The record exists but cannot be read or validated.
+    Corrupt,
+    /// A record this value derives from is corrupt, so the value is unknown.
+    Unknown,
+}
+
+/// Verification state of the managed connection to one installation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationState {
+    /// No install receipt has been imported, so verification never ran.
+    NotStarted,
+    /// A receipt, registration or stale verification exists but is not complete.
+    Incomplete,
+    /// A registered environment matches the verified installation.
+    Verified,
+    /// The owning recovery record is corrupt, so verification cannot be judged.
+    Unknown,
+}
+
+/// One unreadable generation record kept for read-only diagnostics.
+#[derive(Clone, Debug, Serialize)]
+pub struct DeploymentRecordIssue {
+    pub path: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installation_id: Option<String>,
+    pub error: String,
+}
+
+/// Report-level state of the installation inventory sources.
+#[derive(Clone, Debug, Serialize)]
+pub struct DeploymentDiagnostics {
+    /// Registry directory: present, missing, or unreadable.
+    pub inventory: RecordState,
+    pub unreadable_generation_records: Vec<DeploymentRecordIssue>,
+    /// Bounded registry read error; never translated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Read-only per-installation deployment diagnostics.
+#[derive(Clone, Debug, Serialize)]
+pub struct InstallationDiagnostics {
+    /// Immutable generation record read from the media registry.
+    pub generation_record: RecordState,
+    /// Controller-side recovery record: imported receipt, host-key pin and last address.
+    pub recovery_record: RecordState,
+    /// Public install receipt exported by the Windows setup.
+    pub receipt: RecordState,
+    /// Current configuration registration for this installation.
+    pub registration: RecordState,
+    /// Managed-connection verification.
+    pub verification: VerificationState,
+    /// Bounded read/validation error; never translated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
 
 /// One registered environment as reported to the setup GUI.
 #[derive(Clone, Debug, Serialize)]
@@ -47,6 +121,7 @@ pub struct InstallationView {
     pub last_address: Option<String>,
     pub candidate_addresses: Vec<String>,
     pub warning: Option<String>,
+    pub diagnostics: InstallationDiagnostics,
 }
 
 /// Response of `worker_media_status`.
@@ -54,6 +129,7 @@ pub struct InstallationView {
 pub struct StatusReport {
     pub environments: Vec<RegisteredEnvironmentView>,
     pub installations: Vec<InstallationView>,
+    pub diagnostics: DeploymentDiagnostics,
 }
 
 fn matching_registration<'a>(
@@ -66,24 +142,81 @@ fn matching_registration<'a>(
         .find(|(_, environment)| environment_claims(environment, record))
 }
 
+/// Read the deployment diagnostics without touching the import workflow.
+fn read_inventory(paths: &SetupPaths) -> (Vec<GenerationRecord>, DeploymentDiagnostics) {
+    match scan_generation_records(&paths.registry) {
+        Ok(scan) => (
+            scan.records,
+            DeploymentDiagnostics {
+                inventory: if scan.registry_present {
+                    RecordState::Present
+                } else {
+                    RecordState::Missing
+                },
+                unreadable_generation_records: scan
+                    .unreadable
+                    .into_iter()
+                    .map(|record| DeploymentRecordIssue {
+                        path: record.path,
+                        installation_id: record.installation_id,
+                        error: record.error,
+                    })
+                    .collect(),
+                detail: None,
+            },
+        ),
+        Err(error) => (
+            Vec::new(),
+            DeploymentDiagnostics {
+                inventory: RecordState::Corrupt,
+                unreadable_generation_records: Vec::new(),
+                detail: Some(format!("{error:#}")),
+            },
+        ),
+    }
+}
+
 /// Report every generated installation and every registered environment.
 pub fn status(home: &Path, config: &AppConfig) -> Result<StatusReport> {
     let paths = SetupPaths::discover(home);
-    let records = read_records(&paths)?;
+    let (records, diagnostics) = read_inventory(&paths);
     let mut installations = Vec::with_capacity(records.len());
     let mut statuses: BTreeMap<String, InstallationStatus> = BTreeMap::new();
     for record in &records {
-        let (sidecar, mut warning) = match state::read(&paths.root, &record.installation_id) {
-            Ok(state) => (state, None),
-            Err(error) => (None, Some(format!("{error:#}"))),
+        let (sidecar, recovery_record, recovery_detail) =
+            match state::read(&paths.root, &record.installation_id) {
+                Ok(Some(state)) => (Some(state), RecordState::Present, None),
+                Ok(None) => (None, RecordState::Missing, None),
+                Err(error) => (None, RecordState::Corrupt, Some(format!("{error:#}"))),
+            };
+        let receipt = match (&sidecar, recovery_record) {
+            (Some(state), _) if state.receipt.is_some() => RecordState::Present,
+            (Some(_), _) => RecordState::Missing,
+            (None, RecordState::Corrupt) => RecordState::Unknown,
+            (None, _) => RecordState::Missing,
         };
         let registration = matching_registration(config, record);
+        let registration_state = if registration.is_some() {
+            RecordState::Present
+        } else {
+            RecordState::Missing
+        };
         let verified = sidecar
             .as_ref()
             .is_some_and(|state| state.status == InstallationStatus::Available);
         let attempted = sidecar
             .as_ref()
             .is_some_and(|state| state.receipt.is_some());
+        let verification = if recovery_record == RecordState::Corrupt {
+            VerificationState::Unknown
+        } else if verified && registration.is_some() {
+            VerificationState::Verified
+        } else if attempted || registration.is_some() {
+            VerificationState::Incomplete
+        } else {
+            VerificationState::NotStarted
+        };
+        let mut warning = recovery_detail.clone();
         let computed = if verified && registration.is_some() {
             InstallationStatus::Available
         } else if verified {
@@ -127,6 +260,14 @@ pub fn status(home: &Path, config: &AppConfig) -> Result<StatusReport> {
                 .map(|receipt| receipt.candidate_addresses.clone())
                 .unwrap_or_default(),
             warning,
+            diagnostics: InstallationDiagnostics {
+                generation_record: RecordState::Present,
+                recovery_record,
+                receipt,
+                registration: registration_state,
+                verification,
+                detail: recovery_detail,
+            },
         });
     }
     let environments = config
@@ -155,5 +296,6 @@ pub fn status(home: &Path, config: &AppConfig) -> Result<StatusReport> {
     Ok(StatusReport {
         environments,
         installations,
+        diagnostics,
     })
 }

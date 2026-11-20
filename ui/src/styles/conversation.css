@@ -298,6 +298,12 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.job-facts { display: grid; }
+.job-fact-label { margin-right: 4px; }
+.job-fact code, .job-evidence-link code { margin-left: 2px; }
+.job-blocking { color: var(--warning); }
+.job-evidence-link { margin-right: 10px; white-space: nowrap; }
+.job-evidence { white-space: normal; }
 .tool-details {
   border-radius: 6px;
   padding: 12px;
