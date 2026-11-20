@@ -1,7 +1,7 @@
 //! Desktop update orchestration. Network preparation never switches the live worker.
 use super::service::Service;
 use crate::application::maintenance::updates::{
-    OnboardingRelease, environment, maintenance,
+    OnboardingRelease, environment, health, maintenance,
     manifest::{self, Manifest},
     recovery,
 };
@@ -47,7 +47,7 @@ pub struct Status {
     /// True for `cargo package-local` builds; the UI may later show a local/dev
     /// marker. Environment onboarding then uses the bundled local descriptor.
     pub local_build: bool,
-    pub health: super::update_health::Health,
+    pub health: health::Health,
 }
 pub struct Controller {
     status: Mutex<Status>,
@@ -213,7 +213,7 @@ impl Controller {
             result = future => result,
         }
     }
-    fn observe_tool_action(&self, snapshot: super::update_health::Health) {
+    fn observe_tool_action(&self, snapshot: health::Health) {
         let mut state = self.edit();
         state.needs_setup = !snapshot.configured;
         state.diagnosis = snapshot
@@ -421,11 +421,7 @@ impl Controller {
             let current_epoch = service.status().epoch;
             let (config, _, _operation) = service.maintenance_context(current_epoch)?;
             let snapshot = tokio::task::spawn_blocking(move || {
-                super::update_health::check_workbench(
-                    &config,
-                    super::update_health::HealthScope::Quick,
-                    current_epoch,
-                )
+                health::check_workbench(&config, health::HealthScope::Quick, current_epoch)
             })
             .await??;
             self.observe_tool_action(snapshot);
@@ -436,12 +432,12 @@ impl Controller {
         if matches!(action, Action::Health | Action::Doctor) {
             self.phase("health", UiMessage::new("system-checking-tool-health"));
             let snapshot = tokio::task::spawn_blocking(move || {
-                super::update_health::check(
+                health::check(
                     &config,
                     if matches!(action, Action::Doctor) {
-                        super::update_health::HealthScope::Full
+                        health::HealthScope::Full
                     } else {
-                        super::update_health::HealthScope::Quick
+                        health::HealthScope::Quick
                     },
                     epoch,
                 )
@@ -700,7 +696,7 @@ impl Controller {
                 let mut state = self.edit();
                 state.needs_setup = false;
                 // activate() has just checked the live container, tools, and saved binding.
-                state.health = super::update_health::Health::verified_now(service.status().epoch);
+                state.health = health::Health::verified_now(service.status().epoch);
             }
             self.phase(
                 "idle",
@@ -874,7 +870,7 @@ mod tests {
         let controller = Controller::default();
         controller.initialization(&AppConfig::default());
         assert!(controller.status().needs_setup);
-        controller.observe_tool_action(super::super::update_health::Health {
+        controller.observe_tool_action(health::Health {
             configured: true,
             running: Some(true),
             docker: Some(true),

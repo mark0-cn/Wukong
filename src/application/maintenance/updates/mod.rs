@@ -1,5 +1,7 @@
 //! Signed release identities and recoverable desktop maintenance.
 pub mod environment;
+#[cfg(feature = "desktop")]
+pub(crate) mod health;
 #[cfg(feature = "local-release")]
 pub mod local_release;
 pub mod maintenance;

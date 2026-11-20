@@ -109,7 +109,7 @@ pub fn check(config: &AppConfig, scope: HealthScope, epoch: u64) -> Result<Healt
 }
 
 /// Observe the explicitly managed Linux tools even before it is selected for new tasks.
-pub(super) fn check_workbench(
+pub(crate) fn check_workbench(
     config: &AppConfig,
     scope: HealthScope,
     epoch: u64,
