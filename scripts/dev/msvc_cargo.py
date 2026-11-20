@@ -50,14 +50,18 @@ def main():
 
     try:
         environment = msvc.build_environment()
-        print("MSVC environment: " + json.dumps(msvc.diagnostics(environment)), flush=True)
+        print(
+            "MSVC environment: " + json.dumps(msvc.diagnostics(environment)),
+            file=sys.stderr,
+            flush=True,
+        )
         msvc.preflight(environment)
         if args.native_preflight:
             msvc.native_preflight(environment, target=args.preflight_target)
         if command:
             if not args.exec:
                 command.insert(0, msvc.executable("cargo", environment))
-            print("Running: " + subprocess.list2cmdline(command), flush=True)
+            print("Running: " + subprocess.list2cmdline(command), file=sys.stderr, flush=True)
             result = subprocess.run(command, env=environment)
             return result.returncode
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
