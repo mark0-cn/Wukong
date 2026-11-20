@@ -35,7 +35,7 @@ flowchart TB
     PROTO <--> WIN
 ```
 
-应用层查询入口提供中立快照。桌面健康命令将观测交给 `application/maintenance/updates/health`，Windows 安装页面通过 `application/windows_worker_setup/inventory` 读取清单。`interfaces/report/bundle` 管理导出报告的文件清单和离线完整性校验。
+应用层查询入口提供中立快照。桌面健康命令将观测交给 `application/maintenance/updates/health`，Windows 安装页面通过 `application/windows_worker_setup/inventory` 读取清单。`interfaces/report/bundle` 管理导出报告的文件清单和离线完整性校验。桌面任务展示层分别呈现记录的执行结果、资源清理确认和阻塞原因，只关联任务记录中已有的证据引用，绝不把执行结束当作清理确认。Windows 部署诊断同样由各记录所属模块读取生成记录、安装恢复记录、已导入回执和当前登记状态，并区分缺失、损坏与未校验；桌面只投影结果。
 
 公开执行通过 SSH/stdio 使用 JSON-RPC 协议 v3。独立 `workers/protocol` crate 负责方法标识、请求/响应类型、副作用、资源需求及生成的 JSON Schema。Rust/jsonrpsee 和 Python/jsonrpcserver 注册实际处理器，双方校验同一组契约样本。模型工具目录负责角色可见性和所需方法，各 Worker 目录负责处理器及就绪状态。第三方观察保留为原始证据，文件/作业/会话身份与传输配置使用结构化类型。
 

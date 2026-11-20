@@ -1,5 +1,10 @@
 //! Project the existing worker job lifecycle onto its originating tool row.
+//!
+//! Execution, resource cleanup and the reason a finished job is not settled are
+//! read from the durable `JobRecord` only: the desktop never infers cleanup from
+//! the tool call result and never opens a second storage path.
 use super::*;
+use crate::adapters::worker::protocol::{CleanupState, OutcomeCertainty};
 
 #[expect(
     clippy::cast_possible_truncation,
@@ -11,6 +16,106 @@ fn timestamp(value: Option<&Value>) -> Option<chrono::DateTime<chrono::Utc>> {
         return None;
     }
     chrono::DateTime::from_timestamp_millis((seconds * 1000.0) as i64)
+}
+
+/// Bounded worker diagnostics that explain an unresolved resource.
+fn worker_detail(job: &JobRecord) -> Option<String> {
+    ["error", "reconciliation"]
+        .into_iter()
+        .find_map(|key| job.status.extra.get(key).and_then(Value::as_str))
+        .map(|detail| detail.trim())
+        .filter(|detail| !detail.is_empty())
+        .map(|detail| detail.chars().take(512).collect())
+}
+
+/// A finished execution does not imply cleanup; both must be shown separately.
+fn blocking(job: &JobRecord, stale: bool) -> Option<JobBlockingDisplay> {
+    if stale {
+        return Some(JobBlockingDisplay {
+            reason: UiMessage::new("progress-job-stale").into(),
+            detail: None,
+        });
+    }
+    let observation = job.status.observation();
+    if !observation.terminal {
+        return None;
+    }
+    if observation.outcome == OutcomeCertainty::Unknown {
+        return Some(JobBlockingDisplay {
+            reason: UiMessage::new("progress-job-blocked-outcome-unknown").into(),
+            detail: worker_detail(job),
+        });
+    }
+    if observation.cleanup != CleanupState::Confirmed {
+        return Some(JobBlockingDisplay {
+            reason: UiMessage::new("progress-job-blocked-cleanup").into(),
+            detail: worker_detail(job),
+        });
+    }
+    if !job.evidence_ready() {
+        let reason = if job.evidence_sync.state == SyncState::Failed {
+            "progress-job-blocked-evidence-failed"
+        } else {
+            "progress-job-blocked-evidence-pending"
+        };
+        return Some(JobBlockingDisplay {
+            reason: UiMessage::new(reason).into(),
+            detail: job
+                .evidence_sync
+                .error
+                .clone()
+                .or_else(|| worker_detail(job)),
+        });
+    }
+    None
+}
+
+/// Link the evidence records the controller already references from the job.
+fn evidence(job: &JobRecord) -> Vec<JobEvidenceDisplay> {
+    let mut evidence = Vec::new();
+    let execution = job
+        .execution_status_evidence_id
+        .clone()
+        .or_else(|| job.status_evidence_id.clone());
+    if let Some(evidence_id) = execution {
+        evidence.push(JobEvidenceDisplay {
+            role: JobEvidenceRole::Execution,
+            evidence_id,
+        });
+    }
+    if let Some(evidence_id) = job.status_evidence_id.clone() {
+        evidence.push(JobEvidenceDisplay {
+            role: JobEvidenceRole::Cleanup,
+            evidence_id,
+        });
+    }
+    let artifacts = job
+        .imported_artifacts
+        .as_ref()
+        .and_then(|value| value["artifacts"].as_array())
+        .map(|artifacts| {
+            artifacts
+                .iter()
+                .filter_map(|file| file["evidence_id"].as_str())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            job.evidence_sync
+                .files
+                .iter()
+                .filter_map(|file| file.evidence_id.as_deref())
+                .collect()
+        });
+    evidence.extend(
+        artifacts
+            .into_iter()
+            .take(4)
+            .map(|evidence_id| JobEvidenceDisplay {
+                role: JobEvidenceRole::Artifact,
+                evidence_id: evidence_id.to_owned(),
+            }),
+    );
+    evidence
 }
 
 pub fn with_job(
@@ -72,6 +177,31 @@ pub fn with_job(
             .and_then(|result| result.extra.get(key))
             .and_then(Value::as_u64)
     };
+    let observation = job.status.observation();
+    let result = job.status.result.as_ref();
+    let execution = JobExecutionDisplay {
+        finished: observation.terminal,
+        outcome: match observation.outcome {
+            OutcomeCertainty::Known => JobOutcome::Known,
+            OutcomeCertainty::Unknown => JobOutcome::Unknown,
+        },
+        exit_code: result.and_then(|result| result.exit_code),
+        passed: result.and_then(|result| result.passed),
+        evidence_id: job
+            .execution_status_evidence_id
+            .clone()
+            .or_else(|| job.status_evidence_id.clone()),
+    };
+    let cleanup = JobCleanupDisplay {
+        status: match observation.cleanup {
+            CleanupState::Pending => JobCleanupStatus::Pending,
+            CleanupState::Unconfirmed => JobCleanupStatus::Unconfirmed,
+            CleanupState::Confirmed => JobCleanupStatus::Confirmed,
+        },
+        // Only the settled final status is cleanup evidence; a finished
+        // execution receipt must not be presented as cleanup confirmation.
+        evidence_id: job.status_evidence_id.clone(),
+    };
     display.job = Some(JobDisplay {
         id: job.id.clone(),
         state: job.status.state,
@@ -81,6 +211,10 @@ pub fn with_job(
         observed_at: job.updated_at,
         attempts: count("attempts"),
         successes: count("successes"),
+        execution,
+        cleanup,
+        blocking: blocking(job, stale),
+        evidence: evidence(job),
     });
     display
 }

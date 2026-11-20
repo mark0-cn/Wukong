@@ -30,6 +30,13 @@ function useApi(handlers: Handlers) {
 const INSTALLATION_ID = '0123456789abcdef0123456789abcdef';
 const environmentId = 'windows-01234567';
 
+function diagnostics(): WorkerMediaInstallation['diagnostics'] {
+  return {
+    generation_record: 'present', recovery_record: 'missing',
+    receipt: 'missing', registration: 'missing', verification: 'not_started',
+  };
+}
+
 function installation(overrides: Partial<WorkerMediaInstallation> = {}): WorkerMediaInstallation {
   return {
     installation_id: INSTALLATION_ID, environment_id: environmentId,
@@ -41,6 +48,7 @@ function installation(overrides: Partial<WorkerMediaInstallation> = {}): WorkerM
     created_at: '2026-11-18T00:00:00Z',
     registered_environment_id: null, registered_environment_name: null,
     last_address: null, candidate_addresses: [], warning: null,
+    diagnostics: diagnostics(),
     ...overrides,
   };
 }
@@ -53,7 +61,9 @@ function network(overrides: Partial<WorkerMediaNetwork> = {}): WorkerMediaNetwor
   };
 }
 
-const status = (installations: WorkerMediaInstallation[] = []): WorkerMediaStatus => ({ environments: [], installations });
+const status = (installations: WorkerMediaInstallation[] = [],
+  diagnostics: WorkerMediaStatus['diagnostics'] = { inventory: 'present', unreadable_generation_records: [] }): WorkerMediaStatus =>
+  ({ environments: [], installations, diagnostics });
 
 function generation(): WorkerMediaGeneration {
   return {
@@ -235,4 +245,83 @@ test('a foreign or host-key mismatch error keeps the import dialog open with an 
   fireEvent.click(within(dialog).getByRole('button', { name: '导入并校验' }));
   await waitFor(() => expect(within(dialog).getByText(/主机密钥与已登记 Worker 不一致/)).toBeTruthy());
   expect(within(dialog).getByRole('alert').textContent).toContain('different worker host key');
+});
+
+test('corrupt records, missing records and incomplete verification are distinct states', async () => {
+  useApi({
+    worker_media_status: () => status([
+      installation({
+        diagnostics: {
+          generation_record: 'present', recovery_record: 'corrupt', receipt: 'unknown',
+          registration: 'missing', verification: 'unknown',
+          detail: 'read the worker media installation state: invalid JSON',
+        },
+        warning: 'read the worker media installation state: invalid JSON',
+      }),
+      installation({
+        installation_id: 'f'.repeat(32), environment_id: 'windows-ffffffff',
+        state: 'installed_pending', last_address: '192.168.199.40',
+        diagnostics: {
+          generation_record: 'present', recovery_record: 'present', receipt: 'present',
+          registration: 'missing', verification: 'incomplete',
+        },
+      }),
+    ]),
+  });
+  render(<WindowsWorker epoch={1} disabled={false} onRegistered={vi.fn()} />);
+  await screen.findByText('损坏');
+  expect(screen.getAllByText('已记录')).toHaveLength(4);
+  expect(screen.getAllByText('缺失').length).toBeGreaterThan(0);
+  expect(screen.getByText('损坏')).toBeTruthy();
+  expect(screen.getByText('无法判断')).toBeTruthy();
+  expect(screen.getByText('未完成')).toBeTruthy();
+  expect(screen.queryByText('已校验')).toBeNull();
+  expect(screen.getAllByLabelText('部署记录')).toHaveLength(2);
+});
+
+test('corrupt generation records are reported without hiding readable installations', async () => {
+  useApi({
+    worker_media_status: () => status(
+      [installation({
+        state: 'available', registered_environment_id: environmentId,
+        registered_environment_name: 'Windows Worker 01234567',
+        diagnostics: {
+          generation_record: 'present', recovery_record: 'present', receipt: 'present',
+          registration: 'present', verification: 'verified',
+        },
+      })],
+      {
+        inventory: 'present',
+        unreadable_generation_records: [{
+          path: 'C:\\state\\worker-media\\registry\\ffffffffffffffffffffffffffffffff.json',
+          installation_id: 'f'.repeat(32),
+          error: 'parse offline media generation record: expected value',
+        }],
+      },
+    ),
+  });
+  const { container } = render(<WindowsWorker epoch={1} disabled={false} onRegistered={vi.fn()} />);
+  await screen.findByText(/1 个损坏的安装记录已保留/);
+  expect(screen.getByText(/损坏的记录已保留在原位/)).toBeTruthy();
+  expect(screen.getByText('已校验')).toBeTruthy();
+  expect(screen.getByText('Windows Worker 01234567')).toBeTruthy();
+  const details = container.querySelector('details');
+  fireEvent.click(details!.querySelector('summary')!);
+  expect(screen.getByText(/parse offline media generation record/)).toBeTruthy();
+});
+
+test('an unreadable installation inventory is reported as a corrupt source', async () => {
+  useApi({
+    worker_media_status: () => status([], {
+      inventory: 'corrupt',
+      unreadable_generation_records: [],
+      detail: 'offline worker media registry must be a directory',
+    }),
+  });
+  const { container } = render(<WindowsWorker epoch={1} disabled={false} onRegistered={vi.fn()} />);
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('安装记录目录无法读取');
+  expect(alert.textContent).toContain('offline worker media registry must be a directory');
+  expect(screen.getByText(/尚未生成安装包/)).toBeTruthy();
+  expect(container.querySelector('.worker-installations')).toBeNull();
 });

@@ -2,8 +2,9 @@ import { currentLocale, t, useLocale } from '../../shared/i18n';
 import { useEffect, useId, useRef, useState } from 'react';
 import { api, errorText, errorValue } from '../../shared/api/bridge';
 import type {
-  WorkerMediaGeneration, WorkerMediaImportResult, WorkerMediaInstallation,
-  WorkerMediaNetwork, WorkerMediaStatus,
+  WorkerMediaDiagnostics, WorkerMediaGeneration, WorkerMediaImportResult, WorkerMediaInstallation,
+  WorkerMediaInstallationDiagnostics, WorkerMediaNetwork, WorkerMediaRecordState,
+  WorkerMediaStatus, WorkerMediaVerificationState,
 } from '../../shared/api/commands';
 import { displayPath } from '../../shared/lib/displayPath';
 import { Modal } from '../../shared/ui/Modal';
@@ -47,6 +48,49 @@ const stateClass = (state: WorkerMediaStateView) => state === 'available' ? 'sta
 type WorkerMediaStateView = WorkerMediaInstallation['state'];
 const cidrOf = (network: WorkerMediaNetwork) => `${network.ipv4}/${network.prefix_len}`;
 const networkLabel = (network: WorkerMediaNetwork) => `${network.name} — ${cidrOf(network)}${network.recommended ? ` · ${t('windows-worker-network-recommended')}` : ''}`;
+const recordLabel = (state: WorkerMediaRecordState) => t(`windows-worker-record-${state}`);
+const verificationLabel = (state: WorkerMediaVerificationState) => t(`windows-worker-verification-${state.replace('_', '-') as 'not-started' | 'incomplete' | 'verified' | 'unknown'}`);
+const unusualRecord = (state: WorkerMediaRecordState) => state !== 'present';
+
+/** Read-only deployment diagnostics; the desktop never reads these records itself. */
+function InstallationDiagnosticsView({ diagnostics }: { diagnostics: WorkerMediaInstallationDiagnostics }) {
+  const records: [string, WorkerMediaRecordState][] = [
+    [t('windows-worker-record-generation'), diagnostics.generation_record],
+    [t('windows-worker-record-recovery'), diagnostics.recovery_record],
+    [t('windows-worker-record-receipt'), diagnostics.receipt],
+    [t('windows-worker-record-registration'), diagnostics.registration],
+  ];
+  return <div className="worker-facts worker-diagnostics" role="group" aria-label={t('windows-worker-diagnostics')}>
+    {records.map(([label, state]) => <div key={label}>
+      <span>{label}</span>
+      <strong className={unusualRecord(state) ? 'worker-warning' : undefined}>{recordLabel(state)}</strong>
+    </div>)}
+    <div><span>{t('windows-worker-verification')}</span>
+      <strong className={diagnostics.verification === 'verified' ? undefined : 'worker-warning'}>
+        {verificationLabel(diagnostics.verification)}
+      </strong></div>
+  </div>;
+}
+
+function InventoryDiagnostics({ diagnostics }: { diagnostics: WorkerMediaDiagnostics }) {
+  const corrupt = diagnostics.inventory === 'corrupt' || diagnostics.inventory === 'unknown';
+  if (!corrupt && !diagnostics.unreadable_generation_records.length) return null;
+  return <div className="worker-failure">
+    {corrupt && <p className="error" role="alert">
+      {t('windows-worker-inventory-corrupt')}{diagnostics.detail && <><br /><code>{diagnostics.detail}</code></>}
+    </p>}
+    {diagnostics.unreadable_generation_records.length > 0 && <p className="worker-warning" role="alert">
+      {t('windows-worker-unreadable-records', { count: diagnostics.unreadable_generation_records.length })}
+    </p>}
+    {diagnostics.unreadable_generation_records.length > 0 && <>
+      <p className="muted">{t('windows-worker-corrupt-record-detail')}</p>
+      <details><summary>{t('windows-worker-diagnostics')}</summary><ul>
+        {diagnostics.unreadable_generation_records.map(record => <li key={record.path}>
+          <code>{displayPath(record.path)}</code><p className="muted">{record.error}</p></li>)}
+      </ul></details>
+    </>}
+  </div>;
+}
 
 function FailureNote({ error }: { error: Failure }) {
   const hint = failureHint(error);
@@ -122,6 +166,7 @@ export function WindowsWorker({ epoch, disabled = false, onRegistered }: {
     {notice && <p role="status" className="worker-notice">{notice}</p>}
     {error && <FailureNote error={error} />}
     {loading && !status && <p className="muted" role="status">{t('windows-worker-loading')}</p>}
+    {status && <InventoryDiagnostics diagnostics={status.diagnostics} />}
     {status && !installations.length && !loading && <p className="muted">{t('windows-worker-empty')}</p>}
     {installations.length > 0 && <div className="worker-installations">
       {installations.map(installation => <article key={installation.installation_id} className="worker-installation">
@@ -136,6 +181,7 @@ export function WindowsWorker({ epoch, disabled = false, onRegistered }: {
           <div><span>{t('windows-worker-ssh-port')}</span><strong>{installation.ssh_port}</strong></div>
           <div><span>{t('windows-worker-network')}</span><strong>{installation.management_peer}/{installation.network_prefix_len}</strong></div>
         </div>
+        <InstallationDiagnosticsView diagnostics={installation.diagnostics} />
         {!installation.zip_present && <p className="muted">{t('windows-worker-package-missing')}</p>}
         {installation.state === 'generated' && <details className="worker-instructions" open>
           <summary>{t('windows-worker-instructions')}</summary>
