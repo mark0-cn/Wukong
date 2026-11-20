@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Adds a manual `Workbench image` workflow that builds and pushes the version-tagged workbench tool image (`<namespace>/wukong-workbench:local-<version>`), so `cargo package-local` reuses the CI-built image instead of rebuilding a 10 GiB image locally. The repository is separate from the official release image and no `latest` tag moves."
+zh_CN = "新增手动 `Workbench image` 工作流，用于构建并推送带版本标签的 workbench 工具镜像（`<namespace>/wukong-workbench:local-<version>`），使 `cargo package-local` 复用 CI 构建的镜像，而不再在本地重建约 10 GiB 的镜像。该仓库与正式发布镜像分开，且不推 `latest` 标签。"
