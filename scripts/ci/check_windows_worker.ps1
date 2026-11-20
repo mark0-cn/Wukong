@@ -40,6 +40,10 @@ if ($LASTEXITCODE) { exit $LASTEXITCODE }
 $version = ($version | Out-String).Trim()
 python -m scripts.worker.toolchain --cache target/windows-offline-cache --download
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
+# CI restores target/ from the Rust cache, so a previous run's template output
+# can still exist. Clear only this generated directory before recreating it.
+Remove-Item -Recurse -Force target/windows-worker-media-template -ErrorAction SilentlyContinue
+Remove-Item -Force target/windows-worker-media-check.json -ErrorAction SilentlyContinue
 python -m scripts.worker.media template --cache target/windows-offline-cache --native target/windows-worker-native --output target/windows-worker-media-template --version $version
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 python -m scripts.worker.media check --template target/windows-worker-media-template --report target/windows-worker-media-check.json
