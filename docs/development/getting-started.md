@@ -16,6 +16,8 @@ Use this path to develop Wukong or run a checkout whose version has no published
 - For dynamic analysis: Docker with Linux containers, at least 25 GiB free for images/temporary layers, and Python 3.12+ to run source toolchain download scripts. Host GDB/pwntools installations are not needed with Docker tools.
 - A supported model service and model name; configure credentials through environment variable names.
 
+Development and test profiles disable debug information for the `aws-lc-sys`, `ring` and `libsqlite3-sys` FFI packages. This prevents MSVC `D8050` debug-record failures in Cargo build-script process chains while retaining Wukong's own debug information. The package-level trade-off also applies on Linux; release profiles are unchanged. It does not replace the required MSVC/SDK installation.
+
 macOS has no official desktop installer in this release pipeline. The first dynamic backend targets Linux x86_64 ELF; native DbgEng/LLDB backends are not implemented.
 
 <a id="获取并构建客户端"></a>

@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Prevent MSVC D8050 failures when Cargo build scripts compile native dependencies by disabling debug information only for the aws-lc-sys, ring and libsqlite3-sys packages in development/test profiles. Wukong's own debug information and release profiles are unchanged; the package-level trade-off also applies on Linux."
+zh_CN = "开发和测试 profile 现在仅关闭 aws-lc-sys、ring、libsqlite3-sys 的调试信息，防止 Cargo build script 编译原生依赖时触发 MSVC D8050。Wukong 自身的调试信息和 release profile 不变；该包级折衷也适用于 Linux。"

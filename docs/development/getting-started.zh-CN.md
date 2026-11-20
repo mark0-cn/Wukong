@@ -16,6 +16,8 @@
 - 动态分析需要支持 Linux 容器的 Docker，至少为镜像和临时层预留 25 GiB；源码工具链下载脚本需要 Python 3.12+。使用 Docker 工具时无需在宿主机安装 GDB/pwntools。
 - 可用的模型服务和模型名；通过环境变量名称配置凭据。
 
+开发和测试 profile 会关闭 `aws-lc-sys`、`ring`、`libsqlite3-sys` 这三个 FFI 包的调试信息，避免 Cargo build script 进程链中的 MSVC `D8050` 调试记录失败，同时保留 Wukong 自身的调试信息。该包级折衷也适用于 Linux，release profile 不变；它不能替代必需的 MSVC/SDK 安装。
+
 当前发布流水线不提供 macOS 正式桌面安装包。首个动态后端面向 Linux x86_64 ELF，原生 DbgEng/LLDB 后端尚未实现。
 
 <a id="clone-and-build-the-client"></a>
