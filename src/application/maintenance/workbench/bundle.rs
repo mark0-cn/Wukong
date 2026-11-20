@@ -59,16 +59,11 @@ impl Workbench {
         // A debug companion cannot start before its service's PID namespace exists.
         running.sort_by_key(|name| namespace_dependents.contains(name));
         // Stop before snapshotting; even an idle bridge can mutate journals.
-        let mut stopped: Vec<String> = Vec::new();
-        for name in running.iter().rev() {
-            if let Err(error) = self.docker.run(&["stop", name]) {
-                for stopped_name in &stopped {
-                    let _ = self.docker.run(&["start", stopped_name]);
-                }
-                return Err(error);
-            }
-            stopped.push((*name).to_owned());
-        }
+        stop_for_export(
+            &running,
+            &mut |name| self.docker.run(&["stop", name]).map(|_| ()),
+            &mut |name| self.docker.run(&["start", name]).map(|_| ()),
+        )?;
         let result = self.export_stopped(destination);
         let mut restart_errors = vec![];
         for name in running {
@@ -382,9 +377,66 @@ impl Workbench {
     }
 }
 
+fn stop_for_export(
+    running: &[String],
+    stop: &mut dyn FnMut(&str) -> Result<()>,
+    restart: &mut dyn FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    let mut stopped = Vec::new();
+    for name in running.iter().rev() {
+        if let Err(error) = stop(name) {
+            // The normal restart path uses `running`; rollback must undo the
+            // partial stop sequence in the opposite direction for the same
+            // namespace-provider/dependent ordering guarantee.
+            for stopped_name in stopped.into_iter().rev() {
+                let _ = restart(stopped_name);
+            }
+            return Err(error);
+        }
+        stopped.push(name.as_str());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_stop_rolls_back_in_reverse_stop_order() {
+        let running = vec![
+            "provider-one".to_owned(),
+            "provider-two".to_owned(),
+            "debug-companion".to_owned(),
+        ];
+        let mut operations = Vec::new();
+        let mut stop = |name: &str| {
+            operations.push(format!("stop {name}"));
+            if name == "provider-one" {
+                anyhow::bail!("injected stop failure");
+            }
+            Ok(())
+        };
+        let mut restart = |name: &str| {
+            operations.push(format!("start {name}"));
+            Ok(())
+        };
+
+        let error = stop_for_export(&running, &mut stop, &mut restart).unwrap_err();
+
+        assert_eq!(error.to_string(), "injected stop failure");
+        assert_eq!(
+            operations,
+            [
+                "stop debug-companion",
+                "stop provider-two",
+                "stop provider-one",
+                "start provider-two",
+                "start debug-companion",
+            ]
+        );
+    }
+
     #[test]
     fn history_snapshot_copies_wal_and_refuses_active_leases() -> Result<()> {
         let temp = tempfile::tempdir()?;

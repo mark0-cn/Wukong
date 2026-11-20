@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Export rollback now restarts already-stopped containers in reverse stop order, so PID namespace providers are running before dependent debug companions when another container fails to stop."
+zh_CN = "导出回滚现在按停止顺序的逆序重启已停止的容器；当其他容器停止失败时，PID 命名空间提供方会先于依赖它的调试伴随容器恢复运行。"
