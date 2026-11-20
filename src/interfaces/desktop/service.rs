@@ -5,11 +5,11 @@ use super::{
 };
 use crate::i18n::Message as UiMessage;
 use crate::{
-    application::assessment::AssessmentService,
+    application::{assessment::AssessmentService, queries::FindingQueries},
     config::AppConfig,
     domain::*,
     interfaces::report,
-    queries::{FindingDetails, FindingQueries},
+    queries::FindingDetails,
     storage::Store,
 };
 use anyhow::{Result, ensure};

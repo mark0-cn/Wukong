@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::Budget;
+use crate::{domain::Budget, queries::WorkspaceQueries};
 #[test]
 fn cli_and_workspace_share_summary_contract_without_saved_configuration() -> Result<()> {
     let directory = tempfile::tempdir()?;

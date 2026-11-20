@@ -205,6 +205,14 @@ class ExecutionBoundaries(unittest.TestCase):
             source = path.read_text(encoding="utf-8")
             self.assertNotRegex(source, r"\bStore\b|\b(?:store|desktop|bootstrap)\s*::", str(path))
 
+    def test_interfaces_do_not_access_sql_query_modules(self):
+        for path in (ROOT / "src/interfaces").rglob("*.rs"):
+            self.assertNotRegex(
+                path.read_text(encoding="utf-8"),
+                r"\b(?:storage|store)\s*::\s*(?:queries\b|\{[^{}]*\bqueries\b)",
+                str(path),
+            )
+
     def test_contract_has_no_controller_or_platform_dependencies(self):
         manifest = tomllib.loads((ROOT / "workers/protocol/Cargo.toml").read_text(encoding="utf-8"))
         for name, dependency in manifest["dependencies"].items():

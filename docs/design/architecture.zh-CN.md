@@ -122,7 +122,7 @@ Python worker 的入口、传输、操作账本、任务管理、独立监督、
 
 `queries` 包含中立读取模型、增量游标状态和工作区快照输入。`application/queries` 管理持有 Store 的 `AssessmentQueries`、`FindingQueries` 和 `ReportQueries` 查询入口。SQL 实现位于 `storage/queries/workspace_delta` 与 `storage/queries/report`；CLI 与 GUI 共用查询模型，聊天解析和布局缓存只保留在 GUI 适配层。
 
-`storage/queries/workspace_snapshot` 在同一 SQL 事务读取任务/Agent 摘要、调用、后台任务、事件和公开回复。事务结束后，`interfaces/desktop/workspace` 将这份固定快照转换为对话和活动工具 DTO，不额外查询或调用 Worker RPC；存储层不导入桌面展示模块。响应修订签名结合 epoch、`entity_revisions`、事件序号、查询范围和操作员消息；未变化时不重复发送工作区数据，也能观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。前端 `useWorkspace` 丢弃旧请求结果，切换任务或存储目录后重新读取。
+桌面通过 `AssessmentQueries::workspace_snapshot` 请求工作区快照。存储层在同一 SQL 事务读取任务/Agent 摘要、调用、后台任务、事件和公开回复。事务结束后，`interfaces/desktop/workspace` 将这份固定快照转换为对话和活动工具 DTO，不额外查询或调用 Worker RPC。响应修订签名结合 epoch、`entity_revisions`、事件序号、查询范围和操作员消息；未变化时不重复发送工作区数据，也能观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。前端 `useWorkspace` 丢弃旧请求结果，切换任务或存储目录后重新读取。
 
 业务写入通过 `StateSession` 事务会话提交，业务层不接收 SQLite 连接。`StoredRecord` 在存储实现中绑定实体类型、存储位置、身份和会话读取策略；业务使用 `load`、`records`、`save_record`，文档及会话使用有类型的类别接口，任务结果归档也通过具体业务方法完成。消息替换、旧 generation 消息归档和未读计数封装在存储实现内；所有回执与业务更新共享同一次租约校验和 IMMEDIATE 事务。
 

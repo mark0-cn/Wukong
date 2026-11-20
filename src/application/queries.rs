@@ -1,5 +1,11 @@
 //! Application query facades delegate persistence to the store.
-use crate::{queries::models::*, storage::Store};
+use crate::{
+    queries::{
+        models::{EvidencePreview, FindingDetails, ReportSnapshot, RunStatus, RunSummary},
+        workspace::{WorkspaceRequest, WorkspaceSnapshotReply},
+    },
+    storage::Store,
+};
 use anyhow::Result;
 pub struct ReportQueries<'a> {
     store: &'a Store,
@@ -24,6 +30,15 @@ impl<'a> AssessmentQueries<'a> {
     }
     pub fn status(&self, run: &str, limit: usize) -> Result<RunStatus> {
         crate::storage::queries::workspace_delta::status(self.store, run, limit)
+    }
+
+    /// Read the revision and its matching workspace data in one snapshot.
+    pub(crate) fn workspace_snapshot(
+        &self,
+        epoch: u64,
+        request: &WorkspaceRequest,
+    ) -> Result<WorkspaceSnapshotReply> {
+        crate::storage::queries::workspace_snapshot::read(self.store, epoch, request)
     }
 }
 pub struct FindingQueries<'a> {

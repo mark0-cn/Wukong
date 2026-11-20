@@ -258,7 +258,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             require_completed(result.status)?;
         }
         Command::Runs { run, events } => {
-            let queries = crate::queries::AssessmentQueries::new(&store);
+            let queries = crate::application::queries::AssessmentQueries::new(&store);
             match run {
                 Some(run_id) => print_json(&serde_json::to_value(
                     queries.status(&run_id, events.unwrap_or(20))?,

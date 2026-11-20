@@ -10,7 +10,7 @@
 
 - `application/agent_runtime` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`application/agent_runtime/host` 暴露业务操作，`application/assessment/supervisor` 独立管理心跳和后台任务观察；`application/model_catalog`、`application/usage`、`bootstrap` 分别负责模型选择、用量和装配。
 - `application/tools` 保留执行管线和共同校验入口，`application/effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
-- `queries` 定义中立 DTO，`application/queries` 管理持有 Store 的查询入口；`storage/queries/workspace_delta`、`storage/queries/report` 实现 SQL。`storage/queries/workspace_snapshot` 在同一事务读取完整快照，`interfaces/desktop/workspace` 和 `interfaces/desktop/presentation` 在事务结束后转换展示，不额外查询。`ui/src/shared/api/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
+- `queries` 定义中立 DTO。桌面、CLI 和报告模块通过 `application/queries` 中持有 Store 的查询入口读取数据。`storage/queries` 管理 SQL，并在同一事务读取完整工作区快照。桌面展示层在事务结束后转换快照，不额外查询。架构检查禁止 `interfaces` 直接导入 `storage/queries`。`ui/src/shared/api/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
 - `application/coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`adapters/binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
 - `storage` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`storage/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 5，不提供旧数据库迁移。
 

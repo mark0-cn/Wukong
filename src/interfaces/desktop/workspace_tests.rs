@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::{AgentMetadata, Budget, CallState, JobRecord, JobState, ToolCallRecord, now};
 use anyhow::Result;
 use serde_json::json;
 #[test]
@@ -52,7 +53,8 @@ fn returned_call_tracks_job_outcome_without_duplicate_rows() -> Result<()> {
     assert_eq!(data.active_tools.len(), 1);
     assert_eq!(data.active_tools[0].state, "running");
     assert_eq!(data.transcript.len(), 1);
-    let frozen = crate::storage::queries::workspace_snapshot::read(&store, 1, &request)?
+    let frozen = AssessmentQueries::new(&store)
+        .workspace_snapshot(1, &request)?
         .data
         .unwrap();
     // A terminal job updates the same row even though the request already completed.

@@ -1,7 +1,11 @@
 use super::presentation::{self, ChatMessage};
 pub use crate::queries::WorkspaceRequest;
-use crate::queries::workspace::WorkspaceSnapshot;
-use crate::{domain::*, queries::*, storage::Store};
+use crate::{
+    application::queries::AssessmentQueries,
+    domain::{Finding, SharedDocument},
+    queries::{AgentSummary, RunSummary, workspace::WorkspaceSnapshot},
+    storage::Store,
+};
 use serde::Serialize;
 #[derive(Serialize)]
 pub struct WorkspaceData {
@@ -24,7 +28,7 @@ pub fn read(
     epoch: u64,
     request: &WorkspaceRequest,
 ) -> anyhow::Result<WorkspaceResponse> {
-    let snapshot = crate::storage::queries::workspace_snapshot::read(store, epoch, request)?;
+    let snapshot = AssessmentQueries::new(store).workspace_snapshot(epoch, request)?;
     Ok(WorkspaceResponse {
         revision: snapshot.revision,
         data: snapshot.data.map(present),

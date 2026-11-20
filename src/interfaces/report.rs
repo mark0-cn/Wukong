@@ -439,7 +439,7 @@ pub fn export_with_locale(
         "export destination already exists: {}",
         output.display()
     );
-    let snapshot = crate::queries::ReportQueries::new(store).snapshot(run_id)?;
+    let snapshot = crate::application::queries::ReportQueries::new(store).snapshot(run_id)?;
     validate_evidence_refs(&snapshot)?;
     let (target_size, target_hash) =
         hash_file(&snapshot.run.target_path).context("read original target for export")?;
