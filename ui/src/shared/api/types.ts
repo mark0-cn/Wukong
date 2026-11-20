@@ -15,12 +15,23 @@ export interface Agent {
   generation: number; task: string; status: Status; depth: number; turns: number;
   total_tokens: number; summary: string | null; error: string | null;
 }
+export interface JobExecution {
+  finished: boolean; outcome: 'known' | 'unknown'; exit_code: number | null; passed: boolean | null;
+  evidence_id: string | null;
+}
+export interface JobCleanup {
+  status: 'pending' | 'unconfirmed' | 'confirmed'; evidence_id: string | null;
+}
+export interface JobEvidence { role: 'execution' | 'cleanup' | 'artifact'; evidence_id: string }
 export interface ToolDisplay {
   call_id: string; title: string; target: string; purpose: string; state: string;
   summary: string | LocalizedMessage; duration_ms: number | null; evidence_id: string | null;
   preview?: { language: string; text: string; truncated: boolean; evidence_id: string };
   job?: { id: string; state: string; stale: boolean; started_at: string; finished_at: string | null;
-    observed_at: string; attempts: number | null; successes: number | null };
+    observed_at: string; attempts: number | null; successes: number | null;
+    execution: JobExecution; cleanup: JobCleanup;
+    blocking?: { reason: string | LocalizedMessage; detail?: string };
+    evidence: JobEvidence[] };
 }
 export interface ChatMessage {
   id: string; role: 'assistant' | 'user'; agent_id: string | null; author: string | LocalizedMessage;

@@ -17,8 +17,9 @@ pub(crate) use files::*;
 pub use finalize::finalize_media;
 #[cfg(windows)]
 pub use registry::{
-    GenerateOutcome, GenerateRequest, GenerationRecord, MANAGED_NETWORK_PREFIX_LEN, generate,
-    read_generation_records,
+    GenerateOutcome, GenerateRequest, GenerationRecord, GenerationRecordScan,
+    MANAGED_NETWORK_PREFIX_LEN, UnreadableGenerationRecord, generate, read_generation_records,
+    scan_generation_records,
 };
 #[cfg(windows)]
 pub use template::APP_VERSION;

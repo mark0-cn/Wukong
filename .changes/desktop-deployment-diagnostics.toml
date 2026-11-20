@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Windows Worker setup reports missing, corrupt and unverified deployment records separately for generation records, installation recovery records, install receipts and environment registrations. One corrupt generation record no longer hides readable installations; damaged records are preserved in place and the public receipt format is unchanged."
+zh_CN = "Windows Worker 安装页面现在分别报告生成记录、安装恢复记录、安装结果回执和环境登记的缺失、损坏与未校验状态。单个损坏的生成记录不再隐藏可读的安装项；损坏记录保留在原位，公开回执格式保持不变。"

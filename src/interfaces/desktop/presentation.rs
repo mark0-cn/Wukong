@@ -32,6 +32,63 @@ pub struct JobDisplay {
     pub observed_at: chrono::DateTime<chrono::Utc>,
     pub attempts: Option<u64>,
     pub successes: Option<u64>,
+    /// Execution outcome, independent from resource cleanup.
+    pub execution: JobExecutionDisplay,
+    /// Worker resource cleanup, independent from the execution result.
+    pub cleanup: JobCleanupDisplay,
+    /// Why a finished job is not settled yet; `None` when nothing blocks it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocking: Option<JobBlockingDisplay>,
+    /// Evidence already referenced by the durable job record.
+    pub evidence: Vec<JobEvidenceDisplay>,
+}
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobOutcome {
+    Known,
+    Unknown,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobCleanupStatus {
+    /// Execution finished but the worker still owns resources.
+    Pending,
+    /// Cleanup has not been confirmed, including jobs still in flight.
+    Unconfirmed,
+    /// The worker confirmed that no owned resources remain.
+    Confirmed,
+}
+#[derive(Clone, Serialize)]
+pub struct JobExecutionDisplay {
+    pub finished: bool,
+    pub outcome: JobOutcome,
+    pub exit_code: Option<i64>,
+    pub passed: Option<bool>,
+    pub evidence_id: Option<String>,
+}
+#[derive(Clone, Serialize)]
+pub struct JobCleanupDisplay {
+    pub status: JobCleanupStatus,
+    pub evidence_id: Option<String>,
+}
+#[derive(Clone, Serialize)]
+pub struct JobBlockingDisplay {
+    pub reason: DisplayText,
+    /// Bounded verbatim worker diagnostic; never translated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobEvidenceRole {
+    Execution,
+    Cleanup,
+    Artifact,
+}
+#[derive(Clone, Serialize)]
+pub struct JobEvidenceDisplay {
+    pub role: JobEvidenceRole,
+    pub evidence_id: String,
 }
 #[derive(Clone, Serialize)]
 pub struct CodePreview {

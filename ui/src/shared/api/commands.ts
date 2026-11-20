@@ -40,6 +40,18 @@ export interface WindowsConnectionInput {
   confirmed_fingerprint: string; make_default: boolean;
 }
 export type WorkerMediaState = 'generated' | 'installed_pending' | 'available';
+export type WorkerMediaRecordState = 'present' | 'missing' | 'corrupt' | 'unknown';
+export type WorkerMediaVerificationState = 'not_started' | 'incomplete' | 'verified' | 'unknown';
+export interface WorkerMediaInstallationDiagnostics {
+  generation_record: WorkerMediaRecordState; recovery_record: WorkerMediaRecordState;
+  receipt: WorkerMediaRecordState; registration: WorkerMediaRecordState;
+  verification: WorkerMediaVerificationState; detail?: string;
+}
+export interface WorkerMediaDiagnostics {
+  inventory: WorkerMediaRecordState;
+  unreadable_generation_records: { path: string; installation_id?: string; error: string }[];
+  detail?: string;
+}
 export interface WorkerMediaInstallation {
   installation_id: string; environment_id: string; environment_name: string;
   state: WorkerMediaState; app_version: string; ssh_port: number;
@@ -48,6 +60,7 @@ export interface WorkerMediaInstallation {
   created_at: string; registered_environment_id: string | null;
   registered_environment_name: string | null; last_address: string | null;
   candidate_addresses: string[]; warning: string | null;
+  diagnostics: WorkerMediaInstallationDiagnostics;
 }
 export interface WorkerMediaEnvironment {
   environment_id: string; name: string; platform: string; installation_id: string | null;
@@ -56,6 +69,7 @@ export interface WorkerMediaEnvironment {
 export interface WorkerMediaStatus {
   environments: WorkerMediaEnvironment[];
   installations: WorkerMediaInstallation[];
+  diagnostics: WorkerMediaDiagnostics;
 }
 export interface WorkerMediaNetwork {
   id: string; name: string; description: string; ipv4: string; prefix_len: number;
