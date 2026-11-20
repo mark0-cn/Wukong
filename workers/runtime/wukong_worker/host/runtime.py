@@ -9,10 +9,10 @@ from wukong_worker.host.capabilities import doctor
 from wukong_worker.rpc.catalog import register
 from wukong_worker.execution.commands import CommandService
 from wukong_worker.core.contract import PROTOCOL
-from wukong_worker.core.lifecycle import TERMINAL
 from wukong_worker.analysis.adapters import EmuService
 from wukong_worker.artifacts.files import FileService
 from wukong_worker.resources.jobs import JobManager
+from wukong_worker.resources.lifecycle import shutdown_worker
 from wukong_worker.operations.jobs import JobService
 from wukong_worker.analysis.adapters import LibcService
 from wukong_worker.analysis.adapters import SeccompService
@@ -105,22 +105,6 @@ class Runtime:
         with self._admission:
             if self._active_requests > 1:
                 raise ValueError("cannot shut down worker while requests own active resources")
-            return self._shutdown()
-
-    def _shutdown(self):
-        active = [
-            self.jobs.status(path.parent.name)
-            for path in (self.root / "jobs").glob("*/status.json")
-        ]
-        if any(job["state"] not in TERMINAL for job in active):
-            raise ValueError(
-                "cannot shut down worker while jobs are active; cancel and reconcile them first"
-            )
-        self.sessions.close_all()
-        from wukong_worker.resources.inventory import pending_resources
-
-        if pending_resources(self.root, self.jobs):
-            raise ValueError("cannot shut down worker while resource cleanup remains unconfirmed")
-        self.jobs.process_resources.wait()
-        self.stopping = True
-        return {"state": "shutdown"}
+            shutdown_worker(self.root, self.jobs, self.sessions)
+            self.stopping = True
+            return {"state": "shutdown"}
