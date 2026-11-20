@@ -16,6 +16,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error?: string 
 }
 const cleanup = (window as Window & { __WUKONG_CLEANUP__?: { initialData: boolean } }).__WUKONG_CLEANUP__;
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false } },
+  defaultOptions: { queries: { retry: false, networkMode: 'always', refetchOnWindowFocus: false, refetchOnReconnect: false } },
 });
 void initializeLanguage().finally(() => createRoot(document.getElementById('root')!).render(<QueryClientProvider client={queryClient}><LanguageProvider><ErrorBoundary>{cleanup ? <CleanupReview initialData={cleanup.initialData} /> : <App />}</ErrorBoundary></LanguageProvider></QueryClientProvider>));

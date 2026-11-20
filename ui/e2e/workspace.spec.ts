@@ -358,6 +358,29 @@ test('keyboard resizing persists and minimum desktop size keeps controls reachab
   await expect(page.locator('.finding-card').first()).toBeVisible();
 });
 
+test('run switching never displays an old snapshot or accepts its late response', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'parser.elf', exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const native = (window as any).__TAURI_INTERNALS__;
+    const invoke = native.invoke;
+    native.invoke = async (command: string, args: any) => {
+      if (command === 'workspace_read') {
+        const delay = args.request.run === 'run-b' ? 150 : 500;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      return invoke(command, args);
+    };
+    (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await page.locator('.run-card').filter({ hasText: 'archive.elf' }).click();
+  await expect(page.getByRole('heading', { name: 'parser.elf', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'archive.elf', exact: true })).toBeVisible();
+  await page.waitForTimeout(550);
+  await expect(page.getByRole('heading', { name: 'archive.elf', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'parser.elf', exact: true })).toHaveCount(0);
+});
+
 test('task names, filters and panel choices survive reload without changing tasks', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel('重命名任务', { exact: true }).click();
