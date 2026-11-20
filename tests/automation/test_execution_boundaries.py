@@ -8,6 +8,97 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 
+LINUX_WORKER = ROOT / "workers/runtime/wukong_worker"
+WINDOWS_NATIVE = ROOT / "workers/windows/native"
+
+# The resource lifecycle owns durable resources; only the host/RPC entry may
+# depend on it, never the other way around.
+LINUX_RESOURCE_FORBIDDEN = (
+    "wukong_worker.rpc",
+    "wukong_worker.host.runtime",
+    "wukong_worker.cli",
+)
+# Platform adapters perform OS operations for the resource lifecycle and may
+# use artifact primitives; anything above them would reverse the direction.
+LINUX_PLATFORM_ALLOWED = ("wukong_worker.artifacts", "wukong_worker.platform")
+# Real forward edges of RPC entry -> resource lifecycle -> platform adapters.
+LINUX_FORWARD_DEPENDENCIES = {
+    "host/runtime.py": (
+        "wukong_worker.resources.jobs",
+        "wukong_worker.resources.lifecycle",
+        "wukong_worker.resources.operations",
+        "wukong_worker.resources.sessions",
+    ),
+    "resources/jobs.py": (
+        "wukong_worker.platform.environment",
+        "wukong_worker.platform.isolation",
+        "wukong_worker.platform.process_owner",
+    ),
+    "resources/job_ledger.py": ("wukong_worker.platform.process_control",),
+    "resources/sessions.py": ("wukong_worker.platform.process_journal",),
+    "platform/isolation.py": ("wukong_worker.artifacts.common",),
+}
+
+# The Windows resource layer may reference the RPC directory only through these
+# exact binding-validation helpers until they move to a neutral module.
+WINDOWS_RPC_EXCEPTIONS = {
+    "journal.rs": {
+        "crate::rpc::worker_identity::validate",
+        "crate::rpc::pipe_transport::service_name",
+    },
+}
+WINDOWS_RPC_REFERENCE = re.compile(r"crate::rpc(?:::\w+){0,2}|(?<![\w:])rpc::\w+")
+WINDOWS_TEST_MODULE = re.compile(
+    r"\n#\[cfg\(test\)\]\n(?:#\[path = \"[^\"]+\"\]\n)?(?:pub\(crate\)\s+)?mod\s+tests"
+)
+# Ledger writers name these types/modules; the recovery observer must not.
+WINDOWS_LEDGER_REFERENCE = re.compile(
+    r"\b(?:Journal|ResourceManager|ResourceState)\b"
+    r"|(?:crate::resources|super)::(?:journal|manager|state)\b"
+    r"|(?<![\w:])(?:journal|manager|state)::"
+)
+
+
+def _matches(name, module):
+    return name == module or name.startswith(module + ".")
+
+
+def _internal_imports(source):
+    """`wukong_worker.*` imports of one Python file, ignoring TYPE_CHECKING annotations."""
+
+    class Imports(ast.NodeVisitor):
+        def __init__(self):
+            self.names = []
+
+        def visit_If(self, node):
+            if isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
+                return
+            self.generic_visit(node)
+
+        def visit_Import(self, node):
+            self.names.extend(alias.name for alias in node.names)
+
+        def visit_ImportFrom(self, node):
+            self.names.append(node.module or "")
+
+    imports = Imports()
+    imports.visit(ast.parse(source))
+    return [name for name in imports.names if _matches(name, "wukong_worker")]
+
+
+def _forbidden_imports(names, forbidden):
+    return [name for name in names if any(_matches(name, item) for item in forbidden)]
+
+
+def _outside_allowlist(names, allowed):
+    return [name for name in names if not any(_matches(name, item) for item in allowed)]
+
+
+def _production(source):
+    """Rust source before its inline test module; fixture tests are not dependencies."""
+    match = WINDOWS_TEST_MODULE.search(source)
+    return source[: match.start()] if match else source
+
 
 class ExecutionBoundaries(unittest.TestCase):
     def test_python_worker_runtime_dependencies_follow_ownership_direction(self):
@@ -32,29 +123,12 @@ class ExecutionBoundaries(unittest.TestCase):
             "rpc": {"artifacts", "core", "platform"},
         }
 
-        class Imports(ast.NodeVisitor):
-            def __init__(self):
-                self.names = []
-
-            def visit_If(self, node):
-                if isinstance(node.test, ast.Name) and node.test.id == "TYPE_CHECKING":
-                    return
-                self.generic_visit(node)
-
-            def visit_Import(self, node):
-                self.names.extend(alias.name for alias in node.names)
-
-            def visit_ImportFrom(self, node):
-                self.names.append(node.module or "")
-
         root = ROOT / "workers/runtime/wukong_worker"
         for path in root.rglob("*.py"):
             owner = path.relative_to(root).parts[0]
             if owner not in allowed:
                 continue
-            imports = Imports()
-            imports.visit(ast.parse(path.read_text(encoding="utf-8")))
-            for name in imports.names:
+            for name in _internal_imports(path.read_text(encoding="utf-8")):
                 if name.startswith("wukong_worker."):
                     dependency = name.split(".")[1]
                     self.assertIn(dependency, allowed[owner] | {owner}, f"{path}: {name}")
@@ -109,8 +183,100 @@ class ExecutionBoundaries(unittest.TestCase):
             for path in (native / directory).glob("*.rs"):
                 if path.stem.endswith("_tests"):
                     continue
-                production = path.read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0]
+                production = _production(path.read_text(encoding="utf-8"))
                 self.assertNotIn("rpc::catalog", production, str(path))
+
+    def test_linux_resources_do_not_import_the_rpc_request_entry(self):
+        for path in (LINUX_WORKER / "resources").rglob("*.py"):
+            violations = _forbidden_imports(
+                _internal_imports(path.read_text(encoding="utf-8")), LINUX_RESOURCE_FORBIDDEN
+            )
+            self.assertEqual(
+                violations,
+                [],
+                f"{path}: resource layer must not import the RPC/request entry; "
+                f"forbidden dependencies {violations}",
+            )
+
+    def test_linux_platform_adapters_keep_their_dependency_direction(self):
+        for path in (LINUX_WORKER / "platform").rglob("*.py"):
+            violations = _outside_allowlist(
+                _internal_imports(path.read_text(encoding="utf-8")), LINUX_PLATFORM_ALLOWED
+            )
+            self.assertEqual(
+                violations,
+                [],
+                f"{path}: platform adapters may import only artifact primitives and their "
+                f"own package; forbidden dependencies {violations} (direction is "
+                "RPC entry -> resource lifecycle -> platform adapters)",
+            )
+
+    def test_linux_worker_applies_the_rpc_to_resource_to_platform_direction(self):
+        for name, dependencies in LINUX_FORWARD_DEPENDENCIES.items():
+            imports = _internal_imports((LINUX_WORKER / name).read_text(encoding="utf-8"))
+            for dependency in dependencies:
+                self.assertIn(
+                    dependency,
+                    imports,
+                    f"{name}: missing forward dependency {dependency}; the implemented "
+                    "direction is RPC entry -> resource lifecycle -> platform adapters",
+                )
+
+    def test_windows_resources_do_not_reference_the_rpc_entry(self):
+        root = WINDOWS_NATIVE / "resources"
+        for path in root.rglob("*.rs"):
+            if path.stem.endswith("_tests"):
+                continue
+            allowed = WINDOWS_RPC_EXCEPTIONS.get(path.name, set())
+            violations = [
+                reference
+                for reference in WINDOWS_RPC_REFERENCE.findall(
+                    _production(path.read_text(encoding="utf-8"))
+                )
+                if reference not in allowed
+            ]
+            self.assertEqual(
+                violations,
+                [],
+                f"{path}: resource layer references forbidden RPC dependency {violations}; "
+                "only the documented binding-validation helpers may be referenced",
+            )
+
+    def test_windows_recovery_observer_cannot_write_the_resource_ledger(self):
+        root = WINDOWS_NATIVE / "resources"
+        observer = _production((root / "recovery_observer.rs").read_text(encoding="utf-8"))
+        self.assertRegex(
+            observer,
+            re.compile(r"fn observe\(.*?\)\s*->\s*Result<ProtectedReceipt>", re.DOTALL),
+        )
+        self.assertIn("ProtectedReceipt::new(", observer)
+        writer_symbols = WINDOWS_LEDGER_REFERENCE.findall(observer)
+        self.assertEqual(
+            writer_symbols,
+            [],
+            "recovery_observer.rs: external cleanup observer must only return the "
+            f"protected receipt; found ledger writer references {writer_symbols}",
+        )
+        receipt = _production((root / "resource_recovery.rs").read_text(encoding="utf-8"))
+        self.assertIn("pub(crate) struct ProtectedReceipt(Vec<u8>);", receipt)
+        self.assertIn("fn verify_cleanup(&self, receipt: &ProtectedReceipt)", receipt)
+        self.assertEqual(
+            WINDOWS_LEDGER_REFERENCE.findall(receipt),
+            [],
+            "resource_recovery.rs: receipt verification must not write the ledger",
+        )
+        callers = {
+            path.name
+            for path in root.glob("*.rs")
+            if not path.stem.endswith("_tests")
+            and "recovery_observer::observe(" in _production(path.read_text(encoding="utf-8"))
+        }
+        self.assertEqual(
+            callers,
+            {"state.rs"},
+            "recovery_observer::observe must be called only by ResourceState; "
+            f"found callers {sorted(callers)}",
+        )
 
     def test_worker_imports_environment_errors_and_validation_from_their_owners(self):
         indirect = {
@@ -301,6 +467,80 @@ class ExecutionBoundaries(unittest.TestCase):
         source = (ROOT / "src/application/tools/gateway.rs").read_text(encoding="utf-8")
         self.assertNotRegex(source, r'\["(?:job_id|session_id)"\]\s*=')
         self.assertNotIn("map_worker", source)
+
+    def test_boundary_matchers_reject_synthetic_violations(self):
+        """The guards fail on forbidden dependencies; no temporary source edit needed."""
+        self.assertEqual(
+            _forbidden_imports(
+                [
+                    "wukong_worker.resources.inventory",
+                    "wukong_worker.platform.process_control",
+                    "wukong_worker.rpc.server",
+                    "wukong_worker.host.runtime",
+                    "wukong_worker.cli",
+                ],
+                LINUX_RESOURCE_FORBIDDEN,
+            ),
+            ["wukong_worker.rpc.server", "wukong_worker.host.runtime", "wukong_worker.cli"],
+        )
+        self.assertEqual(
+            _outside_allowlist(
+                [
+                    "wukong_worker.artifacts.common",
+                    "wukong_worker.platform.process_control",
+                    "wukong_worker.resources.jobs",
+                    "wukong_worker",
+                ],
+                LINUX_PLATFORM_ALLOWED,
+            ),
+            ["wukong_worker.resources.jobs", "wukong_worker"],
+        )
+
+        def rpc_references(path, source):
+            allowed = WINDOWS_RPC_EXCEPTIONS.get(path, set())
+            return [
+                reference
+                for reference in WINDOWS_RPC_REFERENCE.findall(_production(source))
+                if reference not in allowed
+            ]
+
+        self.assertEqual(
+            rpc_references("journal.rs", "crate::rpc::worker_identity::validate(&binding)?;"),
+            [],
+        )
+        self.assertEqual(
+            rpc_references("journal.rs", "crate::rpc::worker::Identity"),
+            ["crate::rpc::worker::Identity"],
+        )
+        self.assertEqual(
+            rpc_references("state.rs", "use crate::{rpc::worker::Identity};"),
+            ["rpc::worker"],
+        )
+        self.assertEqual(
+            rpc_references(
+                "session.rs",
+                "crate::rpc::catalog::owns_resource()\n#[cfg(test)]\nmod tests {\n"
+                "    crate::rpc::worker::Identity\n}\n",
+            ),
+            ["crate::rpc::catalog::owns_resource"],
+        )
+        self.assertEqual(
+            WINDOWS_LEDGER_REFERENCE.findall(
+                "use crate::resources::resource_recovery::ProtectedReceipt;"
+            ),
+            [],
+        )
+        for forbidden in (
+            "fn observe(journal: &Journal)",
+            "fn observe(manager: &ResourceManager)",
+            "super::state::recover()",
+            "crate::resources::journal::Ticket",
+        ):
+            self.assertNotEqual(
+                WINDOWS_LEDGER_REFERENCE.findall(forbidden),
+                [],
+                f"matcher missed synthetic ledger dependency {forbidden}",
+            )
 
 
 if __name__ == "__main__":
