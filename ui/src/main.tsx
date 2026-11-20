@@ -2,6 +2,7 @@ import { t } from './shared/i18n';
 import { initializeLanguage, LanguageProvider } from './shared/i18n';
 import { Component, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './app/App';
 import { CleanupReview } from './features/maintenance/CleanupReview';
 import './theme.css';
@@ -14,4 +15,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error?: string 
   render() { return this.state.error ? <main className="fatal-error"><h1>{t('workspace-could-not-load-the-interface')}</h1><p>{this.state.error}</p><button onClick={() => window.location.reload()}>{t('workspace-reload')}</button></main> : this.props.children; }
 }
 const cleanup = (window as Window & { __WUKONG_CLEANUP__?: { initialData: boolean } }).__WUKONG_CLEANUP__;
-void initializeLanguage().finally(() => createRoot(document.getElementById('root')!).render(<LanguageProvider><ErrorBoundary>{cleanup ? <CleanupReview initialData={cleanup.initialData} /> : <App />}</ErrorBoundary></LanguageProvider>));
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false } },
+});
+void initializeLanguage().finally(() => createRoot(document.getElementById('root')!).render(<QueryClientProvider client={queryClient}><LanguageProvider><ErrorBoundary>{cleanup ? <CleanupReview initialData={cleanup.initialData} /> : <App />}</ErrorBoundary></LanguageProvider></QueryClientProvider>));
