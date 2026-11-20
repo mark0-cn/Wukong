@@ -14,33 +14,50 @@ from wukong_analysis.validation import bounded_int
 import wukong_worker.debugger.gdb as worker_debugger
 from wukong_worker.debugger.gdb import DebugSession
 from wukong_worker.debugger.interactive import InteractSession
+from wukong_worker.resources.inventory import (
+    PROCESS_RECORD,
+    SESSION_RECORD,
+    session_directories,
+    session_record,
+)
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _reconcile_session(directory: Path) -> dict:
+    """Apply one durable cleanup decision to an abandoned session receipt.
+
+    Startup recovery and explicit cleanup of a session this daemon does not own
+    must discover the same records and apply the same confirmation rule: only
+    the process journal's platform ownership checks can confirm cleanup. Any
+    failure keeps the receipt blocking as ``recovery_required``.
+    """
+    from wukong_worker.platform.process_journal import ProcessJournal
+
+    state = session_record(directory)
+    if state["state"] == "closed":
+        return state
+    journal = directory / PROCESS_RECORD
+    confirmed = journal.exists() and ProcessJournal.reconcile(journal)
+    state["state"] = "lost" if confirmed else "recovery_required"
+    state["cleanup_confirmed"] = bool(confirmed)
+    atomic_json(directory / SESSION_RECORD, state)
+    return state
 
 
 def _recover_sessions(directory: Path) -> None:
     """Reconcile durable process ownership before declaring a former owner gone."""
     skipped = 0
-    records = set(directory.glob("*/session.json"))
-    records.update(path.parent / "session.json" for path in directory.glob("*/processes.json"))
-    for path in sorted(records):
+    for session_directory in session_directories(directory):
         try:
             # A crash between spawn and publishing the session still owns resources.
-            state = load_json(path) if path.exists() else {"state": "recovery_required"}
-            if state["state"] != "closed":
-                from wukong_worker.platform.process_journal import ProcessJournal
-
-                journal = path.parent / "processes.json"
-                confirmed = journal.exists() and ProcessJournal.reconcile(journal)
-                state["state"] = "lost" if confirmed else "recovery_required"
-                state["cleanup_confirmed"] = bool(confirmed)
-                atomic_json(path, state)
+            _reconcile_session(session_directory)
         except (ValueError, OSError) as error:
             # Preserve the existing recovery policy, with bounded diagnostics.
             # Do not log metadata contents, exception messages or arbitrary paths.
             skipped += 1
             if skipped <= 16:
-                identifier = path.parent.name
+                identifier = session_directory.name
                 if not re.fullmatch(r"[0-9a-f]{32}", identifier):
                     identifier = "nonstandard-session-id"
                 LOGGER.warning(
@@ -109,21 +126,12 @@ class SessionManager:
         if not re.fullmatch(r"[0-9a-f]{32}", identifier):
             raise WorkerError("session_lost", "session has no verifiable ownership record")
         directory = self.root / kind / identifier
-        metadata = directory / "session.json"
-        if not metadata.exists():
+        if not (directory / SESSION_RECORD).exists() and not (directory / PROCESS_RECORD).exists():
             raise WorkerError("outcome_unknown", "session cleanup ownership record is missing")
-        state = load_json(metadata)
+        state = _reconcile_session(directory)
         if state["state"] == "closed":
             return {"session_id": identifier, "state": "closed", "cleanup_confirmed": True}
-        from wukong_worker.platform.process_journal import ProcessJournal
-
-        journal = directory / "processes.json"
-        confirmed = journal.exists() and ProcessJournal.reconcile(journal)
-        state.update(
-            state="lost" if confirmed else "recovery_required", cleanup_confirmed=bool(confirmed)
-        )
-        atomic_json(metadata, state)
-        if not confirmed:
+        if not state.get("cleanup_confirmed"):
             raise WorkerError(
                 "outcome_unknown",
                 "session cleanup remains unconfirmed; reconcile its owning environment",
