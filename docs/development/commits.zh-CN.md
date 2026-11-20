@@ -4,7 +4,7 @@
 
 ## 提交信息
 
-采用 `type(scope): describe the concrete change`，模块范围可选，描述以英文为主，标题最多 100 个字符。允许的类型为 `feat`、`fix`、`perf`、`refactor`、`docs`、`test`、`build`、`ci`、`chore`、`revert` 和 `release`。机器规则位于 [commitlint.config.mjs](../../commitlint.config.mjs)；范围使用现有模块名，例如 `ui`、`updater`、`worker`。每个独立功能或修复分别提交，不要求 squash 合并。
+采用 `type(scope): describe the concrete change`，模块范围可选，描述以英文为主，标题最多 100 个字符。允许的类型为 `feat`、`fix`、`perf`、`style`、`refactor`、`docs`、`test`、`build`、`ci`、`chore`、`revert` 和 `release`。机器规则位于 [commitlint.config.mjs](../../commitlint.config.mjs)；范围使用现有模块名，例如 `ui`、`updater`、`worker`。每个独立功能或修复分别提交，不要求 squash 合并。
 
 描述行为、对象或结果，而不只是操作。`fix(updater): locate Docker credential helpers on Windows` 提供了具体信息；`fix: fix bug`、`chore: update`、`feat: improvements` 会被拒绝。较大修改在正文中说明触发条件、原因和结果，记录实际验证与限制。不兼容修改使用 `!`，并通过 `BREAKING CHANGE:` 页脚说明影响和迁移方式。格式检查无法证明内容真实、英文质量或中英文语义一致，仍需评审者结合 diff 核对。
 

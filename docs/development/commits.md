@@ -4,7 +4,7 @@ English · [简体中文](commits.zh-CN.md)
 
 ## Commit messages
 
-Use `type(scope): describe the concrete change` with an optional module scope, English descriptions and a header of at most 100 characters. Allowed types are `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert` and `release`. The executable rules are in [commitlint.config.mjs](../../commitlint.config.mjs); use existing module names such as `ui`, `updater` or `worker` for scopes. Keep each independent feature/fix in its own commit; squash merging is not required.
+Use `type(scope): describe the concrete change` with an optional module scope, English descriptions and a header of at most 100 characters. Allowed types are `feat`, `fix`, `perf`, `style`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert` and `release`. The executable rules are in [commitlint.config.mjs](../../commitlint.config.mjs); use existing module names such as `ui`, `updater` or `worker` for scopes. Keep each independent feature/fix in its own commit; squash merging is not required.
 
 Describe the behavior/object/result, not just the activity. `fix(updater): locate Docker credential helpers on Windows` is useful; `fix: fix bug`, `chore: update` and `feat: improvements` are rejected. For substantial changes, explain the trigger, reason and resulting behavior in the body. Record actual validation and limits. Mark incompatible changes with `!` and describe the impact and migration in a `BREAKING CHANGE:` footer. Formatting checks cannot prove truth, English quality or semantic equivalence; reviewers still compare descriptions with the diff.
 
