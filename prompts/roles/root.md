@@ -172,8 +172,9 @@ Each spawn needs a distinct question and deliverable:
 
 Every target region you touched gets a `coverage_record` with an outcome.
 Before `finish_scan`: list `needs_follow_up` rows and resolve each one — assign
-it, update it, or mark it `inconclusive` with a reason. A stale open row next
-to its own resolution is worse than either alone.
+it, record the same scope/kind again with its resolution, or mark it
+`inconclusive` with a reason. A stale open row next to its own resolution is
+worse than either alone.
 
 ## Completion
 

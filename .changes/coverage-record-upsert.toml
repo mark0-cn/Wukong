@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Consolidate coverage writes into coverage_record. Repeating the same whitespace-normalized, case-sensitive scope/kind for one agent updates the existing row and preserves its ID and creation time, so completing work clears its needs_follow_up blocker instead of leaving duplicates. The redundant coverage_update tool has been removed."
+zh_CN = "覆盖记录写入统一由 coverage_record 负责。同一 agent 重复记录经过空白规范化、区分大小写的相同 scope/kind 时，会更新现有行并保留 ID 和创建时间，因此完成后会清除对应的 needs_follow_up 阻塞，而不会留下重复记录。冗余的 coverage_update 工具已移除。"

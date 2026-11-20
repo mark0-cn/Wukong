@@ -528,19 +528,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::CoverageRecordArgs>(
             "coverage_record",
             "tool-coverage-record",
-            "Record inspected scope, outcome and supporting evidence. needs_follow_up blocks root completion.",
-            ReplayPolicy::Transactional,
-            false,
-            |services, agent, call, name, args| {
-                handlers::handle_coverage_record(&services.evidence, agent, call, name, args)
-            },
-            Visibility::All,
-            Requirement::Controller,
-        ),
-        spec::<args::CoverageUpdateArgs>(
-            "coverage_update",
-            "tool-coverage-update",
-            "Update a coverage record's outcome, notes and evidence.",
+            "Record or update inspected scope, outcome and supporting evidence. Repeating the same normalized scope/kind for an agent updates one row; needs_follow_up blocks root completion.",
             ReplayPolicy::Transactional,
             false,
             |services, agent, call, name, args| {
