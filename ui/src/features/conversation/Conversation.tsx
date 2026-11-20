@@ -4,6 +4,7 @@ import { AssistantRuntimeProvider, ThreadPrimitive, MessagePrimitive, useExterna
   useAuiState, groupPartByType, type ThreadMessageLike } from '@assistant-ui/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import * as Collapsible from '@radix-ui/react-collapsible';
+import TextareaAutosize from 'react-textarea-autosize';
 import { ArrowDown, ArrowUp, Bot, ChevronRight, Code2, User, Maximize2, Minimize2 } from 'lucide-react';
 import { api, errorText, errorValue } from '../../shared/api/bridge';
 import type { Agent, ChatMessage, Host, ToolDisplay, ToolRecord, Workspace } from '../../shared/api/types';
@@ -193,11 +194,6 @@ export function Composer({ target, draft, onDraft, send, busy }: {
   const [sending, setSending] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    if (!input.current) return;
-    input.current.style.height = 'auto';
-    input.current.style.height = `${expanded ? 180 : Math.min(140, Math.max(52, input.current.scrollHeight))}px`;
-  }, [draft.text, expanded]);
   const submit = async () => {
     if (!target || !draft.text.trim() || sending || busy) return;
     if (terminal(target.status) && !draft.followUp) { setError(t('workspace-this-agent-has-finished-select-schedule-follow')); return; }
@@ -208,9 +204,9 @@ export function Composer({ target, draft, onDraft, send, busy }: {
     } catch (error) { setError(errorValue(error)); }
     finally { setSending(false); }
   };
-  return <div className="composer-wrap"><div className="composer">
-    <textarea ref={input} aria-label={t('workspace-message-to-agent')} placeholder={target ? t('workspace-add-information-or-adjust-s-work', { v0: target.name }) : t('workspace-select-a-task-to-message-an-agent')}
-      value={draft.text} disabled={!target} rows={2} onChange={event => onDraft({ ...draft, text: event.target.value })}
+  return <div className="composer-wrap"><div className={`composer${expanded ? ' composer-expanded' : ''}`}>
+    <TextareaAutosize ref={input} aria-label={t('workspace-message-to-agent')} placeholder={target ? t('workspace-add-information-or-adjust-s-work', { v0: target.name }) : t('workspace-select-a-task-to-message-an-agent')}
+      value={draft.text} disabled={!target} minRows={2} onChange={event => onDraft({ ...draft, text: event.target.value })}
       onKeyDown={event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); void submit(); } }} />
     <div className="composer-controls"><div className="composer-target"><Bot size={13} /><span title={target?.name}>{t('ui-recipient')}{' '}{target?.name ?? t('workspace-select-a-task-first')}</span></div>
       <select className="send-mode" aria-label={t('ui-send-mode')} value={draft.followUp ? 'follow_up' : 'information'} onChange={event => { setError(''); onDraft({ ...draft, followUp: event.target.value === 'follow_up' }); }}>

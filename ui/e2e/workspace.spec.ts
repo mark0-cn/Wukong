@@ -241,6 +241,48 @@ test('retains per-agent drafts and targets message delivery after navigation', a
   const sent = await page.evaluate(() => (window as any).__desktopTest.requests.find((request: any) => request.command === 'send_message'));
   expect(sent.args.agent).toBe('analyst'); expect(sent.args.generation).toBe(agents[1].generation);
 });
+test('composer autosizes with pixel limits and preserves draft and keyboard behavior', async ({ page }) => {
+  await page.goto('/');
+  const composer = page.getByLabel('发送给 Agent 的消息');
+  await expect.poll(() => composer.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(52);
+  expect(await composer.evaluate(element => parseFloat(getComputedStyle(element).minHeight))).toBe(52);
+  const longDraft = Array.from({ length: 30 }, (_, index) => `evidence line ${index}: 原始字节`).join('\n');
+  await composer.fill(longDraft);
+  await expect.poll(() => composer.evaluate(element => element.getBoundingClientRect().height)).toBe(140);
+  expect(await composer.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  expect(await composer.evaluate(element => getComputedStyle(element).overflowY)).toBe('auto');
+
+  await page.getByRole('button', { name: '展开输入框', exact: true }).click();
+  await expect.poll(() => composer.evaluate(element => element.getBoundingClientRect().height)).toBe(180);
+  await page.setViewportSize({ width: 860, height: 600 });
+  await expect.poll(() => composer.evaluate(element => element.getBoundingClientRect().height)).toBe(180);
+  await page.getByRole('button', { name: '收起输入框', exact: true }).click();
+  await expect.poll(() => composer.evaluate(element => element.getBoundingClientRect().height)).toBe(140);
+
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.revision++;
+    (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(composer).toHaveValue(longDraft);
+  await page.getByRole('button', { name: /发现与证据/ }).click();
+  await page.getByRole('button', { name: /分析进展/ }).click();
+  await expect(composer).toHaveValue(longDraft);
+
+  await composer.evaluate(element => {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, isComposing: true, bubbles: true }));
+  });
+  expect(await page.evaluate(() => (window as any).__desktopTest.requests.some((request: any) => request.command === 'send_message'))).toBe(false);
+  await page.evaluate(() => {
+    const state = (window as any).__desktopTest;
+    state.data.agents = [];
+    state.revision++;
+    (window as any).__emitDesktop('workspace-changed', null);
+  });
+  await expect(composer).toBeDisabled();
+  await expect(composer).toHaveValue('');
+});
+
 test('loads scoped evidence pages and preserves settings drafts', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /发现与证据/ }).click();
