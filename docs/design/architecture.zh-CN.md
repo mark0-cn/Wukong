@@ -71,6 +71,108 @@ Windows 的执行管理入口只有原生 Worker。控制器负责业务任务�
 | `interfaces/report`、`interfaces/cli` | 报告导出、CLI、人工查询与干预 |
 | `interfaces/desktop`、`ui/src` | Tauri 命令与工作区服务、展示数据适配、React 桌面界面及生命周期 |
 
+<a id="worker-resource-boundaries"></a>
+
+### Worker 资源边界
+
+Worker 依赖只保留一个方向：RPC 入口准入并分发请求，资源生命周期拥有持久资源及其账本，平台适配器执行有界的操作系统操作。控制器通过 RPC 状态方法或维护/关停使用的直接只读清单读取资源，绝不写 Worker 账本。`tests/automation/test_execution_boundaries.py` 守护这些边界，失败时报告违规文件及被禁止依赖；仅类型标注（`TYPE_CHECKING`）的导入和测试专用引用不计入，下列已记录例外在守卫允许清单中。
+
+```mermaid
+flowchart TB
+    subgraph ENTRY["Linux RPC 入口"]
+        TRANSPORT["rpc/transport.py · rpc/server.py<br/>守护进程端点、帧处理、准入"]
+        RUNTIME["host/runtime.py<br/>装配、分发、关停"]
+        REGISTRY["rpc/catalog.py<br/>处理器注册"]
+    end
+    subgraph LIFECYCLE["资源生命周期"]
+        JOBS["resources/jobs.py · supervisor.py<br/>预留与监督"]
+        SESSIONS["resources/sessions.py<br/>调试器与交互会话所有权"]
+        INVENTORY["resources/lifecycle.py · inventory.py<br/>关停与只读清单"]
+        EFFECTS["resources/operations.py<br/>请求/副作用账本"]
+        JOBLEDGER["resources/job_ledger.py<br/>作业账本写入者"]
+    end
+    subgraph PLATFORM["平台适配器"]
+        ENVIRONMENT["platform/environment.py"]
+        ISOLATION["platform/isolation.py"]
+        PROCESS["platform/process_control.py"]
+        JOURNAL["platform/process_journal.py · process_owner.py"]
+    end
+    ARTIFACTS["artifacts 基础能力<br/>受限路径 · 原子元数据"]
+    CONTROLLER["控制器<br/>作业/会话 RPC 读取"]
+    MAINTENANCE["宿主维护与关停<br/>直接读取只读清单"]
+    CONTROLLER --> TRANSPORT
+    MAINTENANCE --> INVENTORY
+    TRANSPORT --> RUNTIME
+    REGISTRY -. 注册 .-> RUNTIME
+    RUNTIME --> JOBS
+    RUNTIME --> SESSIONS
+    RUNTIME --> INVENTORY
+    RUNTIME <--> EFFECTS
+    JOBS <--> JOBLEDGER
+    JOBS --> ENVIRONMENT
+    JOBS --> ISOLATION
+    SESSIONS --> JOURNAL
+    INVENTORY --> JOBLEDGER
+    JOBLEDGER --> PROCESS
+    ENVIRONMENT --> ARTIFACTS
+    ISOLATION --> ARTIFACTS
+```
+
+```mermaid
+flowchart TB
+    subgraph ENTRY["Windows RPC 入口"]
+        WORKER["rpc/worker.rs<br/>公开路由与资源句柄"]
+        REGISTRY["rpc/catalog.rs<br/>方法注册"]
+        SERVICE["host/service.rs<br/>SCM 生命周期、启动、关停"]
+    end
+    subgraph LIFECYCLE["资源生命周期"]
+        MANAGER["resources/manager.rs<br/>ResourceManager：准入与串行化"]
+        STATE["resources/state.rs<br/>ResourceState：准备、轮询、提交"]
+        SESSION["resources/session.rs · operation.rs<br/>会话与工具操作所有权"]
+        RECOVERY["resources/resource_recovery.rs<br/>请求校验与回执核对"]
+        OBSERVER["resources/recovery_observer.rs<br/>外部清理观察者"]
+    end
+    LEDGER["resources/journal.rs<br/>SQLite 资源账本 · schema 2"]
+    subgraph ADAPTERS["平台与执行所有权适配器"]
+        ISOLATION["isolation/<br/>令牌 · AppContainer · Job · ACL"]
+        CONTEXT["host/context.rs<br/>已验证运行上下文"]
+        EXECUTORS["executors/<br/>计划与受拥有的观察"]
+        ARTIFACTS["artifacts/<br/>受保护输入与输出"]
+    end
+    CONTROLLER["控制器<br/>作业/会话 RPC 读取"]
+    CONTROLLER --> WORKER
+    SERVICE --> MANAGER
+    SERVICE -. 以已验证上下文初始化 .-> MANAGER
+    WORKER --> MANAGER
+    REGISTRY -. 注册 .-> WORKER
+    MANAGER --> STATE
+    STATE <--> LEDGER
+    STATE --> SESSION
+    SESSION --> LEDGER
+    STATE --> OBSERVER
+    OBSERVER --> RECOVERY
+    STATE --> RECOVERY
+    MANAGER --> CONTEXT
+    MANAGER --> ISOLATION
+    STATE --> ISOLATION
+    STATE --> EXECUTORS
+    STATE --> ARTIFACTS
+```
+
+| 职责 | Linux Worker（Python） | Windows Worker（原生 Rust） |
+|---|---|---|
+| RPC 入口（已实现） | `rpc/transport.py`/`rpc/server.py` 拥有守护进程端点与帧处理；`rpc/catalog.py` 注册可调用处理器；`host/runtime.py` 装配服务、准入请求并通过请求账本分发，随后把关停交给 `resources/lifecycle.py`。 | `rpc/worker.rs` 路由已注册方法并持有资源句柄；`rpc/catalog.rs` 注册方法；`host/service.rs` 拥有 SCM 生命周期、启动、恢复与关停，并用已验证的 `host/context.rs` 初始化管理器。 |
+| 资源生命周期（已实现） | `resources/jobs.py`/`supervisor.py` 预留、启动并监督作业；`resources/sessions.py` 拥有调试器与交互会话；`resources/operations.py` 预留并对账外部副作用；`resources/lifecycle.py` 和只读的 `resources/inventory.py` 服务关停与维护。 | `resources/manager.rs` 串行处理准入、预留和核对票据后的提交；`resources/state.rs` 推进显式活动资源状态；`resources/session.rs`/`operation.rs` 拥有会话与工具操作；`resources/resource_recovery.rs` 校验恢复请求和回执。 |
+| 平台与执行所有权适配器（已实现） | `platform/environment.py`、`isolation.py`、`process_control.py`、`process_journal.py` 与 `process_owner.py` 提供有界环境、Linux 隔离和进程身份/日志基础能力；`windows_identity.py`/`windows_paths.py` 服务受信的 Windows 夹具。它们可使用制品基础能力，但不得使用资源服务或 RPC。 | `isolation/` 拥有令牌、AppContainer、Job、ACL 与进程启动；`artifacts/` 拥有受保护 IO；`executors/` 拥有计划及执行观察的所有权；资源依赖这些适配器，执行器绝不写账本。 |
+| 账本与单一写入者 | 作业状态仅由 `resources/job_ledger.py` 写入，外部副作用记录仅由 `resources/operations.py` 写入，会话回执仅由 `resources/sessions.py` 写入，进程所有权位于 `platform/process_journal.py`。`resources/inventory.py` 只读。 | `resources/journal.rs` 是唯一的 SQLite 资源账本（schema 2）；所有变更都由 `ResourceManager` 经 `ResourceState` 串行提交。`resources/recovery_observer.rs` 只返回 `ProtectedReceipt`，不引用任何账本类型；`resource_recovery.rs` 只核对回执，不提交回执。 |
+| 归属证据 | 持久作业记录、会话回执和 `processes.json` 带有启动/命名空间与进程创建身份；`inventory.py` 只有生命周期观察与日志中持久 `closed` 观察一致时才判定资源已结算，并且仍能发现发布中断后只剩 `processes.json` 的会话。 | 归属身份绑定安装、启动、run、owner 与 epoch；容量一由账本强制；预留票据拒绝过期提交；清理 `Cleanup` 标记是业务前置条件，并与 OS 观察一并核对；恢复只接受 System 拥有的回执，并把它绑定到尝试、资源、owner、记录摘要和清理事实。 |
+| 控制器读取路径 | RPC 读取方法经 `host/runtime.py` 路由到资源服务的状态查询；宿主维护与关停直接探测 `workbench/control.py` → `resources/inventory.py`。控制器从不写这些记录。 | RPC 状态/列表查询经 `rpc/worker.rs` 路由到 `ResourceManager`/`ResourceState` 对账本的读取；宿主启动与保活轮询同一状态。控制器从不打开原生账本或资源文件。 |
+| 需要人工验证 | 修改关停顺序、会话所有权或清单判定时，需要运行 `python workers/tests/run.py unit -p 'test_*.py'` 及受影响的 Linux 验收；新增或移动守卫例外需要显式的方向评审。 | 修改账本、管理器、恢复观察者或回执核对时，需要 Rust 检查以及可丢弃 VM 或托管 runner 上的原生验收；静态守卫无法证明 OS 清理、崩溃恢复或回执真实性。 |
+| 当前已实现 | RPC 入口 → 资源生命周期 → 平台适配器 → 制品；`resources/**` 不导入任何 RPC/传输入口模块，`platform/**` 只导入制品基础能力。 | RPC 入口 → `ResourceManager` → `ResourceState`/`Journal`；资源生命周期 → 隔离/制品/执行器/宿主上下文；清理观察者无法引用账本类型。 |
+| 尚存例外 | 受守卫的生产依赖图中没有例外。`workers/tests/` 下的 Worker 测试可作为夹具导入任意层，`rpc/catalog.py` 保留对 `host/runtime.py` 的仅 `TYPE_CHECKING` 引用。 | `resources/journal.rs` 在打开账本前调用 `crate::rpc::worker_identity::validate` 与 `crate::rpc::pipe_transport::service_name`；它们是绑定/传输身份辅助函数而非分发入口，也是该守卫唯一列入允许清单的符号。`resources/session.rs` 与 `resources/state_tests.rs` 中仅在测试中出现的 `crate::rpc` 引用不是生产依赖。 |
+
+守卫是静态的：只证明导入和符号引用，不证明运行时所有权、清理或回执真实性。mermaid 图仅作说明；守卫测试和生产代码是权威依据。新增确需的跨层依赖时，必须在评审中同时更新守卫的已记录例外清单和本矩阵的两种语言版本。
+
 <a id="a-runs-lifecycle"></a>
 
 ## 一次任务如何运行
