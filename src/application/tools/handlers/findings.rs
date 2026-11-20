@@ -155,6 +155,21 @@ pub(in crate::application::tools) fn handle_evidence_read<'a>(
     })
 }
 
+pub(in crate::application::tools) fn handle_inventory<'a>(
+    tools: &'a evidence::EvidenceService,
+    agent: &'a AgentMetadata,
+    _call: &'a str,
+    name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        match name {
+            "evidence_search" => super::super::inventory::evidence(&tools.store, agent, &args),
+            _ => super::super::inventory::resources(&tools.store, agent, &args),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::utf8_window;
@@ -176,19 +191,4 @@ mod tests {
         assert_eq!(utf8_window(b"a\xe7\x95", 0..3), None);
         assert_eq!(utf8_window(b"\x80\x80\x80\x80a", 1..5), None);
     }
-}
-
-pub(in crate::application::tools) fn handle_inventory<'a>(
-    tools: &'a evidence::EvidenceService,
-    agent: &'a AgentMetadata,
-    _call: &'a str,
-    name: &'a str,
-    args: Value,
-) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move {
-        match name {
-            "evidence_search" => super::super::inventory::evidence(&tools.store, agent, &args),
-            _ => super::super::inventory::resources(&tools.store, agent, &args),
-        }
-    })
 }
